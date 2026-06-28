@@ -1,0 +1,13 @@
+[package]
+name = "kuzu-optimizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-planner = { path = "../kuzu-planner" }
+kuzu-storage = { path = "../kuzu-storage" }
+tracing.workspace = true
+thiserror.workspace = true

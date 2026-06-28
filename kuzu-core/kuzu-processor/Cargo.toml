@@ -1,0 +1,16 @@
+[package]
+name = "kuzu-processor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-planner = { path = "../kuzu-planner" }
+kuzu-optimizer = { path = "../kuzu-optimizer" }
+kuzu-function = { path = "../kuzu-function" }
+kuzu-storage = { path = "../kuzu-storage" }
+tracing.workspace = true
+thiserror.workspace = true
+hashbrown.workspace = true

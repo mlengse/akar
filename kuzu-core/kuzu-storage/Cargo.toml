@@ -1,0 +1,16 @@
+[package]
+name = "kuzu-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-transaction = { path = "../kuzu-transaction" }
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+hashbrown.workspace = true
+bytes.workspace = true

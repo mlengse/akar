@@ -1,0 +1,23 @@
+[package]
+name = "kuzu-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+bitflags.workspace = true
+bytes.workspace = true
+uuid.workspace = true
+time.workspace = true
+rust_decimal.workspace = true
+fast-float.workspace = true
+hashbrown.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

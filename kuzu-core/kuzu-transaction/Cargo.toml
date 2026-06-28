@@ -1,0 +1,11 @@
+[package]
+name = "kuzu-transaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+tracing.workspace = true
+thiserror.workspace = true

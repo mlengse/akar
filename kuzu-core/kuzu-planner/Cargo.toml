@@ -1,0 +1,14 @@
+[package]
+name = "kuzu-planner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-binder = { path = "../kuzu-binder" }
+kuzu-parser = { path = "../kuzu-parser" }
+tracing.workspace = true
+thiserror.workspace = true
+hashbrown.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "kuzu-main"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-storage = { path = "../kuzu-storage" }
+kuzu-transaction = { path = "../kuzu-transaction" }
+kuzu-catalog = { path = "../kuzu-catalog" }
+kuzu-parser = { path = "../kuzu-parser" }
+kuzu-binder = { path = "../kuzu-binder" }
+kuzu-planner = { path = "../kuzu-planner" }
+kuzu-optimizer = { path = "../kuzu-optimizer" }
+kuzu-processor = { path = "../kuzu-processor" }
+kuzu-function = { path = "../kuzu-function" }
+kuzu-graph = { path = "../kuzu-graph" }
+tracing.workspace = true
+thiserror.workspace = true
