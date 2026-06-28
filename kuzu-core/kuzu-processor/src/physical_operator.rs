@@ -9,6 +9,9 @@ use kuzu_function::scalar::AggValueState;
 use kuzu_function::AggregateFunction;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use crate::expression_evaluator::ExpressionEvaluator;
 
 /// Result of executing a physical operator.
 pub type OperatorResult = Result<Vec<DataChunk>, String>;
@@ -59,19 +62,62 @@ impl PhysicalOperatorExec for PhysicalScan {
 
 pub struct PhysicalFilter {
     pub expression: Expression,
+    pub evaluator: Option<Arc<Mutex<ExpressionEvaluator>>>,
 }
 
 impl PhysicalFilter {
+    pub fn new(expression: Expression) -> Self {
+        Self {
+            expression,
+            evaluator: None,
+        }
+    }
+
+    pub fn with_evaluator(expression: Expression, evaluator: Arc<Mutex<ExpressionEvaluator>>) -> Self {
+        Self {
+            expression,
+            evaluator: Some(evaluator),
+        }
+    }
+
     /// Evaluate a filter expression against values and return a boolean mask.
-    pub fn evaluate_expression(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, String> {
+    /// Uses the new ExpressionEvaluator when available, falls back to legacy logic.
+    pub fn evaluate_expression(
+        expr: &Expression,
+        chunk: &DataChunk,
+        evaluator: Option<&ExpressionEvaluator>,
+    ) -> Result<Vec<bool>, String> {
+        // If we have a proper ExpressionEvaluator, use it
+        if let Some(eval) = evaluator {
+            let result_vec = eval.evaluate(expr, chunk)?;
+            let size = result_vec.size();
+            let mut mask = Vec::with_capacity(size);
+            for i in 0..size {
+                let val = result_vec.get_value(i);
+                match val {
+                    Some(Value::Bool(b)) => mask.push(b),
+                    Some(Value::Null) => mask.push(false),
+                    Some(_) => mask.push(true), // non-null, non-bool = truthy
+                    None => mask.push(false),    // null = false
+                }
+            }
+            return Ok(mask);
+        }
+
+        // Legacy fallback
+        Self::evaluate_expression_legacy(expr, chunk)
+    }
+
+    /// Legacy evaluate_expression — preserved for backward compatibility.
+    fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, String> {
         match expr {
             Expression::BinaryOp(op, left, right) => {
-                let left_vals = Self::evaluate_expression(left, chunk)?;
-                let right_vals = Self::evaluate_expression(right, chunk)?;
-                evaluate_binary_op(op, &left_vals, &right_vals, chunk.size)
+                let left_vals = Self::evaluate_expression_legacy(left, chunk)?;
+                let right_vals = Self::evaluate_expression_legacy(right, chunk)?;
+                evaluate_binary_op_legacy(op, &left_vals, &right_vals, chunk.size)
             }
             Expression::UnaryOp(op, inner) => {
-                let vals = Self::evaluate_expression(inner, chunk)?;
+                let vals = Self::evaluate_expression_legacy(inner, chunk)?;
                 match op {
                     UnaryOp::Not => Ok(vals.iter().map(|v| !v).collect()),
                     UnaryOp::Negate => {
@@ -97,7 +143,7 @@ impl PhysicalFilter {
             }
             Expression::PropertyAccess(obj, _prop) => {
                 // Simplified: evaluate the object expression, return mask
-                Self::evaluate_expression(obj, chunk)
+                Self::evaluate_expression_legacy(obj, chunk)
             }
             Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_) => {
                 Ok(vec![true; chunk.size])
@@ -110,9 +156,16 @@ impl PhysicalOperatorExec for PhysicalFilter {
     fn operator_type(&self) -> &str { "filter" }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        let evaluator = self.evaluator.as_ref()
+            .and_then(|e| e.lock().ok());
+
         let mut output = Vec::new();
         for chunk in input {
-            let mask = Self::evaluate_expression(&self.expression, &chunk)?;
+            let mask = Self::evaluate_expression(
+                &self.expression,
+                &chunk,
+                evaluator.as_deref(),
+            )?;
             // Filter rows based on mask
             let selected: Vec<usize> = mask.iter().enumerate()
                 .filter(|&(_, v)| *v).map(|(i, _)| i).collect();
@@ -144,7 +197,7 @@ impl PhysicalOperatorExec for PhysicalFilter {
     }
 }
 
-fn evaluate_binary_op(
+fn evaluate_binary_op_legacy(
     op: &BinaryOp,
     left: &[bool],
     right: &[bool],

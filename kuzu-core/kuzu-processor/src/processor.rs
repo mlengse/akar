@@ -6,6 +6,7 @@
 //! 3. Projection selects/transforms columns
 //! 4. Limit/OrderBy/Aggregate are applied last
 
+use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
@@ -73,8 +74,12 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Filter(f) => {
-                    let filter = PhysicalFilter {
-                        expression: f.expression.clone(),
+                    let evaluator = self.function_registry.clone()
+                        .map(|reg| Arc::new(Mutex::new(ExpressionEvaluator::new(reg))));
+                    let filter = if let Some(eval) = evaluator {
+                        PhysicalFilter::with_evaluator(f.expression.clone(), eval)
+                    } else {
+                        PhysicalFilter::new(f.expression.clone())
                     };
                     let input = intermediate_result.take().unwrap_or_default();
                     let result = filter.execute(input)?;
@@ -289,9 +294,7 @@ mod tests {
 
     #[test]
     fn test_filter_true_passthrough() {
-        let filter = PhysicalFilter {
-            expression: Expression::Constant(Constant::Bool(true)),
-        };
+        let filter = PhysicalFilter::new(Expression::Constant(Constant::Bool(true)));
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         for i in 0..5 {
             v.set_i64(i, i as i64);
@@ -305,9 +308,7 @@ mod tests {
 
     #[test]
     fn test_filter_false_removes_all() {
-        let filter = PhysicalFilter {
-            expression: Expression::Constant(Constant::Bool(false)),
-        };
+        let filter = PhysicalFilter::new(Expression::Constant(Constant::Bool(false)));
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         for i in 0..5 {
             v.set_i64(i, i as i64);
