@@ -2,6 +2,8 @@
 
 use crate::passes::*;
 use kuzu_planner::logical_operator::LogicalOperator;
+use kuzu_storage::stats::StatsStore;
+use std::sync::{Arc, Mutex};
 
 /// The optimizer applies a chain of optimization passes to a logical plan.
 ///
@@ -34,8 +36,26 @@ impl Optimizer {
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
             Box::new(FactorizationRewriting),
-            // Tree pass 2: Annotate operators with estimated row counts
-            Box::new(CardinalityEstimation),
+            // Tree pass 2: Annotate operators with estimated row counts (static heuristics)
+            Box::new(CardinalityEstimation::new(None)),
+        ];
+        Self { passes, tree_passes }
+    }
+
+    /// Create an optimizer with a stats store for storage-backed cardinality estimation.
+    pub fn with_stats(stats: Arc<Mutex<StatsStore>>) -> Self {
+        let passes: Vec<Box<dyn OptimizationPass>> = vec![
+            Box::new(RemoveUnnecessaryOperators),
+            Box::new(FilterPushDown),
+            Box::new(ProjectionPushDown),
+            Box::new(ConstantFolding),
+            Box::new(JoinOptimization),
+            Box::new(TopKOptimization),
+        ];
+        let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
+            Box::new(FactorizationRewriting),
+            // Use storage-backed cardinality estimation with real stats
+            Box::new(CardinalityEstimation::new(Some(stats))),
         ];
         Self { passes, tree_passes }
     }

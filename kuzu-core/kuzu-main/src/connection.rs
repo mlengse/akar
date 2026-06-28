@@ -71,7 +71,7 @@ impl Connection {
         }
 
         // 5. Optimize
-        let optimizer = Optimizer::new();
+        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // 6. Execute
@@ -173,7 +173,7 @@ impl Connection {
         }
 
         // Optimize
-        let optimizer = Optimizer::new();
+        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Execute

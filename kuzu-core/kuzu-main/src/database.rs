@@ -5,6 +5,7 @@ use kuzu_common::memory::MemoryManager;
 use kuzu_common::task_system::TaskSystem;
 use kuzu_extension::{ExtensionRegistry, ExtensionContext};
 use kuzu_function::FunctionRegistry;
+use kuzu_storage::stats::StatsStore;
 use kuzu_storage::StorageManager;
 use kuzu_transaction::TransactionManager;
 use std::path::PathBuf;
@@ -46,6 +47,7 @@ pub struct Database {
     pub(crate) task_system: Arc<TaskSystem>,
     pub(crate) memory_manager: Arc<MemoryManager>,
     pub(crate) extension_registry: Mutex<ExtensionRegistry>,
+    pub(crate) stats_store: Arc<Mutex<StatsStore>>,
 }
 
 impl Database {
@@ -57,6 +59,7 @@ impl Database {
         let transaction_manager = Arc::new(TransactionManager::new());
         let function_registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         let storage_manager = Arc::new(StorageManager::new(db_path, memory_manager.clone()));
+        let stats_store = Arc::new(Mutex::new(StatsStore::new()));
 
         let mut db = Self {
             storage_manager,
@@ -66,6 +69,7 @@ impl Database {
             task_system,
             memory_manager,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
+            stats_store,
         };
 
         // Load built-in extensions

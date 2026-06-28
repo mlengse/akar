@@ -2,5 +2,6 @@
 
 pub mod passes;
 pub mod optimizer;
+pub mod join_order;
 
 pub use optimizer::Optimizer;

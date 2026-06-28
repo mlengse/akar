@@ -164,7 +164,7 @@ fn extract_variables(expr: &kuzu_parser::ast::Expression, refs: &mut HashSet<Str
 // ========================================================================
 // Pass 3: Join Optimization
 // Converts filter equality conditions to join conditions.
-// Reorders joins so equi-join conditions come first.
+// Reorders joins so the smallest tables are joined first (cardinality-aware).
 // ========================================================================
 
 pub struct JoinOptimization;
@@ -175,11 +175,15 @@ impl OptimizationPass for JoinOptimization {
     }
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
-        // Extract filter conditions that are equality comparisons between variables
+        // Try cardinality-aware join reordering
+        if let Some(reordered) = crate::join_order::reorder_joins_greedy_first(operators) {
+            return reordered;
+        }
+
+        // Fallback: just remove filter conditions that are join conditions
         let mut result: Vec<LogicalOperator> = Vec::new();
         let mut filters_to_remove: Vec<usize> = Vec::new();
 
-        // Phase 1: find equality conditions in filters that could be join conditions
         for (i, op) in operators.iter().enumerate() {
             if let LogicalOperator::Filter(f) = op {
                 if is_join_condition(&f.expression) {
@@ -188,11 +192,8 @@ impl OptimizationPass for JoinOptimization {
             }
         }
 
-        // Phase 2: rebuild plan, skipping converted join filters
-        // and keeping non-join filters
         for (i, op) in operators.iter().enumerate() {
             if filters_to_remove.contains(&i) {
-                // Skip — this filter was converted to a join condition
                 continue;
             }
             result.push(op.clone());
@@ -203,7 +204,7 @@ impl OptimizationPass for JoinOptimization {
 }
 
 /// Check if an expression is an equality join condition between two variables.
-fn is_join_condition(expr: &kuzu_parser::ast::Expression) -> bool {
+pub fn is_join_condition(expr: &kuzu_parser::ast::Expression) -> bool {
     match expr {
         kuzu_parser::ast::Expression::BinaryOp(
             kuzu_parser::ast::BinaryOp::Equal, left, right,
@@ -218,7 +219,7 @@ fn is_join_condition(expr: &kuzu_parser::ast::Expression) -> bool {
 }
 
 /// Extract the root variable from an expression (e.g., `a.id` → `a`).
-fn extract_root_variable(expr: &kuzu_parser::ast::Expression) -> Option<String> {
+pub fn extract_root_variable(expr: &kuzu_parser::ast::Expression) -> Option<String> {
     match expr {
         kuzu_parser::ast::Expression::Variable(name) => Some(name.clone()),
         kuzu_parser::ast::Expression::PropertyAccess(obj, _) => extract_root_variable(obj),
@@ -416,23 +417,54 @@ impl OptimizationPass for FactorizationRewriting {
 /// Static selectivity constant (matching C++ PlannerKnobs).
 const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.01;
 
-pub struct CardinalityEstimation;
+use kuzu_storage::stats::StatsStore;
+use std::sync::{Arc, Mutex};
+
+/// Cardinality estimation pass with optional storage-backed statistics.
+///
+/// When a `StatsStore` is provided, scan node cardinality is queried from
+/// actual table statistics. Otherwise, static heuristics are used.
+pub struct CardinalityEstimation {
+    stats: Option<Arc<Mutex<StatsStore>>>,
+}
 
 impl CardinalityEstimation {
-    fn estimate_scan_node(op: &LogicalOperator) -> u64 {
-        // If PK equality scan → 1, else use a heuristic node count.
-        // Without storage stats, we use a default per-table-name estimate.
+    pub fn new(stats: Option<Arc<Mutex<StatsStore>>>) -> Self {
+        Self { stats }
+    }
+
+    /// Estimate cardinality of a scan node using storage stats when available.
+    fn estimate_scan_node(&self, op: &LogicalOperator) -> u64 {
         match op {
             LogicalOperator::ScanNode(s) => {
                 if s.table_name == "empty" {
-                    0
-                } else {
-                    // Default heuristic: 1000 nodes per table
-                    1000
+                    return 0;
                 }
+                // Try to get real stats from the stats store
+                if let Some(ref stats_store) = self.stats {
+                    if let Ok(store) = stats_store.lock() {
+                        if let Some(table_stats) = store.get_table_stats(s.table_id) {
+                            if table_stats.num_rows > 0 {
+                                return table_stats.num_rows;
+                            }
+                        }
+                    }
+                }
+                // Fallback heuristic: 1000 nodes per table
+                1000
             }
-            LogicalOperator::ScanRel(_s) => {
-                // Default heuristic: 5000 edges per rel table
+            LogicalOperator::ScanRel(s) => {
+                // Try to get real stats from the stats store
+                if let Some(ref stats_store) = self.stats {
+                    if let Ok(store) = stats_store.lock() {
+                        if let Some(table_stats) = store.get_table_stats(s.table_id) {
+                            if table_stats.num_rows > 0 {
+                                return table_stats.num_rows;
+                            }
+                        }
+                    }
+                }
+                // Fallback heuristic: 5000 edges per rel table
                 5000
             }
             _ => 1000,
@@ -449,7 +481,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
         LogicalOperator::visit_bottom_up(root, &mut |op| {
             let card = match op {
                 LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => {
-                    Self::estimate_scan_node(op)
+                    self.estimate_scan_node(op)
                 }
                 LogicalOperator::Filter(f) => {
                     let child_card = f.children.first().map(|c| c.cardinality()).unwrap_or(1);
@@ -1162,7 +1194,7 @@ mod tests {
             cardinality: 0,
         });
 
-        let pass = CardinalityEstimation;
+        let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
         // ScanNode should have default cardinality of 1000
@@ -1182,7 +1214,7 @@ mod tests {
             cardinality: 0,
         });
 
-        let pass = CardinalityEstimation;
+        let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
         assert_eq!(root.cardinality(), 1,
@@ -1202,7 +1234,7 @@ mod tests {
             cardinality: 0,
         });
 
-        let pass = CardinalityEstimation;
+        let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
         assert_eq!(root.cardinality(), 10,
@@ -1223,7 +1255,7 @@ mod tests {
             cardinality: 0,
         });
 
-        let pass = CardinalityEstimation;
+        let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
         // Both ScanNodes get default cardinality of 1000.
