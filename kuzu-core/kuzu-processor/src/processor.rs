@@ -93,6 +93,12 @@ impl QueryProcessor {
                     let result = order.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Flatten(_) => {
+                    // Flatten is a no-op in the flat-list execution model;
+                    // it signals that the child's factorization group should
+                    // be treated as flat during physical execution.
+                    // Pass through the current result unchanged.
+                }
                 LogicalOperator::Aggregate(a) => {
                     let agg = PhysicalAggregate {
                         group_by_cols: if a.group_by.is_empty() {
@@ -160,6 +166,7 @@ mod tests {
             table_id: 0,
             alias: Some("a".into()),
             columns: vec![],
+            cardinality: 0,
         })
     }
 
@@ -167,6 +174,7 @@ mod tests {
         LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
             expression: Expression::Constant(Constant::Bool(true)),
             children: vec![],
+            cardinality: 0,
         })
     }
 
@@ -178,6 +186,7 @@ mod tests {
                 is_constant: false,
             }],
             children: vec![],
+            cardinality: 0,
         })
     }
 
@@ -186,6 +195,7 @@ mod tests {
             limit: 10,
             offset: 0,
             children: vec![],
+            cardinality: 0,
         })
     }
 

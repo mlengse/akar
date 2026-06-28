@@ -41,6 +41,7 @@ impl QueryPlanner {
                                 table_id: pattern.node_table_id.unwrap_or(0),
                                 alias: pattern.node_variable,
                                 columns: Vec::new(),
+                                cardinality: 0,
                             }));
                         }
                         // Scan rel table
@@ -50,6 +51,7 @@ impl QueryPlanner {
                                     table_name: rel_label,
                                     table_id: edge.rel_table_id.unwrap_or(0),
                                     direction: edge.direction,
+                                    cardinality: 0,
                                 }));
                             }
                         }
@@ -62,6 +64,7 @@ impl QueryPlanner {
                     projection = Some(LogicalProjection {
                         expressions: r.expressions,
                         children: Vec::new(),
+                        cardinality: 0,
                     });
                 }
             }
@@ -89,6 +92,7 @@ impl QueryPlanner {
             result.push(LogicalOperator::Filter(LogicalFilter {
                 expression: expr.expression,
                 children: Vec::new(),
+                cardinality: 0,
             }));
         }
 

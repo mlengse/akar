@@ -12,6 +12,19 @@ pub trait OptimizationPass {
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator>;
 }
 
+/// A tree-based optimization pass that transforms a logical plan tree.
+///
+/// Unlike `OptimizationPass` which works on flat `&[LogicalOperator]`,
+/// this trait operates on the operator tree directly, enabling
+/// bottom-up traversals and child insertion/deletion.
+pub trait TreeOptimizationPass {
+    fn name(&self) -> &str;
+
+    /// Apply this pass to the root of a logical plan tree.
+    /// The pass may recursively transform the tree in-place.
+    fn apply_tree(&self, root: &mut LogicalOperator);
+}
+
 // ========================================================================
 // Pass 1: Filter Push-Down
 // Pushes Filter operators closer to their ScanNode sources.
@@ -237,11 +250,13 @@ impl OptimizationPass for TopKOptimization {
                         result.push(LogicalOperator::OrderBy(LogicalOrderBy {
                             sort_keys: order.sort_keys.clone(),
                             children: Vec::new(),
+                            cardinality: 0,
                         }));
                         result.push(LogicalOperator::Limit(LogicalLimit {
                             limit: limit.limit,
                             offset: limit.offset,
                             children: Vec::new(),
+                            cardinality: 0,
                         }));
                         i += 2;
                         continue;
@@ -257,12 +272,14 @@ impl OptimizationPass for TopKOptimization {
                                 result.push(LogicalOperator::OrderBy(LogicalOrderBy {
                                     sort_keys: order.sort_keys.clone(),
                                     children: Vec::new(),
+                                    cardinality: 0,
                                 }));
                                 result.push(operators[i + 1].clone()); // projection
                                 result.push(LogicalOperator::Limit(LogicalLimit {
                                     limit: limit.limit,
                                     offset: limit.offset,
                                     children: Vec::new(),
+                                    cardinality: 0,
                                 }));
                                 i += 3;
                                 continue;
@@ -384,6 +401,7 @@ impl OptimizationPass for ConstantFolding {
                     LogicalOperator::Filter(LogicalFilter {
                         expression: folded,
                         children: f.children.clone(),
+                        cardinality: f.cardinality,
                     })
                 }
                 LogicalOperator::Projection(p) => {
@@ -401,6 +419,7 @@ impl OptimizationPass for ConstantFolding {
                     LogicalOperator::Projection(LogicalProjection {
                         expressions: exprs,
                         children: p.children.clone(),
+                        cardinality: p.cardinality,
                     })
                 }
                 other => other.clone(),
@@ -532,6 +551,7 @@ mod tests {
             table_id: 0,
             alias: None,
             columns: vec!["col1".into(), "col2".into()],
+            cardinality: 0,
         })
     }
 
@@ -545,6 +565,7 @@ mod tests {
                 )),
             ),
             children: Vec::new(),
+            cardinality: 0,
         })
     }
 
@@ -556,6 +577,7 @@ mod tests {
                 is_constant: false,
             }],
             children: Vec::new(),
+            cardinality: 0,
         })
     }
 
@@ -563,6 +585,7 @@ mod tests {
         LogicalOperator::OrderBy(LogicalOrderBy {
             sort_keys: vec![],
             children: Vec::new(),
+            cardinality: 0,
         })
     }
 
@@ -571,6 +594,7 @@ mod tests {
             limit: 10,
             offset: 0,
             children: Vec::new(),
+            cardinality: 0,
         })
     }
 
@@ -634,6 +658,7 @@ mod tests {
             LogicalOperator::Projection(LogicalProjection {
                 expressions: vec![],
                 children: Vec::new(),
+                cardinality: 0,
             }),
         ];
         let pass = RemoveUnnecessaryOperators;
@@ -854,6 +879,7 @@ mod tests {
             LogicalOperator::Filter(LogicalFilter {
                 expression: Expression::Constant(kuzu_parser::ast::Constant::Bool(true)),
                 children: Vec::new(),
+                cardinality: 0,
             }),
         ];
         let pass = RemoveUnnecessaryOperators;
@@ -897,6 +923,7 @@ mod tests {
                 )),
             ),
             children: Vec::new(),
+            cardinality: 0,
         });
         let plan = vec![
             make_scan("A"),

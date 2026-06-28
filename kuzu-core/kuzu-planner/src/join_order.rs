@@ -40,6 +40,7 @@ pub fn build_join_tree(
             table_id: 0,
             alias: None,
             columns: Vec::new(),
+            cardinality: 0,
         }));
     }
 
@@ -173,13 +174,16 @@ fn flatten_plan(plan: &JoinPlan, ops: &mut Vec<LogicalOperator>) {
                     table_id: 0,
                     alias: None,
                     columns: Vec::new(),
+                    cardinality: 0,
                 })),
                 probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
                     table_name: "join_probe".into(),
                     table_id: 0,
                     alias: None,
                     columns: Vec::new(),
+                    cardinality: 0,
                 })),
+                cardinality: 0,
             }));
         }
         JoinPlan::CrossProduct { left, right } => {
@@ -191,13 +195,16 @@ fn flatten_plan(plan: &JoinPlan, ops: &mut Vec<LogicalOperator>) {
                     table_id: 0,
                     alias: None,
                     columns: Vec::new(),
+                    cardinality: 0,
                 })),
                 right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
                     table_name: "cp_right".into(),
                     table_id: 0,
                     alias: None,
                     columns: Vec::new(),
+                    cardinality: 0,
                 })),
+                cardinality: 0,
             }));
         }
     }
@@ -214,6 +221,7 @@ mod tests {
             table_id: 0,
             alias: Some("a".into()),
             columns: Vec::new(),
+            cardinality: 0,
         });
         let plan = build_join_tree(vec![scan], None);
         match plan {
@@ -225,10 +233,10 @@ mod tests {
     #[test]
     fn test_two_scans_cross_product() {
         let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Person".into(), table_id: 0, alias: Some("a".into()), columns: Vec::new(),
+            table_name: "Person".into(), table_id: 0, alias: Some("a".into()), columns: Vec::new(), cardinality: 0,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "City".into(), table_id: 1, alias: Some("c".into()), columns: Vec::new(),
+            table_name: "City".into(), table_id: 1, alias: Some("c".into()), columns: Vec::new(), cardinality: 0,
         });
         let plan = build_join_tree(vec![scan1, scan2], None);
         match plan {
@@ -316,7 +324,7 @@ mod tests {
     #[test]
     fn test_flatten_join_plan() {
         let scan = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "T".into(), table_id: 0, alias: None, columns: Vec::new(),
+            table_name: "T".into(), table_id: 0, alias: None, columns: Vec::new(), cardinality: 0,
         });
         let plan = JoinPlan::Leaf(scan.clone());
         let flat = flatten_join_plan(&plan);
@@ -326,10 +334,10 @@ mod tests {
     #[test]
     fn test_flatten_cross_product() {
         let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "A".into(), table_id: 0, alias: None, columns: Vec::new(),
+            table_name: "A".into(), table_id: 0, alias: None, columns: Vec::new(), cardinality: 0,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "B".into(), table_id: 1, alias: None, columns: Vec::new(),
+            table_name: "B".into(), table_id: 1, alias: None, columns: Vec::new(), cardinality: 0,
         });
         let plan = JoinPlan::CrossProduct {
             left: Box::new(JoinPlan::Leaf(scan1)),

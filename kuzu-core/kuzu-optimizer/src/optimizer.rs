@@ -88,6 +88,7 @@ mod tests {
                 table_id: 0,
                 alias: Some("a".into()),
                 columns: vec!["name".into()],
+                cardinality: 0,
             }),
         ];
         let opt = Optimizer::new();
