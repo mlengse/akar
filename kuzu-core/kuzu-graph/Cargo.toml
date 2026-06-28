@@ -8,6 +8,5 @@ repository.workspace = true
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
 kuzu-storage = { path = "../kuzu-storage" }
-tracing.workspace = true
-thiserror.workspace = true
 hashbrown.workspace = true
+tracing.workspace = true

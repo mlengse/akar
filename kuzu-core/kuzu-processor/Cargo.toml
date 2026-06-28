@@ -11,6 +11,10 @@ kuzu-planner = { path = "../kuzu-planner" }
 kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-storage = { path = "../kuzu-storage" }
+kuzu-parser = { path = "../kuzu-parser" }
 tracing.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true
+
+[dev-dependencies]
+kuzu-binder = { path = "../kuzu-binder" }

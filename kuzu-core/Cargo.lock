@@ -413,7 +413,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "kuzu-common",
  "kuzu-storage",
- "thiserror",
  "tracing",
 ]
 
@@ -482,9 +481,11 @@ name = "kuzu-processor"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "kuzu-binder",
  "kuzu-common",
  "kuzu-function",
  "kuzu-optimizer",
+ "kuzu-parser",
  "kuzu-planner",
  "kuzu-storage",
  "thiserror",
