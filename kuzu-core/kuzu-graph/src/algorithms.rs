@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(dist[0], Some(0)); // Self distance 0
         assert_eq!(dist[1], Some(1)); // Direct neighbor
         assert_eq!(dist[2], Some(1)); // Direct neighbor
-        assert_eq!(dist[3], Some(2)); // 2 hops away (0→2→3 or 0→3)
+        assert_eq!(dist[3], Some(1)); // Direct edge: 3→0
     }
 
     #[test]
@@ -262,7 +262,7 @@ mod tests {
     fn test_shortest_path() {
         let csr = sample_csr();
         let dist = shortest_path(&csr, 0, 3);
-        assert_eq!(dist, Some(2));
+        assert_eq!(dist, Some(1)); // Direct edge: 3→0
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod tests {
         assert!(reachable.contains(&0));
         assert!(reachable.contains(&1));
         assert!(reachable.contains(&2));
-        assert!(!reachable.contains(&3)); // Node 3 is distance 2
+        assert!(reachable.contains(&3)); // Node 3 is distance 1 (direct edge)
     }
 
     #[test]
