@@ -4,9 +4,15 @@ use crate::passes::*;
 use kuzu_planner::logical_operator::LogicalOperator;
 
 /// The optimizer applies a chain of optimization passes to a logical plan.
-/// Passes are applied in order: cheaper/more impactful passes first.
+///
+/// Two kinds of passes are supported:
+/// - **Flat passes** (`OptimizationPass`): transform a flat `Vec<LogicalOperator>`.
+///   These are applied first to the entire plan.
+/// - **Tree passes** (`TreeOptimizationPass`): transform the operator tree in-place
+///   via bottom-up traversal. Applied after flat passes.
 pub struct Optimizer {
     passes: Vec<Box<dyn OptimizationPass>>,
+    tree_passes: Vec<Box<dyn TreeOptimizationPass>>,
 }
 
 impl Optimizer {
@@ -24,26 +30,41 @@ impl Optimizer {
             Box::new(JoinOptimization),
             // Pass 6: Detect and combine top-k patterns (ORDER BY + LIMIT)
             Box::new(TopKOptimization),
-            // Pass 7: Estimate cardinality for cost-based decisions
-            Box::new(CardinalityEstimation),
-            // Pass 8: Rewrite for worst-case optimal joins
-            Box::new(FactorizationRewriting),
         ];
-        Self { passes }
+        let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
+            // Tree pass 1: Insert flatten operators for factorization
+            Box::new(FactorizationRewriting),
+            // Tree pass 2: Annotate operators with estimated row counts
+            Box::new(CardinalityEstimation),
+        ];
+        Self { passes, tree_passes }
     }
 
     pub fn optimize(&self, operators: Vec<LogicalOperator>) -> Vec<LogicalOperator> {
+        // Phase 1: Flat passes (work on the top-level operator list)
         let mut result = operators;
         for pass in &self.passes {
             tracing::debug!("Running optimizer pass: {}", pass.name());
             result = pass.apply(&result);
         }
+
+        // Phase 2: Tree passes (work on the operator tree in-place)
+        // Apply to each top-level operator as a subtree root.
+        for tree_pass in &self.tree_passes {
+            tracing::debug!("Running tree optimizer pass: {}", tree_pass.name());
+            for op in &mut result {
+                tree_pass.apply_tree(op);
+            }
+        }
+
         result
     }
 
     /// Get the list of registered passes (for debugging/inspection).
     pub fn pass_names(&self) -> Vec<&str> {
-        self.passes.iter().map(|p| p.name()).collect()
+        let mut names: Vec<&str> = self.passes.iter().map(|p| p.name()).collect();
+        names.extend(self.tree_passes.iter().map(|p| p.name()));
+        names
     }
 }
 
@@ -67,6 +88,7 @@ mod tests {
         assert!(names.contains(&"constant_folding"));
         assert!(names.contains(&"join_optimization"));
         assert!(names.contains(&"top_k_optimization"));
+        // Tree passes
         assert!(names.contains(&"cardinality_estimation"));
         assert!(names.contains(&"factorization_rewriting"));
         assert_eq!(names.len(), 8);
