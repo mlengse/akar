@@ -107,15 +107,21 @@ pub enum Value {
     UInt32(u32),
     UInt16(u16),
     UInt8(u8),
+    Int128(i128),
     Double(f64),
     Float(f32),
     String(String),
     Blob(Vec<u8>),
     Date(Date),
     Timestamp(Timestamp),
+    TimestampTz(TimestampTZ),
+    TimestampNs(Timestamp),
+    TimestampMs(Timestamp),
+    TimestampSec(Timestamp),
     Interval(Interval),
     InternalID(InternalID),
     List(Vec<Value>),
+    Map(Vec<(Value, Value)>),
     Struct(Vec<(String, Value)>),
 }
 
@@ -196,7 +202,13 @@ impl Value {
             Value::Interval(_) => LogicalTypeID::Interval,
             Value::InternalID(_) => LogicalTypeID::InternalID,
             Value::List(_) => LogicalTypeID::List,
+            Value::Map(_) => LogicalTypeID::Map,
             Value::Struct(_) => LogicalTypeID::Struct,
+            Value::Int128(_) => LogicalTypeID::Int128,
+            Value::TimestampTz(_) => LogicalTypeID::TimestampTz,
+            Value::TimestampNs(_) => LogicalTypeID::TimestampNs,
+            Value::TimestampMs(_) => LogicalTypeID::TimestampMs,
+            Value::TimestampSec(_) => LogicalTypeID::TimestampSec,
         }
     }
 

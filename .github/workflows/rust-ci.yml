@@ -1,0 +1,127 @@
+# Rust CI — Kuzu Core Workspace
+#
+# Builds, tests, and lints the kuzu-core Rust workspace on push and PR.
+# Runs on Ubuntu, macOS, and Windows with both MinGW and WASM targets.
+
+name: Rust CI
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'kuzu-core/**'
+      - '.github/workflows/rust-ci.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'kuzu-core/**'
+      - '.github/workflows/rust-ci.yml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  # ──────────────────────────────────────────────────────
+  # Formatting check
+  # ──────────────────────────────────────────────────────
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # Clippy lint check
+  # ──────────────────────────────────────────────────────
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # Build & Test — Ubuntu
+  # ──────────────────────────────────────────────────────
+  test-ubuntu:
+    name: test (ubuntu)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - run: cargo build --workspace
+        working-directory: kuzu-core
+      - run: cargo test --workspace --no-fail-fast
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # Build & Test — macOS
+  # ──────────────────────────────────────────────────────
+  test-macos:
+    name: test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - run: cargo build --workspace
+        working-directory: kuzu-core
+      - run: cargo test --workspace --no-fail-fast
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # Build & Test — Windows (MSVC)
+  # ──────────────────────────────────────────────────────
+  test-windows:
+    name: test (windows)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - run: cargo build --workspace
+        working-directory: kuzu-core
+      - run: cargo test --workspace --no-fail-fast
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # WASM compatibility check
+  # ──────────────────────────────────────────────────────
+  wasm:
+    name: wasm check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - run: cargo check --target wasm32-unknown-unknown --workspace
+        working-directory: kuzu-core
+
+  # ──────────────────────────────────────────────────────
+  # tools/rust_api native build
+  # ──────────────────────────────────────────────────────
+  rust-api:
+    name: rust-api (native)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build native kuzu crate
+        run: cargo check
+        working-directory: tools/rust_api
