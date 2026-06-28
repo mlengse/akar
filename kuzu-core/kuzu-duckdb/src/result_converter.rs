@@ -50,12 +50,10 @@ pub fn duckdb_results_to_kuzu(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     #[cfg(feature = "bundled")]
     fn test_empty_results() {
-        let result = duckdb_results_to_kuzu(vec![]).unwrap();
+        let result = super::duckdb_results_to_kuzu(vec![]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].num_fields(), 0);
     }

@@ -413,9 +413,8 @@ impl OptimizationPass for FactorizationRewriting {
 // selectivity constants (no storage dependency).
 // ========================================================================
 
-/// Static selectivity constants (matching C++ PlannerKnobs).
+/// Static selectivity constant (matching C++ PlannerKnobs).
 const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.01;
-const NON_EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.1;
 
 pub struct CardinalityEstimation;
 
