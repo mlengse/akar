@@ -1,123 +1,362 @@
-//! Parser implementation — converts Cypher query text to AST.
-//!
-//! TODO: Replace with pest.rs PEG grammar parser.
-//! This is a temporary placeholder to allow compilation.
+//! Parser implementation — converts Cypher query text to AST using pest.rs PEG grammar.
 
 use crate::ast::*;
+use pest::Parser;
 
-/// Parse a Cypher query string into a Statement AST.
+#[derive(pest_derive::Parser)]
+#[grammar = "cypher.pest"]
+pub struct CypherParser;
+
 pub fn parse(input: &str) -> Result<Statement, String> {
     let trimmed = input.trim();
+    let mut pairs = CypherParser::parse(Rule::statement, trimmed)
+        .map_err(|e| format!("Parse error: {e}"))?;
+    let pair = pairs.next().ok_or("Empty input")?;
+    parse_statement(pair)
+}
 
-    if trimmed.to_uppercase().starts_with("CREATE NODE TABLE") {
-        parse_create_node_table(trimmed)
-    } else if trimmed.to_uppercase().starts_with("CREATE REL TABLE") {
-        parse_create_rel_table(trimmed)
-    } else if trimmed.to_uppercase().starts_with("DROP TABLE") {
-        parse_drop_table(trimmed)
-    } else if trimmed.to_uppercase().starts_with("MATCH") || trimmed.to_uppercase().starts_with("RETURN") {
-        parse_query(trimmed)
+fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    // Unwrap the outer statement rule to its inner content
+    let inner = if pair.as_rule() == Rule::statement {
+        pair.into_inner().next().ok_or("Empty statement")?
     } else {
-        Err(format!("Unsupported statement: {input}"))
+        pair
+    };
+    match inner.as_rule() {
+        Rule::ddl_statement => {
+            let ddl_inner = inner.into_inner().next().ok_or("Empty DDL")?;
+            parse_ddl(ddl_inner)
+        }
+        Rule::query_statement => {
+            let query = parse_query_pairs(inner)?;
+            Ok(Statement::Query(query))
+        }
+        _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
 }
 
-fn parse_create_node_table(input: &str) -> Result<Statement, String> {
-    // Simplified: CREATE NODE TABLE name (col1 TYPE, col2 TYPE, PRIMARY KEY (col))
-    let rest = input
-        .strip_prefix("CREATE NODE TABLE")
-        .or_else(|| input.strip_prefix("CREATE NODE TABLE"))
-        .ok_or("Expected CREATE NODE TABLE")?
-        .trim();
-
-    let paren = rest.find('(').ok_or("Expected (")?;
-    let name = rest[..paren].trim().to_string();
-    let body = &rest[paren + 1..];
-    let close = body.rfind(')').ok_or("Expected )")?;
-    let cols_str = body[..close].trim();
-
-    let mut columns = Vec::new();
-    let mut primary_key = String::new();
-
-    for part in cols_str.split(',') {
-        let part = part.trim();
-        if part.to_uppercase().starts_with("PRIMARY KEY") {
-            let pk_start = part.find('(').ok_or("Expected ( in PRIMARY KEY")?;
-            let pk_end = part.rfind(')').ok_or("Expected ) in PRIMARY KEY")?;
-            primary_key = part[pk_start + 1..pk_end].trim().to_string();
-        } else {
-            let tokens: Vec<&str> = part.split_whitespace().collect();
-            if tokens.len() >= 2 {
-                columns.push(ColumnDef {
-                    name: tokens[0].to_string(),
-                    type_name: tokens[1..].join(" "),
-                });
+fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    match pair.as_rule() {
+        Rule::create_node_table => {
+            let mut name = String::new();
+            let mut columns = Vec::new();
+            let mut pk = String::new();
+            for inner in pair.into_inner() {
+                match inner.as_rule() {
+                    Rule::identifier if name.is_empty() => name = inner.as_str().to_string(),
+                    Rule::column_definitions => {
+                        for col in inner.into_inner() {
+                            let mut cn = String::new(); let mut ct = String::new();
+                            for part in col.into_inner() {
+                                match part.as_rule() {
+                                    Rule::identifier => cn = part.as_str().to_string(),
+                                    Rule::type_name => ct = part.as_str().to_string(),
+                                    _ => {}
+                                }
+                            }
+                            columns.push(ColumnDef { name: cn, type_name: ct });
+                        }
+                    }
+                    Rule::primary_key => {
+                        for part in inner.into_inner() {
+                            if part.as_rule() == Rule::identifier { pk = part.as_str().to_string(); }
+                        }
+                    }
+                    _ => {}
+                }
             }
+            Ok(Statement::CreateNodeTable(CreateNodeTable { name, columns, primary_key: pk }))
+        }
+        Rule::create_rel_table => {
+            let mut name = String::new(); let mut from = String::new(); let mut to = String::new();
+            let mut columns = Vec::new();
+            for inner in pair.into_inner() {
+                match inner.as_rule() {
+                    Rule::identifier => {
+                        if name.is_empty() { name = inner.as_str().to_string(); }
+                        else if from.is_empty() { from = inner.as_str().to_string(); }
+                        else { to = inner.as_str().to_string(); }
+                    }
+                    Rule::column_definitions => {
+                        for col in inner.into_inner() {
+                            let mut cn = String::new(); let mut ct = String::new();
+                            for part in col.into_inner() {
+                                match part.as_rule() {
+                                    Rule::identifier => cn = part.as_str().to_string(),
+                                    Rule::type_name => ct = part.as_str().to_string(),
+                                    _ => {}
+                                }
+                            }
+                            columns.push(ColumnDef { name: cn, type_name: ct });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Statement::CreateRelTable(CreateRelTable { name, from, to, columns }))
+        }
+        Rule::drop_table => {
+            let name = pair.into_inner()
+                .find(|p| p.as_rule() == Rule::identifier)
+                .map(|p| p.as_str().to_string())
+                .ok_or("Missing table name")?;
+            Ok(Statement::DropTable(DropTable { name }))
+        }
+        _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
+    }
+}
+
+fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {
+    let mut clauses = Vec::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::match_clause => {
+                clauses.push(Clause::Match(MatchClause { patterns: parse_patterns(inner)? }));
+            }
+            Rule::return_clause => {
+                clauses.push(Clause::Return(ReturnClause { expressions: parse_return_items(inner)? }));
+            }
+            Rule::where_clause => {
+                let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
+                clauses.push(Clause::Where(WhereClause { expression: expr }));
+            }
+            _ => {}
+        }
+    }
+    Ok(Query { clauses })
+}
+
+fn parse_patterns(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Pattern>, String> {
+    pair.into_inner().filter(|p| p.as_rule() == Rule::pattern).map(parse_pattern).collect()
+}
+
+fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, String> {
+    let mut node = None; let mut edge = None;
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::node_pattern => { node = Some(parse_node_pattern(inner)?); }
+            Rule::edge_pattern => { edge = Some(parse_edge_pattern(inner)?); }
+            _ => {}
+        }
+    }
+    Ok(Pattern { node, edge })
+}
+
+fn parse_node_pattern(pair: pest::iterators::Pair<Rule>) -> Result<NodePattern, String> {
+    let mut variable = None; let mut labels = Vec::new(); let mut properties = Vec::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::variable => variable = Some(inner.as_str().to_string()),
+            Rule::label => {
+                for li in inner.into_inner() { labels.push(li.as_str().to_string()); }
+            }
+            Rule::property_map => {
+                for prop in inner.into_inner() {
+                    if prop.as_rule() == Rule::property_key_value {
+                        let (k, v) = parse_property_kv(prop)?;
+                        properties.push((k, v));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(NodePattern { variable, labels, properties })
+}
+
+fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, String> {
+    let mut variable = None; let mut labels = Vec::new(); let mut properties = Vec::new();
+    let direction = if pair.as_str().contains("<-") { EdgeDirection::RightToLeft } else { EdgeDirection::LeftToRight };
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::variable => variable = Some(inner.as_str().to_string()),
+            Rule::label => {
+                for li in inner.into_inner() { labels.push(li.as_str().to_string()); }
+            }
+            Rule::property_map => {
+                for prop in inner.into_inner() {
+                    if prop.as_rule() == Rule::property_key_value {
+                        let (k, v) = parse_property_kv(prop)?;
+                        properties.push((k, v));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(EdgePattern { variable, labels, direction, properties })
+}
+
+fn parse_property_kv(pair: pest::iterators::Pair<Rule>) -> Result<(String, Expression), String> {
+    let mut key = String::new(); let mut val = None;
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => key = part.as_str().to_string(),
+            Rule::expression => val = Some(parse_expression(part)?),
+            _ => {}
+        }
+    }
+    val.map(|v| (key, v)).ok_or("Missing property value".into())
+}
+
+fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnItem>, String> {
+    let mut items = Vec::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::return_item {
+            let mut expr = None; let mut alias = None;
+            for part in inner.into_inner() {
+                match part.as_rule() {
+                    Rule::expression => expr = Some(parse_expression(part)?),
+                    Rule::identifier => alias = Some(part.as_str().to_string()),
+                    _ => {}
+                }
+            }
+            if let Some(e) = expr { items.push(ReturnItem { expression: e, alias }); }
+        }
+    }
+    Ok(items)
+}
+
+fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
+    // Handle compound binary expressions by collecting children
+    let rule = pair.as_rule();
+    let children: Vec<_> = pair.clone().into_inner().collect();
+
+    // Unwrap single-child wrappers (priority/precedence levels)
+    if matches!(rule, Rule::expression | Rule::or_expr | Rule::and_expr | Rule::not_expr
+        | Rule::comparison_expr | Rule::additive_expr | Rule::multiplicative_expr
+        | Rule::unary_expr | Rule::postfix_expr)
+    {
+        if children.len() == 1 {
+            return parse_expression(children[0].clone());
+        }
+        if children.len() >= 3 {
+            let mut result = parse_expression(children[0].clone())?;
+            let mut i = 1;
+            while i + 1 < children.len() {
+                let op = match children[i].as_str() {
+                    "OR" => BinaryOp::Or, "AND" => BinaryOp::And,
+                    "=" => BinaryOp::Equal, "<>" => BinaryOp::NotEqual,
+                    "<" => BinaryOp::LessThan, ">" => BinaryOp::GreaterThan,
+                    "<=" => BinaryOp::LessThanOrEqual, ">=" => BinaryOp::GreaterThanOrEqual,
+                    "+" => BinaryOp::Add, "-" => BinaryOp::Subtract,
+                    "*" => BinaryOp::Multiply, "/" => BinaryOp::Divide, "%" => BinaryOp::Modulo,
+                    _ => return Err(format!("Unknown op: {}", children[i].as_str())),
+                };
+                let right = parse_expression(children[i + 1].clone())?;
+                result = Expression::BinaryOp(op, Box::new(result), Box::new(right));
+                i += 2;
+            }
+            return Ok(result);
         }
     }
 
-    Ok(Statement::CreateNodeTable(CreateNodeTable {
-        name,
-        columns,
-        primary_key,
-    }))
-}
+    // Handle unary NOT
+    if rule == Rule::not_expr && children.len() == 2 {
+        let inner = parse_expression(children[1].clone())?;
+        return Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(inner)));
+    }
 
-fn parse_create_rel_table(input: &str) -> Result<Statement, String> {
-    let rest = input
-        .strip_prefix("CREATE REL TABLE")
-        .ok_or("Expected CREATE REL TABLE")?
-        .trim();
-    let paren = rest.find('(').ok_or("Expected (")?;
-    let name = rest[..paren].trim().to_string();
-    let body = &rest[paren + 1..];
-    let close = body.rfind(')').ok_or("Expected )")?;
-    let cols_str = body[..close].trim();
-
-    let mut columns = Vec::new();
-    let mut from = String::new();
-    let mut to = String::new();
-
-    for part in cols_str.split(',') {
-        let part = part.trim();
-        if part.to_uppercase().starts_with("FROM") {
-            from = part[4..].trim().to_string();
-        } else if part.to_uppercase().starts_with("TO") {
-            to = part[2..].trim().to_string();
-        } else {
-            let tokens: Vec<&str> = part.split_whitespace().collect();
-            if tokens.len() >= 2 {
-                columns.push(ColumnDef {
-                    name: tokens[0].to_string(),
-                    type_name: tokens[1..].join(" "),
-                });
+    match rule {
+        Rule::primary => parse_expression(children.into_iter().next().ok_or("Empty primary")?),
+        Rule::literal => parse_literal(children.into_iter().next().ok_or("Empty literal")?),
+        Rule::string => Ok(Expression::Constant(Constant::String(unescape_string(pair.as_str())))),
+        Rule::integer => {
+            let v: i64 = pair.as_str().parse().map_err(|e| format!("Int: {e}"))?;
+            Ok(Expression::Constant(Constant::Integer(v)))
+        }
+        Rule::float => {
+            let v: f64 = pair.as_str().parse().map_err(|e| format!("Float: {e}"))?;
+            Ok(Expression::Constant(Constant::Float(v)))
+        }
+        Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(
+            pair.as_str().to_uppercase() == "TRUE"
+        ))),
+        Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
+        Rule::variable => Ok(Expression::Variable(pair.as_str().to_string())),
+        Rule::list_literal => {
+            let items = children.into_iter()
+                .filter(|c| c.as_rule() == Rule::expression)
+                .map(parse_expression)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expression::List(items))
+        }
+        Rule::map_literal => {
+            let mut entries = Vec::new();
+            for c in children {
+                if c.as_rule() == Rule::property_key_value {
+                    entries.push(parse_property_kv(c)?);
+                }
+            }
+            Ok(Expression::Map(entries))
+        }
+        Rule::function_args => {
+            // function_call can appear as child of postfix_expr
+            // The parent variable is the function name
+            // We detect this in the postfix chain handling
+            if children.is_empty() {
+                return Ok(Expression::Constant(Constant::Null));
+            }
+            // Extract function name from siblings in parent
+            let name = pair.as_str().split('(').next().unwrap_or("").to_string();
+            let args = children.into_iter()
+                .filter(|c| c.as_rule() == Rule::expression)
+                .map(parse_expression)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expression::FunctionCall(name, args))
+        }
+        Rule::property_access => {
+            let name = children.into_iter().next()
+                .map(|p| p.as_str().to_string())
+                .ok_or("Empty property")?;
+            Ok(Expression::Variable(name))
+        }
+        _ => {
+            // Try unwrapping single child
+            if let Some(child) = children.into_iter().next() {
+                parse_expression(child)
+            } else {
+                Err(format!("Cannot parse: {:?}", rule))
             }
         }
     }
-
-    Ok(Statement::CreateRelTable(CreateRelTable {
-        name,
-        from,
-        to,
-        columns,
-    }))
 }
 
-fn parse_drop_table(input: &str) -> Result<Statement, String> {
-    let name = input
-        .strip_prefix("DROP TABLE")
-        .ok_or("Expected DROP TABLE")?
-        .trim();
-    Ok(Statement::DropTable(DropTable {
-        name: name.to_string(),
-    }))
+fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
+    match pair.as_rule() {
+        Rule::string => Ok(Expression::Constant(Constant::String(unescape_string(pair.as_str())))),
+        Rule::integer => {
+            Ok(Expression::Constant(Constant::Integer(
+                pair.as_str().parse().map_err(|e| format!("Int: {e}"))?
+            )))
+        }
+        Rule::float => {
+            Ok(Expression::Constant(Constant::Float(
+                pair.as_str().parse().map_err(|e| format!("Float: {e}"))?
+            )))
+        }
+        Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(pair.as_str().to_uppercase() == "TRUE"))),
+        Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
+        _ => Err(format!("Unknown literal: {:?}", pair.as_rule())),
+    }
 }
 
-fn parse_query(_input: &str) -> Result<Statement, String> {
-    // Temporary placeholder — real parser with pest.rs will go here
-    Ok(Statement::Query(Query {
-        clauses: Vec::new(),
-    }))
+fn unescape_string(s: &str) -> String {
+    let s = s.trim_matches(|c| c == '"' || c == '\'');
+    let mut r = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => r.push('\n'), Some('t') => r.push('\t'),
+                Some('r') => r.push('\r'), Some('\\') => r.push('\\'),
+                Some('"') => r.push('"'), Some('\'') => r.push('\''),
+                Some(o) => { r.push('\\'); r.push(o); }
+                None => r.push('\\'),
+            }
+        } else { r.push(c); }
+    }
+    r
 }
 
 #[cfg(test)]
@@ -133,6 +372,8 @@ mod tests {
                 assert_eq!(t.name, "Person");
                 assert_eq!(t.columns.len(), 2);
                 assert_eq!(t.primary_key, "name");
+                assert_eq!(t.columns[0].name, "name");
+                assert_eq!(t.columns[0].type_name, "STRING");
             }
             _ => panic!("Expected CreateNodeTable"),
         }
@@ -141,10 +382,82 @@ mod tests {
     #[test]
     fn test_drop_table() {
         let sql = "DROP TABLE Person";
+        assert!(matches!(parse(sql).unwrap(), Statement::DropTable(t) if t.name == "Person"));
+    }
+
+    #[test]
+    fn test_match_return() {
+        let sql = "MATCH (a:Person) RETURN a.name, a.age";
         let stmt = parse(sql).unwrap();
         match stmt {
-            Statement::DropTable(t) => assert_eq!(t.name, "Person"),
-            _ => panic!("Expected DropTable"),
+            Statement::Query(q) => {
+                assert_eq!(q.clauses.len(), 2);
+                assert!(matches!(q.clauses[0], Clause::Match(_)));
+                assert!(matches!(q.clauses[1], Clause::Return(_)));
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_match_where_return() {
+        let sql = "MATCH (a:Person) WHERE a.age > 25 RETURN a.name";
+        let stmt = parse(sql).unwrap();
+        assert!(matches!(stmt, Statement::Query(q) if q.clauses.len() == 3));
+    }
+
+    #[test]
+    fn test_match_with_string() {
+        let sql = "MATCH (a:Person) WHERE a.name = 'Alice' RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_rel_pattern() {
+        let sql = "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a, b";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_function_call() {
+        let sql = "MATCH (a:Person) RETURN COUNT(a)";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_integer_expr() {
+        let sql = "MATCH (a) WHERE a.age = 30 RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_boolean_expr() {
+        let sql = "MATCH (a) WHERE a.active = TRUE RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_list_literal() {
+        let sql = "MATCH (a) WHERE a.age IN [1, 2, 3] RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_complex_and_or() {
+        let sql = "MATCH (a:Person) WHERE a.age > 25 AND a.name = 'Bob' OR a.age < 10 RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_create_rel_table() {
+        let sql = "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateRelTable(t) => {
+                assert_eq!(t.name, "Knows");
+                assert_eq!(t.columns.len(), 1);
+            }
+            _ => panic!("Expected CreateRelTable"),
         }
     }
 }

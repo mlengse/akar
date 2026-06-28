@@ -1,0 +1,146 @@
+// Cypher PEG Grammar for pest.rs
+// Supports: DDL (CREATE NODE/REL TABLE, DROP TABLE) and DML (MATCH, RETURN, WHERE, CREATE)
+
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
+
+// ==================== Top Level ====================
+
+statement = { ddl_statement | query_statement }
+
+ddl_statement = {
+    create_node_table
+    | create_rel_table
+    | drop_table
+}
+
+query_statement = {
+    match_clause ~ return_clause
+    | match_clause ~ where_clause ~ return_clause
+    | match_clause
+    | return_clause
+}
+
+// ==================== DDL ====================
+
+create_node_table = {
+    "CREATE" ~ "NODE" ~ "TABLE" ~ identifier ~ "(" ~ column_definitions ~ "," ~ primary_key ~ ")"
+}
+
+create_rel_table = {
+    "CREATE" ~ "REL" ~ "TABLE" ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ "," ~ column_definitions ~ ")"
+}
+
+drop_table = {
+    "DROP" ~ "TABLE" ~ identifier
+}
+
+column_definitions = { column_def ~ ("," ~ column_def)* }
+column_def = { identifier ~ type_name }
+type_name = { "STRING" | "INT64" | "INT32" | "INT16" | "INT8"
+    | "UINT64" | "UINT32" | "UINT16" | "UINT8"
+    | "DOUBLE" | "FLOAT" | "BOOLEAN" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL" }
+
+primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
+
+// ==================== DML Clauses ====================
+
+match_clause = {
+    "MATCH" ~ pattern ~ ("," ~ pattern)*
+}
+
+pattern = {
+    node_pattern ~ ("-" ~ edge_pattern ~ "-" ~ node_pattern)?
+}
+
+node_pattern = {
+    "(" ~ variable? ~ label? ~ property_map? ~ ")"
+}
+
+edge_pattern = {
+    ("<" ~ "-")? ~ "[" ~ variable? ~ label? ~ property_map? ~ "]" ~ ("-" ~ ">")?
+}
+
+label = { ":" ~ identifier }
+property_map = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
+property_key_value = { identifier ~ ":" ~ expression }
+
+where_clause = {
+    "WHERE" ~ expression
+}
+
+return_clause = {
+    "RETURN" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit?
+}
+
+return_item = {
+    expression ~ ("AS" ~ identifier)?
+}
+
+order_by = {
+    "ORDER" ~ "BY" ~ sort_item ~ ("," ~ sort_item)*
+}
+sort_item = { expression ~ ("ASC" | "DESC")? }
+
+limit = { "LIMIT" ~ integer ~ offset? }
+offset = { "SKIP" ~ integer }
+
+// ==================== Expressions ====================
+
+expression = { or_expr }
+
+or_expr = { and_expr ~ ("OR" ~ and_expr)* }
+and_expr = { not_expr ~ ("AND" ~ not_expr)* }
+not_expr = { ("NOT")? ~ comparison_expr }
+
+comparison_expr = { additive_expr ~ (comparison_op ~ additive_expr)? }
+comparison_op = { "=" | "<>" | "<" | ">" | "<=" | ">=" }
+
+additive_expr = { multiplicative_expr ~ (add_op ~ multiplicative_expr)* }
+add_op = { "+" | "-" }
+
+multiplicative_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
+mul_op = { "*" | "/" | "%" }
+
+unary_expr = { ("-" | "+")? ~ postfix_expr }
+
+postfix_expr = { primary ~ (property_access | "[" ~ expression ~ "]" )* }
+
+property_access = { "." ~ identifier }
+
+primary = {
+    literal
+    | variable ~ function_args?
+    | list_literal
+    | map_literal
+    | "(" ~ expression ~ ")"
+}
+
+function_args = { "(" ~ expression ~ ("," ~ expression)* ~ ")" }
+
+// ==================== Literals ====================
+
+literal = {
+    string
+    | integer
+    | float
+    | boolean_literal
+    | null_literal
+}
+
+string = { "\"" ~ (escape_char | (!"\"" ~ ANY))* ~ "\"" | "'" ~ (escape_char | (!"'" ~ ANY))* ~ "'" }
+escape_char = { "\\" ~ ANY }
+
+integer = { "-"? ~ ASCII_DIGIT+ }
+float = { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (^"e" ~ "-"? ~ ASCII_DIGIT+)? }
+boolean_literal = { "TRUE" | "FALSE" }
+null_literal = { "NULL" }
+
+list_literal = { "[" ~ expression ~ ("," ~ expression)* ~ "]" }
+map_literal = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
+
+// ==================== Identifiers & Variables ====================
+
+variable = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
