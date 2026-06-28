@@ -412,7 +412,7 @@ mod tests {
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 5); // COUNT = 5
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(5)); // COUNT = 5
     }
 
     #[test]
@@ -426,7 +426,7 @@ mod tests {
         v.resize(4);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 10); // 1+2+3+4 = 10
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(10)); // 1+2+3+4 = 10
     }
 
     #[test]
@@ -441,8 +441,8 @@ mod tests {
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 3);  // MIN = 3
-        assert_eq!(result[0].fields[1].get_i64(0).unwrap(), 99); // MAX = 99
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3));  // MIN = 3
+        assert_eq!(result[0].fields[1].get_value(0).unwrap(), Value::Int64(99)); // MAX = 99
     }
 
     #[test]
@@ -456,7 +456,8 @@ mod tests {
         v.resize(4);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 2); // (1+2+3+4)/4 = 2 (integer division)
+        // AVG now returns Double (Value::Double)
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Double(2.5)); // (1+2+3+4)/4 = 2.5
     }
 
     #[test]
@@ -466,7 +467,7 @@ mod tests {
             aggregate_functions: vec!["COUNT".into()],
         };
         let result = agg.execute(vec![]).unwrap();
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 0); // COUNT of empty = 0
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(0)); // COUNT of empty = 0
     }
 
     // ==================== HashJoin Tests ====================

@@ -11,3 +11,4 @@ tracing.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true
 regex.workspace = true
+time.workspace = true

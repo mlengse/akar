@@ -3,8 +3,10 @@
 //! Each physical operator implements the `Operator` trait with an `execute` method
 //! that produces output `DataChunk`s from input `DataChunk`s.
 
-use kuzu_common::types::PhysicalTypeID;
+use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{physical_type_size, DataChunk, ValueVector};
+use kuzu_function::scalar::AggValueState;
+use kuzu_function::AggregateFunction;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use std::collections::HashMap;
 
@@ -341,20 +343,20 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
 
 // ==================== Aggregate ====================
 
-#[derive(Debug, Clone)]
-pub struct Aggregator {
-    pub function_name: String,
-    pub column_index: usize,
-}
-
-/// State for a single aggregate computation.
-#[derive(Debug, Clone)]
-enum AggState {
-    Count(u64),
-    Sum(i64),
-    Min(i64),
-    Max(i64),
-    Avg { sum: i64, count: u64 },
+/// Helper: parse an aggregate function name string into an AggregateFunction enum.
+fn parse_aggregate_function(name: &str) -> AggregateFunction {
+    match name.to_uppercase().as_str() {
+        "COUNT" => AggregateFunction::Count,
+        "COUNT(*)" => AggregateFunction::CountStar,
+        "SUM" => AggregateFunction::Sum,
+        "AVG" => AggregateFunction::Avg,
+        "MIN" => AggregateFunction::Min,
+        "MAX" => AggregateFunction::Max,
+        "COLLECT" => AggregateFunction::Collect,
+        "STDDEV" => AggregateFunction::StdDev,
+        "VARIANCE" => AggregateFunction::Variance,
+        _ => AggregateFunction::Count,
+    }
 }
 
 pub struct PhysicalAggregate {
@@ -366,9 +368,6 @@ impl PhysicalOperatorExec for PhysicalAggregate {
     fn operator_type(&self) -> &str { "aggregate" }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Simplified: if no group by, compute scalar aggregates
-        // If group by exists, hash-based grouping
-
         if input.is_empty() {
             let mut fields = Vec::new();
             for _ in 0..self.aggregate_functions.len() {
@@ -381,10 +380,8 @@ impl PhysicalOperatorExec for PhysicalAggregate {
         }
 
         if self.group_by_cols.is_empty() {
-            // Scalar aggregation (no GROUP BY)
             self.compute_scalar_aggregates(&input)
         } else {
-            // Hash-based GROUP BY
             self.compute_grouped_aggregates(&input)
         }
     }
@@ -393,15 +390,12 @@ impl PhysicalOperatorExec for PhysicalAggregate {
 impl PhysicalAggregate {
     /// Compute scalar aggregates (no GROUP BY) across all input chunks.
     fn compute_scalar_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
-        let mut states: Vec<AggState> = self.aggregate_functions.iter()
-            .map(|name| match name.to_uppercase().as_str() {
-                "COUNT" | "COUNT(*)" => AggState::Count(0),
-                "SUM" => AggState::Sum(0),
-                "MIN" => AggState::Min(i64::MAX),
-                "MAX" => AggState::Max(i64::MIN),
-                "AVG" => AggState::Avg { sum: 0, count: 0 },
-                _ => AggState::Count(0),
-            })
+        let funcs: Vec<AggregateFunction> = self.aggregate_functions.iter()
+            .map(|name| parse_aggregate_function(name))
+            .collect();
+
+        let mut states: Vec<AggValueState> = funcs.iter()
+            .map(|f| AggValueState::new(f))
             .collect();
 
         for chunk in input {
@@ -409,33 +403,31 @@ impl PhysicalAggregate {
                 for (i, state) in states.iter_mut().enumerate() {
                     let col_idx = i.min(chunk.fields.len().saturating_sub(1));
                     let val = chunk.fields.get(col_idx)
-                        .and_then(|f| f.get_i64(row))
-                        .unwrap_or(0);
-                    match state {
-                        AggState::Count(n) => *n += 1,
-                        AggState::Sum(s) => *s += val,
-                        AggState::Min(m) => *m = (*m).min(val),
-                        AggState::Max(m) => *m = (*m).max(val),
-                        AggState::Avg { sum, count } => { *sum += val; *count += 1; }
+                        .and_then(|f| f.get_value(row))
+                        .unwrap_or(Value::Null);
+
+                    // COUNT(*) counts rows regardless
+                    if matches!(funcs[i], AggregateFunction::CountStar) {
+                        if let AggValueState::Count(n) = state {
+                            *n += 1;
+                        }
+                        continue;
                     }
+
+                    state.update(&val);
                 }
             }
         }
 
+        // Build output: determine result types from final values
         let mut fields = Vec::new();
         for state in &states {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-            let result = match state {
-                AggState::Count(n) => *n as i64,
-                AggState::Sum(s) => *s,
-                AggState::Min(m) => *m,
-                AggState::Max(m) => *m,
-                AggState::Avg { sum, count } => {
-                    if *count > 0 { *sum / *count as i64 } else { 0 }
-                }
-            };
-            v.set_i64(0, result);
-            v.resize(1);
+            let result = state.finalize();
+            let physical_type = result.physical_type();
+            let mut v = ValueVector::new(physical_type, 1);
+            v.resize(1); // Must set size first so data() is writable
+            // Store the result value into the vector
+            store_value_in_vector(&mut v, 0, &result);
             fields.push(v);
         }
         Ok(vec![DataChunk::new(fields)])
@@ -443,10 +435,14 @@ impl PhysicalAggregate {
 
     /// Compute hash-based GROUP BY aggregates.
     fn compute_grouped_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
-        // Simplified: group by first column, aggregate the rest
         let group_col = self.group_by_cols.first().copied().unwrap_or(0) as usize;
 
-        let mut groups: HashMap<i64, Vec<AggState>> = HashMap::new();
+        let funcs: Vec<AggregateFunction> = self.aggregate_functions.iter()
+            .map(|name| parse_aggregate_function(name))
+            .collect();
+
+        // Hash map: group key → Vec of AggValueState (one per aggregate function)
+        let mut groups: HashMap<i64, Vec<AggValueState>> = HashMap::new();
 
         for chunk in input {
             for row in 0..chunk.size {
@@ -455,29 +451,22 @@ impl PhysicalAggregate {
                     .unwrap_or(0);
 
                 let entry = groups.entry(key).or_insert_with(|| {
-                    self.aggregate_functions.iter()
-                        .map(|name| match name.to_uppercase().as_str() {
-                            "COUNT" | "COUNT(*)" => AggState::Count(0),
-                            "SUM" => AggState::Sum(0),
-                            "MIN" => AggState::Min(i64::MAX),
-                            "MAX" => AggState::Max(i64::MIN),
-                            "AVG" => AggState::Avg { sum: 0, count: 0 },
-                            _ => AggState::Count(0),
-                        })
-                        .collect()
+                    funcs.iter().map(|f| AggValueState::new(f)).collect()
                 });
 
                 for (i, state) in entry.iter_mut().enumerate() {
-                    let val = chunk.fields.get(i)
-                        .and_then(|f| f.get_i64(row))
-                        .unwrap_or(0);
-                    match state {
-                        AggState::Count(n) => *n += 1,
-                        AggState::Sum(s) => *s += val,
-                        AggState::Min(m) => *m = (*m).min(val),
-                        AggState::Max(m) => *m = (*m).max(val),
-                        AggState::Avg { sum, count } => { *sum += val; *count += 1; }
+                    let val = chunk.fields.get(i.min(chunk.fields.len().saturating_sub(1)))
+                        .and_then(|f| f.get_value(row))
+                        .unwrap_or(Value::Null);
+
+                    if matches!(funcs[i], AggregateFunction::CountStar) {
+                        if let AggValueState::Count(n) = state {
+                            *n += 1;
+                        }
+                        continue;
                     }
+
+                    state.update(&val);
                 }
             }
         }
@@ -492,39 +481,102 @@ impl PhysicalAggregate {
             return Ok(vec![DataChunk::new(fields)]);
         }
 
-        // Build output chunks
-        let mut fields: Vec<Vec<(i64, bool)>> = (0..=self.aggregate_functions.len())
-            .map(|_| Vec::new())
-            .collect();
+        let num_rows = groups.len();
+        let num_agg = self.aggregate_functions.len();
 
-        // Group key column
+        // For each column, collect final values
+        let mut group_key_values: Vec<i64> = Vec::with_capacity(num_rows);
+        let mut agg_results: Vec<Vec<Value>> = (0..num_agg).map(|_| Vec::with_capacity(num_rows)).collect();
+
         for (key, states) in &groups {
-            fields[0].push((*key, false));
+            group_key_values.push(*key);
             for (i, state) in states.iter().enumerate() {
-                let val = match state {
-                    AggState::Count(n) => *n as i64,
-                    AggState::Sum(s) => *s,
-                    AggState::Min(m) => *m,
-                    AggState::Max(m) => *m,
-                    AggState::Avg { sum, count } => {
-                        if *count > 0 { *sum / *count as i64 } else { 0 }
-                    }
-                };
-                fields[i + 1].push((val, false));
+                agg_results[i].push(state.finalize());
             }
         }
 
-        let num_rows = groups.len();
-        let mut output_fields = Vec::new();
-        for col in 0..=self.aggregate_functions.len() {
+        // Build output vectors
+        let mut output_fields = Vec::with_capacity(1 + num_agg);
+
+        // Group key column (Int64)
+        {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, num_rows);
-            for (row, (val, _)) in fields[col].iter().enumerate() {
-                v.set_i64(row, *val);
+            v.resize(num_rows); // Must set size first so data() is writable
+            for (row, &key) in group_key_values.iter().enumerate() {
+                v.set_i64(row, key);
             }
-            v.resize(num_rows);
             output_fields.push(v);
         }
+
+        // Aggregate result columns
+        for i in 0..num_agg {
+            let first_val = &agg_results[i][0];
+            let physical_type = first_val.physical_type();
+            let mut v = ValueVector::new(physical_type, num_rows);
+            v.resize(num_rows); // Must set size first so data() is writable
+            for (row, val) in agg_results[i].iter().enumerate() {
+                store_value_in_vector(&mut v, row, val);
+            }
+            output_fields.push(v);
+        }
+
         Ok(vec![DataChunk::new(output_fields)])
+    }
+}
+
+/// Store a Value into a ValueVector at the given row index.
+fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
+    match val {
+        Value::Null => {
+            v.set_null(row, true);
+        }
+        Value::Bool(x) => {
+            if v.physical_type() == PhysicalTypeID::Bool {
+                v.data_mut()[row] = if *x { 1 } else { 0 };
+                v.set_null(row, false);
+            }
+        }
+        Value::Int64(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::Int32(x) => {
+            let offset = row * 4;
+            if offset + 4 <= v.data().len() {
+                v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::Double(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::Float(x) => {
+            let offset = row * 4;
+            if offset + 4 <= v.data().len() {
+                v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::String(s) => {
+            let offset = row * 16;
+            let bytes = s.as_bytes();
+            let len = bytes.len().min(15) as u8;
+            v.data_mut()[offset] = len;
+            let copy_len = bytes.len().min(15);
+            v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+            v.set_null(row, false);
+        }
+        _ => {
+            // For complex types (List, Struct, etc.), store as Int64 0 placeholder
+            v.set_null(row, true);
+        }
     }
 }
 

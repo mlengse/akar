@@ -1,6 +1,6 @@
 //! ValueVector — typed columnar data array used throughout the query engine.
 
-use crate::types::PhysicalTypeID;
+use crate::types::{PhysicalTypeID, Value};
 
 /// A vector of values of the same physical type.
 /// This is the fundamental columnar data unit in Kuzu's query execution.
@@ -156,6 +156,70 @@ impl ValueVector {
 }
 
 impl ValueVector {
+    /// Get a Value enum from this vector at a given row index.
+    /// This converts the raw byte buffer into the appropriate Value variant.
+    pub fn get_value(&self, idx: usize) -> Option<Value> {
+        if idx >= self.size || self.is_null(idx) {
+            return None;
+        }
+        let type_size = physical_type_size(self.physical_type);
+        let offset = idx * type_size;
+        match self.physical_type {
+            PhysicalTypeID::Bool => Some(Value::Bool(self.data[offset] != 0)),
+            PhysicalTypeID::Int64 => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&self.data[offset..offset + 8]);
+                Some(Value::Int64(i64::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::Int32 => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&self.data[offset..offset + 4]);
+                Some(Value::Int32(i32::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::Int16 => {
+                let mut buf = [0u8; 2];
+                buf.copy_from_slice(&self.data[offset..offset + 2]);
+                Some(Value::Int16(i16::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::Int8 => Some(Value::Int8(self.data[offset] as i8)),
+            PhysicalTypeID::UInt64 => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&self.data[offset..offset + 8]);
+                Some(Value::UInt64(u64::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::UInt32 => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&self.data[offset..offset + 4]);
+                Some(Value::UInt32(u32::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::UInt16 => {
+                let mut buf = [0u8; 2];
+                buf.copy_from_slice(&self.data[offset..offset + 2]);
+                Some(Value::UInt16(u16::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::UInt8 => Some(Value::UInt8(self.data[offset])),
+            PhysicalTypeID::Double => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&self.data[offset..offset + 8]);
+                Some(Value::Double(f64::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::Float => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&self.data[offset..offset + 4]);
+                Some(Value::Float(f32::from_le_bytes(buf)))
+            }
+            PhysicalTypeID::String => {
+                let len = self.data[offset] as usize;
+                let s = String::from_utf8_lossy(&self.data[offset + 1..offset + 1 + len.min(15)]).to_string();
+                Some(Value::String(s))
+            }
+            // For struct/list types, return a simplified representation
+            PhysicalTypeID::Struct => Some(Value::Struct(Vec::new())),
+            PhysicalTypeID::List => Some(Value::List(Vec::new())),
+            _ => None,
+        }
+    }
+
     /// Push a boolean value to the end of the vector.
     pub fn push_bool(&mut self, val: bool) {
         let idx = self.size;
