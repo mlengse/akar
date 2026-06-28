@@ -19,6 +19,7 @@ members = [
     "kuzu-httpfs",
     "kuzu-duckdb",
     "kuzu-algo",
+    "kuzu-neo4j",
     "kuzu-main",
     "kuzu-cli",
 ]

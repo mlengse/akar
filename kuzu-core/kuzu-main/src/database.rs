@@ -133,5 +133,12 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(feature = "neo4j-extension")]
+        {
+            let ext = Box::new(kuzu_neo4j::Neo4jExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
     }
 }

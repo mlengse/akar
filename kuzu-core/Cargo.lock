@@ -533,6 +533,7 @@ dependencies = [
  "kuzu-graph",
  "kuzu-httpfs",
  "kuzu-json",
+ "kuzu-neo4j",
  "kuzu-optimizer",
  "kuzu-parser",
  "kuzu-planner",
@@ -541,6 +542,17 @@ dependencies = [
  "kuzu-transaction",
  "kuzu-vector",
  "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "kuzu-neo4j"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
  "tracing",
 ]
 
