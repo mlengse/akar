@@ -1117,4 +1117,113 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|op| !matches!(op, LogicalOperator::Filter(_))));
     }
+
+    // ==================== Tree Pass Tests ====================
+
+    #[test]
+    fn test_factorization_rewriting_inserts_flatten() {
+        // Build a small tree: HashJoin(ScanNode("A"), ScanNode("B"))
+        let mut root = LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![],
+            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+                cardinality: 0,
+            })),
+            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "B".into(), table_id: 1, alias: None, columns: vec![],
+                cardinality: 0,
+            })),
+            cardinality: 0,
+        });
+
+        let pass = FactorizationRewriting;
+        pass.apply_tree(&mut root);
+
+        // After rewriting, the hash join's children should be wrapped in Flatten
+        match &root {
+            LogicalOperator::HashJoin(hj) => {
+                assert!(matches!(&*hj.probe_side, LogicalOperator::Flatten(_)),
+                    "Probe side should be wrapped in Flatten");
+                assert!(matches!(&*hj.build_side, LogicalOperator::Flatten(_)),
+                    "Build side should be wrapped in Flatten");
+            }
+            _ => panic!("Expected HashJoin"),
+        }
+    }
+
+    #[test]
+    fn test_cardinality_estimation_scan_node() {
+        let mut root = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(), table_id: 0, alias: None, columns: vec![],
+            cardinality: 0,
+        });
+
+        let pass = CardinalityEstimation;
+        pass.apply_tree(&mut root);
+
+        // ScanNode should have default cardinality of 1000
+        assert_eq!(root.cardinality(), 1000);
+    }
+
+    #[test]
+    fn test_cardinality_estimation_aggregate_no_keys() {
+        // Aggregate without GROUP BY → cardinality = 1
+        let mut root = LogicalOperator::Aggregate(LogicalAggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "T".into(), table_id: 0, alias: None, columns: vec![],
+                cardinality: 0,
+            })],
+            cardinality: 0,
+        });
+
+        let pass = CardinalityEstimation;
+        pass.apply_tree(&mut root);
+
+        assert_eq!(root.cardinality(), 1,
+            "Aggregate without GROUP BY should have cardinality 1");
+    }
+
+    #[test]
+    fn test_cardinality_estimation_limit() {
+        // Limit(10) over ScanNode(1000) → cardinality = min(10, 1000) = 10
+        let mut root = LogicalOperator::Limit(LogicalLimit {
+            limit: 10,
+            offset: 0,
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "T".into(), table_id: 0, alias: None, columns: vec![],
+                cardinality: 1000,
+            })],
+            cardinality: 0,
+        });
+
+        let pass = CardinalityEstimation;
+        pass.apply_tree(&mut root);
+
+        assert_eq!(root.cardinality(), 10,
+            "Limit should cap cardinality at its limit value");
+    }
+
+    #[test]
+    fn test_cardinality_estimation_cross_product() {
+        let mut root = LogicalOperator::CrossProduct(LogicalCrossProduct {
+            left: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+                cardinality: 0, // will be overwritten by estimate_scan_node
+            })),
+            right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "B".into(), table_id: 1, alias: None, columns: vec![],
+                cardinality: 0, // will be overwritten by estimate_scan_node
+            })),
+            cardinality: 0,
+        });
+
+        let pass = CardinalityEstimation;
+        pass.apply_tree(&mut root);
+
+        // Both ScanNodes get default cardinality of 1000.
+        // Cross product: 1000 * 1000 = 1,000,000
+        assert_eq!(root.cardinality(), 1_000_000);
+    }
 }
