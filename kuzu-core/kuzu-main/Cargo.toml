@@ -15,6 +15,12 @@ duckdb-extension = ["dep:kuzu-duckdb"]
 algo-extension = ["dep:kuzu-algo"]
 neo4j-extension = ["dep:kuzu-neo4j"]
 llm-extension = ["dep:kuzu-llm"]
+sqlite-extension = ["dep:kuzu-sqlite"]
+delta-extension = ["dep:kuzu-delta"]
+iceberg-extension = ["dep:kuzu-iceberg"]
+azure-extension = ["dep:kuzu-azure"]
+postgres-extension = ["dep:kuzu-postgres"]
+unity-catalog-extension = ["dep:kuzu-unity-catalog"]
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
@@ -37,5 +43,11 @@ kuzu-duckdb = { path = "../kuzu-duckdb", optional = true }
 kuzu-algo = { path = "../kuzu-algo", optional = true }
 kuzu-neo4j = { path = "../kuzu-neo4j", optional = true }
 kuzu-llm = { path = "../kuzu-llm", optional = true }
+kuzu-sqlite = { path = "../kuzu-sqlite", optional = true }
+kuzu-delta = { path = "../kuzu-delta", optional = true }
+kuzu-iceberg = { path = "../kuzu-iceberg", optional = true }
+kuzu-azure = { path = "../kuzu-azure", optional = true }
+kuzu-postgres = { path = "../kuzu-postgres", optional = true }
+kuzu-unity-catalog = { path = "../kuzu-unity-catalog", optional = true }
 tracing.workspace = true
 thiserror.workspace = true

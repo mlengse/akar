@@ -1,0 +1,20 @@
+[package]
+name = "kuzu-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-function = { path = "../kuzu-function" }
+kuzu-catalog = { path = "../kuzu-catalog" }
+kuzu-extension = { path = "../kuzu-extension" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"], optional = true }
+tracing.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+native = ["tokio", "tokio-postgres"]

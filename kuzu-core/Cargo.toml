@@ -21,6 +21,12 @@ members = [
     "kuzu-algo",
     "kuzu-neo4j",
     "kuzu-llm",
+    "kuzu-sqlite",
+    "kuzu-delta",
+    "kuzu-iceberg",
+    "kuzu-azure",
+    "kuzu-postgres",
+    "kuzu-unity-catalog",
     "kuzu-main",
     "kuzu-cli",
 ]

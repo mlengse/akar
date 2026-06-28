@@ -147,5 +147,47 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(feature = "sqlite-extension")]
+        {
+            let ext = Box::new(kuzu_sqlite::SqliteExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "delta-extension")]
+        {
+            let ext = Box::new(kuzu_delta::DeltaExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "iceberg-extension")]
+        {
+            let ext = Box::new(kuzu_iceberg::IcebergExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "azure-extension")]
+        {
+            let ext = Box::new(kuzu_azure::AzureExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "postgres-extension")]
+        {
+            let ext = Box::new(kuzu_postgres::PostgresExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "unity-catalog-extension")]
+        {
+            let ext = Box::new(kuzu_unity_catalog::UnityCatalogExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
     }
 }
