@@ -2,9 +2,11 @@
 //!
 //! Builds a tree of logical operators from the bound AST:
 //! - MATCH → ScanNode / ScanRel
-//! - WHERE → Filter (child of scans)
+//! - Multiple MATCH patterns combined via join tree (HashJoin / CrossProduct)
+//! - WHERE → Filter (applied after joins)
 //! - RETURN → Projection (topmost operator)
 
+use crate::join_order::{build_join_tree, flatten_join_plan};
 use crate::logical_operator::*;
 use kuzu_binder::bound_statement::*;
 
@@ -65,16 +67,24 @@ impl QueryPlanner {
             }
         }
 
-        // Build operator tree bottom-up
-        // If multiple scans, combine with CrossProduct (simplified)
+        // Build operator pipeline bottom-up
         let mut result: Vec<LogicalOperator> = Vec::new();
 
-        // Add scans
-        for scan in scan_ops {
-            result.push(scan);
+        if scan_ops.is_empty() {
+            return Ok(result);
         }
 
-        // Apply filter on top of scans
+        if scan_ops.len() == 1 {
+            // Single scan — no join needed
+            result.push(scan_ops.into_iter().next().unwrap());
+        } else {
+            // Multiple scans — build join tree with greedy ordering
+            let join_plan = build_join_tree(scan_ops, filter_expr.as_ref());
+            let flattened = flatten_join_plan(&join_plan);
+            result.extend(flattened);
+        }
+
+        // Apply filter on top of scans/joins
         if let Some(expr) = filter_expr {
             result.push(LogicalOperator::Filter(LogicalFilter {
                 expression: expr.expression,
