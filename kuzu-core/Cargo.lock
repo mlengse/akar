@@ -396,6 +396,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-extension"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-function",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "kuzu-fts"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
+ "regex",
+ "tracing",
+]
+
+[[package]]
 name = "kuzu-function"
 version = "0.1.0"
 dependencies = [
@@ -417,14 +441,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-json"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "kuzu-main"
 version = "0.1.0"
 dependencies = [
  "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
+ "kuzu-extension",
+ "kuzu-fts",
  "kuzu-function",
  "kuzu-graph",
+ "kuzu-json",
  "kuzu-optimizer",
  "kuzu-parser",
  "kuzu-planner",

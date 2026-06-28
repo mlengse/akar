@@ -1,0 +1,14 @@
+[package]
+name = "kuzu-json"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-function = { path = "../kuzu-function" }
+kuzu-catalog = { path = "../kuzu-catalog" }
+kuzu-extension = { path = "../kuzu-extension" }
+serde_json.workspace = true
+tracing.workspace = true

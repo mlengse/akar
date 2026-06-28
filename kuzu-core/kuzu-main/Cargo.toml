@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+json-extension = ["dep:kuzu-json"]
+fts-extension = ["dep:kuzu-fts"]
+
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
 kuzu-storage = { path = "../kuzu-storage" }
@@ -17,5 +22,8 @@ kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-processor = { path = "../kuzu-processor" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-graph = { path = "../kuzu-graph" }
+kuzu-extension = { path = "../kuzu-extension" }
+kuzu-json = { path = "../kuzu-json", optional = true }
+kuzu-fts = { path = "../kuzu-fts", optional = true }
 tracing.workspace = true
 thiserror.workspace = true

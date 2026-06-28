@@ -12,6 +12,7 @@ members = [
     "kuzu-processor",
     "kuzu-function",
     "kuzu-graph",
+    "kuzu-extension",
     "kuzu-main",
 ]
 
