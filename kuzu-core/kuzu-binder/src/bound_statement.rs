@@ -1,6 +1,5 @@
 //! Bound statement types — AST nodes after semantic analysis.
 
-use kuzu_catalog::CatalogEntry;
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::Expression;
 
@@ -13,9 +12,20 @@ pub enum BoundStatement {
     BoundDropTable(BoundDropTable),
 }
 
+/// A resolved variable in scope (from MATCH patterns).
+#[derive(Debug, Clone)]
+pub struct BoundVariable {
+    pub name: String,
+    pub table_id: u64,
+    pub label: Option<String>,
+    pub is_node: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub clauses: Vec<BoundClause>,
+    /// Variables in scope (accumulated across clauses).
+    pub variables: Vec<BoundVariable>,
 }
 
 #[derive(Debug, Clone)]
@@ -23,18 +33,20 @@ pub enum BoundClause {
     BoundMatch(BoundMatchClause),
     BoundReturn(BoundReturnClause),
     BoundWhere(BoundWhereClause),
-    BoundCreate(BoundCreateClause),
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundMatchClause {
     pub patterns: Vec<BoundPattern>,
+    /// New variables introduced by this MATCH clause.
+    pub new_variables: Vec<BoundVariable>,
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundPattern {
     pub node_variable: Option<String>,
     pub node_label: Option<String>,
+    pub node_table_id: Option<u64>,
     pub edge: Option<BoundEdgePattern>,
 }
 
@@ -42,35 +54,42 @@ pub struct BoundPattern {
 pub struct BoundEdgePattern {
     pub variable: Option<String>,
     pub label: Option<String>,
+    pub rel_table_id: Option<u64>,
     pub direction: kuzu_parser::ast::EdgeDirection,
+}
+
+/// A bound expression with resolved type information.
+#[derive(Debug, Clone)]
+pub struct BoundExpression {
+    pub expression: Expression,
+    pub resolved_type: LogicalTypeID,
+    pub is_constant: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundReturnClause {
-    pub expressions: Vec<(Expression, Option<String>, LogicalTypeID)>,
+    pub expressions: Vec<BoundExpression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundWhereClause {
-    pub expression: Expression,
-}
-
-#[derive(Debug, Clone)]
-pub struct BoundCreateClause {
-    pub patterns: Vec<BoundPattern>,
+    pub expression: BoundExpression,
 }
 
 // DDL
 #[derive(Debug, Clone)]
 pub struct BoundCreateNodeTable {
     pub name: String,
-    pub catalog_entry: CatalogEntry,
+    pub columns: Vec<kuzu_catalog::CatalogColumn>,
+    pub primary_key: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct BoundCreateRelTable {
     pub name: String,
-    pub catalog_entry: CatalogEntry,
+    pub from: String,
+    pub to: String,
+    pub columns: Vec<kuzu_catalog::CatalogColumn>,
 }
 
 #[derive(Debug, Clone)]

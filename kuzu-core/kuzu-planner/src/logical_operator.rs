@@ -1,5 +1,6 @@
 //! Logical operator types for query planning.
 
+use kuzu_binder::bound_statement::BoundExpression;
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::Expression;
 
@@ -41,7 +42,7 @@ pub struct LogicalFilter {
 
 #[derive(Debug, Clone)]
 pub struct LogicalProjection {
-    pub expressions: Vec<(Expression, Option<String>, LogicalTypeID)>,
+    pub expressions: Vec<BoundExpression>,
     pub children: Vec<LogicalOperator>,
 }
 
