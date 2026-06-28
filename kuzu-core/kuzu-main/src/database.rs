@@ -126,5 +126,12 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(feature = "algo-extension")]
+        {
+            let ext = Box::new(kuzu_algo::AlgoExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
     }
 }

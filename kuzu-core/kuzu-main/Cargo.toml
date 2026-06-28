@@ -12,6 +12,7 @@ fts-extension = ["dep:kuzu-fts"]
 vector-extension = ["dep:kuzu-vector"]
 httpfs-extension = ["dep:kuzu-httpfs"]
 duckdb-extension = ["dep:kuzu-duckdb"]
+algo-extension = ["dep:kuzu-algo"]
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
@@ -31,5 +32,6 @@ kuzu-fts = { path = "../kuzu-fts", optional = true }
 kuzu-vector = { path = "../kuzu-vector", optional = true }
 kuzu-httpfs = { path = "../kuzu-httpfs", optional = true }
 kuzu-duckdb = { path = "../kuzu-duckdb", optional = true }
+kuzu-algo = { path = "../kuzu-algo", optional = true }
 tracing.workspace = true
 thiserror.workspace = true

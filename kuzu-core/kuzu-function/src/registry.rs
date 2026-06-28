@@ -100,6 +100,9 @@ pub enum TableFunction {
     ListTables,
     ShowColumns { table_name: String },
     CurrentSetting { key: String },
+    /// Extension-specific custom table function.
+    /// The `name` field identifies which custom function to execute.
+    Custom { name: String },
 }
 
 /// A resolved function with its variant.

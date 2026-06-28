@@ -18,6 +18,7 @@ members = [
     "kuzu-vector",
     "kuzu-httpfs",
     "kuzu-duckdb",
+    "kuzu-algo",
     "kuzu-main",
     "kuzu-cli",
 ]

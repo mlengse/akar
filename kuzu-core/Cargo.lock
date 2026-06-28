@@ -373,6 +373,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-algo"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
+ "kuzu-graph",
+ "tracing",
+]
+
+[[package]]
 name = "kuzu-binder"
 version = "0.1.0"
 dependencies = [
@@ -510,6 +522,7 @@ dependencies = [
 name = "kuzu-main"
 version = "0.1.0"
 dependencies = [
+ "kuzu-algo",
  "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
