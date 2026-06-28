@@ -383,7 +383,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 // Leaf and Flatten operators: no transformation needed
                 LogicalOperator::ScanNode(_)
                 | LogicalOperator::ScanRel(_)
-                | LogicalOperator::Flatten(_) => {}
+                | LogicalOperator::Flatten(_)
+                | LogicalOperator::TableFunctionCall(_) => {}
             }
         });
     }
@@ -496,6 +497,10 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::Flatten(f) => {
                     // Flatten multiplies cardinality by the group size factor
                     f.children.first().map(|c| c.cardinality()).unwrap_or(1)
+                }
+                LogicalOperator::TableFunctionCall(_) => {
+                    // Table functions produce their own rows; default estimate
+                    1000
                 }
             };
             op.set_cardinality(card);

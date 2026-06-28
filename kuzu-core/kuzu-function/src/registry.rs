@@ -6,11 +6,14 @@
 //! - Table functions (produce a table of rows)
 
 use hashbrown::HashMap;
+use kuzu_common::types::Value;
+use kuzu_common::vector::DataChunk;
+use std::sync::Arc;
 
 // ==================== Scalar Function Types ====================
 
 /// All built-in scalar function variants.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum ScalarFunction {
     Arithmetic { op: ArithmeticOp },
     Comparison { op: ComparisonOp },
@@ -22,6 +25,30 @@ pub enum ScalarFunction {
     Struct { op: StructOp },
     Boolean { op: BooleanOp },
     Utility { op: UtilityOp },
+    /// Extension-provided scalar function with a callback closure.
+    /// The closure receives input values and returns an output value.
+    CustomScalar {
+        name: String,
+        execute: Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>,
+    },
+}
+
+impl std::fmt::Debug for ScalarFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Arithmetic { op } => f.debug_struct("Arithmetic").field("op", op).finish(),
+            Self::Comparison { op } => f.debug_struct("Comparison").field("op", op).finish(),
+            Self::String { op } => f.debug_struct("String").field("op", op).finish(),
+            Self::Cast { target_type } => f.debug_struct("Cast").field("target_type", target_type).finish(),
+            Self::Date { op } => f.debug_struct("Date").field("op", op).finish(),
+            Self::List { op } => f.debug_struct("List").field("op", op).finish(),
+            Self::Map { op } => f.debug_struct("Map").field("op", op).finish(),
+            Self::Struct { op } => f.debug_struct("Struct").field("op", op).finish(),
+            Self::Boolean { op } => f.debug_struct("Boolean").field("op", op).finish(),
+            Self::Utility { op } => f.debug_struct("Utility").field("op", op).finish(),
+            Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,7 +119,7 @@ pub enum AggregateFunction {
 // ==================== Table Function Types ====================
 
 /// All built-in table functions.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TableFunction {
     ScanCsv { path: String },
     ScanParquet { path: String },
@@ -100,9 +127,30 @@ pub enum TableFunction {
     ListTables,
     ShowColumns { table_name: String },
     CurrentSetting { key: String },
-    /// Extension-specific custom table function.
+    /// Extension-specific custom table function (tag-based, no callback).
     /// The `name` field identifies which custom function to execute.
     Custom { name: String },
+    /// Extension-provided table function with a callback closure.
+    /// The closure receives input args and fills a mutable DataChunk.
+    CustomTable {
+        name: String,
+        execute: Arc<dyn Fn(&[Value], &mut DataChunk) -> Result<(), String> + Send + Sync>,
+    },
+}
+
+impl std::fmt::Debug for TableFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ScanCsv { path } => f.debug_struct("ScanCsv").field("path", path).finish(),
+            Self::ScanParquet { path } => f.debug_struct("ScanParquet").field("path", path).finish(),
+            Self::ScanJson { path } => f.debug_struct("ScanJson").field("path", path).finish(),
+            Self::ListTables => write!(f, "ListTables"),
+            Self::ShowColumns { table_name } => f.debug_struct("ShowColumns").field("table_name", table_name).finish(),
+            Self::CurrentSetting { key } => f.debug_struct("CurrentSetting").field("key", key).finish(),
+            Self::Custom { name } => f.debug_struct("Custom").field("name", name).finish(),
+            Self::CustomTable { name, .. } => f.debug_struct("CustomTable").field("name", name).finish(),
+        }
+    }
 }
 
 /// A resolved function with its variant.
@@ -277,6 +325,10 @@ impl FunctionRegistry {
 
     pub fn get_aggregate(&self, name: &str) -> Option<&AggregateFunction> {
         self.aggregate_functions.get(&name.to_lowercase())
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&TableFunction> {
+        self.table_functions.get(&name.to_lowercase())
     }
 
     pub fn contains(&self, name: &str) -> bool {

@@ -75,7 +75,7 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // 6. Execute
-        let processor = QueryProcessor::new();
+        let processor = QueryProcessor::with_registry(self.database.function_registry.clone());
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -177,7 +177,7 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Execute
-        let processor = QueryProcessor::new();
+        let processor = QueryProcessor::with_registry(self.database.function_registry.clone());
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;

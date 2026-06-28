@@ -18,6 +18,9 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Struct { op } => evaluate_struct(*op, args),
         ScalarFunction::Boolean { op } => evaluate_boolean(*op, args),
         ScalarFunction::Utility { op } => evaluate_utility(*op, args),
+        ScalarFunction::CustomScalar { execute, .. } => {
+            (execute)(args)
+        }
     }
 }
 

@@ -17,6 +17,7 @@ pub enum LogicalOperator {
     Aggregate(LogicalAggregate),
     Union(LogicalUnion),
     Flatten(LogicalFlatten),
+    TableFunctionCall(LogicalTableFunctionCall),
 }
 
 impl LogicalOperator {
@@ -34,6 +35,7 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.cardinality,
             LogicalOperator::Union(s) => s.cardinality,
             LogicalOperator::Flatten(s) => s.cardinality,
+            LogicalOperator::TableFunctionCall(s) => s.cardinality,
         }
     }
 
@@ -51,6 +53,7 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.cardinality = card,
             LogicalOperator::Union(s) => s.cardinality = card,
             LogicalOperator::Flatten(s) => s.cardinality = card,
+            LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
         }
     }
 
@@ -75,6 +78,7 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.children.iter_mut().collect(),
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
+            LogicalOperator::TableFunctionCall(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -92,6 +96,7 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.children.iter().collect(),
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
+            LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -182,5 +187,17 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// A table function call operator.
+///
+/// Invokes a registered table function (e.g., `duckdb_scan`, `delta_scan`)
+/// and produces a DataChunk as output. The function is looked up by name
+/// in the FunctionRegistry during execution.
+#[derive(Debug, Clone)]
+pub struct LogicalTableFunctionCall {
+    pub function_name: String,
+    pub args: Vec<kuzu_parser::ast::Expression>,
     pub cardinality: u64,
 }

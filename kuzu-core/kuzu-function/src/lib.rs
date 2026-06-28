@@ -10,3 +10,7 @@ pub use registry::{
     MapOp, StructOp, BooleanOp, UtilityOp, CastTarget,
 };
 pub use scalar::evaluate_scalar;
+
+// Re-export types needed for custom function callbacks
+pub use kuzu_common::types::Value;
+pub use kuzu_common::vector::DataChunk;

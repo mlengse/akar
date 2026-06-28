@@ -11,3 +11,8 @@ kuzu-function = { path = "../kuzu-function" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
 tracing.workspace = true
+duckdb = { version = "~1.105", features = ["bundled"], optional = true }
+
+[features]
+default = []
+bundled = ["duckdb/bundled"]

@@ -7,16 +7,29 @@
 //! 4. Limit/OrderBy/Aggregate are applied last
 
 use crate::physical_operator::*;
-use kuzu_common::types::PhysicalTypeID;
+use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
+use std::sync::{Arc, Mutex};
 
 /// The query processor executes a physical plan and produces result chunks.
-pub struct QueryProcessor;
+pub struct QueryProcessor {
+    function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
+}
 
 impl QueryProcessor {
     pub fn new() -> Self {
-        Self
+        Self {
+            function_registry: None,
+        }
+    }
+
+    /// Create a processor with access to the function registry.
+    pub fn with_registry(registry: Arc<Mutex<FunctionRegistry>>) -> Self {
+        Self {
+            function_registry: Some(registry),
+        }
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
@@ -125,10 +138,54 @@ impl QueryProcessor {
                 | LogicalOperator::Union(_) => {
                     intermediate_result = Some(vec![]);
                 }
+                LogicalOperator::TableFunctionCall(tf) => {
+                    let result = self.execute_table_function(tf)?;
+                    intermediate_result = Some(result);
+                }
             }
         }
 
         Ok(intermediate_result.unwrap_or_default())
+    }
+
+    /// Execute a table function call by looking up the function in the registry
+    /// and dispatching to the appropriate handler.
+    fn execute_table_function(
+        &self,
+        tf: &kuzu_planner::logical_operator::LogicalTableFunctionCall,
+    ) -> Result<Vec<DataChunk>, String> {
+        let func_name = &tf.function_name;
+        let args: Vec<Value> = Vec::new(); // args would be evaluated from expressions
+
+        // Look up the function in the registry
+        if let Some(ref registry) = self.function_registry {
+            let reg = registry.lock().unwrap();
+            if let Some(tbl_fn) = reg.get_table(func_name) {
+                match tbl_fn {
+                    TableFunction::CustomTable { execute, .. } => {
+                        let mut chunk = DataChunk::new(Vec::new());
+                        (execute)(&args, &mut chunk)?;
+                        Ok(vec![chunk])
+                    }
+                    TableFunction::ScanCsv { .. }
+                    | TableFunction::ScanParquet { .. }
+                    | TableFunction::ScanJson { .. }
+                    | TableFunction::ListTables
+                    | TableFunction::ShowColumns { .. }
+                    | TableFunction::CurrentSetting { .. }
+                    | TableFunction::Custom { .. } => {
+                        Err(format!("Table function '{}' cannot be executed dynamically (no callback)", func_name))
+                    }
+                }
+            } else {
+                Err(format!("Table function '{}' not found", func_name))
+            }
+        } else {
+            Err(format!(
+                "Cannot execute table function '{}': no function registry available",
+                func_name
+            ))
+        }
     }
 
     /// Execute a single expression against a DataChunk and return a ValueVector of results.
