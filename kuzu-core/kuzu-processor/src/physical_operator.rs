@@ -657,51 +657,78 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
 
-        // Build hash table from build side
-        let mut hash_table: HashMap<i64, Vec<(usize, usize)>> = HashMap::new(); // key → (chunk_idx, row)
+        // Build hash table from build side (Value-keyed, hash + equality)
+        // We use a two-level structure: hash → vec of (actual_value, locations)
+        // The actual Value is stored alongside to disambiguate hash collisions.
+        type HashBucket = Vec<(Value, Vec<(usize, usize)>)>;
+        let mut hash_table: HashMap<u64, HashBucket> = HashMap::new();
+
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                if let Some(key) = chunk.fields.get(build_col)
-                    .and_then(|f| f.get_i64(row))
-                {
-                    hash_table.entry(key).or_default().push((ci, row));
+                if let Some(field) = chunk.fields.get(build_col) {
+                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    let hash = value_hash(&key);
+                    hash_table.entry(hash).or_default().push((key, vec![(ci, row)]));
                 }
             }
         }
 
-        // Probe and output matching rows
-        let mut output_fields: Vec<Vec<(i64, bool)>> = Vec::new();
+        // Probe and output matching rows — collect typed Value rows
+        let mut output_rows: Vec<Vec<(Value, bool)>> = Vec::new();
+        let mut output_types: Vec<PhysicalTypeID> = Vec::new();
         let mut built_cols = false;
+        let mut num_build_fields = 0usize;
 
         for chunk in probe_chunks {
             for row in 0..chunk.size {
-                let key = chunk.fields.get(probe_col)
-                    .and_then(|f| f.get_i64(row))
-                    .unwrap_or(0);
+                let probe_key = chunk.fields.get(probe_col)
+                    .and_then(|f| f.get_value(row))
+                    .unwrap_or(Value::Null);
+                let probe_hash = value_hash(&probe_key);
 
-                if let Some(matches) = hash_table.get(&key) {
-                    if !built_cols {
-                        let num_cols = build_chunks[0].num_fields() + chunk.num_fields();
-                        output_fields = (0..num_cols).map(|_| Vec::new()).collect();
-                        built_cols = true;
-                    }
-
-                    for &(bci, brow) in matches {
-                        // Build side columns
-                        for col in 0..build_chunks[bci].num_fields() {
-                            if let Some(field) = build_chunks[bci].fields.get(col) {
-                                let val = field.get_i64(brow).unwrap_or(0);
-                                let is_null = field.is_null(brow);
-                                output_fields[col].push((val, is_null));
-                            }
+                if let Some(bucket) = hash_table.get(&probe_hash) {
+                    for (build_key, locations) in bucket {
+                        // Value equality (PartialEq) disambiguates hash collisions
+                        if build_key != &probe_key {
+                            continue;
                         }
-                        // Probe side columns
-                        let offset = build_chunks[0].num_fields();
-                        for col in 0..chunk.num_fields() {
-                            if let Some(field) = chunk.fields.get(col) {
-                                let val = field.get_i64(row).unwrap_or(0);
-                                let is_null = field.is_null(row);
-                                output_fields[offset + col].push((val, is_null));
+
+                        if !built_cols {
+                            num_build_fields = build_chunks[0].num_fields();
+                            let num_probe_fields = chunk.num_fields();
+                            let total_cols = num_build_fields + num_probe_fields;
+
+                            // Record physical types for each output column
+                            for col in 0..num_build_fields {
+                                if let Some(field) = build_chunks[0].fields.get(col) {
+                                    output_types.push(field.physical_type());
+                                }
+                            }
+                            for col in 0..num_probe_fields {
+                                if let Some(field) = chunk.fields.get(col) {
+                                    output_types.push(field.physical_type());
+                                }
+                            }
+
+                            output_rows = (0..total_cols).map(|_| Vec::new()).collect();
+                            built_cols = true;
+                        }
+
+                        for &(bci, brow) in locations {
+                            // Build side columns
+                            for col in 0..build_chunks[bci].num_fields() {
+                                if let Some(field) = build_chunks[bci].fields.get(col) {
+                                    let val = field.get_value(brow).unwrap_or(Value::Null);
+                                    output_rows[col].push((val, field.is_null(brow)));
+                                }
+                            }
+                            // Probe side columns
+                            let offset = num_build_fields;
+                            for col in 0..chunk.num_fields() {
+                                if let Some(field) = chunk.fields.get(col) {
+                                    let val = field.get_value(row).unwrap_or(Value::Null);
+                                    output_rows[offset + col].push((val, field.is_null(row)));
+                                }
                             }
                         }
                     }
@@ -713,17 +740,79 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
             return Ok(Vec::new());
         }
 
-        let num_rows = output_fields[0].len();
-        let mut result_fields = Vec::new();
-        for col in 0..output_fields.len() {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, num_rows);
-            for (row, (val, is_null)) in output_fields[col].iter().enumerate() {
-                v.set_i64(row, *val);
-                if *is_null { v.set_null(row, true); }
-            }
+        let num_rows = output_rows[0].len();
+        let mut result_fields = Vec::with_capacity(output_rows.len());
+        for col in 0..output_rows.len() {
+            let phys_type = output_types.get(col).copied().unwrap_or(PhysicalTypeID::Int64);
+            let mut v = ValueVector::new(phys_type, num_rows);
             v.resize(num_rows);
+            for (row, (val, _is_null)) in output_rows[col].iter().enumerate() {
+                if matches!(val, Value::Null) {
+                    v.set_null(row, true);
+                } else {
+                    store_value_in_vector(&mut v, row, val);
+                }
+            }
             result_fields.push(v);
         }
         Ok(vec![DataChunk::new(result_fields)])
     }
+}
+
+/// Compute a hash of a Value for use in hash-based joins.
+/// Hashes the discriminant (variant type) and the payload data.
+fn value_hash(v: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::mem::discriminant(v).hash(&mut hasher);
+    match v {
+        Value::Null => {}
+        Value::Bool(b) => b.hash(&mut hasher),
+        Value::Int64(x) => x.hash(&mut hasher),
+        Value::Int32(x) => x.hash(&mut hasher),
+        Value::Int16(x) => x.hash(&mut hasher),
+        Value::Int8(x) => x.hash(&mut hasher),
+        Value::UInt64(x) => x.hash(&mut hasher),
+        Value::UInt32(x) => x.hash(&mut hasher),
+        Value::UInt16(x) => x.hash(&mut hasher),
+        Value::UInt8(x) => x.hash(&mut hasher),
+        Value::Int128(x) => x.hash(&mut hasher),
+        Value::Double(x) => x.to_bits().hash(&mut hasher),
+        Value::Float(x) => x.to_bits().hash(&mut hasher),
+        Value::String(s) => s.hash(&mut hasher),
+        Value::Blob(b) => b.hash(&mut hasher),
+        Value::Date(d) => d.0.hash(&mut hasher),
+        Value::Timestamp(ts) => ts.0.hash(&mut hasher),
+        Value::TimestampTz(ts) => ts.0.hash(&mut hasher),
+        Value::TimestampNs(ts) => ts.0.hash(&mut hasher),
+        Value::TimestampMs(ts) => ts.0.hash(&mut hasher),
+        Value::TimestampSec(ts) => ts.0.hash(&mut hasher),
+        Value::Interval(iv) => {
+            iv.months.hash(&mut hasher);
+            iv.days.hash(&mut hasher);
+            iv.micros.hash(&mut hasher);
+        }
+        Value::InternalID(id) => {
+            id.table_id.hash(&mut hasher);
+            id.offset.hash(&mut hasher);
+        }
+        Value::List(items) => {
+            for item in items {
+                hasher.write_u64(value_hash(item));
+            }
+        }
+        Value::Map(pairs) => {
+            for (k, v) in pairs {
+                hasher.write_u64(value_hash(k));
+                hasher.write_u64(value_hash(v));
+            }
+        }
+        Value::Struct(fields) => {
+            for (name, val) in fields {
+                name.hash(&mut hasher);
+                hasher.write_u64(value_hash(val));
+            }
+        }
+    }
+    hasher.finish()
 }
