@@ -40,6 +40,7 @@ pub struct BufferManagerStats {
 }
 
 /// The buffer manager manages a pool of frames with a Clock eviction policy.
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct BufferManager {
     /// Path to the database directory.

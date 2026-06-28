@@ -4,6 +4,7 @@
 
 pub mod page;
 pub mod buffer_manager;
+pub mod column;
 pub mod wal;
 pub mod compression;
 pub mod shadow_file;
