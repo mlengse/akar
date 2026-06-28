@@ -89,7 +89,7 @@ impl Database {
         Ok(db)
     }
 
-    /// Register built-in extensions (JSON, FTS, etc.).
+    /// Register built-in extensions (JSON, FTS, Vector, HTTPFS, DuckDB).
     fn register_builtin_extensions(&mut self) {
         #[cfg(feature = "json-extension")]
         {
@@ -101,6 +101,27 @@ impl Database {
         #[cfg(feature = "fts-extension")]
         {
             let ext = Box::new(kuzu_fts::FtsExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "vector-extension")]
+        {
+            let ext = Box::new(kuzu_vector::VectorExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "httpfs-extension")]
+        {
+            let ext = Box::new(kuzu_httpfs::HttpfsExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
+        #[cfg(feature = "duckdb-extension")]
+        {
+            let ext = Box::new(kuzu_duckdb::DuckDbExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
                 reg.register(ext);
             }

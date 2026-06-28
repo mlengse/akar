@@ -15,6 +15,9 @@ members = [
     "kuzu-extension",
     "kuzu-json",
     "kuzu-fts",
+    "kuzu-vector",
+    "kuzu-httpfs",
+    "kuzu-duckdb",
     "kuzu-main",
     "kuzu-cli",
 ]

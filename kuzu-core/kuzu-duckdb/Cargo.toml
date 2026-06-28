@@ -1,0 +1,13 @@
+[package]
+name = "kuzu-duckdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kuzu-common = { path = "../kuzu-common" }
+kuzu-function = { path = "../kuzu-function" }
+kuzu-catalog = { path = "../kuzu-catalog" }
+kuzu-extension = { path = "../kuzu-extension" }
+tracing.workspace = true

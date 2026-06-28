@@ -428,6 +428,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-duckdb"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
+ "tracing",
+]
+
+[[package]]
 name = "kuzu-extension"
 version = "0.1.0"
 dependencies = [
@@ -473,6 +484,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-httpfs"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
+ "tracing",
+]
+
+[[package]]
 name = "kuzu-json"
 version = "0.1.0"
 dependencies = [
@@ -491,10 +513,12 @@ dependencies = [
  "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
+ "kuzu-duckdb",
  "kuzu-extension",
  "kuzu-fts",
  "kuzu-function",
  "kuzu-graph",
+ "kuzu-httpfs",
  "kuzu-json",
  "kuzu-optimizer",
  "kuzu-parser",
@@ -502,6 +526,7 @@ dependencies = [
  "kuzu-processor",
  "kuzu-storage",
  "kuzu-transaction",
+ "kuzu-vector",
  "thiserror",
  "tracing",
 ]
@@ -584,6 +609,17 @@ version = "0.1.0"
 dependencies = [
  "kuzu-common",
  "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "kuzu-vector"
+version = "0.1.0"
+dependencies = [
+ "kuzu-catalog",
+ "kuzu-common",
+ "kuzu-extension",
+ "kuzu-function",
  "tracing",
 ]
 

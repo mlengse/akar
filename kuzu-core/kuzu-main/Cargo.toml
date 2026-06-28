@@ -9,6 +9,9 @@ repository.workspace = true
 default = []
 json-extension = ["dep:kuzu-json"]
 fts-extension = ["dep:kuzu-fts"]
+vector-extension = ["dep:kuzu-vector"]
+httpfs-extension = ["dep:kuzu-httpfs"]
+duckdb-extension = ["dep:kuzu-duckdb"]
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
@@ -25,5 +28,8 @@ kuzu-graph = { path = "../kuzu-graph" }
 kuzu-extension = { path = "../kuzu-extension" }
 kuzu-json = { path = "../kuzu-json", optional = true }
 kuzu-fts = { path = "../kuzu-fts", optional = true }
+kuzu-vector = { path = "../kuzu-vector", optional = true }
+kuzu-httpfs = { path = "../kuzu-httpfs", optional = true }
+kuzu-duckdb = { path = "../kuzu-duckdb", optional = true }
 tracing.workspace = true
 thiserror.workspace = true
