@@ -335,6 +335,15 @@ impl Binder {
                     }
                 }
             }
+            Expression::Parameter(_name) => {
+                // Parameters are unresolved at bind time; assign Any type.
+                // Type checking happens at execute time when values are provided.
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: LogicalTypeID::Any,
+                    is_constant: false,
+                })
+            }
             Expression::PropertyAccess(obj, prop) => {
                 let _bound_obj = self.resolve_expression(obj, variables)?;
                 // For now, resolve property types to common defaults

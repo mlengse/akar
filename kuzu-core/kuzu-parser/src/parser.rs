@@ -274,6 +274,10 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
         ))),
         Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
         Rule::variable => Ok(Expression::Variable(pair.as_str().to_string())),
+        Rule::parameter => {
+            let name = pair.as_str().strip_prefix('$').unwrap_or(pair.as_str()).to_string();
+            Ok(Expression::Parameter(name))
+        },
         Rule::list_literal => {
             let items = children.into_iter()
                 .filter(|c| c.as_rule() == Rule::expression)

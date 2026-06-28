@@ -111,10 +111,13 @@ property_access = { "." ~ identifier }
 primary = {
     literal
     | variable ~ function_args?
+    | parameter
     | list_literal
     | map_literal
     | "(" ~ expression ~ ")"
 }
+
+parameter = { "$" ~ identifier }
 
 function_args = { "(" ~ expression ~ ("," ~ expression)* ~ ")" }
 

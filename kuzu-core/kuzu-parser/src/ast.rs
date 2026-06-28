@@ -84,6 +84,8 @@ pub enum EdgeDirection {
 pub enum Expression {
     Constant(Constant),
     Variable(String),
+    /// A query parameter reference like `$name` or `$age`.
+    Parameter(String),
     PropertyAccess(Box<Expression>, String),
     FunctionCall(String, Vec<Expression>),
     BinaryOp(BinaryOp, Box<Expression>, Box<Expression>),
@@ -101,7 +103,7 @@ pub enum Constant {
     String(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -120,7 +122,7 @@ pub enum BinaryOp {
     Concat,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     Not,
     Negate,

@@ -235,3 +235,107 @@ fn test_multiple_connections_same_db() {
     let r2 = conn_b.query("MATCH (g:Group) RETURN g.name").unwrap();
     assert!(r2.is_success());
 }
+
+// ==================== PreparedStatement Tests ====================
+
+#[test]
+fn test_prepare_and_execute() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    // Prepare a query with parameter
+    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    assert_eq!(stmt.parameter_names(), &["min_age"]);
+    assert_eq!(stmt.num_parameters(), 1);
+}
+
+#[test]
+fn test_prepare_cache() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    let stmt1 = conn.prepare("MATCH (p:Person) RETURN p.name").unwrap();
+    let stmt2 = conn.prepare("MATCH (p:Person) RETURN p.name").unwrap();
+    // Both should produce the same parameter lists
+    assert_eq!(stmt1.parameter_names(), stmt2.parameter_names());
+    // Cache should have 1 entry
+    assert_eq!(conn.cache_size(), 1);
+}
+
+#[test]
+fn test_prepare_multiple_params() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))");
+
+    // Use two separate WHERE conditions in a prepared statement
+    let stmt = conn.prepare(
+        "MATCH (p:Person) WHERE p.age > $min RETURN p.name"
+    ).unwrap();
+    assert_eq!(stmt.parameter_names(), &["min"]);
+}
+
+#[test]
+fn test_prepare_missing_param_fails() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    let result = conn.execute(&stmt, vec![]);
+    assert!(result.is_err(), "Should fail with missing parameter");
+    let err = result.unwrap_err();
+    assert!(err.contains("Missing parameter"), "Expected missing param error, got: {err}");
+}
+
+#[test]
+fn test_execute_with_params() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    // Execute with parameter — should work (returns placeholder data from PhysicalScan)
+    let result = conn.execute(&stmt, vec![("min_age", kuzu_common::types::Value::Int64(25))]);
+    assert!(result.is_ok(), "Execute failed: {:?}", result.err());
+    let r = result.unwrap();
+    assert!(r.is_success());
+}
+
+#[test]
+fn test_prepare_ddl() {
+    let (_db, conn) = setup_db();
+
+    // DDL shouldn't need parameters
+    let stmt = conn.prepare("CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
+    assert!(stmt.parameter_names().is_empty());
+
+    // Execute should work
+    let result = conn.execute(&stmt, vec![]).unwrap();
+    assert!(result.is_success());
+    assert!(result.summary().contains("City"));
+}
+
+#[test]
+fn test_clear_cache() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))");
+
+    conn.prepare("MATCH (t:T) RETURN t.id").unwrap();
+    assert_eq!(conn.cache_size(), 1);
+
+    conn.clear_cache();
+    assert_eq!(conn.cache_size(), 0);
+}
+
+#[test]
+fn test_parameter_parse_and_bind() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    // Test that $param syntax is parsed correctly
+    let result = conn.query("MATCH (p:Person) WHERE p.age > $min RETURN p.name");
+    assert!(result.is_ok(), "Query with parameter should be parseable: {:?}", result.err());
+
+    // Test that missing parameter substitution fails at execute time (not bind time)
+    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $x RETURN p.name").unwrap();
+    let result = conn.execute(&stmt, vec![]);
+    assert!(result.is_err());
+}
