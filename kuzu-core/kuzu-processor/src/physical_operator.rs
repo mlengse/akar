@@ -6,6 +6,7 @@
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{physical_type_size, DataChunk, ValueVector};
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
+use std::collections::HashMap;
 
 /// Result of executing a physical operator.
 pub type OperatorResult = Result<Vec<DataChunk>, String>;
@@ -30,11 +31,9 @@ impl PhysicalOperatorExec for PhysicalScan {
     fn operator_type(&self) -> &str { "scan" }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        // Create output vector with the requested columns
         let mut fields = Vec::new();
         for &col_id in &self.column_ids {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1000);
-            // Fill with sequential IDs as placeholder data
             for i in 0..100.min(self.estimated_cardinality as usize) {
                 v.set_i64(i, (col_id as i64) * 1000 + i as i64);
             }
@@ -42,7 +41,6 @@ impl PhysicalOperatorExec for PhysicalScan {
             fields.push(v);
         }
         if fields.is_empty() {
-            // Default: output a single int64 column
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1000);
             for i in 0..100.min(self.estimated_cardinality as usize) {
                 v.set_i64(i, i as i64);
@@ -275,12 +273,89 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
     fn operator_type(&self) -> &str { "order_by" }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Simplified: just pass through (full sort requires multi-chunk merge)
-        Ok(input)
+        // Collect all rows into a single buffer, sort, then output
+        if input.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Count total rows
+        let total_rows: usize = input.iter().map(|c| c.size).sum();
+        if total_rows == 0 {
+            return Ok(input);
+        }
+
+        // Collect all field values per column
+        let num_fields = input[0].num_fields();
+        let mut all_values: Vec<Vec<(i64, bool)>> = (0..num_fields)
+            .map(|_| Vec::with_capacity(total_rows))
+            .collect();
+
+        for chunk in &input {
+            for row in 0..chunk.size {
+                for col in 0..num_fields {
+                    if let Some(field) = chunk.fields.get(col) {
+                        let val = field.get_i64(row).unwrap_or(0);
+                        let is_null = field.is_null(row);
+                        all_values[col].push((val, is_null));
+                    }
+                }
+            }
+        }
+
+        // Sort indices based on sort_column
+        let sort_col = self.sort_column as usize;
+        let mut indices: Vec<usize> = (0..total_rows).collect();
+        if sort_col < num_fields {
+            let vals = &all_values[sort_col];
+            if self.ascending {
+                indices.sort_by(|a, b| vals[*a].0.cmp(&vals[*b].0));
+            } else {
+                indices.sort_by(|a, b| vals[*b].0.cmp(&vals[*a].0));
+            }
+        }
+
+        // Build sorted output chunks (up to 100 rows per chunk)
+        let chunk_size = 100usize;
+        let mut output = Vec::new();
+        for chunk_start in (0..total_rows).step_by(chunk_size) {
+            let chunk_end = (chunk_start + chunk_size).min(total_rows);
+            let size = chunk_end - chunk_start;
+            let mut fields = Vec::new();
+            for col in 0..num_fields {
+                let mut v = ValueVector::new(PhysicalTypeID::Int64, size);
+                for (out_idx, &src_idx) in indices[chunk_start..chunk_end].iter().enumerate() {
+                    let (val, is_null) = all_values[col][src_idx];
+                    v.set_i64(out_idx, val);
+                    if is_null {
+                        v.set_null(out_idx, true);
+                    }
+                }
+                v.resize(size);
+                fields.push(v);
+            }
+            output.push(DataChunk::new(fields));
+        }
+        Ok(output)
     }
 }
 
 // ==================== Aggregate ====================
+
+#[derive(Debug, Clone)]
+pub struct Aggregator {
+    pub function_name: String,
+    pub column_index: usize,
+}
+
+/// State for a single aggregate computation.
+#[derive(Debug, Clone)]
+enum AggState {
+    Count(u64),
+    Sum(i64),
+    Min(i64),
+    Max(i64),
+    Avg { sum: i64, count: u64 },
+}
 
 pub struct PhysicalAggregate {
     pub group_by_cols: Vec<u32>,
@@ -290,16 +365,166 @@ pub struct PhysicalAggregate {
 impl PhysicalOperatorExec for PhysicalAggregate {
     fn operator_type(&self) -> &str { "aggregate" }
 
-    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        // Simplified: return a single chunk with one row (empty aggregate)
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        // Simplified: if no group by, compute scalar aggregates
+        // If group by exists, hash-based grouping
+
+        if input.is_empty() {
+            let mut fields = Vec::new();
+            for _ in 0..self.aggregate_functions.len() {
+                let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+                v.set_i64(0, 0);
+                v.resize(1);
+                fields.push(v);
+            }
+            return Ok(vec![DataChunk::new(fields)]);
+        }
+
+        if self.group_by_cols.is_empty() {
+            // Scalar aggregation (no GROUP BY)
+            self.compute_scalar_aggregates(&input)
+        } else {
+            // Hash-based GROUP BY
+            self.compute_grouped_aggregates(&input)
+        }
+    }
+}
+
+impl PhysicalAggregate {
+    /// Compute scalar aggregates (no GROUP BY) across all input chunks.
+    fn compute_scalar_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
+        let mut states: Vec<AggState> = self.aggregate_functions.iter()
+            .map(|name| match name.to_uppercase().as_str() {
+                "COUNT" | "COUNT(*)" => AggState::Count(0),
+                "SUM" => AggState::Sum(0),
+                "MIN" => AggState::Min(i64::MAX),
+                "MAX" => AggState::Max(i64::MIN),
+                "AVG" => AggState::Avg { sum: 0, count: 0 },
+                _ => AggState::Count(0),
+            })
+            .collect();
+
+        for chunk in input {
+            for row in 0..chunk.size {
+                for (i, state) in states.iter_mut().enumerate() {
+                    let col_idx = i.min(chunk.fields.len().saturating_sub(1));
+                    let val = chunk.fields.get(col_idx)
+                        .and_then(|f| f.get_i64(row))
+                        .unwrap_or(0);
+                    match state {
+                        AggState::Count(n) => *n += 1,
+                        AggState::Sum(s) => *s += val,
+                        AggState::Min(m) => *m = (*m).min(val),
+                        AggState::Max(m) => *m = (*m).max(val),
+                        AggState::Avg { sum, count } => { *sum += val; *count += 1; }
+                    }
+                }
+            }
+        }
+
         let mut fields = Vec::new();
-        for _ in 0..self.aggregate_functions.len() {
+        for state in &states {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-            v.set_i64(0, 0);
+            let result = match state {
+                AggState::Count(n) => *n as i64,
+                AggState::Sum(s) => *s,
+                AggState::Min(m) => *m,
+                AggState::Max(m) => *m,
+                AggState::Avg { sum, count } => {
+                    if *count > 0 { *sum / *count as i64 } else { 0 }
+                }
+            };
+            v.set_i64(0, result);
             v.resize(1);
             fields.push(v);
         }
         Ok(vec![DataChunk::new(fields)])
+    }
+
+    /// Compute hash-based GROUP BY aggregates.
+    fn compute_grouped_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
+        // Simplified: group by first column, aggregate the rest
+        let group_col = self.group_by_cols.first().copied().unwrap_or(0) as usize;
+
+        let mut groups: HashMap<i64, Vec<AggState>> = HashMap::new();
+
+        for chunk in input {
+            for row in 0..chunk.size {
+                let key = chunk.fields.get(group_col)
+                    .and_then(|f| f.get_i64(row))
+                    .unwrap_or(0);
+
+                let entry = groups.entry(key).or_insert_with(|| {
+                    self.aggregate_functions.iter()
+                        .map(|name| match name.to_uppercase().as_str() {
+                            "COUNT" | "COUNT(*)" => AggState::Count(0),
+                            "SUM" => AggState::Sum(0),
+                            "MIN" => AggState::Min(i64::MAX),
+                            "MAX" => AggState::Max(i64::MIN),
+                            "AVG" => AggState::Avg { sum: 0, count: 0 },
+                            _ => AggState::Count(0),
+                        })
+                        .collect()
+                });
+
+                for (i, state) in entry.iter_mut().enumerate() {
+                    let val = chunk.fields.get(i)
+                        .and_then(|f| f.get_i64(row))
+                        .unwrap_or(0);
+                    match state {
+                        AggState::Count(n) => *n += 1,
+                        AggState::Sum(s) => *s += val,
+                        AggState::Min(m) => *m = (*m).min(val),
+                        AggState::Max(m) => *m = (*m).max(val),
+                        AggState::Avg { sum, count } => { *sum += val; *count += 1; }
+                    }
+                }
+            }
+        }
+
+        if groups.is_empty() {
+            let mut fields = Vec::new();
+            for _ in 0..=self.aggregate_functions.len() {
+                let mut v = ValueVector::new(PhysicalTypeID::Int64, 0);
+                v.resize(0);
+                fields.push(v);
+            }
+            return Ok(vec![DataChunk::new(fields)]);
+        }
+
+        // Build output chunks
+        let mut fields: Vec<Vec<(i64, bool)>> = (0..=self.aggregate_functions.len())
+            .map(|_| Vec::new())
+            .collect();
+
+        // Group key column
+        for (key, states) in &groups {
+            fields[0].push((*key, false));
+            for (i, state) in states.iter().enumerate() {
+                let val = match state {
+                    AggState::Count(n) => *n as i64,
+                    AggState::Sum(s) => *s,
+                    AggState::Min(m) => *m,
+                    AggState::Max(m) => *m,
+                    AggState::Avg { sum, count } => {
+                        if *count > 0 { *sum / *count as i64 } else { 0 }
+                    }
+                };
+                fields[i + 1].push((val, false));
+            }
+        }
+
+        let num_rows = groups.len();
+        let mut output_fields = Vec::new();
+        for col in 0..=self.aggregate_functions.len() {
+            let mut v = ValueVector::new(PhysicalTypeID::Int64, num_rows);
+            for (row, (val, _)) in fields[col].iter().enumerate() {
+                v.set_i64(row, *val);
+            }
+            v.resize(num_rows);
+            output_fields.push(v);
+        }
+        Ok(vec![DataChunk::new(output_fields)])
     }
 }
 
@@ -313,8 +538,87 @@ pub struct PhysicalHashJoin {
 impl PhysicalOperatorExec for PhysicalHashJoin {
     fn operator_type(&self) -> &str { "hash_join" }
 
-    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        // TODO: implement actual hash join
-        Ok(vec![])
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        // Expect input chunks from both build and probe sides
+        // Simplified: treat first N chunks as build side, rest as probe
+        if input.len() < 2 {
+            return Ok(input); // Not enough data — pass through
+        }
+
+        let mid = input.len() / 2;
+        let build_chunks = &input[..mid];
+        let probe_chunks = &input[mid..];
+
+        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
+        let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
+
+        // Build hash table from build side
+        let mut hash_table: HashMap<i64, Vec<(usize, usize)>> = HashMap::new(); // key → (chunk_idx, row)
+        for (ci, chunk) in build_chunks.iter().enumerate() {
+            for row in 0..chunk.size {
+                if let Some(key) = chunk.fields.get(build_col)
+                    .and_then(|f| f.get_i64(row))
+                {
+                    hash_table.entry(key).or_default().push((ci, row));
+                }
+            }
+        }
+
+        // Probe and output matching rows
+        let mut output_fields: Vec<Vec<(i64, bool)>> = Vec::new();
+        let mut built_cols = false;
+
+        for chunk in probe_chunks {
+            for row in 0..chunk.size {
+                let key = chunk.fields.get(probe_col)
+                    .and_then(|f| f.get_i64(row))
+                    .unwrap_or(0);
+
+                if let Some(matches) = hash_table.get(&key) {
+                    if !built_cols {
+                        let num_cols = build_chunks[0].num_fields() + chunk.num_fields();
+                        output_fields = (0..num_cols).map(|_| Vec::new()).collect();
+                        built_cols = true;
+                    }
+
+                    for &(bci, brow) in matches {
+                        // Build side columns
+                        for col in 0..build_chunks[bci].num_fields() {
+                            if let Some(field) = build_chunks[bci].fields.get(col) {
+                                let val = field.get_i64(brow).unwrap_or(0);
+                                let is_null = field.is_null(brow);
+                                output_fields[col].push((val, is_null));
+                            }
+                        }
+                        // Probe side columns
+                        let offset = build_chunks[0].num_fields();
+                        for col in 0..chunk.num_fields() {
+                            if let Some(field) = chunk.fields.get(col) {
+                                let val = field.get_i64(row).unwrap_or(0);
+                                let is_null = field.is_null(row);
+                                output_fields[offset + col].push((val, is_null));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !built_cols {
+            return Ok(Vec::new());
+        }
+
+        let num_rows = output_fields[0].len();
+        let mut result_fields = Vec::new();
+        for col in 0..output_fields.len() {
+            let mut v = ValueVector::new(PhysicalTypeID::Int64, num_rows);
+            for (row, (val, is_null)) in output_fields[col].iter().enumerate() {
+                v.set_i64(row, *val);
+                if *is_null { v.set_null(row, true); }
+            }
+            v.resize(num_rows);
+            result_fields.push(v);
+        }
+        Ok(vec![DataChunk::new(result_fields)])
     }
 }

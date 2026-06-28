@@ -95,14 +95,27 @@ impl QueryProcessor {
                 }
                 LogicalOperator::Aggregate(a) => {
                     let agg = PhysicalAggregate {
-                        group_by_cols: Vec::new(),
+                        group_by_cols: if a.group_by.is_empty() {
+                            Vec::new()
+                        } else {
+                            (0..a.group_by.len() as u32).collect()
+                        },
                         aggregate_functions: a.aggregates.iter().map(|(n, _)| n.clone()).collect(),
                     };
                     let input = intermediate_result.take().unwrap_or_default();
                     let result = agg.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::HashJoin(_) | LogicalOperator::CrossProduct(_)
+                LogicalOperator::HashJoin(_h) => {
+                    let join = PhysicalHashJoin {
+                        build_columns: Vec::new(),
+                        probe_columns: Vec::new(),
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = join.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::CrossProduct(_)
                 | LogicalOperator::Union(_) => {
                     intermediate_result = Some(vec![]);
                 }
@@ -280,5 +293,177 @@ mod tests {
         let input = vec![DataChunk::new(vec![v1, v2])];
         let result = proj.execute(input).unwrap();
         assert_eq!(result[0].num_fields(), 1); // Only first column
+    }
+
+    // ==================== OrderBy Tests ====================
+
+    #[test]
+    fn test_order_by_ascending() {
+        let order = PhysicalOrderBy { sort_column: 0, ascending: true };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        let vals = [5, 3, 1, 4, 2];
+        for i in 0..5 { v.set_i64(i, vals[i]); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = order.execute(input).unwrap();
+        assert!(!result.is_empty());
+        let sorted = result[0].fields[0].get_i64(0).unwrap();
+        assert_eq!(sorted, 1); // Min should be first
+    }
+
+    #[test]
+    fn test_order_by_descending() {
+        let order = PhysicalOrderBy { sort_column: 0, ascending: false };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        let vals = [5, 3, 1, 4, 2];
+        for i in 0..5 { v.set_i64(i, vals[i]); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = order.execute(input).unwrap();
+        assert!(!result.is_empty());
+        let sorted = result[0].fields[0].get_i64(0).unwrap();
+        assert_eq!(sorted, 5); // Max should be first
+    }
+
+    #[test]
+    fn test_order_by_empty_input() {
+        let order = PhysicalOrderBy { sort_column: 0, ascending: true };
+        let result = order.execute(vec![]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    // ==================== Aggregate Tests ====================
+
+    #[test]
+    fn test_aggregate_count() {
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["COUNT".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        for i in 0..5 { v.set_i64(i, i as i64); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 5); // COUNT = 5
+    }
+
+    #[test]
+    fn test_aggregate_sum() {
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["SUM".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 4);
+        for i in 0..4 { v.set_i64(i, (i + 1) as i64); }
+        v.resize(4);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 10); // 1+2+3+4 = 10
+    }
+
+    #[test]
+    fn test_aggregate_min_max() {
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["MIN".into(), "MAX".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        let vals = [42, 7, 99, 15, 3];
+        for i in 0..5 { v.set_i64(i, vals[i]); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 3);  // MIN = 3
+        assert_eq!(result[0].fields[1].get_i64(0).unwrap(), 99); // MAX = 99
+    }
+
+    #[test]
+    fn test_aggregate_avg() {
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["AVG".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 4);
+        for i in 0..4 { v.set_i64(i, (i + 1) as i64); }
+        v.resize(4);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 2); // (1+2+3+4)/4 = 2 (integer division)
+    }
+
+    #[test]
+    fn test_aggregate_empty_input() {
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["COUNT".into()],
+        };
+        let result = agg.execute(vec![]).unwrap();
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 0); // COUNT of empty = 0
+    }
+
+    // ==================== HashJoin Tests ====================
+
+    #[test]
+    fn test_hash_join_basic() {
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        // Build side: keys [1, 2, 3]
+        let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
+        for i in 0..3 { build.set_i64(i, (i + 1) as i64); }
+        build.resize(3);
+        // Probe side: keys [2, 3, 4]
+        let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
+        probe.set_i64(0, 2); probe.set_i64(1, 3); probe.set_i64(2, 4);
+        probe.resize(3);
+        let input = vec![
+            DataChunk::new(vec![build]),
+            DataChunk::new(vec![probe]),
+        ];
+        let result = join.execute(input).unwrap();
+        // Should match 2 and 3 (2 rows)
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_hash_join_no_match() {
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        // Build: [1, 2]
+        let mut build = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build.set_i64(0, 1); build.set_i64(1, 2);
+        build.resize(2);
+        // Probe: [3, 4]
+        let mut probe = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe.set_i64(0, 3); probe.set_i64(1, 4);
+        probe.resize(2);
+        let input = vec![
+            DataChunk::new(vec![build]),
+            DataChunk::new(vec![probe]),
+        ];
+        let result = join.execute(input).unwrap();
+        assert!(result.is_empty()); // No matches
+    }
+
+    #[test]
+    fn test_hash_join_empty_build() {
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        let build = ValueVector::new(PhysicalTypeID::Int64, 0);
+        let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
+        probe.set_i64(0, 1); probe.set_i64(1, 2); probe.set_i64(2, 3);
+        probe.resize(3);
+        let input = vec![
+            DataChunk::new(vec![build]),
+            DataChunk::new(vec![probe]),
+        ];
+        let result = join.execute(input).unwrap();
+        assert!(result.is_empty()); // Empty build → no matches
     }
 }
