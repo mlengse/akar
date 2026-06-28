@@ -12,17 +12,20 @@ use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
+use kuzu_storage::table::{TableCatalog, ColumnDefinition};
 use std::sync::{Arc, Mutex};
 
 /// The query processor executes a physical plan and produces result chunks.
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
+    table_catalog: Option<Arc<Mutex<TableCatalog>>>,
 }
 
 impl QueryProcessor {
     pub fn new() -> Self {
         Self {
             function_registry: None,
+            table_catalog: None,
         }
     }
 
@@ -30,7 +33,52 @@ impl QueryProcessor {
     pub fn with_registry(registry: Arc<Mutex<FunctionRegistry>>) -> Self {
         Self {
             function_registry: Some(registry),
+            table_catalog: None,
         }
+    }
+
+    /// Create a processor with function registry and table catalog access.
+    pub fn with_catalog(
+        registry: Arc<Mutex<FunctionRegistry>>,
+        table_catalog: Arc<Mutex<TableCatalog>>,
+    ) -> Self {
+        Self {
+            function_registry: Some(registry),
+            table_catalog: Some(table_catalog),
+        }
+    }
+
+    /// Resolve table data and column definitions for a scan node.
+    fn resolve_scan_data(
+        &self,
+        table_name: &str,
+    ) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
+        if let Some(ref tc) = self.table_catalog {
+            let catalog = tc.lock().unwrap();
+            // Try node table first
+            if let Some(node_table) = catalog.get_node_table_by_name(table_name) {
+                let num_rows = node_table.num_rows;
+                if num_rows > 0 {
+                    return (
+                        Some(node_table.data.clone()),
+                        node_table.columns.clone(),
+                        num_rows,
+                    );
+                }
+            }
+            // Try rel table
+            if let Some(rel_table) = catalog.get_rel_table_by_name(table_name) {
+                let num_rows = rel_table.num_rows;
+                if num_rows > 0 {
+                    return (
+                        Some(rel_table.data.clone()),
+                        rel_table.columns.clone(),
+                        num_rows,
+                    );
+                }
+            }
+        }
+        (None, Vec::new(), 0)
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
@@ -54,22 +102,28 @@ impl QueryProcessor {
         for op in operators {
             match op {
                 LogicalOperator::ScanNode(s) => {
-                    let scan = PhysicalScan {
-                        table_name: s.table_name.clone(),
-                        table_id: s.table_id,
-                        column_ids: Vec::new(),
-                        estimated_cardinality: 1000,
-                    };
+                    let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
+                    let mut scan = PhysicalScan::new(
+                        s.table_name.clone(),
+                        s.table_id,
+                        num_rows.max(1),
+                    );
+                    if let Some(d) = data {
+                        scan = scan.with_data(d, columns);
+                    }
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::ScanRel(s) => {
-                    let scan = PhysicalScan {
-                        table_name: s.table_name.clone(),
-                        table_id: s.table_id,
-                        column_ids: Vec::new(),
-                        estimated_cardinality: 500,
-                    };
+                    let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
+                    let mut scan = PhysicalScan::new(
+                        s.table_name.clone(),
+                        s.table_id,
+                        num_rows.max(1),
+                    );
+                    if let Some(d) = data {
+                        scan = scan.with_data(d, columns);
+                    }
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
@@ -219,8 +273,9 @@ impl Default for QueryProcessor {
 mod tests {
     use super::*;
     use kuzu_binder::bound_statement::BoundExpression;
-    use kuzu_common::types::LogicalTypeID;
+    use kuzu_common::types::{LogicalTypeID, Value};
     use kuzu_parser::ast::{Constant, Expression};
+    use kuzu_storage::table::ColumnDefinition;
 
     fn make_scan_op() -> LogicalOperator {
         LogicalOperator::ScanNode(kuzu_planner::logical_operator::LogicalScanNode {
@@ -261,6 +316,32 @@ mod tests {
         })
     }
 
+    /// Create a processor with a Person table containing test data.
+    fn make_processor_with_person_table() -> QueryProcessor {
+        let catalog = Arc::new(Mutex::new(TableCatalog::new()));
+        {
+            let mut cat = catalog.lock().unwrap();
+            cat.create_node_table("Person".into(), vec![
+                ColumnDefinition {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    name: "age".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ]);
+            // Insert some data
+            let table = cat.get_node_table_by_name_mut("Person").unwrap();
+            table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
+            table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+        }
+        let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
+        QueryProcessor::with_catalog(registry, catalog)
+    }
+
     #[test]
     fn test_empty_plan() {
         let proc = QueryProcessor::new();
@@ -270,15 +351,16 @@ mod tests {
 
     #[test]
     fn test_scan_only() {
-        let proc = QueryProcessor::new();
+        let proc = make_processor_with_person_table();
         let result = proc.execute(&[make_scan_op()]).unwrap();
         assert!(!result.is_empty());
         assert!(result[0].num_fields() > 0);
+        assert_eq!(result[0].size, 2); // 2 rows
     }
 
     #[test]
     fn test_scan_filter_projection() {
-        let proc = QueryProcessor::new();
+        let proc = make_processor_with_person_table();
         let plan = vec![make_scan_op(), make_filter_op(), make_proj_op()];
         let result = proc.execute(&plan).unwrap();
         assert!(!result.is_empty());
@@ -286,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_scan_filter_limit() {
-        let proc = QueryProcessor::new();
+        let proc = make_processor_with_person_table();
         let plan = vec![make_scan_op(), make_filter_op(), make_limit_op()];
         let result = proc.execute(&plan).unwrap();
         assert!(!result.is_empty());

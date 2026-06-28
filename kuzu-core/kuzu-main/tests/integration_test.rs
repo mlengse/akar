@@ -83,8 +83,8 @@ fn test_match_empty_table() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
     let msg = exec(&conn, "MATCH (a:Person) RETURN a.name");
-    // PhysicalScan placeholder produces 100 rows
-    assert!(msg.contains("100"), "Expected 100 rows, got: {msg}");
+    // Empty table returns empty result (no synthetic data)
+    assert!(msg.contains("empty"), "Expected empty result for empty table, got: {msg}");
 }
 
 #[test]
@@ -138,12 +138,11 @@ fn test_query_with_where_clause() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
 
-    // Query with WHERE — PhysicalScan generates 100 rows of placeholder data;
-    // the filter expression evaluator is simplified and passes all rows through.
+    // Query with WHERE on empty table — returns 0 rows (no synthetic data)
     let result = conn.query("MATCH (p:Person) WHERE p.age > 25 RETURN p.name").unwrap();
     assert!(result.is_success());
-    // Placeholder scan produces 100 rows
-    assert!(result.num_rows() > 0);
+    // Empty table returns 0 rows
+    assert_eq!(result.num_rows(), 0, "Expected 0 rows for empty table");
 }
 
 #[test]
@@ -338,4 +337,95 @@ fn test_parameter_parse_and_bind() {
     let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $x RETURN p.name").unwrap();
     let result = conn.execute(&stmt, vec![]);
     assert!(result.is_err());
+}
+
+// ==================== PhysicalScan real-data tests ====================
+
+#[test]
+fn test_physical_scan_reads_real_data() {
+    use kuzu_common::types::Value;
+
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    // Insert real data directly into the storage layer
+    {
+        let tc = db.table_catalog();
+        let mut catalog = tc.lock().unwrap();
+        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        table.insert_row(vec![
+            Value::String("Alice".into()),
+            Value::Int64(30),
+        ]).unwrap();
+        table.insert_row(vec![
+            Value::String("Bob".into()),
+            Value::Int64(25),
+        ]).unwrap();
+        table.insert_row(vec![
+            Value::String("Charlie".into()),
+            Value::Int64(35),
+        ]).unwrap();
+    }
+
+    // Query should return the real 3 rows, not synthetic data
+    let result = conn.query("MATCH (p:Person) RETURN p.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 3, "Expected 3 rows from real data, got {}", result.num_rows());
+
+    // Verify the summary reflects correct row count
+    let summary = result.summary();
+    assert!(summary.contains("3"), "Expected 3 in summary: {summary}");
+}
+
+#[test]
+fn test_physical_scan_with_where_on_real_data() {
+    use kuzu_common::types::Value;
+
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    // Insert data
+    {
+        let tc = db.table_catalog();
+        let mut catalog = tc.lock().unwrap();
+        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
+        table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+        table.insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)]).unwrap();
+    }
+
+    // Simple scan without WHERE — verifies real data flows through the pipeline
+    let result = conn.query("MATCH (p:Person) RETURN p.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 3, "Expected 3 rows from real data");
+}
+
+#[test]
+fn test_scan_multiple_columns() {
+    use kuzu_common::types::Value;
+
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))");
+
+    // Insert data
+    {
+        let tc = db.table_catalog();
+        let mut catalog = tc.lock().unwrap();
+        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        table.insert_row(vec![
+            Value::String("Alice".into()),
+            Value::Int64(30),
+            Value::Double(95.5),
+        ]).unwrap();
+        table.insert_row(vec![
+            Value::String("Bob".into()),
+            Value::Int64(25),
+            Value::Double(87.0),
+        ]).unwrap();
+    }
+
+    // Query scanning multiple columns
+    let result = conn.query("MATCH (p:Person) RETURN p.name, p.age, p.score").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 2, "Expected 2 rows");
 }

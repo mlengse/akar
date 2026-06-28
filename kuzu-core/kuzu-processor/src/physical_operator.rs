@@ -3,11 +3,12 @@
 //! Each physical operator implements the `Operator` trait with an `execute` method
 //! that produces output `DataChunk`s from input `DataChunk`s.
 
-use kuzu_common::types::{PhysicalTypeID, Value};
+use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
 use kuzu_common::vector::{physical_type_size, DataChunk, ValueVector};
 use kuzu_function::scalar::AggValueState;
 use kuzu_function::AggregateFunction;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
+use kuzu_storage::table::ColumnDefinition;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -30,31 +31,211 @@ pub struct PhysicalScan {
     pub table_id: u64,
     pub column_ids: Vec<u32>,
     pub estimated_cardinality: u64,
+    /// Column-major table data: data[col_idx][row_idx].
+    /// When present, PhysicalScan reads actual data instead of generating synthetic values.
+    pub table_data: Option<Vec<Vec<Value>>>,
+    /// Column definitions to map column names to physical types.
+    pub table_columns: Vec<ColumnDefinition>,
+}
+
+impl PhysicalScan {
+    pub fn new(
+        table_name: String,
+        table_id: u64,
+        estimated_cardinality: u64,
+    ) -> Self {
+        Self {
+            table_name,
+            table_id,
+            column_ids: Vec::new(),
+            estimated_cardinality,
+            table_data: None,
+            table_columns: Vec::new(),
+        }
+    }
+
+    /// Set column IDs to scan. These map to column indices in the table data.
+    pub fn with_columns(mut self, column_ids: Vec<u32>) -> Self {
+        self.column_ids = column_ids;
+        self
+    }
+
+    /// Attach table data for the scan to read from.
+    pub fn with_data(mut self, data: Vec<Vec<Value>>, columns: Vec<ColumnDefinition>) -> Self {
+        self.table_data = Some(data);
+        self.table_columns = columns;
+        self
+    }
+
+    /// Convert a Value to bytes in a ValueVector at the given row index.
+    fn write_value_to_vector(v: &mut ValueVector, row: usize, val: &Value) {
+        match val {
+            Value::Null => {
+                v.set_null(row, true);
+            }
+            Value::Bool(x) => {
+                if v.physical_type() == PhysicalTypeID::Bool {
+                    v.data_mut()[row] = if *x { 1 } else { 0 };
+                    v.set_null(row, false);
+                }
+            }
+            Value::Int64(x) => {
+                let offset = row * 8;
+                if offset + 8 <= v.data().len() {
+                    v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                    v.set_null(row, false);
+                }
+            }
+            Value::Int32(x) => {
+                let offset = row * 4;
+                if offset + 4 <= v.data().len() {
+                    v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
+                    v.set_null(row, false);
+                }
+            }
+            Value::Double(x) => {
+                let offset = row * 8;
+                if offset + 8 <= v.data().len() {
+                    v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                    v.set_null(row, false);
+                }
+            }
+            Value::Float(x) => {
+                let offset = row * 4;
+                if offset + 4 <= v.data().len() {
+                    v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
+                    v.set_null(row, false);
+                }
+            }
+            Value::String(s) => {
+                let offset = row * 16;
+                let bytes = s.as_bytes();
+                let len = bytes.len().min(15) as u8;
+                if offset < v.data().len() {
+                    v.data_mut()[offset] = len;
+                    let copy_len = bytes.len().min(15);
+                    if offset + 1 + copy_len <= v.data().len() {
+                        v.data_mut()[offset + 1..offset + 1 + copy_len]
+                            .copy_from_slice(&bytes[..copy_len]);
+                    }
+                    v.set_null(row, false);
+                }
+            }
+            _ => {
+                // For complex types, set null
+                v.set_null(row, true);
+            }
+        }
+    }
+
+    /// Determine the PhysicalTypeID for a Value, with fallback.
+    fn value_to_physical_type(val: &Value) -> PhysicalTypeID {
+        match val {
+            Value::Null => PhysicalTypeID::Int64,
+            Value::Bool(_) => PhysicalTypeID::Bool,
+            Value::Int64(_) | Value::UInt64(_) | Value::Int128(_) => PhysicalTypeID::Int64,
+            Value::Int32(_) | Value::UInt32(_) => PhysicalTypeID::Int32,
+            Value::Int16(_) | Value::UInt16(_) => PhysicalTypeID::Int16,
+            Value::Int8(_) | Value::UInt8(_) => PhysicalTypeID::Int8,
+            Value::Double(_) => PhysicalTypeID::Double,
+            Value::Float(_) => PhysicalTypeID::Float,
+            Value::String(_) | Value::Date(_) | Value::Timestamp(_)
+                | Value::TimestampTz(_) | Value::TimestampNs(_)
+                | Value::TimestampMs(_) | Value::TimestampSec(_)
+                | Value::Interval(_) => PhysicalTypeID::String,
+            Value::Blob(_) => PhysicalTypeID::Blob,
+            Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => {
+                PhysicalTypeID::Int64
+            }
+        }
+    }
+
+    /// Determine PhysicalTypeID from a LogicalTypeID.
+    fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
+        match logical {
+            LogicalTypeID::Bool => PhysicalTypeID::Bool,
+            LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial => PhysicalTypeID::Int64,
+            LogicalTypeID::Int32 | LogicalTypeID::UInt32 => PhysicalTypeID::Int32,
+            LogicalTypeID::Int16 | LogicalTypeID::UInt16 => PhysicalTypeID::Int16,
+            LogicalTypeID::Int8 | LogicalTypeID::UInt8 => PhysicalTypeID::Int8,
+            LogicalTypeID::Double | LogicalTypeID::Decimal => PhysicalTypeID::Double,
+            LogicalTypeID::Float => PhysicalTypeID::Float,
+            LogicalTypeID::String
+            | LogicalTypeID::Date
+            | LogicalTypeID::Timestamp
+            | LogicalTypeID::TimestampTz
+            | LogicalTypeID::TimestampMs
+            | LogicalTypeID::TimestampNs
+            | LogicalTypeID::TimestampSec
+            | LogicalTypeID::Interval => PhysicalTypeID::String,
+            LogicalTypeID::Blob => PhysicalTypeID::Blob,
+            LogicalTypeID::Any
+            | LogicalTypeID::Node
+            | LogicalTypeID::Rel
+            | LogicalTypeID::RecursiveRel
+            | LogicalTypeID::List
+            | LogicalTypeID::Array
+            | LogicalTypeID::Map
+            | LogicalTypeID::Struct
+            | LogicalTypeID::Union
+            | LogicalTypeID::Uuid
+            | LogicalTypeID::InternalID => PhysicalTypeID::Int64,
+        }
+    }
 }
 
 impl PhysicalOperatorExec for PhysicalScan {
     fn operator_type(&self) -> &str { "scan" }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        let mut fields = Vec::new();
-        for &col_id in &self.column_ids {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1000);
-            for i in 0..100.min(self.estimated_cardinality as usize) {
-                v.set_i64(i, (col_id as i64) * 1000 + i as i64);
+        // If we have real table data, read from it
+        if let Some(ref data) = self.table_data {
+            if data.is_empty() || data[0].is_empty() {
+                return Ok(vec![DataChunk::new(vec![])]);
             }
-            v.resize(100.min(self.estimated_cardinality as usize));
-            fields.push(v);
-        }
-        if fields.is_empty() {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1000);
-            for i in 0..100.min(self.estimated_cardinality as usize) {
-                v.set_i64(i, i as i64);
+
+            let num_rows = data[0].len();
+            // Use column_ids if specified, otherwise scan all columns
+            let cols_to_scan: Vec<usize> = if self.column_ids.is_empty() {
+                (0..data.len()).collect()
+            } else {
+                self.column_ids.iter().map(|&id| id as usize).collect()
+            };
+
+            let mut fields = Vec::with_capacity(cols_to_scan.len());
+            for &col_idx in &cols_to_scan {
+                if col_idx >= data.len() {
+                    continue;
+                }
+                let col_data = &data[col_idx];
+
+                // Determine physical type from the first non-null value or column definition
+                let phys_type = if let Some(col_def) = self.table_columns.get(col_idx) {
+                    Self::logical_to_physical(&col_def.logical_type)
+                } else {
+                    col_data.iter().find_map(|v| {
+                        if !matches!(v, Value::Null) {
+                            Some(Self::value_to_physical_type(v))
+                        } else {
+                            None
+                        }
+                    }).unwrap_or(PhysicalTypeID::Int64)
+                };
+
+                let mut v = ValueVector::new(phys_type, num_rows);
+                v.resize(num_rows);
+                for (row, val) in col_data.iter().enumerate() {
+                    Self::write_value_to_vector(&mut v, row, val);
+                }
+                fields.push(v);
             }
-            v.resize(100.min(self.estimated_cardinality as usize));
-            fields.push(v);
+
+            let chunk = DataChunk::new(fields);
+            return Ok(vec![chunk]);
         }
-        let chunk = DataChunk::new(fields);
-        Ok(vec![chunk])
+
+        // Fallback: no data available — return empty result
+        Ok(vec![DataChunk::new(vec![])])
     }
 }
 

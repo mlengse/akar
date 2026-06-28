@@ -51,6 +51,10 @@ pub struct Database {
 }
 
 impl Database {
+    /// Get the table catalog for programmatic data access.
+    pub fn table_catalog(&self) -> std::sync::Arc<std::sync::Mutex<kuzu_storage::TableCatalog>> {
+        self.storage_manager.table_catalog()
+    }
     pub fn new(db_path: impl Into<PathBuf>, config: SystemConfig) -> Result<Self, String> {
         let db_path = db_path.into();
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));

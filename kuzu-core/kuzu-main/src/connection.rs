@@ -20,6 +20,7 @@ use kuzu_optimizer::Optimizer;
 use kuzu_parser::parse;
 use kuzu_planner::QueryPlanner;
 use kuzu_processor::QueryProcessor;
+use kuzu_storage::table::ColumnDefinition;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -75,7 +76,10 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // 6. Execute
-        let processor = QueryProcessor::with_registry(self.database.function_registry.clone());
+        let processor = QueryProcessor::with_catalog(
+            self.database.function_registry.clone(),
+            self.database.storage_manager.table_catalog(),
+        );
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -177,7 +181,10 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Execute
-        let processor = QueryProcessor::with_registry(self.database.function_registry.clone());
+        let processor = QueryProcessor::with_catalog(
+            self.database.function_registry.clone(),
+            self.database.storage_manager.table_catalog(),
+        );
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -190,12 +197,32 @@ impl Connection {
     fn handle_ddl(&self, bound: &BoundStatement) -> Result<Option<QueryResult>, String> {
         match bound {
             BoundStatement::BoundCreateNodeTable(t) => {
+                // Also create a storage table with in-memory data capacity
+                let columns: Vec<ColumnDefinition> = t.columns.iter().map(|c| {
+                    ColumnDefinition {
+                        name: c.name.clone(),
+                        logical_type: c.logical_type,
+                        is_primary_key: c.is_primary_key,
+                    }
+                }).collect();
+                self.database.storage_manager.create_node_table(t.name.clone(), columns);
                 tracing::info!("Created node table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Node table '{}' created", t.name
                 ))))
             }
             BoundStatement::BoundCreateRelTable(t) => {
+                // Create a storage rel table
+                let columns: Vec<ColumnDefinition> = t.columns.iter().map(|c| {
+                    ColumnDefinition {
+                        name: c.name.clone(),
+                        logical_type: c.logical_type,
+                        is_primary_key: c.is_primary_key,
+                    }
+                }).collect();
+                let src_id = 0; // src table ID resolved during binding
+                let dst_id = 0;
+                self.database.storage_manager.create_rel_table(t.name.clone(), src_id, dst_id, columns);
                 tracing::info!("Created rel table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Rel table '{}' created", t.name
