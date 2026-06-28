@@ -1,9 +1,10 @@
 //! Optimizer — runs a sequence of optimization passes on a logical plan.
 
-use crate::passes::{FilterPushDown, OptimizationPass, ProjectionPushDown};
+use crate::passes::*;
 use kuzu_planner::logical_operator::LogicalOperator;
 
 /// The optimizer applies a chain of optimization passes to a logical plan.
+/// Passes are applied in order: cheaper/more impactful passes first.
 pub struct Optimizer {
     passes: Vec<Box<dyn OptimizationPass>>,
 }
@@ -11,8 +12,22 @@ pub struct Optimizer {
 impl Optimizer {
     pub fn new() -> Self {
         let passes: Vec<Box<dyn OptimizationPass>> = vec![
+            // Pass 1: Remove obviously unnecessary operators early
+            Box::new(RemoveUnnecessaryOperators),
+            // Pass 2: Push filters toward scan nodes (reduces intermediate rows)
             Box::new(FilterPushDown),
+            // Pass 3: Remove unused columns from scans (reduces I/O)
             Box::new(ProjectionPushDown),
+            // Pass 4: Fold constant expressions
+            Box::new(ConstantFolding),
+            // Pass 5: Reorder joins for efficiency
+            Box::new(JoinOptimization),
+            // Pass 6: Detect and combine top-k patterns (ORDER BY + LIMIT)
+            Box::new(TopKOptimization),
+            // Pass 7: Estimate cardinality for cost-based decisions
+            Box::new(CardinalityEstimation),
+            // Pass 8: Rewrite for worst-case optimal joins
+            Box::new(FactorizationRewriting),
         ];
         Self { passes }
     }
@@ -25,10 +40,59 @@ impl Optimizer {
         }
         result
     }
+
+    /// Get the list of registered passes (for debugging/inspection).
+    pub fn pass_names(&self) -> Vec<&str> {
+        self.passes.iter().map(|p| p.name()).collect()
+    }
 }
 
 impl Default for Optimizer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_optimizer_registers_all_passes() {
+        let opt = Optimizer::new();
+        let names = opt.pass_names();
+        assert!(names.contains(&"remove_unnecessary"));
+        assert!(names.contains(&"filter_push_down"));
+        assert!(names.contains(&"projection_push_down"));
+        assert!(names.contains(&"constant_folding"));
+        assert!(names.contains(&"join_optimization"));
+        assert!(names.contains(&"top_k_optimization"));
+        assert!(names.contains(&"cardinality_estimation"));
+        assert!(names.contains(&"factorization_rewriting"));
+        assert_eq!(names.len(), 8);
+    }
+
+    #[test]
+    fn test_optimizer_empty_plan() {
+        let opt = Optimizer::new();
+        let result = opt.optimize(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_optimizer_preserves_valid_plan() {
+        use kuzu_planner::logical_operator::*;
+        let plan = vec![
+            LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "Person".into(),
+                table_id: 0,
+                alias: Some("a".into()),
+                columns: vec!["name".into()],
+            }),
+        ];
+        let opt = Optimizer::new();
+        let result = opt.optimize(plan);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], LogicalOperator::ScanNode(_)));
     }
 }

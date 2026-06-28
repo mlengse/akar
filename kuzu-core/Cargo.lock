@@ -440,7 +440,10 @@ dependencies = [
 name = "kuzu-optimizer"
 version = "0.1.0"
 dependencies = [
+ "kuzu-binder",
+ "kuzu-catalog",
  "kuzu-common",
+ "kuzu-parser",
  "kuzu-planner",
  "kuzu-storage",
  "thiserror",
