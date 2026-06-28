@@ -1,5 +1,6 @@
 #include "c_api/helpers.h"
 
+#include <cstdint>
 #include <cstring>
 
 #ifdef _WIN32
