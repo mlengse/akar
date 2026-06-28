@@ -104,6 +104,7 @@ mod tests {
     use kuzu_catalog::{Catalog, CatalogColumn};
     use kuzu_common::types::LogicalTypeID;
     use kuzu_parser::parse;
+    use std::sync::Arc;
 
     fn setup_binder() -> Binder {
         let mut catalog = Catalog::new();
@@ -118,7 +119,7 @@ mod tests {
             "Knows".into(), 0, 0,
             vec![CatalogColumn { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None }],
         );
-        Binder::new(catalog)
+        Binder::new(Arc::new(std::sync::Mutex::new(catalog)))
     }
 
     #[test]
@@ -158,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_plan_ddl_empty() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(std::sync::Mutex::new(Catalog::new())));
         let sql = "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))";
         let stmt = parse(sql).unwrap();
         let bound = binder.bind(stmt).unwrap();

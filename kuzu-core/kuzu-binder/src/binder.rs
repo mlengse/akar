@@ -4,19 +4,17 @@ use crate::bound_statement::*;
 use kuzu_catalog::{Catalog, CatalogColumn, CatalogResult};
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::{Clause, Expression, Statement, *};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// The binder transforms a parsed AST into a bound statement
 /// by resolving symbols against the catalog and validating types.
 pub struct Binder {
-    catalog: Mutex<Catalog>,
+    catalog: Arc<Mutex<Catalog>>,
 }
 
 impl Binder {
-    pub fn new(catalog: Catalog) -> Self {
-        Self {
-            catalog: Mutex::new(catalog),
-        }
+    pub fn new(catalog: Arc<Mutex<Catalog>>) -> Self {
+        Self { catalog }
     }
 
     pub fn bind(&self, statement: Statement) -> Result<BoundStatement, String> {
@@ -592,12 +590,12 @@ mod tests {
                 default_value: None,
             }],
         );
-        Binder::new(catalog)
+        Binder::new(Arc::new(Mutex::new(catalog)))
     }
 
     #[test]
     fn test_bind_create_node_table() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
         let sql = "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))";
         let stmt = parse(sql).unwrap();
         let bound = binder.bind(stmt).unwrap();
@@ -614,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_bind_drop_table() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
         let sql = "DROP TABLE Person";
         // Should fail because table doesn't exist
         assert!(binder.bind(parse(sql).unwrap()).is_err());
@@ -689,7 +687,7 @@ mod tests {
 
     #[test]
     fn test_bind_invalid_type() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
         // Valid type but wrong for PRIMARY KEY
         let sql = "CREATE NODE TABLE Bad(age INT64, PRIMARY KEY (name))";
         assert!(binder.bind(parse(sql).unwrap()).is_err());
@@ -697,7 +695,7 @@ mod tests {
 
     #[test]
     fn test_bind_empty_table_name() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
         let sql = "CREATE NODE TABLE (name STRING, PRIMARY KEY (name))";
         // This should fail because parser expects a name
         assert!(parse(sql).is_err() || binder.bind(parse(sql).unwrap()).is_err());
@@ -705,7 +703,7 @@ mod tests {
 
     #[test]
     fn test_bind_create_rel_table() {
-        let binder = Binder::new(Catalog::new());
+        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
         let sql = "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))";
         binder.bind(parse(sql).unwrap()).unwrap();
         let sql2 = "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)";

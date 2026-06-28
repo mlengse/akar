@@ -4,6 +4,6 @@ pub mod database;
 pub mod connection;
 pub mod query_result;
 
-pub use database::Database;
+pub use database::{Database, SystemConfig};
 pub use connection::Connection;
 pub use query_result::QueryResult;
