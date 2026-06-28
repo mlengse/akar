@@ -26,8 +26,7 @@ impl Extension for UnityCatalogExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
-        use kuzu_function::Value;
+        use kuzu_function::registry::TableFunction;
 
         #[cfg(feature = "duckdb-delegation")]
         {
@@ -58,11 +57,11 @@ impl Extension for UnityCatalogExtension {
                         token.replace('\'', "''"),
                         endpoint.replace('\'', "''")
                     );
-                    helper.execute(&create_secret)?;
+                    helper.execute_batch(&create_secret)?;
 
                     // Use DuckDB's UC catalog to read the table
                     let sql = format!("SELECT * FROM {} LIMIT 1000", table);
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
                     Ok(())
                 });
 

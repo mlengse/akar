@@ -28,8 +28,7 @@ impl Extension for AzureExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
-        use kuzu_function::Value;
+        use kuzu_function::registry::TableFunction;
 
         #[cfg(feature = "duckdb-delegation")]
         {
@@ -52,11 +51,11 @@ impl Extension for AzureExtension {
 
                     let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
                     helper.install_and_load("httpfs")?;
-                    helper.execute("CREATE SECRET (TYPE AZURE)")?;
+                    helper.execute_batch("CREATE SECRET (TYPE AZURE)")?;
 
                     // Use DuckDB's read_parquet or read_csv_auto on the azure path
                     let sql = format!("SELECT * FROM read_parquet('{}')", path.replace('\'', "''"));
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
                     Ok(())
                 });
 

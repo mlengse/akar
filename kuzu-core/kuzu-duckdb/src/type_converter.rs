@@ -1,14 +1,13 @@
-//! Type converter between DuckDB logical types / values and Kuzu types / values.
+//! Type converter between DuckDB values and Kuzu types/values.
 //!
 //! Maps DuckDB types (INTEGER, BIGINT, VARCHAR, DOUBLE, BOOLEAN, etc.)
 //! to Kuzu `LogicalTypeID` and `Value` types.
 
-use kuzu_common::types::{LogicalTypeID, Value};
+use kuzu_common::types::LogicalTypeID;
+#[cfg(feature = "bundled")]
+use kuzu_common::types::Value;
 
 /// Convert a DuckDB logical type string to a Kuzu `LogicalTypeID`.
-///
-/// This is used when DuckDB returns query results and we need to know
-/// the Kuzu type of each column.
 pub fn duckdb_type_to_kuzu(duckdb_type: &str) -> LogicalTypeID {
     match duckdb_type.to_uppercase().as_str() {
         "BOOLEAN" | "BOOL" => LogicalTypeID::Bool,
@@ -23,7 +22,7 @@ pub fn duckdb_type_to_kuzu(duckdb_type: &str) -> LogicalTypeID {
         "TIMESTAMP" | "TIMESTAMP_SEC" | "TIMESTAMP_MS" | "TIMESTAMP_NS" => LogicalTypeID::Timestamp,
         "INTERVAL" => LogicalTypeID::Interval,
         "BLOB" | "BYTEA" => LogicalTypeID::Blob,
-        "UUID" => LogicalTypeID::UUID,
+        "UUID" => LogicalTypeID::Uuid,
         "INTEGER[]" | "BIGINT[]" | "VARCHAR[]" | "DOUBLE[]" => LogicalTypeID::List,
         "STRUCT" | "MAP" => LogicalTypeID::Struct,
         _ => {
@@ -33,88 +32,25 @@ pub fn duckdb_type_to_kuzu(duckdb_type: &str) -> LogicalTypeID {
     }
 }
 
-/// Convert a DuckDB value reference to a Kuzu `Value`.
-///
-/// Handles the common DuckDB types by matching on the dynamic type
-/// information available through DuckDB's type system.
+/// Convert a duckdb::types::Value to a Kuzu Value.
 #[cfg(feature = "bundled")]
-pub fn duckdb_value_to_kuzu(
-    row: &duckdb::DataRow,
-    idx: usize,
-) -> Result<Value, String> {
-    // Try each type in order of likelihood
-    if let Ok(val) = row.get::<_, i64>(idx) {
-        return Ok(Value::Int64(val));
-    }
-    if let Ok(val) = row.get::<_, i32>(idx) {
-        return Ok(Value::Int32(val));
-    }
-    if let Ok(val) = row.get::<_, f64>(idx) {
-        return Ok(Value::Double(val));
-    }
-    if let Ok(val) = row.get::<_, f32>(idx) {
-        return Ok(Value::Float(val));
-    }
-    if let Ok(val) = row.get::<_, bool>(idx) {
-        return Ok(Value::Bool(val));
-    }
-    if let Ok(val) = row.get::<_, String>(idx) {
-        return Ok(Value::String(val));
-    }
-    if let Ok(val) = row.get::<_, Vec<i64>>(idx) {
-        return Ok(Value::List(val.into_iter().map(Value::Int64).collect()));
-    }
-    if let Ok(val) = row.get::<_, Vec<String>>(idx) {
-        return Ok(Value::List(val.into_iter().map(Value::String).collect()));
-    }
-    // Try i64 as fallback
-    Err(format!("Cannot convert DuckDB value at index {idx}"))
-}
-
-/// Convert a DuckDB value to a Kuzu Value using the column type name.
-#[cfg(feature = "bundled")]
-pub fn duckdb_value_to_kuzu_typed(
-    row: &duckdb::DataRow,
-    idx: usize,
-    col_type: &str,
-) -> Result<Value, String> {
-    match col_type.to_uppercase().as_str() {
-        "BOOLEAN" | "BOOL" => {
-            let val: bool = row.get(idx).map_err(|e| format!("Bool conversion: {e}"))?;
-            Ok(Value::Bool(val))
+pub fn duckdb_value_to_kuzu(duck_val: &duckdb::types::Value) -> Value {
+    use duckdb::types::Value as DuckValue;
+    match duck_val {
+        DuckValue::Null => Value::Null,
+        DuckValue::Boolean(b) => Value::Bool(*b),
+        DuckValue::TinyInt(n) => Value::Int64(*n as i64),
+        DuckValue::SmallInt(n) => Value::Int64(*n as i64),
+        DuckValue::Int(n) => Value::Int32(*n),
+        DuckValue::BigInt(n) => Value::Int64(*n),
+        DuckValue::HugeInt(n) => Value::String(n.to_string()),
+        DuckValue::Float(n) => Value::Float(*n),
+        DuckValue::Double(n) => Value::Double(*n),
+        DuckValue::Text(s) => Value::String(s.clone()),
+        DuckValue::Date32(_) => {
+            Value::String(format!("{:?}", duck_val))
         }
-        "TINYINT" => {
-            let val: i8 = row.get(idx).map_err(|e| format!("TinyInt conversion: {e}"))?;
-            Ok(Value::Int64(val as i64))
-        }
-        "SMALLINT" | "INT2" => {
-            let val: i16 = row.get(idx).map_err(|e| format!("SmallInt conversion: {e}"))?;
-            Ok(Value::Int64(val as i64))
-        }
-        "INTEGER" | "INT" | "INT4" | "INT32" => {
-            let val: i32 = row.get(idx).map_err(|e| format!("Int conversion: {e}"))?;
-            Ok(Value::Int32(val))
-        }
-        "BIGINT" | "INT8" | "INT64" | "LONG" => {
-            let val: i64 = row.get(idx).map_err(|e| format!("BigInt conversion: {e}"))?;
-            Ok(Value::Int64(val))
-        }
-        "FLOAT" | "REAL" | "FLOAT4" => {
-            let val: f32 = row.get(idx).map_err(|e| format!("Float conversion: {e}"))?;
-            Ok(Value::Float(val))
-        }
-        "DOUBLE" | "FLOAT8" => {
-            let val: f64 = row.get(idx).map_err(|e| format!("Double conversion: {e}"))?;
-            Ok(Value::Double(val))
-        }
-        "VARCHAR" | "TEXT" | "STRING" | "CHAR" | "BPCHAR" => {
-            let val: String = row.get(idx).map_err(|e| format!("String conversion: {e}"))?;
-            Ok(Value::String(val))
-        }
-        _ => {
-            // Fallback
-            duckdb_value_to_kuzu(row, idx)
-        }
+        _ => Value::String(format!("{:?}", duck_val)),
     }
 }
 
@@ -133,7 +69,7 @@ mod tests {
         assert_eq!(duckdb_type_to_kuzu("DATE"), LogicalTypeID::Date);
         assert_eq!(duckdb_type_to_kuzu("TIMESTAMP"), LogicalTypeID::Timestamp);
         assert_eq!(duckdb_type_to_kuzu("BLOB"), LogicalTypeID::Blob);
-        assert_eq!(duckdb_type_to_kuzu("UUID"), LogicalTypeID::UUID);
+        assert_eq!(duckdb_type_to_kuzu("UUID"), LogicalTypeID::Uuid);
     }
 
     #[test]

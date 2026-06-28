@@ -27,8 +27,7 @@ impl Extension for DeltaExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
-        use kuzu_function::Value;
+        use kuzu_function::registry::TableFunction;
 
         #[cfg(feature = "duckdb-delegation")]
         {
@@ -47,7 +46,7 @@ impl Extension for DeltaExtension {
                     helper.install_and_load("delta")?;
 
                     let sql = format!("SELECT * FROM delta_scan('{}')", path.replace('\'', "''"));
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
 
                     Ok(())
                 });

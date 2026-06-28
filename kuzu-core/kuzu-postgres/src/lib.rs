@@ -26,8 +26,7 @@ impl Extension for PostgresExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
-        use kuzu_function::Value;
+        use kuzu_function::registry::ScalarFunction;
 
         #[cfg(feature = "native")]
         {

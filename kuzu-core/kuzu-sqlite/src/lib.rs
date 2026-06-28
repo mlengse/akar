@@ -26,6 +26,7 @@ impl Extension for SqliteExtension {
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use kuzu_function::registry::{ScalarFunction, TableFunction};
+        #[allow(unused_imports)]
         use kuzu_function::Value;
 
         // sqlite_query(path: String, sql: String) → executes SQL against SQLite DB

@@ -1,10 +1,13 @@
 //! DuckDB connection manager.
 //!
-//! Manages a `duckdb::Database` and `duckdb::Connection` with
-//! support for local file, in-memory, and remote HTTP/S3 modes.
+//! Manages a DuckDB connection with support for local file,
+//! in-memory, and remote HTTP/S3 modes.
 
 #[cfg(feature = "bundled")]
-use duckdb::{AccessMode, Config, Database, Connection as DuckDbRawConnection};
+use std::sync::Mutex;
+
+#[cfg(feature = "bundled")]
+use duckdb::{AccessMode, Config, Connection as DuckDbConn};
 
 /// The three modes of DuckDB operation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -78,13 +81,10 @@ impl DuckDbConfig {
     }
 }
 
-/// Manager for a DuckDB database connection.
+/// Manager for a DuckDB connection.
 pub struct DuckDbManager {
     #[cfg(feature = "bundled")]
-    database: Database,
-    #[cfg(feature = "bundled")]
-    connection: DuckDbRawConnection,
-    config: DuckDbConfig,
+    connection: Mutex<DuckDbConn>,
 }
 
 impl DuckDbManager {
@@ -98,82 +98,94 @@ impl DuckDbManager {
         };
 
         let mut duck_config = Config::default();
-        duck_config
+        duck_config = duck_config
             .access_mode(access_mode)
             .map_err(|e| format!("Failed to set access mode: {e}"))?;
 
         if let Some(threads) = config.thread_count {
-            duck_config
-                .set_maximum_threads(threads as i64)
+            duck_config = duck_config
+                .threads(threads as i64)
                 .map_err(|e| format!("Failed to set threads: {e}"))?;
         }
 
         if let Some(ref max_mem) = config.max_memory {
-            duck_config
-                .set_max_memory(max_mem)
+            duck_config = duck_config
+                .max_memory(max_mem)
                 .map_err(|e| format!("Failed to set max memory: {e}"))?;
         }
 
-        let database = Database::open_with_config(&config.database_path, duck_config)
-            .map_err(|e| format!("Failed to open DuckDB database: {e}"))?;
-
-        let connection = database
-            .connect()
-            .map_err(|e| format!("Failed to connect to DuckDB: {e}"))?;
+        let connection = if config.database_path == ":memory:" {
+            DuckDbConn::open_in_memory_with_flags(duck_config)
+        } else {
+            DuckDbConn::open_with_flags(&config.database_path, duck_config)
+        }
+        .map_err(|e| format!("Failed to open DuckDB: {e}"))?;
 
         Ok(Self {
-            database,
-            connection,
-            config,
+            connection: Mutex::new(connection),
         })
     }
 
     /// Open an in-memory DuckDB database.
     #[cfg(feature = "bundled")]
     pub fn in_memory() -> Result<Self, String> {
-        Self::open(DuckDbConfig::in_memory())
+        let connection = DuckDbConn::open_in_memory()
+            .map_err(|e| format!("Failed to open in-memory DuckDB: {e}"))?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
     }
 
-    /// Execute a SQL query and return the number of rows affected.
+    /// Execute a SQL statement and return the number of rows affected.
     #[cfg(feature = "bundled")]
-    pub fn execute(&self, sql: &str) -> Result<u64, String> {
-        self.connection
-            .execute(sql, [])
+    pub fn execute(&self, sql: &str) -> Result<usize, String> {
+        let conn = self.connection.lock().unwrap();
+        conn.execute(sql, [])
             .map_err(|e| format!("DuckDB execute error: {e}"))
     }
 
-    /// Execute a SQL query and return the result set.
+    /// Execute a SQL statement (batch, no return).
     #[cfg(feature = "bundled")]
-    pub fn query(&self, sql: &str) -> Result<duckdb::ResultSet<duckdb::DataRow>, String> {
-        self.connection
-            .query(sql, [])
-            .map_err(|e| format!("DuckDB query error: {e}"))
-    }
-
-    /// Execute a SQL query and return a DuckDB prepared statement for chunked access.
-    #[cfg(feature = "bundled")]
-    pub fn prepare(&self, sql: &str) -> Result<duckdb::Statement<'_>, String> {
-        self.connection
-            .prepare(sql)
-            .map_err(|e| format!("DuckDB prepare error: {e}"))
+    pub fn execute_batch(&self, sql: &str) -> Result<(), String> {
+        let conn = self.connection.lock().unwrap();
+        conn.execute_batch(sql)
+            .map_err(|e| format!("DuckDB execute batch error: {e}"))
     }
 
     /// Install and load a DuckDB extension.
     #[cfg(feature = "bundled")]
-    pub fn install_and_load(&self, extension_name: &str) -> Result<(), String> {
-        self.execute(&format!("INSTALL {}; LOAD {};", extension_name, extension_name))?;
-        Ok(())
+    pub fn install_and_load(&self, name: &str) -> Result<(), String> {
+        let sql = format!("INSTALL '{}'; LOAD '{}';", name, name);
+        let conn = self.connection.lock().unwrap();
+        conn.execute_batch(&sql)
+            .map_err(|e| format!("Failed to install/load DuckDB extension '{name}': {e}"))
     }
 
-    /// Get the connection (for advanced operations).
+    /// Query rows using a prepared statement.
     #[cfg(feature = "bundled")]
-    pub fn connection(&self) -> &DuckDbRawConnection {
-        &self.connection
-    }
+    pub fn query_rows(&self, sql: &str) -> Result<Vec<Vec<duckdb::types::Value>>, String> {
+        let conn = self.connection.lock().unwrap();
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(e) => return Err(format!("DuckDB prepare error: {e}")),
+        };
+        let col_count = stmt.column_count();
+        let mut rows = match stmt.query([]) {
+            Ok(r) => r,
+            Err(e) => return Err(format!("DuckDB query error: {e}")),
+        };
 
-    /// Get the config.
-    pub fn config(&self) -> &DuckDbConfig {
-        &self.config
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().map_err(|e| format!("DuckDB row error: {e}"))? {
+            let mut values = Vec::with_capacity(col_count);
+            for i in 0..col_count {
+                let val: duckdb::types::Value = row.get::<_, duckdb::types::Value>(i)
+                    .unwrap_or(duckdb::types::Value::Null);
+                values.push(val);
+            }
+            results.push(values);
+        }
+        Ok(results)
     }
 }
 
@@ -185,6 +197,22 @@ impl DuckDbManager {
 
     pub fn in_memory() -> Result<Self, String> {
         Err("DuckDB support not enabled (feature 'bundled' not active)".into())
+    }
+
+    pub fn execute(&self, _sql: &str) -> Result<usize, String> {
+        Err("DuckDB support not enabled".into())
+    }
+
+    pub fn execute_batch(&self, _sql: &str) -> Result<(), String> {
+        Err("DuckDB support not enabled".into())
+    }
+
+    pub fn query_rows(&self, _sql: &str) -> Result<Vec<Vec<String>>, String> {
+        Err("DuckDB support not enabled".into())
+    }
+
+    pub fn install_and_load(&self, _name: &str) -> Result<(), String> {
+        Err("DuckDB support not enabled".into())
     }
 }
 
@@ -214,14 +242,13 @@ mod tests {
     #[cfg(feature = "bundled")]
     fn test_open_in_memory() {
         let manager = DuckDbManager::in_memory().unwrap();
-        let count: i64 = manager
-            .query("SELECT 1 + 1")
-            .unwrap()
-            .into_iter()
-            .next()
-            .and_then(|row| row.get::<_, i64>(0).ok())
-            .unwrap_or(0);
-        assert_eq!(count, 2);
+        let rows = manager.query_rows("SELECT 1 + 1").unwrap();
+        assert!(!rows.is_empty());
+        if let Some(first) = rows.first() {
+            if let Some(val) = first.first() {
+                assert_eq!(val.to_string(), "2");
+            }
+        }
     }
 
     #[test]

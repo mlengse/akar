@@ -30,6 +30,7 @@ impl Extension for DuckDbExtension {
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use kuzu_function::registry::{ScalarFunction, TableFunction};
+        #[allow(unused_imports)]
         use kuzu_function::Value;
 
         // duckdb_query(sql: String) → executes SQL via DuckDB and returns JSON result
@@ -49,23 +50,13 @@ impl Extension for DuckDbExtension {
                     Err(e) => return Err(format!("Failed to open DuckDB: {e}")),
                 };
 
-                match manager.query(&sql) {
+                match manager.query_rows(&sql) {
                     Ok(rows) => {
                         // Collect first row, first column as string result
-                        for row in rows {
-                            if let Ok(val) = row.get::<_, String>(0) {
-                                return Ok(Value::String(val));
+                        if let Some(first_row) = rows.first() {
+                            if let Some(val) = first_row.first() {
+                                return Ok(Value::String(format!("{:?}", val)));
                             }
-                            if let Ok(val) = row.get::<_, i64>(0) {
-                                return Ok(Value::String(val.to_string()));
-                            }
-                            if let Ok(val) = row.get::<_, f64>(0) {
-                                return Ok(Value::String(val.to_string()));
-                            }
-                            if let Ok(val) = row.get::<_, bool>(0) {
-                                return Ok(Value::String(val.to_string()));
-                            }
-                            break;
                         }
                         Ok(Value::String("(empty)".into()))
                     }
@@ -97,7 +88,7 @@ impl Extension for DuckDbExtension {
                         Err(e) => return Err(format!("Failed to open DuckDB: {e}")),
                     };
 
-                    match manager.query(&sql) {
+                    match manager.query_rows(&sql) {
                         Ok(_rows) => {
                             // Rows are collected; DataChunk filling is done lazily
                             // by the processor. For now, just validate the query works.

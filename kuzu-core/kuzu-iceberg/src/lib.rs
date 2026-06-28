@@ -27,8 +27,7 @@ impl Extension for IcebergExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
-        use kuzu_function::Value;
+        use kuzu_function::registry::TableFunction;
 
         #[cfg(feature = "duckdb-delegation")]
         {
@@ -46,7 +45,7 @@ impl Extension for IcebergExtension {
                     let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
                     helper.install_and_load("iceberg")?;
                     let sql = format!("SELECT * FROM iceberg_scan('{}')", path.replace('\'', "''"));
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
                     Ok(())
                 });
 
@@ -72,7 +71,7 @@ impl Extension for IcebergExtension {
                     let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
                     helper.install_and_load("iceberg")?;
                     let sql = format!("SELECT * FROM iceberg_metadata('{}')", path.replace('\'', "''"));
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
                     Ok(())
                 });
 
@@ -98,7 +97,7 @@ impl Extension for IcebergExtension {
                     let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
                     helper.install_and_load("iceberg")?;
                     let sql = format!("SELECT * FROM iceberg_snapshots('{}')", path.replace('\'', "''"));
-                    helper.query(&sql)?;
+                    helper.query_rows(&sql)?;
                     Ok(())
                 });
 
