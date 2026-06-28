@@ -14,6 +14,7 @@ httpfs-extension = ["dep:kuzu-httpfs"]
 duckdb-extension = ["dep:kuzu-duckdb"]
 algo-extension = ["dep:kuzu-algo"]
 neo4j-extension = ["dep:kuzu-neo4j"]
+llm-extension = ["dep:kuzu-llm"]
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
@@ -35,5 +36,6 @@ kuzu-httpfs = { path = "../kuzu-httpfs", optional = true }
 kuzu-duckdb = { path = "../kuzu-duckdb", optional = true }
 kuzu-algo = { path = "../kuzu-algo", optional = true }
 kuzu-neo4j = { path = "../kuzu-neo4j", optional = true }
+kuzu-llm = { path = "../kuzu-llm", optional = true }
 tracing.workspace = true
 thiserror.workspace = true

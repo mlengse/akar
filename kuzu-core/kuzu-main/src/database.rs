@@ -140,5 +140,12 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(feature = "llm-extension")]
+        {
+            let ext = Box::new(kuzu_llm::LlmExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
     }
 }
