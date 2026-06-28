@@ -464,4 +464,23 @@ mod tests {
             _ => panic!("Expected CreateRelTable"),
         }
     }
+
+    #[test]
+    fn test_parameter_syntax() {
+        let sql = "MATCH (a:Person) WHERE a.age > $min RETURN a";
+        let stmt = parse(sql).unwrap();
+        assert!(matches!(stmt, Statement::Query(_)));
+    }
+
+    #[test]
+    fn test_multiple_parameters() {
+        let sql = "MATCH (a:Person) WHERE a.age > $min AND a.age < $max RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_parameter_with_string() {
+        let sql = "MATCH (a:Person) WHERE a.name = $name RETURN a";
+        assert!(parse(sql).is_ok());
+    }
 }
