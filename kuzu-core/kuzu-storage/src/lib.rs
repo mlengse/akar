@@ -2,6 +2,7 @@
 //!
 //! Disk-based columnar storage with buffer management, WAL, compression, and indexing.
 
+pub mod page;
 pub mod buffer_manager;
 pub mod wal;
 pub mod compression;
@@ -12,6 +13,7 @@ pub mod index;
 pub mod stats;
 pub mod checkpoint;
 
+use buffer_manager::{BufferManager, BufferManagerConfig};
 use kuzu_common::memory::MemoryManager;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,23 +22,22 @@ use std::sync::Arc;
 #[allow(dead_code)]
 pub struct StorageManager {
     db_path: PathBuf,
-    buffer_manager: Arc<buffer_manager::BufferManager>,
+    buffer_manager: Arc<std::sync::Mutex<BufferManager>>,
     memory_manager: Arc<MemoryManager>,
 }
 
 impl StorageManager {
     pub fn new(db_path: PathBuf, memory_manager: Arc<MemoryManager>) -> Self {
-        let buffer_manager = Arc::new(buffer_manager::BufferManager::new(
-            memory_manager.clone(),
-        ));
+        let config = BufferManagerConfig::default();
+        let bm = BufferManager::new(db_path.clone(), memory_manager.clone(), config);
         Self {
             db_path,
-            buffer_manager,
+            buffer_manager: Arc::new(std::sync::Mutex::new(bm)),
             memory_manager,
         }
     }
 
-    pub fn buffer_manager(&self) -> &Arc<buffer_manager::BufferManager> {
+    pub fn buffer_manager(&self) -> &Arc<std::sync::Mutex<BufferManager>> {
         &self.buffer_manager
     }
 
