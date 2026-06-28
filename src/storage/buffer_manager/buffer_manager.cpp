@@ -22,11 +22,13 @@
 #if defined(_WIN32)
 #include <exception>
 
-#include <eh.h>
 #include <errhandlingapi.h>
 #include <memoryapi.h>
 #include <windows.h>
 #include <winnt.h>
+#if !defined(__MINGW32__)
+#include <eh.h>
+#endif
 #endif
 
 using namespace kuzu::common;
@@ -159,6 +161,7 @@ public:
     const uint8_t* location;
 };
 
+#if !defined(__MINGW32__)
 class ScopedTranslator {
     const _se_translator_function old;
 
@@ -167,6 +170,7 @@ public:
         : old{_set_se_translator(newTranslator)} {}
     ~ScopedTranslator() { _set_se_translator(old); }
 };
+#endif
 
 void handleAccessViolation(unsigned int exceptionCode, PEXCEPTION_POINTERS exceptionRecord) {
     if (exceptionCode == EXCEPTION_ACCESS_VIOLATION
@@ -218,7 +222,7 @@ inline bool try_func(const std::function<void(uint8_t*)>& func, uint8_t* frame,
 void BufferManager::optimisticRead(FileHandle& fileHandle, page_idx_t pageIdx,
     const std::function<void(uint8_t*)>& func) {
     auto pageState = fileHandle.getPageState(pageIdx);
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(__MINGW32__)
     // Change the Structured Exception handling just for the scope of this function
     auto translator = ScopedTranslator(handleAccessViolation);
 #endif
