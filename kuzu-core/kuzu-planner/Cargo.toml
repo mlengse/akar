@@ -12,3 +12,7 @@ kuzu-parser = { path = "../kuzu-parser" }
 tracing.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true
+
+[dev-dependencies]
+kuzu-parser = { path = "../kuzu-parser" }
+kuzu-catalog = { path = "../kuzu-catalog" }

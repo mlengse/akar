@@ -1,7 +1,6 @@
 //! Logical operator types for query planning.
 
 use kuzu_binder::bound_statement::BoundExpression;
-use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::Expression;
 
 /// A logical operator in the query plan.

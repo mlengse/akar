@@ -467,6 +467,7 @@ version = "0.1.0"
 dependencies = [
  "hashbrown 0.15.5",
  "kuzu-binder",
+ "kuzu-catalog",
  "kuzu-common",
  "kuzu-parser",
  "thiserror",
