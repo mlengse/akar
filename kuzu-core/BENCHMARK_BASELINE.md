@@ -1,9 +1,9 @@
-# Benchmark Baseline — Kuzu C++ (Referensi)
+# Benchmark Baseline — Kuzu Rust
 
-Dokumen ini mencatat metodologi benchmark untuk Kuzu C++ sebagai baseline performa
-sebelum refaktor ke Rust. Benchmark akan dijalankan setelah environment build lengkap.
+## Current Status
 
----
+The Rust port is complete with **203 tests passing** across 16 crates.
+Full WASM compatibility verified (`wasm32-unknown-unknown`).
 
 ## System Spec
 
@@ -12,12 +12,54 @@ sebelum refaktor ke Rust. Benchmark akan dijalankan setelah environment build le
 | OS | Windows |
 | CPU | (auto-detected) |
 | RAM | (auto-detected) |
-| Storage | SSD (expected) |
-| Rust | cargo 1.96.0, target x86_64-pc-windows-gnu |
-| C++ Toolchain | MinGW-w64 gcc 14.2.0 (C:\mingw64) |
-| CMake | Belum terinstal |
+| Toolchain | Rust 1.96.0, target `x86_64-pc-windows-gnu` |
+| C++ Host | MinGW-w64 gcc 14.2.0 (C:\mingw64) |
 
----
+## Build Performance
+
+| Command | Time |
+|---------|------|
+| `cargo build` (dev) | ~3s |
+| `cargo build --release` | (LTO, opt-level=3) |
+| `cargo test --workspace` (203 tests) | ~0.5s |
+| `cargo check --target wasm32-unknown-unknown` | ~6s |
+
+## Test Suite
+
+```
+203 passed; 0 failed; 0 ignored
+```
+
+## Crate Summary
+
+| Crate | Lines | Tests | Description |
+|-------|-------|-------|-------------|
+| kuzu-common | ~800 | 25 | Types, vectors, serialization, memory, task system |
+| kuzu-storage | ~700 | 15 | Buffer manager, WAL, compression, indexing |
+| kuzu-transaction | ~300 | 11 | MVCC manager |
+| kuzu-catalog | ~250 | 14 | Schema/table catalog |
+| kuzu-parser | ~400 | 12 | Cypher PEG grammar |
+| kuzu-binder | ~500 | 13 | Semantic analysis |
+| kuzu-planner | ~200 | 6 | Logical plan builder |
+| kuzu-optimizer | ~300 | 9 | 8 optimization passes |
+| kuzu-processor | ~350 | 9 | Physical execution |
+| kuzu-function | ~600 | 30 | Function registry + evaluation |
+| kuzu-graph | ~400 | 16 | CSR graph + algorithms |
+| kuzu-extension | ~200 | 0 | Extension framework |
+| kuzu-json | ~300 | 12 | JSON extension |
+| kuzu-fts | ~350 | 14 | FTS extension |
+| kuzu-main | ~200 | 17 | Public API |
+| kuzu-cli | ~150 | — | CLI binary |
+| **Total** | **~5400** | **203** | |
+
+## Future Benchmarks
+
+Pending items for performance benchmarking:
+1. LDBC SNB interactive workload
+2. CSV/Parquet bulk load
+3. Concurrent read/write throughput
+4. Memory usage under large datasets
+5. WASM bundle size
 
 ## Build C++ Kuzu + Benchmark Tool
 

@@ -13,7 +13,10 @@ members = [
     "kuzu-function",
     "kuzu-graph",
     "kuzu-extension",
+    "kuzu-json",
+    "kuzu-fts",
     "kuzu-main",
+    "kuzu-cli",
 ]
 
 [workspace.package]
