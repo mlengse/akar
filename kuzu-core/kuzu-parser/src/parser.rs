@@ -28,16 +28,19 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
             parse_ddl(ddl_inner)
         }
         Rule::query_statement => {
-            // Check if this is a MERGE statement
-            let has_merge = inner.clone().into_inner().any(|c| c.as_rule() == Rule::merge_clause);
-            if has_merge {
-                // Reparse as merge
+            let inner_clone = inner.clone();
+            let child_rules: Vec<_> = inner_clone.into_inner().map(|c| c.as_rule()).collect();
+            if child_rules.iter().any(|r| *r == Rule::merge_clause) {
                 let merge = parse_merge(inner)?;
                 Ok(merge)
             } else {
                 let query = parse_query_pairs(inner)?;
                 Ok(Statement::Query(query))
             }
+        }
+        Rule::call_statement => {
+            let call = parse_call(inner)?;
+            Ok(Statement::Call(call))
         }
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
@@ -633,6 +636,44 @@ fn parse_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         file_path,
         options,
     }))
+}
+
+/// Parse a CALL statement.
+fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<CallStatement, String> {
+    let mut function_name = String::new();
+    let mut args = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::call_clause => {
+                for part in inner.into_inner() {
+                    match part.as_rule() {
+                        Rule::function_name => {
+                            function_name = part.as_str().to_string();
+                        }
+                        Rule::call_args => {
+                            for expr in part.into_inner() {
+                                if expr.as_rule() == Rule::expression {
+                                    args.push(parse_expression(expr)?);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Rule::return_clause => {
+                // CALL with RETURN — handled at execution level
+            }
+            _ => {}
+        }
+    }
+
+    if function_name.is_empty() {
+        return Err("CALL requires a function name".into());
+    }
+
+    Ok(CallStatement { function_name, args })
 }
 
 /// Parse a MERGE statement.

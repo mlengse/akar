@@ -556,4 +556,58 @@ impl FunctionRegistry {
     pub fn total_count(&self) -> usize {
         self.scalar_count() + self.aggregate_count() + self.table_count()
     }
+
+    /// Execute a table function by name with the given pre-evaluated arguments.
+    ///
+    /// Returns a `Vec<Vec<Value>>` representing rows of results.
+    /// Each inner vec is one row with one or more column values.
+    pub fn execute_table_function(
+        &self,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Vec<Vec<Value>>, String> {
+        use kuzu_common::vector::DataChunk;
+
+        let func = self
+            .get_table(name)
+            .ok_or_else(|| format!("Table function '{}' not found", name))?;
+
+        match func {
+            TableFunction::ListTables => {
+                Err("ListTables requires catalog access — handled at connection level".into())
+            }
+            TableFunction::ShowColumns { .. } => {
+                Err("ShowColumns requires catalog access — handled at connection level".into())
+            }
+            TableFunction::Custom { name: custom_name } => {
+                Err(format!("Custom table function '{}' has no callback registered", custom_name))
+            }
+            TableFunction::CustomTable { name: _, execute } => {
+                let mut chunk = DataChunk {
+                    fields: Vec::new(),
+                    size: 0,
+                };
+                execute(args, &mut chunk).map(|_| {
+                    let mut rows = Vec::new();
+                    for row in 0..chunk.size {
+                        let mut row_vals = Vec::new();
+                        for field in &chunk.fields {
+                            row_vals.push(field.get_value(row).unwrap_or(Value::Null));
+                        }
+                        rows.push(row_vals);
+                    }
+                    rows
+                })
+            }
+            TableFunction::ScanCsv { .. }
+            | TableFunction::ScanParquet { .. }
+            | TableFunction::ScanJson { .. }
+            | TableFunction::CurrentSetting { .. } => {
+                Err(format!(
+                    "Table function '{}' requires file/catalog context — use COPY FROM instead",
+                    name
+                ))
+            }
+        }
+    }
 }

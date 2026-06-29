@@ -6,7 +6,8 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // ==================== Top Level ====================
 
-statement = { union_statement | ddl_statement | query_statement }
+statement = { call_statement | union_statement | ddl_statement | query_statement }
+call_statement = { call_clause ~ return_clause? }
 union_statement = { query_statement ~ ("UNION" ~ "ALL"?) ~ query_statement }
 
 alter_table = { "ALTER" ~ "TABLE" ~ identifier ~ alter_action }
@@ -51,6 +52,10 @@ set_clause = { "SET" ~ set_item ~ ("," ~ set_item)* }
 set_item = { expression ~ "=" ~ expression }
 
 merge_clause = { "MERGE" ~ pattern ~ on_create_set? ~ on_match_set? }
+
+call_clause = { "CALL" ~ function_name ~ "(" ~ call_args? ~ ")" }
+call_args = { expression ~ ("," ~ expression)* }
+function_name = { identifier ~ ("." ~ identifier)* }
 on_create_set = { "ON" ~ "CREATE" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
 on_match_set = { "ON" ~ "MATCH" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
 

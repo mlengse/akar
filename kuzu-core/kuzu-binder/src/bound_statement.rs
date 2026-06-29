@@ -8,6 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub enum BoundStatement {
     BoundQuery(BoundQuery),
+    BoundCall(BoundCall),
     BoundCreateNodeTable(BoundCreateNodeTable),
     BoundCreateRelTable(BoundCreateRelTable),
     BoundDropTable(BoundDropTable),
@@ -158,6 +159,13 @@ pub struct BoundUnion {
     pub left: Box<BoundQuery>,
     pub right: Box<BoundQuery>,
     pub all: bool,
+}
+
+/// Bound CALL statement — invoke a table function.
+#[derive(Debug, Clone)]
+pub struct BoundCall {
+    pub function_name: String,
+    pub args: Vec<kuzu_parser::ast::Expression>,
 }
 
 /// Bound MERGE statement — match or create a node pattern.

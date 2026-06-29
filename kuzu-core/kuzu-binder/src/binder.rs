@@ -78,6 +78,7 @@ impl Binder {
             Statement::AlterTable(a) => self.bind_alter_table(a),
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
+            Statement::Call(c) => self.bind_call(c),
         }
     }
 
@@ -724,6 +725,16 @@ impl Binder {
             properties,
             on_create,
             on_match,
+        }))
+    }
+
+    fn bind_call(&self, c: kuzu_parser::ast::CallStatement) -> Result<BoundStatement, String> {
+        // CALL is a table function invocation — validate the function exists
+        // in the function registry. At binding time we just pass through;
+        // resolution happens at execution time.
+        Ok(BoundStatement::BoundCall(BoundCall {
+            function_name: c.function_name,
+            args: c.args,
         }))
     }
 

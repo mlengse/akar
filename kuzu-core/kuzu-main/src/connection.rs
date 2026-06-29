@@ -425,6 +425,52 @@ impl Connection {
                     ))))
                 }
             }
+            BoundStatement::BoundCall(c) => {
+                tracing::info!("CALL '{}'", c.function_name);
+
+                // Handle catalog-aware functions first
+                let fn_lower = c.function_name.to_lowercase();
+                let result = match fn_lower.as_str() {
+                    "show_tables" | "show tables" | "list_tables" | "list tables" | "tables" => {
+                        // Return list of tables from the catalog
+                        let catalog = self.database.catalog.lock().unwrap();
+                        let names: Vec<String> = catalog.all_entries().map(|e| e.name().to_string()).collect();
+                        Ok(names.into_iter().map(|n| vec![Value::String(n)]).collect())
+                    }
+                    _ => {
+                        // Evaluate AST arguments to Values
+                        let args: Vec<Value> = c.args.iter().map(|expr| eval_ast_expr_to_value(expr)).collect();
+                        let registry = self.database.function_registry.lock().unwrap();
+                        registry.execute_table_function(&c.function_name, &args)
+                    }
+                };
+
+                let result = result?;
+
+                // Convert Vec<Vec<Value>> to a simple text result
+                let mut lines: Vec<String> = result
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|v| match v {
+                                Value::String(s) => s.clone(),
+                                Value::Int64(i) => i.to_string(),
+                                Value::Int32(i) => i.to_string(),
+                                Value::Double(f) => f.to_string(),
+                                Value::Bool(b) => b.to_string(),
+                                Value::Null => "NULL".into(),
+                                other => format!("{other:?}"),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    lines.push("(empty result)".into());
+                }
+                let message = lines.join("\n");
+                Ok(Some(QueryResult::success_message(message)))
+            }
             BoundStatement::BoundQuery(_) => Ok(None),
         }
     }
@@ -499,6 +545,14 @@ fn ast_constant_to_value(c: &kuzu_parser::ast::Constant) -> Value {
         kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
         kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
         kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
+    }
+}
+
+/// Evaluate an AST expression to a Value (for constant expressions).
+fn eval_ast_expr_to_value(expr: &kuzu_parser::ast::Expression) -> Value {
+    match expr {
+        kuzu_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
+        _ => Value::Null,
     }
 }
 
@@ -1179,6 +1233,65 @@ mod merge_tests {
 
         let result = exec_ok(&conn, "MERGE (n:NoSuchTable {name: 'x'})");
         assert!(result.is_err(), "MERGE into non-existent table should fail");
+    }
+}
+
+// =========================================================================
+// CALL Tests
+// =========================================================================
+
+#[cfg(test)]
+mod call_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    #[test]
+    fn test_call_show_tables_empty() {
+        let (_dir, _db, conn) = setup_db();
+        // CALL SHOW_TABLES on empty DB should succeed with empty result
+        let result = exec_ok(&conn, "CALL show_tables()");
+        assert!(result.is_ok(), "CALL show_tables() should succeed: {:?}", result);
+    }
+
+    #[test]
+    fn test_call_show_tables_with_tables() {
+        let (_dir, _db, conn) = setup_db();
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
+
+        let result = exec_ok(&conn, "CALL show_tables()");
+        assert!(result.is_ok(), "CALL show_tables() with tables: {:?}", result);
+        // The result should mention the table names
+        let out = result.unwrap().to_lowercase();
+        assert!(out.contains("person") || out.contains("city"), "Should list tables: {out}");
+    }
+
+    #[test]
+    fn test_call_nonexistent_function() {
+        let (_dir, _db, conn) = setup_db();
+        let result = exec_ok(&conn, "CALL nonexistent_function()");
+        assert!(result.is_err(), "Calling non-existent function should fail");
+    }
+
+    #[test]
+    fn test_call_syntax_no_args() {
+        let (_dir, _db, conn) = setup_db();
+        let result = exec_ok(&conn, "CALL tables()");
+        assert!(result.is_ok(), "CALL tables() should succeed: {:?}", result);
     }
 }
 

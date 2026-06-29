@@ -11,6 +11,7 @@ pub enum Statement {
     AlterTable(AlterTable),
     Union(UnionStatement),
     Merge(MergeStatement),
+    Call(CallStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -222,6 +223,13 @@ pub struct MergeStatement {
     pub pattern: Pattern,
     pub on_create: Vec<SetItem>,
     pub on_match: Vec<SetItem>,
+}
+
+/// CALL statement — invoke a table function or procedure.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallStatement {
+    pub function_name: String,
+    pub args: Vec<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
