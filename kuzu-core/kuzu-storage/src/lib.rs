@@ -101,10 +101,45 @@ impl StorageManager {
         catalog.create_rel_table(name, src_table_id, dst_table_id, columns)
     }
 
+    /// Get the total size of the WAL in bytes.
+    pub fn wal_size(&self) -> usize {
+        self.wal.lock().unwrap().total_size()
+    }
+
     /// Perform a checkpoint: flush WAL + dirty pages to disk.
     pub fn checkpoint(&self) -> std::io::Result<checkpoint::CheckpointResult> {
         let mut wal = self.wal.lock().unwrap();
         checkpoint(&mut wal, &self.buffer_manager)
+    }
+
+    /// Conditionally trigger a checkpoint based on the given threshold.
+    ///
+    /// This is called after every DML/DDL operation from `Connection::query()`.
+    ///
+    /// Semantics:
+    /// - `threshold < 0` (e.g., -1): checkpoint after every write (every DML/DDL).
+    /// - `threshold == 0`: never auto-checkpoint (manual only via `CHECKPOINT`).
+    /// - `threshold > 0`: checkpoint when `wal_size() > threshold` (bytes).
+    ///
+    /// Returns `true` if a checkpoint was triggered.
+    pub fn maybe_checkpoint(&self, threshold: i64) -> std::io::Result<bool> {
+        if threshold == 0 {
+            return Ok(false); // Auto-checkpoint disabled
+        }
+
+        let should_checkpoint = if threshold < 0 {
+            // Always checkpoint after every write (default behavior)
+            true
+        } else {
+            self.wal_size() > threshold as usize
+        };
+
+        if should_checkpoint {
+            self.checkpoint()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Recover state from the WAL after a crash or unclean shutdown.

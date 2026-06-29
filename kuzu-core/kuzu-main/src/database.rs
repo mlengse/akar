@@ -48,6 +48,8 @@ pub struct Database {
     pub(crate) memory_manager: Arc<MemoryManager>,
     pub(crate) extension_registry: Mutex<ExtensionRegistry>,
     pub(crate) stats_store: Arc<Mutex<StatsStore>>,
+    /// Configuration used at database creation time.
+    pub(crate) config: SystemConfig,
 }
 
 impl Database {
@@ -74,6 +76,7 @@ impl Database {
             memory_manager,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
+            config,
         };
 
         // Load built-in extensions

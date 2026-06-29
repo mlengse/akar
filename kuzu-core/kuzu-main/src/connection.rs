@@ -56,6 +56,8 @@ impl Connection {
 
         // 3. Route: DDL vs DML
         if let Some(result) = self.handle_ddl(&bound)? {
+            // DDL may have modified the catalog; checkpoint if needed.
+            self.maybe_auto_checkpoint()?;
             return Ok(result);
         }
 
@@ -79,6 +81,10 @@ impl Connection {
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
+
+        // 7. Auto-checkpoint: if this was a write operation, check WAL size
+        //    and trigger a checkpoint if the threshold is met.
+        self.maybe_auto_checkpoint()?;
 
         Ok(QueryResult::new(chunks))
     }
@@ -144,6 +150,7 @@ impl Connection {
 
         // Handle DDL prepared statements
         if let Some(result) = self.handle_ddl(&prepared.bound_statement)? {
+            self.maybe_auto_checkpoint()?;
             return Ok(result);
         }
 
@@ -171,7 +178,33 @@ impl Connection {
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
 
+        // Auto-checkpoint after DML execution
+        self.maybe_auto_checkpoint()?;
+
         Ok(QueryResult::new(chunks))
+    }
+
+    /// Check whether an auto-checkpoint should be triggered based on the
+    /// database configuration, and if so, run a checkpoint.
+    ///
+    /// The checkpoint_threshold config controls this:
+    /// - -1 (default): checkpoint after every write (every DML/DDL).
+    /// - 0: never auto-checkpoint (manual only via `CHECKPOINT`).
+    /// - N > 0: checkpoint when WAL total_size exceeds N bytes.
+    fn maybe_auto_checkpoint(&self) -> Result<(), String> {
+        let threshold = self.database.config.checkpoint_threshold;
+        match self.database.storage_manager.maybe_checkpoint(threshold) {
+            Ok(true) => {
+                tracing::debug!("Auto-checkpoint triggered (threshold={})", threshold);
+                Ok(())
+            }
+            Ok(false) => Ok(()),
+            Err(e) => {
+                tracing::warn!("Auto-checkpoint failed: {e}");
+                // Don't fail the query — checkpoint is an optimization/durability concern
+                Ok(())
+            }
+        }
     }
 
     /// Handle DDL statements by checking the bound statement type.
@@ -832,5 +865,112 @@ mod integration_tests {
             .query("MATCH (n:T) OPTIONAL MATCH (m:T {id: 999}) RETURN n.id, m.id ORDER BY n.id")
             .unwrap();
         assert_eq!(result.num_rows(), 2, "Expected 2 rows from left side");
+    }
+
+    // ==================== Auto-Checkpoint Tests ====================
+
+    /// Create a Database with a specific checkpoint_threshold.
+    fn setup_db_with_checkpoint(threshold: i64) -> (Arc<Database>, Connection, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig {
+            checkpoint_threshold: threshold,
+            ..SystemConfig::default()
+        };
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (database, conn, dir)
+    }
+
+    #[test]
+    fn test_auto_checkpoint_default_triggers_after_write() {
+        // With default threshold (-1), checkpoint happens after every write.
+        // DDL (CREATE TABLE) + auto-checkpoint: after checkpoint, WAL has the
+        // Checkpoint marker (1 record).
+        let (db, conn, _dir) = setup_db_with_checkpoint(-1);
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        // DDL triggered auto-checkpoint (threshold=-1).
+        // After checkpoint, WAL has exactly 1 record (Checkpoint marker).
+        {
+            let wal = db.storage_manager.wal().lock().unwrap();
+            assert_eq!(wal.len(), 1, "WAL should have Checkpoint marker after DDL+checkpoint");
+            assert!(matches!(wal.records()[0], kuzu_storage::wal::WALRecord::Checkpoint));
+        }
+
+        // Insert data via COPY — after execution, auto-checkpoint runs again.
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n1\n2\n3\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // After DML + auto-checkpoint, WAL has only the Checkpoint marker again.
+        {
+            let wal = db.storage_manager.wal().lock().unwrap();
+            assert_eq!(wal.len(), 1, "WAL should have only Checkpoint marker after DML");
+            assert!(matches!(wal.records()[0], kuzu_storage::wal::WALRecord::Checkpoint));
+        }
+
+        // Verify data is still there
+        let vals = query_column(&conn, "MATCH (n:T) RETURN n.id");
+        assert_eq!(vals.len(), 3, "Data should survive checkpoint");
+    }
+
+    #[test]
+    fn test_auto_checkpoint_disabled_no_checkpoint() {
+        // With threshold = 0, auto-checkpoint is disabled.
+        let (db, conn, _dir) = setup_db_with_checkpoint(0);
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        // We should be able to verify that auto-checkpoint didn't run
+        // by checking that after multiple DDLs, everything still works.
+        exec_ok(&conn, "CREATE NODE TABLE U(val INT64, PRIMARY KEY (val))").unwrap();
+
+        // Insert data via COPY
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n10\n20\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // With checkpoint disabled, WAL should not have the Checkpoint marker
+        // that auto-checkpoint would add.
+        {
+            let wal = db.storage_manager.wal().lock().unwrap();
+            // WAL is empty because the query pipeline doesn't log individual
+            // INSERT operations to the WAL. The WAL is for low-level page writes.
+            // Auto-checkpoint being disabled just means we DON'T force a checkpoint.
+            assert_eq!(wal.len(), 0, "WAL should be empty (no page-level writes)");
+        }
+
+        // Verify data is present
+        let vals = query_column(&conn, "MATCH (n:T) RETURN n.id");
+        assert_eq!(vals.len(), 2, "Data should be present even without checkpoint");
+    }
+
+    #[test]
+    fn test_auto_checkpoint_threshold_respected() {
+        // With a high threshold (1MB), the checkpoint doesn't trigger for small writes.
+        let (db, conn, _dir) = setup_db_with_checkpoint(1_000_000);
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n100\n200\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // With high threshold, auto-checkpoint runs but since WAL is empty
+        // (no page-level writes), it doesn't do anything visible.
+        // The key verifications: checkpoint returns Ok, data is correct.
+        let vals = query_column(&conn, "MATCH (n:T) RETURN n.id");
+        assert_eq!(vals.len(), 2, "Data should be present");
+
+        // Verify the WAL state is stable (no unexpected markers)
+        {
+            let wal = db.storage_manager.wal().lock().unwrap();
+            assert_eq!(wal.len(), 0, "High threshold + no WAL writes = empty WAL");
+        }
     }
 }
