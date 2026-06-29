@@ -1469,10 +1469,29 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
             .clone()
             .ok_or_else(|| "No table catalog available for VectorSimilarityScan".to_string())?;
 
-        // Resolve the vector index
-        let vi = tc
-            .get_vector_index_by_name(&self.index_name)
-            .ok_or_else(|| format!("Vector index '{}' not found", self.index_name))?;
+        // Resolve the vector index — by name if given, or find first index on the table
+        let vi = if self.index_name.is_empty() {
+            // Find the first vector index on this table
+            // Scan all vector indexes to find one matching this table
+            let index_name = {
+                let mut found_name = String::new();
+                for entry in tc.all_vector_indexes() {
+                    if entry.table_name == self.table_name {
+                        found_name = entry.name.clone();
+                        break;
+                    }
+                }
+                if found_name.is_empty() {
+                    return Err(format!("No vector index found on table '{}'", self.table_name));
+                }
+                found_name
+            };
+            tc.get_vector_index_by_name(&index_name)
+                .ok_or_else(|| format!("Vector index '{}' not found", index_name))?
+        } else {
+            tc.get_vector_index_by_name(&self.index_name)
+                .ok_or_else(|| format!("Vector index '{}' not found", self.index_name))?
+        };
 
         // Search the HNSW index for top-K nearest neighbours
         let results = vi.hnsw().search(&self.query_vector, self.top_k as usize);

@@ -686,7 +686,33 @@ impl Connection {
                     }
                 }
 
+                let row_id = table.num_rows as usize;
                 table.insert_row(values)?;
+
+                // Auto-populate vector indexes on this table
+                let vec_indexes_on_table: Vec<(String, String)> = catalog
+                    .all_vector_indexes()
+                    .iter()
+                    .filter(|entry| entry.table_name == c.table_name)
+                    .map(|entry| (entry.name.clone(), entry.column_name.clone()))
+                    .collect();
+
+                for (index_name, col_name) in &vec_indexes_on_table {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name) {
+                        if let Some(val) = table.get_value(row_id, col_idx) {
+                            if let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val) {
+                                if let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name) {
+                                    vi.hnsw_mut().insert(vec, row_id);
+                                    tracing::debug!(
+                                        "Auto-populated vector index '{}' with row {}",
+                                        index_name, row_id
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Ok(Some(QueryResult::success_message(format!(
                     "Created node in '{}'", c.table_name
                 ))))
