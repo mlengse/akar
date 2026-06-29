@@ -9,31 +9,13 @@ categories = ["database"]
 rust-version = "1.81"
 edition = "2021"
 
-[features]
-default = ["native"]
-native = ["kuzu-main", "kuzu-common"]
-
 [dependencies]
-kuzu-main = { path = "../../kuzu-core/kuzu-main", optional = true }
-kuzu-common = { path = "../../kuzu-core/kuzu-common", optional = true }
-
-# Legacy C++ FFI dependencies (used when native feature is disabled)
-arrow = { version = "55", optional = true, default-features = false, features = ["ffi"] }
-cxx = { version = "=1.0.138", optional = true }
-rust_decimal = { version = "1.37", default-features = false, optional = true }
-time = { version = "0.3", optional = true }
-uuid = { version = "1.6", optional = true }
-
-[build-dependencies]
-cmake = { version = "0.1", optional = true }
-cxx-build = { version = "=1.0.138", optional = true }
-rustversion = { version = "1", optional = true }
+kuzu-main = { path = "../../kuzu-core/kuzu-main" }
+kuzu-common = { path = "../../kuzu-core/kuzu-common" }
 
 [dev-dependencies]
 anyhow = "1"
-rust_decimal_macros = "1.37"
 tempfile = "3"
-time = { version = "0.3", features = ["macros"] }
 
 [package.metadata.docs.rs]
 all-features = true

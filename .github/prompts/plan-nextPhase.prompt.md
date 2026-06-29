@@ -2,9 +2,11 @@
 
 ## TL;DR
 
-**Kondisi saat ini (2026-06-29):** ~28 crate Rust, ~200+ tests, 9 optimizer passes, full storage engine (BufferManager, WAL, Checkpoint, Column, Compression, NodeGroup), 11 extension crates real, full query pipeline (parse→bind→plan→optimize→execute) sudah membaca data storage sungguhan, PreparedStatement, Transaction MVCC, CLI REPL.
+**Kondisi saat ini (2026-06-29):** ~28 crate Rust, ~600+ tests, 9 optimizer passes, full storage engine (BufferManager, WAL, Checkpoint, Column, Compression, NodeGroup), 11 extension crates real, full query pipeline (parse→bind→plan→optimize→execute) sudah membaca data storage sungguhan, PreparedStatement, Transaction MVCC, CLI REPL.
 
-**Yang masih kurang:** ~~On-disk HashIndex~~ ✅ (A1), ~~WAL recovery on startup~~ ✅ (A2), ~~Auto-checkpoint wiring~~ ✅ (A3), ~~ShadowFile+LocalStorage→Commit~~ ✅ (A4), ~~HNSW Vector Index~~ ✅ (A5), ~~MERGE~~ ✅ (B1), ~~CALL~~ ✅ (B2), CLI polish (history, auto-complete, multi-line), DML CREATE, FOREACH, var-length path, subquery, Benchmarks, tools/rust_api, CI/CD, C++ cleanup.
+**Yang sudah selesai:** ✅ On-disk HashIndex (A1), ✅ WAL recovery on startup (A2), ✅ Auto-checkpoint wiring (A3), ✅ ShadowFile+LocalStorage→Commit (A4), ✅ HNSW Vector Index (A5), ✅ MERGE (B1), ✅ CALL (B2), ✅ DML CREATE (B3), ✅ FOREACH & Variable-length Path (B4), ✅ Subquery Support (B5), ✅ CLI Enhancement (C1), ✅ tools/rust_api Integration (C2)
+
+**Yang masih kurang:** D1 (GitHub Actions CI), D2 (Release Workflow), D3 (Benchmark Infrastructure), D4 (C++ Cleanup).
 
 **Pendekatan:** 4 fase paralel + 1 fase final, masing-masing independen kecuali dinyatakan.
 
@@ -185,15 +187,16 @@ B4, B5 independent from B1-B3, but higher complexity
 - **Dependencies:** `rustyline = "12"`, `dirs`, `kuzu-catalog` added
 - **Catatan**: rustyline 14/13 membutuhkan rustc 1.88+, jadi versi 12 digunakan + home@0.5.11 pinned
 
-### C2. tools/rust_api Integration (`tools/rust_api/`)
-- **Saat ini:** tools/rust_api adalah C++ FFI wrapper — memanggil C++ kuzu melalui build.rs yang compile C++.
-- **Rencana:** Bikin thin wrapper yang panggil `kuzu-main` Rust crate langsung:
-  1. Buat `tools/rust_api/Cargo.toml` baru dengan path dependency ke `kuzu-main`
-  2. Rewrite `tools/rust_api/src/lib.rs` — `Database`, `Connection`, `QueryResult` re-export dari `kuzu-main`
-  3. Maintain backward compat API (function signatures yang sama)
-  4. Hapus C++ FFI deps (`cxx`, `cmake`, C++ headers)
-  5. Update `build.rs` — hapus cmake build, jadi pure Rust
-- **Files:** `tools/rust_api/build.rs`, `tools/rust_api/Cargo.toml`, `tools/rust_api/src/`
+### C2. tools/rust_api Integration (`tools/rust_api/`) ✅
+- **Saat ini:** Pure Rust via `kuzu-main`. C++ FFI (cxx, cmake, C++ headers) dihapus.
+- **Implemented:**
+  1. `Cargo.toml` — required `kuzu-main` + `kuzu-common`, semua optional FFI deps dihapus, tidak ada features
+  2. `build.rs` — pure Rust, hanya `println!("cargo:rustc-cfg=native")`
+  3. `src/lib.rs` — selalu `mod native`, tidak ada dispatch ke FFI
+  4. `src/native.rs` — backward compat API: `Database`, `Connection` (Result-based), `Error` type, `Value`, `InternalID`, `LogicalTypeID`, `VERSION`, `get_storage_version()`
+  5. File legacy dihapus: `include/`, `src/ffi-legacy/`, `src/lib_ffi.rs`, `kuzu-src`, `update_version.py`
+- **Verifikasi:** `cargo build` sukses (kuzu + kuzu-rust-example), `cargo test --workspace` — all 600+ tests pass, 0 failures
+- **Catatan:** `Error` type wrapper (`Error(pub String)`) untuk backward compat dengan `Result<_, Error>` signature. `Connection::new(&Database)` returns `Result<Self, Error>`. `Database::new(path, config)` returns `Result<Self, Error>`.
 
 ### Dependencies dalam Fase C
 C1 parallel dengan C2 (independent)
