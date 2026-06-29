@@ -376,9 +376,8 @@ impl Connection {
             BoundStatement::BoundCreateDml(c) => {
                 tracing::info!("CREATE DML into '{}'", c.table_name);
 
-                let cat_arc = self.database.storage_manager.table_catalog();
-                let mut catalog = cat_arc.lock().unwrap();
-                let table = catalog
+                let catalog = self.database.storage_manager.table_catalog();
+                let mut table = catalog
                     .get_node_table_by_name_mut(&c.table_name)
                     .ok_or_else(|| format!("Table '{}' not found in storage", c.table_name))?;
 
@@ -392,14 +391,7 @@ impl Connection {
                     }
                 }
 
-                // Drop catalog lock before insert_row (which takes its own lock)
-                let _ = table;
-                drop(catalog);
-                let cat2 = self.database.storage_manager.table_catalog();
-                let mut cat2 = cat2.lock().unwrap();
-                if let Some(t) = cat2.get_node_table_by_name_mut(&c.table_name) {
-                    t.insert_row(values)?;
-                }
+                table.insert_row(values)?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Created node in '{}'", c.table_name
                 ))))
@@ -407,10 +399,9 @@ impl Connection {
             BoundStatement::BoundMerge(m) => {
                 tracing::info!("MERGE into '{}'", m.table_name);
 
-                // Get the table
-                let cat_arc = self.database.storage_manager.table_catalog();
-                let mut catalog = cat_arc.lock().unwrap();
-                let table = catalog
+                // Get the table — DashMap handles locking internally
+                let catalog = self.database.storage_manager.table_catalog();
+                let mut table = catalog
                     .get_node_table_by_name_mut(&m.table_name)
                     .ok_or_else(|| format!("Table '{}' not found in storage", m.table_name))?;
 
@@ -465,14 +456,7 @@ impl Connection {
                             }
                         }
                     }
-                    // Drop catalog lock before insert_row (which takes its own lock)
-                    let _ = table;
-                    drop(catalog);
-                    let cat2 = self.database.storage_manager.table_catalog();
-                    let mut cat2 = cat2.lock().unwrap();
-                    if let Some(t) = cat2.get_node_table_by_name_mut(&m.table_name) {
-                        t.insert_row(values)?;
-                    }
+                    table.insert_row(values)?;
                     Ok(Some(QueryResult::success_message(format!(
                         "Created new node in '{}'", m.table_name
                     ))))
@@ -1958,8 +1942,7 @@ mod fase_a_verification {
 
         // Create a table
         {
-            let cat_arc = db.storage_manager.table_catalog();
-            let mut catalog = cat_arc.lock().unwrap();
+            let catalog = db.storage_manager.table_catalog();
             catalog.create_node_table(
                 "T".into(),
                 vec![
@@ -1998,9 +1981,8 @@ mod fase_a_verification {
         // Verify LocalStorage cleared and table unchanged
         assert!(local_storage.is_empty(), "LocalStorage should be empty after rollback");
         {
-            let cat_arc = db.storage_manager.table_catalog();
-            let cat = cat_arc.lock().unwrap();
-            let table = cat.get_node_table(table_id).unwrap();
+            let catalog = db.storage_manager.table_catalog();
+            let table = catalog.get_node_table(table_id).unwrap();
             assert_eq!(table.num_rows, 0, "Table should have 0 rows after rollback");
         }
     }

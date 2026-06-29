@@ -415,9 +415,8 @@ fn test_physical_scan_reads_real_data() {
 
     // Insert real data directly into the storage layer
     {
-        let tc = db.table_catalog();
-        let mut catalog = tc.lock().unwrap();
-        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        let catalog = db.table_catalog();
+        let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
         table
             .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
             .unwrap();
@@ -456,9 +455,8 @@ fn test_physical_scan_with_where_on_real_data() {
 
     // Insert data
     {
-        let tc = db.table_catalog();
-        let mut catalog = tc.lock().unwrap();
-        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        let catalog = db.table_catalog();
+        let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
         table
             .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
             .unwrap();
@@ -488,9 +486,8 @@ fn test_scan_multiple_columns() {
 
     // Insert data
     {
-        let tc = db.table_catalog();
-        let mut catalog = tc.lock().unwrap();
-        let table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        let catalog = db.table_catalog();
+        let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
         table
             .insert_row(vec![
                 Value::String("Alice".into()),

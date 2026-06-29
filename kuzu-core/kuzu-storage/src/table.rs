@@ -2,6 +2,7 @@
 
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
+use dashmap::DashMap;
 use kuzu_common::types::{LogicalTypeID, Value};
 use std::collections::HashMap;
 
@@ -438,15 +439,20 @@ impl RelTable {
 }
 
 /// A collection of tables managed by the storage engine.
+///
+/// Uses `DashMap` internally for lock-free concurrent reads.
+/// Write operations synchronize on individual entries rather than
+/// the entire catalog, allowing concurrent writers to different
+/// tables to proceed in parallel.
 #[derive(Debug, Default)]
 pub struct TableCatalog {
-    node_tables: HashMap<u64, NodeTable>,
-    rel_tables: HashMap<u64, RelTable>,
-    /// Map from table name to table ID for node tables
-    node_name_to_id: HashMap<String, u64>,
-    /// Map from table name to table ID for rel tables
-    rel_name_to_id: HashMap<String, u64>,
-    next_table_id: u64,
+    node_tables: DashMap<u64, NodeTable>,
+    rel_tables: DashMap<u64, RelTable>,
+    /// Map from table name to table ID for node tables.
+    node_name_to_id: DashMap<String, u64>,
+    /// Map from table name to table ID for rel tables.
+    rel_name_to_id: DashMap<String, u64>,
+    next_table_id: std::sync::atomic::AtomicU64,
 }
 
 impl TableCatalog {
@@ -454,9 +460,8 @@ impl TableCatalog {
         Self::default()
     }
 
-    pub fn create_node_table(&mut self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
-        let table_id = self.next_table_id;
-        self.next_table_id += 1;
+    pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
+        let table_id = self.next_table_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let table = NodeTable::new(table_id, name.clone(), columns);
         self.node_name_to_id.insert(name, table_id);
         self.node_tables.insert(table_id, table.clone());
@@ -464,65 +469,96 @@ impl TableCatalog {
     }
 
     pub fn create_rel_table(
-        &mut self,
+        &self,
         name: String,
         src_table_id: u64,
         dst_table_id: u64,
         columns: Vec<ColumnDefinition>,
     ) -> RelTable {
-        let table_id = self.next_table_id;
-        self.next_table_id += 1;
+        let table_id = self.next_table_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let table = RelTable::new(table_id, name.clone(), src_table_id, dst_table_id, columns);
         self.rel_name_to_id.insert(name, table_id);
         self.rel_tables.insert(table_id, table.clone());
         table
     }
 
-    pub fn get_node_table(&self, table_id: u64) -> Option<&NodeTable> {
+    pub fn get_node_table(&self, table_id: u64) -> Option<dashmap::mapref::one::Ref<'_, u64, NodeTable>> {
         self.node_tables.get(&table_id)
     }
 
-    pub fn get_node_table_mut(&mut self, table_id: u64) -> Option<&mut NodeTable> {
+    pub fn get_node_table_mut(&self, table_id: u64) -> Option<dashmap::mapref::one::RefMut<'_, u64, NodeTable>> {
         self.node_tables.get_mut(&table_id)
     }
 
-    pub fn get_node_table_by_name(&self, name: &str) -> Option<&NodeTable> {
-        self.node_name_to_id.get(name).and_then(|id| self.node_tables.get(id))
+    pub fn get_node_table_by_name(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, u64, NodeTable>> {
+        let id = self.node_name_to_id.get(name)?;
+        self.node_tables.get(&*id)
     }
 
-    pub fn get_node_table_by_name_mut(&mut self, name: &str) -> Option<&mut NodeTable> {
-        let id = self.node_name_to_id.get(name).copied()?;
-        self.node_tables.get_mut(&id)
+    pub fn get_node_table_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, NodeTable>> {
+        let id = self.node_name_to_id.get(name)?;
+        self.node_tables.get_mut(&*id)
     }
 
-    pub fn get_rel_table(&self, table_id: u64) -> Option<&RelTable> {
+    pub fn get_rel_table(&self, table_id: u64) -> Option<dashmap::mapref::one::Ref<'_, u64, RelTable>> {
         self.rel_tables.get(&table_id)
     }
 
-    pub fn get_rel_table_mut(&mut self, table_id: u64) -> Option<&mut RelTable> {
+    pub fn get_rel_table_mut(&self, table_id: u64) -> Option<dashmap::mapref::one::RefMut<'_, u64, RelTable>> {
         self.rel_tables.get_mut(&table_id)
     }
 
-    pub fn get_rel_table_by_name(&self, name: &str) -> Option<&RelTable> {
-        self.rel_name_to_id.get(name).and_then(|id| self.rel_tables.get(id))
+    pub fn get_rel_table_by_name(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, u64, RelTable>> {
+        let id = self.rel_name_to_id.get(name)?;
+        self.rel_tables.get(&*id)
     }
 
-    pub fn get_rel_table_by_name_mut(&mut self, name: &str) -> Option<&mut RelTable> {
-        let id = self.rel_name_to_id.get(name).copied()?;
-        self.rel_tables.get_mut(&id)
+    pub fn get_rel_table_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, RelTable>> {
+        let id = self.rel_name_to_id.get(name)?;
+        self.rel_tables.get_mut(&*id)
     }
 
-    pub fn all_node_tables(&self) -> impl Iterator<Item = &NodeTable> {
-        self.node_tables.values()
+    pub fn all_node_tables(
+        &self,
+    ) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, NodeTable>> {
+        self.node_tables.iter().collect()
     }
 
-    pub fn all_rel_tables(&self) -> impl Iterator<Item = &RelTable> {
-        self.rel_tables.values()
+    pub fn all_rel_tables(
+        &self,
+    ) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, RelTable>> {
+        self.rel_tables.iter().collect()
     }
 
     /// Get the number of rows in a node table by name.
     pub fn node_table_num_rows(&self, name: &str) -> u64 {
-        self.get_node_table_by_name(name).map(|t| t.num_rows).unwrap_or(0)
+        self.get_node_table_by_name(name)
+            .map(|t| t.num_rows)
+            .unwrap_or(0)
+    }
+
+    /// Remove a node table by name. Returns true if the table existed.
+    pub fn drop_node_table(&self, name: &str) -> bool {
+        if let Some(id) = self.node_name_to_id.get(name) {
+            let table_id = *id;
+            drop(id);
+            self.node_name_to_id.remove(name);
+            self.node_tables.remove(&table_id).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Remove a rel table by name. Returns true if the table existed.
+    pub fn drop_rel_table(&self, name: &str) -> bool {
+        if let Some(id) = self.rel_name_to_id.get(name) {
+            let table_id = *id;
+            drop(id);
+            self.rel_name_to_id.remove(name);
+            self.rel_tables.remove(&table_id).is_some()
+        } else {
+            false
+        }
     }
 }
 
@@ -838,7 +874,7 @@ mod tests {
 
     #[test]
     fn test_catalog_create_and_lookup() {
-        let mut cat = TableCatalog::new();
+        let cat = TableCatalog::new();
         let node_table = cat.create_node_table(
             "Person".into(),
             vec![ColumnDefinition {

@@ -10,6 +10,7 @@ pub mod compression;
 pub mod csv_reader;
 pub mod index;
 pub mod local_storage;
+pub mod local_wal;
 pub mod node_group;
 pub mod page;
 pub mod parquet_reader;
@@ -29,6 +30,7 @@ use wal::WAL;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
 pub use local_storage::LocalStorage;
+pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
 pub use shadow_file::ShadowFile;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
@@ -40,8 +42,8 @@ pub struct StorageManager {
     buffer_manager: Arc<Mutex<BufferManager>>,
     wal: Arc<Mutex<WAL>>,
     memory_manager: Arc<MemoryManager>,
-    /// In-memory table catalog holding actual data for all tables.
-    pub(crate) table_catalog: Arc<Mutex<TableCatalog>>,
+    /// Lock-free table catalog using DashMap internally.
+    pub(crate) table_catalog: Arc<TableCatalog>,
 }
 
 impl StorageManager {
@@ -58,7 +60,7 @@ impl StorageManager {
             buffer_manager: Arc::new(Mutex::new(bm)),
             wal: Arc::new(Mutex::new(wal)),
             memory_manager,
-            table_catalog: Arc::new(Mutex::new(TableCatalog::new())),
+            table_catalog: Arc::new(TableCatalog::new()),
         }
     }
 
@@ -75,7 +77,7 @@ impl StorageManager {
     }
 
     /// Get a reference to the table catalog for reading/writing table data.
-    pub fn table_catalog(&self) -> Arc<Mutex<TableCatalog>> {
+    pub fn table_catalog(&self) -> Arc<TableCatalog> {
         self.table_catalog.clone()
     }
 
@@ -87,8 +89,7 @@ impl StorageManager {
 
     /// Create a node table in the catalog and return its ID.
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
-        let mut catalog = self.table_catalog.lock().unwrap();
-        catalog.create_node_table(name, columns)
+        self.table_catalog.create_node_table(name, columns)
     }
 
     /// Create a rel table in the catalog.
@@ -99,8 +100,8 @@ impl StorageManager {
         dst_table_id: u64,
         columns: Vec<ColumnDefinition>,
     ) -> RelTable {
-        let mut catalog = self.table_catalog.lock().unwrap();
-        catalog.create_rel_table(name, src_table_id, dst_table_id, columns)
+        self.table_catalog
+            .create_rel_table(name, src_table_id, dst_table_id, columns)
     }
 
     /// Get the total size of the WAL in bytes.
@@ -247,13 +248,13 @@ impl StorageManager {
         // Replay each record
         wal.replay(|record| {
             use crate::wal::WALRecord;
-            let mut cat = catalog.lock().unwrap();
+            let cat = catalog.clone();
 
             match record {
                 WALRecord::Insert { table_id, data } => {
                     // Deserialize the data as Value vec and insert into the
                     // corresponding node table.
-                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, table.columns.len());
                         if let Err(e) = table.insert_row(values) {
                             return Err(std::io::Error::new(
@@ -264,7 +265,7 @@ impl StorageManager {
                     }
                 }
                 WALRecord::Delete { table_id, row_id } => {
-                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         if let Err(e) = table.delete_row(*row_id) {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::Other,
@@ -279,7 +280,7 @@ impl StorageManager {
                     column,
                     data,
                 } => {
-                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, 1);
                         if let Some(val) = values.into_iter().next() {
                             if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
@@ -308,6 +309,14 @@ impl StorageManager {
                     // durable. We can clear what we've processed so far.
                     // In practice, a checkpoint clears the WAL so this
                     // marker should rarely appear during recovery.
+                }
+                WALRecord::LocalWALData { .. } => {
+                    // LocalWALData is a bulk-copied buffer from a committed
+                    // transaction's LocalWAL. The individual records within
+                    // have already been applied during normal commit flow.
+                    // At recovery time, the raw data is opaque — we skip it
+                    // since the table-level records (Insert/Delete/Update)
+                    // are replayed independently from the same transaction.
                 }
             }
             Ok(())
@@ -890,10 +899,9 @@ mod integration_tests {
             // Put the table back into the catalog so WAL knows about it.
             // We re-create the table entry via the catalog API.
             {
-                let mut cat = sm.table_catalog.lock().unwrap();
                 // Re-create the table entry with the same schema so the
                 // catalog has a valid entry for recovery to target.
-                cat.create_node_table(
+                sm.table_catalog.create_node_table(
                     "Person".into(),
                     vec![
                         ColumnDefinition {
@@ -978,8 +986,7 @@ mod integration_tests {
             // Verify data survived — the table was re-created empty,
             // and recovery inserted exactly 3 rows from the WAL.
             {
-                let cat = sm.table_catalog.lock().unwrap();
-                let recovered_table = cat.get_node_table_by_name("Person").unwrap();
+                let recovered_table = sm.table_catalog.get_node_table_by_name("Person").unwrap();
                 assert_eq!(recovered_table.num_rows, 3, "Should have recovered 3 rows");
                 assert_eq!(recovered_table.get_value(0, 0), Some(&Value::String("Alice".into())));
                 assert_eq!(recovered_table.get_value(1, 0), Some(&Value::String("Bob".into())));
@@ -1121,8 +1128,7 @@ mod integration_tests {
         // Create table via catalog directly so we know the table_id
         let table_id;
         {
-            let mut cat = sm.table_catalog.lock().unwrap();
-            let table = cat.create_node_table(
+            let table = sm.table_catalog.create_node_table(
                 "Person".into(),
                 vec![
                     ColumnDefinition {
@@ -1167,8 +1173,7 @@ mod integration_tests {
 
         // Verify data was flushed to the table
         {
-            let cat = sm.table_catalog.lock().unwrap();
-            let t = cat.get_node_table_by_name("Person").unwrap();
+            let t = sm.table_catalog.get_node_table_by_name("Person").unwrap();
             assert_eq!(t.num_rows, 1, "Should have 1 row after commit");
             assert_eq!(t.get_value(0, 0), Some(&Value::String("Alice".into())));
             assert_eq!(t.get_value(0, 1), Some(&Value::Int64(30)));
@@ -1254,8 +1259,7 @@ mod integration_tests {
 
         // Verify both rows
         {
-            let cat = sm.table_catalog.lock().unwrap();
-            let t = cat.get_node_table_by_name("Item").unwrap();
+            let t = sm.table_catalog.get_node_table_by_name("Item").unwrap();
             assert_eq!(t.num_rows, 2, "Should have 2 rows after commit");
         }
     }

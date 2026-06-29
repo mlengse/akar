@@ -1157,7 +1157,7 @@ pub struct PhysicalSet {
     pub column_name: String,
     pub column_idx: usize,
     pub value: kuzu_parser::ast::Expression,
-    pub table_catalog: Arc<Mutex<TableCatalog>>,
+    pub table_catalog: Arc<TableCatalog>,
 }
 
 impl PhysicalOperatorExec for PhysicalSet {
@@ -1189,15 +1189,16 @@ impl PhysicalOperatorExec for PhysicalSet {
         }
 
         // Apply updates to the table
-        let mut catalog = self.table_catalog.lock().unwrap();
-        let updated = if let Some(table) = catalog.get_node_table_by_name_mut(&self.table_name) {
-            let mut count = 0u64;
-            for (row_idx, val) in &rows_to_update {
-                if table.update_cell(*row_idx, self.column_idx, val.clone()).is_ok() {
-                    count += 1;
+        let updated =
+            if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name)
+            {
+                let mut count = 0u64;
+                for (row_idx, val) in &rows_to_update {
+                    if table.update_cell(*row_idx, self.column_idx, val.clone()).is_ok() {
+                        count += 1;
+                    }
                 }
-            }
-            count
+                count
         } else {
             return Err(format!("Table '{}' not found for SET", self.table_name));
         };
@@ -1245,7 +1246,7 @@ pub struct PhysicalDelete {
     pub primary_key_column: String,
     /// Row indices to delete (found by the scan/filter pipeline).
     pub row_indices: Vec<u64>,
-    pub table_catalog: Arc<Mutex<TableCatalog>>,
+    pub table_catalog: Arc<TableCatalog>,
 }
 
 impl PhysicalOperatorExec for PhysicalDelete {
@@ -1277,8 +1278,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
         }
 
         // Delete rows from the table
-        let mut catalog = self.table_catalog.lock().unwrap();
-        let deleted = if let Some(table) = catalog.get_node_table_by_name_mut(&self.table_name) {
+        let deleted = if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
             let mut count = 0u64;
             for &row_idx in &rows_to_delete {
                 if table.delete_row(row_idx).is_ok() {
@@ -1376,7 +1376,7 @@ pub struct PhysicalForeach {
     pub expression: Expression,
     pub sub_plans: Vec<Vec<kuzu_planner::logical_operator::LogicalOperator>>,
     pub function_registry: Option<Arc<Mutex<kuzu_function::registry::FunctionRegistry>>>,
-    pub table_catalog: Option<Arc<Mutex<TableCatalog>>>,
+    pub table_catalog: Option<Arc<TableCatalog>>,
 }
 
 impl PhysicalOperatorExec for PhysicalForeach {
@@ -1454,7 +1454,7 @@ pub struct PhysicalCopyFrom {
     pub file_path: String,
     pub columns: Vec<ColumnDefinition>,
     pub options: std::collections::HashMap<String, String>,
-    pub table_catalog: Arc<Mutex<TableCatalog>>,
+    pub table_catalog: Arc<TableCatalog>,
 }
 
 impl PhysicalOperatorExec for PhysicalCopyFrom {
@@ -1505,10 +1505,9 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
         };
 
         // 4. Insert rows into the table
-        let mut catalog = self.table_catalog.lock().unwrap();
         let num_rows = rows.len();
 
-        if let Some(table) = catalog.get_node_table_by_name_mut(&self.table_name) {
+        if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
             for row in &rows {
                 table
                     .insert_row(row.clone())
@@ -1518,7 +1517,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 "COPY FROM: inserted {num_rows} rows into node table '{}'",
                 self.table_name
             );
-        } else if let Some(table) = catalog.get_rel_table_by_name_mut(&self.table_name) {
+        } else if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
             for row in &rows {
                 if row.len() < 2 {
                     return Err("RelTable COPY FROM needs at least FROM and TO columns".into());

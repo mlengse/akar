@@ -31,6 +31,11 @@ pub enum WALRecord {
         page_id: u64,
         data: Vec<u8>,
     },
+    /// Bulk-copied serialized WAL data from a transaction's LocalWAL.
+    /// The raw bytes are flushed directly to disk during checkpoint.
+    LocalWALData {
+        data: Vec<u8>,
+    },
     Commit {
         transaction_id: u64,
     },
@@ -67,6 +72,7 @@ impl WAL {
             WALRecord::Insert { data, .. } => data.len(),
             WALRecord::Update { data, .. } => data.len(),
             WALRecord::ColumnWrite { data, .. } => data.len(),
+            WALRecord::LocalWALData { data } => data.len(),
             _ => 8,
         };
         self.total_size += size;
@@ -81,6 +87,25 @@ impl WAL {
             col_id,
             page_id,
             data: data.to_vec(),
+        });
+    }
+
+    /// Bulk-copy a `LocalWAL`'s serialized buffer into this global WAL.
+    ///
+    /// Called during commit path: the transaction's `LocalWAL` has already
+    /// been serialized to a byte buffer; this method appends the raw bytes
+    /// directly to the in-memory record list.
+    ///
+    /// The caller (`StorageManager::commit_transaction()`) is responsible
+    /// for holding the `Arc<Mutex<WAL>>` lock to serialize concurrent calls.
+    pub fn write_raw_buffer(&mut self, local_wal_buffer: &[u8]) {
+        if local_wal_buffer.is_empty() {
+            return;
+        }
+        self.total_size += local_wal_buffer.len();
+        self.is_dirty = true;
+        self.records.push(WALRecord::LocalWALData {
+            data: local_wal_buffer.to_vec(),
         });
     }
 
@@ -156,6 +181,11 @@ impl WAL {
                     table_id.serialize(&mut file)?;
                     col_id.serialize(&mut file)?;
                     page_id.serialize(&mut file)?;
+                    (data.len() as u32).serialize(&mut file)?;
+                    file.write_all(data)?;
+                }
+                WALRecord::LocalWALData { data } => {
+                    file.write_all(b"L")?;
                     (data.len() as u32).serialize(&mut file)?;
                     file.write_all(data)?;
                 }
@@ -268,6 +298,12 @@ impl WAL {
                 b'R' => {
                     let transaction_id = u64::deserialize(&mut cursor)?;
                     self.records.push(WALRecord::Rollback { transaction_id });
+                }
+                b'L' => {
+                    let data_len = u32::deserialize(&mut cursor)? as usize;
+                    let mut data = vec![0u8; data_len];
+                    cursor.read_exact(&mut data)?;
+                    self.records.push(WALRecord::LocalWALData { data });
                 }
                 b'K' => {
                     self.records.push(WALRecord::Checkpoint);

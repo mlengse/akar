@@ -7,7 +7,7 @@
 
 use crate::table::{NodeTable, RelTable, TableCatalog};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// A local table insert/update buffer for an in-progress transaction.
 ///
@@ -130,17 +130,16 @@ impl LocalStorage {
     ///
     /// Called on commit. After a successful flush, the transaction's writes
     /// are visible to subsequent transactions.
-    pub fn flush_to_tables(&self, catalog: &Arc<Mutex<TableCatalog>>) -> Result<(), String> {
-        let mut cat = catalog.lock().unwrap();
+    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>) -> Result<(), String> {
         for (&table_id, table_data) in &self.tables {
             if table_data.is_empty() {
                 continue;
             }
             // Try node table first, then rel table
-            if let Some(node_table) = cat.get_node_table_mut(table_id) {
-                table_data.flush_to_node_table(node_table)?;
-            } else if let Some(rel_table) = cat.get_rel_table_mut(table_id) {
-                table_data.flush_to_rel_table(rel_table)?;
+            if let Some(mut node_table) = catalog.get_node_table_mut(table_id) {
+                table_data.flush_to_node_table(&mut *node_table)?;
+            } else if let Some(mut rel_table) = catalog.get_rel_table_mut(table_id) {
+                table_data.flush_to_rel_table(&mut *rel_table)?;
             }
         }
         Ok(())

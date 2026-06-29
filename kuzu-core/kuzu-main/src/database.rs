@@ -63,7 +63,7 @@ impl Database {
         self.catalog.clone()
     }
 
-    pub fn table_catalog(&self) -> std::sync::Arc<std::sync::Mutex<kuzu_storage::TableCatalog>> {
+    pub fn table_catalog(&self) -> Arc<kuzu_storage::TableCatalog> {
         self.storage_manager.table_catalog()
     }
     pub fn new(db_path: impl Into<PathBuf>, config: SystemConfig) -> Result<Self, String> {

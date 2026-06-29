@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 /// The query processor executes a physical plan and produces result chunks.
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
-    table_catalog: Option<Arc<Mutex<TableCatalog>>>,
+    table_catalog: Option<Arc<TableCatalog>>,
 }
 
 impl QueryProcessor {
@@ -38,7 +38,7 @@ impl QueryProcessor {
     }
 
     /// Create a processor with function registry and table catalog access.
-    pub fn with_catalog(registry: Arc<Mutex<FunctionRegistry>>, table_catalog: Arc<Mutex<TableCatalog>>) -> Self {
+    pub fn with_catalog(registry: Arc<Mutex<FunctionRegistry>>, table_catalog: Arc<TableCatalog>) -> Self {
         Self {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
@@ -48,9 +48,8 @@ impl QueryProcessor {
     /// Resolve table data and column definitions for a scan node.
     fn resolve_scan_data(&self, table_name: &str) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
         if let Some(ref tc) = self.table_catalog {
-            let catalog = tc.lock().unwrap();
             // Try node table first
-            if let Some(node_table) = catalog.get_node_table_by_name(table_name) {
+            if let Some(node_table) = tc.get_node_table_by_name(table_name) {
                 let num_rows = node_table.num_rows;
                 if num_rows > 0 {
                     return (
@@ -61,7 +60,7 @@ impl QueryProcessor {
                 }
             }
             // Try rel table
-            if let Some(rel_table) = catalog.get_rel_table_by_name(table_name) {
+            if let Some(rel_table) = tc.get_rel_table_by_name(table_name) {
                 let num_rows = rel_table.num_rows;
                 if num_rows > 0 {
                     return (
@@ -253,15 +252,13 @@ impl QueryProcessor {
                         .ok_or_else(|| "No table catalog available for COPY FROM".to_string())?;
 
                     // Get column definitions from the table catalog
-                    let catalog = table_catalog.lock().unwrap();
-                    let columns = if let Some(node_table) = catalog.get_node_table_by_name(&cf.table_name) {
+                    let columns = if let Some(node_table) = table_catalog.get_node_table_by_name(&cf.table_name) {
                         node_table.columns.clone()
-                    } else if let Some(rel_table) = catalog.get_rel_table_by_name(&cf.table_name) {
+                    } else if let Some(rel_table) = table_catalog.get_rel_table_by_name(&cf.table_name) {
                         rel_table.columns.clone()
                     } else {
                         return Err(format!("Table '{}' not found in storage catalog", cf.table_name));
                     };
-                    drop(catalog);
 
                     let copy_op = PhysicalCopyFrom {
                         table_name: cf.table_name.clone(),
@@ -409,10 +406,9 @@ mod tests {
 
     /// Create a processor with a Person table containing test data.
     fn make_processor_with_person_table() -> QueryProcessor {
-        let catalog = Arc::new(Mutex::new(TableCatalog::new()));
+        let catalog = Arc::new(TableCatalog::new());
         {
-            let mut cat = catalog.lock().unwrap();
-            cat.create_node_table(
+            catalog.create_node_table(
                 "Person".into(),
                 vec![
                     ColumnDefinition {
@@ -428,7 +424,7 @@ mod tests {
                 ],
             );
             // Insert some data
-            let table = cat.get_node_table_by_name_mut("Person").unwrap();
+            let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
             table
                 .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
                 .unwrap();
