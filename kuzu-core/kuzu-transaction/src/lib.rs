@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Type of transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,13 +109,15 @@ pub enum CommitResult {
 /// Configuration for the transaction manager.
 #[derive(Debug, Clone)]
 pub struct TransactionManagerConfig {
-    pub max_concurrent_writers: usize,
+    /// When true (default), multiple write transactions can run concurrently.
+    /// When false, only one write transaction at a time is allowed (single-writer mode).
+    pub concurrent_writes: bool,
 }
 
 impl Default for TransactionManagerConfig {
     fn default() -> Self {
         Self {
-            max_concurrent_writers: 1,
+            concurrent_writes: true,
         }
     }
 }
@@ -132,6 +134,11 @@ pub struct TransactionManager {
     /// Tracks which tables are locked by which transaction ID.
     table_locks: Mutex<HashMap<u64, u64>>, // table_id → transaction_id
     commit_history: Mutex<Vec<(u64, u64)>>,
+    /// Whether concurrent writes are allowed. Can be toggled at runtime
+    /// (e.g., via `SET concurrent_writes=true|false`).
+    concurrent_writes: AtomicBool,
+    /// Configuration snapshot kept for reference (used during construction).
+    #[allow(dead_code)]
     config: TransactionManagerConfig,
 }
 
@@ -147,8 +154,20 @@ impl TransactionManager {
             active_transactions: Mutex::new(HashMap::new()),
             table_locks: Mutex::new(HashMap::new()),
             commit_history: Mutex::new(Vec::new()),
+            concurrent_writes: AtomicBool::new(config.concurrent_writes),
             config,
         }
+    }
+
+    /// Check whether concurrent writes are currently allowed.
+    pub fn allow_concurrent_writes(&self) -> bool {
+        self.concurrent_writes.load(Ordering::Acquire)
+    }
+
+    /// Toggle concurrent writes at runtime.
+    /// When set to `false`, falls back to single-writer (serialized) mode.
+    pub fn set_concurrent_writes(&self, enabled: bool) {
+        self.concurrent_writes.store(enabled, Ordering::Release);
     }
 
     pub fn begin_read(&self) -> Transaction {
@@ -164,16 +183,17 @@ impl TransactionManager {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(id, TransactionType::Write);
 
-        if let Ok(active) = self.active_transactions.lock() {
-            let wc = active
-                .values()
-                .filter(|t| t.transaction_type == TransactionType::Write && t.is_active())
-                .count();
-            if wc >= self.config.max_concurrent_writers {
-                return Err(format!(
-                    "Max concurrent writers reached ({})",
-                    self.config.max_concurrent_writers
-                ));
+        // In single-writer mode, reject if another writer is active.
+        if !self.allow_concurrent_writes() {
+            if let Ok(active) = self.active_transactions.lock() {
+                let has_writer = active
+                    .values()
+                    .any(|t| t.transaction_type == TransactionType::Write && t.is_active());
+                if has_writer {
+                    return Err(
+                        "Only one write transaction allowed (concurrent_writes=false)".into()
+                    );
+                }
             }
         }
 
@@ -315,8 +335,9 @@ mod tests {
 
     #[test]
     fn test_concurrent_writer_limit() {
+        // With concurrent_writes=false, only one writer at a time.
         let config = TransactionManagerConfig {
-            max_concurrent_writers: 1,
+            concurrent_writes: false,
         };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
@@ -326,9 +347,19 @@ mod tests {
     }
 
     #[test]
+    fn test_concurrent_writes_allowed() {
+        // With concurrent_writes=true (default), multiple writers are allowed.
+        let tm = TransactionManager::new();
+        let _tx1 = tm.begin_write().unwrap();
+        let _tx2 = tm.begin_write().unwrap();
+        // Both succeed — no error
+        assert!(tm.begin_write().is_ok());
+    }
+
+    #[test]
     fn test_write_write_conflict() {
         let config = TransactionManagerConfig {
-            max_concurrent_writers: 2,
+            concurrent_writes: true,
         };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
@@ -345,7 +376,7 @@ mod tests {
     #[test]
     fn test_no_conflict_different_tables() {
         let config = TransactionManagerConfig {
-            max_concurrent_writers: 2,
+            concurrent_writes: true,
         };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
