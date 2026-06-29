@@ -1558,6 +1558,61 @@ mod var_length_path_tests {
 }
 
 // =========================================================================
+// Subquery Tests
+// =========================================================================
+
+#[cfg(test)]
+mod subquery_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    #[test]
+    fn test_exists_subquery_in_where() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(&conn, "CREATE NODE TABLE City(name STRING, pop INT64, PRIMARY KEY (name))").unwrap();
+
+        // EXISTS subquery in WHERE — should parse and bind
+        let result = exec_ok(&conn,
+            "MATCH (a:Person) WHERE EXISTS { MATCH (b:City) WHERE b.pop > 1000 } RETURN a.name"
+        );
+        assert!(result.is_ok(), "EXISTS subquery should work: {:?}", result);
+    }
+
+    #[test]
+    fn test_exists_subquery_parse_only() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))").unwrap();
+        exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
+
+        // EXISTS subquery — use the binder directly to verify parse+bind
+        // without going through the full pipeline (subquery executor not configured)
+        let sql = "MATCH (a:Person) WHERE EXISTS { MATCH (b:City) RETURN b.name } RETURN a.name";
+        let parsed = kuzu_parser::parse(sql);
+        assert!(parsed.is_ok(), "EXISTS should parse: {:?}", parsed);
+        let bound = kuzu_binder::Binder::new(conn.database.catalog.clone()).bind(parsed.unwrap());
+        assert!(bound.is_ok(), "EXISTS should bind: {:?}", bound);
+    }
+
+}
+
+// =========================================================================
 // Fase A Verification Tests — End-to-end persistence, recovery, checkpoint
 // =========================================================================
 

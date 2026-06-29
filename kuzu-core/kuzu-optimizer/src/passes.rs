@@ -812,7 +812,25 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
         }
         // Leave these unchanged
         Expression::Variable(_) | Expression::Parameter(_) | Expression::Constant(_) => expr.clone(),
+        Expression::ExistsSubquery(query) => {
+            Expression::ExistsSubquery(Box::new(fold_query(query)))
+        }
     }
+}
+
+/// Fold constant sub-expressions in a Query's clauses.
+fn fold_query(query: &kuzu_parser::ast::Query) -> kuzu_parser::ast::Query {
+    let clauses: Vec<kuzu_parser::ast::Clause> = query.clauses.iter().map(|clause| {
+        match clause {
+            kuzu_parser::ast::Clause::Where(w) => {
+                kuzu_parser::ast::Clause::Where(kuzu_parser::ast::WhereClause {
+                    expression: fold_expression(&w.expression),
+                })
+            }
+            other => other.clone(),
+        }
+    }).collect();
+    kuzu_parser::ast::Query { clauses }
 }
 
 #[cfg(test)]

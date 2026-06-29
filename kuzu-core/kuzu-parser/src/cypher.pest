@@ -194,12 +194,15 @@ property_access = { "." ~ identifier }
 
 primary = {
     literal
+    | exists_subquery
     | variable ~ function_args?
     | parameter
     | list_literal
     | map_literal
     | "(" ~ expression ~ ")"
 }
+
+exists_subquery = { "EXISTS" ~ "{" ~ query_statement ~ "}" }
 
 parameter = { "$" ~ identifier }
 

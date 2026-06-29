@@ -15,17 +15,38 @@ use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::FunctionRegistry;
 use kuzu_function::scalar::evaluate_scalar;
-use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
+use kuzu_parser::ast::{BinaryOp, Constant, Expression, Query, UnaryOp};
 use std::sync::{Arc, Mutex};
 
 /// Evaluates expressions against DataChunks using the function registry.
 pub struct ExpressionEvaluator {
     registry: Arc<Mutex<FunctionRegistry>>,
+    /// Optional callback to execute subqueries at evaluation time.
+    /// Takes a parsed Query and returns DataChunks.
+    pub subquery_fn: Option<Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>,
 }
 
 impl ExpressionEvaluator {
     pub fn new(registry: Arc<Mutex<FunctionRegistry>>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            subquery_fn: None,
+        }
+    }
+
+    /// Set the subquery execution callback.
+    pub fn with_subquery_fn(mut self, f: Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>) -> Self {
+        self.subquery_fn = Some(f);
+        self
+    }
+
+    /// Evaluate a subquery by calling the stored callback.
+    fn evaluate_subquery(&self, query: &Query) -> Result<Vec<DataChunk>, String> {
+        if let Some(ref f) = self.subquery_fn {
+            f(query)
+        } else {
+            Err("No subquery executor configured".into())
+        }
     }
 
     /// Evaluate an expression for every row in the chunk, returning a ValueVector.
@@ -46,6 +67,19 @@ impl ExpressionEvaluator {
                 v.resize(chunk.size);
                 for i in 0..chunk.size {
                     v.set_null(i, true);
+                }
+                Ok(v)
+            }
+            Expression::ExistsSubquery(query) => {
+                // Evaluate EXISTS subquery: execute the inner query against
+                // the database. If it returns at least one row → true, else false.
+                // For uncorrelated subqueries, execute once and fill all rows.
+                let result = self.evaluate_subquery(query)?;
+                let exists = !result.is_empty() && result.iter().any(|c| c.size > 0);
+                let mut v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, chunk.size);
+                v.resize(chunk.size);
+                for i in 0..chunk.size {
+                    store_value_in_vector_simple(&mut v, i, &Value::Bool(exists));
                 }
                 Ok(v)
             }
@@ -307,6 +341,48 @@ impl ExpressionEvaluator {
         }
 
         Ok(result_vec)
+    }
+}
+
+/// Simplified store_value_in_vector that accepts any Value type.
+/// This is a copy adapted from physical_operator.rs.
+fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) {
+    match val {
+        Value::Null => {
+            v.set_null(row, true);
+        }
+        Value::Bool(x) => {
+            if v.physical_type() == kuzu_common::types::PhysicalTypeID::Bool {
+                v.data_mut()[row] = if *x { 1 } else { 0 };
+                v.set_null(row, false);
+            }
+        }
+        Value::Int64(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::Double(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::String(s) => {
+            let offset = row * 16;
+            let bytes = s.as_bytes();
+            let len = bytes.len().min(15) as u8;
+            v.data_mut()[offset] = len;
+            let copy_len = bytes.len().min(15);
+            v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+            v.set_null(row, false);
+        }
+        _ => {
+            v.set_null(row, true);
+        }
     }
 }
 

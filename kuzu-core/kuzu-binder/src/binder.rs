@@ -520,6 +520,16 @@ impl Binder {
                     is_constant: false,
                 })
             }
+            Expression::ExistsSubquery(query) => {
+                // Bind the inner query. EXISTS returns Bool.
+                // For now, do NOT pass outer variables (uncorrelated subquery).
+                let _bound = self.bind_query(*query.clone())?;
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: LogicalTypeID::Bool,
+                    is_constant: false,
+                })
+            }
         }
     }
 

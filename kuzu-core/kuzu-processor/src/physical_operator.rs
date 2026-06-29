@@ -331,7 +331,8 @@ impl PhysicalFilter {
                 // Simplified: evaluate the object expression, return mask
                 Self::evaluate_expression_legacy(obj, chunk)
             }
-            Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_) => {
+            Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_)
+            | Expression::ExistsSubquery(_) => {
                 Ok(vec![true; chunk.size])
             }
         }

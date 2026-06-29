@@ -141,6 +141,8 @@ pub enum Expression {
     UnaryOp(UnaryOp, Box<Expression>),
     List(Vec<Expression>),
     Map(Vec<(String, Expression)>),
+    /// EXISTS { MATCH ... WHERE ... } — returns true if the pattern matches.
+    ExistsSubquery(Box<Query>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

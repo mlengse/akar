@@ -10,7 +10,7 @@
 
 use kuzu_binder::bound_statement::BoundStatement;
 use kuzu_common::types::Value;
-use kuzu_parser::ast::Expression;
+use kuzu_parser::ast::{Clause, Expression, Query, ReturnClause, ReturnItem, WhereClause};
 use kuzu_planner::logical_operator::LogicalOperator;
 use std::collections::HashMap;
 
@@ -139,6 +139,19 @@ fn collect_params_from_expr(expr: &Expression, params: &mut Vec<String>) {
             }
         }
         Expression::Variable(_) | Expression::Constant(_) => {}
+        Expression::ExistsSubquery(q) => {
+            for clause in &q.clauses {
+                match clause {
+                    Clause::Where(w) => collect_params_from_expr(&w.expression, params),
+                    Clause::Return(r) => {
+                        for item in &r.expressions {
+                            collect_params_from_expr(&item.expression, params);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 }
 
@@ -181,7 +194,35 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
         }
         // Non-parameter expressions pass through
         Expression::Variable(_) | Expression::Constant(_) => Ok(expr.clone()),
+        Expression::ExistsSubquery(q) => {
+            Ok(Expression::ExistsSubquery(Box::new(substitute_params_in_query(q, param_values)?)))
+        }
     }
+}
+
+/// Substitute parameters in a Query's clauses.
+fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Value>) -> Result<Query, String> {
+    let mut new_clauses = Vec::new();
+    for clause in &query.clauses {
+        let new_clause = match clause {
+            Clause::Where(w) => {
+                let new_expr = substitute_params(&w.expression, param_values)?;
+                Clause::Where(WhereClause { expression: new_expr })
+            }
+            Clause::Return(r) => {
+                let new_items: Result<Vec<ReturnItem>, String> = r.expressions.iter()
+                    .map(|item| {
+                        let new_expr = substitute_params(&item.expression, param_values)?;
+                        Ok(ReturnItem { expression: new_expr, alias: item.alias.clone() })
+                    })
+                    .collect();
+                Clause::Return(ReturnClause { expressions: new_items? })
+            }
+            other => other.clone(),
+        };
+        new_clauses.push(new_clause);
+    }
+    Ok(Query { clauses: new_clauses })
 }
 
 /// Convert a Value to a Constant for expression substitution.

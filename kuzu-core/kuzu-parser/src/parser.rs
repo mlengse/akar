@@ -532,6 +532,16 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             }
             Ok(Expression::Map(entries))
         }
+        Rule::exists_subquery => {
+            // EXISTS { MATCH ... }
+            for c in children {
+                if c.as_rule() == Rule::query_statement {
+                    let query = parse_query_pairs(c)?;
+                    return Ok(Expression::ExistsSubquery(Box::new(query)));
+                }
+            }
+            Err("EXISTS subquery requires a query statement".into())
+        }
         Rule::function_args => {
             // function_call can appear as child of postfix_expr
             // The parent variable is the function name
@@ -946,6 +956,18 @@ mod tests {
     #[test]
     fn test_var_length_path_with_rel_variable() {
         let sql = "MATCH (a:Person)-[r:*1..3]->(b:Person) RETURN a, b";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_exists_subquery_basic() {
+        let sql = "MATCH (a:Person) WHERE EXISTS { MATCH (b:City) WHERE b.name = a.name } RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_exists_subquery_in_return() {
+        let sql = "MATCH (a:Person) RETURN EXISTS { MATCH (b:City) WHERE b.pop > 1000 }";
         assert!(parse(sql).is_ok());
     }
 
