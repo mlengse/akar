@@ -454,41 +454,50 @@ impl PhysicalOperatorExec for PhysicalLimit {
             }
             let chunk_size = chunk.size as u64;
 
-            // Apply offset
+            // Apply offset: skip entire chunks before the offset
             if skipped + chunk_size <= skip {
                 skipped += chunk_size;
                 continue;
             }
+
+            // Calculate start position within this chunk
             let start_in_chunk = if skipped < skip {
                 (skip - skipped) as usize
             } else {
                 0
             };
-            skipped = skip.max(skipped + chunk_size);
 
-            // Apply limit
-            let available = chunk_size.saturating_sub(start_in_chunk as u64) as usize;
+            // Mark this chunk as processed
+            skipped += chunk_size;
+
+            // Calculate how many rows to take from this chunk
+            let available = (chunk_size as usize).saturating_sub(start_in_chunk);
             let take = available.min(remaining as usize);
+
+            if take == 0 {
+                continue;
+            }
+
             remaining -= take as u64;
 
-            if take == chunk.size {
+            if start_in_chunk == 0 && take == chunk.size {
+                // Full chunk, no truncation needed
                 output.push(chunk);
             } else {
-                // Create truncated chunk (simplified: just resize)
-                let mut new_fields = Vec::new();
+                // Partial chunk: copy row-by-row using get_value/store_value_in_vector
+                // This correctly handles all Value types (including variable-length ones)
+                let mut new_fields = Vec::with_capacity(chunk.fields.len());
                 for field in &chunk.fields {
-                    let mut new_v = ValueVector::new(field.physical_type(), take);
-                    new_v.resize(take); // Pre-allocate
-                    let type_size = physical_type_size(field.physical_type());
-                    let src_start = start_in_chunk * type_size;
-                    let copy_size = take * type_size;
-                    if src_start + copy_size <= field.data().len() && copy_size <= new_v.data().len() {
-                        new_v.data_mut()[..copy_size].copy_from_slice(
-                            &field.data()[src_start..src_start + copy_size],
-                        );
-                    }
+                    let phys_type = field.physical_type();
+                    let mut new_v = ValueVector::new(phys_type, take);
+                    new_v.resize(take);
                     for i in 0..take {
-                        new_v.set_null(i, field.is_null(start_in_chunk + i));
+                        let src_row = start_in_chunk + i;
+                        if field.is_null(src_row) {
+                            new_v.set_null(i, true);
+                        } else if let Some(val) = field.get_value(src_row) {
+                            store_value_in_vector(&mut new_v, i, &val);
+                        }
                     }
                     new_fields.push(new_v);
                 }
