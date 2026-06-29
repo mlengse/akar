@@ -26,6 +26,7 @@ pub enum Clause {
     Create(CreateClause),
     Delete(DeleteClause),
     Set(SetClause),
+    OptionalMatch(OptionalMatchClause),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,11 @@ pub struct DeleteClause {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchClause {
+    pub patterns: Vec<Pattern>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionalMatchClause {
     pub patterns: Vec<Pattern>,
 }
 

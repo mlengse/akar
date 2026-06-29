@@ -58,6 +58,9 @@ query_statement = {
     | match_clause ~ delete_clause
     | match_clause ~ where_clause ~ set_clause
     | match_clause ~ set_clause
+    | match_clause ~ optional_match_clause ~ return_clause
+    | match_clause ~ optional_match_clause ~ where_clause ~ return_clause
+    | match_clause ~ optional_match_clause
     | match_clause
     | return_clause
 }
@@ -86,6 +89,8 @@ type_name = { "STRING" | "INT64" | "INT32" | "INT16" | "INT8"
 primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
 
 // ==================== DML Clauses ====================
+
+optional_match_clause = { "OPTIONAL" ~ "MATCH" ~ pattern ~ where_clause? }
 
 match_clause = {
     "MATCH" ~ pattern ~ ("," ~ pattern)*

@@ -87,6 +87,10 @@ impl Binder {
                     let bound = self.bind_set(&s, &variables)?;
                     (BoundClause::BoundSet(bound), Vec::new())
                 }
+                Clause::OptionalMatch(m) => {
+                    let (bound, vars) = self.bind_optional_match(&m, &variables)?;
+                    (BoundClause::BoundOptionalMatch(bound), vars)
+                }
             };
             variables.extend(new_vars);
             clauses.push(bound_clause);
@@ -566,6 +570,25 @@ impl Binder {
             }
             _ => Err("Failed to drop table".into()),
         }
+    }
+
+    fn bind_optional_match(
+        &self,
+        m: &kuzu_parser::ast::OptionalMatchClause,
+        existing_vars: &[BoundVariable],
+    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), String> {
+        let mut patterns = Vec::new();
+        let mut new_vars = Vec::new();
+
+        for pattern in &m.patterns {
+            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned()
+                .chain(new_vars.iter().cloned()).collect();
+            let (bound, nv) = self.bind_pattern(pattern, &all_vars)?;
+            patterns.push(bound);
+            new_vars.extend(nv);
+        }
+
+        Ok((BoundMatchClause { patterns, new_variables: new_vars.clone() }, new_vars))
     }
 
     fn bind_set(

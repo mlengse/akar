@@ -79,6 +79,33 @@ impl QueryPlanner {
                         cardinality: 0,
                     });
                 }
+                BoundClause::BoundOptionalMatch(om) => {
+                    for pattern in &om.patterns {
+                        if let Some(label) = &pattern.node_label {
+                            delete_exprs.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                table_name: label.clone(),
+                                table_id: pattern.node_table_id.unwrap_or(0),
+                                alias: pattern.node_variable.clone(),
+                                columns: Vec::new(),
+                                cardinality: 0,
+                            }));
+                        }
+                        if let Some(edge) = &pattern.edge {
+                            if let Some(rel_label) = &edge.label {
+                                delete_exprs.push(LogicalOperator::ScanRel(LogicalScanRel {
+                                    table_name: rel_label.clone(),
+                                    table_id: edge.rel_table_id.unwrap_or(0),
+                                    direction: edge.direction.clone(),
+                                    cardinality: 0,
+                                }));
+                            }
+                        }
+                    }
+                    // Mark as optional by appending an OptionalMatch marker
+                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch {
+                        cardinality: 0,
+                    }));
+                }
                 BoundClause::BoundDelete(d) => {
                     delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
                         table_name: d.table_name.clone(),

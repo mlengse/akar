@@ -21,6 +21,7 @@ pub enum LogicalOperator {
     CopyFrom(LogicalCopyFrom),
     Delete(LogicalDelete),
     Set(LogicalSet),
+    OptionalMatch(LogicalOptionalMatch),
 }
 
 impl LogicalOperator {
@@ -42,6 +43,7 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(s) => s.cardinality,
             LogicalOperator::Delete(s) => s.cardinality,
             LogicalOperator::Set(s) => s.cardinality,
+            LogicalOperator::OptionalMatch(s) => s.cardinality,
         }
     }
 
@@ -63,6 +65,7 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
             LogicalOperator::Delete(s) => s.cardinality = card,
             LogicalOperator::Set(s) => s.cardinality = card,
+            LogicalOperator::OptionalMatch(s) => s.cardinality = card,
         }
     }
 
@@ -90,7 +93,8 @@ impl LogicalOperator {
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
-            | LogicalOperator::Set(_) => vec![],
+            | LogicalOperator::Set(_)
+            | LogicalOperator::OptionalMatch(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -111,7 +115,8 @@ impl LogicalOperator {
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
-            | LogicalOperator::Set(_) => vec![],
+            | LogicalOperator::Set(_)
+            | LogicalOperator::OptionalMatch(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -202,6 +207,12 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// OPTIONAL MATCH operator — marks preceding scan as optional (produces NULLs for non-matches).
+#[derive(Debug, Clone)]
+pub struct LogicalOptionalMatch {
     pub cardinality: u64,
 }
 

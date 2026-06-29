@@ -49,6 +49,7 @@ pub enum BoundClause {
     BoundWhere(BoundWhereClause),
     BoundDelete(BoundDeleteClause),
     BoundSet(BoundSetClause),
+    BoundOptionalMatch(BoundMatchClause),
 }
 
 #[derive(Debug, Clone)]

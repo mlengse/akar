@@ -116,6 +116,9 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
             Rule::match_clause => {
                 clauses.push(Clause::Match(MatchClause { patterns: parse_patterns(inner)? }));
             }
+            Rule::optional_match_clause => {
+                clauses.push(Clause::OptionalMatch(OptionalMatchClause { patterns: parse_patterns(inner)? }));
+            }
             Rule::return_clause => {
                 clauses.push(Clause::Return(ReturnClause { expressions: parse_return_items(inner)? }));
             }

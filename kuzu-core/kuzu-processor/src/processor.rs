@@ -193,6 +193,23 @@ impl QueryProcessor {
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::OptionalMatch(_) => {
+                    // OptionalMatch passes through input chunks but marks that NULLs
+                    // should be produced for non-matching optional patterns.
+                    // In the current flat pipeline model, the scan before this marker
+                    // may produce 0 rows for unmatched; this pass-through preserves
+                    // the left side rows when the optional has no matches.
+                    let input = intermediate_result.take().unwrap_or_default();
+                    if input.is_empty() {
+                        // Produce a single chunk with one row of NULLs for optional fields
+                        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+                        v.resize(1);
+                        v.set_null(0, true);
+                        intermediate_result = Some(vec![DataChunk::new(vec![v])]);
+                    } else {
+                        intermediate_result = Some(input);
+                    }
+                }
                 LogicalOperator::Set(sl) => {
                     let table_catalog = self.table_catalog.clone()
                         .ok_or_else(|| "No table catalog available for SET".to_string())?;
