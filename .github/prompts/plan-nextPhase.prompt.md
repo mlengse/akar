@@ -171,17 +171,19 @@ B4, B5 independent from B1-B3, but higher complexity
 ## Fase C: CLI & Tools Completeness (P2 🔵)
 *Membuat kuzu-cli menjadi shell database yang usable dan mengintegrasikan tools/rust_api.*
 
-### C1. CLI Enhancement (`kuzu-cli/src/main.rs`)
-- **Saat ini:** REPL minimal — single-line input, basic table output, exit/help commands.
-- **Tambahan:**
-  - **Multi-line input detection**: jika query ends with `;` atau tidak, collect multiple lines
-  - **Command history**: pakai `rustyline` atau `liner` crate untuk readline support
-  - **Syntax highlighting**: colored output untuk header/values (opsional)
-  - **`.mode` command**: csv, table, json, line, column output format
-  - **`.import` / `.export`**: quick CSV import/export
-  - **Tab completion**: table names, keywords
-  - **Pager support**: `less`-style untuk long output
-- **Dependencies:** `rustyline`, `syntect` (opsional untuk highlighting)
+### C1. CLI Enhancement (`kuzu-cli/src/main.rs`) ✅
+- **Saat ini:** REPL dgn rustyline, multi-line, history, .mode, .import, .export, tab-completion.
+- **Implemented:**
+  - **Multi-line input**: Mendeteksi `;` akhir query → collect multiple lines, prompt `kuzu>` / `  ..>`
+  - **Command history**: rustyline 12.0.0, history file di `$data_dir/kuzu/history.txt`, ↑↓ navigasi
+  - **`.mode` command**: table (aligned), csv, json, line, column output formats
+  - **`.tables` / `.schema`**: List table names and schemas from catalog
+  - **`.import <file> <table>`**: CSV import via `COPY FROM`
+  - **`.export <file> <query>`**: CSV export to file
+  - **Tab completion**: Cypher keywords (MATCH, RETURN, WHERE, dll.) + table names dari catalog
+  - **`.help` / `.exit`**: Built-in help and exit
+- **Dependencies:** `rustyline = "12"`, `dirs`, `kuzu-catalog` added
+- **Catatan**: rustyline 14/13 membutuhkan rustc 1.88+, jadi versi 12 digunakan + home@0.5.11 pinned
 
 ### C2. tools/rust_api Integration (`tools/rust_api/`)
 - **Saat ini:** tools/rust_api adalah C++ FFI wrapper — memanggil C++ kuzu melalui build.rs yang compile C++.
