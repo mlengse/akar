@@ -24,6 +24,18 @@ pub enum Clause {
     Where(WhereClause),
     Create(CreateClause),
     Delete(DeleteClause),
+    Set(SetClause),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetClause {
+    pub items: Vec<SetItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetItem {
+    pub property: Expression,
+    pub value: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq)]

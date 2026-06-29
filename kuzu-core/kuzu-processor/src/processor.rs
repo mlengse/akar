@@ -193,6 +193,22 @@ impl QueryProcessor {
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Set(sl) => {
+                    let table_catalog = self.table_catalog.clone()
+                        .ok_or_else(|| "No table catalog available for SET".to_string())?;
+
+                    let set_op = PhysicalSet {
+                        table_name: sl.table_name.clone(),
+                        table_id: sl.table_id,
+                        column_name: sl.column_name.clone(),
+                        column_idx: sl.column_idx,
+                        value: sl.value.clone(),
+                        table_catalog,
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = set_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Delete(dl) => {
                     let table_catalog = self.table_catalog.clone()
                         .ok_or_else(|| "No table catalog available for DELETE".to_string())?;

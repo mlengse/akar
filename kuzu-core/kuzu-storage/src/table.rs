@@ -112,6 +112,29 @@ impl NodeTable {
         result
     }
 
+    /// Update a single cell (row, column) with a new value.
+    pub fn update_cell(&mut self, row_idx: u64, col_idx: usize, value: Value) -> Result<(), String> {
+        if col_idx >= self.columns.len() {
+            return Err(format!("Column index {col_idx} out of range"));
+        }
+        if row_idx >= self.num_rows {
+            return Err(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows));
+        }
+
+        let mut offset = 0u64;
+        for group in &mut self.node_groups {
+            if row_idx < offset + group.num_nodes {
+                let local_row = (row_idx - offset) as usize;
+                if let Some(col_chunk) = group.columns.get_mut(col_idx) {
+                    col_chunk.set_value(local_row, value)?;
+                }
+                return Ok(());
+            }
+            offset += group.num_nodes;
+        }
+        Err(format!("Row index {row_idx} not found in any node group"))
+    }
+
     /// Delete a row by its index. Marks the row as null by setting all its column
     /// values to `Value::Null`. This is a soft delete — the row slot remains.
     pub fn delete_row(&mut self, row_idx: u64) -> Result<(), String> {

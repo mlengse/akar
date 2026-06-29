@@ -47,6 +47,22 @@ pub enum BoundClause {
     BoundReturn(BoundReturnClause),
     BoundWhere(BoundWhereClause),
     BoundDelete(BoundDeleteClause),
+    BoundSet(BoundSetClause),
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundSetItem {
+    pub property: kuzu_parser::ast::Expression,
+    pub value: kuzu_parser::ast::Expression,
+    pub column_name: String,
+    pub column_idx: usize,
+    pub table_name: String,
+    pub table_id: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundSetClause {
+    pub items: Vec<BoundSetItem>,
 }
 
 #[derive(Debug, Clone)]

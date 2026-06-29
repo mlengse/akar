@@ -20,6 +20,7 @@ pub enum LogicalOperator {
     TableFunctionCall(LogicalTableFunctionCall),
     CopyFrom(LogicalCopyFrom),
     Delete(LogicalDelete),
+    Set(LogicalSet),
 }
 
 impl LogicalOperator {
@@ -40,6 +41,7 @@ impl LogicalOperator {
             LogicalOperator::TableFunctionCall(s) => s.cardinality,
             LogicalOperator::CopyFrom(s) => s.cardinality,
             LogicalOperator::Delete(s) => s.cardinality,
+            LogicalOperator::Set(s) => s.cardinality,
         }
     }
 
@@ -60,6 +62,7 @@ impl LogicalOperator {
             LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
             LogicalOperator::Delete(s) => s.cardinality = card,
+            LogicalOperator::Set(s) => s.cardinality = card,
         }
     }
 
@@ -86,7 +89,8 @@ impl LogicalOperator {
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
-            | LogicalOperator::Delete(_) => vec![],
+            | LogicalOperator::Delete(_)
+            | LogicalOperator::Set(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -106,7 +110,8 @@ impl LogicalOperator {
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
-            | LogicalOperator::Delete(_) => vec![],
+            | LogicalOperator::Delete(_)
+            | LogicalOperator::Set(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -197,6 +202,17 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// SET operator — updates properties on matched rows.
+#[derive(Debug, Clone)]
+pub struct LogicalSet {
+    pub table_name: String,
+    pub table_id: u64,
+    pub column_name: String,
+    pub column_idx: usize,
+    pub value: kuzu_parser::ast::Expression,
     pub cardinality: u64,
 }
 

@@ -87,10 +87,22 @@ impl QueryPlanner {
                         cardinality: 0,
                     }));
                 }
+                BoundClause::BoundSet(s) => {
+                    for item in &s.items {
+                        delete_exprs.push(LogicalOperator::Set(LogicalSet {
+                            table_name: item.table_name.clone(),
+                            table_id: item.table_id,
+                            column_name: item.column_name.clone(),
+                            column_idx: item.column_idx,
+                            value: item.value.clone(),
+                            cardinality: 0,
+                        }));
+                    }
+                }
             }
         }
 
-        // Collect delete clauses (added after the main pipeline)
+        // Collect delete/set clauses (added after the main pipeline)
         let delete_ops: Vec<LogicalOperator> = delete_exprs.drain(..).collect();
 
         // Build operator pipeline bottom-up

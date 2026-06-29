@@ -82,6 +82,10 @@ impl Binder {
                     let bound = self.bind_delete(&d, &variables)?;
                     (BoundClause::BoundDelete(bound), Vec::new())
                 }
+                Clause::Set(s) => {
+                    let bound = self.bind_set(&s, &variables)?;
+                    (BoundClause::BoundSet(bound), Vec::new())
+                }
             };
             variables.extend(new_vars);
             clauses.push(bound_clause);
@@ -561,6 +565,40 @@ impl Binder {
             }
             _ => Err("Failed to drop table".into()),
         }
+    }
+
+    fn bind_set(
+        &self,
+        s: &kuzu_parser::ast::SetClause,
+        variables: &[BoundVariable],
+    ) -> Result<BoundSetClause, String> {
+        let mut items = Vec::new();
+        for item in &s.items {
+            // Property must be of form `variable.property`
+            match &item.property {
+                kuzu_parser::ast::Expression::PropertyAccess(var_expr, prop_name) => {
+                    match var_expr.as_ref() {
+                        kuzu_parser::ast::Expression::Variable(var_name) => {
+                            let bound_var = variables.iter().find(|v| v.name == *var_name)
+                                .ok_or_else(|| format!(
+                                    "Variable '{}' not in scope for SET", var_name
+                                ))?;
+                            items.push(BoundSetItem {
+                                property: item.property.clone(),
+                                value: item.value.clone(),
+                                column_name: prop_name.clone(),
+                                column_idx: 0, // resolved by catalog lookup
+                                table_name: bound_var.label.clone().unwrap_or_default(),
+                                table_id: bound_var.table_id,
+                            });
+                        }
+                        _ => return Err("SET property must be on a variable".into()),
+                    }
+                }
+                _ => return Err("SET requires property access expression (e.g., n.age)".into()),
+            }
+        }
+        Ok(BoundSetClause { items })
     }
 
     fn bind_delete(

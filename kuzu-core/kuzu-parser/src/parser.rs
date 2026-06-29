@@ -128,6 +128,18 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                     .collect();
                 clauses.push(Clause::Delete(DeleteClause { expressions: expressions? }));
             }
+            Rule::set_clause => {
+                let items: Result<Vec<SetItem>, String> = inner.into_inner()
+                    .filter(|p| p.as_rule() == Rule::set_item)
+                    .map(|item| {
+                        let mut parts = item.into_inner();
+                        let prop = parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
+                        let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
+                        Ok(SetItem { property: prop, value: val })
+                    })
+                    .collect();
+                clauses.push(Clause::Set(SetClause { items: items? }));
+            }
             _ => {}
         }
     }
