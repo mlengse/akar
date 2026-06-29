@@ -2,84 +2,82 @@
 
 Dokumen ini membandingkan basis kode **LadybugDB** (C++) dengan porting Rust **Kuzu Core** (`kuzu-core`), mendaftar fitur unggulan LadybugDB yang belum ada di Kuzu Rust, serta merancang rencana implementasi terperinci untuk mengadopsi fitur-fitur tersebut ke dalam Kuzu Rust.
 
-> **Status Terakhir: 2026-06-30** — Concurrent Multi-Writer (Phase A-C) telah selesai diimplementasikan. Fokus berikutnya: ART Index, HNSW Full Integration, Disk Spilling.
+> **Status Terakhir: 2026-06-30** — Audit kode selesai terhadap 52+ klaim. 48 ✅ real implementation. Tersisa: 4 gap (UNION execution, Disk Spilling, Release workflow, Code Cleanup TODOs).
 
 ---
 
 ## 1. Analisis Perbandingan Codebase
 
-Berikut adalah peta perbandingan arsitektur antara tiga varian evolusi Kuzu dengan status terkini:
+Berikut adalah peta perbandingan arsitektur antara tiga varian evolusi Kuzu dengan status terkini (48/52 fitur ✅ real):
 
 | Dimensi | **LadybugDB (C++ Fork)** | **Kuzu (Vela Partners C++ Fork)** | **Kuzu Core (Pure Rust Port)** |
 |---|---|---|---|
 | **Fokus Utama** | Efisiensi graf analitis lokal, AI Agent memory, HNSW native | Multi-Agent concurrency, stabilitas penulisan paralel | Re-implementasi penuh Kuzu ke Rust tanpa dependensi C++ |
-| **Model Transaksi** | *Single-Writer Constraint* (tradisional ACID) | **Concurrent Multi-Writer Support** (paralel writes) | ✅ **Concurrent Multi-Writer** (dashmap + LocalWAL + MVCC, default `true`) |
-| **Indeks Vektor** | Native HNSW terintegrasi di dalam graf & query engine | Sama dengan upstream Kuzu (ekstensi terpisah) | ⚠️ `HnswIndex` in-memory (`kuzu-vector`), fungsi skalar ✅, **parser/integrasi ❌** |
-| **Indeks PK** | Mendukung **HASH** dan **ART** (Adaptive Radix Tree) | Mendukung HASH | ✅ **HASH** (`HashIndex` + `OnDiskHashIndex`), **ART ❌** |
-| **Manajemen Memori** | Spilling ke disk & *batch stream-merge* di Arrow-CSR | Pengelolaan antrean transaksi C++ | ❌ Belum ada spilling ke disk |
-| **Interoperabilitas** | C++ native dengan binding eksternal luas | C++ native dengan fokus ke Python/Vela | Rust native murni, CLI (`kuzu-cli`) ✅ |
-| **CI/CD** | GitHub Actions penuh | — | ❌ **Belum ada** (D1-D4 masih pending) |
-| **Benchmark** | C++ benchmark suite | — | ❌ **Belum ada** (perlu `criterion`) |
+| **Model Transaksi** | *Single-Writer Constraint* (tradisional ACID) | **Concurrent Multi-Writer Support** (paralel writes) | ✅ **Concurrent Multi-Writer** (dashmap + LocalWAL + MVCC version chains, default `true`) |
+| **Bahasa** | C++20 | C++20 | ✅ **Pure Rust** (edition 2024, zero C++ dep in `kuzu-core`) |
+| **Parser** | ANTLR4 (C++/Java) | ANTLR4 (C++) | ✅ **pest.rs PEG** (Rust-native, grammar di `cypher.pest`) |
+| **Storage Engine** | BufferManager + WAL + Compression + Columnar | BufferManager + WAL + Compression + Columnar | ✅ **Full**: BufferManager (Clock eviction), WAL (8 record types), Compression (Constant/Boolean/IntegerBitpacking/Float), Column (page-based), NodeGroup (4096 rows), Checkpoint, ShadowFile |
+| **MVCC / Versioning** | Undo records | Undo records + concurrent version chains | ✅ **VersionInfo** (insert/delete visibility) + **UpdateInfo** (MVCC version chains) per-ColumnChunk |
+| **Indeks PK** | HASH + **ART** (Adaptive Radix Tree) | HASH | ✅ **HASH** (two-layer: L1 HashMap + L2 OnDiskHashIndex), ✅ **ART** (Node4/16/48/256, range_scan, BufferManager persistence) |
+| **Indeks Vektor** | Native HNSW terintegrasi penuh | Ekstensi terpisah | ✅ **Full HNSW integration**: `CREATE VECTOR INDEX` DDL, `VectorIndexTable` (BM persistence), `PhysicalVectorSimilarityScan`, 5 distance metrics, detection pass + rewrite |
+| **Concurrent Writing** | Single-writer (mutex) | **Multi-writer** (Vela) | ✅ **Multi-writer** (`concurrent_writes=true` default, dashmap TableCatalog, LocalWAL, two-phase checkpoint drain, background auto-checkpoint worker) |
+| **Manajemen Memori** | **Disk Spilling** & stream-merge (Arrow-CSR) | Antrean transaksi C++ | ❌ **Belum ada spilling** — ColumnChunk/NodeGroup in-memory penuh |
+| **Optimizer Passes** | 15+ passes (full C++) | 15+ passes | ✅ **11 passes** (FilterPushDown, ProjectionPushDown, ConstantFolding, JoinOptimization greedy, TopKOptimization, FactorizationRewriting tree, CardinalityEstimation tree, RemoveUnnecessary, AggregateDetection, **VectorSimilarityDetection**, **ArtRangeScanDetection**) |
+| **Physical Operators** | 40+ (full C++) | 40+ | ✅ **20+ operators**: Scan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin (generalized), Unwind, CopyFrom, Merge, Foreach, OptionalMatch, Delete, Set, VectorSimilarityScan, ArtIndexRangeScan, ExpressionEvaluator |
+| **Logical Operators** | 30+ (C++) | 30+ | ✅ **20 variants**: ScanNode, ScanRel, Filter, Projection, HashJoin, CrossProduct, OrderBy, Limit, Aggregate, **Union**, **VectorSimilarityScan**, **ArtIndexRangeScan**, Flatten, TableFunctionCall, CopyFrom, Delete, Set, OptionalMatch, Unwind, Foreach |
+| **Cypher Coverage** | Full TCK | Full TCK | ✅ MATCH, RETURN, WHERE, CREATE, DELETE, SET, MERGE, UNION, CALL, OPTIONAL MATCH, WITH, UNWIND, FOREACH, variable-length path, subquery `EXISTS`, ALTER, COPY FROM (CSV/Parquet), DDL. ⚠️ **UNION physical execution no-op** (parser+binder ✅, planner+processor ❌) |
+| **Extension Ekosistem** | C++ extensions via plugin | C++ extensions | ✅ **15 crate extensions**: JSON, FTS, Vector, HTTPFS, DuckDB, ALGO (7 graph algorithms), NEO4J, LLM (OpenAI+Ollama), SQLite (rusqlite), Delta, Iceberg, Azure, Postgres (tokio-postgres), UnityCatalog |
+| **Function System** | 100+ built-in functions | 100+ built-in | ✅ **Scalar** (arithmetic, comparison, string, cast, date, list, map, struct, boolean, utility) + **Aggregate** (COUNT, SUM, MIN, MAX, AVG, COUNT_STAR) + **Table functions** + **Callback Bridge** (CustomScalar/CustomTable) |
+| **PreparedStatement** | `prepare()` + `execute()` | `prepare()` + `execute()` | ✅ **`prepare()` + `execute()`** dengan `$param` syntax, statement cache |
+| **CLI / Tools** | `kuzu_shell` (C++) | `kuzu_shell` (C++) | ✅ **`kuzu-cli`** REPL: rustyline history, multi-line, tab-completion, .mode/.import/.export/.tables/.schema/.help |
+| **Graph Module** | In-memory + OnDisk graph | In-memory + OnDisk | ✅ **CSR adjacency, Graph, OnDiskGraph** + BFS, PageRank, WCC, shortest path, degree centrality |
+| **WASM Support** | ❌ C++ can't | ❌ C++ can't | ✅ **`wasm32-unknown-unknown`** — all crates check clean |
+| **Interoperabilitas** | C++ native + Python/Node.js/Java bindings | C++ + Python/Vela | ✅ Rust native (`kuzu-main`), CLI (`kuzu-cli`), `tools/rust_api` dual-mode (pure Rust default) |
+| **CI/CD** | GitHub Actions penuh | — | ✅ **Rust CI** (fmt, clippy, test Ubuntu/macOS/Windows, WASM). ⏳ **Release workflow** (`rust-release.yml`) belum ada |
+| **Benchmark** | C++ benchmark suite (`kuzu_benchmark`) | — | ✅ **criterion v0.5**: 7 bench files (scan, filter, hash join, order by, aggregate, pipeline, buffer), `BENCHMARK_COMPARISON.md`, `BENCHMARK_RUST.md`, `BENCHMARK_BASELINE.md` |
+| **Catalog** | Full catalog CRUD | Full catalog CRUD | ✅ NodeTableEntry, RelTableEntry, IndexType { Hash, Art }, VectorIndexEntry, CRUD methods, DashMap-based lock-free |
 
 ---
 
-## 2. Ringkasan Status Implementasi Kuzu Rust (kuzu-core)
+## 2. Ringkasan Status — Hanya Gap yang Tersisa
 
-### ✅ Sudah Diimplementasikan
+**48 dari 52 fitur sudah ✅ real implementation.** Berikut 4 gap yang tersisa (semua sudah teridentifikasi di `REMAINING_WORK.md`):
 
-| Area | Detail | Crate |
-|------|--------|-------|
-| **Concurrent Multi-Writer** | `concurrent_writes=true` default, dashmap TableCatalog, LocalWAL, MVCC version chains (VersionInfo/UpdateInfo), two-phase checkpoint drain, background auto-checkpoint worker, BEGIN/COMMIT/ROLLBACK Cypher | `kuzu-transaction`, `kuzu-storage`, `kuzu-main` |
-| **Storage Engine** | WAL + recovery, checkpoint, BufferManager, ShadowFile, LocalStorage, ColumnChunk, NodeGroup, Column, page management, compression | `kuzu-storage` |
-| **HashIndex (PK)** | Two-layer: L1 `HashMap<K,u64>` in-memory + L2 `OnDiskHashIndex` via BufferManager pages | `kuzu-storage/src/index.rs` |
-| **Table Storage** | `NodeTable` (NodeGroup-based columnar), `RelTable` (CSR adjacency), `TableCatalog` (DashMap) | `kuzu-storage/src/table.rs` |
-| **Cypher Parser** | Pest-based grammar: MATCH, RETURN, WHERE, CREATE, DELETE, SET, MERGE, UNION, CALL, OPTIONAL MATCH, WITH, UNWIND, FOREACH, variable-length path, subquery, ALTER, COPY FROM, DDL | `kuzu-parser` |
-| **Binder** | Full binding for all statement types, type resolution, schema validation | `kuzu-binder` |
-| **Planner** | Logical plan construction from bound statements | `kuzu-planner` |
-| **Optimizer** | 9 passes: FilterPushDown, ProjectionPushDown, ConstantFolding, JoinOptimization (greedy), TopKOptimization, FactorizationRewriting (tree), CardinalityEstimation (tree), RemoveUnnecessary, AggregateDetection | `kuzu-optimizer` |
-| **Processor** | 16 physical operators: Scan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin (generalized), Unwind, CopyFrom, Merge, Foreach, OptionalMatch, Delete, Set, ExpressionEvaluator | `kuzu-processor` |
-| **Functions** | Scalar (string, numeric, datetime, boolean, list, cast), aggregate (COUNT, SUM, MIN, MAX, AVG), table functions | `kuzu-function` |
-| **Graph Module** | CSR adjacency, in-memory Graph, OnDiskGraph placeholder | `kuzu-graph` |
-| **Catalog** | CRUD table entries, column management, name/ID lookup | `kuzu-catalog` |
-| **Extension System** | Extension trait + registry, 15 extension crates registered: JSON, FTS, Vector, HTTPFS, DuckDB, ALGO, NEO4J, LLM, SQLite, Delta, Iceberg, Azure, Postgres, UnityCatalog | `kuzu-extension` + `kuzu-*` |
-| **CLI** | REPL with history, `kuzu-cli` binary | `kuzu-cli` |
-| **PreparedStatement** | Parameterized queries with `$param` syntax | `kuzu-main` |
-| **HNSW In-Memory** | `HnswIndex` struct with `insert()`/`search()`, greedy+beam search, 5 distance metrics (Cos, Eucl, L1, L2Sq, Dot) | `kuzu-vector/src/hnsw.rs` |
-| **WAL + Recovery** | Crash recovery on startup, replay, auto-checkpoint after checkpoint threshold | `kuzu-storage` |
-| **tools/rust_api** | Rust-native API via `Database` + `Connection` | `kuzu-main` |
-
-### ❌ Belum Diimplementasikan (Prioritas)
-
-| Prioritas | Fitur | Detail | Referensi C++ (Ladybug) |
-|-----------|-------|--------|------------------------|
-| **P0** | **ART Index** | Adaptive Radix Tree untuk range scan PK | `ladybug/src/storage/index/art_index.h` (Node4/16/48/256, `ArtPrimaryKeyIndex`), `art_index.cpp`, `art_index_disk.cpp` |
-| **P0** | **HNSW Full Integration** | Parser `CREATE VECTOR INDEX`, catalog registrasi, persistensi via BufferManager, physical operator `VectorSimilarityScan` | (Tidak ada di ladybug — HNSW native asli Kuzu) |
-| **P1** | **Disk Spilling** | `Spiller` + stream-merge untuk batch insert besar | `ladybug/src/storage/buffer_manager/spiller.h`, `spiller.cpp`, `spill_result.h` |
-| **P1** | **CI/CD** | GitHub Actions build + test + release | — |
-| **P2** | **Benchmark** | `criterion` benchmark suite vs C++ baseline | `ladybug/benchmark/` |
-| **P2** | **DuckDB Binding** | DuckDB Rust binding via callback bridge | — |
+| # | Prioritas | Fitur | Detail | Lapisan | Estimasi |
+|---|-----------|-------|--------|---------|----------|
+| 1 | **P1 🔴** | **UNION Physical Execution** | UNION di-parse ✅ (cypher.pest), di-bind ✅ (bind_union), tapi planner catch-all `_ => vec![]` ❌ dan processor no-op `Union(_) => vec![]` ❌. Query UNION parsing sukses tapi return empty. | Planner (`planner.rs:23`), Processor (`processor.rs:270`) | ~2-3 jam |
+| 2 | **P1 🔴** | **Disk Spilling** | `Spiller` + `MultiWayStreamMerge` untuk batch insert besar. `ColumnChunk` masih `Vec<Value>` in-memory penuh, `NodeGroup` tanpa memory threshold. BufferManager sudah punya Clock eviction ✅, MemoryManager tracking ✅ — tinggal wiring. | `kuzu-storage/src/spiller.rs` (NEW), ColumnChunk, NodeGroup, connection.rs | ~1-2 minggu |
+| 3 | **P2 🟡** | **Release Workflow** | `rust-ci.yml` ✅ (fmt, clippy, test 3 platform, WASM, rust-api). `rust-release.yml` ❌ — belum ada workflow untuk `cargo publish` ke crates.io. | `.github/workflows/rust-release.yml` (NEW), Cargo.toml metadata | ~2-3 jam |
+| 4 | **P3 🟢** | **Code Cleanup TODOs** | 2 TODO comments di `ladybug/tools/rust_api/src/value.rs` (line 247 enforce type contents, line 1154 test equivalence) — di C++ FFI wrapper crate, bukan kuzu-core. | `ladybug/tools/rust_api/src/value.rs` | ~1 jam |
 
 ---
 
-## 3. Fitur Unggulan LadybugDB yang Belum Ada di Kuzu Rust
+## 3. Fitur Unggulan LadybugDB — Status Implementasi
 
-### A. Indeks ART (Adaptive Radix Tree) untuk Primary Key
+### A. Indeks ART (Adaptive Radix Tree) untuk Primary Key ✅
 *   **Deskripsi:** Radix tree adaptif berbasis byte-ordered keys yang menggantikan atau berjalan paralel dengan `HashIndex`.
-*   **Keunggulan:** Mendukung pencarian rentang (*range scans*) pada primary key (misal: `p.ID >= 10 AND p.ID < 20`), pemulihan crash (*rollback cleanup*), checkpointing terstruktur, dan efisiensi traversal tinggi.
-*   **Referensi C++:** `ladybug/src/include/storage/index/art_index.h` (~300+ LOC) — mendefinisikan `ArtKey`, `ArtPrimaryKeyIndexStorageInfo`, `ArtPrimaryKeyIndex` dengan NODE4/NODE16/NODE48/NODE256. Juga `art_index_disk_utils.h` untuk serialisasi disk dan shadow file.
-*   **Parser C++:** `ladybug/src/parser/transform/transform_ddl.cpp` — `CREATE [ART|HASH] INDEX name FOR (n:Label) ON (n.prop)`, default HASH.
-*   **Dokumentasi C++:** `ladybug/docs/art_index.md` — contoh penggunaan.
-*   **Status Kuzu Rust:** Hanya memiliki `HashIndex` (`kuzu-storage/src/index.rs`) yang tidak mendukung range scan (hanya equality lookup).
+*   **Keunggulan:** Mendukung pencarian rentang (*range scans*) pada primary key (misal: `p.ID >= 10 AND p.ID < 20`).
+*   **Status Kuzu Rust:** ✅ **Sudah diimplementasikan penuh.**
+    - `ArtKey` di `kuzu-storage/src/art_key.rs` — order-preserving byte encoding untuk Int64, Int32, UInt64, Float64, String, Date, Timestamp, Interval, Int128, InternalID
+    - `ArtNode` di `kuzu-storage/src/art_node.rs` — Node4/16/48/256 dengan prefix, children arrays, overflow_offsets, arena allocation (NodeBlock)
+    - `ArtPrimaryKeyIndex` di `kuzu-storage/src/art_index.rs` — `insert()`, `lookup()`, `delete()`, `range_scan()` (DFS with bound pruning), persistence via BufferManager
+    - Catalog: `IndexType { Hash, Art }` enum di `kuzu-catalog/src/lib.rs`
+    - Parser: `CREATE [ART|HASH] INDEX` dan `DROP INDEX` grammar + AST
+    - Optimizer: `ArtRangeScanDetection` pass — deteksi `ScanNode + Filter(inequality on PK)` → rewrite ke `ArtIndexRangeScan`
+    - Processor: `PhysicalArtIndexRangeScan` operator — range scan execution + column fetch
 
-### B. Indeks Vektor Native HNSW yang Terintegrasi Penuh
+### B. Indeks Vektor Native HNSW yang Terintegrasi Penuh ✅
 *   **Deskripsi:** Indeks HNSW (Hierarchical Navigable Small World) yang terhubung langsung dengan catalog, storage manager, parser Cypher, optimizer, dan processor.
 *   **Keunggulan:** Mengeksekusi pencarian kemiripan vektor (*vector similarity search*) secara hibrida bersanding dengan traversal graf analitis dalam satu kueri Cypher.
-*   **Status Kuzu Rust:** ✅ `HnswIndex` in-memory dengan `insert()` dan `search()` sudah ada di `kuzu-vector/src/hnsw.rs` (~400 LOC, lengkap dengan greedy search + layer-0 beam search + 5 distance metrics). ❌ Yang belum:
-    - Parser: tidak ada grammar `CREATE VECTOR INDEX`
-    - Binder: tidak ada `BoundCreateIndex` untuk vector
-    - Catalog: tidak ada registrasi `IndexType::HNSW`
-    - Storage: `HnswIndex` tidak terhubung ke `BufferManager` (belum persistensi)
-    - Processor: tidak ada `PhysicalVectorSimilarityScan`
+*   **Status Kuzu Rust:** ✅ **Sudah diimplementasikan penuh.**
+    - `HnswIndex` in-memory di `kuzu-vector/src/hnsw.rs` — `insert()`, `search()` (greedy + beam), 5 distance metrics (Cosine, Euclidean, L1, L2Squared, DotProduct)
+    - `VectorIndexTable` di `kuzu-storage/src/vector_index.rs` — persistence via BufferManager (header page + data pages), `save()`/`load()`
+    - Parser: `CREATE VECTOR INDEX name ON (label.column) WITH (metric=..., dims=...)` grammar + AST
+    - Binder: `bind_create_vector_index()` — validasi tabel, kolom, metric, dimension
+    - Catalog: `VectorIndexEntry`, `CatalogEntry::VectorIndex`, `create_vector_index()`/`drop_vector_index()`/`list_vector_indexes()`
+    - Optimizer: Detection pass untuk `distance_fn + ORDER BY + LIMIT` → rewrite ke `VectorSimilarityScan`
+    - Processor: `PhysicalVectorSimilarityScan` operator — ANN query via HNSW search + column fetch
+    - `CALL vector_similarity_scan(...)` table function juga tersedia
 
 ### C. Manajemen Memori: Arrow-CSR Spilling & Stream-Merge
 *   **Deskripsi:** Mekanisme pengontrolan lonjakan memori transien (*transient peak memory*) menggunakan `Spiller` yang memindahkan *sorted runs* data ke disk saat batch insert melewati batas memori, kemudian digabungkan secara streaming (*stream-merge*).
@@ -89,12 +87,16 @@ Berikut adalah peta perbandingan arsitektur antara tiga varian evolusi Kuzu deng
 
 ---
 
-## 4. Rencana Implementasi untuk Kuzu Rust (kuzu-core)
+## 4. Rencana Implementasi — FASE yang Sudah Selesai
 
-### FASE 1: Porting ART Primary Key Index ⬅️ **PRIORITAS TERTINGGI**
-Fase ini berfokus pada penambahan struktur indeks radix tree adaptif ke `kuzu-storage` dan integrasinya dengan parser, catalog, dan optimizer.
+### FASE 1: Porting ART Primary Key Index ✅ **SELESAI**
+Fase ini sudah diimplementasikan penuh. Detail implementasi:
+- `ArtKey` encoding di `kuzu-storage/src/art_key.rs`
+- `ArtNode` (Node4/16/48/256) di `kuzu-storage/src/art_node.rs`
+- `ArtPrimaryKeyIndex` (insert/lookup/delete/range_scan/persistence) di `kuzu-storage/src/art_index.rs`
+- Catalog `IndexType`, parser grammar, binder, optimizer (`ArtRangeScanDetection`), processor (`PhysicalArtIndexRangeScan`)
 
-**Referensi C++ utama:**
+**Referensi C++ (arsip):**
 - `ladybug/src/include/storage/index/art_index.h` — Definisi kelas `ArtPrimaryKeyIndex`, `ArtKey`, tipe node
 - `ladybug/src/storage/index/art_index.cpp` — Implementasi ART
 - `ladybug/src/storage/index/art_index_disk.cpp` — Serialisasi/deserialisasi disk
@@ -118,10 +120,17 @@ Fase ini berfokus pada penambahan struktur indeks radix tree adaptif ke `kuzu-st
 
 ---
 
-### FASE 2: Integrasi Penuh HNSW Vector Index ⬅️ **PRIORITAS TINGGI**
-Fase ini mengintegrasikan indeks HNSW yang sudah ada di `kuzu-vector` ke dalam mesin penyimpanan dan query database.
+### FASE 2: Integrasi Penuh HNSW Vector Index ✅ **SELESAI**
+Fase ini sudah diimplementasikan penuh:
+- Persistence: `VectorIndexTable` di `kuzu-storage/src/vector_index.rs` — save/load via BufferManager
+- Parser: `CREATE VECTOR INDEX` grammar + AST
+- Catalog: `VectorIndexEntry` + CRUD methods
+- Binder: `bind_create_vector_index()`
+- Processor: `PhysicalVectorSimilarityScan` operator
+- Optimizer: detection pass + rewrite
+- `CALL vector_similarity_scan(...)` table function
 
-**Status awal:** ✅ `HnswIndex` in-memory (insert + search + 5 metrics) sudah ada di `kuzu-vector/src/hnsw.rs`.
+**Status awal (arsip):** ✅ `HnswIndex` in-memory (insert + search + 5 metrics) sudah ada di `kuzu-vector/src/hnsw.rs`.
 
 #### Sub-steps:
 
@@ -138,8 +147,15 @@ Fase ini mengintegrasikan indeks HNSW yang sudah ada di `kuzu-vector` ke dalam m
 
 ---
 
-### FASE 3: Implementasi Disk Spilling & Stream-Merge (Arrow-CSR)
-Fase ini mengoptimalkan penulisan batch besar dengan menghemat konsumsi RAM melalui disk spilling.
+### FASE 3: Implementasi Disk Spilling & Stream-Merge (P1 🔴 — Belum Dimulai)
+Fase ini mengoptimalkan penulisan batch besar dengan menghemat konsumsi RAM melalui disk spilling. Satu-satunya fitur LadybugDB yang belum di-port sama sekali.
+
+**Status riset:**
+- `ColumnChunk` in-memory penuh (`Vec<Value>`) — tidak ada threshold memori
+- `NodeGroup` in-memory penuh — menumpuk sampai di-`flush()` manual
+- `BufferManager` ✅ sudah punya Clock eviction untuk page-level data
+- `MemoryManager` ✅ tracking alokasi, tapi enforcement tidak di-wire
+- **Tidak ada `spiller.rs`**
 
 **Referensi C++:**
 - `ladybug/src/include/storage/buffer_manager/spiller.h`
@@ -150,34 +166,70 @@ Fase ini mengoptimalkan penulisan batch besar dengan menghemat konsumsi RAM mela
 
 | Step | File | Perubahan |
 |------|------|-----------|
-| **3.1** | `kuzu-storage/src/spiller.rs` **(NEW)** | Port `Spiller`: konstruktor dengan `tmp_dir`, threshold memori. Method `spill(sorted_run)` — tulis sorted run ke file temp. |
+| **3.1** | `kuzu-storage/src/spiller.rs` **(NEW)** | Port `Spiller`: konstruktor dengan `tmp_dir`, threshold memori. Method `spill(column_chunk)` — serialisasi chunk ke file temp. |
 | **3.2** | `kuzu-storage/src/column_chunk.rs` | Integrasi `Spiller` — saat `append()` batch besar melebihi threshold, spill ke disk. |
 | **3.3** | `kuzu-storage/src/node_group.rs` | Integrasi `Spiller` — spill node group yang melebihi kapasitas memori. |
-| **3.4** | `kuzu-storage/src/spiller.rs` | Implementasi `MultiWayStreamMerge` — baca multiple sorted runs, merge streaming, deduplikasi PK, tulis ke storage final. |
-| **3.5** | `kuzu-main/src/connection.rs` | Konfigurasi `SET spill_threshold = bytes` — ekspos via Cypher. |
+| **3.4** | `kuzu-storage/src/spiller.rs` | Implementasi `MultiWayStreamMerge` — baca multiple sorted runs, merge streaming, deduplikasi PK, tulis ke storage final via BufferManager. |
+| **3.5** | `kuzu-main/src/database.rs` + `connection.rs` | Tambah `spill_threshold` ke `SystemConfig`. Ekspos via `SET spill_threshold = bytes` Cypher. |
 
 ---
 
-## 5. Verification Plan
+### FASE 4: UNION Physical Execution (P1 🔴 — ~2-3 jam)
+Menutup gap UNION: parser ✅, binder ✅, planner ❌, processor ❌.
 
-Untuk memastikan implementasi berjalan dengan benar tanpa merusak fungsi yang sudah ada:
+#### Sub-steps:
 
-### Automated Tests
-*   **Unit Tests Baru di `kuzu-storage`:**
-    *   ART: key encoding untuk semua tipe data (`Int64`, `Float`, `String`, dll.) — byte-ordering konsisten
-    *   ART: insert, lookup, delete, `range_scan` dengan berbagai ukuran dataset
-    *   HNSW: serialisasi/deserialisasi roundtrip
-    *   HNSW: persistensi via BufferManager
-    *   Spiller: spill + stream-merge pada data yang melampaui threshold
-*   **Integration Tests Baru di `kuzu-main`:**
-    *   Range scan Cypher: `MATCH (p:Person) WHERE p.ID >= 100 AND p.ID <= 200 RETURN p.name` dengan indeks ART
-    *   Vector similarity: `MATCH (p:Person) WHERE cosine_similarity(p.embedding, $query) > 0.8 RETURN p.name`
-    *   Stress-test batch `COPY FROM` GB-scale dengan threshold memori rendah (50MB)
-*   **Regression Tests:**
-    *   Semua test yang sudah ada tetap lulus (`cargo test --workspace`)
-    *   Single-writer mode (`SET concurrent_writes = false`) tetap kompatibel
+| Step | File | Perubahan |
+|------|------|-----------|
+| **4.1** | `kuzu-planner/src/planner.rs` | Tambah match arm `BoundStatement::BoundUnion(u)` → plan left query → plan right query → wrap di `LogicalOperator::Union(LogicalUnion { left, right, cardinality })`. |
+| **4.2** | `kuzu-processor/src/processor.rs:270` | Ganti no-op `Union(_) => vec![]` dengan eksekusi: execute left subtree → collect DataChunks → execute right subtree → concat via `ValueVector::append()` per kolom. |
+| **4.3** | Tests | `UNION ALL` dua query identik → row tercatenate; `UNION` distinct → duplicate dihapus; column count mismatch → error. |
 
-### Manual Verification
-*   Validasi kompatibilitas silang platform (Windows, Linux): `cargo build --workspace`
-*   Verifikasi performa memori transien via logging statistik RAM selama batch loading
-*   Perbandingan hasil query ART range scan vs HASH full-scan untuk dataset identik
+---
+
+### FASE 5: Release Workflow (P2 🟡 — ~2-3 jam)
+Menambahkan automation untuk publikasi ke crates.io.
+
+#### Sub-steps:
+
+| Step | File | Perubahan |
+|------|------|-----------|
+| **5.1** | `kuzu-core/Cargo.toml` | Tambah `description`, `keywords`, `categories` ke `[workspace.package]`. Tambah `publish = false` ke internal crate. |
+| **5.2** | `.github/workflows/rust-release.yml` **(NEW)** | Trigger tag push `v*`, jobs: test → `cargo publish` (dependency order), GitHub Release. |
+| **5.3** | `kuzu-core/RELEASE.md` **(NEW)** | Dokumentasi: version numbering, cut a release, dependency order. |
+
+---
+
+### FASE 6: Code Cleanup TODOs (P3 🟢 — ~1 jam)
+Membersihkan 2 TODO comments di `ladybug/tools/rust_api/src/value.rs` (C++ FFI wrapper).
+
+| Step | File | Perubahan |
+|------|------|-----------|
+| **6.1** | `ladybug/tools/rust_api/src/value.rs:247` | Resolve "Enforce type of contents" — tambah validasi atau update comment. |
+| **6.2** | `ladybug/tools/rust_api/src/value.rs:1154` | Tambah test: `RETURN 42` via query equals `Value::Int64(42)` Rust-constructed. |
+
+---
+
+## 5. Verification Plan — Sisa Pekerjaan
+
+### FASE 4: UNION Execution
+*   `UNION ALL`: dua MATCH query identik → row tercatenate
+*   `UNION` (distinct): duplicate dihapus
+*   Column count mismatch → error
+*   Regression: `cargo test --workspace` ✅
+
+### FASE 5: Release Workflow
+*   `cargo publish --dry-run -p kuzu-main` sukses
+*   Workflow trigger via tag push
+*   Crate terpublish di crates.io
+
+### FASE 6: Code Cleanup
+*   `grep -r TODO ladybug/tools/rust_api/src/` — tidak ada hasil
+*   `cargo build -p lbug` — zero warnings
+
+### FASE 3: Disk Spilling
+*   Spill → restore roundtrip: data identik
+*   Multi-way merge 3 spill files → sort order + dedup benar
+*   `COPY FROM` dengan threshold kecil → spilling triggered
+*   Peak memory di bawah threshold selama batch load
+*   Regression: `cargo test --workspace` ✅
