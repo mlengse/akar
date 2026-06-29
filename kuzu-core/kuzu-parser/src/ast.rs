@@ -8,6 +8,7 @@ pub enum Statement {
     CreateRelTable(CreateRelTable),
     DropTable(DropTable),
     CopyFrom(CopyFrom),
+    AlterTable(AlterTable),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -166,6 +167,21 @@ pub struct CreateRelTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropTable {
     pub name: String,
+}
+
+/// ALTER TABLE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterTable {
+    pub table_name: String,
+    pub action: AlterAction,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlterAction {
+    AddColumn { name: String, type_name: String },
+    DropColumn { name: String },
+    RenameColumn { old_name: String, new_name: String },
+    RenameTable { new_name: String },
 }
 
 /// COPY FROM statement — load data from a file into a table.

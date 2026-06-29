@@ -234,6 +234,47 @@ impl Connection {
                     "Table '{}' dropped", t.name
                 ))))
             }
+            BoundStatement::BoundAlterTable(a) => {
+                tracing::info!("ALTER TABLE '{}'", a.table_name);
+                let mut catalog = self.database.catalog.lock().unwrap();
+                match &a.action {
+                    kuzu_parser::ast::AlterAction::AddColumn { name, type_name } => {
+                        let logical_type = kuzu_binder::Binder::parse_type(type_name)
+                            .map_err(|e| format!("ALTER ADD: {e}"))?;
+                        catalog.add_column(&a.table_name, kuzu_catalog::CatalogColumn {
+                            name: name.clone(),
+                            logical_type,
+                            is_primary_key: false,
+                            default_value: None,
+                        }).map_err(|e| format!("ALTER ADD: {e}"))?;
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Column '{}' added to table '{}'", name, a.table_name
+                        ))))
+                    }
+                    kuzu_parser::ast::AlterAction::DropColumn { name } => {
+                        catalog.drop_column(&a.table_name, name)
+                            .map_err(|e| format!("ALTER DROP: {e}"))?;
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Column '{}' dropped from table '{}'", name, a.table_name
+                        ))))
+                    }
+                    kuzu_parser::ast::AlterAction::RenameColumn { old_name, new_name } => {
+                        catalog.rename_column(&a.table_name, old_name, new_name)
+                            .map_err(|e| format!("ALTER RENAME COLUMN: {e}"))?;
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Column '{}' renamed to '{}' in table '{}'",
+                            old_name, new_name, a.table_name
+                        ))))
+                    }
+                    kuzu_parser::ast::AlterAction::RenameTable { new_name } => {
+                        catalog.rename_table(&a.table_name, new_name)
+                            .map_err(|e| format!("ALTER RENAME TABLE: {e}"))?;
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Table '{}' renamed to '{}'", a.table_name, new_name
+                        ))))
+                    }
+                }
+            }
             BoundStatement::BoundCopyFrom(c) => {
                 tracing::info!("COPY FROM '{}' from '{}'", c.table_name, c.file_path);
                 // Fall through to the pipeline (plan → optimize → execute)

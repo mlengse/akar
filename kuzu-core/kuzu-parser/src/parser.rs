@@ -104,6 +104,7 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
             Ok(Statement::DropTable(DropTable { name }))
         }
         Rule::copy_from => parse_copy_from(pair),
+        Rule::alter_table => parse_alter_table(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
 }
@@ -381,6 +382,65 @@ fn unescape_string(s: &str) -> String {
         } else { r.push(c); }
     }
     r
+}
+
+fn parse_alter_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut table_name = String::new();
+    let mut action = None;
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier => {
+                if table_name.is_empty() {
+                    table_name = inner.as_str().to_string();
+                }
+            }
+            Rule::alter_action => {
+                let action_inner = inner.into_inner().next()
+                    .ok_or("Empty alter action")?;
+                action = Some(match action_inner.as_rule() {
+                    Rule::add_column => {
+                        let mut name = String::new();
+                        let mut type_name = String::new();
+                        for part in action_inner.into_inner() {
+                            match part.as_rule() {
+                                Rule::identifier => name = part.as_str().to_string(),
+                                Rule::type_name => type_name = part.as_str().to_string(),
+                                _ => {}
+                            }
+                        }
+                        AlterAction::AddColumn { name, type_name }
+                    }
+                    Rule::drop_column => {
+                        let name = action_inner.into_inner()
+                            .find(|p| p.as_rule() == Rule::identifier)
+                            .map(|p| p.as_str().to_string())
+                            .ok_or("Missing column name in DROP")?;
+                        AlterAction::DropColumn { name }
+                    }
+                    Rule::rename_column => {
+                        let mut parts = action_inner.into_inner()
+                            .filter(|p| p.as_rule() == Rule::identifier);
+                        let old_name = parts.next()
+                            .ok_or("Missing old column name")?.as_str().to_string();
+                        let new_name = parts.next()
+                            .ok_or("Missing new column name")?.as_str().to_string();
+                        AlterAction::RenameColumn { old_name, new_name }
+                    }
+                    Rule::rename_table => {
+                        let new_name = action_inner.into_inner()
+                            .find(|p| p.as_rule() == Rule::identifier)
+                            .map(|p| p.as_str().to_string())
+                            .ok_or("Missing new table name")?;
+                        AlterAction::RenameTable { new_name }
+                    }
+                    _ => return Err(format!("Unknown alter action: {:?}", action_inner.as_rule())),
+                });
+            }
+            _ => {}
+        }
+    }
+    let action = action.ok_or("Missing alter action")?;
+    Ok(Statement::AlterTable(AlterTable { table_name, action }))
 }
 
 fn parse_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {

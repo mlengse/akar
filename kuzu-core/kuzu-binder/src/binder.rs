@@ -24,11 +24,12 @@ impl Binder {
             Statement::CreateRelTable(t) => self.bind_create_rel_table(t),
             Statement::DropTable(t) => self.bind_drop_table(t),
             Statement::CopyFrom(c) => self.bind_copy_from(c),
+            Statement::AlterTable(a) => self.bind_alter_table(a),
         }
     }
 
     /// Map a string type name to LogicalTypeID.
-    fn parse_type(type_name: &str) -> Result<LogicalTypeID, String> {
+    pub fn parse_type(type_name: &str) -> Result<LogicalTypeID, String> {
         match type_name.to_uppercase().as_str() {
             "BOOL" | "BOOLEAN" => Ok(LogicalTypeID::Bool),
             "INT64" => Ok(LogicalTypeID::Int64),
@@ -599,6 +600,49 @@ impl Binder {
             }
         }
         Ok(BoundSetClause { items })
+    }
+
+    fn bind_alter_table(&self, a: kuzu_parser::ast::AlterTable) -> Result<BoundStatement, String> {
+        // Validate table exists and extract column info
+        let col_names: Vec<String> = {
+            let catalog = self.catalog.lock().unwrap();
+            let entry = catalog
+                .get_entry_by_name(&a.table_name)
+                .ok_or_else(|| format!("Table '{}' not found", a.table_name))?;
+            entry.columns().iter().map(|c| c.name.clone()).collect()
+        };
+
+        fn has_name(col_names: &[String], name: &str) -> bool {
+            col_names.iter().any(|c| c.eq_ignore_ascii_case(name))
+        }
+
+        // Validate alter action
+        match &a.action {
+            kuzu_parser::ast::AlterAction::AddColumn { name: _, type_name } => {
+                Self::parse_type(type_name)?;
+            }
+            kuzu_parser::ast::AlterAction::DropColumn { name } => {
+                if !has_name(&col_names, name) {
+                    return Err(format!("Column '{name}' not found in table '{}'", a.table_name));
+                }
+            }
+            kuzu_parser::ast::AlterAction::RenameColumn { old_name, new_name } => {
+                if !has_name(&col_names, old_name) {
+                    return Err(format!("Column '{old_name}' not found in table '{}'", a.table_name));
+                }
+                if has_name(&col_names, new_name) {
+                    return Err(format!("Column '{new_name}' already exists in table '{}'", a.table_name));
+                }
+            }
+            kuzu_parser::ast::AlterAction::RenameTable { new_name: _ } => {
+                // Rename table duplicate check happens at execution time in the catalog
+            }
+        }
+
+        Ok(BoundStatement::BoundAlterTable(BoundAlterTable {
+            table_name: a.table_name,
+            action: a.action,
+        }))
     }
 
     fn bind_delete(

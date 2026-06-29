@@ -193,6 +193,100 @@ impl Catalog {
         self.name_to_id.get(name).and_then(|id| self.entries.get(id))
     }
 
+    /// Get a mutable catalog entry by table name.
+    pub fn get_entry_by_name_mut(&mut self, name: &str) -> Option<&mut CatalogEntry> {
+        let id = self.name_to_id.get(name).copied()?;
+        self.entries.get_mut(&id)
+    }
+
+    /// Add a column to a table in the catalog.
+    pub fn add_column(&mut self, table_name: &str, column: CatalogColumn) -> Result<(), String> {
+        let entry = self.get_entry_by_name_mut(table_name)
+            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+        match entry {
+            CatalogEntry::NodeTable(t) => {
+                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
+                    return Err(format!("Column '{}' already exists", column.name));
+                }
+                t.columns.push(column);
+                Ok(())
+            }
+            CatalogEntry::RelTable(t) => {
+                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
+                    return Err(format!("Column '{}' already exists", column.name));
+                }
+                t.columns.push(column);
+                Ok(())
+            }
+        }
+    }
+
+    /// Drop a column from a table in the catalog.
+    pub fn drop_column(&mut self, table_name: &str, column_name: &str) -> Result<(), String> {
+        let entry = self.get_entry_by_name_mut(table_name)
+            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+        match entry {
+            CatalogEntry::NodeTable(t) => {
+                let pos = t.columns.iter().position(|c| c.name == column_name)
+                    .ok_or_else(|| format!("Column '{column_name}' not found"))?;
+                t.columns.remove(pos);
+                Ok(())
+            }
+            CatalogEntry::RelTable(t) => {
+                let pos = t.columns.iter().position(|c| c.name == column_name)
+                    .ok_or_else(|| format!("Column '{column_name}' not found"))?;
+                t.columns.remove(pos);
+                Ok(())
+            }
+        }
+    }
+
+    /// Rename a column in a table in the catalog.
+    pub fn rename_column(&mut self, table_name: &str, old_name: &str, new_name: &str) -> Result<(), String> {
+        // Check for duplicates before the mutable borrow
+        let cols = self.get_entry_by_name(table_name)
+            .ok_or_else(|| format!("Table '{table_name}' not found"))?
+            .columns().to_vec();
+        if !cols.iter().any(|c| c.name == old_name) {
+            return Err(format!("Column '{old_name}' not found"));
+        }
+        if cols.iter().any(|c| c.name == new_name) {
+            return Err(format!("Column '{new_name}' already exists"));
+        }
+        drop(cols);
+
+        let entry = self.get_entry_by_name_mut(table_name).unwrap();
+        match entry {
+            CatalogEntry::NodeTable(t) => {
+                let col = t.columns.iter_mut().find(|c| c.name == old_name).unwrap();
+                col.name = new_name.to_string();
+                Ok(())
+            }
+            CatalogEntry::RelTable(t) => {
+                let col = t.columns.iter_mut().find(|c| c.name == old_name).unwrap();
+                col.name = new_name.to_string();
+                Ok(())
+            }
+        }
+    }
+
+    /// Rename a table in the catalog.
+    pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+        let id = self.name_to_id.get(old_name).copied()
+            .ok_or_else(|| format!("Table '{old_name}' not found"))?;
+        if self.name_to_id.contains_key(new_name) {
+            return Err(format!("Table '{new_name}' already exists"));
+        }
+        match self.entries.get_mut(&id) {
+            Some(CatalogEntry::NodeTable(t)) => t.name = new_name.to_string(),
+            Some(CatalogEntry::RelTable(t)) => t.name = new_name.to_string(),
+            None => return Err("Table not found".into()),
+        }
+        self.name_to_id.remove(old_name);
+        self.name_to_id.insert(new_name.to_string(), id);
+        Ok(())
+    }
+
     /// Get table ID by name.
     pub fn get_table_id(&self, name: &str) -> Option<u64> {
         self.name_to_id.get(name).copied()

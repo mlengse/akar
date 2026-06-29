@@ -8,11 +8,24 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 statement = { ddl_statement | query_statement }
 
+alter_table = { "ALTER" ~ "TABLE" ~ identifier ~ alter_action }
+alter_action = {
+    add_column
+    | drop_column
+    | rename_column
+    | rename_table
+}
+add_column = { "ADD" ~ identifier ~ type_name }
+drop_column = { "DROP" ~ identifier }
+rename_column = { "RENAME" ~ identifier ~ "TO" ~ identifier }
+rename_table = { "RENAME" ~ "TO" ~ identifier }
+
 ddl_statement = {
     create_node_table
     | create_rel_table
     | drop_table
     | copy_from
+    | alter_table
 }
 
 // ==================== COPY FROM ====================

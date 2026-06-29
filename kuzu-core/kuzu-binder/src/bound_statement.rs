@@ -12,6 +12,7 @@ pub enum BoundStatement {
     BoundCreateRelTable(BoundCreateRelTable),
     BoundDropTable(BoundDropTable),
     BoundCopyFrom(BoundCopyFrom),
+    BoundAlterTable(BoundAlterTable),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -133,4 +134,10 @@ pub struct BoundCreateRelTable {
 #[derive(Debug, Clone)]
 pub struct BoundDropTable {
     pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundAlterTable {
+    pub table_name: String,
+    pub action: kuzu_parser::ast::AlterAction,
 }
