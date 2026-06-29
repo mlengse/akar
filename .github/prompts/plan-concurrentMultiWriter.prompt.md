@@ -1,5 +1,12 @@
 # Plan: Concurrent Multi-Writer Transaction Model (Full Scope)
 
+> **STATUS: ✅ SELESAI — 2026-06-30**
+> Semua Phase A (A1-A9), Phase B (B1-B8), dan Phase C (C1-C5) telah diimplementasikan.
+> Lihat `kuzu-transaction/src/lib.rs`, `kuzu-storage/src/`, dan `kuzu-main/src/connection.rs`.
+> Perubahan utama: `TransactionManager` dengan checkpoint drain, `Connection::query()` dengan txn lifecycle,
+> MVCC version chains, LocalWAL, DashMap TableCatalog, background auto-checkpoint worker.
+> Test: `cargo test --workspace` ✅ (300+ tests), `cargo clippy --workspace` ✅.
+
 ## TL;DR
 
 Refactor Kuzu Core Rust from **Single-Writer Constraint** (`max_concurrent_writers: 1` with fail-fast) to **Concurrent Multi-Writer** matching the Vela Partners C++ fork. All FASE 1-3 in one cycle. Default mode: **`concurrent_writes=true`** (unlimited writers). Uses **`dashmap`** for lock-free TableCatalog reads, per-transaction `LocalWAL`, MVCC version chains on `ColumnChunk`, and two-phase checkpoint drain.

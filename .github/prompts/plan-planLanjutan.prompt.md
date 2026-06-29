@@ -1,24 +1,29 @@
-# Plan: Lanjutan — Mengatasi Gaps vs Original Plan
+# Plan: Lanjutan — Mengatasi Gaps vs Original Plan (ARSIP)
+
+> **STATUS: Sebagian besar sudah selesai.** Dokumen ini adalah arsip dari fase awal proyek.
+> Update terakhir: 2026-06-30 — Concurrent Multi-Writer (Phase A-C) + semua Fase 15-20 sudah selesai.
+> Lihat `implementation_plan.md` untuk rencana terkini.
 
 **TL;DR:** 7 fase tambahan untuk menutup semua gap yang tersisa dari rencana refaktor original. Pendekatan incremental: setiap fase selesai → test dulu sebelum lanjut.
 
 ---
 
-## Gap Summary
+## Gap Summary (Status Terkini)
 
 | # | Gap | Severity | Status Sekarang |
 |---|-----|----------|-----------------|
-| 1 | PreparedStatement | 🟡 Medium | Belum ada |
-| 2 | Join Order Enumeration | 🔴 Critical | Flat list, no join tree |
-| 3 | Optimizer Passes | 🟡 Medium | 5/8 passes masih stub |
-| 4 | Physical Operators | 🟡 Medium | HashJoin placeholder |
-| 5 | Extensions (12 remaining) | 🟢 Low | Hanya JSON + FTS |
-| 6 | tools/rust_api Integration | 🟡 Medium | Masih C++ FFI |
-| 7 | CI/CD | 🟢 Low | Belum ada Rust CI |
+| 1 | PreparedStatement | 🟡 Medium | ✅ **Selesai** (`prepare()` + `execute()` + cache) |
+| 2 | Join Order Enumeration | 🔴 Critical | ✅ **Selesai** (greedy join ordering + tree-based) |
+| 3 | Optimizer Passes | 🟡 Medium | ✅ **Selesai** (9 passes: FilterPushDown, ProjectionPushDown, ConstantFolding, JoinOpt, TopK, FactorizationRewriting, CardinalityEstimation, RemoveUnnecessary, AggregateDetection) |
+| 4 | Physical Operators | 🟡 Medium | ✅ **Selesai** (16 operators: Scan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin generalized, Unwind, CopyFrom, Merge, Foreach, OptionalMatch, Delete, Set) |
+| 5 | Extensions (12 remaining) | 🟢 Low | ✅ **Selesai** (15 crates: JSON, FTS, Vector, HTTPFS, DuckDB, ALGO, NEO4J, LLM, SQLite, Delta, Iceberg, Azure, Postgres, UnityCatalog) |
+| 6 | tools/rust_api Integration | 🟡 Medium | ✅ **Selesai** (dual-mode: pure Rust `kuzu-main` default) |
+| 7 | CI/CD | 🟢 Low | ❌ **Masih pending** (D1-D4) |
+| **NEW** | Concurrent Multi-Writer | 🔴 Critical | ✅ **Selesai** (dashmap + LocalWAL + MVCC + checkpoint drain) |
 
 ---
 
-## Fase 15: PreparedStatement
+## Fase 15: PreparedStatement ✅
 
 **Tujuan:** Parameterized query support — `prepare()` + `execute()` dengan binding parameter.
 
@@ -40,7 +45,7 @@
 
 ---
 
-## Fase 16: Join Order Enumeration (Planner Deepening)
+## Fase 16: Join Order Enumeration (Planner Deepening) ✅
 
 **Tujuan:** Mengganti flat list planner dengan tree-based join planning.
 
@@ -64,7 +69,7 @@
 
 ---
 
-## Fase 17: Optimizer Passes Deepening
+## Fase 17: Optimizer Passes Deepening ✅
 
 **Tujuan:** Fix semua 5 stub passes + tambah passes yang hilang.
 
@@ -87,7 +92,7 @@
 
 ---
 
-## Fase 18: Physical Operator Deepening
+## Fase 18: Physical Operator Deepening ✅
 
 **Tujuan:** Implementasi physical operator yang lengkap.
 
@@ -110,7 +115,7 @@
 
 ---
 
-## Fase 19: More Extensions
+## Fase 19: More Extensions ✅
 
 **Tujuan:** Port extension C++ ke Rust, prioritas berdasarkan popularity/kegunaan.
 
@@ -133,7 +138,7 @@
 
 ---
 
-## Fase 20: tools/rust_api Integration
+## Fase 20: tools/rust_api Integration ✅
 
 **Tujuan:** Ganti C++ FFI di `tools/rust_api/` dengan panggilan langsung ke `kuzu-core`.
 
@@ -157,7 +162,7 @@
 
 ---
 
-## Fase 21: CI/CD & Finalization
+## Fase 21: CI/CD & Finalization ❌ (Masih Pending)
 
 **Tujuan:** GitHub Actions untuk Rust build + test + release.
 
