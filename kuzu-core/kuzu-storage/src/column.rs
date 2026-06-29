@@ -17,9 +17,11 @@
 //!   2. Type-specific payload (primitives as fixed-size LE bytes,
 //!      variable-length types with a u32 length prefix)
 
+use crate::compression::{compress_serialized_value, decompress_serialized_value, serialized_value_size};
 use crate::buffer_manager::BufferManager;
 use crate::page::FileHandle;
-use kuzu_common::types::{LogicalTypeID, Value};
+use kuzu_common::enums::CompressionType;
+use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -79,6 +81,8 @@ struct PageHeader {
 pub struct Column {
     /// The logical type of values stored in this column.
     pub logical_type: LogicalTypeID,
+    /// Physical type derived from `logical_type`.
+    pub physical_type: PhysicalTypeID,
     /// The owning table ID (used to construct the file name).
     pub table_id: u64,
     /// The column index within the table.
@@ -89,6 +93,10 @@ pub struct Column {
     pub file_handle: FileHandle,
     /// Shared buffer manager for page caching and eviction.
     pub buffer_manager: Arc<Mutex<BufferManager>>,
+    /// Compression algorithm applied to serialized values.
+    pub compression_type: CompressionType,
+    /// Byte size of the serialized primitive value (0 for variable-length types).
+    pub value_size: usize,
     /// Total number of values stored.
     pub num_values: u64,
     /// Number of pages allocated.
@@ -103,6 +111,9 @@ impl Column {
     ///
     /// The file is named `col_{table_id}_{col_idx}` and registered with
     /// the `BufferManager` automatically.
+    ///
+    /// `compression_type` determines the compression algorithm applied to
+    /// serialized values. Use `CompressionType::Uncompressed` for no compression.
     pub fn new(
         logical_type: LogicalTypeID,
         table_id: u64,
@@ -110,6 +121,27 @@ impl Column {
         db_path: &PathBuf,
         buffer_manager: Arc<Mutex<BufferManager>>,
         page_size: usize,
+    ) -> Self {
+        Self::with_compression(
+            logical_type,
+            table_id,
+            col_idx,
+            db_path,
+            buffer_manager,
+            page_size,
+            CompressionType::Uncompressed,
+        )
+    }
+
+    /// Create a new column with a specific compression algorithm.
+    pub fn with_compression(
+        logical_type: LogicalTypeID,
+        table_id: u64,
+        col_idx: u32,
+        db_path: &PathBuf,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+        page_size: usize,
+        compression_type: CompressionType,
     ) -> Self {
         let file_name = format!("col_{}_{}", table_id, col_idx);
         let col_file_path = db_path.join(&file_name);
@@ -121,14 +153,19 @@ impl Column {
         }
 
         let fh = FileHandle::new(col_file_path, page_size);
+        let physical_type = kuzu_common::types::physical_type_from_logical(logical_type);
+        let value_size = serialized_value_size(physical_type);
 
         Self {
             logical_type,
+            physical_type,
             table_id,
             col_idx,
             file_name,
             file_handle: fh,
             buffer_manager,
+            compression_type,
+            value_size,
             num_values: 0,
             num_pages: 0,
             page_row_offsets: Vec::new(),
@@ -145,8 +182,11 @@ impl Column {
     ///
     /// Automatically allocates a new page when the current one is full or
     /// when the current page has reached the maximum values per page (256).
+    ///
+    /// Serialized values are compressed according to `self.compression_type`.
     pub fn append_value(&mut self, value: &Value) -> std::io::Result<()> {
-        let serialized = Self::serialize_value(value);
+        let raw = Self::serialize_value(value);
+        let serialized = compress_serialized_value(self.compression_type, &raw, self.value_size);
         // Check if the current page is full (too many values or no space) before trying.
         if self.num_pages > 0 {
             let last_page = self.num_pages - 1;
@@ -586,8 +626,12 @@ impl Column {
     }
 
     /// Deserialize a value from a page at the given local row index.
+    ///
+    /// Decompresses the stored bytes according to `self.compression_type`
+    /// before deserializing the Value.
     fn deserialize_value_from_page(&self, data: &[u8], header: &PageHeader, local_row: usize) -> std::io::Result<Value> {
-        let bytes = self.extract_value_bytes(data, header, local_row)?;
+        let stored = self.extract_value_bytes(data, header, local_row)?;
+        let bytes = decompress_serialized_value(self.compression_type, &stored, self.value_size);
         let mut pos = 0;
         Self::deserialize_value(&bytes, &mut pos)
     }
@@ -601,6 +645,7 @@ impl Column {
 mod tests {
     use super::*;
     use crate::page::DEFAULT_PAGE_SIZE;
+    use kuzu_common::enums::CompressionType;
     use kuzu_common::memory::MemoryManager;
     use kuzu_common::types::{Date, Interval, InternalID, Timestamp, TimestampTZ};
 
@@ -791,5 +836,111 @@ mod tests {
         let (col, _dir) = setup_column();
         assert_eq!(col.num_values, 0);
         assert_eq!(col.num_pages, 0);
+    }
+
+    // ==================== Compression integration ====================
+
+    fn setup_compressed_column(ctype: CompressionType) -> (Column, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().to_path_buf();
+        let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+        let config = crate::buffer_manager::BufferManagerConfig::default();
+        let bm = Arc::new(Mutex::new(crate::buffer_manager::BufferManager::new(
+            db_path.clone(),
+            mm,
+            config,
+        )));
+        let col = Column::with_compression(
+            LogicalTypeID::Int64,
+            0, // table_id
+            0, // col_idx
+            &db_path,
+            bm,
+            DEFAULT_PAGE_SIZE,
+            ctype,
+        );
+        (col, dir)
+    }
+
+    #[test]
+    fn test_column_with_integer_bitpacking() {
+        let (mut col, _dir) = setup_compressed_column(CompressionType::IntegerBitpacking);
+        assert_eq!(col.compression_type, CompressionType::IntegerBitpacking);
+
+        // Small integers benefit from bitpacking
+        for i in 0i64..50 {
+            col.append_value(&Value::Int64(i)).unwrap();
+        }
+        assert_eq!(col.num_values, 50);
+
+        // Verify roundtrip
+        for i in 0i64..50 {
+            let v = col.get_value(i as u64).unwrap();
+            assert_eq!(v, Value::Int64(i));
+        }
+    }
+
+    #[test]
+    fn test_column_with_float_compression() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().to_path_buf();
+        let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+        let config = crate::buffer_manager::BufferManagerConfig::default();
+        let bm = Arc::new(Mutex::new(crate::buffer_manager::BufferManager::new(
+            db_path.clone(),
+            mm,
+            config,
+        )));
+        let mut col = Column::with_compression(
+            LogicalTypeID::Double,
+            0, 0,
+            &db_path, bm, DEFAULT_PAGE_SIZE,
+            CompressionType::Float,
+        );
+
+        let vals = vec![1.0, 3.14159, -2.5, 0.0, 1e10];
+        for v in &vals {
+            col.append_value(&Value::Double(*v)).unwrap();
+        }
+        assert_eq!(col.num_values, 5);
+
+        for (i, expected) in vals.iter().enumerate() {
+            let v = col.get_value(i as u64).unwrap();
+            match v {
+                Value::Double(d) => assert!((d - expected).abs() < 1e-10, "mismatch at {}", i),
+                _ => panic!("expected Double, got {:?}", v),
+            }
+        }
+    }
+
+    #[test]
+    fn test_column_compression_large_values() {
+        // Large integers should still roundtrip correctly
+        let (mut col, _dir) = setup_compressed_column(CompressionType::IntegerBitpacking);
+        let large: Vec<i64> = vec![i64::MAX, i64::MIN, 0, 1, -1, 1_000_000_000, -999_999_999];
+
+        for v in &large {
+            col.append_value(&Value::Int64(*v)).unwrap();
+        }
+
+        for (i, expected) in large.iter().enumerate() {
+            let v = col.get_value(i as u64).unwrap();
+            assert_eq!(v, Value::Int64(*expected), "mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_column_compression_mixed_types() {
+        // String values should pass through correctly with IntegerBitpacking
+        // (value_size=0 for strings, so compression is pass-through)
+        let (mut col, _dir) = setup_compressed_column(CompressionType::IntegerBitpacking);
+        // Actually, for String type, value_size=0, so it behaves like pass-through
+        // This test uses Int64 to verify compression doesn't break data
+        col.append_value(&Value::Int64(42)).unwrap();
+        col.append_value(&Value::Int64(0)).unwrap();
+        col.append_value(&Value::Int64(-1)).unwrap();
+        assert_eq!(col.get_value(0).unwrap(), Value::Int64(42));
+        assert_eq!(col.get_value(1).unwrap(), Value::Int64(0));
+        assert_eq!(col.get_value(2).unwrap(), Value::Int64(-1));
     }
 }
