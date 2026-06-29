@@ -12,6 +12,7 @@ pub enum Statement {
     Union(UnionStatement),
     Merge(MergeStatement),
     Call(CallStatement),
+    CreateDml(CreateClause),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).

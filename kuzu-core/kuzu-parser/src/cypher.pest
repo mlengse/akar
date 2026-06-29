@@ -6,7 +6,9 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // ==================== Top Level ====================
 
-statement = { call_statement | union_statement | ddl_statement | query_statement }
+statement = { call_statement | union_statement | ddl_statement | create_dml_statement | query_statement }
+
+create_dml_statement = { "CREATE" ~ pattern ~ return_clause? }
 call_statement = { call_clause ~ return_clause? }
 union_statement = { query_statement ~ ("UNION" ~ "ALL"?) ~ query_statement }
 

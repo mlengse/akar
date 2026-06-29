@@ -27,6 +27,11 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
             let ddl_inner = inner.into_inner().next().ok_or("Empty DDL")?;
             parse_ddl(ddl_inner)
         }
+        Rule::create_dml_statement => {
+            let inner_clone = inner.clone();
+            let patterns = parse_patterns(inner_clone)?;
+            Ok(Statement::CreateDml(CreateClause { patterns }))
+        }
         Rule::query_statement => {
             let inner_clone = inner.clone();
             let child_rules: Vec<_> = inner_clone.into_inner().map(|c| c.as_rule()).collect();

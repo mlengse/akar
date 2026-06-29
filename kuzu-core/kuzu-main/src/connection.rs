@@ -351,6 +351,37 @@ impl Connection {
                 // Fall through to the pipeline (plan → optimize → execute)
                 Ok(None)
             }
+            BoundStatement::BoundCreateDml(c) => {
+                tracing::info!("CREATE DML into '{}'", c.table_name);
+
+                let cat_arc = self.database.storage_manager.table_catalog();
+                let mut catalog = cat_arc.lock().unwrap();
+                let table = catalog
+                    .get_node_table_by_name_mut(&c.table_name)
+                    .ok_or_else(|| format!("Table '{}' not found in storage", c.table_name))?;
+
+                // Build values from pattern properties, defaulting to Null
+                let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
+                for (prop_name, expr) in &c.properties {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                        if let kuzu_parser::ast::Expression::Constant(con) = expr {
+                            values[col_idx] = ast_constant_to_value(con);
+                        }
+                    }
+                }
+
+                // Drop catalog lock before insert_row (which takes its own lock)
+                let _ = table;
+                drop(catalog);
+                let cat2 = self.database.storage_manager.table_catalog();
+                let mut cat2 = cat2.lock().unwrap();
+                if let Some(t) = cat2.get_node_table_by_name_mut(&c.table_name) {
+                    t.insert_row(values)?;
+                }
+                Ok(Some(QueryResult::success_message(format!(
+                    "Created node in '{}'", c.table_name
+                ))))
+            }
             BoundStatement::BoundMerge(m) => {
                 tracing::info!("MERGE into '{}'", m.table_name);
 
@@ -1292,6 +1323,143 @@ mod call_tests {
         let (_dir, _db, conn) = setup_db();
         let result = exec_ok(&conn, "CALL tables()");
         assert!(result.is_ok(), "CALL tables() should succeed: {:?}", result);
+    }
+}
+
+// =========================================================================
+// CREATE DML Tests — `CREATE (n:Label {props})`
+// =========================================================================
+
+#[cfg(test)]
+mod create_dml_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
+        let result = conn.query(sql).unwrap();
+        result
+            .chunks
+            .iter()
+            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .collect()
+    }
+
+    #[test]
+    fn test_create_dml_basic() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // CREATE a node with properties
+        let result = exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})");
+        assert!(result.is_ok(), "CREATE DML should succeed: {:?}", result);
+
+        // Verify the node was created
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 1, "Should have 1 node");
+        assert_eq!(names[0], Value::String("Alice".into()));
+    }
+
+    #[test]
+    fn test_create_dml_multiple_nodes() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // Create multiple nodes sequentially
+        exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+        exec_ok(&conn, "CREATE (n:Person {name: 'Bob', age: 25})").unwrap();
+        exec_ok(&conn, "CREATE (n:Person {name: 'Charlie', age: 35})").unwrap();
+
+        // Verify all nodes were created
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name ORDER BY n.name");
+        assert_eq!(names.len(), 3, "Should have 3 nodes");
+        assert_eq!(names[0], Value::String("Alice".into()));
+        assert_eq!(names[1], Value::String("Bob".into()));
+        assert_eq!(names[2], Value::String("Charlie".into()));
+    }
+
+    #[test]
+    fn test_create_dml_nonexistent_table() {
+        let (_dir, _db, conn) = setup_db();
+
+        let result = exec_ok(&conn, "CREATE (n:NoSuchTable {name: 'x'})");
+        assert!(result.is_err(), "CREATE into non-existent table should fail");
+    }
+
+    #[test]
+    fn test_create_dml_without_variable() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
+
+        // CREATE without a variable name
+        let result = exec_ok(&conn, "CREATE (:City {name: 'Jakarta'})");
+        assert!(result.is_ok(), "CREATE without variable should succeed: {:?}", result);
+
+        let names = query_column(&conn, "MATCH (n:City) RETURN n.name");
+        assert_eq!(names.len(), 1, "Should have 1 city");
+        assert_eq!(names[0], Value::String("Jakarta".into()));
+    }
+
+    #[test]
+    fn test_create_dml_verify_via_match() {
+        let (_dir, _db, conn) = setup_db();
+
+        // Use name as the first column (PK) since RETURN expression mapping
+        // uses column index 0 for the first projected expression
+        exec_ok(&conn, "CREATE NODE TABLE Product(name STRING, id INT64, price INT64, PRIMARY KEY (name))").unwrap();
+
+        // CREATE with various property types
+        exec_ok(&conn, "CREATE (p:Product {name: 'Laptop', id: 1, price: 999})").unwrap();
+        exec_ok(&conn, "CREATE (p:Product {name: 'Mouse', id: 2, price: 25})").unwrap();
+
+        // Verify via MATCH
+        let names = query_column(&conn, "MATCH (p:Product) RETURN p.name");
+        assert_eq!(names.len(), 2, "Should have 2 products");
+        assert_eq!(names[0], Value::String("Laptop".into()));
+        assert_eq!(names[1], Value::String("Mouse".into()));
+    }
+
+    #[test]
+    fn test_create_dml_empty_properties() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // CREATE with no properties (all fields default to null)
+        let result = exec_ok(&conn, "CREATE (n:Person {name: 'NullTest', age: 99})");
+        assert!(result.is_ok(), "CREATE with properties should succeed: {:?}", result);
+
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn test_create_dml_duplicate_pk_fails() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+
+        // Creating a node with a duplicate PK should fail
+        let result = exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 40})");
+        assert!(result.is_err(), "Duplicate PK should fail");
     }
 }
 

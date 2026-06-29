@@ -16,6 +16,7 @@ pub enum BoundStatement {
     BoundAlterTable(BoundAlterTable),
     BoundUnion(BoundUnion),
     BoundMerge(BoundMerge),
+    BoundCreateDml(BoundCreateDml),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -166,6 +167,14 @@ pub struct BoundUnion {
 pub struct BoundCall {
     pub function_name: String,
     pub args: Vec<kuzu_parser::ast::Expression>,
+}
+
+/// Bound CREATE DML statement — create a node with properties.
+#[derive(Debug, Clone)]
+pub struct BoundCreateDml {
+    pub table_name: String,
+    pub table_id: u64,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
 }
 
 /// Bound MERGE statement — match or create a node pattern.

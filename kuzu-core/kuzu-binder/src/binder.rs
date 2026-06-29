@@ -79,6 +79,7 @@ impl Binder {
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
             Statement::Call(c) => self.bind_call(c),
+            Statement::CreateDml(c) => self.bind_create_dml(c),
         }
     }
 
@@ -725,6 +726,25 @@ impl Binder {
             properties,
             on_create,
             on_match,
+        }))
+    }
+
+    fn bind_create_dml(&self, c: kuzu_parser::ast::CreateClause) -> Result<BoundStatement, String> {
+        let node = c.patterns.first().and_then(|p| p.node.as_ref()).ok_or("CREATE DML requires a node pattern")?;
+        let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
+
+        let catalog = self.catalog.lock().unwrap();
+        let entry = catalog
+            .get_entry_by_name(label)
+            .ok_or_else(|| format!("Table '{label}' not found"))?;
+
+        let table_id = entry.table_id();
+        let table_name = label.clone();
+
+        Ok(BoundStatement::BoundCreateDml(BoundCreateDml {
+            table_name,
+            table_id,
+            properties: node.properties.clone(),
         }))
     }
 

@@ -112,10 +112,14 @@ A5 parallel dengan A1-A4
 - Digunakan untuk table functions (e.g., `CALL page_rank(...)`)
 - **Planner/Processor**: Map CALL ke table function lookup di registry → execute sebagai Scan
 
-### B3. DML `CREATE (n:Label {props})` — tanpa table definition
-- **Saat ini**: `CREATE NODE TABLE` (DDL) ada, tapi `CREATE (n:Person {name: 'Bob'})` (DML) belum.
-- **Grammar**: `create_clause → { "CREATE" ~ pattern }` — perlu di-extend
-- **Processor**: `PhysicalCreate` — insert node/rel ke table yang sudah ada
+### B3. DML `CREATE (n:Label {props})` — tanpa table definition ✅
+- **Saat ini**: `CREATE (n:Person {name: 'Bob'})` (DML) sudah berfungsi.
+- **Grammar**: `create_dml_statement = { "CREATE" ~ pattern ~ return_clause? }` ditambahkan sebagai alternatif di `statement`
+- **Parser**: `parse_statement` menangani `Rule::create_dml_statement` → `Statement::CreateDml(CreateClause)`
+- **Binder**: `bind_create_dml` → `BoundStatement::BoundCreateDml(BoundCreateDml { table_name, table_id, properties })`
+- **Connection**: `handle_ddl` → `BoundCreateDml` — insert row ke node table
+- **Tests**: 7 test cases (basic, multiple, without variable, nonexistent table, duplicate PK, empty properties, verify via MATCH)
+- **Catatan**: `999.99` float literal masih belum support di grammar (integer `999` digunakan sebagai gantinya)
 
 ### B4. `FOREACH` & Variable-length Path Patterns
 - `FOREACH (var IN list | ...)` — loop over list elements
