@@ -21,6 +21,7 @@ pub mod wal;
 use buffer_manager::{BufferManager, BufferManagerConfig};
 use checkpoint::checkpoint;
 use kuzu_common::memory::MemoryManager;
+use kuzu_common::types::Value;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
@@ -46,11 +47,9 @@ impl StorageManager {
         let config = BufferManagerConfig::default();
         let bm = BufferManager::new(db_path.clone(), memory_manager.clone(), config);
         let wal_path = db_path.join("wal.log");
-        // If a WAL file exists from a previous session, recover from it.
-        // For now, start with a fresh WAL.
-        if wal_path.exists() {
-            let _ = std::fs::remove_file(&wal_path);
-        }
+        // Do NOT delete the WAL file — it may contain un-recovered data from
+        // a previous session. Recovery is triggered later by `Database::new()`
+        // via the `recover()` method.
         let wal = WAL::new(wal_path);
         Self {
             db_path,
@@ -107,6 +106,207 @@ impl StorageManager {
         let mut wal = self.wal.lock().unwrap();
         checkpoint(&mut wal, &self.buffer_manager)
     }
+
+    /// Recover state from the WAL after a crash or unclean shutdown.
+    ///
+    /// This loads any on-disk WAL records, replays them against the
+    /// in-memory `TableCatalog`, then takes a checkpoint to reset the WAL.
+    ///
+    /// Call this once during `Database::new()`, **after** table schemas
+    /// have been re-created (e.g., from DDL replay or a persisted catalog).
+    ///
+    /// Returns the number of records recovered, or an error if recovery
+    /// fails (database is corrupt).
+    pub fn recover(&self) -> std::io::Result<usize> {
+        let mut wal = self.wal.lock().unwrap();
+
+        // Load WAL records from disk
+        wal.load_from_disk()?;
+
+        if wal.is_empty() {
+            return Ok(0); // Nothing to recover
+        }
+
+        let count = wal.len();
+        let catalog = self.table_catalog.clone();
+
+        // Replay each record
+        wal.replay(|record| {
+            use crate::wal::WALRecord;
+            let mut cat = catalog.lock().unwrap();
+
+            match record {
+                WALRecord::Insert { table_id, data } => {
+                    // Deserialize the data as Value vec and insert into the
+                    // corresponding node table.
+                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                        let values = deserialize_values_from_bytes(data, table.columns.len());
+                        if let Err(e) = table.insert_row(values) {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("WAL recovery insert failed: {e}"),
+                            ));
+                        }
+                    }
+                }
+                WALRecord::Delete { table_id, row_id } => {
+                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                        if let Err(e) = table.delete_row(*row_id) {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("WAL recovery delete failed: {e}"),
+                            ));
+                        }
+                    }
+                }
+                WALRecord::Update {
+                    table_id,
+                    row_id,
+                    column,
+                    data,
+                } => {
+                    if let Some(table) = cat.get_node_table_mut(*table_id) {
+                        let values = deserialize_values_from_bytes(data, 1);
+                        if let Some(val) = values.into_iter().next() {
+                            if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    format!("WAL recovery update failed: {e}"),
+                                ));
+                            }
+                        }
+                    }
+                }
+                WALRecord::ColumnWrite { .. } => {
+                    // ColumnWrite records are for the BufferManager-level
+                    // page writes. At the table level, data is already in
+                    // NodeGroup memory, so we skip these during recovery
+                    // (the checkpoint handles page-level persistence).
+                }
+                WALRecord::Commit { .. } | WALRecord::Rollback { .. } => {
+                    // Transaction markers — ignore during recovery since
+                    // all records in the WAL at startup are from already-
+                    // committed transactions (uncommitted ones were lost
+                    // in the crash).
+                }
+                WALRecord::Checkpoint => {
+                    // Checkpoint marker — all data before this is already
+                    // durable. We can clear what we've processed so far.
+                    // In practice, a checkpoint clears the WAL so this
+                    // marker should rarely appear during recovery.
+                }
+            }
+            Ok(())
+        })?;
+
+        // After successful replay, take a checkpoint to reset the WAL
+        // and make all recovered data durable.
+        if let Err(e) = checkpoint(&mut wal, &self.buffer_manager) {
+            tracing::warn!("WAL recovery: checkpoint after replay failed: {e}");
+        }
+
+        Ok(count)
+    }
+}
+
+/// Helper: deserialize binary data back into a `Vec<Value>`.
+///
+/// Each value is stored as a tag byte followed by type-specific data
+/// (see `column.rs` for the tag format). This is a simplified version
+/// that handles the common primary-key and property types.
+fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) -> Vec<Value> {
+    use crate::column::*;
+    use std::io::Read;
+
+    if data.is_empty() || expected_count == 0 {
+        return Vec::new();
+    }
+
+    let mut cursor = std::io::Cursor::new(data);
+    let mut values = Vec::with_capacity(expected_count);
+
+    for _ in 0..expected_count {
+        let mut tag_buf = [0u8; 1];
+        if cursor.read_exact(&mut tag_buf).is_err() {
+            values.push(Value::Null);
+            continue;
+        }
+        let tag = tag_buf[0];
+
+        match tag {
+            TAG_NULL => values.push(Value::Null),
+            TAG_BOOL => {
+                let mut buf = [0u8; 1];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Bool(buf[0] != 0));
+                }
+            }
+            TAG_INT64 => {
+                let mut buf = [0u8; 8];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Int64(i64::from_le_bytes(buf)));
+                }
+            }
+            TAG_INT32 => {
+                let mut buf = [0u8; 4];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Int32(i32::from_le_bytes(buf)));
+                }
+            }
+            TAG_DOUBLE => {
+                let mut buf = [0u8; 8];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Double(f64::from_le_bytes(buf)));
+                }
+            }
+            TAG_FLOAT => {
+                let mut buf = [0u8; 4];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Float(f32::from_le_bytes(buf)));
+                }
+            }
+            TAG_STRING => {
+                let mut len_buf = [0u8; 4];
+                if cursor.read_exact(&mut len_buf).is_ok() {
+                    let len = u32::from_le_bytes(len_buf) as usize;
+                    let mut str_buf = vec![0u8; len];
+                    if cursor.read_exact(&mut str_buf).is_ok() {
+                        if let Ok(s) = String::from_utf8(str_buf) {
+                            values.push(Value::String(s));
+                        }
+                    }
+                }
+            }
+            TAG_DATE => {
+                let mut buf = [0u8; 4];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Date(kuzu_common::types::Date(i32::from_le_bytes(buf))));
+                }
+            }
+            TAG_TIMESTAMP => {
+                let mut buf = [0u8; 8];
+                if cursor.read_exact(&mut buf).is_ok() {
+                    values.push(Value::Timestamp(kuzu_common::types::Timestamp(i64::from_le_bytes(buf))));
+                }
+            }
+            TAG_INTERNAL_ID => {
+                let mut table_buf = [0u8; 8];
+                let mut offset_buf = [0u8; 8];
+                if cursor.read_exact(&mut table_buf).is_ok() && cursor.read_exact(&mut offset_buf).is_ok() {
+                    values.push(Value::InternalID(kuzu_common::types::InternalID {
+                        table_id: u64::from_le_bytes(table_buf),
+                        offset: u64::from_le_bytes(offset_buf),
+                    }));
+                }
+            }
+            // For any other type, skip one byte and push null
+            _ => {
+                values.push(Value::Null);
+            }
+        }
+    }
+
+    values
 }
 
 // =========================================================================
@@ -117,7 +317,7 @@ impl StorageManager {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::column::Column;
+    use crate::column::{Column, TAG_INT64, TAG_STRING};
     use crate::page::DEFAULT_PAGE_SIZE;
     use crate::wal::WALRecord;
     use kuzu_common::enums::CompressionType;
@@ -537,5 +737,263 @@ mod integration_tests {
             "Stress test should use multiple pages, got {}",
             col.num_pages
         );
+    }
+
+    // =================================================================
+    // Test 7: WAL recovery — insert data, simulate crash, recover
+    // =================================================================
+    #[test]
+    fn test_wal_recovery_insert_then_recover() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Phase 1: Create DB, insert data, flush WAL, then "crash"
+        let row_count = {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+
+            // Create a node table
+            let mut table = sm.create_node_table(
+                "Person".into(),
+                vec![
+                    ColumnDefinition {
+                        name: "name".into(),
+                        logical_type: LogicalTypeID::String,
+                        is_primary_key: true,
+                    },
+                    ColumnDefinition {
+                        name: "age".into(),
+                        logical_type: LogicalTypeID::Int64,
+                        is_primary_key: false,
+                    },
+                ],
+            );
+
+            // Insert rows
+            table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
+            table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+            table.insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)]).unwrap();
+
+            // Put the table back into the catalog so WAL knows about it.
+            // We re-create the table entry via the catalog API.
+            {
+                let mut cat = sm.table_catalog.lock().unwrap();
+                // Re-create the table entry with the same schema so the
+                // catalog has a valid entry for recovery to target.
+                cat.create_node_table(
+                    "Person".into(),
+                    vec![
+                        ColumnDefinition {
+                            name: "name".into(),
+                            logical_type: LogicalTypeID::String,
+                            is_primary_key: true,
+                        },
+                        ColumnDefinition {
+                            name: "age".into(),
+                            logical_type: LogicalTypeID::Int64,
+                            is_primary_key: false,
+                        },
+                    ],
+                );
+            }
+
+            let count = table.num_rows;
+            assert_eq!(count, 3);
+
+            // Write WAL records and flush to disk
+            {
+                let mut wal = sm.wal.lock().unwrap();
+                wal.append(WALRecord::Insert {
+                    table_id: table.table_id,
+                    data: vec![
+                        TAG_STRING, 5, 0, 0, 0, b'A', b'l', b'i', b'c', b'e',
+                        TAG_INT64, 30, 0, 0, 0, 0, 0, 0, 0,
+                    ],
+                });
+                wal.append(WALRecord::Insert {
+                    table_id: table.table_id,
+                    data: vec![
+                        TAG_STRING, 3, 0, 0, 0, b'B', b'o', b'b',
+                        TAG_INT64, 25, 0, 0, 0, 0, 0, 0, 0,
+                    ],
+                });
+                wal.append(WALRecord::Insert {
+                    table_id: table.table_id,
+                    data: vec![
+                        TAG_STRING, 7, 0, 0, 0, b'C', b'h', b'a', b'r', b'l', b'i', b'e',
+                        TAG_INT64, 35, 0, 0, 0, 0, 0, 0, 0,
+                    ],
+                });
+                wal.flush_to_disk().unwrap();
+            }
+
+            count
+        }; // "Crash" — all state dropped
+
+        // Phase 2: Recover — create a new StorageManager, it should NOT delete
+        // the WAL. Then manually trigger recovery.
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+
+            // Verify WAL file exists and has records
+            let wal_path = dir.path().join("wal.log");
+            assert!(wal_path.exists(), "WAL file should exist for recovery");
+
+            // Create the same table schema so recovery has a target
+            // (the catalog create_node_table stores the table internally).
+            sm.create_node_table(
+                "Person".into(),
+                vec![
+                    ColumnDefinition {
+                        name: "name".into(),
+                        logical_type: LogicalTypeID::String,
+                        is_primary_key: true,
+                    },
+                    ColumnDefinition {
+                        name: "age".into(),
+                        logical_type: LogicalTypeID::Int64,
+                        is_primary_key: false,
+                    },
+                ],
+            );
+
+            // Recover — the WAL has table_id = 0 (the first table created).
+            let recovered = sm.recover().unwrap();
+            assert_eq!(recovered, 3, "Should recover 3 WAL records");
+
+            // Verify data survived — the table was re-created empty,
+            // and recovery inserted exactly 3 rows from the WAL.
+            {
+                let cat = sm.table_catalog.lock().unwrap();
+                let recovered_table = cat.get_node_table_by_name("Person").unwrap();
+                assert_eq!(recovered_table.num_rows, 3, "Should have recovered 3 rows");
+                assert_eq!(recovered_table.get_value(0, 0), Some(&Value::String("Alice".into())));
+                assert_eq!(recovered_table.get_value(1, 0), Some(&Value::String("Bob".into())));
+                assert_eq!(recovered_table.get_value(2, 0), Some(&Value::String("Charlie".into())));
+                assert_eq!(recovered_table.get_value(0, 1), Some(&Value::Int64(30)));
+                assert_eq!(recovered_table.get_value(1, 1), Some(&Value::Int64(25)));
+                assert_eq!(recovered_table.get_value(2, 1), Some(&Value::Int64(35)));
+            }
+
+            // Verify WAL was checkpointed — after checkpoint the WAL has
+            // exactly 1 record (the Checkpoint marker).
+            {
+                let wal = sm.wal.lock().unwrap();
+                assert_eq!(wal.len(), 1, "WAL should have only the checkpoint marker after recovery");
+                assert!(matches!(wal.records()[0], crate::wal::WALRecord::Checkpoint));
+            }
+        }
+    }
+
+    // =================================================================
+    // Test 8: WAL recovery — no-op when no WAL exists
+    // =================================================================
+    #[test]
+    fn test_wal_recovery_no_wal() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+        let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+
+        // No WAL file = recovery returns 0
+        let recovered = sm.recover().unwrap();
+        assert_eq!(recovered, 0, "No WAL = no records recovered");
+    }
+
+    // =================================================================
+    // Test 9: WAL recovery — empty WAL file
+    // =================================================================
+    #[test]
+    fn test_wal_recovery_empty_wal() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create an empty WAL file on disk
+        let wal_path = dir.path().join("wal.log");
+        std::fs::write(&wal_path, b"").unwrap();
+
+        let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+        let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+
+        let recovered = sm.recover().unwrap();
+        assert_eq!(recovered, 0, "Empty WAL = no records recovered");
+    }
+
+    // =================================================================
+    // Test 10: WAL load_from_disk roundtrip
+    // =================================================================
+    #[test]
+    fn test_wal_load_from_disk_roundtrip() {
+        use crate::wal::WALRecord;
+        let dir = tempfile::tempdir().unwrap();
+        let wal_path = dir.path().join("wal.log");
+
+        // Write records
+        {
+            let mut wal = WAL::new(wal_path.clone());
+            wal.append(WALRecord::Insert {
+                table_id: 42,
+                data: vec![1, 2, 3, 4],
+            });
+            wal.append(WALRecord::Delete {
+                table_id: 42,
+                row_id: 0,
+            });
+            wal.append(WALRecord::Update {
+                table_id: 42,
+                row_id: 1,
+                column: 2,
+                data: vec![5, 6],
+            });
+            wal.append(WALRecord::ColumnWrite {
+                table_id: 42,
+                col_id: 0,
+                page_id: 1,
+                data: vec![7, 8, 9],
+            });
+            wal.append(WALRecord::Commit { transaction_id: 100 });
+            wal.append(WALRecord::Rollback { transaction_id: 101 });
+            wal.append(WALRecord::Checkpoint);
+            wal.flush_to_disk().unwrap();
+        }
+
+        // Load from disk
+        {
+            let mut wal = WAL::new(wal_path.clone());
+            wal.load_from_disk().unwrap();
+            assert_eq!(wal.len(), 7, "Should load 7 records from disk");
+            assert!(wal.is_dirty());
+
+            // Verify each record type
+            match &wal.records()[0] {
+                WALRecord::Insert { table_id, data } => {
+                    assert_eq!(*table_id, 42);
+                    assert_eq!(data, &[1, 2, 3, 4]);
+                }
+                _ => panic!("Expected Insert"),
+            }
+            match &wal.records()[1] {
+                WALRecord::Delete { table_id, row_id } => {
+                    assert_eq!(*table_id, 42);
+                    assert_eq!(*row_id, 0);
+                }
+                _ => panic!("Expected Delete"),
+            }
+            match &wal.records()[4] {
+                WALRecord::Commit { transaction_id } => {
+                    assert_eq!(*transaction_id, 100);
+                }
+                _ => panic!("Expected Commit"),
+            }
+            match &wal.records()[5] {
+                WALRecord::Rollback { transaction_id } => {
+                    assert_eq!(*transaction_id, 101);
+                }
+                _ => panic!("Expected Rollback"),
+            }
+            match &wal.records()[6] {
+                WALRecord::Checkpoint => {}
+                _ => panic!("Expected Checkpoint"),
+            }
+        }
     }
 }

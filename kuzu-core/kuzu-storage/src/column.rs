@@ -28,32 +28,32 @@ use std::sync::{Arc, Mutex};
 // ---------------------------------------------------------------------------
 // Tag bytes for Value discriminant (must match Value::DISCRIMINANT ordering)
 // ---------------------------------------------------------------------------
-const TAG_NULL: u8 = 0;
-const TAG_BOOL: u8 = 1;
-const TAG_INT64: u8 = 2;
-const TAG_INT32: u8 = 3;
-const TAG_INT16: u8 = 4;
-const TAG_INT8: u8 = 5;
-const TAG_UINT64: u8 = 6;
-const TAG_UINT32: u8 = 7;
-const TAG_UINT16: u8 = 8;
-const TAG_UINT8: u8 = 9;
-const TAG_INT128: u8 = 10;
-const TAG_DOUBLE: u8 = 11;
-const TAG_FLOAT: u8 = 12;
-const TAG_STRING: u8 = 13;
-const TAG_BLOB: u8 = 14;
-const TAG_DATE: u8 = 15;
-const TAG_TIMESTAMP: u8 = 16;
-const TAG_TIMESTAMP_TZ: u8 = 17;
-const TAG_TIMESTAMP_NS: u8 = 18;
-const TAG_TIMESTAMP_MS: u8 = 19;
-const TAG_TIMESTAMP_SEC: u8 = 20;
-const TAG_INTERVAL: u8 = 21;
-const TAG_INTERNAL_ID: u8 = 22;
-const TAG_LIST: u8 = 23;
-const TAG_MAP: u8 = 24;
-const TAG_STRUCT: u8 = 25;
+pub(crate) const TAG_NULL: u8 = 0;
+pub(crate) const TAG_BOOL: u8 = 1;
+pub(crate) const TAG_INT64: u8 = 2;
+pub(crate) const TAG_INT32: u8 = 3;
+pub(crate) const TAG_INT16: u8 = 4;
+pub(crate) const TAG_INT8: u8 = 5;
+pub(crate) const TAG_UINT64: u8 = 6;
+pub(crate) const TAG_UINT32: u8 = 7;
+pub(crate) const TAG_UINT16: u8 = 8;
+pub(crate) const TAG_UINT8: u8 = 9;
+pub(crate) const TAG_INT128: u8 = 10;
+pub(crate) const TAG_DOUBLE: u8 = 11;
+pub(crate) const TAG_FLOAT: u8 = 12;
+pub(crate) const TAG_STRING: u8 = 13;
+pub(crate) const TAG_BLOB: u8 = 14;
+pub(crate) const TAG_DATE: u8 = 15;
+pub(crate) const TAG_TIMESTAMP: u8 = 16;
+pub(crate) const TAG_TIMESTAMP_TZ: u8 = 17;
+pub(crate) const TAG_TIMESTAMP_NS: u8 = 18;
+pub(crate) const TAG_TIMESTAMP_MS: u8 = 19;
+pub(crate) const TAG_TIMESTAMP_SEC: u8 = 20;
+pub(crate) const TAG_INTERVAL: u8 = 21;
+pub(crate) const TAG_INTERNAL_ID: u8 = 22;
+pub(crate) const TAG_LIST: u8 = 23;
+pub(crate) const TAG_MAP: u8 = 24;
+pub(crate) const TAG_STRUCT: u8 = 25;
 
 /// Maximum values stored per page (keeps the offset array fixed-size).
 const MAX_VALS_PER_PAGE: usize = 256;

@@ -62,7 +62,7 @@ impl Database {
         let catalog = Arc::new(Mutex::new(Catalog::new()));
         let transaction_manager = Arc::new(TransactionManager::new());
         let function_registry = Arc::new(Mutex::new(FunctionRegistry::new()));
-        let storage_manager = Arc::new(StorageManager::new(db_path, memory_manager.clone()));
+        let storage_manager = Arc::new(StorageManager::new(db_path.clone(), memory_manager.clone()));
         let stats_store = Arc::new(Mutex::new(StatsStore::new()));
 
         let mut db = Self {
@@ -89,6 +89,15 @@ impl Database {
                     (name, Err(e)) => tracing::warn!("Extension '{name}' failed to load: {e}"),
                 }
             }
+        }
+
+        // Attempt WAL recovery from a previous session
+        if let Err(e) = db.storage_manager.recover() {
+            tracing::warn!(
+                "WAL recovery failed (database may need manual repair): {e}. \
+                 Starting with fresh state."
+            );
+            // Do not fail — allow read-only or empty-state start
         }
 
         Ok(db)

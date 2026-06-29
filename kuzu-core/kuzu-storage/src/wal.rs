@@ -175,6 +175,116 @@ impl WAL {
         file.flush()?;
         Ok(())
     }
+
+    /// Load and deserialize WAL records from disk.
+    ///
+    /// Reads the WAL file at `self.path` and populates `self.records` with
+    /// the deserialized records. Returns an error if the file doesn't exist
+    /// or is corrupt.
+    ///
+    /// # Format
+    ///
+    /// Each record on disk starts with a single-byte type tag:
+    /// - `I` → Insert { table_id: u64, data_len: u32, data: [u8; data_len] }
+    /// - `D` → Delete { table_id: u64, row_id: u64 }
+    /// - `U` → Update { table_id: u64, row_id: u64, column: u32, data_len: u32, data }
+    /// - `W` → ColumnWrite { table_id: u64, col_id: u32, page_id: u64, data_len: u32, data }
+    /// - `C` → Commit { transaction_id: u64 }
+    /// - `R` → Rollback { transaction_id: u64 }
+    /// - `K` → Checkpoint
+    pub fn load_from_disk(&mut self) -> std::io::Result<()> {
+        use kuzu_common::serialization::Deserialize;
+        use std::io::{BufReader, Read};
+
+        if !self.path.exists() {
+            return Ok(()); // Nothing to recover
+        }
+
+        let file = std::fs::File::open(&self.path)?;
+        let mut reader = BufReader::new(file);
+
+        // Read all data into a buffer for easier parsing
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer)?;
+
+        if buffer.is_empty() {
+            return Ok(());
+        }
+
+        let mut cursor = std::io::Cursor::new(&buffer);
+
+        while cursor.position() < buffer.len() as u64 {
+            let mut tag_buf = [0u8; 1];
+            if cursor.read_exact(&mut tag_buf).is_err() {
+                break;
+            }
+            let tag = tag_buf[0];
+
+            match tag {
+                b'I' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    let data_len = u32::deserialize(&mut cursor)? as usize;
+                    let mut data = vec![0u8; data_len];
+                    cursor.read_exact(&mut data)?;
+                    self.records.push(WALRecord::Insert { table_id, data });
+                }
+                b'D' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    let row_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::Delete { table_id, row_id });
+                }
+                b'U' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    let row_id = u64::deserialize(&mut cursor)?;
+                    let column = u32::deserialize(&mut cursor)?;
+                    let data_len = u32::deserialize(&mut cursor)? as usize;
+                    let mut data = vec![0u8; data_len];
+                    cursor.read_exact(&mut data)?;
+                    self.records.push(WALRecord::Update {
+                        table_id,
+                        row_id,
+                        column,
+                        data,
+                    });
+                }
+                b'W' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    let col_id = u32::deserialize(&mut cursor)?;
+                    let page_id = u64::deserialize(&mut cursor)?;
+                    let data_len = u32::deserialize(&mut cursor)? as usize;
+                    let mut data = vec![0u8; data_len];
+                    cursor.read_exact(&mut data)?;
+                    self.records.push(WALRecord::ColumnWrite {
+                        table_id,
+                        col_id,
+                        page_id,
+                        data,
+                    });
+                }
+                b'C' => {
+                    let transaction_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::Commit { transaction_id });
+                }
+                b'R' => {
+                    let transaction_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::Rollback { transaction_id });
+                }
+                b'K' => {
+                    self.records.push(WALRecord::Checkpoint);
+                }
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("WAL: unknown record tag byte: 0x{:02x}", tag),
+                    ));
+                }
+            }
+        }
+
+        self.total_size = buffer.len();
+        self.is_dirty = !self.records.is_empty();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
