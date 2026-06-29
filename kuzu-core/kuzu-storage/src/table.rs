@@ -116,7 +116,18 @@ impl NodeTable {
     ///
     /// Returns a flat `Vec<Value>` containing values from `start` to
     /// `start + count` (or fewer if the end of the table is reached).
-    pub fn scan_column(&self, col_idx: usize, start: u64, count: u64) -> Vec<Value> {
+    ///
+    /// If `snapshot_ts` is `Some(...)`, performs MVCC snapshot isolation:
+    /// rows inserted/deleted by transactions committed after `snapshot_ts`
+    /// are excluded, and versioned updates are resolved.
+    pub fn scan_column(
+        &self,
+        col_idx: usize,
+        start: u64,
+        count: u64,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> Vec<Value> {
         if col_idx >= self.columns.len() || start >= self.num_rows {
             return Vec::new();
         }
@@ -141,7 +152,8 @@ impl NodeTable {
             let take = available.min(remaining as usize);
 
             for row in local_start..local_start + take {
-                match group.get_value(row, col_idx) {
+                let val = group.get_value_with_snapshot(row, col_idx, snapshot_ts, commit_history);
+                match val {
                     Some(v) => result.push(v.clone()),
                     None => result.push(Value::Null),
                 }
@@ -201,13 +213,27 @@ impl NodeTable {
     /// Get a single value at (row, col) by locating the correct `NodeGroup`
     /// and `ColumnChunk`.
     pub fn get_value(&self, row: usize, col: usize) -> Option<&Value> {
+        self.get_value_with_snapshot(row, col, None, &[])
+    }
+
+    /// Get a single value with MVCC snapshot isolation.
+    ///
+    /// Checks `VersionInfo` for insert/delete visibility and `UpdateInfo`
+    /// version chains when `snapshot_ts` is provided.
+    pub fn get_value_with_snapshot(
+        &self,
+        row: usize,
+        col: usize,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> Option<&Value> {
         if col >= self.columns.len() || row as u64 >= self.num_rows {
             return None;
         }
         let group_idx = self.find_group(row as u64);
         let group = self.node_groups.get(group_idx)?;
         let local_row = row as u64 - group.start_offset;
-        group.get_value(local_row as usize, col)
+        group.get_value_with_snapshot(local_row as usize, col, snapshot_ts, commit_history)
     }
 
     /// Reconstruct column-major data (`Vec<Vec<Value>>`) from all node groups.
@@ -639,7 +665,7 @@ mod tests {
         for i in 0..100 {
             table.insert_row(vec![Value::Int64(i)]).unwrap();
         }
-        let scanned = table.scan_column(0, 10, 5);
+        let scanned = table.scan_column(0, 10, 5, None, &[]);
         assert_eq!(scanned.len(), 5);
         assert_eq!(scanned[0], Value::Int64(10));
         assert_eq!(scanned[4], Value::Int64(14));

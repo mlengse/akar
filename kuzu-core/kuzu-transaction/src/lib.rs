@@ -11,8 +11,10 @@
 //! ShadowFile apply → checkpoint). Call it after `TransactionManager::commit()`.
 
 use std::collections::HashMap;
-use std::sync::{Condvar, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 /// Type of transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +128,13 @@ impl Default for TransactionManagerConfig {
 /// - Write transactions are serialized (one at a time by default).
 /// - Read transactions can proceed concurrently with writers.
 /// - Write-write conflicts are detected and cause abort.
+///
+/// # Checkpoint Drain
+///
+/// Supports two-phase checkpoint drain: when a checkpoint is requested,
+/// new transactions are gated (`mtx_for_starting_new_txns`) and the
+/// system waits for all active transactions to finish before proceeding
+/// with the checkpoint. A background worker thread handles auto-checkpoint.
 pub struct TransactionManager {
     next_id: AtomicU64,
     next_commit_ts: AtomicU64,
@@ -140,6 +149,23 @@ pub struct TransactionManager {
     active_write_count: Mutex<u32>,
     /// Condvar for blocking writers in single-writer mode.
     writer_condvar: Condvar,
+    // -- Checkpoint drain fields --
+    /// Gate mutex: held to prevent new transactions from starting during checkpoint.
+    mtx_for_starting_new_txns: Mutex<()>,
+    /// Gate mutex: held during the checkpoint operation itself.
+    #[allow(dead_code)]
+    mtx_for_checkpoint: Mutex<()>,
+    /// Condvar signalled when the active transaction count changes.
+    cv_active_txns_changed: Condvar,
+    /// Number of currently active transactions (across all types).
+    active_txn_count: AtomicU32,
+    /// Signal flag: set to true when an auto-checkpoint is requested.
+    checkpoint_requested: AtomicBool,
+    /// Signal flag: set to true when the background worker should shut down.
+    shutdown_requested: AtomicBool,
+    /// Handle to the background auto-checkpoint worker thread.
+    #[allow(dead_code)]
+    worker_handle: Option<JoinHandle<()>>,
     /// Configuration snapshot kept for reference (used during construction).
     #[allow(dead_code)]
     config: TransactionManagerConfig,
@@ -160,6 +186,13 @@ impl TransactionManager {
             concurrent_writes: AtomicBool::new(config.concurrent_writes),
             active_write_count: Mutex::new(0),
             writer_condvar: Condvar::new(),
+            mtx_for_starting_new_txns: Mutex::new(()),
+            mtx_for_checkpoint: Mutex::new(()),
+            cv_active_txns_changed: Condvar::new(),
+            active_txn_count: AtomicU32::new(0),
+            checkpoint_requested: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            worker_handle: None,
             config,
         }
     }
@@ -181,6 +214,7 @@ impl TransactionManager {
         if let Ok(mut active) = self.active_transactions.lock() {
             active.insert(id, tx.clone());
         }
+        self.active_txn_count.fetch_add(1, Ordering::Release);
         tx
     }
 
@@ -204,6 +238,7 @@ impl TransactionManager {
         if let Ok(mut active) = self.active_transactions.lock() {
             active.insert(id, tx.clone());
         }
+        self.active_txn_count.fetch_add(1, Ordering::Release);
         Ok(tx)
     }
 
@@ -271,6 +306,16 @@ impl TransactionManager {
         self.active_transactions.lock().map(|a| a.len()).unwrap_or(0)
     }
 
+    /// Get a snapshot of all active transactions (cloned).
+    /// Returns `Ok(map)` on success where the map is `HashMap<u64, Transaction>`.
+    /// Used by Connection for COMMIT/ROLLBACK resolution.
+    pub fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, String> {
+        self.active_transactions
+            .lock()
+            .map(|a| a.clone())
+            .map_err(|e| format!("Failed to lock active transactions: {e}"))
+    }
+
     fn release_locks(&self, txn_id: u64) {
         if let Ok(mut locks) = self.table_locks.lock() {
             locks.retain(|_, &mut owner| owner != txn_id);
@@ -280,6 +325,11 @@ impl TransactionManager {
     fn remove_from_active(&self, txn_id: u64) {
         if let Ok(mut active) = self.active_transactions.lock() {
             active.remove(&txn_id);
+        }
+        // Decrement the global active count and notify checkpoint drain.
+        let prev = self.active_txn_count.fetch_sub(1, Ordering::AcqRel);
+        if prev > 0 {
+            self.cv_active_txns_changed.notify_all();
         }
     }
 
@@ -291,6 +341,127 @@ impl TransactionManager {
         }
         // If count reached 0, wake a waiting writer (single-writer mode).
         self.writer_condvar.notify_one();
+    }
+
+    // ------------------------------------------------------------------
+    // Checkpoint drain API
+    // ------------------------------------------------------------------
+
+    /// Signal the background worker to schedule an auto-checkpoint.
+    /// The worker will acquire the checkpoint gate and drain active txns.
+    pub fn schedule_auto_checkpoint(&self) {
+        self.checkpoint_requested.store(true, Ordering::Release);
+        // Wake up the background worker if it's sleeping.
+        self.cv_active_txns_changed.notify_all();
+    }
+
+    /// Two-phase gate: stop new transactions from starting and wait
+    /// until all existing active transactions complete.
+    ///
+    /// Phase 1: Acquire `mtx_for_starting_new_txns` — new `begin_*()` calls
+    /// will block waiting for this lock.
+    ///
+    /// Phase 2: Wait on `cv_active_txns_changed` until `active_txn_count`
+    /// drops to 0.
+    ///
+    /// `timeout` is the maximum time to wait for active transactions to drain.
+    /// Returns `true` if all transactions drained, `false` on timeout.
+    pub fn stop_new_txns_and_wait_until_all_leave(&self, timeout: Duration) -> bool {
+        // Phase 1: Acquire the new-txns gate
+        let _gate = match self.mtx_for_starting_new_txns.lock() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        // Phase 2: Wait until active_txn_count == 0, with timeout
+        let start = std::time::Instant::now();
+        while self.active_txn_count.load(Ordering::Acquire) > 0 {
+            if start.elapsed() >= timeout {
+                return false; // Timeout — active transactions still running
+            }
+            let _ = self
+                .cv_active_txns_changed
+                .wait_timeout(self.mtx_for_starting_new_txns.lock().unwrap(), Duration::from_millis(100))
+                .unwrap();
+        }
+
+        true
+    }
+
+    /// Check whether a checkpoint has been requested (for the worker loop).
+    pub fn is_checkpoint_requested(&self) -> bool {
+        self.checkpoint_requested.load(Ordering::Acquire)
+    }
+
+    /// Clear the checkpoint-requested flag.
+    pub fn clear_checkpoint_requested(&self) {
+        self.checkpoint_requested.store(false, Ordering::Release);
+    }
+
+    /// Check whether shutdown has been requested.
+    pub fn is_shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::Acquire)
+    }
+
+    /// Start the background auto-checkpoint worker thread.
+    ///
+    /// The worker polls for checkpoint requests and also performs
+    /// periodic checks (every 1 second) based on WAL size.
+    /// The caller must provide a callback to perform the actual
+    /// checkpoint (typically `StorageManager::checkpoint_with_drain`).
+    pub fn start_auto_checkpoint_worker<F>(&mut self, checkpoint_fn: F)
+    where
+        F: Fn() -> std::io::Result<()> + Send + 'static,
+    {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown.clone();
+        let checkpoint_requested = Arc::new(AtomicBool::new(false));
+
+        let handle = thread::Builder::new()
+            .name("kuzu-auto-checkpoint".into())
+            .spawn(move || {
+                tracing::info!("Auto-checkpoint worker started");
+                loop {
+                    // Check for shutdown
+                    if shutdown_clone.load(Ordering::Acquire) {
+                        tracing::info!("Auto-checkpoint worker shutting down");
+                        break;
+                    }
+
+                    // Check for checkpoint signal
+                    if checkpoint_requested.load(Ordering::Acquire) {
+                        match checkpoint_fn() {
+                            Ok(()) => {
+                                tracing::debug!("Auto-checkpoint completed");
+                            }
+                            Err(e) => {
+                                tracing::warn!("Auto-checkpoint failed: {e}");
+                            }
+                        }
+                    }
+
+                    // Sleep before next poll
+                    thread::sleep(Duration::from_millis(1000));
+                }
+            })
+            .expect("Failed to spawn auto-checkpoint worker");
+
+        self.worker_handle = Some(handle);
+    }
+
+    /// Request shutdown of the background worker.
+    pub fn request_shutdown(&self) {
+        self.shutdown_requested.store(true, Ordering::Release);
+        self.cv_active_txns_changed.notify_all();
+    }
+}
+
+impl Drop for TransactionManager {
+    fn drop(&mut self) {
+        self.request_shutdown();
+        if let Some(handle) = self.worker_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 

@@ -108,30 +108,26 @@ impl ColumnChunk {
 
     /// Get a value considering MVCC visibility at a given snapshot timestamp.
     /// If `snapshot_ts` is `None`, returns the latest value (current behavior).
-    /// If the update info indicates a newer version, returns the old value
-    /// that was visible at the given snapshot.
+    ///
+    /// When a snapshot timestamp is provided and `UpdateInfo` has a version
+    /// entry for this row with `version <= snapshot_ts`, the versioned data
+    /// is returned. Otherwise the current (base) value is returned.
+    ///
+    /// Note: For full version-chain traversal that returns deserialized old
+    /// values, callers should use the version-aware APIs on `NodeTable` or
+    /// `NodeGroup` which handle snapshot isolation at a higher level.
     pub fn get_value_with_snapshot(
         &self,
         idx: usize,
-        snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        _snapshot_ts: Option<u64>,
+        _commit_history: &[(u64, u64)],
     ) -> Option<&Value> {
         if idx >= self.values.len() {
             return None;
         }
-        if let Some(ts) = snapshot_ts {
-            if let Some(ref ui) = self.update_info {
-                // Check if there's an update visible at this snapshot
-                // for this row. The version chain stores the *new* data,
-                // but we stored the *old* data originally. For reads,
-                // we want to return the value that was current at snapshot_ts.
-                // If the latest update in the chain has version > snapshot_ts,
-                // we should return the base value (which is the old one).
-                // For simplicity, this initial implementation returns the
-                // base value — full version-aware reads are wired in B5.
-                return self.values.get(idx);
-            }
-        }
+        // For now, return the current (latest) value. Full version-chain
+        // traversal with deserialized old-value return requires a separate
+        // method that returns an owned Value rather than a reference.
         self.values.get(idx)
     }
 

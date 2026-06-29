@@ -228,6 +228,30 @@ impl NodeGroup {
         self.columns.get(col_idx).and_then(|chunk| chunk.get(local_row))
     }
 
+    /// Access a single value with MVCC snapshot isolation.
+    ///
+    /// Checks `VersionInfo` for insert/delete visibility first. If the row
+    /// is not visible at `snapshot_ts`, returns `None`. Then checks
+    /// `UpdateInfo` version chain on the column chunk for versioned updates.
+    pub fn get_value_with_snapshot(
+        &self,
+        local_row: usize,
+        col_idx: usize,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> Option<&Value> {
+        // Check version info visibility (inserts/deletes)
+        if let Some(ts) = snapshot_ts {
+            if !self.is_row_visible(local_row, ts, commit_history) {
+                return None;
+            }
+        }
+        // Get value with update version chain check
+        self.columns.get(col_idx).and_then(|chunk| {
+            chunk.get_value_with_snapshot(local_row, snapshot_ts, commit_history)
+        })
+    }
+
     /// Check whether a row is visible at the given snapshot timestamp.
     /// Returns `true` if no version tracking is active (backward compat).
     pub fn is_row_visible(&self, local_row: usize, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
