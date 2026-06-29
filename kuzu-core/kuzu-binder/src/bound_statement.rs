@@ -21,6 +21,8 @@ pub struct BoundCopyFrom {
     pub table_id: u64,
     pub file_path: String,
     pub options: HashMap<String, String>,
+    /// Resolved column schema from the catalog (column names + types).
+    pub columns: Vec<kuzu_catalog::CatalogColumn>,
 }
 
 /// A resolved variable in scope (from MATCH patterns).

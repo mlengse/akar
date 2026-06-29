@@ -560,16 +560,65 @@ impl Binder {
     }
 
     fn bind_copy_from(&self, c: kuzu_parser::ast::CopyFrom) -> Result<BoundStatement, String> {
+        // 1. Look up table in catalog and resolve column schema
         let catalog = self.catalog.lock().unwrap();
         let entry = catalog
             .get_entry_by_name(&c.table_name)
             .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;
         let table_id = entry.table_id();
+        let columns: Vec<kuzu_catalog::CatalogColumn> = entry.columns().to_vec();
+        drop(catalog);
+
+        // 2. Validate file path exists and is accessible
+        let path = std::path::Path::new(&c.file_path);
+        if !path.exists() {
+            return Err(format!("File '{}' not found", c.file_path));
+        }
+        if !path.is_file() {
+            return Err(format!("'{}' is not a file", c.file_path));
+        }
+
+        // 3. If HEADER=true, peek at first CSV line to validate column count
+        if let Some(header_val) = c.options.get("HEADER") {
+            if header_val.eq_ignore_ascii_case("true") {
+                let delimiter = c
+                    .options
+                    .get("DELIM")
+                    .and_then(|d| d.chars().next())
+                    .unwrap_or(',');
+
+                let file = std::fs::File::open(&c.file_path)
+                    .map_err(|e| format!("Cannot open file '{}': {}", c.file_path, e))?;
+                use std::io::{BufRead, BufReader};
+                let mut reader = BufReader::new(file);
+                let mut first_line = String::new();
+                reader
+                    .read_line(&mut first_line)
+                    .map_err(|e| format!("Cannot read file '{}': {}", c.file_path, e))?;
+
+                let trimmed = first_line.trim();
+                if trimmed.is_empty() {
+                    return Err(format!("File '{}' is empty, cannot validate header", c.file_path));
+                }
+
+                let csv_col_count = trimmed.split(delimiter).count();
+                if csv_col_count != columns.len() {
+                    return Err(format!(
+                        "Column count mismatch: CSV header has {csv_col_count} columns \
+                         but table '{}' has {} columns",
+                        c.table_name,
+                        columns.len()
+                    ));
+                }
+            }
+        }
+
         Ok(BoundStatement::BoundCopyFrom(BoundCopyFrom {
             table_name: c.table_name,
             table_id,
             file_path: c.file_path,
             options: c.options,
+            columns,
         }))
     }
 }
