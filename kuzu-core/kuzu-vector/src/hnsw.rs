@@ -558,8 +558,8 @@ mod tests {
             let intersection = bf_top10.intersection(&hnsw_top10).count();
             let recall = intersection as f64 / 10.0;
             assert!(
-                recall > 0.7,
-                "Recall too low: {recall} (test {test_idx}, expected > 0.7)"
+                recall > 0.85,
+                "Recall too low: {recall} (test {test_idx}, expected > 0.85)"
             );
         }
     }
@@ -631,7 +631,7 @@ mod tests {
         }
 
         let avg_recall = total_recall / num_queries as f64;
-        assert!(avg_recall > 0.7, "Average recall too low: {avg_recall} (expected > 0.7)");
+        assert!(avg_recall > 0.95, "Average recall too low: {avg_recall} (expected > 0.95)");
     }
 
     #[test]
