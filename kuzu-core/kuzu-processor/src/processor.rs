@@ -60,7 +60,7 @@ impl QueryProcessor {
                 let num_rows = node_table.num_rows;
                 if num_rows > 0 {
                     return (
-                        Some(node_table.data.clone()),
+                        Some(node_table.to_column_major_data()),
                         node_table.columns.clone(),
                         num_rows,
                     );
@@ -71,7 +71,7 @@ impl QueryProcessor {
                 let num_rows = rel_table.num_rows;
                 if num_rows > 0 {
                     return (
-                        Some(rel_table.data.clone()),
+                        Some(rel_table.to_column_major_data()),
                         rel_table.columns.clone(),
                         num_rows,
                     );

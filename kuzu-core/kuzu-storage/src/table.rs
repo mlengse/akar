@@ -1,5 +1,6 @@
-//! Table storage — columnar node/rel tables with CSR adjacency index.
+//! Table storage — columnar node/rel tables with NodeGroup-based storage.
 
+use crate::node_group::NodeGroup;
 use kuzu_common::types::{LogicalTypeID, Value};
 use std::collections::HashMap;
 
@@ -11,7 +12,9 @@ pub struct ColumnDefinition {
     pub is_primary_key: bool,
 }
 
-/// A node table stores properties for a node label.
+/// A node table stores properties for a node label using NodeGroup-based
+/// columnar storage. Data is held in-memory as `NodeGroup`s; when a group
+/// reaches `NODE_GROUP_SIZE` rows a new group is automatically created.
 #[derive(Debug, Clone)]
 pub struct NodeTable {
     pub table_id: u64,
@@ -19,8 +22,9 @@ pub struct NodeTable {
     pub columns: Vec<ColumnDefinition>,
     pub primary_key_column: usize,
     pub num_rows: u64,
-    /// Column-major in-memory data storage: data[col_idx][row_idx]
-    pub data: Vec<Vec<Value>>,
+    /// NodeGroup-based columnar storage. Each group holds up to
+    /// `NODE_GROUP_SIZE` rows across all columns.
+    pub node_groups: Vec<NodeGroup>,
 }
 
 impl NodeTable {
@@ -29,18 +33,21 @@ impl NodeTable {
             .iter()
             .position(|c| c.is_primary_key)
             .unwrap_or(0);
-        let num_cols = columns.len();
         Self {
             table_id,
             name,
             columns,
             primary_key_column,
             num_rows: 0,
-            data: vec![Vec::new(); num_cols],
+            node_groups: Vec::new(),
         }
     }
 
-    /// Insert a row of values into the table (column-major storage).
+    /// Insert a row of values into the table.
+    ///
+    /// Appends to the current `NodeGroup`; auto-creates a new group when the
+    /// current one is full (reaches `NODE_GROUP_SIZE` rows).
+    ///
     /// Returns an error if the number of values doesn't match the number of columns.
     pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
         if values.len() != self.columns.len() {
@@ -50,21 +57,109 @@ impl NodeTable {
                 values.len()
             ));
         }
-        for (col_idx, val) in values.into_iter().enumerate() {
-            self.data[col_idx].push(val);
+
+        // Get or create the current node group.
+        let num_cols = self.columns.len();
+        if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
+            let start_offset = self.num_rows;
+            self.node_groups
+                .push(NodeGroup::new(num_cols, start_offset));
         }
+
+        let current = self.node_groups.last_mut().unwrap();
+        current.append_row(values)?;
         self.num_rows += 1;
         Ok(())
     }
 
-    /// Get all values for a given column (by index) as a slice.
-    pub fn get_column(&self, col_idx: usize) -> Option<&[Value]> {
-        self.data.get(col_idx).map(|v| v.as_slice())
+    /// Scan all values for a given column across all node groups.
+    ///
+    /// Returns a flat `Vec<Value>` containing values from `start` to
+    /// `start + count` (or fewer if the end of the table is reached).
+    pub fn scan_column(&self, col_idx: usize, start: u64, count: u64) -> Vec<Value> {
+        if col_idx >= self.columns.len() || start >= self.num_rows {
+            return Vec::new();
+        }
+        let end = (start + count).min(self.num_rows);
+        let mut result = Vec::with_capacity((end - start) as usize);
+
+        // Find the first node group containing `start`.
+        let group_start = self.find_group(start);
+        let mut remaining = end - start;
+
+        for g_idx in group_start..self.node_groups.len() {
+            if remaining == 0 {
+                break;
+            }
+            let group = &self.node_groups[g_idx];
+            let local_start = if g_idx == group_start {
+                (start - group.start_offset) as usize
+            } else {
+                0
+            };
+            let available = (group.num_nodes as usize).saturating_sub(local_start);
+            let take = available.min(remaining as usize);
+
+            for row in local_start..local_start + take {
+                match group.get_value(row, col_idx) {
+                    Some(v) => result.push(v.clone()),
+                    None => result.push(Value::Null),
+                }
+            }
+            remaining -= take as u64;
+        }
+
+        result
     }
 
-    /// Get a single value at (row, col).
+    /// Get a single value at (row, col) by locating the correct `NodeGroup`
+    /// and `ColumnChunk`.
     pub fn get_value(&self, row: usize, col: usize) -> Option<&Value> {
-        self.data.get(col).and_then(|col_data| col_data.get(row))
+        if col >= self.columns.len() || row as u64 >= self.num_rows {
+            return None;
+        }
+        let group_idx = self.find_group(row as u64);
+        let group = self.node_groups.get(group_idx)?;
+        let local_row = row as u64 - group.start_offset;
+        group.get_value(local_row as usize, col)
+    }
+
+    /// Reconstruct column-major data (`Vec<Vec<Value>>`) from all node groups.
+    ///
+    /// Used by the processor (`resolve_scan_data`) for backward compatibility.
+    pub fn to_column_major_data(&self) -> Vec<Vec<Value>> {
+        let num_cols = self.columns.len();
+        let mut result = vec![Vec::with_capacity(self.num_rows as usize); num_cols];
+
+        for group in &self.node_groups {
+            for row in 0..group.num_nodes as usize {
+                for col in 0..num_cols {
+                    match group.get_value(row, col) {
+                        Some(v) => result[col].push(v.clone()),
+                        None => result[col].push(Value::Null),
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Binary-search for the node group that contains `row`.
+    fn find_group(&self, row: u64) -> usize {
+        match self
+            .node_groups
+            .binary_search_by_key(&row, |g| g.start_offset)
+        {
+            Ok(i) => i,
+            Err(i) => {
+                if i == 0 {
+                    0
+                } else {
+                    i - 1
+                }
+            }
+        }
     }
 }
 
@@ -120,6 +215,11 @@ impl RelTable {
     /// Get all values for a given column (by index) as a slice.
     pub fn get_column(&self, col_idx: usize) -> Option<&[Value]> {
         self.data.get(col_idx).map(|v| v.as_slice())
+    }
+
+    /// Return column-major data (clone of the internal Vec<Vec<Value>>).
+    pub fn to_column_major_data(&self) -> Vec<Vec<Value>> {
+        self.data.clone()
     }
 }
 
