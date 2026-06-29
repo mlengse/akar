@@ -79,6 +79,13 @@ impl QueryPlanner {
                         cardinality: 0,
                     });
                 }
+                BoundClause::BoundWith(r) => {
+                    delete_exprs.push(LogicalOperator::Projection(LogicalProjection {
+                        expressions: r.expressions,
+                        children: Vec::new(),
+                        cardinality: 0,
+                    }));
+                }
                 BoundClause::BoundOptionalMatch(om) => {
                     for pattern in &om.patterns {
                         if let Some(label) = &pattern.node_label {

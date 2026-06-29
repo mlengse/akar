@@ -71,6 +71,10 @@ impl Binder {
                     let bound = self.bind_return(&r, &variables)?;
                     (BoundClause::BoundReturn(bound), Vec::new())
                 }
+                Clause::With(r) => {
+                    let bound = self.bind_return(&r, &variables)?;
+                    (BoundClause::BoundWith(bound), Vec::new())
+                }
                 Clause::Where(w) => {
                     let bound = self.bind_where(&w, &variables)?;
                     (BoundClause::BoundWhere(bound), Vec::new())

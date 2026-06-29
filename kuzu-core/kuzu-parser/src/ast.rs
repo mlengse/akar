@@ -27,6 +27,7 @@ pub enum Clause {
     Delete(DeleteClause),
     Set(SetClause),
     OptionalMatch(OptionalMatchClause),
+    With(ReturnClause),
 }
 
 #[derive(Debug, Clone, PartialEq)]

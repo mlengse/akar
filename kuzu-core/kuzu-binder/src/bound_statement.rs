@@ -50,6 +50,7 @@ pub enum BoundClause {
     BoundDelete(BoundDeleteClause),
     BoundSet(BoundSetClause),
     BoundOptionalMatch(BoundMatchClause),
+    BoundWith(BoundReturnClause),
 }
 
 #[derive(Debug, Clone)]

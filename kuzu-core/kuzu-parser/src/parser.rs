@@ -122,6 +122,9 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
             Rule::return_clause => {
                 clauses.push(Clause::Return(ReturnClause { expressions: parse_return_items(inner)? }));
             }
+            Rule::with_clause => {
+                clauses.push(Clause::With(ReturnClause { expressions: parse_return_items(inner)? }));
+            }
             Rule::where_clause => {
                 let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
                 clauses.push(Clause::Where(WhereClause { expression: expr }));

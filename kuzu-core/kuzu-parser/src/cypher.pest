@@ -52,7 +52,9 @@ set_item = { expression ~ "=" ~ expression }
 delete_clause = { "DELETE" ~ expression ~ ("," ~ expression)* }
 
 query_statement = {
-    match_clause ~ return_clause
+    match_clause ~ with_clause ~ return_clause
+    | match_clause ~ where_clause ~ with_clause ~ return_clause
+    | match_clause ~ return_clause
     | match_clause ~ where_clause ~ return_clause
     | match_clause ~ where_clause ~ delete_clause
     | match_clause ~ delete_clause
@@ -61,6 +63,7 @@ query_statement = {
     | match_clause ~ optional_match_clause ~ return_clause
     | match_clause ~ optional_match_clause ~ where_clause ~ return_clause
     | match_clause ~ optional_match_clause
+    | match_clause ~ with_clause
     | match_clause
     | return_clause
 }
@@ -115,6 +118,8 @@ property_key_value = { identifier ~ ":" ~ expression }
 where_clause = {
     "WHERE" ~ expression
 }
+
+with_clause = { "WITH" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit? }
 
 return_clause = {
     "RETURN" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit?
