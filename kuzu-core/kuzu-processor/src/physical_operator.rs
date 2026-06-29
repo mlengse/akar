@@ -700,26 +700,49 @@ impl PhysicalAggregate {
 
     /// Compute hash-based GROUP BY aggregates.
     fn compute_grouped_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
-        let group_col = self.group_by_cols.first().copied().unwrap_or(0) as usize;
-
         let funcs: Vec<AggregateFunction> = self.aggregate_functions.iter()
             .map(|name| parse_aggregate_function(name))
             .collect();
 
-        // Hash map: group key → Vec of AggValueState (one per aggregate function)
-        let mut groups: HashMap<i64, Vec<AggValueState>> = HashMap::new();
+        // Hash map: hash → Vec of (actual_value, agg_states)
+        // Using separate hash + value to avoid requiring Hash+Eq on Value.
+        // Collisions are resolved by comparing actual values (PartialEq).
+        type GroupBucket = Vec<(Value, Vec<AggValueState>)>;
+        let mut groups: HashMap<u64, GroupBucket> = HashMap::new();
+        let num_group_cols = self.group_by_cols.len();
 
         for chunk in input {
             for row in 0..chunk.size {
-                let key = chunk.fields.get(group_col)
-                    .and_then(|f| f.get_i64(row))
-                    .unwrap_or(0);
+                // Build composite key
+                let key = if num_group_cols == 1 {
+                    let col = self.group_by_cols[0] as usize;
+                    chunk.fields.get(col)
+                        .and_then(|f| f.get_value(row))
+                        .unwrap_or(Value::Null)
+                } else {
+                    let mut key_vals = Vec::with_capacity(num_group_cols);
+                    for &gc in &self.group_by_cols {
+                        let val = chunk.fields.get(gc as usize)
+                            .and_then(|f| f.get_value(row))
+                            .unwrap_or(Value::Null);
+                        key_vals.push(val);
+                    }
+                    Value::List(key_vals)
+                };
 
-                let entry = groups.entry(key).or_insert_with(|| {
-                    funcs.iter().map(|f| AggValueState::new(f)).collect()
-                });
+                let hash = value_hash(&key);
+                let bucket = groups.entry(hash).or_default();
 
-                for (i, state) in entry.iter_mut().enumerate() {
+                // Find existing entry or create new one
+                let entry_idx = bucket.iter().position(|(k, _)| *k == key);
+                let states = if let Some(idx) = entry_idx {
+                    &mut bucket[idx].1
+                } else {
+                    bucket.push((key, funcs.iter().map(|f| AggValueState::new(f)).collect()));
+                    &mut bucket.last_mut().unwrap().1
+                };
+
+                for (i, state) in states.iter_mut().enumerate() {
                     let val = chunk.fields.get(i.min(chunk.fields.len().saturating_sub(1)))
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null);
@@ -737,40 +760,68 @@ impl PhysicalAggregate {
         }
 
         if groups.is_empty() {
-            let mut fields = Vec::new();
-            for _ in 0..=self.aggregate_functions.len() {
-                let mut v = ValueVector::new(PhysicalTypeID::Int64, 0);
-                v.resize(0);
-                fields.push(v);
-            }
-            return Ok(vec![DataChunk::new(fields)]);
+            let num_cols = num_group_cols + self.aggregate_functions.len();
+            return Ok(vec![DataChunk::new(Vec::with_capacity(num_cols))]);
         }
 
-        let num_rows = groups.len();
+        // Collect all groups (flatten buckets)
+        let mut group_keys: Vec<Value> = Vec::new();
+        let mut agg_results: Vec<Vec<Value>> = (0..self.aggregate_functions.len())
+            .map(|_| Vec::new()).collect();
+
+        for (_hash, bucket) in &groups {
+            for (key, states) in bucket {
+                group_keys.push(key.clone());
+                for (i, state) in states.iter().enumerate() {
+                    agg_results[i].push(state.finalize());
+                }
+            }
+        }
+
+        let num_rows = group_keys.len();
         let num_agg = self.aggregate_functions.len();
 
-        // For each column, collect final values
-        let mut group_key_values: Vec<i64> = Vec::with_capacity(num_rows);
-        let mut agg_results: Vec<Vec<Value>> = (0..num_agg).map(|_| Vec::with_capacity(num_rows)).collect();
-
-        for (key, states) in &groups {
-            group_key_values.push(*key);
-            for (i, state) in states.iter().enumerate() {
-                agg_results[i].push(state.finalize());
-            }
-        }
-
         // Build output vectors
-        let mut output_fields = Vec::with_capacity(1 + num_agg);
+        let mut output_fields = Vec::with_capacity(num_group_cols + num_agg);
 
-        // Group key column (Int64)
-        {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, num_rows);
-            v.resize(num_rows); // Must set size first so data() is writable
-            for (row, &key) in group_key_values.iter().enumerate() {
-                v.set_i64(row, key);
+        // Group key columns — one per group_by_col
+        if num_group_cols == 1 {
+            let first_val = &group_keys[0];
+            let phys_type = first_val.physical_type();
+            let mut v = ValueVector::new(phys_type, num_rows);
+            v.resize(num_rows);
+            for (row, key) in group_keys.iter().enumerate() {
+                if matches!(key, Value::Null) {
+                    v.set_null(row, true);
+                } else {
+                    store_value_in_vector(&mut v, row, key);
+                }
             }
             output_fields.push(v);
+        } else {
+            // Multi-key: expand Value::List back into individual columns
+            for gc_idx in 0..num_group_cols {
+                let first_key = &group_keys[0];
+                let inner_val = match first_key {
+                    Value::List(vals) => vals.get(gc_idx).cloned().unwrap_or(Value::Null),
+                    _ => Value::Null,
+                };
+                let phys_type = inner_val.physical_type();
+                let mut v = ValueVector::new(phys_type, num_rows);
+                v.resize(num_rows);
+                for (row, key) in group_keys.iter().enumerate() {
+                    let val = match key {
+                        Value::List(vals) => vals.get(gc_idx).cloned().unwrap_or(Value::Null),
+                        _ => Value::Null,
+                    };
+                    if matches!(val, Value::Null) {
+                        v.set_null(row, true);
+                    } else {
+                        store_value_in_vector(&mut v, row, &val);
+                    }
+                }
+                output_fields.push(v);
+            }
         }
 
         // Aggregate result columns
@@ -778,7 +829,7 @@ impl PhysicalAggregate {
             let first_val = &agg_results[i][0];
             let physical_type = first_val.physical_type();
             let mut v = ValueVector::new(physical_type, num_rows);
-            v.resize(num_rows); // Must set size first so data() is writable
+            v.resize(num_rows);
             for (row, val) in agg_results[i].iter().enumerate() {
                 store_value_in_vector(&mut v, row, val);
             }
