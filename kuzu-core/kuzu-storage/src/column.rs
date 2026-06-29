@@ -492,7 +492,7 @@ impl Column {
         // Update num_values.
         frame.data[..4].copy_from_slice(&((num_vals + 1) as u32).to_le_bytes());
         frame.mark_dirty();
-        bm.unpin(page_idx);
+        bm.unpin(&self.file_name, page_idx);
         drop(bm);
 
         self.num_values += 1;
@@ -542,7 +542,7 @@ impl Column {
         let mut bm = self.buffer_manager.lock().unwrap();
         let frame = bm.pin(&self.file_name, page_idx as u64)?;
         let data = frame.data.clone();
-        bm.unpin(page_idx as u64);
+        bm.unpin(&self.file_name, page_idx as u64);
         Ok(data)
     }
 
