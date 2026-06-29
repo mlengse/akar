@@ -7,6 +7,7 @@ pub enum Statement {
     CreateNodeTable(CreateNodeTable),
     CreateRelTable(CreateRelTable),
     DropTable(DropTable),
+    CopyFrom(CopyFrom),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -147,6 +148,14 @@ pub struct CreateRelTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropTable {
     pub name: String,
+}
+
+/// COPY FROM statement — load data from a file into a table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyFrom {
+    pub table_name: String,
+    pub file_path: String,
+    pub options: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

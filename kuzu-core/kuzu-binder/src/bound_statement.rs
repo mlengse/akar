@@ -2,6 +2,7 @@
 
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::Expression;
+use std::collections::HashMap;
 
 /// A bound statement after semantic analysis.
 #[derive(Debug, Clone)]
@@ -10,6 +11,16 @@ pub enum BoundStatement {
     BoundCreateNodeTable(BoundCreateNodeTable),
     BoundCreateRelTable(BoundCreateRelTable),
     BoundDropTable(BoundDropTable),
+    BoundCopyFrom(BoundCopyFrom),
+}
+
+/// COPY FROM statement — load data from a file into a table.
+#[derive(Debug, Clone)]
+pub struct BoundCopyFrom {
+    pub table_name: String,
+    pub table_id: u64,
+    pub file_path: String,
+    pub options: HashMap<String, String>,
 }
 
 /// A resolved variable in scope (from MATCH patterns).

@@ -234,6 +234,12 @@ impl Connection {
                     "Table '{}' dropped", t.name
                 ))))
             }
+            BoundStatement::BoundCopyFrom(c) => {
+                tracing::info!("COPY FROM '{}' from '{}'", c.table_name, c.file_path);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Copy from '{}' into table '{}'", c.file_path, c.table_name
+                ))))
+            }
             BoundStatement::BoundQuery(_) => Ok(None),
         }
     }

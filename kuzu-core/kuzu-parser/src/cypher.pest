@@ -12,7 +12,26 @@ ddl_statement = {
     create_node_table
     | create_rel_table
     | drop_table
+    | copy_from
 }
+
+// ==================== COPY FROM ====================
+
+copy_from = { "COPY" ~ identifier ~ "FROM" ~ string ~ copy_options? }
+
+copy_options = { "(" ~ copy_option ~ ("," ~ copy_option)* ~ ")" }
+
+copy_option = {
+    header_option
+    | delim_option
+    | escape_option
+    | quote_option
+}
+
+header_option = { "HEADER" ~ (boolean_literal | integer) }
+delim_option = { "DELIM" ~ string }
+escape_option = { "ESCAPE" ~ string }
+quote_option = { "QUOTE" ~ string }
 
 query_statement = {
     match_clause ~ return_clause

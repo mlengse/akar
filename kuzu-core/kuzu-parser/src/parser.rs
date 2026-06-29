@@ -2,6 +2,7 @@
 
 use crate::ast::*;
 use pest::Parser;
+use std::collections::HashMap;
 
 #[derive(pest_derive::Parser)]
 #[grammar = "cypher.pest"]
@@ -102,6 +103,7 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                 .ok_or("Missing table name")?;
             Ok(Statement::DropTable(DropTable { name }))
         }
+        Rule::copy_from => parse_copy_from(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
 }
@@ -363,6 +365,64 @@ fn unescape_string(s: &str) -> String {
     r
 }
 
+fn parse_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut table_name = String::new();
+    let mut file_path = String::new();
+    let mut options = HashMap::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier => {
+                if table_name.is_empty() {
+                    table_name = inner.as_str().to_string();
+                }
+            }
+            Rule::string => {
+                if file_path.is_empty() {
+                    file_path = unescape_string(inner.as_str());
+                }
+            }
+            Rule::copy_options => {
+                // copy_options contains: "(", copy_option, (",", copy_option)*, ")"
+                for item in inner.into_inner() {
+                    // item is either "(", ")", "," (punctuation) or copy_option
+                    if item.as_rule() != Rule::copy_option {
+                        continue;
+                    }
+                    // copy_option wraps one of: header_option | delim_option | escape_option | quote_option
+                    if let Some(opt) = item.into_inner().next() {
+                        let opt_name = match opt.as_rule() {
+                            Rule::header_option => "header",
+                            Rule::delim_option => "delim",
+                            Rule::escape_option => "escape",
+                            Rule::quote_option => "quote",
+                            _ => continue,
+                        };
+                        // Extract the value from the option (skip keyword tokens)
+                        for val in opt.into_inner() {
+                            let text = val.as_str();
+                            let r = val.as_rule();
+                            let value = match r {
+                                Rule::string => unescape_string(text),
+                                Rule::boolean_literal | Rule::integer => text.to_string(),
+                                _ => continue, // skip keywords like "HEADER", "DELIM", etc.
+                            };
+                            options.insert(opt_name.to_string(), value);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(Statement::CopyFrom(CopyFrom {
+        table_name,
+        file_path,
+        options,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +542,69 @@ mod tests {
     fn test_parameter_with_string() {
         let sql = "MATCH (a:Person) WHERE a.name = $name RETURN a";
         assert!(parse(sql).is_ok());
+    }
+
+    // ==================== COPY FROM tests ====================
+
+    #[test]
+    fn test_copy_from_basic() {
+        let sql = "COPY Person FROM 'data.csv'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyFrom(c) => {
+                assert_eq!(c.table_name, "Person");
+                assert!(c.file_path.contains("data.csv"));
+                assert!(c.options.is_empty());
+            }
+            _ => panic!("Expected CopyFrom, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_copy_from_with_options() {
+        let sql = "COPY Person FROM 'data.csv' (HEADER TRUE, DELIM ',')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyFrom(c) => {
+                assert_eq!(c.table_name, "Person");
+                assert_eq!(c.options.get("header").map(|s| s.as_str()), Some("TRUE"));
+                assert_eq!(c.options.get("delim").map(|s| s.as_str()), Some(","));
+            }
+            _ => panic!("Expected CopyFrom"),
+        }
+    }
+
+    #[test]
+    fn test_copy_from_full_options() {
+        let sql = "COPY Knows FROM 'rels.csv' (HEADER TRUE, DELIM '|', QUOTE '\"', ESCAPE '\\\\')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyFrom(c) => {
+                assert_eq!(c.table_name, "Knows");
+                assert_eq!(c.options.get("header").map(|s| s.as_str()), Some("TRUE"));
+                assert_eq!(c.options.get("delim").map(|s| s.as_str()), Some("|"));
+            }
+            _ => panic!("Expected CopyFrom"),
+        }
+    }
+
+    #[test]
+    fn test_copy_from_parse_error() {
+        // Missing file path
+        let sql = "COPY Person FROM";
+        assert!(parse(sql).is_err());
+    }
+
+    #[test]
+    fn test_copy_from_single_quoted_path() {
+        let sql = "COPY Person FROM 'path/to/data.csv'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyFrom(c) => {
+                assert_eq!(c.table_name, "Person");
+                assert!(c.file_path.contains("path/to/data.csv"));
+            }
+            _ => panic!("Expected CopyFrom"),
+        }
     }
 }

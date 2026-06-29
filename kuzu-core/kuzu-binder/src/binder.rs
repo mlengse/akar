@@ -23,6 +23,7 @@ impl Binder {
             Statement::CreateNodeTable(t) => self.bind_create_node_table(t),
             Statement::CreateRelTable(t) => self.bind_create_rel_table(t),
             Statement::DropTable(t) => self.bind_drop_table(t),
+            Statement::CopyFrom(c) => self.bind_copy_from(c),
         }
     }
 
@@ -556,6 +557,20 @@ impl Binder {
             }
             _ => Err("Failed to drop table".into()),
         }
+    }
+
+    fn bind_copy_from(&self, c: kuzu_parser::ast::CopyFrom) -> Result<BoundStatement, String> {
+        let catalog = self.catalog.lock().unwrap();
+        let entry = catalog
+            .get_entry_by_name(&c.table_name)
+            .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;
+        let table_id = entry.table_id();
+        Ok(BoundStatement::BoundCopyFrom(BoundCopyFrom {
+            table_name: c.table_name,
+            table_id,
+            file_path: c.file_path,
+            options: c.options,
+        }))
     }
 }
 
