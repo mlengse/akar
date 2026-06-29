@@ -141,9 +141,36 @@ impl Column {
 
     /// Append a single value to the column.
     ///
-    /// Automatically allocates a new page when the current one is full.
+    /// Append a single value to the column.
+    ///
+    /// Automatically allocates a new page when the current one is full or
+    /// when the current page has reached the maximum values per page (256).
     pub fn append_value(&mut self, value: &Value) -> std::io::Result<()> {
-        self.write_value_at(value, self.num_values)
+        let serialized = Self::serialize_value(value);
+        // Check if the current page is full (too many values or no space) before trying.
+        if self.num_pages > 0 {
+            let last_page = self.num_pages - 1;
+            let page_data = self.read_page_data(last_page as usize)?;
+            let num_vals = u32::from_le_bytes(page_data[..4].try_into().unwrap()) as usize;
+            if num_vals >= MAX_VALS_PER_PAGE {
+                // Page has hit the max values limit; allocate a new one.
+                let new_page = self.allocate_new_page()?;
+                return self.write_value_to_page(new_page, &serialized);
+            }
+            // Check if the value fits in the remaining space.
+            let data_end = if num_vals > 0 {
+                let last_off_pos = 4 + (num_vals - 1) * 4;
+                PAGE_HEADER_SIZE + u32::from_le_bytes(page_data[last_off_pos..last_off_pos + 4].try_into().unwrap()) as usize
+            } else {
+                PAGE_HEADER_SIZE
+            };
+            if data_end + serialized.len() > self.file_handle.page_size {
+                let new_page = self.allocate_new_page()?;
+                return self.write_value_to_page(new_page, &serialized);
+            }
+        }
+        let page_idx = self.ensure_page_for_write()?;
+        self.write_value_to_page(page_idx, &serialized)
     }
 
     /// Get a single value by row index.
@@ -407,13 +434,6 @@ impl Column {
         }
     }
 
-    /// Write a value at the given global row index (always appends).
-    fn write_value_at(&mut self, value: &Value, _row_idx: u64) -> std::io::Result<()> {
-        let serialized = Self::serialize_value(value);
-        let page_idx = self.ensure_page_for_write()?;
-        self.write_value_to_page(page_idx, &serialized)
-    }
-
     /// Write a serialized value to a page (append to the data area).
     ///
     /// Page layout (fixed-size header, never shifts):
@@ -475,11 +495,6 @@ impl Column {
         bm.unpin(page_idx);
         drop(bm);
 
-        // Update our tracking metadata.
-        if self.num_pages <= page_idx {
-            self.page_row_offsets.push(self.num_values);
-            self.num_pages = page_idx + 1;
-        }
         self.num_values += 1;
 
         Ok(())
@@ -502,17 +517,24 @@ impl Column {
     /// Ensure at least one page exists, allocating a new one if needed.
     fn ensure_page_for_write(&mut self) -> std::io::Result<u64> {
         if self.num_pages == 0 {
-            let mut fh = self.file_handle.clone();
-            let page_num = fh.allocate_page();
-            let empty_header = vec![0u8; self.file_handle.page_size];
-            fh.write_page(page_num, &empty_header)?;
-            self.file_handle = fh;
-            self.num_pages = 1;
-            self.page_row_offsets.push(0);
+            let page_num = self.allocate_new_page()?;
             Ok(page_num)
         } else {
             Ok(self.num_pages - 1)
         }
+    }
+
+    /// Allocate a new, empty page and update tracking metadata.
+    fn allocate_new_page(&mut self) -> std::io::Result<u64> {
+        let mut fh = self.file_handle.clone();
+        let page_num = fh.allocate_page();
+        let empty_header = vec![0u8; self.file_handle.page_size];
+        fh.write_page(page_num, &empty_header)?;
+        self.file_handle = fh;
+        self.page_row_offsets.push(self.num_values);
+        let page_idx = self.num_pages;
+        self.num_pages += 1;
+        Ok(page_idx)
     }
 
     /// Read raw page data from the buffer manager.

@@ -5,6 +5,7 @@
 pub mod page;
 pub mod buffer_manager;
 pub mod column;
+pub mod column_chunk;
 pub mod wal;
 pub mod compression;
 pub mod shadow_file;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub use table::{TableCatalog, NodeTable, RelTable, ColumnDefinition};
+pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 
 /// The storage manager — root of the storage engine.
 #[allow(dead_code)]
