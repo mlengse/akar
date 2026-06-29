@@ -6,7 +6,8 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // ==================== Top Level ====================
 
-statement = { ddl_statement | query_statement }
+statement = { union_statement | ddl_statement | query_statement }
+union_statement = { query_statement ~ ("UNION" ~ "ALL"?) ~ query_statement }
 
 alter_table = { "ALTER" ~ "TABLE" ~ identifier ~ alter_action }
 alter_action = {

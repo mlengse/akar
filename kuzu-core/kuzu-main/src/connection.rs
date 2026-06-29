@@ -234,6 +234,38 @@ impl Connection {
                     "Table '{}' dropped", t.name
                 ))))
             }
+            BoundStatement::BoundUnion(u) => {
+                tracing::info!("UNION ALL query");
+                let planner = QueryPlanner::new();
+                let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
+
+                // Execute left side
+                let left_plan = planner.plan(BoundStatement::BoundQuery(*u.left.clone()))
+                    .map_err(|e| format!("Plan left UNION: {e}"))?;
+                let left_optimized = optimizer.optimize(left_plan);
+                let processor = QueryProcessor::with_catalog(
+                    self.database.function_registry.clone(),
+                    self.database.storage_manager.table_catalog(),
+                );
+                let left_chunks = processor.execute(&left_optimized)
+                    .map_err(|e| format!("Execute left UNION: {e}"))?;
+
+                // Execute right side
+                let right_plan = planner.plan(BoundStatement::BoundQuery(*u.right.clone()))
+                    .map_err(|e| format!("Plan right UNION: {e}"))?;
+                let right_optimized = optimizer.optimize(right_plan);
+                let processor = QueryProcessor::with_catalog(
+                    self.database.function_registry.clone(),
+                    self.database.storage_manager.table_catalog(),
+                );
+                let right_chunks = processor.execute(&right_optimized)
+                    .map_err(|e| format!("Execute right UNION: {e}"))?;
+
+                // Concatenate results
+                let mut all_chunks = left_chunks;
+                all_chunks.extend(right_chunks);
+                Ok(Some(QueryResult::new(all_chunks)))
+            }
             BoundStatement::BoundAlterTable(a) => {
                 tracing::info!("ALTER TABLE '{}'", a.table_name);
                 let mut catalog = self.database.catalog.lock().unwrap();

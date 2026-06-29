@@ -103,6 +103,14 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                 .ok_or("Missing table name")?;
             Ok(Statement::DropTable(DropTable { name }))
         }
+        Rule::union_statement => {
+            let mut inner = pair.into_inner();
+            let left = parse_query_pairs(inner.next().ok_or("Missing left query")?)?;
+            let union_keyword = inner.next().ok_or("Missing UNION")?;
+            let all = union_keyword.as_str().eq_ignore_ascii_case("UNION ALL");
+            let right = parse_query_pairs(inner.next().ok_or("Missing right query")?)?;
+            Ok(Statement::Union(UnionStatement { left, right, all }))
+        }
         Rule::copy_from => parse_copy_from(pair),
         Rule::alter_table => parse_alter_table(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),

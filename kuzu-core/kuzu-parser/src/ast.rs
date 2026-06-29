@@ -9,6 +9,7 @@ pub enum Statement {
     DropTable(DropTable),
     CopyFrom(CopyFrom),
     AlterTable(AlterTable),
+    Union(UnionStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -189,6 +190,14 @@ pub enum AlterAction {
     DropColumn { name: String },
     RenameColumn { old_name: String, new_name: String },
     RenameTable { new_name: String },
+}
+
+/// UNION statement — combines results from two queries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionStatement {
+    pub left: Query,
+    pub right: Query,
+    pub all: bool,
 }
 
 /// COPY FROM statement — load data from a file into a table.

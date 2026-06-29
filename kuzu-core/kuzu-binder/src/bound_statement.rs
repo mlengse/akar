@@ -13,6 +13,7 @@ pub enum BoundStatement {
     BoundDropTable(BoundDropTable),
     BoundCopyFrom(BoundCopyFrom),
     BoundAlterTable(BoundAlterTable),
+    BoundUnion(BoundUnion),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -142,4 +143,11 @@ pub struct BoundDropTable {
 pub struct BoundAlterTable {
     pub table_name: String,
     pub action: kuzu_parser::ast::AlterAction,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundUnion {
+    pub left: Box<BoundQuery>,
+    pub right: Box<BoundQuery>,
+    pub all: bool,
 }

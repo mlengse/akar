@@ -25,6 +25,7 @@ impl Binder {
             Statement::DropTable(t) => self.bind_drop_table(t),
             Statement::CopyFrom(c) => self.bind_copy_from(c),
             Statement::AlterTable(a) => self.bind_alter_table(a),
+            Statement::Union(u) => self.bind_union(u),
         }
     }
 
@@ -627,6 +628,21 @@ impl Binder {
             }
         }
         Ok(BoundSetClause { items })
+    }
+
+    fn bind_union(&self, u: kuzu_parser::ast::UnionStatement) -> Result<BoundStatement, String> {
+        let left = self.bind_query(u.left)?;
+        let right = self.bind_query(u.right)?;
+        if let (BoundStatement::BoundQuery(lq), BoundStatement::BoundQuery(rq)) = (&left, &right) {
+            if lq.clauses.len() != rq.clauses.len() {
+                return Err("UNION queries must have compatible structures".into());
+            }
+        }
+        Ok(BoundStatement::BoundUnion(BoundUnion {
+            left: Box::new(match left { BoundStatement::BoundQuery(q) => q, _ => unreachable!() }),
+            right: Box::new(match right { BoundStatement::BoundQuery(q) => q, _ => unreachable!() }),
+            all: u.all,
+        }))
     }
 
     fn bind_alter_table(&self, a: kuzu_parser::ast::AlterTable) -> Result<BoundStatement, String> {
