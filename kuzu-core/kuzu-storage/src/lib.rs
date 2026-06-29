@@ -12,6 +12,7 @@ pub mod compression;
 pub mod shadow_file;
 pub mod local_storage;
 pub mod table;
+pub mod csv_reader;
 pub mod index;
 pub mod stats;
 pub mod checkpoint;
