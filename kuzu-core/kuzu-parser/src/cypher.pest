@@ -58,7 +58,8 @@ column_definitions = { column_def ~ ("," ~ column_def)* }
 column_def = { identifier ~ type_name }
 type_name = { "STRING" | "INT64" | "INT32" | "INT16" | "INT8"
     | "UINT64" | "UINT32" | "UINT16" | "UINT8"
-    | "DOUBLE" | "FLOAT" | "BOOLEAN" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL" }
+    | "BOOL" | "BOOLEAN"
+    | "DOUBLE" | "FLOAT" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL" }
 
 primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
 
@@ -155,7 +156,7 @@ escape_char = { "\\" ~ ANY }
 
 integer = { "-"? ~ ASCII_DIGIT+ }
 float = { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (^"e" ~ "-"? ~ ASCII_DIGIT+)? }
-boolean_literal = { "TRUE" | "FALSE" }
+boolean_literal = { ^"TRUE" | ^"FALSE" }
 null_literal = { "NULL" }
 
 list_literal = { "[" ~ expression ~ ("," ~ expression)* ~ "]" }

@@ -578,14 +578,14 @@ impl Binder {
             return Err(format!("'{}' is not a file", c.file_path));
         }
 
-        // 3. If HEADER=true, peek at first CSV line to validate column count
-        if let Some(header_val) = c.options.get("HEADER") {
-            if header_val.eq_ignore_ascii_case("true") {
-                let delimiter = c
-                    .options
-                    .get("DELIM")
-                    .and_then(|d| d.chars().next())
-                    .unwrap_or(',');
+        // 3. If HEADER=true and delimiter is known, peek at first CSV line to
+        //    validate column count. If no explicit delimiter option was given,
+        //    skip validation (the physical operator handles it with config-aware parsing).
+        let header_val = c.options.get("HEADER").or_else(|| c.options.get("header"));
+        let delim_val = c.options.get("DELIM").or_else(|| c.options.get("delim"));
+        if let Some(hv) = header_val {
+            if hv.eq_ignore_ascii_case("true") && delim_val.is_some() {
+                let delimiter = delim_val.and_then(|d| d.chars().next()).unwrap_or(',');
 
                 let file = std::fs::File::open(&c.file_path)
                     .map_err(|e| format!("Cannot open file '{}': {}", c.file_path, e))?;

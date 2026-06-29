@@ -1044,30 +1044,9 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
         // 3. Read the file
         let rows = match ext.as_str() {
             "csv" | "tsv" => {
-                let mut config = kuzu_storage::csv_reader::CsvReaderConfig::default();
-                if ext == "tsv" {
+                let mut config = kuzu_storage::csv_reader::CsvReaderConfig::from_options(&self.options);
+                if ext == "tsv" && !self.options.contains_key("DELIM") && !self.options.contains_key("delim") {
                     config.delimiter = b'\t';
-                }
-                if let Some(h) = self.options.get("HEADER") {
-                    config.has_header = h.eq_ignore_ascii_case("true");
-                }
-                if let Some(d) = self
-                    .options
-                    .get("DELIM")
-                    .or_else(|| self.options.get("delim"))
-                {
-                    if let Some(c) = d.chars().next() {
-                        config.delimiter = c as u8;
-                    }
-                }
-                if let Some(q) = self
-                    .options
-                    .get("QUOTE")
-                    .or_else(|| self.options.get("quote"))
-                {
-                    if let Some(c) = q.chars().next() {
-                        config.quote = c as u8;
-                    }
                 }
 
                 kuzu_storage::csv_reader::read_csv(path, &catalog_cols, &config)

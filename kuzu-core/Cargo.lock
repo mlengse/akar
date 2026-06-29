@@ -1440,6 +1440,7 @@ dependencies = [
 name = "kuzu-main"
 version = "0.1.0"
 dependencies = [
+ "arrow 53.4.1",
  "kuzu-algo",
  "kuzu-azure",
  "kuzu-binder",
@@ -1466,6 +1467,8 @@ dependencies = [
  "kuzu-transaction",
  "kuzu-unity-catalog",
  "kuzu-vector",
+ "parquet",
+ "tempfile",
  "thiserror",
  "tracing",
 ]

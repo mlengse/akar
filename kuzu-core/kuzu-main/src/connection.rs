@@ -303,3 +303,219 @@ fn substitute_in_bound_expr(
         is_constant: expr.is_constant,
     })
 }
+
+// ─── Integration tests ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    /// Create a temporary Database and Connection for testing.
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    /// Helper: execute a query and return whether it succeeded.
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    /// Helper: extract all values from the first column of a query result.
+    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
+        let result = conn.query(sql).unwrap();
+        result.chunks.iter().flat_map(|c| {
+            (0..c.size).filter_map(|i| {
+                c.fields.first().and_then(|f| f.get_value(i))
+            })
+        }).collect()
+    }
+
+    #[test]
+    fn test_copy_csv_with_header() {
+        let (dir, _db, conn) = setup_db();
+        let db_path = dir.path().join("test_db");
+        let _ = &db_path; // keep db path alive
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = dir.path().join("people.csv");
+        std::fs::write(&csv_path,
+            "name,age,score,active\nAlice,30,95.5,true\nBob,25,87.3,false\nCharlie,35,91.2,true\n"
+        ).unwrap();
+
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Person FROM '{file_path}' (HEADER true)")).unwrap();
+
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name ORDER BY n.name");
+        let extracted: Vec<String> = names.iter().filter_map(|v| {
+            if let Value::String(s) = v { Some(s.clone()) } else { None }
+        }).collect();
+        assert_eq!(extracted, vec!["Alice", "Bob", "Charlie"]);
+    }
+
+    #[test]
+    fn test_copy_csv_no_header() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = _dir.path().join("noheader.csv");
+        std::fs::write(&csv_path, "Alice,30,95.5,true\nBob,25,87.3,false\n").unwrap();
+
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Person FROM '{file_path}' (HEADER false)")).unwrap();
+
+        // Verify: MATCH should return 2 rows (even if column projection is raw)
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 2, "Expected 2 rows in MATCH result");
+    }
+
+    #[test]
+    fn test_copy_csv_custom_delimiter() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Item(name STRING, price DOUBLE, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = _dir.path().join("items.csv");
+        std::fs::write(&csv_path, "name|price\nWidget|19.99\nGadget|29.99\n").unwrap();
+
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Item FROM '{file_path}' (HEADER true, DELIM '|')")).unwrap();
+
+        // Verify 2 rows were inserted
+        let names = query_column(&conn, "MATCH (n:Item) RETURN n.name");
+        assert_eq!(names.len(), 2, "Expected 2 rows after pipe-delimited COPY");
+    }
+
+    #[test]
+    fn test_copy_csv_file_not_found() {
+        let (dir, _db, conn) = setup_db();
+        let _ = &dir;
+
+        exec_ok(&conn, "CREATE NODE TABLE T(name STRING, PRIMARY KEY (name))").unwrap();
+
+        let result = exec_ok(&conn, "COPY T FROM 'nonexistent.csv' (HEADER true)");
+        assert!(result.is_err(), "Expected file not found error");
+        let err = result.unwrap_err();
+        assert!(err.contains("not found"), "Expected file not found error, got: {err}");
+    }
+
+    #[test]
+    fn test_copy_csv_type_mismatch() {
+        let (dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = dir.path().join("bad.csv");
+        std::fs::write(&csv_path, "name,age\nAlice,not_a_number\n").unwrap();
+
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        let result = exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)"));
+        assert!(result.is_err(), "Expected type coercion error");
+        let err = result.unwrap_err();
+        assert!(err.contains("INT64") || err.contains("parse"),
+            "Expected type error, got: {err}");
+    }
+
+    #[test]
+    fn test_copy_csv_column_count_mismatch() {
+        let (dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = dir.path().join("bad_cols.csv");
+        std::fs::write(&csv_path, "name,age,extra\nAlice,30,oops\n").unwrap();
+
+        // Without DELIM option, the binder skips header validation.
+        // The CSV reader will detect the mismatch and error at read time.
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        let result = exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)"));
+        assert!(result.is_err(), "Expected column count error");
+        let err = result.unwrap_err();
+        assert!(err.contains("Column count mismatch") || err.contains("match"),
+            "Expected column count error, got: {err}");
+    }
+
+    #[test]
+    fn test_copy_parquet_roundtrip() {
+        use arrow::array::*;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+
+        let (dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+
+        let pq_path = dir.path().join("data.parquet");
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("age", DataType::Int64, false),
+            Field::new("score", DataType::Float64, false),
+            Field::new("active", DataType::Boolean, false),
+        ]));
+
+        let batch = arrow::record_batch::RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["Alice", "Bob"])),
+                Arc::new(Int64Array::from(vec![30i64, 25])),
+                Arc::new(Float64Array::from(vec![95.5, 87.3])),
+                Arc::new(BooleanArray::from(vec![true, false])),
+            ],
+        ).unwrap();
+
+        let file = std::fs::File::create(&pq_path).unwrap();
+        let mut writer = parquet::arrow::ArrowWriter::try_new(file, batch.schema(), None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let file_path = pq_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Person FROM '{file_path}'")).unwrap();
+
+        // Verify 2 rows were inserted via Parquet
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 2, "Expected 2 rows from Parquet COPY");
+    }
+
+    #[test]
+    fn test_copy_csv_tab_delimiter() {
+        let (dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(a STRING, b INT64, PRIMARY KEY (a))").unwrap();
+
+        let csv_path = dir.path().join("data.tsv");
+        std::fs::write(&csv_path, "a\tb\nx\t10\ny\t20\n").unwrap();
+
+        // .tsv extension triggers tab delimiter in PhysicalCopyFrom.
+        // Without a DELIM option, the binder skips header validation.
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)")).unwrap();
+
+        // Verify 2 rows were inserted via TSV
+        let vals = query_column(&conn, "MATCH (n:T) RETURN n.b");
+        assert_eq!(vals.len(), 2, "Expected 2 rows from TSV COPY");
+    }
+
+    #[test]
+    fn test_copy_empty_csv() {
+        let (dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(name STRING, PRIMARY KEY (name))").unwrap();
+
+        let csv_path = dir.path().join("empty.csv");
+        std::fs::write(&csv_path, "name\n").unwrap(); // header only
+
+        let file_path = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)")).unwrap();
+
+        let vals = query_column(&conn, "MATCH (n:T) RETURN n.name");
+        assert!(vals.is_empty(), "Expected no rows in empty CSV");
+    }
+}
