@@ -57,3 +57,11 @@ tempfile = "3"
 arrow = "53"
 parquet = "53"
 criterion.workspace = true
+
+[[bench]]
+name = "query_pipeline"
+harness = false
+
+[[bench]]
+name = "storage_bench"
+harness = false
