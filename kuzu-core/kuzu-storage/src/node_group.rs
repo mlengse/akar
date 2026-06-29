@@ -12,6 +12,7 @@
 
 use crate::column::Column;
 use crate::column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
+use crate::version_info::VersionInfo;
 use kuzu_common::types::Value;
 
 /// A node group stores up to `NODE_GROUP_SIZE` rows in columnar format.
@@ -19,6 +20,9 @@ use kuzu_common::types::Value;
 /// `start_offset` is the global row index within the owning table where
 /// this group's data begins. `num_nodes` counts how many rows have been
 /// appended so far (≤ `NODE_GROUP_SIZE`).
+///
+/// `version_info` tracks MVCC insert/delete visibility for concurrent
+/// writers. It is `None` for single-writer mode (backward compat).
 #[derive(Debug, Clone)]
 pub struct NodeGroup {
     /// One in-memory ColumnChunk per column of the table.
@@ -27,6 +31,8 @@ pub struct NodeGroup {
     pub start_offset: u64,
     /// Number of rows currently stored in this group.
     pub num_nodes: u64,
+    /// Optional MVCC version tracker for this group.
+    pub version_info: Option<VersionInfo>,
 }
 
 impl NodeGroup {
@@ -41,6 +47,7 @@ impl NodeGroup {
             columns,
             start_offset,
             num_nodes: 0,
+            version_info: None,
         }
     }
 
@@ -51,6 +58,15 @@ impl NodeGroup {
             columns,
             start_offset,
             num_nodes: 0,
+            version_info: None,
+        }
+    }
+
+    /// Enable MVCC version tracking for this node group.
+    /// Must be called before any inserts if concurrent writes are expected.
+    pub fn enable_version_info(&mut self) {
+        if self.version_info.is_none() {
+            self.version_info = Some(VersionInfo::new(NODE_GROUP_SIZE));
         }
     }
 
@@ -62,7 +78,15 @@ impl NodeGroup {
     ///
     /// Returns an error if the number of values does not match the number
     /// of columns, or if the group is already full.
+    ///
+    /// If `txn_id` is `Some(...)`, the insert is recorded in the version
+    /// info for MVCC visibility tracking.
     pub fn append_row(&mut self, row: Vec<Value>) -> Result<(), String> {
+        self.append_row_with_txn(row, None)
+    }
+
+    /// Append a row with an optional transaction ID for MVCC tracking.
+    pub fn append_row_with_txn(&mut self, row: Vec<Value>, txn_id: Option<u64>) -> Result<(), String> {
         if row.len() != self.columns.len() {
             return Err(format!(
                 "column count mismatch: expected {} values, got {}",
@@ -75,6 +99,12 @@ impl NodeGroup {
         }
         for (col_idx, value) in row.into_iter().enumerate() {
             self.columns[col_idx].append(value);
+        }
+        // Record insert in version info if MVCC tracking is enabled
+        if let Some(ref vi) = self.version_info {
+            if let Some(txn) = txn_id {
+                vi.insert(txn, self.num_nodes as u32);
+            }
         }
         self.num_nodes += 1;
         Ok(())
@@ -196,6 +226,15 @@ impl NodeGroup {
     /// Access a single value at the given local row and column index.
     pub fn get_value(&self, local_row: usize, col_idx: usize) -> Option<&Value> {
         self.columns.get(col_idx).and_then(|chunk| chunk.get(local_row))
+    }
+
+    /// Check whether a row is visible at the given snapshot timestamp.
+    /// Returns `true` if no version tracking is active (backward compat).
+    pub fn is_row_visible(&self, local_row: usize, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
+        match &self.version_info {
+            Some(vi) => vi.is_visible(local_row as u32, snapshot_ts, commit_history),
+            None => true, // No version tracking → always visible
+        }
     }
 
     /// Reset the group to empty without flushing.

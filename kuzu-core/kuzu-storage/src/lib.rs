@@ -17,6 +17,8 @@ pub mod parquet_reader;
 pub mod shadow_file;
 pub mod stats;
 pub mod table;
+pub mod update_info;
+pub mod version_info;
 pub mod wal;
 
 use buffer_manager::{BufferManager, BufferManagerConfig};
