@@ -205,10 +205,6 @@ mod tests {
 
     #[test]
     fn test_wal_column_write_replay() {
-        use kuzu_common::types::{LogicalTypeID, Value};
-        use crate::column::Column;
-        use crate::page::DEFAULT_PAGE_SIZE;
-
         let dir = tempfile::tempdir().unwrap();
         let wal_path = dir.path().join("wal.log");
         let mut wal = WAL::new(wal_path);
