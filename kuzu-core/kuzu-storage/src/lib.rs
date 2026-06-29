@@ -971,7 +971,7 @@ mod integration_tests {
         let dir = tempfile::tempdir().unwrap();
 
         // Phase 1: Create DB, insert data, flush WAL, then "crash"
-        let row_count = {
+        let _row_count = {
             let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
             let sm = StorageManager::new(dir.path().to_path_buf(), mm);
 

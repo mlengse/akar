@@ -1787,7 +1787,6 @@ mod merge_tests {
 mod call_tests {
     use super::*;
     use crate::database::SystemConfig;
-    use kuzu_common::types::Value;
 
     fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
         let dir = tempfile::tempdir().unwrap();
@@ -1983,7 +1982,6 @@ mod create_dml_tests {
 mod foreach_tests {
     use super::*;
     use crate::database::SystemConfig;
-    use kuzu_common::types::Value;
 
     fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
         let dir = tempfile::tempdir().unwrap();
@@ -2034,7 +2032,6 @@ mod foreach_tests {
 mod var_length_path_tests {
     use super::*;
     use crate::database::SystemConfig;
-    use kuzu_common::types::Value;
 
     fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
         let dir = tempfile::tempdir().unwrap();
@@ -2081,7 +2078,6 @@ mod var_length_path_tests {
 mod subquery_tests {
     use super::*;
     use crate::database::SystemConfig;
-    use kuzu_common::types::Value;
 
     fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
         let dir = tempfile::tempdir().unwrap();
