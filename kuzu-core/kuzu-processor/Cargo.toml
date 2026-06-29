@@ -19,3 +19,4 @@ hashbrown.workspace = true
 
 [dev-dependencies]
 kuzu-binder = { path = "../kuzu-binder" }
+criterion.workspace = true

@@ -56,3 +56,4 @@ thiserror.workspace = true
 tempfile = "3"
 arrow = "53"
 parquet = "53"
+criterion.workspace = true
