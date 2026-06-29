@@ -133,9 +133,16 @@ A5 parallel dengan A1-A4
 - **Tests**: 5 parser tests (foreach basic, foreach in match, var-length simple, var-length with bounds, var-length with variable) + 4 integration tests (foreach parse only, foreach in match, var-length parse, var-length with bounds parse)
 - **Catatan**: PhysicalForeach membuat QueryProcessor baru per sub-plan per item, belum optimal; var-length path hanya parsing & binding (scan masih flat, belum recursive extend)
 
-### B5. Subquery Support (`CALL { ... }`)
-- Subquery expressions: `EXISTS { MATCH ... }`, scalar subqueries
-- Correlated vs uncorrelated subqueries
+### B5. Subquery Support (`EXISTS { MATCH ... }`) ✅
+- `EXISTS { MATCH ... WHERE ... RETURN ... }` — boolean expression dalam WHERE clause
+- **Grammar**: `exists_subquery = { "EXISTS" ~ "{" ~ query_statement ~ "}" }` di `primary` (sebelum `variable` untuk menghindari ambiguitas)
+- **AST**: `Expression::ExistsSubquery(Box<Query>)`
+- **Parser**: Handle `Rule::exists_subquery` di `parse_expression` → parse inner `query_statement`
+- **Binder**: `resolve_expression` untuk `ExistsSubquery` → bind inner query, return `LogicalTypeID::Bool`
+- **Expression Evaluator**: Handle `ExistsSubquery` via `evaluate_subquery()` callback (default: "No subquery executor configured")
+- **Subquery executor**: `subquery_fn: Option<Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>` pada `ExpressionEvaluator`
+- **Tests**: 2 parser tests (EXISTS in WHERE, EXISTS in RETURN) + 2 integration tests (EXISTS in WHERE, EXISTS parse+bind via Binder)
+- **Catatan**: Correlated subqueries (referencing outer variables) belum didukung. Subquery execution via callback butuh wiring di Connection level.
 
 ### Dependencies dalam Fase B
 B1, B2, B3 parallel (independent grammar additions)
