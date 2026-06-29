@@ -163,7 +163,17 @@ impl NodeTable {
     }
 }
 
-/// A relationship (edge) table with CSR adjacency storage.
+/// A relationship (edge) table with CSR (Compressed Sparse Row) adjacency storage.
+///
+/// Each edge connects a source node to a destination node and may carry
+/// a set of property values (one per column in `columns`).
+///
+/// # Storage layout
+///
+/// - `edges` — flat edge list: `edge_idx → (src_offset, dst_offset)`
+/// - `fwd_adj` — forward index: `src_offset → Vec<(dst_offset, edge_idx)>`
+/// - `rev_adj` — reverse index: `dst_offset → Vec<(src_offset, edge_idx)>`
+/// - `properties` — column-major property storage: `properties[col_idx][edge_idx]`
 #[derive(Debug, Clone)]
 pub struct RelTable {
     pub table_id: u64,
@@ -172,8 +182,14 @@ pub struct RelTable {
     pub dst_table_id: u64,
     pub columns: Vec<ColumnDefinition>,
     pub num_rows: u64,
-    /// Column-major in-memory data storage: data[col_idx][row_idx]
-    pub data: Vec<Vec<Value>>,
+    /// Flat edge list: edge_idx → (src_offset, dst_offset).
+    pub edges: Vec<(u64, u64)>,
+    /// Forward CSR adjacency: src_offset → [(dst_offset, edge_idx), ...].
+    pub fwd_adj: HashMap<u64, Vec<(u64, usize)>>,
+    /// Reverse CSR adjacency: dst_offset → [(src_offset, edge_idx), ...].
+    pub rev_adj: HashMap<u64, Vec<(u64, usize)>>,
+    /// Column-major property storage: properties[col_idx][edge_idx].
+    pub properties: Vec<Vec<Value>>,
 }
 
 impl RelTable {
@@ -192,12 +208,26 @@ impl RelTable {
             dst_table_id,
             columns,
             num_rows: 0,
-            data: vec![Vec::new(); num_cols],
+            edges: Vec::new(),
+            fwd_adj: HashMap::new(),
+            rev_adj: HashMap::new(),
+            properties: vec![Vec::new(); num_cols],
         }
     }
 
-    /// Insert a row of values into the table (column-major storage).
-    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
+    /// Insert a relationship (edge) between two nodes with property values.
+    ///
+    /// `from` and `to` are the node offsets of the source and destination
+    /// nodes within their respective tables.
+    ///
+    /// Returns an error if the number of values doesn't match the number
+    /// of property columns.
+    pub fn insert_rel(
+        &mut self,
+        from: u64,
+        to: u64,
+        values: Vec<Value>,
+    ) -> Result<(), String> {
         if values.len() != self.columns.len() {
             return Err(format!(
                 "Column count mismatch: expected {} values, got {}",
@@ -205,21 +235,118 @@ impl RelTable {
                 values.len()
             ));
         }
+
+        let edge_idx = self.edges.len();
+        self.edges.push((from, to));
+
+        // Update forward adjacency.
+        self.fwd_adj
+            .entry(from)
+            .or_default()
+            .push((to, edge_idx));
+
+        // Update reverse adjacency.
+        self.rev_adj
+            .entry(to)
+            .or_default()
+            .push((from, edge_idx));
+
+        // Store property values.
         for (col_idx, val) in values.into_iter().enumerate() {
-            self.data[col_idx].push(val);
+            self.properties[col_idx].push(val);
         }
+
         self.num_rows += 1;
         Ok(())
     }
 
-    /// Get all values for a given column (by index) as a slice.
-    pub fn get_column(&self, col_idx: usize) -> Option<&[Value]> {
-        self.data.get(col_idx).map(|v| v.as_slice())
+    /// Insert a row of values (legacy alias that treats all columns as properties).
+    /// Only the first two values are treated as (from, to) if the table has
+    /// at least 2 columns; otherwise they are stored as pure properties.
+    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
+        // If there are at least 2 "structural" columns (src_id, dst_id) plus
+        // property columns, we assume the first two values are the node offsets.
+        // This preserves backward compatibility with the old flat API.
+        let num_prop_cols = self.columns.len();
+        if values.len() != num_prop_cols {
+            return Err(format!(
+                "Column count mismatch: expected {} values, got {}",
+                num_prop_cols,
+                values.len()
+            ));
+        }
+
+        // We treat the values as plain properties and use sequential edge IDs
+        // as (from, to) placeholders. Real callers should use `insert_rel`.
+        let from = self.num_rows;
+        let to = self.num_rows;
+        self.insert_rel(from, to, values)
     }
 
-    /// Return column-major data (clone of the internal Vec<Vec<Value>>).
+    /// Scan the forward adjacency list for a given source node.
+    ///
+    /// Returns a list of `(dst_offset, edge_idx)` pairs, or an empty vec
+    /// if the node has no outgoing edges.
+    pub fn scan_adj_list(&self, src_offset: u64) -> &[(u64, usize)] {
+        self.fwd_adj
+            .get(&src_offset)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Scan the reverse adjacency list for a given destination node.
+    ///
+    /// Returns a list of `(src_offset, edge_idx)` pairs, or an empty vec
+    /// if the node has no incoming edges.
+    pub fn scan_rev_adj_list(&self, dst_offset: u64) -> &[(u64, usize)] {
+        self.rev_adj
+            .get(&dst_offset)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get all outgoing edges from a source node as `(dst_offset, property_values)`.
+    pub fn get_outgoing_edges(&self, src_offset: u64) -> Vec<(u64, Vec<Value>)> {
+        self.scan_adj_list(src_offset)
+            .iter()
+            .map(|&(dst, edge_idx)| {
+                let props = self.get_edge_properties(edge_idx);
+                (dst, props)
+            })
+            .collect()
+    }
+
+    /// Get all incoming edges to a destination node as `(src_offset, property_values)`.
+    pub fn get_incoming_edges(&self, dst_offset: u64) -> Vec<(u64, Vec<Value>)> {
+        self.scan_rev_adj_list(dst_offset)
+            .iter()
+            .map(|&(src, edge_idx)| {
+                let props = self.get_edge_properties(edge_idx);
+                (src, props)
+            })
+            .collect()
+    }
+
+    /// Get the property values for a specific edge by index.
+    pub fn get_edge_properties(&self, edge_idx: usize) -> Vec<Value> {
+        let mut props = Vec::with_capacity(self.columns.len());
+        for col in &self.properties {
+            match col.get(edge_idx) {
+                Some(v) => props.push(v.clone()),
+                None => props.push(Value::Null),
+            }
+        }
+        props
+    }
+
+    /// Get all values for a given property column (by index) as a slice.
+    pub fn get_column(&self, col_idx: usize) -> Option<&[Value]> {
+        self.properties.get(col_idx).map(|v| v.as_slice())
+    }
+
+    /// Reconstruct column-major data from properties for backward compatibility.
     pub fn to_column_major_data(&self) -> Vec<Vec<Value>> {
-        self.data.clone()
+        self.properties.clone()
     }
 }
 
@@ -310,5 +437,250 @@ impl TableCatalog {
         self.get_node_table_by_name(name)
             .map(|t| t.num_rows)
             .unwrap_or(0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::column_chunk::NODE_GROUP_SIZE;
+
+    // ==================== NodeTable tests ====================
+
+    #[test]
+    fn test_node_table_empty() {
+        let table = NodeTable::new(1, "Person".into(), vec![
+            ColumnDefinition { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true },
+            ColumnDefinition { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        assert_eq!(table.num_rows, 0);
+        assert!(table.node_groups.is_empty());
+    }
+
+    #[test]
+    fn test_node_table_insert_and_get() {
+        let mut table = NodeTable::new(1, "Person".into(), vec![
+            ColumnDefinition { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true },
+            ColumnDefinition { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
+        table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+
+        assert_eq!(table.num_rows, 2);
+        assert_eq!(table.get_value(0, 0), Some(&Value::String("Alice".into())));
+        assert_eq!(table.get_value(1, 1), Some(&Value::Int64(25)));
+    }
+
+    #[test]
+    fn test_node_table_scan_column() {
+        let mut table = NodeTable::new(1, "T".into(), vec![
+            ColumnDefinition { name: "val".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        for i in 0..100 {
+            table.insert_row(vec![Value::Int64(i)]).unwrap();
+        }
+        let scanned = table.scan_column(0, 10, 5);
+        assert_eq!(scanned.len(), 5);
+        assert_eq!(scanned[0], Value::Int64(10));
+        assert_eq!(scanned[4], Value::Int64(14));
+    }
+
+    #[test]
+    fn test_node_table_to_column_major() {
+        let mut table = NodeTable::new(1, "T".into(), vec![
+            ColumnDefinition { name: "x".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+            ColumnDefinition { name: "y".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        table.insert_row(vec![Value::Int64(1), Value::Int64(10)]).unwrap();
+        table.insert_row(vec![Value::Int64(2), Value::Int64(20)]).unwrap();
+
+        let data = table.to_column_major_data();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0], vec![Value::Int64(1), Value::Int64(2)]);
+        assert_eq!(data[1], vec![Value::Int64(10), Value::Int64(20)]);
+    }
+
+    #[test]
+    fn test_node_table_auto_node_group() {
+        let mut table = NodeTable::new(1, "T".into(), vec![
+            ColumnDefinition { name: "v".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        // Insert NODE_GROUP_SIZE + 1 rows to force a second node group
+        for i in 0..NODE_GROUP_SIZE as u64 + 1 {
+            table.insert_row(vec![Value::Int64(i as i64)]).unwrap();
+        }
+        assert_eq!(table.num_rows, NODE_GROUP_SIZE as u64 + 1);
+        assert_eq!(table.node_groups.len(), 2);
+        assert_eq!(table.node_groups[0].num_nodes, NODE_GROUP_SIZE as u64);
+        assert_eq!(table.node_groups[1].num_nodes, 1);
+        // Scan should still return all values
+        assert_eq!(table.get_value(0, 0), Some(&Value::Int64(0)));
+        assert_eq!(table.get_value(NODE_GROUP_SIZE, 0), Some(&Value::Int64(NODE_GROUP_SIZE as i64)));
+    }
+
+    // ==================== RelTable (CSR) tests ====================
+
+    fn make_rel_table() -> RelTable {
+        RelTable::new(1, "Knows".into(), 0, 1, vec![
+            ColumnDefinition { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+            ColumnDefinition { name: "weight".into(), logical_type: LogicalTypeID::Double, is_primary_key: false },
+        ])
+    }
+
+    #[test]
+    fn test_rel_table_empty() {
+        let rel = make_rel_table();
+        assert_eq!(rel.num_rows, 0);
+        assert!(rel.edges.is_empty());
+        assert!(rel.fwd_adj.is_empty());
+        assert!(rel.rev_adj.is_empty());
+    }
+
+    #[test]
+    fn test_rel_insert_basic() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
+        rel.insert_rel(0, 2, vec![Value::Int64(2021), Value::Double(0.8)]).unwrap();
+        rel.insert_rel(1, 0, vec![Value::Int64(2020), Value::Double(0.3)]).unwrap();
+
+        assert_eq!(rel.num_rows, 3);
+        assert_eq!(rel.edges.len(), 3);
+
+        // Forward adjacency from node 0
+        let fwd = rel.scan_adj_list(0);
+        assert_eq!(fwd.len(), 2);
+        assert_eq!(fwd[0], (1, 0)); // (dst=1, edge_idx=0)
+        assert_eq!(fwd[1], (2, 1)); // (dst=2, edge_idx=1)
+
+        // Forward from node 1
+        let fwd1 = rel.scan_adj_list(1);
+        assert_eq!(fwd1.len(), 1);
+        assert_eq!(fwd1[0], (0, 2));
+    }
+
+    #[test]
+    fn test_rel_reverse_adjacency() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 5, vec![Value::Int64(2022), Value::Double(1.0)]).unwrap();
+        rel.insert_rel(3, 5, vec![Value::Int64(2023), Value::Double(1.5)]).unwrap();
+
+        // Node 5 has two incoming edges
+        let rev = rel.scan_rev_adj_list(5);
+        assert_eq!(rev.len(), 2);
+        assert_eq!(rev[0], (0, 0));
+        assert_eq!(rev[1], (3, 1));
+    }
+
+    #[test]
+    fn test_rel_get_edge_properties() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
+        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)]).unwrap();
+
+        let props0 = rel.get_edge_properties(0);
+        assert_eq!(props0, vec![Value::Int64(2020), Value::Double(0.5)]);
+
+        let props1 = rel.get_edge_properties(1);
+        assert_eq!(props1, vec![Value::Int64(2021), Value::Double(0.9)]);
+    }
+
+    #[test]
+    fn test_rel_get_outgoing_edges() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 10, vec![Value::Int64(2020), Value::Double(1.0)]).unwrap();
+        rel.insert_rel(0, 20, vec![Value::Int64(2021), Value::Double(2.0)]).unwrap();
+
+        let outgoing = rel.get_outgoing_edges(0);
+        assert_eq!(outgoing.len(), 2);
+        assert_eq!(outgoing[0].0, 10);
+        assert_eq!(outgoing[0].1, vec![Value::Int64(2020), Value::Double(1.0)]);
+        assert_eq!(outgoing[1].0, 20);
+    }
+
+    #[test]
+    fn test_rel_get_incoming_edges() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(10, 5, vec![Value::Int64(2020), Value::Double(1.0)]).unwrap();
+        rel.insert_rel(20, 5, vec![Value::Int64(2021), Value::Double(2.0)]).unwrap();
+
+        let incoming = rel.get_incoming_edges(5);
+        assert_eq!(incoming.len(), 2);
+        assert_eq!(incoming[0].0, 10);
+        assert_eq!(incoming[1].0, 20);
+    }
+
+    #[test]
+    fn test_rel_no_edges() {
+        let rel = make_rel_table();
+        assert!(rel.scan_adj_list(0).is_empty());
+        assert!(rel.scan_rev_adj_list(0).is_empty());
+        assert!(rel.get_outgoing_edges(0).is_empty());
+        assert!(rel.get_incoming_edges(0).is_empty());
+    }
+
+    #[test]
+    fn test_rel_insert_row_legacy() {
+        let mut rel = make_rel_table();
+        // insert_row treats values as properties with sequential edge IDs
+        rel.insert_row(vec![Value::Int64(2022), Value::Double(3.0)]).unwrap();
+        assert_eq!(rel.num_rows, 1);
+        assert_eq!(rel.edges[0], (0, 0)); // sequential from=0, to=0
+        assert_eq!(rel.get_edge_properties(0), vec![Value::Int64(2022), Value::Double(3.0)]);
+    }
+
+    #[test]
+    fn test_rel_wrong_column_count() {
+        let mut rel = make_rel_table();
+        let result = rel.insert_rel(0, 1, vec![Value::Int64(42)]); // 1 value, expected 2
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rel_get_column() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(1.5)]).unwrap();
+        rel.insert_rel(1, 2, vec![Value::Int64(2021), Value::Double(2.5)]).unwrap();
+
+        let since_col = rel.get_column(0).unwrap();
+        assert_eq!(since_col, &[Value::Int64(2020), Value::Int64(2021)]);
+
+        let weight_col = rel.get_column(1).unwrap();
+        assert_eq!(weight_col, &[Value::Double(1.5), Value::Double(2.5)]);
+    }
+
+    #[test]
+    fn test_rel_to_column_major() {
+        let mut rel = make_rel_table();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
+        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)]).unwrap();
+
+        let data = rel.to_column_major_data();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0], vec![Value::Int64(2020), Value::Int64(2021)]);
+        assert_eq!(data[1], vec![Value::Double(0.5), Value::Double(0.9)]);
+    }
+
+    // ==================== TableCatalog tests ====================
+
+    #[test]
+    fn test_catalog_create_and_lookup() {
+        let mut cat = TableCatalog::new();
+        let node_table = cat.create_node_table("Person".into(), vec![
+            ColumnDefinition { name: "id".into(), logical_type: LogicalTypeID::Int64, is_primary_key: true },
+        ]);
+        assert_eq!(node_table.table_id, 0);
+
+        let rel_table = cat.create_rel_table("Knows".into(), 0, 1, vec![
+            ColumnDefinition { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ]);
+        assert_eq!(rel_table.table_id, 1);
+
+        assert!(cat.get_node_table(0).is_some());
+        assert!(cat.get_rel_table(1).is_some());
+        assert_eq!(cat.node_table_num_rows("Person"), 0);
     }
 }
