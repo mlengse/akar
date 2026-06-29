@@ -156,6 +156,16 @@ impl Binder {
                     };
                     (BoundClause::BoundUnwind(bound), vec![new_var])
                 }
+                Clause::Foreach(f) => {
+                    let bound = self.bind_foreach(&f)?;
+                    let new_var = BoundVariable {
+                        name: bound.variable.clone(),
+                        table_id: 0,
+                        label: None,
+                        is_node: false,
+                    };
+                    (BoundClause::BoundForeach(bound), vec![new_var])
+                }
                 Clause::OptionalMatch(m) => {
                     let (bound, vars) = self.bind_optional_match(&m, &variables)?;
                     (BoundClause::BoundOptionalMatch(bound), vars)
@@ -282,6 +292,8 @@ impl Binder {
                 label: edge_label,
                 rel_table_id,
                 direction: e.direction.clone(),
+                lower_bound: e.lower_bound,
+                upper_bound: e.upper_bound,
             });
         }
 
@@ -621,6 +633,36 @@ impl Binder {
         Ok(BoundUnwindClause {
             expression: u.expression.clone(),
             variable: u.variable.clone(),
+        })
+    }
+
+    fn bind_foreach(&self, f: &kuzu_parser::ast::ForeachClause) -> Result<BoundForeachClause, String> {
+        // Validate the expression is a list
+        match &f.expression {
+            kuzu_parser::ast::Expression::List(_) | kuzu_parser::ast::Expression::Variable(_) => {}
+            _ => {
+                return Err(format!(
+                    "FOREACH requires a list expression, got: {:?}",
+                    f.expression
+                ))
+            }
+        }
+        if f.variable.is_empty() {
+            return Err("FOREACH requires a variable name".into());
+        }
+        // Bind sub-statements by wrapping in a Query statement
+        let mut sub_statements = Vec::new();
+        for clause in &f.clauses {
+            let query = kuzu_parser::ast::Query {
+                clauses: vec![clause.clone()],
+            };
+            let bound = self.bind_query(query)?;
+            sub_statements.push(bound);
+        }
+        Ok(BoundForeachClause {
+            variable: f.variable.clone(),
+            expression: f.expression.clone(),
+            sub_statements,
         })
     }
 

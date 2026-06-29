@@ -279,6 +279,18 @@ impl QueryProcessor {
                     let result = self.execute_table_function(tf)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Foreach(fc) => {
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let foreach_op = PhysicalForeach {
+                        variable: fc.variable.clone(),
+                        expression: fc.expression.clone(),
+                        sub_plans: fc.sub_plans.clone(),
+                        function_registry: self.function_registry.clone(),
+                        table_catalog: self.table_catalog.clone(),
+                    };
+                    let result = foreach_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
             }
         }
 

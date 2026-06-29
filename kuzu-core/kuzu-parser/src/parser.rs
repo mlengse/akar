@@ -227,10 +227,74 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
             Rule::merge_clause => {
                 // MERGE is handled separately in parse_statement
             }
+            Rule::foreach_clause => {
+                let clause = parse_foreach_clause(inner)?;
+                clauses.push(Clause::Foreach(clause));
+            }
+            Rule::create_clause_inline => {
+                // CREATE inside FOREACH body
+                let patterns = parse_patterns(inner)?;
+                clauses.push(Clause::Create(CreateClause { patterns }));
+            }
             _ => {}
         }
     }
     Ok(Query { clauses })
+}
+
+/// Parse a FOREACH clause: `FOREACH (var IN list | body_clauses...)`
+fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<ForeachClause, String> {
+    let mut variable = String::new();
+    let mut expression = None;
+    let mut sub_clauses = Vec::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::variable => variable = inner.as_str().to_string(),
+            Rule::expression => expression = Some(parse_expression(inner)?),
+            Rule::foreach_body => {
+                // Parse body clauses (CREATE, SET, DELETE)
+                for body_inner in inner.into_inner() {
+                    match body_inner.as_rule() {
+                        Rule::create_clause_inline => {
+                            let patterns = parse_patterns(body_inner)?;
+                            sub_clauses.push(Clause::Create(CreateClause { patterns }));
+                        }
+                        Rule::set_clause => {
+                            let items: Result<Vec<SetItem>, String> = body_inner
+                                .into_inner()
+                                .filter(|p| p.as_rule() == Rule::set_item)
+                                .map(|item| {
+                                    let mut parts = item.into_inner();
+                                    let prop = parse_expression(
+                                        parts.next().ok_or("Missing SET property".to_string())?,
+                                    )?;
+                                    let val = parse_expression(
+                                        parts.next().ok_or("Missing SET value".to_string())?,
+                                    )?;
+                                    Ok(SetItem { property: prop, value: val })
+                                })
+                                .collect();
+                            sub_clauses.push(Clause::Set(SetClause { items: items? }));
+                        }
+                        Rule::delete_clause => {
+                            let expressions: Result<Vec<_>, _> =
+                                body_inner.into_inner().map(parse_expression).collect();
+                            sub_clauses.push(Clause::Delete(DeleteClause {
+                                expressions: expressions?,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(ForeachClause {
+        variable,
+        expression: expression.ok_or("Missing FOREACH expression")?,
+        clauses: sub_clauses,
+    })
 }
 
 fn parse_patterns(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Pattern>, String> {
@@ -291,6 +355,8 @@ fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, 
     let mut variable = None;
     let mut labels = Vec::new();
     let mut properties = Vec::new();
+    let mut lower_bound = None;
+    let mut upper_bound = None;
     let direction = if pair.as_str().contains("<-") {
         EdgeDirection::RightToLeft
     } else {
@@ -312,6 +378,20 @@ fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, 
                     }
                 }
             }
+            Rule::var_length => {
+                let parts: Vec<i64> = inner
+                    .into_inner()
+                    .filter_map(|p| p.as_str().parse::<i64>().ok())
+                    .collect();
+                if parts.len() == 2 {
+                    lower_bound = Some(parts[0] as u64);
+                    upper_bound = Some(parts[1] as u64);
+                } else {
+                    // Just `*` with no bounds
+                    lower_bound = Some(1);
+                    upper_bound = None;
+                }
+            }
             _ => {}
         }
     }
@@ -320,6 +400,8 @@ fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, 
         labels,
         direction,
         properties,
+        lower_bound,
+        upper_bound,
     })
 }
 
@@ -821,6 +903,49 @@ mod tests {
     #[test]
     fn test_list_literal() {
         let sql = "MATCH (a) WHERE a.age IN [1, 2, 3] RETURN a";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_foreach_basic() {
+        let sql = "FOREACH (x IN [1,2,3] | CREATE (n:Num {val: x}))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(q.clauses.len(), 1);
+                match &q.clauses[0] {
+                    Clause::Foreach(f) => {
+                        assert_eq!(f.variable, "x");
+                        assert_eq!(f.clauses.len(), 1);
+                    }
+                    _ => panic!("Expected Foreach clause"),
+                }
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_foreach_in_match() {
+        let sql = "MATCH (a:Person) FOREACH (x IN [1,2] | SET a.val = x)";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_var_length_path_simple() {
+        let sql = "MATCH (a:Person)-[*]->(b:Person) RETURN a, b";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_var_length_path_with_bounds() {
+        let sql = "MATCH (a:Person)-[*1..5]->(b:Person) RETURN a, b";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_var_length_path_with_rel_variable() {
+        let sql = "MATCH (a:Person)-[r:*1..3]->(b:Person) RETURN a, b";
         assert!(parse(sql).is_ok());
     }
 

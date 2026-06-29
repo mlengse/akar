@@ -23,6 +23,7 @@ pub enum LogicalOperator {
     Set(LogicalSet),
     OptionalMatch(LogicalOptionalMatch),
     Unwind(LogicalUnwind),
+    Foreach(LogicalForeach),
 }
 
 impl LogicalOperator {
@@ -46,6 +47,7 @@ impl LogicalOperator {
             LogicalOperator::Set(s) => s.cardinality,
             LogicalOperator::OptionalMatch(s) => s.cardinality,
             LogicalOperator::Unwind(s) => s.cardinality,
+            LogicalOperator::Foreach(s) => s.cardinality,
         }
     }
 
@@ -69,6 +71,7 @@ impl LogicalOperator {
             LogicalOperator::Set(s) => s.cardinality = card,
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
             LogicalOperator::Unwind(s) => s.cardinality = card,
+            LogicalOperator::Foreach(s) => s.cardinality = card,
         }
     }
 
@@ -98,7 +101,8 @@ impl LogicalOperator {
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::OptionalMatch(_)
-            | LogicalOperator::Unwind(_) => vec![],
+            | LogicalOperator::Unwind(_)
+            | LogicalOperator::Foreach(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -121,7 +125,8 @@ impl LogicalOperator {
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::OptionalMatch(_)
-            | LogicalOperator::Unwind(_) => vec![],
+            | LogicalOperator::Unwind(_)
+            | LogicalOperator::Foreach(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -258,6 +263,16 @@ pub struct LogicalCopyFrom {
     pub table_id: u64,
     pub file_path: String,
     pub options: std::collections::HashMap<String, String>,
+    pub cardinality: u64,
+}
+
+/// FOREACH operator — iterates over list elements and executes sub-plans.
+#[derive(Debug, Clone)]
+pub struct LogicalForeach {
+    pub variable: String,
+    pub expression: kuzu_parser::ast::Expression,
+    /// Sub-plans to execute for each list element.
+    pub sub_plans: Vec<Vec<LogicalOperator>>,
     pub cardinality: u64,
 }
 

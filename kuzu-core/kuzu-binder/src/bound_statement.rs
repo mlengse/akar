@@ -56,6 +56,7 @@ pub enum BoundClause {
     BoundOptionalMatch(BoundMatchClause),
     BoundWith(BoundReturnClause),
     BoundUnwind(BoundUnwindClause),
+    BoundForeach(BoundForeachClause),
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +88,15 @@ pub struct BoundUnwindClause {
     pub variable: String,
 }
 
+/// Bound FOREACH clause — iterate over list and execute sub-statements.
+#[derive(Debug, Clone)]
+pub struct BoundForeachClause {
+    pub variable: String,
+    pub expression: kuzu_parser::ast::Expression,
+    /// Bound sub-statements (CREATE, SET, DELETE) produced by bind_foreach.
+    pub sub_statements: Vec<BoundStatement>,
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundMatchClause {
     pub patterns: Vec<BoundPattern>,
@@ -108,6 +118,8 @@ pub struct BoundEdgePattern {
     pub label: Option<String>,
     pub rel_table_id: Option<u64>,
     pub direction: kuzu_parser::ast::EdgeDirection,
+    pub lower_bound: Option<u64>,
+    pub upper_bound: Option<u64>,
 }
 
 /// A bound expression with resolved type information.

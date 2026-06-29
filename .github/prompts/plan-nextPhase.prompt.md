@@ -121,10 +121,17 @@ A5 parallel dengan A1-A4
 - **Tests**: 7 test cases (basic, multiple, without variable, nonexistent table, duplicate PK, empty properties, verify via MATCH)
 - **Catatan**: `999.99` float literal masih belum support di grammar (integer `999` digunakan sebagai gantinya)
 
-### B4. `FOREACH` & Variable-length Path Patterns
-- `FOREACH (var IN list | ...)` — loop over list elements
-- `(a)-[*1..5]->(b)` — variable-length path expansion
-- Kompleksitas tinggi, perlu recursive extend operator
+### B4. `FOREACH` & Variable-length Path Patterns ✅
+- `FOREACH (var IN list | ...)` — suddah berfungsi dengan grammar, AST, parser, binder, physical operator.
+- `(a)-[*1..5]->(b)` — grammar & parser sudah support `[*]`, `[*min..max]`, `[*max]`
+- **Grammar**: `foreach_clause = { "FOREACH" ~ "(" ~ variable ~ "IN" ~ expression ~ "|" ~ foreach_body ~ ")" }`; `var_length = { "*" ~ (integer ~ ".." ~ integer)? }`
+- **AST**: `Clause::Foreach(ForeachClause { variable, expression, clauses })`; `EdgePattern { ..., lower_bound, upper_bound }`
+- **Parser**: `parse_foreach_clause()` menangani inner CREATE/SET/DELETE; `parse_edge_pattern` menangani `var_length`
+- **Binder**: `bind_foreach()` — validasi list expression, bind sub-statements (CREATE/SET/DELETE)
+- **Logical**: `LogicalForeach { variable, expression, sub_plans }`
+- **Physical**: `PhysicalForeach` — evaluate list, execute sub-plans per item
+- **Tests**: 5 parser tests (foreach basic, foreach in match, var-length simple, var-length with bounds, var-length with variable) + 4 integration tests (foreach parse only, foreach in match, var-length parse, var-length with bounds parse)
+- **Catatan**: PhysicalForeach membuat QueryProcessor baru per sub-plan per item, belum optimal; var-length path hanya parsing & binding (scan masih flat, belum recursive extend)
 
 ### B5. Subquery Support (`CALL { ... }`)
 - Subquery expressions: `EXISTS { MATCH ... }`, scalar subqueries

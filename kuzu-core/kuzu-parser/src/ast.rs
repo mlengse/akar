@@ -33,6 +33,15 @@ pub enum Clause {
     OptionalMatch(OptionalMatchClause),
     With(ReturnClause),
     Unwind(UnwindClause),
+    Foreach(ForeachClause),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForeachClause {
+    pub variable: String,
+    pub expression: Expression,
+    /// Sub-statements inside FOREACH (CREATE, SET, DELETE clauses).
+    pub clauses: Vec<Clause>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,6 +117,8 @@ pub struct EdgePattern {
     pub labels: Vec<String>,
     pub direction: EdgeDirection,
     pub properties: Vec<(String, Expression)>,
+    pub lower_bound: Option<u64>,
+    pub upper_bound: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

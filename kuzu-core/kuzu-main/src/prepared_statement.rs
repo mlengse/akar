@@ -95,6 +95,12 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                             collect_params_from_expr(&item.value, params);
                         }
                     }
+                    kuzu_binder::bound_statement::BoundClause::BoundForeach(f) => {
+                        collect_params_from_expr(&f.expression, params);
+                        for sub in &f.sub_statements {
+                            collect_params_from_statement(sub, params);
+                        }
+                    }
                 }
             }
         }

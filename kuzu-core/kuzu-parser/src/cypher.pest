@@ -65,6 +65,12 @@ delete_clause = { "DELETE" ~ expression ~ ("," ~ expression)* }
 
 unwind_clause = { "UNWIND" ~ expression ~ "AS" ~ variable }
 
+foreach_clause = { "FOREACH" ~ "(" ~ variable ~ "IN" ~ expression ~ "|" ~ foreach_body ~ ")" }
+foreach_body = { create_clause_inline | set_clause | delete_clause }
+
+// Inline CREATE for FOREACH body (CREATE pattern without being wrapped in a full clause)
+create_clause_inline = { "CREATE" ~ pattern }
+
 query_statement = {
     match_clause ~ with_clause ~ return_clause
     | match_clause ~ where_clause ~ with_clause ~ return_clause
@@ -83,6 +89,11 @@ query_statement = {
     | return_clause
     | unwind_clause ~ return_clause
     | unwind_clause
+    | foreach_clause
+    | match_clause ~ foreach_clause ~ return_clause?
+    | match_clause ~ where_clause ~ foreach_clause ~ return_clause?
+    | match_clause ~ foreach_clause ~ set_clause
+    | match_clause ~ foreach_clause ~ delete_clause
 }
 
 // ==================== DDL ====================
@@ -125,7 +136,11 @@ node_pattern = {
 }
 
 edge_pattern = {
-    ("<" ~ "-")? ~ "[" ~ variable? ~ label? ~ property_map? ~ "]" ~ ("-" ~ ">")?
+    ("<" ~ "-")? ~ "[" ~ variable? ~ label? ~ var_length? ~ property_map? ~ "]" ~ ("-" ~ ">")?
+}
+
+var_length = {
+    "*" ~ (integer ~ ".." ~ integer)?
 }
 
 label = { ":" ~ identifier }

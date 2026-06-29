@@ -138,6 +138,20 @@ impl QueryPlanner {
                         }));
                     }
                 }
+                BoundClause::BoundForeach(f) => {
+                    // Plan FOREACH sub-statements
+                    let mut sub_plans = Vec::new();
+                    for sub_stmt in &f.sub_statements {
+                        let plan = self.plan(sub_stmt.clone())?;
+                        sub_plans.push(plan);
+                    }
+                    delete_exprs.push(LogicalOperator::Foreach(LogicalForeach {
+                        variable: f.variable.clone(),
+                        expression: f.expression.clone(),
+                        sub_plans,
+                        cardinality: 0,
+                    }));
+                }
             }
         }
 

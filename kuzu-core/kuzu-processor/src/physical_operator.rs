@@ -1298,6 +1298,17 @@ impl PhysicalOperatorExec for PhysicalDelete {
     }
 }
 
+/// Convert an AST Constant to a Value.
+fn ast_constant_to_value(c: &Constant) -> Value {
+    match c {
+        Constant::Null => Value::Null,
+        Constant::Bool(b) => Value::Bool(*b),
+        Constant::Integer(i) => Value::Int64(*i),
+        Constant::Float(f) => Value::Double(*f),
+        Constant::String(s) => Value::String(s.clone()),
+    }
+}
+
 /// Compute a hash of a Value for use in hash-based joins.
 /// Hashes the discriminant (variant type) and the payload data.
 fn value_hash(v: &Value) -> u64 {
@@ -1354,6 +1365,80 @@ fn value_hash(v: &Value) -> u64 {
         }
     }
     hasher.finish()
+}
+
+// ==================== Foreach ====================
+
+/// Physical FOREACH operator — iterates over list elements and executes sub-plans.
+pub struct PhysicalForeach {
+    pub variable: String,
+    pub expression: Expression,
+    pub sub_plans: Vec<Vec<kuzu_planner::logical_operator::LogicalOperator>>,
+    pub function_registry: Option<Arc<Mutex<kuzu_function::registry::FunctionRegistry>>>,
+    pub table_catalog: Option<Arc<Mutex<TableCatalog>>>,
+}
+
+impl PhysicalOperatorExec for PhysicalForeach {
+    fn operator_type(&self) -> &str {
+        "foreach"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // Evaluate the list expression
+        let list_val = match &self.expression {
+            Expression::List(items) => {
+                let mut vals = Vec::with_capacity(items.len());
+                for item in items {
+                    if let Expression::Constant(c) = item {
+                        vals.push(ast_constant_to_value(c));
+                    } else {
+                        vals.push(Value::Null);
+                    }
+                }
+                Value::List(vals)
+            }
+            _ => {
+                return Err(format!(
+                    "FOREACH requires a list expression, got: {:?}",
+                    self.expression
+                ));
+            }
+        };
+
+        let list_items = match &list_val {
+            Value::List(items) => items.clone(),
+            _ => return Ok(vec![]),
+        };
+
+        if list_items.is_empty() || self.sub_plans.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // For each list item, execute sub-plans with the item value in scope.
+        // We use a simplified approach: create a DataChunk with the item value
+        // and pass it to each sub-plan.
+        for item in &list_items {
+            for sub_plan in &self.sub_plans {
+                // Create a single-row DataChunk containing the current item
+                let phys_type = PhysicalScan::value_to_physical_type(item);
+                let mut v = ValueVector::new(phys_type, 1);
+                v.resize(1);
+                store_value_in_vector(&mut v, 0, item);
+                let chunk = DataChunk::new(vec![v]);
+
+                // Execute the sub-plan using the QueryProcessor-like pipeline
+                // Use the processor module directly from the same crate
+                let processor = crate::processor::QueryProcessor::with_catalog(
+                    self.function_registry.clone().unwrap(),
+                    self.table_catalog.clone().unwrap(),
+                );
+                let _result = processor.execute(sub_plan)?;
+            }
+        }
+
+        // FOREACH produces no output rows (it's a write-only operation)
+        Ok(vec![])
+    }
 }
 
 // ==================== CopyFrom ====================

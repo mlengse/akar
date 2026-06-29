@@ -1464,6 +1464,100 @@ mod create_dml_tests {
 }
 
 // =========================================================================
+// FOREACH Tests
+// =========================================================================
+
+#[cfg(test)]
+mod foreach_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    #[test]
+    fn test_foreach_parse_only() {
+        let (_dir, _db, conn) = setup_db();
+
+        // FOREACH with a simple CREATE inside
+        exec_ok(&conn, "CREATE NODE TABLE Num(val INT64, PRIMARY KEY (val))").unwrap();
+
+        // FOREACH should parse and bind correctly
+        let result = exec_ok(&conn, "FOREACH (x IN [1,2,3] | CREATE (n:Num {val: x}))");
+        assert!(result.is_ok(), "FOREACH should execute: {:?}", result);
+    }
+
+    #[test]
+    fn test_foreach_in_match_context() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // FOREACH in a MATCH context
+        let result = exec_ok(&conn, "MATCH (n:Person) FOREACH (x IN [1] | SET n.age = 99)");
+        assert!(result.is_ok(), "FOREACH in MATCH context: {:?}", result);
+    }
+}
+
+// =========================================================================
+// Variable-length Path Tests
+// =========================================================================
+
+#[cfg(test)]
+mod var_length_path_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    #[test]
+    fn test_var_length_path_parse() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))").unwrap();
+        exec_ok(&conn, "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)").unwrap();
+
+        // Variable-length path queries should parse and bind
+        let result = exec_ok(&conn, "MATCH (a:Person)-[*]->(b:Person) RETURN a.name, b.name");
+        assert!(result.is_ok(), "Var-length path (*) should parse: {:?}", result);
+    }
+
+    #[test]
+    fn test_var_length_path_with_bounds_parse() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))").unwrap();
+        exec_ok(&conn, "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)").unwrap();
+
+        let result = exec_ok(&conn, "MATCH (a:Person)-[*1..5]->(b:Person) RETURN a.name");
+        assert!(result.is_ok(), "Var-length path with bounds should parse: {:?}", result);
+    }
+}
+
+// =========================================================================
 // Fase A Verification Tests — End-to-end persistence, recovery, checkpoint
 // =========================================================================
 
