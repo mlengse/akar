@@ -2,10 +2,10 @@
 
 Core type system and utilities for the Kuzu database engine.
 
-**Types:** `LogicalTypeID` (37 variants), `PhysicalTypeID` (17 variants), `Value`, `InternalID`, date/time types.
+**Types:** `LogicalTypeID` (37 variants including Decimal, UUID, struct types), `PhysicalTypeID` (17 variants), `Value` (28 variants: Null, Bool, Int8–Int64, UInt8–UInt64, Int128, Float, Double, String, Blob, Date, Timestamp variants, Interval, InternalID, List, Map, Struct), date/time types.
 
-**Vectors:** `ValueVector` — typed columnar data buffer with null mask. `DataChunk` — batch of vectors.
+**Vectors:** `ValueVector` — typed columnar data buffer with null mask and get_value/set_value for all 28 types. `DataChunk` — batch of vectors for pipeline execution.
 
-**Infrastructure:** Memory manager, task system (rayon thread pool), file system abstraction, serialization.
+**Infrastructure:** Memory manager (tracking), task system (rayon thread pool), file system abstraction, binary serialization for Value/LogicalType.
 
 **Tests:** 25
