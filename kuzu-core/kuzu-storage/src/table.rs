@@ -1,5 +1,6 @@
 //! Table storage — columnar node/rel tables with NodeGroup-based storage.
 
+use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use kuzu_common::types::{LogicalTypeID, Value};
 use std::collections::HashMap;
@@ -15,6 +16,10 @@ pub struct ColumnDefinition {
 /// A node table stores properties for a node label using NodeGroup-based
 /// columnar storage. Data is held in-memory as `NodeGroup`s; when a group
 /// reaches `NODE_GROUP_SIZE` rows a new group is automatically created.
+///
+/// Primary key uniqueness is enforced via an in-memory `HashIndex` that maps
+/// PK values to row offsets. For persistent indexes, use `OnDiskHashIndex`
+/// alongside the L1 cache (see `index.rs`).
 #[derive(Debug, Clone)]
 pub struct NodeTable {
     pub table_id: u64,
@@ -25,6 +30,9 @@ pub struct NodeTable {
     /// NodeGroup-based columnar storage. Each group holds up to
     /// `NODE_GROUP_SIZE` rows across all columns.
     pub node_groups: Vec<NodeGroup>,
+    /// In-memory hash index for primary key → row lookup and dedup.
+    /// Stores the PK value (as a string representation) mapped to row offset.
+    pub hash_index: HashIndex<String>,
 }
 
 impl NodeTable {
@@ -37,6 +45,7 @@ impl NodeTable {
             primary_key_column,
             num_rows: 0,
             node_groups: Vec::new(),
+            hash_index: HashIndex::new(),
         }
     }
 
@@ -45,7 +54,12 @@ impl NodeTable {
     /// Appends to the current `NodeGroup`; auto-creates a new group when the
     /// current one is full (reaches `NODE_GROUP_SIZE` rows).
     ///
-    /// Returns an error if the number of values doesn't match the number of columns.
+    /// If the table has a primary key column, checks for duplicates and rejects
+    /// rows with already-existing PK values. The hash index is updated after
+    /// a successful insert.
+    ///
+    /// Returns an error if the number of values doesn't match the number of columns,
+    /// or if a duplicate primary key value is detected.
     pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
         if values.len() != self.columns.len() {
             return Err(format!(
@@ -53,6 +67,18 @@ impl NodeTable {
                 self.columns.len(),
                 values.len()
             ));
+        }
+
+        // Check primary key uniqueness
+        if self.primary_key_column < self.columns.len() {
+            let pk_value = &values[self.primary_key_column];
+            let pk_key = pk_value_to_string(pk_value);
+            if self.hash_index.lookup(&pk_key).is_some() {
+                return Err(format!(
+                    "Duplicate primary key value: '{pk_key}' in table '{}'",
+                    self.name
+                ));
+            }
         }
 
         // Get or create the current node group.
@@ -63,9 +89,26 @@ impl NodeTable {
         }
 
         let current = self.node_groups.last_mut().unwrap();
-        current.append_row(values)?;
+        current.append_row(values.clone())?;
         self.num_rows += 1;
+
+        // Update hash index with the PK value for this row
+        if self.primary_key_column < self.columns.len() {
+            let pk_value = &values[self.primary_key_column];
+            let pk_key = pk_value_to_string(pk_value);
+            self.hash_index.insert(pk_key, self.num_rows - 1);
+        }
+
         Ok(())
+    }
+
+    /// Look up a row offset by its primary key value.
+    ///
+    /// Returns `Some(row_offset)` if the PK exists, or `None` if not found.
+    /// Uses the in-memory hash index for O(1) lookup.
+    pub fn lookup_by_pk(&self, pk_value: &Value) -> Option<u64> {
+        let pk_key = pk_value_to_string(pk_value);
+        self.hash_index.lookup(&pk_key)
     }
 
     /// Scan all values for a given column across all node groups.
@@ -199,6 +242,28 @@ impl NodeTable {
                 }
             }
         }
+    }
+}
+
+/// Convert a Value to its string representation for use as a hash index key.
+fn pk_value_to_string(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int16(i) => i.to_string(),
+        Value::Int8(i) => i.to_string(),
+        Value::UInt64(u) => u.to_string(),
+        Value::UInt32(u) => u.to_string(),
+        Value::UInt16(u) => u.to_string(),
+        Value::UInt8(u) => u.to_string(),
+        Value::Double(f) => f.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Date(d) => format!("Date({})", d.0),
+        Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
+        other => format!("{other:?}"),
     }
 }
 

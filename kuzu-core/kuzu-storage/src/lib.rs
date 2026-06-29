@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use wal::WAL;
 
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
+pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
 pub use node_group::NodeGroup;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 

@@ -111,6 +111,11 @@ impl BufferManager {
         self.frames.len()
     }
 
+    /// Check if a file is already registered with the buffer manager.
+    pub fn is_file_registered(&self, name: &str) -> bool {
+        self.files.contains_key(name)
+    }
+
     /// Register a database file with the buffer manager.
     pub fn register_file(&mut self, name: &str, path: PathBuf) {
         let num_pages = if path.exists() {
