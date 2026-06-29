@@ -28,7 +28,9 @@ use wal::WAL;
 
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
+pub use local_storage::LocalStorage;
 pub use node_group::NodeGroup;
+pub use shadow_file::ShadowFile;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 
 /// The storage manager — root of the storage engine.
@@ -142,6 +144,83 @@ impl StorageManager {
         }
     }
 
+    /// Commit a write transaction's data to storage.
+    ///
+    /// Orchestrates the full commit pipeline:
+    /// 1. Append `Commit` record to the WAL (write-ahead log)
+    /// 2. Flush `LocalStorage` buffered writes to the actual tables
+    /// 3. Apply `ShadowFile` copy-on-write pages to the BufferManager
+    /// 4. Optionally checkpoint if the WAL threshold is met
+    ///
+    /// # Arguments
+    ///
+    /// * `local_storage` — the transaction's write buffer (consumed on success).
+    /// * `shadow_file` — the transaction's COW page buffer.
+    /// * `checkpoint_threshold` — passed to `maybe_checkpoint()`; use -1 for
+    ///   always-checkpoint, 0 for never, N for byte-based threshold.
+    ///
+    /// Returns `Ok(())` if the commit pipeline succeeded.
+    pub fn commit_transaction(
+        &self,
+        local_storage: &crate::local_storage::LocalStorage,
+        shadow_file: &crate::shadow_file::ShadowFile,
+        checkpoint_threshold: i64,
+        txn_id: u64,
+    ) -> Result<(), String> {
+        // Step 1: Write-ahead log the commit
+        {
+            let mut wal = self.wal.lock().unwrap();
+            wal.append(crate::wal::WALRecord::Commit { transaction_id: txn_id });
+            wal.flush_to_disk()
+                .map_err(|e| format!("WAL flush failed during commit: {e}"))?;
+        }
+
+        // Step 2: Flush local storage buffers to the actual tables
+        local_storage
+            .flush_to_tables(&self.table_catalog)
+            .map_err(|e| format!("LocalStorage flush failed during commit: {e}"))?;
+
+        // Step 3: Apply shadow pages to the BufferManager
+        shadow_file
+            .apply(&self.buffer_manager)
+            .map_err(|e| format!("ShadowFile apply failed during commit: {e}"))?;
+
+        // Step 4: Auto-checkpoint if needed
+        if let Err(e) = self.maybe_checkpoint(checkpoint_threshold) {
+            tracing::warn!("Checkpoint after commit failed: {e}");
+            // Non-fatal — data is already in tables and WAL
+        }
+
+        Ok(())
+    }
+
+    /// Roll back a write transaction, discarding all pending changes.
+    ///
+    /// Clears the local storage buffer and discards shadow pages.
+    /// The caller should also call `TransactionManager::rollback()` to
+    /// update the transaction's status and release locks.
+    ///
+    /// Returns `Ok(())` on success.
+    pub fn rollback_transaction(
+        &self,
+        local_storage: &mut crate::local_storage::LocalStorage,
+        shadow_file: &mut crate::shadow_file::ShadowFile,
+        txn_id: u64,
+    ) -> Result<(), String> {
+        // Log the rollback to WAL
+        {
+            let mut wal = self.wal.lock().unwrap();
+            wal.append(crate::wal::WALRecord::Rollback { transaction_id: txn_id });
+            let _ = wal.flush_to_disk();
+        }
+
+        // Discard buffered writes
+        local_storage.clear();
+        shadow_file.discard();
+
+        Ok(())
+    }
+
     /// Recover state from the WAL after a crash or unclean shutdown.
     ///
     /// This loads any on-disk WAL records, replays them against the
@@ -249,7 +328,7 @@ impl StorageManager {
 /// Each value is stored as a tag byte followed by type-specific data
 /// (see `column.rs` for the tag format). This is a simplified version
 /// that handles the common primary-key and property types.
-fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) -> Vec<Value> {
+pub(crate) fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) -> Vec<Value> {
     use crate::column::*;
     use std::io::Read;
 
@@ -1029,6 +1108,155 @@ mod integration_tests {
                 WALRecord::Checkpoint => {}
                 _ => panic!("Expected Checkpoint"),
             }
+        }
+    }
+
+    // =================================================================
+    // Test: Commit pipeline — LocalStorage flush → ShadowFile apply
+    // =================================================================
+    #[test]
+    fn test_commit_pipeline_local_storage_flush() {
+        let (sm, _dir) = setup_integration();
+
+        // Create table via catalog directly so we know the table_id
+        let table_id;
+        {
+            let mut cat = sm.table_catalog.lock().unwrap();
+            let table = cat.create_node_table(
+                "Person".into(),
+                vec![
+                    ColumnDefinition {
+                        name: "name".into(),
+                        logical_type: LogicalTypeID::String,
+                        is_primary_key: true,
+                    },
+                    ColumnDefinition {
+                        name: "age".into(),
+                        logical_type: LogicalTypeID::Int64,
+                        is_primary_key: false,
+                    },
+                ],
+            );
+            table_id = table.table_id;
+        }
+
+        // Simulate a transaction: buffer a row in LocalStorage
+        let mut local_storage = crate::local_storage::LocalStorage::new();
+        {
+            let txn_table = local_storage.get_or_create_table(table_id);
+
+            // Encode a row: name="Alice"(String), age=30(Int64)
+            let mut row_bytes = Vec::new();
+            row_bytes.push(13 /* TAG_STRING */);
+            let name = "Alice";
+            let name_bytes = name.as_bytes();
+            row_bytes.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+            row_bytes.extend_from_slice(name_bytes);
+            row_bytes.push(2 /* TAG_INT64 */);
+            row_bytes.extend_from_slice(&30i64.to_le_bytes());
+
+            txn_table.insert(row_bytes);
+        }
+
+        assert_eq!(local_storage.len(), 1, "Should have 1 table in local storage");
+
+        // Commit via StorageManager
+        let shadow = crate::shadow_file::ShadowFile::new();
+        sm.commit_transaction(&local_storage, &shadow, -1 /* checkpoint */, 1 /* txn_id */)
+            .unwrap();
+
+        // Verify data was flushed to the table
+        {
+            let cat = sm.table_catalog.lock().unwrap();
+            let t = cat.get_node_table_by_name("Person").unwrap();
+            assert_eq!(t.num_rows, 1, "Should have 1 row after commit");
+            assert_eq!(t.get_value(0, 0), Some(&Value::String("Alice".into())));
+            assert_eq!(t.get_value(0, 1), Some(&Value::Int64(30)));
+        }
+
+        // Verify WAL has the commit record (and was checkpointed)
+        {
+            let wal = sm.wal.lock().unwrap();
+            // After checkpoint, WAL has 1 record (Checkpoint marker)
+            assert_eq!(wal.len(), 1, "WAL should have Checkpoint marker after commit");
+        }
+    }
+
+    // =================================================================
+    // Test: Rollback pipeline — LocalStorage clear, no data written
+    // =================================================================
+    #[test]
+    fn test_rollback_pipeline_no_data_written() {
+        let (sm, _dir) = setup_integration();
+        let mut local_storage = crate::local_storage::LocalStorage::new();
+        let mut shadow = crate::shadow_file::ShadowFile::new();
+
+        // Buffer some data
+        {
+            let txn_table = local_storage.get_or_create_table(0);
+            txn_table.insert(vec![2 /* TAG_INT64 */, 42, 0, 0, 0, 0, 0, 0, 0]);
+        }
+
+        assert!(!local_storage.is_empty(), "LocalStorage should have buffered data");
+
+        // Rollback
+        sm.rollback_transaction(&mut local_storage, &mut shadow, 1 /* txn_id */)
+            .unwrap();
+
+        // Verify buffers are cleared
+        assert!(local_storage.is_empty(), "LocalStorage should be empty after rollback");
+        assert!(shadow.is_empty(), "ShadowFile should be empty after rollback");
+    }
+
+    // =================================================================
+    // Test: Multiple buffered rows commit correctly
+    // =================================================================
+    #[test]
+    fn test_commit_multiple_rows() {
+        let (sm, _dir) = setup_integration();
+        sm.create_node_table(
+            "Item".into(),
+            vec![
+                ColumnDefinition {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    name: "price".into(),
+                    logical_type: LogicalTypeID::Double,
+                    is_primary_key: false,
+                },
+            ],
+        );
+
+        // Buffer multiple rows
+        let mut local = crate::local_storage::LocalStorage::new();
+        {
+            let txn_table = local.get_or_create_table(0); // table_id = 0
+
+            // Row 1: "Widget", 19.99
+            let mut row = Vec::new();
+            row.push(13); row.extend_from_slice(&6u32.to_le_bytes()); row.extend_from_slice(b"Widget");
+            row.push(11); row.extend_from_slice(&19.99f64.to_le_bytes());
+            txn_table.insert(row);
+
+            // Row 2: "Gadget", 29.99
+            let mut row = Vec::new();
+            row.push(13); row.extend_from_slice(&6u32.to_le_bytes()); row.extend_from_slice(b"Gadget");
+            row.push(11); row.extend_from_slice(&29.99f64.to_le_bytes());
+            txn_table.insert(row);
+        }
+
+        let shadow = crate::shadow_file::ShadowFile::new();
+        sm.commit_transaction(&local, &shadow, 0 /* no checkpoint */, 2 /* txn_id */)
+            .unwrap();
+
+        // Verify both rows
+        {
+            let cat = sm.table_catalog.lock().unwrap();
+            let t = cat.get_node_table_by_name("Item").unwrap();
+            assert_eq!(t.num_rows, 2, "Should have 2 rows after commit");
         }
     }
 }

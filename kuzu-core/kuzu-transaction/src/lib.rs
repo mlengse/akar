@@ -5,6 +5,10 @@
 //! - Reads see a consistent snapshot based on their tx_id.
 //! - Writes create new versions; old versions kept for concurrent readers.
 //! - Serializable isolation via timestamp ordering + conflict detection.
+//!
+//! Integration with the storage engine: the `StorageManager::commit_transaction()`
+//! method orchestrates the full commit pipeline (WAL → LocalStorage flush →
+//! ShadowFile apply → checkpoint). Call it after `TransactionManager::commit()`.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
