@@ -14,17 +14,38 @@ use std::sync::Arc;
 
 /// All built-in scalar function variants.
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub enum ScalarFunction {
-    Arithmetic { op: ArithmeticOp },
-    Comparison { op: ComparisonOp },
-    String { op: StringOp },
-    Cast { target_type: CastTarget },
-    Date { op: DateOp },
-    List { op: ListOp },
-    Map { op: MapOp },
-    Struct { op: StructOp },
-    Boolean { op: BooleanOp },
-    Utility { op: UtilityOp },
+    Arithmetic {
+        op: ArithmeticOp,
+    },
+    Comparison {
+        op: ComparisonOp,
+    },
+    String {
+        op: StringOp,
+    },
+    Cast {
+        target_type: CastTarget,
+    },
+    Date {
+        op: DateOp,
+    },
+    List {
+        op: ListOp,
+    },
+    Map {
+        op: MapOp,
+    },
+    Struct {
+        op: StructOp,
+    },
+    Boolean {
+        op: BooleanOp,
+    },
+    Utility {
+        op: UtilityOp,
+    },
     /// Extension-provided scalar function with a callback closure.
     /// The closure receives input values and returns an output value.
     CustomScalar {
@@ -53,57 +74,126 @@ impl std::fmt::Debug for ScalarFunction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ArithmeticOp {
-    Add, Sub, Mul, Div, Mod, Abs, Ceil, Floor, Round, Negate,
-    Power, Sqrt, Log, Exp, Sin, Cos, Tan,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Abs,
+    Ceil,
+    Floor,
+    Round,
+    Negate,
+    Power,
+    Sqrt,
+    Log,
+    Exp,
+    Sin,
+    Cos,
+    Tan,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComparisonOp {
-    Eq, NotEq, Lt, Lte, Gt, Gte, IsNull, IsNotNull,
+    Eq,
+    NotEq,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    IsNull,
+    IsNotNull,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum StringOp {
-    Concat, Contains, StartsWith, EndsWith,
-    ToUpper, ToLower, Trim, LTrim, RTrim,
-    Length, Reverse, Repeat, Replace, Substring,
-    RegexMatches, RegexReplace,
+    Concat,
+    Contains,
+    StartsWith,
+    EndsWith,
+    ToUpper,
+    ToLower,
+    Trim,
+    LTrim,
+    RTrim,
+    Length,
+    Reverse,
+    Repeat,
+    Replace,
+    Substring,
+    RegexMatches,
+    RegexReplace,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum CastTarget {
-    String, Int64, Int32, Double, Float, Bool, Date, Timestamp,
+    String,
+    Int64,
+    Int32,
+    Double,
+    Float,
+    Bool,
+    Date,
+    Timestamp,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum DateOp {
-    DatePart, DateTrunc, DateDiff, DateAdd, CurrentDate, CurrentTimestamp,
-    Year, Month, Day, Hour, Minute, Second,
+    DatePart,
+    DateTrunc,
+    DateDiff,
+    DateAdd,
+    CurrentDate,
+    CurrentTimestamp,
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum ListOp {
-    Creation, Extract, Concat, Len, Sort, Reverse, Contains, Append, Prepend,
+    Creation,
+    Extract,
+    Concat,
+    Len,
+    Sort,
+    Reverse,
+    Contains,
+    Append,
+    Prepend,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum MapOp {
-    Creation, Extract, Keys, Values, Contains,
+    Creation,
+    Extract,
+    Keys,
+    Values,
+    Contains,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum StructOp {
-    Creation, Extract,
+    Creation,
+    Extract,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum BooleanOp {
-    And, Or, Xor, Not,
+    And,
+    Or,
+    Xor,
+    Not,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum UtilityOp {
-    Coalesce, IfNull, TypeOf,
+    Coalesce,
+    IfNull,
+    TypeOf,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -111,9 +201,15 @@ pub enum UtilityOp {
 /// All built-in aggregate functions.
 #[derive(Debug, Clone)]
 pub enum AggregateFunction {
-    Count, Sum, Avg, Min, Max, Collect,
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+    Collect,
     CountStar,
-    StdDev, Variance,
+    StdDev,
+    Variance,
 }
 
 // ==================== Table Function Types ====================
@@ -121,17 +217,30 @@ pub enum AggregateFunction {
 /// All built-in table functions.
 #[derive(Clone)]
 pub enum TableFunction {
-    ScanCsv { path: String },
-    ScanParquet { path: String },
-    ScanJson { path: String },
+    ScanCsv {
+        path: String,
+    },
+    ScanParquet {
+        path: String,
+    },
+    ScanJson {
+        path: String,
+    },
     ListTables,
-    ShowColumns { table_name: String },
-    CurrentSetting { key: String },
+    ShowColumns {
+        table_name: String,
+    },
+    CurrentSetting {
+        key: String,
+    },
     /// Extension-specific custom table function (tag-based, no callback).
     /// The `name` field identifies which custom function to execute.
-    Custom { name: String },
+    Custom {
+        name: String,
+    },
     /// Extension-provided table function with a callback closure.
     /// The closure receives input args and fills a mutable DataChunk.
+    #[allow(clippy::type_complexity)]
     CustomTable {
         name: String,
         execute: Arc<dyn Fn(&[Value], &mut DataChunk) -> Result<(), String> + Send + Sync>,
@@ -187,27 +296,62 @@ impl FunctionRegistry {
         self.register_scalar("%", ScalarFunction::Arithmetic { op: ArithmeticOp::Mod });
         self.register_scalar("abs", ScalarFunction::Arithmetic { op: ArithmeticOp::Abs });
         self.register_scalar("ceil", ScalarFunction::Arithmetic { op: ArithmeticOp::Ceil });
-        self.register_scalar("floor", ScalarFunction::Arithmetic { op: ArithmeticOp::Floor });
-        self.register_scalar("round", ScalarFunction::Arithmetic { op: ArithmeticOp::Round });
-        self.register_scalar("^", ScalarFunction::Arithmetic { op: ArithmeticOp::Power });
+        self.register_scalar(
+            "floor",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Floor,
+            },
+        );
+        self.register_scalar(
+            "round",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Round,
+            },
+        );
+        self.register_scalar(
+            "^",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Power,
+            },
+        );
         self.register_scalar("sqrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Sqrt });
         self.register_scalar("log", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
         self.register_scalar("exp", ScalarFunction::Arithmetic { op: ArithmeticOp::Exp });
 
         // --- Comparison ---
         self.register_scalar("=", ScalarFunction::Comparison { op: ComparisonOp::Eq });
-        self.register_scalar("<>", ScalarFunction::Comparison { op: ComparisonOp::NotEq });
+        self.register_scalar(
+            "<>",
+            ScalarFunction::Comparison {
+                op: ComparisonOp::NotEq,
+            },
+        );
         self.register_scalar("<", ScalarFunction::Comparison { op: ComparisonOp::Lt });
         self.register_scalar("<=", ScalarFunction::Comparison { op: ComparisonOp::Lte });
         self.register_scalar(">", ScalarFunction::Comparison { op: ComparisonOp::Gt });
         self.register_scalar(">=", ScalarFunction::Comparison { op: ComparisonOp::Gte });
-        self.register_scalar("IS NULL", ScalarFunction::Comparison { op: ComparisonOp::IsNull });
-        self.register_scalar("IS NOT NULL", ScalarFunction::Comparison { op: ComparisonOp::IsNotNull });
+        self.register_scalar(
+            "IS NULL",
+            ScalarFunction::Comparison {
+                op: ComparisonOp::IsNull,
+            },
+        );
+        self.register_scalar(
+            "IS NOT NULL",
+            ScalarFunction::Comparison {
+                op: ComparisonOp::IsNotNull,
+            },
+        );
 
         // --- String ---
         self.register_scalar("concat", ScalarFunction::String { op: StringOp::Concat });
         self.register_scalar("contains", ScalarFunction::String { op: StringOp::Contains });
-        self.register_scalar("starts_with", ScalarFunction::String { op: StringOp::StartsWith });
+        self.register_scalar(
+            "starts_with",
+            ScalarFunction::String {
+                op: StringOp::StartsWith,
+            },
+        );
         self.register_scalar("ends_with", ScalarFunction::String { op: StringOp::EndsWith });
         self.register_scalar("to_upper", ScalarFunction::String { op: StringOp::ToUpper });
         self.register_scalar("to_lower", ScalarFunction::String { op: StringOp::ToLower });
@@ -218,17 +362,42 @@ impl FunctionRegistry {
         self.register_scalar("reverse", ScalarFunction::String { op: StringOp::Reverse });
         self.register_scalar("repeat", ScalarFunction::String { op: StringOp::Repeat });
         self.register_scalar("replace", ScalarFunction::String { op: StringOp::Replace });
-        self.register_scalar("substring", ScalarFunction::String { op: StringOp::Substring });
-        self.register_scalar("regex_matches", ScalarFunction::String { op: StringOp::RegexMatches });
-        self.register_scalar("regex_replace", ScalarFunction::String { op: StringOp::RegexReplace });
+        self.register_scalar(
+            "substring",
+            ScalarFunction::String {
+                op: StringOp::Substring,
+            },
+        );
+        self.register_scalar(
+            "regex_matches",
+            ScalarFunction::String {
+                op: StringOp::RegexMatches,
+            },
+        );
+        self.register_scalar(
+            "regex_replace",
+            ScalarFunction::String {
+                op: StringOp::RegexReplace,
+            },
+        );
 
         // --- Date/Time ---
         self.register_scalar("date_part", ScalarFunction::Date { op: DateOp::DatePart });
         self.register_scalar("date_trunc", ScalarFunction::Date { op: DateOp::DateTrunc });
         self.register_scalar("date_diff", ScalarFunction::Date { op: DateOp::DateDiff });
         self.register_scalar("date_add", ScalarFunction::Date { op: DateOp::DateAdd });
-        self.register_scalar("current_date", ScalarFunction::Date { op: DateOp::CurrentDate });
-        self.register_scalar("current_timestamp", ScalarFunction::Date { op: DateOp::CurrentTimestamp });
+        self.register_scalar(
+            "current_date",
+            ScalarFunction::Date {
+                op: DateOp::CurrentDate,
+            },
+        );
+        self.register_scalar(
+            "current_timestamp",
+            ScalarFunction::Date {
+                op: DateOp::CurrentTimestamp,
+            },
+        );
         self.register_scalar("year", ScalarFunction::Date { op: DateOp::Year });
         self.register_scalar("month", ScalarFunction::Date { op: DateOp::Month });
         self.register_scalar("day", ScalarFunction::Date { op: DateOp::Day });
@@ -237,11 +406,36 @@ impl FunctionRegistry {
         self.register_scalar("second", ScalarFunction::Date { op: DateOp::Second });
 
         // --- Cast ---
-        self.register_scalar("CAST", ScalarFunction::Cast { target_type: CastTarget::String });
-        self.register_scalar("cast_string", ScalarFunction::Cast { target_type: CastTarget::String });
-        self.register_scalar("cast_int64", ScalarFunction::Cast { target_type: CastTarget::Int64 });
-        self.register_scalar("cast_double", ScalarFunction::Cast { target_type: CastTarget::Double });
-        self.register_scalar("cast_bool", ScalarFunction::Cast { target_type: CastTarget::Bool });
+        self.register_scalar(
+            "CAST",
+            ScalarFunction::Cast {
+                target_type: CastTarget::String,
+            },
+        );
+        self.register_scalar(
+            "cast_string",
+            ScalarFunction::Cast {
+                target_type: CastTarget::String,
+            },
+        );
+        self.register_scalar(
+            "cast_int64",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Int64,
+            },
+        );
+        self.register_scalar(
+            "cast_double",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Double,
+            },
+        );
+        self.register_scalar(
+            "cast_bool",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Bool,
+            },
+        );
 
         // --- List ---
         self.register_scalar("list_creation", ScalarFunction::List { op: ListOp::Creation });
@@ -270,7 +464,12 @@ impl FunctionRegistry {
         self.register_scalar("NOT", ScalarFunction::Boolean { op: BooleanOp::Not });
 
         // --- Utility ---
-        self.register_scalar("coalesce", ScalarFunction::Utility { op: UtilityOp::Coalesce });
+        self.register_scalar(
+            "coalesce",
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
+        );
         self.register_scalar("ifnull", ScalarFunction::Utility { op: UtilityOp::IfNull });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
 

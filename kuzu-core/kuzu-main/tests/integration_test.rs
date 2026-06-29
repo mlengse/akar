@@ -3,13 +3,11 @@
 //! Tests the end-to-end flow: parse → bind → plan → optimize → execute
 //! through the public Database + Connection API.
 
-use kuzu_main::{Database, Connection, SystemConfig};
+use kuzu_main::{Connection, Database, SystemConfig};
 
 /// Create a temporary database for testing.
 fn setup_db() -> (std::sync::Arc<Database>, Connection) {
-    let db = std::sync::Arc::new(
-        Database::new(":memory:", SystemConfig::default()).unwrap(),
-    );
+    let db = std::sync::Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
     let conn = Connection::new(&db);
     (db, conn)
 }
@@ -17,7 +15,11 @@ fn setup_db() -> (std::sync::Arc<Database>, Connection) {
 /// Helper: execute a query and assert success.
 fn exec(conn: &Connection, query: &str) -> String {
     let result = conn.query(query).unwrap();
-    assert!(result.is_success(), "Query failed: {query} → {:?}", result.error_message);
+    assert!(
+        result.is_success(),
+        "Query failed: {query} → {:?}",
+        result.error_message
+    );
     result.summary()
 }
 
@@ -40,7 +42,10 @@ fn exec_err(conn: &Connection, query: &str) -> String {
 #[test]
 fn test_create_node_table() {
     let (_db, conn) = setup_db();
-    let msg = exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    let msg = exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     assert!(msg.contains("Person"), "Expected Person in: {msg}");
     assert!(msg.contains("created"), "Expected created in: {msg}");
 }
@@ -81,10 +86,16 @@ fn test_drop_nonexistent_table_fails() {
 #[test]
 fn test_match_empty_table() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     let msg = exec(&conn, "MATCH (a:Person) RETURN a.name");
     // Empty table returns empty result (no synthetic data)
-    assert!(msg.contains("empty"), "Expected empty result for empty table, got: {msg}");
+    assert!(
+        msg.contains("empty"),
+        "Expected empty result for empty table, got: {msg}"
+    );
 }
 
 #[test]
@@ -101,8 +112,14 @@ fn test_full_ddl_and_query_flow() {
     let (_db, conn) = setup_db();
 
     // Create tables
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))");
-    exec(&conn, "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))",
+    );
 
     // Verify catalog persistence across connections
     // (Catalog is shared via Arc<Mutex<Catalog>>)
@@ -119,8 +136,14 @@ fn test_multiple_ddl_statements() {
 
     // Create multiple tables
     exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
-    exec(&conn, "CREATE NODE TABLE Product(id INT64, title STRING, price DOUBLE, PRIMARY KEY (id))");
-    exec(&conn, "CREATE NODE TABLE Order(id INT64, total DOUBLE, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Product(id INT64, title STRING, price DOUBLE, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE Order(id INT64, total DOUBLE, PRIMARY KEY (id))",
+    );
 
     // All should be queryable
     let r1 = conn.query("MATCH (u:User) RETURN u.name").unwrap();
@@ -136,7 +159,10 @@ fn test_multiple_ddl_statements() {
 #[test]
 fn test_query_with_where_clause() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Query with WHERE on empty table — returns 0 rows (no synthetic data)
     let result = conn.query("MATCH (p:Person) WHERE p.age > 25 RETURN p.name").unwrap();
@@ -199,7 +225,9 @@ fn test_query_result_display() {
     let (_db, conn) = setup_db();
 
     // DDL message
-    let r = conn.query("CREATE NODE TABLE Test(id INT64, PRIMARY KEY (id))").unwrap();
+    let r = conn
+        .query("CREATE NODE TABLE Test(id INT64, PRIMARY KEY (id))")
+        .unwrap();
     let display = format!("{r}");
     assert!(!display.is_empty());
 
@@ -215,14 +243,15 @@ fn test_query_result_display() {
 
 #[test]
 fn test_multiple_connections_same_db() {
-    let db = std::sync::Arc::new(
-        Database::new(":memory:", SystemConfig::default()).unwrap(),
-    );
+    let db = std::sync::Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
     let conn_a = Connection::new(&db);
     let conn_b = Connection::new(&db);
 
     // Create table from A
-    exec(&conn_a, "CREATE NODE TABLE User(name STRING, email STRING, PRIMARY KEY (name))");
+    exec(
+        &conn_a,
+        "CREATE NODE TABLE User(name STRING, email STRING, PRIMARY KEY (name))",
+    );
 
     // Create rel table from B
     exec(&conn_b, "CREATE NODE TABLE Group(name STRING, PRIMARY KEY (name))");
@@ -240,10 +269,15 @@ fn test_multiple_connections_same_db() {
 #[test]
 fn test_prepare_and_execute() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Prepare a query with parameter
-    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    let stmt = conn
+        .prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name")
+        .unwrap();
     assert_eq!(stmt.parameter_names(), &["min_age"]);
     assert_eq!(stmt.num_parameters(), 1);
 }
@@ -251,7 +285,10 @@ fn test_prepare_and_execute() {
 #[test]
 fn test_prepare_cache() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     let stmt1 = conn.prepare("MATCH (p:Person) RETURN p.name").unwrap();
     let stmt2 = conn.prepare("MATCH (p:Person) RETURN p.name").unwrap();
@@ -264,33 +301,49 @@ fn test_prepare_cache() {
 #[test]
 fn test_prepare_multiple_params() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))",
+    );
 
     // Verify at least one parameter is extracted
-    let stmt = conn.prepare(
-        "MATCH (p:Person) WHERE p.age > $min AND p.age < $max RETURN p.name"
-    ).unwrap();
+    let stmt = conn
+        .prepare("MATCH (p:Person) WHERE p.age > $min AND p.age < $max RETURN p.name")
+        .unwrap();
     assert!(!stmt.parameter_names().is_empty(), "Should find parameters");
 }
 
 #[test]
 fn test_prepare_missing_param_fails() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
-    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    let stmt = conn
+        .prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name")
+        .unwrap();
     let result = conn.execute(&stmt, vec![]);
     assert!(result.is_err(), "Should fail with missing parameter");
     let err = result.unwrap_err();
-    assert!(err.contains("Missing parameter"), "Expected missing param error, got: {err}");
+    assert!(
+        err.contains("Missing parameter"),
+        "Expected missing param error, got: {err}"
+    );
 }
 
 #[test]
 fn test_execute_with_params() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
-    let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name").unwrap();
+    let stmt = conn
+        .prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name")
+        .unwrap();
     // Execute with parameter — should work (returns placeholder data from PhysicalScan)
     let result = conn.execute(&stmt, vec![("min_age", kuzu_common::types::Value::Int64(25))]);
     assert!(result.is_ok(), "Execute failed: {:?}", result.err());
@@ -303,7 +356,9 @@ fn test_prepare_ddl() {
     let (_db, conn) = setup_db();
 
     // DDL shouldn't need parameters
-    let stmt = conn.prepare("CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
+    let stmt = conn
+        .prepare("CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))")
+        .unwrap();
     assert!(stmt.parameter_names().is_empty());
 
     // Execute should work
@@ -327,11 +382,18 @@ fn test_clear_cache() {
 #[test]
 fn test_parameter_parse_and_bind() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Test that $param syntax is parsed correctly
     let result = conn.query("MATCH (p:Person) WHERE p.age > $min RETURN p.name");
-    assert!(result.is_ok(), "Query with parameter should be parseable: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Query with parameter should be parseable: {:?}",
+        result.err()
+    );
 
     // Test that missing parameter substitution fails at execute time (not bind time)
     let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $x RETURN p.name").unwrap();
@@ -346,31 +408,36 @@ fn test_physical_scan_reads_real_data() {
     use kuzu_common::types::Value;
 
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Insert real data directly into the storage layer
     {
         let tc = db.table_catalog();
         let mut catalog = tc.lock().unwrap();
         let table = catalog.get_node_table_by_name_mut("Person").unwrap();
-        table.insert_row(vec![
-            Value::String("Alice".into()),
-            Value::Int64(30),
-        ]).unwrap();
-        table.insert_row(vec![
-            Value::String("Bob".into()),
-            Value::Int64(25),
-        ]).unwrap();
-        table.insert_row(vec![
-            Value::String("Charlie".into()),
-            Value::Int64(35),
-        ]).unwrap();
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)])
+            .unwrap();
     }
 
     // Query should return the real 3 rows, not synthetic data
     let result = conn.query("MATCH (p:Person) RETURN p.name").unwrap();
     assert!(result.is_success());
-    assert_eq!(result.num_rows(), 3, "Expected 3 rows from real data, got {}", result.num_rows());
+    assert_eq!(
+        result.num_rows(),
+        3,
+        "Expected 3 rows from real data, got {}",
+        result.num_rows()
+    );
 
     // Verify the summary reflects correct row count
     let summary = result.summary();
@@ -382,16 +449,25 @@ fn test_physical_scan_with_where_on_real_data() {
     use kuzu_common::types::Value;
 
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Insert data
     {
         let tc = db.table_catalog();
         let mut catalog = tc.lock().unwrap();
         let table = catalog.get_node_table_by_name_mut("Person").unwrap();
-        table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
-        table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
-        table.insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)]).unwrap();
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)])
+            .unwrap();
     }
 
     // Simple scan without WHERE — verifies real data flows through the pipeline
@@ -405,23 +481,26 @@ fn test_scan_multiple_columns() {
     use kuzu_common::types::Value;
 
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, PRIMARY KEY (name))",
+    );
 
     // Insert data
     {
         let tc = db.table_catalog();
         let mut catalog = tc.lock().unwrap();
         let table = catalog.get_node_table_by_name_mut("Person").unwrap();
-        table.insert_row(vec![
-            Value::String("Alice".into()),
-            Value::Int64(30),
-            Value::Double(95.5),
-        ]).unwrap();
-        table.insert_row(vec![
-            Value::String("Bob".into()),
-            Value::Int64(25),
-            Value::Double(87.0),
-        ]).unwrap();
+        table
+            .insert_row(vec![
+                Value::String("Alice".into()),
+                Value::Int64(30),
+                Value::Double(95.5),
+            ])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25), Value::Double(87.0)])
+            .unwrap();
     }
 
     // Query scanning multiple columns

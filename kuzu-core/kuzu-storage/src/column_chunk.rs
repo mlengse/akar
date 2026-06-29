@@ -397,9 +397,6 @@ mod tests {
         // Verify a few values at boundaries
         assert_eq!(column.get_value(0).unwrap(), Value::Int64(0));
         let last_idx = (NODE_GROUP_SIZE - 1) as u64;
-        assert_eq!(
-            column.get_value(last_idx).unwrap(),
-            Value::Int64(last_idx as i64)
-        );
+        assert_eq!(column.get_value(last_idx).unwrap(), Value::Int64(last_idx as i64));
     }
 }

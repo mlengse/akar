@@ -22,21 +22,17 @@ impl Extension for HttpfsExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
         use kuzu_function::registry::UtilityOp;
+        use kuzu_function::registry::{ScalarFunction, TableFunction};
 
         context.register_scalar_function(
             "http_get",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
-        context.register_table_function(
-            "http_scan",
-            TableFunction::ScanJson { path: "http".into() },
-        );
-        context.register_table_function(
-            "https_scan",
-            TableFunction::ScanJson { path: "https".into() },
-        );
+        context.register_table_function("http_scan", TableFunction::ScanJson { path: "http".into() });
+        context.register_table_function("https_scan", TableFunction::ScanJson { path: "https".into() });
 
         tracing::info!("HTTPFS extension loaded: 3 functions registered");
         Ok(())
@@ -56,12 +52,12 @@ pub struct Url {
 /// Parse a URL string into its components.
 pub fn parse_url(url_str: &str) -> Result<Url, String> {
     let url_str = url_str.trim();
-    let (scheme, rest) = url_str.split_once("://")
+    let (scheme, rest) = url_str
+        .split_once("://")
         .ok_or_else(|| format!("Invalid URL (no scheme): {url_str}"))?;
 
     let scheme = scheme.to_lowercase();
-    let (host_part, path_and_query) = rest.split_once('/')
-        .unwrap_or((rest, ""));
+    let (host_part, path_and_query) = rest.split_once('/').unwrap_or((rest, ""));
 
     let path = if path_and_query.is_empty() {
         "/".to_string()
@@ -82,7 +78,13 @@ pub fn parse_url(url_str: &str) -> Result<Url, String> {
         (path, None)
     };
 
-    Ok(Url { scheme, host, port, path, query })
+    Ok(Url {
+        scheme,
+        host,
+        port,
+        path,
+        query,
+    })
 }
 
 /// Validate that a URL uses a supported scheme (http/https).

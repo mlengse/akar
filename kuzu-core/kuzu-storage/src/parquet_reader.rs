@@ -38,10 +38,7 @@ impl std::fmt::Display for ParquetReaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParquetReaderError::ParquetError(e) => write!(f, "Parquet error: {e}"),
-            ParquetReaderError::ColumnNotFound {
-                column_name,
-                available,
-            } => write!(
+            ParquetReaderError::ColumnNotFound { column_name, available } => write!(
                 f,
                 "Column '{}' not found in Parquet file. Available columns: [{}]",
                 column_name,
@@ -102,12 +99,9 @@ pub type ParquetResult<T> = Result<T, ParquetReaderError>;
 ///
 /// A vector of rows, where each row is a `Vec<Value>` with length equal to
 /// `columns.len()`.
-pub fn read_parquet(
-    path: &Path,
-    columns: &[CatalogColumn],
-) -> ParquetResult<Vec<Vec<Value>>> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| ParquetReaderError::ParquetError(format!("Cannot open file: {e}")))?;
+pub fn read_parquet(path: &Path, columns: &[CatalogColumn]) -> ParquetResult<Vec<Vec<Value>>> {
+    let file =
+        std::fs::File::open(path).map_err(|e| ParquetReaderError::ParquetError(format!("Cannot open file: {e}")))?;
 
     let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)?;
     let schema = builder.schema().clone();
@@ -166,8 +160,7 @@ pub fn read_parquet(
             for (catalog_idx, &arrow_col_idx) in col_indices.iter().enumerate() {
                 let col = &columns[catalog_idx];
                 let array = batch.column(arrow_col_idx);
-                let value =
-                    arrow_array_to_value(array, row_idx, &col.name, col.logical_type, results.len())?;
+                let value = arrow_array_to_value(array, row_idx, &col.name, col.logical_type, results.len())?;
                 row.push(value);
             }
             results.push(row);
@@ -180,10 +173,7 @@ pub fn read_parquet(
 // ─── Type validation ────────────────────────────────────────────────────────────
 
 /// Check that an Arrow `DataType` is compatible with the expected Kuzu `LogicalTypeID`.
-fn validate_type_compatibility(
-    arrow_type: &ArrowDataType,
-    expected: LogicalTypeID,
-) -> Result<(), ()> {
+fn validate_type_compatibility(arrow_type: &ArrowDataType, expected: LogicalTypeID) -> Result<(), ()> {
     match (arrow_type, expected) {
         (ArrowDataType::Boolean, LogicalTypeID::Bool) => Ok(()),
         (ArrowDataType::Int8, LogicalTypeID::Int8) => Ok(()),
@@ -339,12 +329,11 @@ fn arrow_array_to_value(
 
 // ─── Downcast helper ────────────────────────────────────────────────────────────
 
-fn downcast<'a, T: Array + 'static>(
-    array: &'a dyn Array,
-    column_name: &str,
-) -> ParquetResult<&'a T> {
-    array.as_any().downcast_ref::<T>().ok_or_else(|| {
-        ParquetReaderError::ConversionError {
+fn downcast<'a, T: Array + 'static>(array: &'a dyn Array, column_name: &str) -> ParquetResult<&'a T> {
+    array
+        .as_any()
+        .downcast_ref::<T>()
+        .ok_or_else(|| ParquetReaderError::ConversionError {
             column_name: column_name.to_string(),
             row: 0,
             message: format!(
@@ -352,8 +341,7 @@ fn downcast<'a, T: Array + 'static>(
                 std::any::type_name::<T>(),
                 array.data_type()
             ),
-        }
-    })
+        })
 }
 
 // ─── Numeric casting ────────────────────────────────────────────────────────────
@@ -487,11 +475,7 @@ fn cast_timestamp_to_micros(array: &dyn Array, row: usize, column_name: &str) ->
 // ─── Complex type helpers ───────────────────────────────────────────────────────
 
 /// Convert a List array entry to `Vec<Value>`.
-fn array_list_to_values(
-    array: &dyn Array,
-    row: usize,
-    column_name: &str,
-) -> ParquetResult<Vec<Value>> {
+fn array_list_to_values(array: &dyn Array, row: usize, column_name: &str) -> ParquetResult<Vec<Value>> {
     let list_arr = downcast::<ListArray>(array, column_name)?;
     let values = list_arr.value(row);
     let mut result = Vec::with_capacity(values.len());
@@ -508,11 +492,7 @@ fn array_list_to_values(
 }
 
 /// Convert a Struct array entry to `Vec<(String, Value)>`.
-fn array_struct_to_values(
-    array: &dyn Array,
-    row: usize,
-    column_name: &str,
-) -> ParquetResult<Vec<(String, Value)>> {
+fn array_struct_to_values(array: &dyn Array, row: usize, column_name: &str) -> ParquetResult<Vec<(String, Value)>> {
     let struct_arr = downcast::<StructArray>(array, column_name)?;
     let mut result = Vec::with_capacity(struct_arr.num_columns());
     for col_idx in 0..struct_arr.num_columns() {
@@ -533,11 +513,7 @@ fn array_struct_to_values(
 }
 
 /// Convert a Map array entry to `Vec<(Value, Value)>`.
-fn array_map_to_values(
-    array: &dyn Array,
-    row: usize,
-    column_name: &str,
-) -> ParquetResult<Vec<(Value, Value)>> {
+fn array_map_to_values(array: &dyn Array, row: usize, column_name: &str) -> ParquetResult<Vec<(Value, Value)>> {
     let map_arr = downcast::<MapArray>(array, column_name)?;
     let entries = map_arr.value(row);
     let keys = map_arr.keys();
@@ -610,8 +586,6 @@ mod tests {
             },
         ]
     }
-
-
 
     #[test]
     fn test_validate_type_compatibility() {
@@ -709,11 +683,7 @@ mod tests {
     fn test_type_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let schema = Arc::new(Schema::new(vec![Field::new("val", DataType::Boolean, false)]));
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(BooleanArray::from(vec![true]))],
-        )
-        .unwrap();
+        let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(BooleanArray::from(vec![true]))]).unwrap();
         let path = write_parquet_batch(&dir, "mismatch.parquet", &batch);
 
         let columns = vec![CatalogColumn {
@@ -873,12 +843,7 @@ mod tests {
 
         let batch = RecordBatch::try_new(
             schema,
-            vec![
-                Arc::new(names),
-                Arc::new(ages),
-                Arc::new(scores),
-                Arc::new(actives),
-            ],
+            vec![Arc::new(names), Arc::new(ages), Arc::new(scores), Arc::new(actives)],
         )
         .unwrap();
 
@@ -917,11 +882,7 @@ mod tests {
         let names = StringArray::from(vec![Some("Alice"), None, Some("Charlie")]);
         let ages = Int64Array::from(vec![Some(30), Some(25), None]);
 
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![Arc::new(names), Arc::new(ages)],
-        )
-        .unwrap();
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(names), Arc::new(ages)]).unwrap();
 
         let parquet_path = write_parquet_batch(&dir, "nulls.parquet", &batch);
 
@@ -968,12 +929,7 @@ mod tests {
 
         let batch = RecordBatch::try_new(
             schema,
-            vec![
-                Arc::new(small),
-                Arc::new(medium),
-                Arc::new(large),
-                Arc::new(temp),
-            ],
+            vec![Arc::new(small), Arc::new(medium), Arc::new(large), Arc::new(temp)],
         )
         .unwrap();
 

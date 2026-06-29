@@ -82,7 +82,9 @@ impl Extension for UnityCatalogExtension {
                 "uc_scan",
                 TableFunction::CustomTable {
                     name: "uc_scan".into(),
-                    execute: Arc::new(|_, _| Err("Unity Catalog not available (feature 'duckdb-delegation' disabled)".into())),
+                    execute: Arc::new(|_, _| {
+                        Err("Unity Catalog not available (feature 'duckdb-delegation' disabled)".into())
+                    }),
                 },
             );
             tracing::info!("Unity Catalog extension loaded (placeholder)");

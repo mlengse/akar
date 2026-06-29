@@ -17,8 +17,8 @@
 //!   2. Type-specific payload (primitives as fixed-size LE bytes,
 //!      variable-length types with a u32 length prefix)
 
-use crate::compression::{compress_serialized_value, decompress_serialized_value, serialized_value_size};
 use crate::buffer_manager::BufferManager;
+use crate::compression::{compress_serialized_value, decompress_serialized_value, serialized_value_size};
 use crate::page::FileHandle;
 use kuzu_common::enums::CompressionType;
 use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
@@ -200,7 +200,8 @@ impl Column {
             // Check if the value fits in the remaining space.
             let data_end = if num_vals > 0 {
                 let last_off_pos = 4 + (num_vals - 1) * 4;
-                PAGE_HEADER_SIZE + u32::from_le_bytes(page_data[last_off_pos..last_off_pos + 4].try_into().unwrap()) as usize
+                PAGE_HEADER_SIZE
+                    + u32::from_le_bytes(page_data[last_off_pos..last_off_pos + 4].try_into().unwrap()) as usize
             } else {
                 PAGE_HEADER_SIZE
             };
@@ -275,18 +276,54 @@ impl Column {
     fn serialize_into(buf: &mut Vec<u8>, value: &Value) {
         match value {
             Value::Null => buf.push(TAG_NULL),
-            Value::Bool(v) => { buf.push(TAG_BOOL); buf.push(if *v { 1 } else { 0 }); }
-            Value::Int64(v) => { buf.push(TAG_INT64); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::Int32(v) => { buf.push(TAG_INT32); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::Int16(v) => { buf.push(TAG_INT16); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::Int8(v) => { buf.push(TAG_INT8); buf.push(*v as u8); }
-            Value::UInt64(v) => { buf.push(TAG_UINT64); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::UInt32(v) => { buf.push(TAG_UINT32); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::UInt16(v) => { buf.push(TAG_UINT16); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::UInt8(v) => { buf.push(TAG_UINT8); buf.push(*v); }
-            Value::Int128(v) => { buf.push(TAG_INT128); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::Double(v) => { buf.push(TAG_DOUBLE); buf.extend_from_slice(&v.to_le_bytes()); }
-            Value::Float(v) => { buf.push(TAG_FLOAT); buf.extend_from_slice(&v.to_le_bytes()); }
+            Value::Bool(v) => {
+                buf.push(TAG_BOOL);
+                buf.push(if *v { 1 } else { 0 });
+            }
+            Value::Int64(v) => {
+                buf.push(TAG_INT64);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Int32(v) => {
+                buf.push(TAG_INT32);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Int16(v) => {
+                buf.push(TAG_INT16);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Int8(v) => {
+                buf.push(TAG_INT8);
+                buf.push(*v as u8);
+            }
+            Value::UInt64(v) => {
+                buf.push(TAG_UINT64);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::UInt32(v) => {
+                buf.push(TAG_UINT32);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::UInt16(v) => {
+                buf.push(TAG_UINT16);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::UInt8(v) => {
+                buf.push(TAG_UINT8);
+                buf.push(*v);
+            }
+            Value::Int128(v) => {
+                buf.push(TAG_INT128);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Double(v) => {
+                buf.push(TAG_DOUBLE);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Float(v) => {
+                buf.push(TAG_FLOAT);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
             Value::String(v) => {
                 buf.push(TAG_STRING);
                 buf.extend_from_slice(&(v.len() as u32).to_le_bytes());
@@ -297,7 +334,10 @@ impl Column {
                 buf.extend_from_slice(&(v.len() as u32).to_le_bytes());
                 buf.extend_from_slice(v);
             }
-            Value::Date(v) => { buf.push(TAG_DATE); buf.extend_from_slice(&v.0.to_le_bytes()); }
+            Value::Date(v) => {
+                buf.push(TAG_DATE);
+                buf.extend_from_slice(&v.0.to_le_bytes());
+            }
             Value::Timestamp(v) | Value::TimestampNs(v) | Value::TimestampMs(v) | Value::TimestampSec(v) => {
                 let tag = match value {
                     Value::Timestamp(_) => TAG_TIMESTAMP,
@@ -309,7 +349,10 @@ impl Column {
                 buf.push(tag);
                 buf.extend_from_slice(&v.0.to_le_bytes());
             }
-            Value::TimestampTz(v) => { buf.push(TAG_TIMESTAMP_TZ); buf.extend_from_slice(&v.0.to_le_bytes()); }
+            Value::TimestampTz(v) => {
+                buf.push(TAG_TIMESTAMP_TZ);
+                buf.extend_from_slice(&v.0.to_le_bytes());
+            }
             Value::Interval(v) => {
                 buf.push(TAG_INTERVAL);
                 buf.extend_from_slice(&v.months.to_le_bytes());
@@ -352,7 +395,10 @@ impl Column {
     /// Deserialise a Value from a byte slice starting at the tag byte.
     fn deserialize_value<'a>(data: &'a [u8], pos: &mut usize) -> std::io::Result<Value> {
         if *pos >= data.len() {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF reading value tag"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "unexpected EOF reading value tag",
+            ));
         }
         let tag = data[*pos];
         *pos += 1;
@@ -361,7 +407,10 @@ impl Column {
             ($ty:ty) => {{
                 let size = std::mem::size_of::<$ty>();
                 if *pos + size > data.len() {
-                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected EOF reading value"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "unexpected EOF reading value",
+                    ));
                 }
                 let mut arr = [0u8; std::mem::size_of::<$ty>()];
                 arr.copy_from_slice(&data[*pos..*pos + size]);
@@ -373,7 +422,12 @@ impl Column {
         match tag {
             TAG_NULL => Ok(Value::Null),
             TAG_BOOL => {
-                if *pos >= data.len() { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading bool")); }
+                if *pos >= data.len() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "eof reading bool",
+                    ));
+                }
                 let v = data[*pos] != 0;
                 *pos += 1;
                 Ok(Value::Bool(v))
@@ -382,7 +436,9 @@ impl Column {
             TAG_INT32 => Ok(Value::Int32(read_le!(i32))),
             TAG_INT16 => Ok(Value::Int16(read_le!(i16))),
             TAG_INT8 => {
-                if *pos >= data.len() { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading i8")); }
+                if *pos >= data.len() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading i8"));
+                }
                 let v = data[*pos] as i8;
                 *pos += 1;
                 Ok(Value::Int8(v))
@@ -391,7 +447,9 @@ impl Column {
             TAG_UINT32 => Ok(Value::UInt32(read_le!(u32))),
             TAG_UINT16 => Ok(Value::UInt16(read_le!(u16))),
             TAG_UINT8 => {
-                if *pos >= data.len() { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading u8")); }
+                if *pos >= data.len() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading u8"));
+                }
                 let v = data[*pos];
                 *pos += 1;
                 Ok(Value::UInt8(v))
@@ -402,7 +460,10 @@ impl Column {
             TAG_STRING => {
                 let len = read_le!(u32) as usize;
                 if *pos + len > data.len() {
-                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading string data"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "eof reading string data",
+                    ));
                 }
                 let s = String::from_utf8_lossy(&data[*pos..*pos + len]).into_owned();
                 *pos += len;
@@ -411,7 +472,10 @@ impl Column {
             TAG_BLOB => {
                 let len = read_le!(u32) as usize;
                 if *pos + len > data.len() {
-                    return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading blob data"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "eof reading blob data",
+                    ));
                 }
                 let blob = data[*pos..*pos + len].to_vec();
                 *pos += len;
@@ -458,7 +522,10 @@ impl Column {
                 for _ in 0..len {
                     let name_len = read_le!(u32) as usize;
                     if *pos + name_len > data.len() {
-                        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof reading struct field name"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "eof reading struct field name",
+                        ));
                     }
                     let name = String::from_utf8_lossy(&data[*pos..*pos + name_len]).into_owned();
                     *pos += name_len;
@@ -611,7 +678,10 @@ impl Column {
     /// where `start_off = 0 if i==0 else offsets[i-1]`, `end_off = offsets[i]`.
     fn extract_value_bytes(&self, data: &[u8], header: &PageHeader, local_row: usize) -> std::io::Result<Vec<u8>> {
         if local_row >= header.num_values as usize {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "local row out of range"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "local row out of range",
+            ));
         }
         let value_start = if local_row > 0 {
             PAGE_HEADER_SIZE + header.offsets[local_row - 1] as usize
@@ -620,7 +690,10 @@ impl Column {
         };
         let value_end = PAGE_HEADER_SIZE + header.offsets[local_row] as usize;
         if value_start >= data.len() || value_end > data.len() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "value offset out of bounds"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "value offset out of bounds",
+            ));
         }
         Ok(data[value_start..value_end].to_vec())
     }
@@ -629,7 +702,12 @@ impl Column {
     ///
     /// Decompresses the stored bytes according to `self.compression_type`
     /// before deserializing the Value.
-    fn deserialize_value_from_page(&self, data: &[u8], header: &PageHeader, local_row: usize) -> std::io::Result<Value> {
+    fn deserialize_value_from_page(
+        &self,
+        data: &[u8],
+        header: &PageHeader,
+        local_row: usize,
+    ) -> std::io::Result<Value> {
         let stored = self.extract_value_bytes(data, header, local_row)?;
         let bytes = decompress_serialized_value(self.compression_type, &stored, self.value_size);
         let mut pos = 0;
@@ -647,7 +725,7 @@ mod tests {
     use crate::page::DEFAULT_PAGE_SIZE;
     use kuzu_common::enums::CompressionType;
     use kuzu_common::memory::MemoryManager;
-    use kuzu_common::types::{Date, Interval, InternalID, Timestamp, TimestampTZ};
+    use kuzu_common::types::{Date, InternalID, Interval, Timestamp, TimestampTZ};
 
     fn setup_column() -> (Column, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -722,8 +800,15 @@ mod tests {
             Value::Date(Date(12345)),
             Value::Timestamp(Timestamp(1_700_000_000_000_000)),
             Value::TimestampTz(TimestampTZ(1_700_000_000_000_000)),
-            Value::Interval(Interval { months: 12, days: 30, micros: 1_000_000 }),
-            Value::InternalID(InternalID { table_id: 10, offset: 42 }),
+            Value::Interval(Interval {
+                months: 12,
+                days: 30,
+                micros: 1_000_000,
+            }),
+            Value::InternalID(InternalID {
+                table_id: 10,
+                offset: 42,
+            }),
         ];
         for v in &vals {
             let buf = Column::serialize_value(v);
@@ -804,7 +889,8 @@ mod tests {
         col.append_value(&Value::String("hello".to_string())).unwrap();
         col.append_value(&Value::Double(3.14)).unwrap();
         col.append_value(&Value::Bool(true)).unwrap();
-        col.append_value(&Value::List(vec![Value::Int64(1), Value::Int64(2)])).unwrap();
+        col.append_value(&Value::List(vec![Value::Int64(1), Value::Int64(2)]))
+            .unwrap();
 
         assert_eq!(col.get_value(0).unwrap(), Value::String("hello".to_string()));
         assert_eq!(col.get_value(1).unwrap(), Value::Double(3.14));
@@ -893,8 +979,11 @@ mod tests {
         )));
         let mut col = Column::with_compression(
             LogicalTypeID::Double,
-            0, 0,
-            &db_path, bm, DEFAULT_PAGE_SIZE,
+            0,
+            0,
+            &db_path,
+            bm,
+            DEFAULT_PAGE_SIZE,
             CompressionType::Float,
         );
 

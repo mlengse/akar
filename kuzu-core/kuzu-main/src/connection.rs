@@ -12,8 +12,7 @@ use crate::prepared_statement::{PreparedStatement, substitute_params};
 use crate::query_result::QueryResult;
 use kuzu_binder::Binder;
 use kuzu_binder::bound_statement::{
-    BoundStatement, BoundClause, BoundExpression,
-    BoundQuery, BoundReturnClause, BoundWhereClause,
+    BoundClause, BoundExpression, BoundQuery, BoundReturnClause, BoundStatement, BoundWhereClause,
 };
 use kuzu_common::types::Value;
 use kuzu_optimizer::Optimizer;
@@ -49,13 +48,11 @@ impl Connection {
         }
 
         // 1. Parse
-        let statement = parse(trimmed)
-            .map_err(|e| format!("Parse error: {e}"))?;
+        let statement = parse(trimmed).map_err(|e| format!("Parse error: {e}"))?;
 
         // 2. Bind (using shared catalog Arc — DDL mutations persist)
         let binder = Binder::new(self.database.catalog.clone());
-        let bound = binder.bind(statement)
-            .map_err(|e| format!("Bind error: {e}"))?;
+        let bound = binder.bind(statement).map_err(|e| format!("Bind error: {e}"))?;
 
         // 3. Route: DDL vs DML
         if let Some(result) = self.handle_ddl(&bound)? {
@@ -64,8 +61,7 @@ impl Connection {
 
         // 4. Plan
         let planner = QueryPlanner::new();
-        let logical_plan = planner.plan(bound)
-            .map_err(|e| format!("Plan error: {e}"))?;
+        let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
 
         if logical_plan.is_empty() {
             return Ok(QueryResult::success_message("Query executed (no result)".into()));
@@ -104,13 +100,11 @@ impl Connection {
         }
 
         // Parse
-        let statement = parse(trimmed)
-            .map_err(|e| format!("Parse error: {e}"))?;
+        let statement = parse(trimmed).map_err(|e| format!("Parse error: {e}"))?;
 
         // Bind
         let binder = Binder::new(self.database.catalog.clone());
-        let bound = binder.bind(statement)
-            .map_err(|e| format!("Bind error: {e}"))?;
+        let bound = binder.bind(statement).map_err(|e| format!("Bind error: {e}"))?;
 
         let prepared = PreparedStatement::new(trimmed.to_string(), bound);
 
@@ -128,11 +122,7 @@ impl Connection {
     /// Parameters are provided as a vector of `(name, value)` pairs.
     /// The values are substituted for `$name` references in the query before
     /// planning and execution.
-    pub fn execute(
-        &self,
-        prepared: &PreparedStatement,
-        params: Vec<(&str, Value)>,
-    ) -> Result<QueryResult, String> {
+    pub fn execute(&self, prepared: &PreparedStatement, params: Vec<(&str, Value)>) -> Result<QueryResult, String> {
         // Build parameter map
         let mut param_map = HashMap::new();
         let num_expected = prepared.parameters.len();
@@ -149,11 +139,7 @@ impl Connection {
 
         // Check for unknown parameters
         if params.len() > num_expected {
-            return Err(format!(
-                "Expected {} parameter(s), got {}",
-                num_expected,
-                params.len()
-            ));
+            return Err(format!("Expected {} parameter(s), got {}", num_expected, params.len()));
         }
 
         // Handle DDL prepared statements
@@ -162,15 +148,11 @@ impl Connection {
         }
 
         // Substitute parameters in the bound statement
-        let substituted = substitute_params_in_statement(
-            &prepared.bound_statement,
-            &param_map,
-        )?;
+        let substituted = substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
 
         // Plan
         let planner = QueryPlanner::new();
-        let logical_plan = planner.plan(substituted)
-            .map_err(|e| format!("Plan error: {e}"))?;
+        let logical_plan = planner.plan(substituted).map_err(|e| format!("Plan error: {e}"))?;
 
         if logical_plan.is_empty() {
             return Ok(QueryResult::success_message("Query executed (no result)".into()));
@@ -198,40 +180,49 @@ impl Connection {
         match bound {
             BoundStatement::BoundCreateNodeTable(t) => {
                 // Also create a storage table with in-memory data capacity
-                let columns: Vec<ColumnDefinition> = t.columns.iter().map(|c| {
-                    ColumnDefinition {
+                let columns: Vec<ColumnDefinition> = t
+                    .columns
+                    .iter()
+                    .map(|c| ColumnDefinition {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 self.database.storage_manager.create_node_table(t.name.clone(), columns);
                 tracing::info!("Created node table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
-                    "Node table '{}' created", t.name
+                    "Node table '{}' created",
+                    t.name
                 ))))
             }
             BoundStatement::BoundCreateRelTable(t) => {
                 // Create a storage rel table
-                let columns: Vec<ColumnDefinition> = t.columns.iter().map(|c| {
-                    ColumnDefinition {
+                let columns: Vec<ColumnDefinition> = t
+                    .columns
+                    .iter()
+                    .map(|c| ColumnDefinition {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 let src_id = 0; // src table ID resolved during binding
                 let dst_id = 0;
-                self.database.storage_manager.create_rel_table(t.name.clone(), src_id, dst_id, columns);
+                self.database
+                    .storage_manager
+                    .create_rel_table(t.name.clone(), src_id, dst_id, columns);
                 tracing::info!("Created rel table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
-                    "Rel table '{}' created", t.name
+                    "Rel table '{}' created",
+                    t.name
                 ))))
             }
             BoundStatement::BoundDropTable(t) => {
                 tracing::info!("Dropped table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
-                    "Table '{}' dropped", t.name
+                    "Table '{}' dropped",
+                    t.name
                 ))))
             }
             BoundStatement::BoundUnion(u) => {
@@ -240,25 +231,29 @@ impl Connection {
                 let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
 
                 // Execute left side
-                let left_plan = planner.plan(BoundStatement::BoundQuery(*u.left.clone()))
+                let left_plan = planner
+                    .plan(BoundStatement::BoundQuery(*u.left.clone()))
                     .map_err(|e| format!("Plan left UNION: {e}"))?;
                 let left_optimized = optimizer.optimize(left_plan);
                 let processor = QueryProcessor::with_catalog(
                     self.database.function_registry.clone(),
                     self.database.storage_manager.table_catalog(),
                 );
-                let left_chunks = processor.execute(&left_optimized)
+                let left_chunks = processor
+                    .execute(&left_optimized)
                     .map_err(|e| format!("Execute left UNION: {e}"))?;
 
                 // Execute right side
-                let right_plan = planner.plan(BoundStatement::BoundQuery(*u.right.clone()))
+                let right_plan = planner
+                    .plan(BoundStatement::BoundQuery(*u.right.clone()))
                     .map_err(|e| format!("Plan right UNION: {e}"))?;
                 let right_optimized = optimizer.optimize(right_plan);
                 let processor = QueryProcessor::with_catalog(
                     self.database.function_registry.clone(),
                     self.database.storage_manager.table_catalog(),
                 );
-                let right_chunks = processor.execute(&right_optimized)
+                let right_chunks = processor
+                    .execute(&right_optimized)
                     .map_err(|e| format!("Execute right UNION: {e}"))?;
 
                 // Concatenate results
@@ -271,27 +266,36 @@ impl Connection {
                 let mut catalog = self.database.catalog.lock().unwrap();
                 match &a.action {
                     kuzu_parser::ast::AlterAction::AddColumn { name, type_name } => {
-                        let logical_type = kuzu_binder::Binder::parse_type(type_name)
+                        let logical_type =
+                            kuzu_binder::Binder::parse_type(type_name).map_err(|e| format!("ALTER ADD: {e}"))?;
+                        catalog
+                            .add_column(
+                                &a.table_name,
+                                kuzu_catalog::CatalogColumn {
+                                    name: name.clone(),
+                                    logical_type,
+                                    is_primary_key: false,
+                                    default_value: None,
+                                },
+                            )
                             .map_err(|e| format!("ALTER ADD: {e}"))?;
-                        catalog.add_column(&a.table_name, kuzu_catalog::CatalogColumn {
-                            name: name.clone(),
-                            logical_type,
-                            is_primary_key: false,
-                            default_value: None,
-                        }).map_err(|e| format!("ALTER ADD: {e}"))?;
                         Ok(Some(QueryResult::success_message(format!(
-                            "Column '{}' added to table '{}'", name, a.table_name
+                            "Column '{}' added to table '{}'",
+                            name, a.table_name
                         ))))
                     }
                     kuzu_parser::ast::AlterAction::DropColumn { name } => {
-                        catalog.drop_column(&a.table_name, name)
+                        catalog
+                            .drop_column(&a.table_name, name)
                             .map_err(|e| format!("ALTER DROP: {e}"))?;
                         Ok(Some(QueryResult::success_message(format!(
-                            "Column '{}' dropped from table '{}'", name, a.table_name
+                            "Column '{}' dropped from table '{}'",
+                            name, a.table_name
                         ))))
                     }
                     kuzu_parser::ast::AlterAction::RenameColumn { old_name, new_name } => {
-                        catalog.rename_column(&a.table_name, old_name, new_name)
+                        catalog
+                            .rename_column(&a.table_name, old_name, new_name)
                             .map_err(|e| format!("ALTER RENAME COLUMN: {e}"))?;
                         Ok(Some(QueryResult::success_message(format!(
                             "Column '{}' renamed to '{}' in table '{}'",
@@ -299,10 +303,12 @@ impl Connection {
                         ))))
                     }
                     kuzu_parser::ast::AlterAction::RenameTable { new_name } => {
-                        catalog.rename_table(&a.table_name, new_name)
+                        catalog
+                            .rename_table(&a.table_name, new_name)
                             .map_err(|e| format!("ALTER RENAME TABLE: {e}"))?;
                         Ok(Some(QueryResult::success_message(format!(
-                            "Table '{}' renamed to '{}'", a.table_name, new_name
+                            "Table '{}' renamed to '{}'",
+                            a.table_name, new_name
                         ))))
                     }
                 }
@@ -340,26 +346,27 @@ fn substitute_params_in_statement(
             for clause in &q.clauses {
                 let new_clause = match clause {
                     BoundClause::BoundReturn(r) => {
-                        let new_exprs: Result<Vec<_>, _> = r.expressions.iter()
+                        let new_exprs: Result<Vec<_>, _> = r
+                            .expressions
+                            .iter()
                             .map(|e| substitute_in_bound_expr(e, params))
                             .collect();
-                        BoundClause::BoundReturn(
-                            BoundReturnClause { expressions: new_exprs? }
-                        )
+                        BoundClause::BoundReturn(BoundReturnClause {
+                            expressions: new_exprs?,
+                        })
                     }
                     BoundClause::BoundWhere(w) => {
                         let new_expr = substitute_in_bound_expr(&w.expression, params)?;
-                        BoundClause::BoundWhere(
-                            BoundWhereClause { expression: new_expr }
-                        )
+                        BoundClause::BoundWhere(BoundWhereClause { expression: new_expr })
                     }
                     other => other.clone(),
                 };
                 new_clauses.push(new_clause);
             }
-            Ok(BoundStatement::BoundQuery(
-                BoundQuery { variables: q.variables.clone(), clauses: new_clauses }
-            ))
+            Ok(BoundStatement::BoundQuery(BoundQuery {
+                variables: q.variables.clone(),
+                clauses: new_clauses,
+            }))
         }
         other => Ok(other.clone()),
     }
@@ -403,11 +410,11 @@ mod integration_tests {
     /// Helper: extract all values from the first column of a query result.
     fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
         let result = conn.query(sql).unwrap();
-        result.chunks.iter().flat_map(|c| {
-            (0..c.size).filter_map(|i| {
-                c.fields.first().and_then(|f| f.get_value(i))
-            })
-        }).collect()
+        result
+            .chunks
+            .iter()
+            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .collect()
     }
 
     #[test]
@@ -416,20 +423,33 @@ mod integration_tests {
         let db_path = dir.path().join("test_db");
         let _ = &db_path; // keep db path alive
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         let csv_path = dir.path().join("people.csv");
-        std::fs::write(&csv_path,
-            "name,age,score,active\nAlice,30,95.5,true\nBob,25,87.3,false\nCharlie,35,91.2,true\n"
-        ).unwrap();
+        std::fs::write(
+            &csv_path,
+            "name,age,score,active\nAlice,30,95.5,true\nBob,25,87.3,false\nCharlie,35,91.2,true\n",
+        )
+        .unwrap();
 
         let file_path = csv_path.to_string_lossy().replace('\\', "/");
         exec_ok(&conn, &format!("COPY Person FROM '{file_path}' (HEADER true)")).unwrap();
 
         let names = query_column(&conn, "MATCH (n:Person) RETURN n.name ORDER BY n.name");
-        let extracted: Vec<String> = names.iter().filter_map(|v| {
-            if let Value::String(s) = v { Some(s.clone()) } else { None }
-        }).collect();
+        let extracted: Vec<String> = names
+            .iter()
+            .filter_map(|v| {
+                if let Value::String(s) = v {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(extracted, vec!["Alice", "Bob", "Charlie"]);
     }
 
@@ -437,7 +457,11 @@ mod integration_tests {
     fn test_copy_csv_no_header() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         let csv_path = _dir.path().join("noheader.csv");
         std::fs::write(&csv_path, "Alice,30,95.5,true\nBob,25,87.3,false\n").unwrap();
@@ -454,7 +478,11 @@ mod integration_tests {
     fn test_copy_csv_custom_delimiter() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Item(name STRING, price DOUBLE, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Item(name STRING, price DOUBLE, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         let csv_path = _dir.path().join("items.csv");
         std::fs::write(&csv_path, "name|price\nWidget|19.99\nGadget|29.99\n").unwrap();
@@ -493,8 +521,10 @@ mod integration_tests {
         let result = exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)"));
         assert!(result.is_err(), "Expected type coercion error");
         let err = result.unwrap_err();
-        assert!(err.contains("INT64") || err.contains("parse"),
-            "Expected type error, got: {err}");
+        assert!(
+            err.contains("INT64") || err.contains("parse"),
+            "Expected type error, got: {err}"
+        );
     }
 
     #[test]
@@ -512,8 +542,10 @@ mod integration_tests {
         let result = exec_ok(&conn, &format!("COPY T FROM '{file_path}' (HEADER true)"));
         assert!(result.is_err(), "Expected column count error");
         let err = result.unwrap_err();
-        assert!(err.contains("Column count mismatch") || err.contains("match"),
-            "Expected column count error, got: {err}");
+        assert!(
+            err.contains("Column count mismatch") || err.contains("match"),
+            "Expected column count error, got: {err}"
+        );
     }
 
     #[test]
@@ -524,7 +556,11 @@ mod integration_tests {
 
         let (dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         let pq_path = dir.path().join("data.parquet");
         let schema = Arc::new(Schema::new(vec![
@@ -542,7 +578,8 @@ mod integration_tests {
                 Arc::new(Float64Array::from(vec![95.5, 87.3])),
                 Arc::new(BooleanArray::from(vec![true, false])),
             ],
-        ).unwrap();
+        )
+        .unwrap();
 
         let file = std::fs::File::create(&pq_path).unwrap();
         let mut writer = parquet::arrow::ArrowWriter::try_new(file, batch.schema(), None).unwrap();
@@ -599,7 +636,11 @@ mod integration_tests {
         // Scan an empty table (no data) — should return empty result, not error
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Empty(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Empty(id INT64, label STRING, PRIMARY KEY (id))",
+        )
+        .unwrap();
 
         let result = conn.query("MATCH (n:Empty) RETURN n.id, n.label").unwrap();
         // Should produce a valid empty result
@@ -629,7 +670,11 @@ mod integration_tests {
         // NOTE: grammar uses ADD <name> <type> (no COLUMN keyword)
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // Insert some data
         let csv_path = _dir.path().join("people.csv");
@@ -664,7 +709,11 @@ mod integration_tests {
 
         // Rename column (grammar: RENAME <name> TO <newname>)
         let rename_result = exec_ok(&conn, "ALTER TABLE T RENAME label TO renamed");
-        assert!(rename_result.is_ok(), "ALTER RENAME should succeed: {:?}", rename_result);
+        assert!(
+            rename_result.is_ok(),
+            "ALTER RENAME should succeed: {:?}",
+            rename_result
+        );
     }
 
     #[test]
@@ -672,7 +721,11 @@ mod integration_tests {
         // NOTE: grammar uses DROP <name> (no COLUMN keyword)
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, score DOUBLE, PRIMARY KEY (id))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE T(id INT64, label STRING, score DOUBLE, PRIMARY KEY (id))",
+        )
+        .unwrap();
 
         let csv_path = _dir.path().join("data.csv");
         std::fs::write(&csv_path, "id,label,score\n1,foo,10.5\n2,bar,20.0\n").unwrap();
@@ -689,7 +742,11 @@ mod integration_tests {
         // Insert 10K rows to test dataset stability
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Large(id INT64, value INT64, label STRING, PRIMARY KEY (id))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Large(id INT64, value INT64, label STRING, PRIMARY KEY (id))",
+        )
+        .unwrap();
 
         // Generate a large CSV with simple integer values
         let csv_path = _dir.path().join("large.csv");
@@ -771,7 +828,9 @@ mod integration_tests {
         exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
 
         // OPTIONAL MATCH that finds nothing should produce a row with NULL fields
-        let result = conn.query("MATCH (n:T) OPTIONAL MATCH (m:T {id: 999}) RETURN n.id, m.id ORDER BY n.id").unwrap();
+        let result = conn
+            .query("MATCH (n:T) OPTIONAL MATCH (m:T {id: 999}) RETURN n.id, m.id ORDER BY n.id")
+            .unwrap();
         assert_eq!(result.num_rows(), 2, "Expected 2 rows from left side");
     }
 }

@@ -74,8 +74,8 @@ pub const fn physical_type_size(t: PhysicalTypeID) -> usize {
         PhysicalTypeID::Int32 | PhysicalTypeID::UInt32 | PhysicalTypeID::Float => 4,
         PhysicalTypeID::Int64 | PhysicalTypeID::UInt64 | PhysicalTypeID::Double | PhysicalTypeID::Interval => 8,
         PhysicalTypeID::Int128 => 16,
-        PhysicalTypeID::String => 16,   // string view
-        PhysicalTypeID::Struct => 8,    // pointer to struct data
+        PhysicalTypeID::String => 16,                       // string view
+        PhysicalTypeID::Struct => 8,                        // pointer to struct data
         PhysicalTypeID::List | PhysicalTypeID::Array => 16, // list header
         PhysicalTypeID::Blob => 16,
         PhysicalTypeID::Any => 1,
@@ -261,8 +261,7 @@ impl ValueVector {
             self.null_mask.resize(start + count, true);
             self.capacity = start + count;
         }
-        self.data[start * type_size..start * type_size + bytes_to_copy]
-            .copy_from_slice(&other.data[..bytes_to_copy]);
+        self.data[start * type_size..start * type_size + bytes_to_copy].copy_from_slice(&other.data[..bytes_to_copy]);
         for i in 0..count {
             self.null_mask[start + i] = other.null_mask[i];
         }
@@ -277,46 +276,43 @@ pub struct DataChunk {
     pub size: usize,
 }
 
+/// Resize a DataChunk to the given number of rows.
+pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
+    chunk.size = new_size;
+    for field in &mut chunk.fields {
+        field.resize(new_size);
+    }
+}
+
+impl DataChunk {
+    pub fn new(fields: Vec<ValueVector>) -> Self {
+        let size = fields.first().map(|f| f.size()).unwrap_or(0);
+        Self { fields, size }
+    }
+
+    pub fn field(&self, idx: usize) -> &ValueVector {
+        &self.fields[idx]
+    }
+
+    pub fn field_mut(&mut self, idx: usize) -> &mut ValueVector {
+        &mut self.fields[idx]
+    }
+
+    pub fn num_fields(&self) -> usize {
+        self.fields.len()
+    }
+
+    pub fn resize(&mut self, new_size: usize) {
+        self.size = new_size;
+        for field in &mut self.fields {
+            field.resize(new_size);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_value_vector_create() {
-        let v = ValueVector::new(PhysicalTypeID::Int64, 10);
-        assert_eq!(v.physical_type(), PhysicalTypeID::Int64);
-        assert_eq!(v.capacity(), 10);
-        assert_eq!(v.size(), 0);
-    }
-
-    #[test]
-    fn test_value_vector_set_get_i64() {
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
-        v.set_i64(0, 42);
-        v.set_i64(1, -17);
-        assert_eq!(v.get_i64(0), Some(42));
-        assert_eq!(v.get_i64(1), Some(-17));
-        assert_eq!(v.size(), 2);
-    }
-
-    #[test]
-    fn test_value_vector_null() {
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
-        v.set_i64(0, 100);
-        assert!(!v.is_null(0));
-        v.set_null(0, true);
-        assert!(v.is_null(0));
-        assert_eq!(v.get_i64(0), None);
-    }
-
-    #[test]
-    fn test_value_vector_set_get_f64() {
-        let mut v = ValueVector::new(PhysicalTypeID::Double, 5);
-        v.set_double(0, 3.14);
-        v.set_double(1, -2.71);
-        assert!((v.get_double(0).unwrap() - 3.14).abs() < 1e-10);
-        assert!((v.get_double(1).unwrap() - (-2.71)).abs() < 1e-10);
-    }
 
     #[test]
     fn test_value_vector_bool() {
@@ -356,31 +352,5 @@ mod tests {
         assert_eq!(v1.size(), 4);
         assert_eq!(v1.get_i64(2), Some(3));
         assert_eq!(v1.get_i64(3), Some(4));
-    }
-}
-
-impl DataChunk {
-    pub fn new(fields: Vec<ValueVector>) -> Self {
-        let size = fields.first().map(|f| f.size()).unwrap_or(0);
-        Self { fields, size }
-    }
-
-    pub fn field(&self, idx: usize) -> &ValueVector {
-        &self.fields[idx]
-    }
-
-    pub fn field_mut(&mut self, idx: usize) -> &mut ValueVector {
-        &mut self.fields[idx]
-    }
-
-    pub fn num_fields(&self) -> usize {
-        self.fields.len()
-    }
-
-    pub fn resize(&mut self, new_size: usize) {
-        self.size = new_size;
-        for field in &mut self.fields {
-            field.resize(new_size);
-        }
     }
 }

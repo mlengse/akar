@@ -131,7 +131,7 @@ pub fn read_varint<R: Read>(reader: &mut R) -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Date, Timestamp, Interval, InternalID};
+    use crate::types::{Date, InternalID, Interval, Timestamp};
 
     #[test]
     fn test_serialize_primitive_roundtrip() {
@@ -152,14 +152,17 @@ mod tests {
     #[test]
     fn test_serialize_f64_roundtrip() {
         let mut buf = Vec::new();
-        3.14159f64.serialize(&mut buf).unwrap();
+        std::f64::consts::PI.serialize(&mut buf).unwrap();
         let val = f64::deserialize(&mut &buf[..]).unwrap();
-        assert!((val - 3.14159).abs() < 1e-10);
+        assert!((val - std::f64::consts::PI).abs() < 1e-10);
     }
 
     #[test]
     fn test_serialize_internal_id() {
-        let id = InternalID { table_id: 10, offset: 42 };
+        let id = InternalID {
+            table_id: 10,
+            offset: 42,
+        };
         let mut buf = Vec::new();
         id.serialize(&mut buf).unwrap();
         let val = InternalID::deserialize(&mut &buf[..]).unwrap();
@@ -187,7 +190,11 @@ mod tests {
 
     #[test]
     fn test_serialize_interval() {
-        let iv = Interval { months: 12, days: 30, micros: 1_000_000 };
+        let iv = Interval {
+            months: 12,
+            days: 30,
+            micros: 1_000_000,
+        };
         let mut buf = Vec::new();
         iv.serialize(&mut buf).unwrap();
         let val = Interval::deserialize(&mut &buf[..]).unwrap();

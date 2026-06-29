@@ -8,11 +8,11 @@
 //! - Memory management
 //! - File system abstraction
 
-pub mod types;
-pub mod vector;
 pub mod data_chunk;
 pub mod enums;
+pub mod file_system;
+pub mod memory;
 pub mod serialization;
 pub mod task_system;
-pub mod memory;
-pub mod file_system;
+pub mod types;
+pub mod vector;

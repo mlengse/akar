@@ -85,9 +85,21 @@ impl CSRAdjacency {
         for edge in edges {
             let src = edge.src_offset as usize;
             let dst = edge.dst_offset as usize;
-            adj[pos[src]] = (edge.rel_id, InternalID { table_id: edge.rel_table_id, offset: edge.dst_offset });
+            adj[pos[src]] = (
+                edge.rel_id,
+                InternalID {
+                    table_id: edge.rel_table_id,
+                    offset: edge.dst_offset,
+                },
+            );
             pos[src] += 1;
-            adj[pos[dst]] = (edge.rel_id, InternalID { table_id: edge.rel_table_id, offset: edge.src_offset });
+            adj[pos[dst]] = (
+                edge.rel_id,
+                InternalID {
+                    table_id: edge.rel_table_id,
+                    offset: edge.src_offset,
+                },
+            );
             pos[dst] += 1;
         }
 
@@ -135,16 +147,14 @@ impl Graph {
     }
 
     pub fn get_neighbors(&self, node_offset: u64) -> Option<&[(u64, InternalID)]> {
-        self.csr
-            .as_ref()
-            .and_then(|csr| {
-                let pos = node_offset as usize;
-                if pos < csr.num_nodes() {
-                    Some(csr.neighbors(pos))
-                } else {
-                    None
-                }
-            })
+        self.csr.as_ref().and_then(|csr| {
+            let pos = node_offset as usize;
+            if pos < csr.num_nodes() {
+                Some(csr.neighbors(pos))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn num_nodes(&self) -> u64 {
@@ -169,11 +179,7 @@ impl OnDiskGraph {
     }
 
     /// Scan a relationship table and build an in-memory graph.
-    pub fn build_from_storage(
-        &self,
-        _rel_table_id: u64,
-        _num_nodes: u64,
-    ) -> Result<Graph, String> {
+    pub fn build_from_storage(&self, _rel_table_id: u64, _num_nodes: u64) -> Result<Graph, String> {
         // TODO: read from storage engine
         Ok(Graph::new())
     }
@@ -185,11 +191,36 @@ mod tests {
 
     fn sample_edges() -> Vec<Edge> {
         vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 3, rel_table_id: 0 },
-            Edge { src_offset: 3, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 3,
+                dst_offset: 0,
+                rel_id: 4,
+                rel_table_id: 0,
+            },
         ]
     }
 
@@ -268,7 +299,12 @@ mod tests {
 
     #[test]
     fn test_csr_single_node() {
-        let edges = vec![Edge { src_offset: 0, dst_offset: 0, rel_id: 0, rel_table_id: 0 }];
+        let edges = vec![Edge {
+            src_offset: 0,
+            dst_offset: 0,
+            rel_id: 0,
+            rel_table_id: 0,
+        }];
         let csr = CSRAdjacency::build(&edges, 1);
         assert_eq!(csr.num_nodes(), 1);
         assert_eq!(csr.num_edges(), 2); // Self-loop counted twice in undirected

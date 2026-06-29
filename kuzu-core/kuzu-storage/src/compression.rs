@@ -27,12 +27,16 @@ pub fn compress(compression: CompressionType, data: &[u8], num_values: usize) ->
             let value_size = if num_values > 0 { data.len() / num_values } else { 4 };
             compress_float(data, num_values, value_size)
         }
-        CompressionType::OneValue | CompressionType::Uncompressed => {
-            CompressedChunk { compression, data: data.to_vec(), num_values }
-        }
-        CompressionType::StringDictionary => {
-            CompressedChunk { compression, data: data.to_vec(), num_values }
-        }
+        CompressionType::OneValue | CompressionType::Uncompressed => CompressedChunk {
+            compression,
+            data: data.to_vec(),
+            num_values,
+        },
+        CompressionType::StringDictionary => CompressedChunk {
+            compression,
+            data: data.to_vec(),
+            num_values,
+        },
     }
 }
 
@@ -65,10 +69,7 @@ pub fn decompress(chunk: &CompressedChunk, expected_size: usize) -> Vec<u8> {
 fn compress_integer_impl(value_bytes: &[u8]) -> Vec<u8> {
     let n = value_bytes.len();
     // Find the last non-zero byte from the high end of the LE representation.
-    let significant = (0..n)
-        .rev()
-        .find(|&i| value_bytes[i] != 0)
-        .map_or(0, |i| i + 1);
+    let significant = (0..n).rev().find(|&i| value_bytes[i] != 0).map_or(0, |i| i + 1);
     let used = significant.max(1); // at least 1 byte
     let mut out = Vec::with_capacity(1 + used);
     out.push(used as u8);
@@ -281,17 +282,27 @@ pub fn serialized_value_size(physical_type: kuzu_common::types::PhysicalTypeID) 
 /// Constant compression: for columns where all values are the same.
 /// Format: [num_vals: u32][value_bytes...]
 fn compress_constant(data: &[u8], num_values: usize) -> CompressedChunk {
-    let val_size = if data.is_empty() { 0 } else { data.len() / num_values.max(1) };
+    let val_size = if data.is_empty() {
+        0
+    } else {
+        data.len() / num_values.max(1)
+    };
     let mut compressed = Vec::with_capacity(4 + val_size);
     compressed.extend_from_slice(&(num_values as u32).to_le_bytes());
     if val_size > 0 {
         compressed.extend_from_slice(&data[..val_size]);
     }
-    CompressedChunk { compression: CompressionType::Constant, data: compressed, num_values }
+    CompressedChunk {
+        compression: CompressionType::Constant,
+        data: compressed,
+        num_values,
+    }
 }
 
 fn decompress_constant(data: &[u8], expected_size: usize) -> Vec<u8> {
-    if data.len() < 4 { return Vec::new(); }
+    if data.len() < 4 {
+        return Vec::new();
+    }
     let mut arr = [0u8; 4];
     arr.copy_from_slice(&data[..4]);
     let num_vals = u32::from_le_bytes(arr) as usize;
@@ -308,9 +319,15 @@ fn compress_boolean(data: &[u8], num_values: usize) -> CompressedChunk {
     let packed_len = (num_values + 7) / 8;
     let mut packed = vec![0u8; packed_len];
     for i in 0..num_values.min(data.len()) {
-        if data[i] != 0 { packed[i / 8] |= 1 << (i % 8); }
+        if data[i] != 0 {
+            packed[i / 8] |= 1 << (i % 8);
+        }
     }
-    CompressedChunk { compression: CompressionType::Boolean, data: packed, num_values }
+    CompressedChunk {
+        compression: CompressionType::Boolean,
+        data: packed,
+        num_values,
+    }
 }
 
 fn decompress_boolean(data: &[u8], num_values: usize) -> Vec<u8> {
@@ -424,11 +441,7 @@ mod tests {
         // Compressed payload should be smaller than 8 bytes for value 42
         assert!(compressed.len() < raw.len(), "compression should reduce size");
 
-        let decompressed = super::decompress_serialized_value(
-            CompressionType::IntegerBitpacking,
-            &compressed,
-            8,
-        );
+        let decompressed = super::decompress_serialized_value(CompressionType::IntegerBitpacking, &compressed, 8);
         assert_eq!(decompressed, raw, "full roundtrip should match original");
 
         // Verify value roundtrips correctly
@@ -469,11 +482,7 @@ mod tests {
         );
         // Should be pass-through (unchanged)
         assert_eq!(compressed, raw);
-        let decompressed = super::decompress_serialized_value(
-            CompressionType::IntegerBitpacking,
-            &compressed,
-            0,
-        );
+        let decompressed = super::decompress_serialized_value(CompressionType::IntegerBitpacking, &compressed, 0);
         assert_eq!(decompressed, raw);
     }
 

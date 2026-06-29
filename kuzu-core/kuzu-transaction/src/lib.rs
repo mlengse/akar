@@ -7,8 +7,8 @@
 //! - Serializable isolation via timestamp ordering + conflict detection.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Type of transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,14 +58,23 @@ impl Transaction {
     }
 
     pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) {
-        self.undo_records.push(UndoRecord { table_id, row_id, column, old_data });
+        self.undo_records.push(UndoRecord {
+            table_id,
+            row_id,
+            column,
+            old_data,
+        });
         if !self.modified_tables.contains(&table_id) {
             self.modified_tables.push(table_id);
         }
     }
 
-    pub fn is_active(&self) -> bool { self.status == TransactionStatus::Active }
-    pub fn is_committed(&self) -> bool { self.status == TransactionStatus::Committed }
+    pub fn is_active(&self) -> bool {
+        self.status == TransactionStatus::Active
+    }
+    pub fn is_committed(&self) -> bool {
+        self.status == TransactionStatus::Committed
+    }
 
     pub fn description(&self) -> String {
         let s = match self.status {
@@ -76,7 +85,10 @@ impl Transaction {
         format!(
             "txn#{} [{}] {} — {} undo records",
             self.transaction_id,
-            match self.transaction_type { TransactionType::ReadOnly => "RO", TransactionType::Write => "RW" },
+            match self.transaction_type {
+                TransactionType::ReadOnly => "RO",
+                TransactionType::Write => "RW",
+            },
             s,
             self.undo_records.len()
         )
@@ -97,7 +109,11 @@ pub struct TransactionManagerConfig {
 }
 
 impl Default for TransactionManagerConfig {
-    fn default() -> Self { Self { max_concurrent_writers: 1 } }
+    fn default() -> Self {
+        Self {
+            max_concurrent_writers: 1,
+        }
+    }
 }
 
 /// Manages concurrent transaction lifecycle with MVCC timestamp ordering.
@@ -145,9 +161,15 @@ impl TransactionManager {
         let tx = Transaction::new(id, TransactionType::Write);
 
         if let Ok(active) = self.active_transactions.lock() {
-            let wc = active.values().filter(|t| t.transaction_type == TransactionType::Write && t.is_active()).count();
+            let wc = active
+                .values()
+                .filter(|t| t.transaction_type == TransactionType::Write && t.is_active())
+                .count();
             if wc >= self.config.max_concurrent_writers {
-                return Err(format!("Max concurrent writers reached ({})", self.config.max_concurrent_writers));
+                return Err(format!(
+                    "Max concurrent writers reached ({})",
+                    self.config.max_concurrent_writers
+                ));
             }
         }
 
@@ -159,6 +181,7 @@ impl TransactionManager {
 
     /// Lock a table for writing (called by the user after begin_write).
     /// Returns an error if another write transaction already holds the lock.
+    #[allow(clippy::collapsible_if)]
     pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), String> {
         let mut locks = self.table_locks.lock().unwrap();
         if let Some(&owner) = locks.get(&table_id) {
@@ -176,7 +199,9 @@ impl TransactionManager {
             transaction.commit_ts = Some(self.next_commit_ts.fetch_add(1, Ordering::SeqCst));
             self.remove_from_active(transaction.transaction_id);
             self.release_locks(transaction.transaction_id);
-            return CommitResult::Committed { commit_ts: transaction.commit_ts.unwrap() };
+            return CommitResult::Committed {
+                commit_ts: transaction.commit_ts.unwrap(),
+            };
         }
 
         // Release all table locks on commit
@@ -204,7 +229,9 @@ impl TransactionManager {
     pub fn is_visible(&self, txn_id: u64, snapshot_ts: u64) -> bool {
         if let Ok(history) = self.commit_history.lock() {
             for &(id, commit_ts) in history.iter() {
-                if id == txn_id { return commit_ts <= snapshot_ts; }
+                if id == txn_id {
+                    return commit_ts <= snapshot_ts;
+                }
             }
         }
         false
@@ -228,7 +255,9 @@ impl TransactionManager {
 }
 
 impl Default for TransactionManager {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -282,7 +311,9 @@ mod tests {
 
     #[test]
     fn test_concurrent_writer_limit() {
-        let config = TransactionManagerConfig { max_concurrent_writers: 1 };
+        let config = TransactionManagerConfig {
+            max_concurrent_writers: 1,
+        };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
         assert!(tm.begin_write().is_err());
@@ -292,7 +323,9 @@ mod tests {
 
     #[test]
     fn test_write_write_conflict() {
-        let config = TransactionManagerConfig { max_concurrent_writers: 2 };
+        let config = TransactionManagerConfig {
+            max_concurrent_writers: 2,
+        };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
         tm.lock_table(tx1.transaction_id, 1).unwrap();
@@ -307,7 +340,9 @@ mod tests {
 
     #[test]
     fn test_no_conflict_different_tables() {
-        let config = TransactionManagerConfig { max_concurrent_writers: 2 };
+        let config = TransactionManagerConfig {
+            max_concurrent_writers: 2,
+        };
         let tm = TransactionManager::new_with_config(config);
         let mut tx1 = tm.begin_write().unwrap();
         tm.lock_table(tx1.transaction_id, 1).unwrap();

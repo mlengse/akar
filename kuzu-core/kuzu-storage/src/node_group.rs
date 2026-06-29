@@ -46,9 +46,7 @@ impl NodeGroup {
 
     /// Create a new node group with a custom chunk capacity per column.
     pub fn with_capacity(num_columns: usize, start_offset: u64, capacity: usize) -> Self {
-        let columns = (0..num_columns)
-            .map(|_| ColumnChunk::with_capacity(capacity))
-            .collect();
+        let columns = (0..num_columns).map(|_| ColumnChunk::with_capacity(capacity)).collect();
         Self {
             columns,
             start_offset,
@@ -257,15 +255,11 @@ mod tests {
     #[test]
     fn test_append_row() {
         let mut group = NodeGroup::new(2, 100);
-        group
-            .append_row(vec![Value::Int64(1), Value::Int64(2)])
-            .unwrap();
+        group.append_row(vec![Value::Int64(1), Value::Int64(2)]).unwrap();
         assert_eq!(group.num_nodes, 1);
         assert!(!group.is_empty());
 
-        group
-            .append_row(vec![Value::Int64(3), Value::Int64(4)])
-            .unwrap();
+        group.append_row(vec![Value::Int64(3), Value::Int64(4)]).unwrap();
         assert_eq!(group.num_nodes, 2);
     }
 
@@ -274,9 +268,7 @@ mod tests {
         let mut group = NodeGroup::new(2, 0);
         let result = group.append_row(vec![Value::Int64(1)]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("column count mismatch"));
+        assert!(result.unwrap_err().contains("column count mismatch"));
     }
 
     #[test]
@@ -295,18 +287,10 @@ mod tests {
     fn test_scan() {
         let mut group = NodeGroup::new(3, 0);
         group
-            .append_row(vec![
-                Value::Int64(10),
-                Value::Int64(20),
-                Value::Int64(30),
-            ])
+            .append_row(vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)])
             .unwrap();
         group
-            .append_row(vec![
-                Value::Int64(11),
-                Value::Int64(21),
-                Value::Int64(31),
-            ])
+            .append_row(vec![Value::Int64(11), Value::Int64(21), Value::Int64(31)])
             .unwrap();
 
         let data = group.scan();
@@ -320,9 +304,7 @@ mod tests {
     fn test_scan_range() {
         let mut group = NodeGroup::new(2, 0);
         for i in 0..10 {
-            group
-                .append_row(vec![Value::Int64(i), Value::Int64(i * 10)])
-                .unwrap();
+            group.append_row(vec![Value::Int64(i), Value::Int64(i * 10)]).unwrap();
         }
 
         let slice = group.scan_range(3, 4);
@@ -334,9 +316,7 @@ mod tests {
     #[test]
     fn test_get_value() {
         let mut group = NodeGroup::new(2, 50);
-        group
-            .append_row(vec![Value::Int64(100), Value::Int64(200)])
-            .unwrap();
+        group.append_row(vec![Value::Int64(100), Value::Int64(200)]).unwrap();
 
         assert_eq!(group.get_value(0, 0), Some(&Value::Int64(100)));
         assert_eq!(group.get_value(0, 1), Some(&Value::Int64(200)));
@@ -350,9 +330,7 @@ mod tests {
         let mut group = NodeGroup::new(2, 0);
 
         for i in 0i64..50 {
-            group
-                .append_row(vec![Value::Int64(i), Value::Int64(i * 10)])
-                .unwrap();
+            group.append_row(vec![Value::Int64(i), Value::Int64(i * 10)]).unwrap();
         }
 
         let flushed = group.flush(&mut cols).unwrap();
@@ -373,9 +351,7 @@ mod tests {
         let mut cols = setup_columns(2, dir.path());
         let mut group = NodeGroup::new(2, 0);
 
-        group
-            .append_row(vec![Value::Int64(1), Value::Int64(2)])
-            .unwrap();
+        group.append_row(vec![Value::Int64(1), Value::Int64(2)]).unwrap();
 
         let flushed = group.flush_copy(&mut cols).unwrap();
         assert_eq!(flushed, 1);
@@ -387,9 +363,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut group = NodeGroup::new(2, 0);
-        group
-            .append_row(vec![Value::Int64(1), Value::Int64(2)])
-            .unwrap();
+        group.append_row(vec![Value::Int64(1), Value::Int64(2)]).unwrap();
         group.clear();
         assert_eq!(group.num_nodes, 0);
         assert!(group.is_empty());
@@ -400,9 +374,13 @@ mod tests {
         // `remaining()` is based on NODE_GROUP_SIZE (4096), not chunk capacity.
         let mut group = NodeGroup::with_capacity(3, 0, 10);
         assert_eq!(group.remaining(), NODE_GROUP_SIZE);
-        group.append_row(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]).unwrap();
+        group
+            .append_row(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)])
+            .unwrap();
         assert_eq!(group.remaining(), NODE_GROUP_SIZE - 1);
-        group.append_row(vec![Value::Int64(4), Value::Int64(5), Value::Int64(6)]).unwrap();
+        group
+            .append_row(vec![Value::Int64(4), Value::Int64(5), Value::Int64(6)])
+            .unwrap();
         assert_eq!(group.remaining(), NODE_GROUP_SIZE - 2);
     }
 
@@ -439,17 +417,13 @@ mod tests {
 
         // Flush cycle 1
         for i in 0i64..15 {
-            group
-                .append_row(vec![Value::Int64(i), Value::Int64(-i)])
-                .unwrap();
+            group.append_row(vec![Value::Int64(i), Value::Int64(-i)]).unwrap();
         }
         assert_eq!(group.flush(&mut cols).unwrap(), 15);
 
         // Flush cycle 2
         for i in 15i64..30 {
-            group
-                .append_row(vec![Value::Int64(i), Value::Int64(-i)])
-                .unwrap();
+            group.append_row(vec![Value::Int64(i), Value::Int64(-i)]).unwrap();
         }
         assert_eq!(group.flush(&mut cols).unwrap(), 15);
 

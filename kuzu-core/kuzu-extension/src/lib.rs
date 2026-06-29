@@ -4,11 +4,11 @@
 //! for registering external functionality (custom types, functions, table functions)
 //! into the database engine.
 
-pub mod registry;
 pub mod context;
+pub mod registry;
 
-pub use registry::ExtensionRegistry;
 pub use context::ExtensionContext;
+pub use registry::ExtensionRegistry;
 
 /// The base trait for all Kuzu extensions.
 ///

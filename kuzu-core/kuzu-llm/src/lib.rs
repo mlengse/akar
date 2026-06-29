@@ -27,7 +27,9 @@ impl Extension for LlmExtension {
 
         context.register_scalar_function(
             "create_embedding",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
 
         tracing::info!("LLM extension loaded: create_embedding function registered");
@@ -105,7 +107,9 @@ pub fn create_embedding(text: &str, config: Option<&EmbeddingConfig>) -> Result<
 /// Uses the `/v1/embeddings` endpoint.
 /// Requires `OPENAI_API_KEY` environment variable or config.api_key.
 fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, String> {
-    let api_key = config.api_key.as_deref()
+    let api_key = config
+        .api_key
+        .as_deref()
         .or_else(|| {
             // Try environment variable as fallback
             let env_key = std::env::var("OPENAI_API_KEY").ok()?;
@@ -113,8 +117,7 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
             Some(Box::leak(env_key.into_boxed_str()) as &str)
         })
         .ok_or_else(|| {
-            "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config."
-                .to_string()
+            "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config.".to_string()
         })?;
 
     let url = config
@@ -126,8 +129,7 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         "input": text,
         "model": config.model,
     });
-    let body_str = serde_json::to_string(&request_body)
-        .map_err(|e| format!("Failed to serialize request: {e}"))?;
+    let body_str = serde_json::to_string(&request_body).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
     let response = ureq::post(url)
         .header("Authorization", &format!("Bearer {api_key}"))
@@ -136,15 +138,17 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .map_err(|e| format!("OpenAI API request failed: {e}"))?;
 
     let status = response.status();
-    let response_text = response.into_body().read_to_string()
+    let response_text = response
+        .into_body()
+        .read_to_string()
         .map_err(|e| format!("Failed to read response: {e}"))?;
 
     if status != 200 {
         return Err(format!("OpenAI API error (HTTP {status}): {response_text}"));
     }
 
-    let parsed: serde_json::Value = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse OpenAI response: {e}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse OpenAI response: {e}"))?;
 
     let vector: Vec<f64> = parsed["data"][0]["embedding"]
         .as_array()
@@ -168,17 +172,13 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
 ///
 /// Default endpoint: http://localhost:11434/api/embed
 fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, String> {
-    let url = config
-        .api_url
-        .as_deref()
-        .unwrap_or("http://localhost:11434/api/embed");
+    let url = config.api_url.as_deref().unwrap_or("http://localhost:11434/api/embed");
 
     let request_body = serde_json::json!({
         "model": config.model,
         "input": text,
     });
-    let body_str = serde_json::to_string(&request_body)
-        .map_err(|e| format!("Failed to serialize request: {e}"))?;
+    let body_str = serde_json::to_string(&request_body).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
     let response = ureq::post(url)
         .header("Content-Type", "application/json")
@@ -186,15 +186,17 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .map_err(|e| format!("Ollama API request failed: {e}"))?;
 
     let status = response.status();
-    let response_text = response.into_body().read_to_string()
+    let response_text = response
+        .into_body()
+        .read_to_string()
         .map_err(|e| format!("Failed to read response: {e}"))?;
 
     if status != 200 {
         return Err(format!("Ollama API error (HTTP {status}): {response_text}"));
     }
 
-    let parsed: serde_json::Value = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse Ollama response: {e}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_text).map_err(|e| format!("Failed to parse Ollama response: {e}"))?;
 
     // Ollama returns embeddings in `embeddings[0]` or `embedding`
     let vector: Vec<f64> = parsed["embeddings"][0]
@@ -265,10 +267,7 @@ mod tests {
         let result = create_embedding("hello", Some(&config));
         assert!(result.is_err(), "Should fail without API key");
         let err = result.unwrap_err();
-        assert!(
-            err.contains("API key"),
-            "Error should mention API key, got: {err}"
-        );
+        assert!(err.contains("API key"), "Error should mention API key, got: {err}");
     }
 
     #[test]

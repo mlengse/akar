@@ -125,11 +125,7 @@ impl Catalog {
     }
 
     /// Create a node table. Returns error if name already exists.
-    pub fn create_node_table(
-        &mut self,
-        name: String,
-        columns: Vec<CatalogColumn>,
-    ) -> CatalogResult {
+    pub fn create_node_table(&mut self, name: String, columns: Vec<CatalogColumn>) -> CatalogResult {
         if self.name_to_id.contains_key(&name) {
             return CatalogResult::AlreadyExists;
         }
@@ -201,7 +197,8 @@ impl Catalog {
 
     /// Add a column to a table in the catalog.
     pub fn add_column(&mut self, table_name: &str, column: CatalogColumn) -> Result<(), String> {
-        let entry = self.get_entry_by_name_mut(table_name)
+        let entry = self
+            .get_entry_by_name_mut(table_name)
             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
@@ -223,17 +220,24 @@ impl Catalog {
 
     /// Drop a column from a table in the catalog.
     pub fn drop_column(&mut self, table_name: &str, column_name: &str) -> Result<(), String> {
-        let entry = self.get_entry_by_name_mut(table_name)
+        let entry = self
+            .get_entry_by_name_mut(table_name)
             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
-                let pos = t.columns.iter().position(|c| c.name == column_name)
+                let pos = t
+                    .columns
+                    .iter()
+                    .position(|c| c.name == column_name)
                     .ok_or_else(|| format!("Column '{column_name}' not found"))?;
                 t.columns.remove(pos);
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
-                let pos = t.columns.iter().position(|c| c.name == column_name)
+                let pos = t
+                    .columns
+                    .iter()
+                    .position(|c| c.name == column_name)
                     .ok_or_else(|| format!("Column '{column_name}' not found"))?;
                 t.columns.remove(pos);
                 Ok(())
@@ -244,9 +248,11 @@ impl Catalog {
     /// Rename a column in a table in the catalog.
     pub fn rename_column(&mut self, table_name: &str, old_name: &str, new_name: &str) -> Result<(), String> {
         // Check for duplicates before the mutable borrow
-        let cols = self.get_entry_by_name(table_name)
+        let cols = self
+            .get_entry_by_name(table_name)
             .ok_or_else(|| format!("Table '{table_name}' not found"))?
-            .columns().to_vec();
+            .columns()
+            .to_vec();
         if !cols.iter().any(|c| c.name == old_name) {
             return Err(format!("Column '{old_name}' not found"));
         }
@@ -272,7 +278,10 @@ impl Catalog {
 
     /// Rename a table in the catalog.
     pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
-        let id = self.name_to_id.get(old_name).copied()
+        let id = self
+            .name_to_id
+            .get(old_name)
+            .copied()
             .ok_or_else(|| format!("Table '{old_name}' not found"))?;
         if self.name_to_id.contains_key(new_name) {
             return Err(format!("Table '{new_name}' already exists"));
@@ -362,8 +371,18 @@ mod tests {
 
     fn sample_node_columns() -> Vec<CatalogColumn> {
         vec![
-            CatalogColumn { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true, default_value: None },
-            CatalogColumn { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None },
+            CatalogColumn {
+                name: "name".into(),
+                logical_type: LogicalTypeID::String,
+                is_primary_key: true,
+                default_value: None,
+            },
+            CatalogColumn {
+                name: "age".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            },
         ]
     }
 
@@ -379,9 +398,17 @@ mod tests {
     fn test_create_rel_table() {
         let mut cat = Catalog::new();
         cat.create_node_table("Person".into(), sample_node_columns());
-        let result = cat.create_rel_table("Knows".into(), 0, 0, vec![
-            CatalogColumn { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None },
-        ]);
+        let result = cat.create_rel_table(
+            "Knows".into(),
+            0,
+            0,
+            vec![CatalogColumn {
+                name: "since".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            }],
+        );
         assert!(matches!(result, CatalogResult::Created { .. }));
         assert_eq!(cat.len(), 2);
     }
@@ -405,7 +432,10 @@ mod tests {
     fn test_duplicate_name() {
         let mut cat = Catalog::new();
         cat.create_node_table("Person".into(), sample_node_columns());
-        assert_eq!(cat.create_node_table("Person".into(), sample_node_columns()), CatalogResult::AlreadyExists);
+        assert_eq!(
+            cat.create_node_table("Person".into(), sample_node_columns()),
+            CatalogResult::AlreadyExists
+        );
     }
 
     #[test]
@@ -441,7 +471,10 @@ mod tests {
     fn test_rename() {
         let mut cat = Catalog::new();
         cat.create_node_table("Person".into(), sample_node_columns());
-        assert!(matches!(cat.rename("Person", "Employee".into()), CatalogResult::Created { .. }));
+        assert!(matches!(
+            cat.rename("Person", "Employee".into()),
+            CatalogResult::Created { .. }
+        ));
         assert!(cat.contains("Employee"));
         assert!(!cat.contains("Person"));
     }

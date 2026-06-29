@@ -3,10 +3,10 @@
 use kuzu_catalog::Catalog;
 use kuzu_common::memory::MemoryManager;
 use kuzu_common::task_system::TaskSystem;
-use kuzu_extension::{ExtensionRegistry, ExtensionContext};
+use kuzu_extension::{ExtensionContext, ExtensionRegistry};
 use kuzu_function::FunctionRegistry;
-use kuzu_storage::stats::StatsStore;
 use kuzu_storage::StorageManager;
+use kuzu_storage::stats::StatsStore;
 use kuzu_transaction::TransactionManager;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -82,10 +82,7 @@ impl Database {
         // Load all registered extensions
         {
             let mut ext_registry = db.extension_registry.lock().unwrap();
-            let context = ExtensionContext::new(
-                db.function_registry.clone(),
-                db.catalog.clone(),
-            );
+            let context = ExtensionContext::new(db.function_registry.clone(), db.catalog.clone());
             for result in ext_registry.load_all(&context) {
                 match result {
                     (name, Ok(())) => tracing::info!("Extension '{name}' loaded successfully"),

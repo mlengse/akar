@@ -137,10 +137,7 @@ fn collect_params_from_expr(expr: &Expression, params: &mut Vec<String>) {
 }
 
 /// Substitute parameter references with concrete values in an expression tree.
-pub fn substitute_params(
-    expr: &Expression,
-    param_values: &HashMap<String, Value>,
-) -> Result<Expression, String> {
+pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value>) -> Result<Expression, String> {
     match expr {
         Expression::Parameter(name) => {
             let value = param_values
@@ -153,10 +150,7 @@ pub fn substitute_params(
             Ok(Expression::PropertyAccess(Box::new(new_obj), prop.clone()))
         }
         Expression::FunctionCall(name, args) => {
-            let new_args: Result<Vec<_>, _> = args
-                .iter()
-                .map(|a| substitute_params(a, param_values))
-                .collect();
+            let new_args: Result<Vec<_>, _> = args.iter().map(|a| substitute_params(a, param_values)).collect();
             Ok(Expression::FunctionCall(name.clone(), new_args?))
         }
         Expression::BinaryOp(op, left, right) => {
@@ -169,14 +163,11 @@ pub fn substitute_params(
             Ok(Expression::UnaryOp(*op, Box::new(new_inner)))
         }
         Expression::List(items) => {
-            let new_items: Result<Vec<_>, _> = items
-                .iter()
-                .map(|i| substitute_params(i, param_values))
-                .collect();
+            let new_items: Result<Vec<_>, _> = items.iter().map(|i| substitute_params(i, param_values)).collect();
             Ok(Expression::List(new_items?))
         }
         Expression::Map(entries) => {
-                        let new_entries: Result<Vec<(String, Expression)>, String> = entries
+            let new_entries: Result<Vec<(String, Expression)>, String> = entries
                 .iter()
                 .map(|(k, v)| Ok((k.clone(), substitute_params(v, param_values)?)))
                 .collect();
@@ -270,14 +261,12 @@ mod tests {
 
         let substituted = substitute_params(&expr, &params).unwrap();
         match substituted {
-            Expression::BinaryOp(_, _, right) => {
-                match *right {
-                    Expression::Constant(Constant::String(s)) => {
-                        assert_eq!(s, "Alice");
-                    }
-                    _ => panic!("Expected constant string"),
+            Expression::BinaryOp(_, _, right) => match *right {
+                Expression::Constant(Constant::String(s)) => {
+                    assert_eq!(s, "Alice");
                 }
-            }
+                _ => panic!("Expected constant string"),
+            },
             _ => panic!("Expected binary op"),
         }
     }
@@ -296,7 +285,10 @@ mod tests {
     #[test]
     fn test_value_to_constant() {
         assert_eq!(value_to_constant(&Value::Int64(42)), Constant::Integer(42));
-        assert_eq!(value_to_constant(&Value::String("hi".into())), Constant::String("hi".into()));
+        assert_eq!(
+            value_to_constant(&Value::String("hi".into())),
+            Constant::String("hi".into())
+        );
         assert_eq!(value_to_constant(&Value::Bool(true)), Constant::Bool(true));
         assert_eq!(value_to_constant(&Value::Double(3.14)), Constant::Float(3.14));
         assert_eq!(value_to_constant(&Value::Null), Constant::Null);

@@ -28,10 +28,7 @@ impl TaskSystem {
                 .build()
                 .expect("Failed to build rayon thread pool"),
         );
-        Self {
-            pool,
-            num_threads: num,
-        }
+        Self { pool, num_threads: num }
     }
 
     pub fn num_threads(&self) -> usize {

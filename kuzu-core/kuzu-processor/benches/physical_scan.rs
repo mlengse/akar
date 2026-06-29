@@ -1,15 +1,12 @@
 //! PhysicalScan throughput benchmarks at various table sizes.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::{LogicalTypeID, Value};
 use kuzu_processor::physical_operator::{PhysicalOperatorExec, PhysicalScan};
 use kuzu_storage::table::ColumnDefinition;
 
 /// Generate a Vec<Vec<Value>> table with num_rows rows and the given schema.
-fn generate_table(
-    num_rows: usize,
-    columns: &[ColumnDefinition],
-) -> Vec<Vec<Value>> {
+fn generate_table(num_rows: usize, columns: &[ColumnDefinition]) -> Vec<Vec<Value>> {
     let num_cols = columns.len();
     let mut data: Vec<Vec<Value>> = (0..num_cols).map(|_| Vec::with_capacity(num_rows)).collect();
 
@@ -37,10 +34,26 @@ fn make_scan(table_data: Vec<Vec<Value>>, columns: Vec<ColumnDefinition>) -> Phy
 
 fn schema() -> Vec<ColumnDefinition> {
     vec![
-        ColumnDefinition { name: String::from("id"), logical_type: LogicalTypeID::Int64, is_primary_key: true },
-        ColumnDefinition { name: String::from("name"), logical_type: LogicalTypeID::String, is_primary_key: false },
-        ColumnDefinition { name: String::from("score"), logical_type: LogicalTypeID::Double, is_primary_key: false },
-        ColumnDefinition { name: String::from("active"), logical_type: LogicalTypeID::Bool, is_primary_key: false },
+        ColumnDefinition {
+            name: String::from("id"),
+            logical_type: LogicalTypeID::Int64,
+            is_primary_key: true,
+        },
+        ColumnDefinition {
+            name: String::from("name"),
+            logical_type: LogicalTypeID::String,
+            is_primary_key: false,
+        },
+        ColumnDefinition {
+            name: String::from("score"),
+            logical_type: LogicalTypeID::Double,
+            is_primary_key: false,
+        },
+        ColumnDefinition {
+            name: String::from("active"),
+            logical_type: LogicalTypeID::Bool,
+            is_primary_key: false,
+        },
     ]
 }
 

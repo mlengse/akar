@@ -18,10 +18,7 @@ pub enum JoinPlan {
         right: Box<JoinPlan>,
     },
     /// Cross product of two sub-plans.
-    CrossProduct {
-        left: Box<JoinPlan>,
-        right: Box<JoinPlan>,
-    },
+    CrossProduct { left: Box<JoinPlan>, right: Box<JoinPlan> },
 }
 
 /// Build a join tree from a list of scan operators and an optional filter expression.
@@ -30,10 +27,7 @@ pub enum JoinPlan {
 /// 1. Start with the first scan as the base
 /// 2. For each remaining scan, find any join conditions from the filter
 /// 3. If join conditions exist → HashJoin, otherwise → CrossProduct
-pub fn build_join_tree(
-    scans: Vec<LogicalOperator>,
-    filter_expr: Option<&BoundExpression>,
-) -> JoinPlan {
+pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundExpression>) -> JoinPlan {
     if scans.is_empty() {
         return JoinPlan::Leaf(LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "empty".into(),
@@ -62,10 +56,9 @@ pub fn build_join_tree(
         let alias = get_scan_alias(&scan);
 
         // Try to find a join condition matching this scan's alias
-        let matching_conditions: Vec<Expression> = join_conditions.iter()
-            .filter(|(left_alias, right_alias, _expr)| {
-                left_alias == &alias || right_alias == &alias
-            })
+        let matching_conditions: Vec<Expression> = join_conditions
+            .iter()
+            .filter(|(left_alias, right_alias, _expr)| left_alias == &alias || right_alias == &alias)
             .map(|(_, _, expr)| expr.clone())
             .collect();
 
@@ -111,10 +104,7 @@ fn extract_join_conditions(expr: &Expression) -> Vec<(Option<String>, Option<Str
 }
 
 /// Recursively collect equality conditions that reference different variables.
-fn collect_equality_conditions(
-    expr: &Expression,
-    conditions: &mut Vec<(Option<String>, Option<String>, Expression)>,
-) {
+fn collect_equality_conditions(expr: &Expression, conditions: &mut Vec<(Option<String>, Option<String>, Expression)>) {
     match expr {
         Expression::BinaryOp(BinaryOp::Equal, left, right) => {
             let left_var = extract_variable_alias(left);
@@ -233,10 +223,18 @@ mod tests {
     #[test]
     fn test_two_scans_cross_product() {
         let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Person".into(), table_id: 0, alias: Some("a".into()), columns: Vec::new(), cardinality: 0,
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: Vec::new(),
+            cardinality: 0,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "City".into(), table_id: 1, alias: Some("c".into()), columns: Vec::new(), cardinality: 0,
+            table_name: "City".into(),
+            table_id: 1,
+            alias: Some("c".into()),
+            columns: Vec::new(),
+            cardinality: 0,
         });
         let plan = build_join_tree(vec![scan1, scan2], None);
         match plan {
@@ -290,16 +288,19 @@ mod tests {
             Box::new(Expression::BinaryOp(
                 BinaryOp::Equal,
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())), "id".into(),
+                    Box::new(Expression::Variable("a".into())),
+                    "id".into(),
                 )),
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("b".into())), "id".into(),
+                    Box::new(Expression::Variable("b".into())),
+                    "id".into(),
                 )),
             )),
             Box::new(Expression::BinaryOp(
                 BinaryOp::GreaterThan,
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())), "age".into(),
+                    Box::new(Expression::Variable("a".into())),
+                    "age".into(),
                 )),
                 Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(25))),
             )),
@@ -311,10 +312,7 @@ mod tests {
 
     #[test]
     fn test_extract_variable_alias() {
-        let expr = Expression::PropertyAccess(
-            Box::new(Expression::Variable("p".into())),
-            "name".into(),
-        );
+        let expr = Expression::PropertyAccess(Box::new(Expression::Variable("p".into())), "name".into());
         assert_eq!(extract_variable_alias(&expr), Some("p".into()));
 
         let expr = Expression::Variable("x".into());
@@ -324,7 +322,11 @@ mod tests {
     #[test]
     fn test_flatten_join_plan() {
         let scan = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "T".into(), table_id: 0, alias: None, columns: Vec::new(), cardinality: 0,
+            table_name: "T".into(),
+            table_id: 0,
+            alias: None,
+            columns: Vec::new(),
+            cardinality: 0,
         });
         let plan = JoinPlan::Leaf(scan.clone());
         let flat = flatten_join_plan(&plan);
@@ -334,10 +336,18 @@ mod tests {
     #[test]
     fn test_flatten_cross_product() {
         let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "A".into(), table_id: 0, alias: None, columns: Vec::new(), cardinality: 0,
+            table_name: "A".into(),
+            table_id: 0,
+            alias: None,
+            columns: Vec::new(),
+            cardinality: 0,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "B".into(), table_id: 1, alias: None, columns: Vec::new(), cardinality: 0,
+            table_name: "B".into(),
+            table_id: 1,
+            alias: None,
+            columns: Vec::new(),
+            cardinality: 0,
         });
         let plan = JoinPlan::CrossProduct {
             left: Box::new(JoinPlan::Leaf(scan1)),

@@ -1,6 +1,6 @@
 //! PhysicalHashJoin throughput benchmarks at various build/probe sizes.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_processor::physical_operator::{PhysicalHashJoin, PhysicalOperatorExec};
@@ -31,7 +31,10 @@ fn make_two_col_chunk(ids: &[i64], payload_base: i64) -> DataChunk {
 }
 
 fn bench_join_small(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     let probe = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     c.bench_function("join/100_build_100_probe", |b| {
@@ -43,7 +46,10 @@ fn bench_join_small(c: &mut Criterion) {
 }
 
 fn bench_join_medium(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     let probe = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_build_1k_probe", |b| {
@@ -55,7 +61,10 @@ fn bench_join_medium(c: &mut Criterion) {
 }
 
 fn bench_join_large_build(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     let probe = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     c.bench_function("join/10k_build_100_probe", |b| {
@@ -67,7 +76,10 @@ fn bench_join_large_build(c: &mut Criterion) {
 }
 
 fn bench_join_large_probe(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     let probe = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("join/100_build_10k_probe", |b| {
@@ -79,7 +91,10 @@ fn bench_join_large_probe(c: &mut Criterion) {
 }
 
 fn bench_join_multi_column(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_two_col_chunk(&(0..1_000).collect::<Vec<i64>>(), 1000);
     let probe = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_multi_col_build_1k_probe", |b| {
@@ -91,7 +106,10 @@ fn bench_join_multi_column(c: &mut Criterion) {
 }
 
 fn bench_join_no_match(c: &mut Criterion) {
-    let join = PhysicalHashJoin { build_columns: vec![0], probe_columns: vec![0] };
+    let join = PhysicalHashJoin {
+        build_columns: vec![0],
+        probe_columns: vec![0],
+    };
     let build = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     let probe = make_i64_chunk(&(100_000..101_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_no_match", |b| {

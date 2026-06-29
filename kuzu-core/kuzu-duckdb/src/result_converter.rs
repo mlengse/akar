@@ -11,9 +11,7 @@ use kuzu_common::vector::{DataChunk, ValueVector};
 
 /// Convert DuckDB query results (Vec<Vec<duckdb::Value>>) to Vec of Kuzu `DataChunk`s.
 #[cfg(feature = "bundled")]
-pub fn duckdb_results_to_kuzu(
-    results: Vec<Vec<duckdb::types::Value>>,
-) -> Result<Vec<DataChunk>, String> {
+pub fn duckdb_results_to_kuzu(results: Vec<Vec<duckdb::types::Value>>) -> Result<Vec<DataChunk>, String> {
     if results.is_empty() {
         return Ok(vec![DataChunk::new(Vec::new())]);
     }

@@ -4,8 +4,8 @@
 //! database initialization.
 
 use crate::Extension;
-use std::collections::HashMap;
 use crate::context::ExtensionContext;
+use std::collections::HashMap;
 
 /// The extension registry manages all loaded extensions.
 #[derive(Default)]

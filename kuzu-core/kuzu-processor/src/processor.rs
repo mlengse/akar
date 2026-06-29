@@ -12,7 +12,7 @@ use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
-use kuzu_storage::table::{TableCatalog, ColumnDefinition};
+use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::sync::{Arc, Mutex};
 
 /// The query processor executes a physical plan and produces result chunks.
@@ -38,10 +38,7 @@ impl QueryProcessor {
     }
 
     /// Create a processor with function registry and table catalog access.
-    pub fn with_catalog(
-        registry: Arc<Mutex<FunctionRegistry>>,
-        table_catalog: Arc<Mutex<TableCatalog>>,
-    ) -> Self {
+    pub fn with_catalog(registry: Arc<Mutex<FunctionRegistry>>, table_catalog: Arc<Mutex<TableCatalog>>) -> Self {
         Self {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
@@ -49,10 +46,7 @@ impl QueryProcessor {
     }
 
     /// Resolve table data and column definitions for a scan node.
-    fn resolve_scan_data(
-        &self,
-        table_name: &str,
-    ) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
+    fn resolve_scan_data(&self, table_name: &str) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
         if let Some(ref tc) = self.table_catalog {
             let catalog = tc.lock().unwrap();
             // Try node table first
@@ -82,10 +76,7 @@ impl QueryProcessor {
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
-    pub fn execute(
-        &self,
-        operators: &[LogicalOperator],
-    ) -> Result<Vec<DataChunk>, String> {
+    pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, String> {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
@@ -103,11 +94,7 @@ impl QueryProcessor {
             match op {
                 LogicalOperator::ScanNode(s) => {
                     let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
-                    let mut scan = PhysicalScan::new(
-                        s.table_name.clone(),
-                        s.table_id,
-                        num_rows.max(1),
-                    );
+                    let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
                     if let Some(d) = data {
                         scan = scan.with_data(d, columns);
                     }
@@ -116,11 +103,7 @@ impl QueryProcessor {
                 }
                 LogicalOperator::ScanRel(s) => {
                     let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
-                    let mut scan = PhysicalScan::new(
-                        s.table_name.clone(),
-                        s.table_id,
-                        num_rows.max(1),
-                    );
+                    let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
                     if let Some(d) = data {
                         scan = scan.with_data(d, columns);
                     }
@@ -128,7 +111,9 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Filter(f) => {
-                    let evaluator = self.function_registry.clone()
+                    let evaluator = self
+                        .function_registry
+                        .clone()
                         .map(|reg| Arc::new(Mutex::new(ExpressionEvaluator::new(reg))));
                     let filter = if let Some(eval) = evaluator {
                         PhysicalFilter::with_evaluator(f.expression.clone(), eval)
@@ -158,12 +143,13 @@ impl QueryProcessor {
                 }
                 LogicalOperator::OrderBy(o) => {
                     // Build sort_keys: each key is (column_index, ascending)
-                    let sort_keys: Vec<(u32, bool)> = o.sort_keys.iter().enumerate().map(|(i, _s)| {
-                        (i as u32, o.sort_keys.get(i).map(|s| s.1).unwrap_or(true))
-                    }).collect();
-                    let order = PhysicalOrderBy {
-                        sort_keys,
-                    };
+                    let sort_keys: Vec<(u32, bool)> = o
+                        .sort_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _s)| (i as u32, o.sort_keys.get(i).map(|s| s.1).unwrap_or(true)))
+                        .collect();
+                    let order = PhysicalOrderBy { sort_keys };
                     let input = intermediate_result.take().unwrap_or_default();
                     let result = order.execute(input)?;
                     intermediate_result = Some(result);
@@ -223,7 +209,9 @@ impl QueryProcessor {
                     }
                 }
                 LogicalOperator::Set(sl) => {
-                    let table_catalog = self.table_catalog.clone()
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
                         .ok_or_else(|| "No table catalog available for SET".to_string())?;
 
                     let set_op = PhysicalSet {
@@ -239,7 +227,9 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Delete(dl) => {
-                    let table_catalog = self.table_catalog.clone()
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
                         .ok_or_else(|| "No table catalog available for DELETE".to_string())?;
 
                     let delete_op = PhysicalDelete {
@@ -253,12 +243,13 @@ impl QueryProcessor {
                     let result = delete_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::CrossProduct(_)
-                | LogicalOperator::Union(_) => {
+                LogicalOperator::CrossProduct(_) | LogicalOperator::Union(_) => {
                     intermediate_result = Some(vec![]);
                 }
                 LogicalOperator::CopyFrom(cf) => {
-                    let table_catalog = self.table_catalog.clone()
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
                         .ok_or_else(|| "No table catalog available for COPY FROM".to_string())?;
 
                     // Get column definitions from the table catalog
@@ -319,9 +310,10 @@ impl QueryProcessor {
                     | TableFunction::ListTables
                     | TableFunction::ShowColumns { .. }
                     | TableFunction::CurrentSetting { .. }
-                    | TableFunction::Custom { .. } => {
-                        Err(format!("Table function '{}' cannot be executed dynamically (no callback)", func_name))
-                    }
+                    | TableFunction::Custom { .. } => Err(format!(
+                        "Table function '{}' cannot be executed dynamically (no callback)",
+                        func_name
+                    )),
                 }
             } else {
                 Err(format!("Table function '{}' not found", func_name))
@@ -408,22 +400,29 @@ mod tests {
         let catalog = Arc::new(Mutex::new(TableCatalog::new()));
         {
             let mut cat = catalog.lock().unwrap();
-            cat.create_node_table("Person".into(), vec![
-                ColumnDefinition {
-                    name: "name".into(),
-                    logical_type: LogicalTypeID::String,
-                    is_primary_key: true,
-                },
-                ColumnDefinition {
-                    name: "age".into(),
-                    logical_type: LogicalTypeID::Int64,
-                    is_primary_key: false,
-                },
-            ]);
+            cat.create_node_table(
+                "Person".into(),
+                vec![
+                    ColumnDefinition {
+                        name: "name".into(),
+                        logical_type: LogicalTypeID::String,
+                        is_primary_key: true,
+                    },
+                    ColumnDefinition {
+                        name: "age".into(),
+                        logical_type: LogicalTypeID::Int64,
+                        is_primary_key: false,
+                    },
+                ],
+            );
             // Insert some data
             let table = cat.get_node_table_by_name_mut("Person").unwrap();
-            table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
-            table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+            table
+                .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+                .unwrap();
+            table
+                .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+                .unwrap();
         }
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         QueryProcessor::with_catalog(registry, catalog)
@@ -536,10 +535,14 @@ mod tests {
 
     #[test]
     fn test_order_by_ascending() {
-        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+        let order = PhysicalOrderBy {
+            sort_keys: vec![(0, true)],
+        };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         let vals = [5, 3, 1, 4, 2];
-        for i in 0..5 { v.set_i64(i, vals[i]); }
+        for i in 0..5 {
+            v.set_i64(i, vals[i]);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = order.execute(input).unwrap();
@@ -550,10 +553,14 @@ mod tests {
 
     #[test]
     fn test_order_by_descending() {
-        let order = PhysicalOrderBy { sort_keys: vec![(0, false)] };
+        let order = PhysicalOrderBy {
+            sort_keys: vec![(0, false)],
+        };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         let vals = [5, 3, 1, 4, 2];
-        for i in 0..5 { v.set_i64(i, vals[i]); }
+        for i in 0..5 {
+            v.set_i64(i, vals[i]);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = order.execute(input).unwrap();
@@ -564,7 +571,9 @@ mod tests {
 
     #[test]
     fn test_order_by_empty_input() {
-        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+        let order = PhysicalOrderBy {
+            sort_keys: vec![(0, true)],
+        };
         let result = order.execute(vec![]).unwrap();
         assert!(result.is_empty());
     }
@@ -578,7 +587,9 @@ mod tests {
             aggregate_functions: vec!["COUNT".into()],
         };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
-        for i in 0..5 { v.set_i64(i, i as i64); }
+        for i in 0..5 {
+            v.set_i64(i, i as i64);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
@@ -592,7 +603,9 @@ mod tests {
             aggregate_functions: vec!["SUM".into()],
         };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 4);
-        for i in 0..4 { v.set_i64(i, (i + 1) as i64); }
+        for i in 0..4 {
+            v.set_i64(i, (i + 1) as i64);
+        }
         v.resize(4);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
@@ -607,11 +620,13 @@ mod tests {
         };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         let vals = [42, 7, 99, 15, 3];
-        for i in 0..5 { v.set_i64(i, vals[i]); }
+        for i in 0..5 {
+            v.set_i64(i, vals[i]);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3));  // MIN = 3
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3)); // MIN = 3
         assert_eq!(result[0].fields[1].get_value(0).unwrap(), Value::Int64(99)); // MAX = 99
     }
 
@@ -622,7 +637,9 @@ mod tests {
             aggregate_functions: vec!["AVG".into()],
         };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 4);
-        for i in 0..4 { v.set_i64(i, (i + 1) as i64); }
+        for i in 0..4 {
+            v.set_i64(i, (i + 1) as i64);
+        }
         v.resize(4);
         let input = vec![DataChunk::new(vec![v])];
         let result = agg.execute(input).unwrap();
@@ -650,16 +667,17 @@ mod tests {
         };
         // Build side: keys [1, 2, 3]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
-        for i in 0..3 { build.set_i64(i, (i + 1) as i64); }
+        for i in 0..3 {
+            build.set_i64(i, (i + 1) as i64);
+        }
         build.resize(3);
         // Probe side: keys [2, 3, 4]
         let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
-        probe.set_i64(0, 2); probe.set_i64(1, 3); probe.set_i64(2, 4);
+        probe.set_i64(0, 2);
+        probe.set_i64(1, 3);
+        probe.set_i64(2, 4);
         probe.resize(3);
-        let input = vec![
-            DataChunk::new(vec![build]),
-            DataChunk::new(vec![probe]),
-        ];
+        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
         let result = join.execute(input).unwrap();
         // Should match 2 and 3 (2 rows)
         assert!(!result.is_empty());
@@ -673,16 +691,15 @@ mod tests {
         };
         // Build: [1, 2]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 2);
-        build.set_i64(0, 1); build.set_i64(1, 2);
+        build.set_i64(0, 1);
+        build.set_i64(1, 2);
         build.resize(2);
         // Probe: [3, 4]
         let mut probe = ValueVector::new(PhysicalTypeID::Int64, 2);
-        probe.set_i64(0, 3); probe.set_i64(1, 4);
+        probe.set_i64(0, 3);
+        probe.set_i64(1, 4);
         probe.resize(2);
-        let input = vec![
-            DataChunk::new(vec![build]),
-            DataChunk::new(vec![probe]),
-        ];
+        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
         let result = join.execute(input).unwrap();
         assert!(result.is_empty()); // No matches
     }
@@ -695,12 +712,11 @@ mod tests {
         };
         let build = ValueVector::new(PhysicalTypeID::Int64, 0);
         let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
-        probe.set_i64(0, 1); probe.set_i64(1, 2); probe.set_i64(2, 3);
+        probe.set_i64(0, 1);
+        probe.set_i64(1, 2);
+        probe.set_i64(2, 3);
         probe.resize(3);
-        let input = vec![
-            DataChunk::new(vec![build]),
-            DataChunk::new(vec![probe]),
-        ];
+        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
         let result = join.execute(input).unwrap();
         assert!(result.is_empty()); // Empty build → no matches
     }
@@ -726,10 +742,7 @@ mod tests {
         probe.set_i64(1, 3);
         // Row 2 stays NULL
         probe.resize(3);
-        let input = vec![
-            DataChunk::new(vec![build]),
-            DataChunk::new(vec![probe]),
-        ];
+        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
         let result = join.execute(input).unwrap();
         // Should match 1→1 (1 row) and 3→3 (1 row)
         // NULLs should NOT match each other
@@ -755,10 +768,7 @@ mod tests {
         probe.set_null(1, true);
         probe.set_null(2, true);
 
-        let input = vec![
-            DataChunk::new(vec![build]),
-            DataChunk::new(vec![probe]),
-        ];
+        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
         let result = join.execute(input).unwrap();
         // NULL = NULL is unknown in SQL, so no matches
         assert!(result.is_empty());
@@ -767,7 +777,9 @@ mod tests {
     #[test]
     fn test_order_by_with_nulls() {
         // NULLs should sort last (ASC)
-        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+        let order = PhysicalOrderBy {
+            sort_keys: vec![(0, true)],
+        };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         v.set_i64(0, 3);
         v.set_null(1, true); // NULL
@@ -792,7 +804,9 @@ mod tests {
         // LIMIT 0 should return empty result
         let limit = PhysicalLimit { limit: 0, offset: 0 };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
-        for i in 0..5 { v.set_i64(i, i as i64); }
+        for i in 0..5 {
+            v.set_i64(i, i as i64);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = limit.execute(input).unwrap();
@@ -804,7 +818,9 @@ mod tests {
         // OFFSET larger than total rows → empty result
         let limit = PhysicalLimit { limit: 5, offset: 100 };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
-        for i in 0..5 { v.set_i64(i, i as i64); }
+        for i in 0..5 {
+            v.set_i64(i, i as i64);
+        }
         v.resize(5);
         let input = vec![DataChunk::new(vec![v])];
         let result = limit.execute(input).unwrap();
@@ -868,7 +884,9 @@ mod tests {
         keys.set_i64(5, 2);
         keys.resize(n);
         let mut vals = ValueVector::new(PhysicalTypeID::Int64, n);
-        for i in 0..n { vals.set_i64(i, i as i64); }
+        for i in 0..n {
+            vals.set_i64(i, i as i64);
+        }
         vals.resize(n);
         let input = vec![DataChunk::new(vec![keys, vals])];
         let result = agg.execute(input).unwrap();

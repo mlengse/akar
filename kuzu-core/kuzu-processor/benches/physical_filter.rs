@@ -1,6 +1,6 @@
 //! PhysicalFilter throughput benchmarks at various selectivities.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_parser::ast::{Constant, Expression};

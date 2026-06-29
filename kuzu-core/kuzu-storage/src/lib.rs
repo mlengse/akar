@@ -2,21 +2,21 @@
 //!
 //! Disk-based columnar storage with buffer management, WAL, compression, and indexing.
 
-pub mod page;
 pub mod buffer_manager;
+pub mod checkpoint;
 pub mod column;
 pub mod column_chunk;
-pub mod node_group;
-pub mod wal;
 pub mod compression;
-pub mod shadow_file;
-pub mod local_storage;
-pub mod table;
 pub mod csv_reader;
-pub mod parquet_reader;
 pub mod index;
+pub mod local_storage;
+pub mod node_group;
+pub mod page;
+pub mod parquet_reader;
+pub mod shadow_file;
 pub mod stats;
-pub mod checkpoint;
+pub mod table;
+pub mod wal;
 
 use buffer_manager::{BufferManager, BufferManagerConfig};
 use checkpoint::checkpoint;
@@ -25,9 +25,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
 
-pub use table::{TableCatalog, NodeTable, RelTable, ColumnDefinition};
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use node_group::NodeGroup;
+pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 
 /// The storage manager — root of the storage engine.
 #[allow(dead_code)]
@@ -84,11 +84,7 @@ impl StorageManager {
     }
 
     /// Create a node table in the catalog and return its ID.
-    pub fn create_node_table(
-        &self,
-        name: String,
-        columns: Vec<ColumnDefinition>,
-    ) -> NodeTable {
+    pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
         let mut catalog = self.table_catalog.lock().unwrap();
         catalog.create_node_table(name, columns)
     }
@@ -163,30 +159,18 @@ mod integration_tests {
 
         // 2. Insert rows into the table
         table
-            .insert_row(vec![
-                Value::String("Alice".into()),
-                Value::Int64(30),
-            ])
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
             .unwrap();
         table
-            .insert_row(vec![
-                Value::String("Bob".into()),
-                Value::Int64(25),
-            ])
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
             .unwrap();
         table
-            .insert_row(vec![
-                Value::String("Charlie".into()),
-                Value::Int64(35),
-            ])
+            .insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)])
             .unwrap();
         assert_eq!(table.num_rows, 3);
 
         // 3. Verify data before checkpoint
-        assert_eq!(
-            table.get_value(0, 0),
-            Some(&Value::String("Alice".into()))
-        );
+        assert_eq!(table.get_value(0, 0), Some(&Value::String("Alice".into())));
         assert_eq!(table.get_value(1, 1), Some(&Value::Int64(25)));
 
         // 4. Read back via scan_column across node groups
@@ -212,11 +196,7 @@ mod integration_tests {
         let (wal_records_count, column_count) = {
             let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
             let config = BufferManagerConfig::default();
-            let bm = Arc::new(Mutex::new(BufferManager::new(
-                dir.path().to_path_buf(),
-                mm,
-                config,
-            )));
+            let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
             let mut wal = WAL::new(wal_path.clone());
 
             let mut col = Column::new(
@@ -257,11 +237,7 @@ mod integration_tests {
         // Phase 2: Verify the on-disk WAL file exists and has content
         assert!(wal_path.exists(), "WAL file should exist after flush");
         let file_len = std::fs::metadata(&wal_path).unwrap().len();
-        assert!(
-            file_len > 0,
-            "WAL file should have content, got {} bytes",
-            file_len
-        );
+        assert!(file_len > 0, "WAL file should have content, got {} bytes", file_len);
 
         // Verify that a fresh WAL created from the file would contain
         // the right number of records. Since WAL::new() starts in-memory,
@@ -284,11 +260,7 @@ mod integration_tests {
         let dir = tempfile::tempdir().unwrap();
         let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
         let config = BufferManagerConfig::default();
-        let bm = Arc::new(Mutex::new(BufferManager::new(
-            dir.path().to_path_buf(),
-            mm,
-            config,
-        )));
+        let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
 
         let mut col_int = Column::with_compression(
             LogicalTypeID::Int64,
@@ -350,7 +322,12 @@ mod integration_tests {
         // Read again after flush
         for (i, expected) in test_values.iter().enumerate() {
             let v = col_int.get_value(i as u64).unwrap();
-            assert_eq!(v, Value::Int64(*expected), "After flush: IntegerBitpacking mismatch at {}", i);
+            assert_eq!(
+                v,
+                Value::Int64(*expected),
+                "After flush: IntegerBitpacking mismatch at {}",
+                i
+            );
         }
         for (i, expected) in floats.iter().enumerate() {
             let v = col_float.get_value(i as u64).unwrap();
@@ -394,10 +371,7 @@ mod integration_tests {
         let total_rows = NODE_GROUP_SIZE + 500;
         for i in 0..total_rows {
             table
-                .insert_row(vec![
-                    Value::Int64(i as i64),
-                    Value::Int64((i * 2) as i64),
-                ])
+                .insert_row(vec![Value::Int64(i as i64), Value::Int64((i * 2) as i64)])
                 .unwrap();
         }
 
@@ -445,14 +419,8 @@ mod integration_tests {
         // Scan column 1 with offset and count spanning both groups
         let scan_mid = table.scan_column(1, (NODE_GROUP_SIZE - 100) as u64, 200);
         assert_eq!(scan_mid.len(), 200);
-        assert_eq!(
-            scan_mid[0],
-            Value::Int64(((NODE_GROUP_SIZE - 100) * 2) as i64)
-        );
-        assert_eq!(
-            scan_mid[199],
-            Value::Int64(((NODE_GROUP_SIZE + 99) * 2) as i64)
-        );
+        assert_eq!(scan_mid[0], Value::Int64(((NODE_GROUP_SIZE - 100) * 2) as i64));
+        assert_eq!(scan_mid[199], Value::Int64(((NODE_GROUP_SIZE + 99) * 2) as i64));
 
         // Verify to_column_major_data correctness
         let data = table.to_column_major_data();
@@ -474,11 +442,7 @@ mod integration_tests {
 
         // Use explicit BM + WAL for full control
         let config = BufferManagerConfig::default();
-        let bm = Arc::new(Mutex::new(BufferManager::new(
-            dir.path().to_path_buf(),
-            mm,
-            config,
-        )));
+        let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
         let wal_path = dir.path().join("wal.log");
         let mut wal = WAL::new(wal_path);
 
@@ -536,11 +500,7 @@ mod integration_tests {
         let dir = tempfile::tempdir().unwrap();
         let mm = Arc::new(MemoryManager::new(256 * 1024 * 1024));
         let config = BufferManagerConfig::default();
-        let bm = Arc::new(Mutex::new(BufferManager::new(
-            dir.path().to_path_buf(),
-            mm,
-            config,
-        )));
+        let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
 
         let mut col = Column::new(
             LogicalTypeID::Int64,

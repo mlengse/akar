@@ -47,9 +47,7 @@ pub fn duckdb_value_to_kuzu(duck_val: &duckdb::types::Value) -> Value {
         DuckValue::Float(n) => Value::Float(*n),
         DuckValue::Double(n) => Value::Double(*n),
         DuckValue::Text(s) => Value::String(s.clone()),
-        DuckValue::Date32(_) => {
-            Value::String(format!("{:?}", duck_val))
-        }
+        DuckValue::Date32(_) => Value::String(format!("{:?}", duck_val)),
         _ => Value::String(format!("{:?}", duck_val)),
     }
 }

@@ -3,7 +3,7 @@
 //! Measures end-to-end throughput: parse → bind → plan → optimize → execute
 //! for representative Cypher queries.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_main::connection::Connection;
 use kuzu_main::database::{Database, SystemConfig};
 use std::sync::Arc;
@@ -78,7 +78,7 @@ fn bench_query_create_node_table(c: &mut Criterion) {
     c.bench_function("query/create_node_table", |b| {
         b.iter(|| {
             let result = conn.query(black_box(
-                "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))"
+                "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))",
             ));
             black_box(result.unwrap());
         })
@@ -87,7 +87,8 @@ fn bench_query_create_node_table(c: &mut Criterion) {
 
 fn bench_query_copy_csv(c: &mut Criterion) {
     let (dir, _db, conn) = setup_db();
-    conn.query("CREATE NODE TABLE T(name STRING, val INT64, PRIMARY KEY (name))").unwrap();
+    conn.query("CREATE NODE TABLE T(name STRING, val INT64, PRIMARY KEY (name))")
+        .unwrap();
     let csv_path = dir.path().join("copy_bench.csv");
     std::fs::write(&csv_path, "name,val\nx,1\ny,2\nz,3\n").unwrap();
     let fp = csv_path.to_string_lossy().replace('\\', "/");

@@ -129,8 +129,7 @@ impl DuckDbManager {
     /// Open an in-memory DuckDB database.
     #[cfg(feature = "bundled")]
     pub fn in_memory() -> Result<Self, String> {
-        let connection = DuckDbConn::open_in_memory()
-            .map_err(|e| format!("Failed to open in-memory DuckDB: {e}"))?;
+        let connection = DuckDbConn::open_in_memory().map_err(|e| format!("Failed to open in-memory DuckDB: {e}"))?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -140,8 +139,7 @@ impl DuckDbManager {
     #[cfg(feature = "bundled")]
     pub fn execute(&self, sql: &str) -> Result<usize, String> {
         let conn = self.connection.lock().unwrap();
-        conn.execute(sql, [])
-            .map_err(|e| format!("DuckDB execute error: {e}"))
+        conn.execute(sql, []).map_err(|e| format!("DuckDB execute error: {e}"))
     }
 
     /// Execute a SQL statement (batch, no return).
@@ -179,7 +177,8 @@ impl DuckDbManager {
         while let Some(row) = rows.next().map_err(|e| format!("DuckDB row error: {e}"))? {
             let mut values = Vec::with_capacity(col_count);
             for i in 0..col_count {
-                let val: duckdb::types::Value = row.get::<_, duckdb::types::Value>(i)
+                let val: duckdb::types::Value = row
+                    .get::<_, duckdb::types::Value>(i)
                     .unwrap_or(duckdb::types::Value::Null);
                 values.push(val);
             }
@@ -256,7 +255,9 @@ mod tests {
     fn test_execute() {
         let manager = DuckDbManager::in_memory().unwrap();
         manager.execute("CREATE TABLE test (id INTEGER, name VARCHAR)").unwrap();
-        let affected = manager.execute("INSERT INTO test VALUES (1, 'hello'), (2, 'world')").unwrap();
+        let affected = manager
+            .execute("INSERT INTO test VALUES (1, 'hello'), (2, 'world')")
+            .unwrap();
         assert_eq!(affected, 2);
     }
 }

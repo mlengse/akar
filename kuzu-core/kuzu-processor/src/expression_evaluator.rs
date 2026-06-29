@@ -77,9 +77,14 @@ impl ExpressionEvaluator {
     fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
         // Try to find the field by position (the binder resolves names to positions)
         if let Ok(idx) = name.parse::<usize>() {
-            return chunk.fields.get(idx)
-                .cloned()
-                .ok_or_else(|| format!("Variable '{}' (index {}) not found in chunk with {} fields", name, idx, chunk.fields.len()));
+            return chunk.fields.get(idx).cloned().ok_or_else(|| {
+                format!(
+                    "Variable '{}' (index {}) not found in chunk with {} fields",
+                    name,
+                    idx,
+                    chunk.fields.len()
+                )
+            });
         }
 
         // For unresolved variable names (e.g., from MATCH patterns), fall back to
@@ -104,15 +109,26 @@ impl ExpressionEvaluator {
 
     /// Evaluate a property access expression.
     /// For now, evaluate the object expression and return it (simplified).
-    fn evaluate_property_access(&self, obj: &Expression, _prop: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_property_access(
+        &self,
+        obj: &Expression,
+        _prop: &str,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
         // Simplified: evaluate the object expression
         self.evaluate(obj, chunk)
     }
 
     /// Evaluate a function call expression.
-    fn evaluate_function_call(&self, name: &str, args: &[Expression], chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_function_call(
+        &self,
+        name: &str,
+        args: &[Expression],
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
         // Evaluate all argument expressions first
-        let arg_vectors: Vec<ValueVector> = args.iter()
+        let arg_vectors: Vec<ValueVector> = args
+            .iter()
             .map(|arg| self.evaluate(arg, chunk))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -138,7 +154,8 @@ impl ExpressionEvaluator {
         let result_type = {
             let mut result = None;
             for row in 0..num_rows {
-                let arg_values: Vec<Value> = arg_vectors.iter()
+                let arg_values: Vec<Value> = arg_vectors
+                    .iter()
                     .map(|vec| {
                         if row < vec.size() && !vec.is_null(row) {
                             vec.get_value(row).unwrap_or(Value::Null)
@@ -162,7 +179,8 @@ impl ExpressionEvaluator {
         result_vec.resize(num_rows);
 
         for row in 0..num_rows {
-            let arg_values: Vec<Value> = arg_vectors.iter()
+            let arg_values: Vec<Value> = arg_vectors
+                .iter()
                 .map(|vec| {
                     if row < vec.size() && !vec.is_null(row) {
                         vec.get_value(row).unwrap_or(Value::Null)
@@ -196,7 +214,13 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a binary operation.
-    fn evaluate_binary_op(&self, op: &BinaryOp, left: &Expression, right: &Expression, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_binary_op(
+        &self,
+        op: &BinaryOp,
+        left: &Expression,
+        right: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
         // Map AST BinaryOp to a scalar function name
         let func_name = match op {
             BinaryOp::Add => "+",

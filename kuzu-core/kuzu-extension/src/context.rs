@@ -3,7 +3,7 @@
 //! Provides access to register functions, types, and other database components.
 
 use kuzu_catalog::Catalog;
-use kuzu_function::registry::{FunctionRegistry, ScalarFunction, AggregateFunction, TableFunction};
+use kuzu_function::registry::{AggregateFunction, FunctionRegistry, ScalarFunction, TableFunction};
 use std::sync::{Arc, Mutex};
 
 /// Context passed to `Extension::load()` with hooks into the database engine.
@@ -14,10 +14,7 @@ pub struct ExtensionContext {
 
 impl ExtensionContext {
     /// Create a new extension context.
-    pub fn new(
-        function_registry: Arc<Mutex<FunctionRegistry>>,
-        catalog: Arc<Mutex<Catalog>>,
-    ) -> Self {
+    pub fn new(function_registry: Arc<Mutex<FunctionRegistry>>, catalog: Arc<Mutex<Catalog>>) -> Self {
         Self {
             function_registry,
             catalog,

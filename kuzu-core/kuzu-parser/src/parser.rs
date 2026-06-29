@@ -10,8 +10,7 @@ pub struct CypherParser;
 
 pub fn parse(input: &str) -> Result<Statement, String> {
     let trimmed = input.trim();
-    let mut pairs = CypherParser::parse(Rule::statement, trimmed)
-        .map_err(|e| format!("Parse error: {e}"))?;
+    let mut pairs = CypherParser::parse(Rule::statement, trimmed).map_err(|e| format!("Parse error: {e}"))?;
     let pair = pairs.next().ok_or("Empty input")?;
     parse_statement(pair)
 }
@@ -47,7 +46,8 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                     Rule::identifier if name.is_empty() => name = inner.as_str().to_string(),
                     Rule::column_definitions => {
                         for col in inner.into_inner() {
-                            let mut cn = String::new(); let mut ct = String::new();
+                            let mut cn = String::new();
+                            let mut ct = String::new();
                             for part in col.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => cn = part.as_str().to_string(),
@@ -55,32 +55,48 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                                     _ => {}
                                 }
                             }
-                            columns.push(ColumnDef { name: cn, type_name: ct });
+                            columns.push(ColumnDef {
+                                name: cn,
+                                type_name: ct,
+                            });
                         }
                     }
                     Rule::primary_key => {
                         for part in inner.into_inner() {
-                            if part.as_rule() == Rule::identifier { pk = part.as_str().to_string(); }
+                            if part.as_rule() == Rule::identifier {
+                                pk = part.as_str().to_string();
+                            }
                         }
                     }
                     _ => {}
                 }
             }
-            Ok(Statement::CreateNodeTable(CreateNodeTable { name, columns, primary_key: pk }))
+            Ok(Statement::CreateNodeTable(CreateNodeTable {
+                name,
+                columns,
+                primary_key: pk,
+            }))
         }
         Rule::create_rel_table => {
-            let mut name = String::new(); let mut from = String::new(); let mut to = String::new();
+            let mut name = String::new();
+            let mut from = String::new();
+            let mut to = String::new();
             let mut columns = Vec::new();
             for inner in pair.into_inner() {
                 match inner.as_rule() {
                     Rule::identifier => {
-                        if name.is_empty() { name = inner.as_str().to_string(); }
-                        else if from.is_empty() { from = inner.as_str().to_string(); }
-                        else { to = inner.as_str().to_string(); }
+                        if name.is_empty() {
+                            name = inner.as_str().to_string();
+                        } else if from.is_empty() {
+                            from = inner.as_str().to_string();
+                        } else {
+                            to = inner.as_str().to_string();
+                        }
                     }
                     Rule::column_definitions => {
                         for col in inner.into_inner() {
-                            let mut cn = String::new(); let mut ct = String::new();
+                            let mut cn = String::new();
+                            let mut ct = String::new();
                             for part in col.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => cn = part.as_str().to_string(),
@@ -88,16 +104,25 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                                     _ => {}
                                 }
                             }
-                            columns.push(ColumnDef { name: cn, type_name: ct });
+                            columns.push(ColumnDef {
+                                name: cn,
+                                type_name: ct,
+                            });
                         }
                     }
                     _ => {}
                 }
             }
-            Ok(Statement::CreateRelTable(CreateRelTable { name, from, to, columns }))
+            Ok(Statement::CreateRelTable(CreateRelTable {
+                name,
+                from,
+                to,
+                columns,
+            }))
         }
         Rule::drop_table => {
-            let name = pair.into_inner()
+            let name = pair
+                .into_inner()
                 .find(|p| p.as_rule() == Rule::identifier)
                 .map(|p| p.as_str().to_string())
                 .ok_or("Missing table name")?;
@@ -122,26 +147,34 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::match_clause => {
-                clauses.push(Clause::Match(MatchClause { patterns: parse_patterns(inner)? }));
+                clauses.push(Clause::Match(MatchClause {
+                    patterns: parse_patterns(inner)?,
+                }));
             }
             Rule::optional_match_clause => {
-                clauses.push(Clause::OptionalMatch(OptionalMatchClause { patterns: parse_patterns(inner)? }));
+                clauses.push(Clause::OptionalMatch(OptionalMatchClause {
+                    patterns: parse_patterns(inner)?,
+                }));
             }
             Rule::return_clause => {
-                clauses.push(Clause::Return(ReturnClause { expressions: parse_return_items(inner)? }));
+                clauses.push(Clause::Return(ReturnClause {
+                    expressions: parse_return_items(inner)?,
+                }));
             }
             Rule::with_clause => {
-                clauses.push(Clause::With(ReturnClause { expressions: parse_return_items(inner)? }));
+                clauses.push(Clause::With(ReturnClause {
+                    expressions: parse_return_items(inner)?,
+                }));
             }
             Rule::where_clause => {
                 let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
                 clauses.push(Clause::Where(WhereClause { expression: expr }));
             }
             Rule::delete_clause => {
-                let expressions: Result<Vec<_>, _> = inner.into_inner()
-                    .map(parse_expression)
-                    .collect();
-                clauses.push(Clause::Delete(DeleteClause { expressions: expressions? }));
+                let expressions: Result<Vec<_>, _> = inner.into_inner().map(parse_expression).collect();
+                clauses.push(Clause::Delete(DeleteClause {
+                    expressions: expressions?,
+                }));
             }
             Rule::unwind_clause => {
                 let mut expr = None;
@@ -154,16 +187,23 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                     }
                 }
                 let expression = expr.ok_or("Missing UNWIND expression")?;
-                clauses.push(Clause::Unwind(UnwindClause { expression, variable: var }));
+                clauses.push(Clause::Unwind(UnwindClause {
+                    expression,
+                    variable: var,
+                }));
             }
             Rule::set_clause => {
-                let items: Result<Vec<SetItem>, String> = inner.into_inner()
+                let items: Result<Vec<SetItem>, String> = inner
+                    .into_inner()
                     .filter(|p| p.as_rule() == Rule::set_item)
                     .map(|item| {
                         let mut parts = item.into_inner();
                         let prop = parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
                         let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
-                        Ok(SetItem { property: prop, value: val })
+                        Ok(SetItem {
+                            property: prop,
+                            value: val,
+                        })
                     })
                     .collect();
                 clauses.push(Clause::Set(SetClause { items: items? }));
@@ -175,15 +215,23 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
 }
 
 fn parse_patterns(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Pattern>, String> {
-    pair.into_inner().filter(|p| p.as_rule() == Rule::pattern).map(parse_pattern).collect()
+    pair.into_inner()
+        .filter(|p| p.as_rule() == Rule::pattern)
+        .map(parse_pattern)
+        .collect()
 }
 
 fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, String> {
-    let mut node = None; let mut edge = None;
+    let mut node = None;
+    let mut edge = None;
     for inner in pair.into_inner() {
         match inner.as_rule() {
-            Rule::node_pattern => { node = Some(parse_node_pattern(inner)?); }
-            Rule::edge_pattern => { edge = Some(parse_edge_pattern(inner)?); }
+            Rule::node_pattern => {
+                node = Some(parse_node_pattern(inner)?);
+            }
+            Rule::edge_pattern => {
+                edge = Some(parse_edge_pattern(inner)?);
+            }
             _ => {}
         }
     }
@@ -191,12 +239,16 @@ fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, String> {
 }
 
 fn parse_node_pattern(pair: pest::iterators::Pair<Rule>) -> Result<NodePattern, String> {
-    let mut variable = None; let mut labels = Vec::new(); let mut properties = Vec::new();
+    let mut variable = None;
+    let mut labels = Vec::new();
+    let mut properties = Vec::new();
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::variable => variable = Some(inner.as_str().to_string()),
             Rule::label => {
-                for li in inner.into_inner() { labels.push(li.as_str().to_string()); }
+                for li in inner.into_inner() {
+                    labels.push(li.as_str().to_string());
+                }
             }
             Rule::property_map => {
                 for prop in inner.into_inner() {
@@ -209,17 +261,29 @@ fn parse_node_pattern(pair: pest::iterators::Pair<Rule>) -> Result<NodePattern, 
             _ => {}
         }
     }
-    Ok(NodePattern { variable, labels, properties })
+    Ok(NodePattern {
+        variable,
+        labels,
+        properties,
+    })
 }
 
 fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, String> {
-    let mut variable = None; let mut labels = Vec::new(); let mut properties = Vec::new();
-    let direction = if pair.as_str().contains("<-") { EdgeDirection::RightToLeft } else { EdgeDirection::LeftToRight };
+    let mut variable = None;
+    let mut labels = Vec::new();
+    let mut properties = Vec::new();
+    let direction = if pair.as_str().contains("<-") {
+        EdgeDirection::RightToLeft
+    } else {
+        EdgeDirection::LeftToRight
+    };
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::variable => variable = Some(inner.as_str().to_string()),
             Rule::label => {
-                for li in inner.into_inner() { labels.push(li.as_str().to_string()); }
+                for li in inner.into_inner() {
+                    labels.push(li.as_str().to_string());
+                }
             }
             Rule::property_map => {
                 for prop in inner.into_inner() {
@@ -232,11 +296,17 @@ fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, 
             _ => {}
         }
     }
-    Ok(EdgePattern { variable, labels, direction, properties })
+    Ok(EdgePattern {
+        variable,
+        labels,
+        direction,
+        properties,
+    })
 }
 
 fn parse_property_kv(pair: pest::iterators::Pair<Rule>) -> Result<(String, Expression), String> {
-    let mut key = String::new(); let mut val = None;
+    let mut key = String::new();
+    let mut val = None;
     for part in pair.into_inner() {
         match part.as_rule() {
             Rule::identifier => key = part.as_str().to_string(),
@@ -251,7 +321,8 @@ fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnIte
     let mut items = Vec::new();
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::return_item {
-            let mut expr = None; let mut alias = None;
+            let mut expr = None;
+            let mut alias = None;
             for part in inner.into_inner() {
                 match part.as_rule() {
                     Rule::expression => expr = Some(parse_expression(part)?),
@@ -259,7 +330,9 @@ fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnIte
                     _ => {}
                 }
             }
-            if let Some(e) = expr { items.push(ReturnItem { expression: e, alias }); }
+            if let Some(e) = expr {
+                items.push(ReturnItem { expression: e, alias });
+            }
         }
     }
     Ok(items)
@@ -271,10 +344,18 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
     let children: Vec<_> = pair.clone().into_inner().collect();
 
     // Unwrap single-child wrappers (priority/precedence levels)
-    if matches!(rule, Rule::expression | Rule::or_expr | Rule::and_expr | Rule::not_expr
-        | Rule::comparison_expr | Rule::additive_expr | Rule::multiplicative_expr
-        | Rule::unary_expr | Rule::postfix_expr)
-    {
+    if matches!(
+        rule,
+        Rule::expression
+            | Rule::or_expr
+            | Rule::and_expr
+            | Rule::not_expr
+            | Rule::comparison_expr
+            | Rule::additive_expr
+            | Rule::multiplicative_expr
+            | Rule::unary_expr
+            | Rule::postfix_expr
+    ) {
         if children.len() == 1 {
             return parse_expression(children[0].clone());
         }
@@ -283,12 +364,19 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             let mut i = 1;
             while i + 1 < children.len() {
                 let op = match children[i].as_str() {
-                    "OR" => BinaryOp::Or, "AND" => BinaryOp::And,
-                    "=" => BinaryOp::Equal, "<>" => BinaryOp::NotEqual,
-                    "<" => BinaryOp::LessThan, ">" => BinaryOp::GreaterThan,
-                    "<=" => BinaryOp::LessThanOrEqual, ">=" => BinaryOp::GreaterThanOrEqual,
-                    "+" => BinaryOp::Add, "-" => BinaryOp::Subtract,
-                    "*" => BinaryOp::Multiply, "/" => BinaryOp::Divide, "%" => BinaryOp::Modulo,
+                    "OR" => BinaryOp::Or,
+                    "AND" => BinaryOp::And,
+                    "=" => BinaryOp::Equal,
+                    "<>" => BinaryOp::NotEqual,
+                    "<" => BinaryOp::LessThan,
+                    ">" => BinaryOp::GreaterThan,
+                    "<=" => BinaryOp::LessThanOrEqual,
+                    ">=" => BinaryOp::GreaterThanOrEqual,
+                    "+" => BinaryOp::Add,
+                    "-" => BinaryOp::Subtract,
+                    "*" => BinaryOp::Multiply,
+                    "/" => BinaryOp::Divide,
+                    "%" => BinaryOp::Modulo,
                     _ => return Err(format!("Unknown op: {}", children[i].as_str())),
                 };
                 let right = parse_expression(children[i + 1].clone())?;
@@ -318,16 +406,17 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             Ok(Expression::Constant(Constant::Float(v)))
         }
         Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(
-            pair.as_str().to_uppercase() == "TRUE"
+            pair.as_str().to_uppercase() == "TRUE",
         ))),
         Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
         Rule::variable => Ok(Expression::Variable(pair.as_str().to_string())),
         Rule::parameter => {
             let name = pair.as_str().strip_prefix('$').unwrap_or(pair.as_str()).to_string();
             Ok(Expression::Parameter(name))
-        },
+        }
         Rule::list_literal => {
-            let items = children.into_iter()
+            let items = children
+                .into_iter()
                 .filter(|c| c.as_rule() == Rule::expression)
                 .map(parse_expression)
                 .collect::<Result<Vec<_>, _>>()?;
@@ -351,14 +440,17 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             }
             // Extract function name from siblings in parent
             let name = pair.as_str().split('(').next().unwrap_or("").to_string();
-            let args = children.into_iter()
+            let args = children
+                .into_iter()
                 .filter(|c| c.as_rule() == Rule::expression)
                 .map(parse_expression)
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Expression::FunctionCall(name, args))
         }
         Rule::property_access => {
-            let name = children.into_iter().next()
+            let name = children
+                .into_iter()
+                .next()
                 .map(|p| p.as_str().to_string())
                 .ok_or("Empty property")?;
             Ok(Expression::Variable(name))
@@ -377,17 +469,15 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
 fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
     match pair.as_rule() {
         Rule::string => Ok(Expression::Constant(Constant::String(unescape_string(pair.as_str())))),
-        Rule::integer => {
-            Ok(Expression::Constant(Constant::Integer(
-                pair.as_str().parse().map_err(|e| format!("Int: {e}"))?
-            )))
-        }
-        Rule::float => {
-            Ok(Expression::Constant(Constant::Float(
-                pair.as_str().parse().map_err(|e| format!("Float: {e}"))?
-            )))
-        }
-        Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(pair.as_str().to_uppercase() == "TRUE"))),
+        Rule::integer => Ok(Expression::Constant(Constant::Integer(
+            pair.as_str().parse().map_err(|e| format!("Int: {e}"))?,
+        ))),
+        Rule::float => Ok(Expression::Constant(Constant::Float(
+            pair.as_str().parse().map_err(|e| format!("Float: {e}"))?,
+        ))),
+        Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(
+            pair.as_str().to_uppercase() == "TRUE",
+        ))),
         Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
         _ => Err(format!("Unknown literal: {:?}", pair.as_rule())),
     }
@@ -400,13 +490,21 @@ fn unescape_string(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
-                Some('n') => r.push('\n'), Some('t') => r.push('\t'),
-                Some('r') => r.push('\r'), Some('\\') => r.push('\\'),
-                Some('"') => r.push('"'), Some('\'') => r.push('\''),
-                Some(o) => { r.push('\\'); r.push(o); }
+                Some('n') => r.push('\n'),
+                Some('t') => r.push('\t'),
+                Some('r') => r.push('\r'),
+                Some('\\') => r.push('\\'),
+                Some('"') => r.push('"'),
+                Some('\'') => r.push('\''),
+                Some(o) => {
+                    r.push('\\');
+                    r.push(o);
+                }
                 None => r.push('\\'),
             }
-        } else { r.push(c); }
+        } else {
+            r.push(c);
+        }
     }
     r
 }
@@ -422,8 +520,7 @@ fn parse_alter_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Str
                 }
             }
             Rule::alter_action => {
-                let action_inner = inner.into_inner().next()
-                    .ok_or("Empty alter action")?;
+                let action_inner = inner.into_inner().next().ok_or("Empty alter action")?;
                 action = Some(match action_inner.as_rule() {
                     Rule::add_column => {
                         let mut name = String::new();
@@ -438,23 +535,22 @@ fn parse_alter_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Str
                         AlterAction::AddColumn { name, type_name }
                     }
                     Rule::drop_column => {
-                        let name = action_inner.into_inner()
+                        let name = action_inner
+                            .into_inner()
                             .find(|p| p.as_rule() == Rule::identifier)
                             .map(|p| p.as_str().to_string())
                             .ok_or("Missing column name in DROP")?;
                         AlterAction::DropColumn { name }
                     }
                     Rule::rename_column => {
-                        let mut parts = action_inner.into_inner()
-                            .filter(|p| p.as_rule() == Rule::identifier);
-                        let old_name = parts.next()
-                            .ok_or("Missing old column name")?.as_str().to_string();
-                        let new_name = parts.next()
-                            .ok_or("Missing new column name")?.as_str().to_string();
+                        let mut parts = action_inner.into_inner().filter(|p| p.as_rule() == Rule::identifier);
+                        let old_name = parts.next().ok_or("Missing old column name")?.as_str().to_string();
+                        let new_name = parts.next().ok_or("Missing new column name")?.as_str().to_string();
                         AlterAction::RenameColumn { old_name, new_name }
                     }
                     Rule::rename_table => {
-                        let new_name = action_inner.into_inner()
+                        let new_name = action_inner
+                            .into_inner()
                             .find(|p| p.as_rule() == Rule::identifier)
                             .map(|p| p.as_str().to_string())
                             .ok_or("Missing new table name")?;
@@ -591,6 +687,13 @@ mod tests {
     fn test_function_call() {
         let sql = "MATCH (a:Person) RETURN COUNT(a)";
         assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_count_star() {
+        let sql = "MATCH (a:Person) RETURN COUNT(*)";
+        let result = parse(sql);
+        assert!(result.is_ok(), "COUNT(*) should parse: {:?}", result.err());
     }
 
     #[test]

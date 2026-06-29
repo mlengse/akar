@@ -30,7 +30,9 @@ impl Extension for Neo4jExtension {
 
         context.register_table_function(
             "neo4j_migrate",
-            TableFunction::Custom { name: "neo4j_migrate".into() },
+            TableFunction::Custom {
+                name: "neo4j_migrate".into(),
+            },
         );
 
         tracing::info!("NEO4J extension loaded: neo4j_migrate function registered");
@@ -61,14 +63,8 @@ pub struct Neo4jRel {
 /// A parsed constraint or index statement.
 #[derive(Debug, Clone)]
 pub enum Neo4jSchemaStmt {
-    Constraint {
-        label: String,
-        property: String,
-    },
-    Index {
-        label: String,
-        property: String,
-    },
+    Constraint { label: String, property: String },
+    Index { label: String, property: String },
 }
 
 /// Result of parsing a Neo4j dump.
@@ -124,7 +120,9 @@ pub fn parse_neo4j_dump(input: &str) -> Result<Neo4jDump, String> {
 /// Parse `CREATE CONSTRAINT FOR (n:Label) REQUIRE n.prop IS UNIQUE`
 fn parse_constraint(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
     // Pattern: CREATE CONSTRAINT FOR (n:Label) REQUIRE n.prop IS UNIQUE
-    let line = line.trim().strip_prefix("CREATE CONSTRAINT")
+    let line = line
+        .trim()
+        .strip_prefix("CREATE CONSTRAINT")
         .or_else(|| line.trim().strip_prefix("create constraint"))
         .ok_or_else(|| format!("Expected CREATE CONSTRAINT, got: {line}"))?;
 
@@ -132,7 +130,8 @@ fn parse_constraint(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
     let label = extract_label(line)?;
 
     // Extract property from REQUIRE n.prop
-    let after_label = line.split("REQUIRE")
+    let after_label = line
+        .split("REQUIRE")
         .nth(1)
         .or_else(|| line.split("require").nth(1))
         .ok_or_else(|| format!("Missing REQUIRE in constraint: {line}"))?;
@@ -154,14 +153,17 @@ fn parse_constraint(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
 
 /// Parse `CREATE INDEX FOR (n:Label) ON (n.prop)`
 fn parse_index(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
-    let line = line.trim().strip_prefix("CREATE INDEX")
+    let line = line
+        .trim()
+        .strip_prefix("CREATE INDEX")
         .or_else(|| line.trim().strip_prefix("create index"))
         .ok_or_else(|| format!("Expected CREATE INDEX, got: {line}"))?;
 
     let label = extract_label(line)?;
 
     // Extract property from ON (n.prop)
-    let after_label = line.split("ON")
+    let after_label = line
+        .split("ON")
         .nth(1)
         .or_else(|| line.split("on").nth(1))
         .ok_or_else(|| format!("Missing ON in index: {line}"))?;
@@ -185,7 +187,9 @@ fn parse_index(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
 fn extract_label(s: &str) -> Result<String, String> {
     let paren_start = s.find('(').ok_or_else(|| format!("Missing '(' in: {s}"))?;
     let after_paren = &s[paren_start + 1..];
-    let colon_pos = after_paren.find(':').ok_or_else(|| format!("Missing ':' in label: {s}"))?;
+    let colon_pos = after_paren
+        .find(':')
+        .ok_or_else(|| format!("Missing ':' in label: {s}"))?;
     let label_end = after_paren[colon_pos + 1..]
         .find(|c: char| c == ')' || c == ' ' || c == '\n')
         .unwrap_or_else(|| after_paren[colon_pos + 1..].len());
@@ -205,19 +209,26 @@ fn parse_node_creation(line: &str) -> Result<Option<Neo4jNode>, String> {
     let (variable, labels, props_str) = parse_node_pattern(&paren_content)?;
     let properties = parse_properties(&props_str)?;
 
-    Ok(Some(Neo4jNode { variable, labels, properties }))
+    Ok(Some(Neo4jNode {
+        variable,
+        labels,
+        properties,
+    }))
 }
 
 /// Parse `MATCH ... CREATE (a)-[r:REL_TYPE {props}]->(b)`
 fn parse_rel_creation(line: &str) -> Result<Option<Neo4jRel>, String> {
     // Find "CREATE" portion
-    let create_idx = line.to_uppercase().find("CREATE")
+    let create_idx = line
+        .to_uppercase()
+        .find("CREATE")
         .ok_or_else(|| format!("Missing CREATE in rel stmt: {line}"))?;
     let create_part = &line[create_idx + 6..].trim();
 
     // Pattern: (from_var)-[r:TYPE {props}]->(to_var)
     // Find the arrow boundary `]->(`
-    let arrow_pos = create_part.find("]->(")
+    let arrow_pos = create_part
+        .find("]->(")
         .ok_or_else(|| format!("Missing ']->(' in rel pattern: {line}"))?;
 
     // Everything before `]->` is the from-side expression: (from_var)-[...]
@@ -226,9 +237,11 @@ fn parse_rel_creation(line: &str) -> Result<Option<Neo4jRel>, String> {
     let to_expr = &create_part[arrow_pos + 3..];
 
     // Parse from-side: find the opening `(` and extract variable before `)`
-    let from_paren_start = from_expr.find('(')
+    let from_paren_start = from_expr
+        .find('(')
         .ok_or_else(|| format!("Missing '(' in from pattern: {line}"))?;
-    let from_paren_end = from_expr[from_paren_start + 1..].find(')')
+    let from_paren_end = from_expr[from_paren_start + 1..]
+        .find(')')
         .ok_or_else(|| format!("Missing ')' in from pattern: {line}"))?;
     let from_var = from_expr[from_paren_start + 1..][..from_paren_end].trim();
     // Strip labels if present: take only the variable name (before first ':')
@@ -239,7 +252,8 @@ fn parse_rel_creation(line: &str) -> Result<Option<Neo4jRel>, String> {
     let to_var = to_content.split(':').next().unwrap_or("").trim().to_string();
 
     // Parse relationship inside brackets: [r:TYPE {props}]
-    let bracket_start = from_expr.find('[')
+    let bracket_start = from_expr
+        .find('[')
         .ok_or_else(|| format!("Missing '[' in rel pattern: {line}"))?;
     let bracket_content = &from_expr[bracket_start + 1..];
 
@@ -409,22 +423,24 @@ pub struct MigrationReport {
 pub fn run_migration(dump_content: &str) -> Result<MigrationReport, String> {
     let parsed = parse_neo4j_dump(dump_content)?;
 
-    let constraints = parsed.schema.iter()
+    let constraints = parsed
+        .schema
+        .iter()
         .filter(|s| matches!(s, Neo4jSchemaStmt::Constraint { .. }))
         .count();
-    let indexes = parsed.schema.iter()
+    let indexes = parsed
+        .schema
+        .iter()
         .filter(|s| matches!(s, Neo4jSchemaStmt::Index { .. }))
         .count();
 
     // Validate: count unique labels/types
-    let node_labels: std::collections::HashSet<&str> = parsed.nodes
+    let node_labels: std::collections::HashSet<&str> = parsed
+        .nodes
         .iter()
         .flat_map(|n| n.labels.iter().map(|l| l.as_str()))
         .collect();
-    let rel_types: std::collections::HashSet<&str> = parsed.rels
-        .iter()
-        .map(|r| r.rel_type.as_str())
-        .collect();
+    let rel_types: std::collections::HashSet<&str> = parsed.rels.iter().map(|r| r.rel_type.as_str()).collect();
 
     tracing::info!(
         "Migration parsed: {} nodes (labels: {:?}), {} rels (types: {:?}), {} constraints, {} indexes",

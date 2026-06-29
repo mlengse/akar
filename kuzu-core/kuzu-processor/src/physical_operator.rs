@@ -4,9 +4,9 @@
 //! that produces output `DataChunk`s from input `DataChunk`s.
 
 use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
-use kuzu_common::vector::{physical_type_size, DataChunk, ValueVector};
-use kuzu_function::scalar::AggValueState;
+use kuzu_common::vector::{DataChunk, ValueVector, physical_type_size};
 use kuzu_function::AggregateFunction;
+use kuzu_function::scalar::AggValueState;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::collections::HashMap;
@@ -40,11 +40,7 @@ pub struct PhysicalScan {
 }
 
 impl PhysicalScan {
-    pub fn new(
-        table_name: String,
-        table_id: u64,
-        estimated_cardinality: u64,
-    ) -> Self {
+    pub fn new(table_name: String, table_id: u64, estimated_cardinality: u64) -> Self {
         Self {
             table_name,
             table_id,
@@ -116,8 +112,7 @@ impl PhysicalScan {
                     v.data_mut()[offset] = len;
                     let copy_len = bytes.len().min(15);
                     if offset + 1 + copy_len <= v.data().len() {
-                        v.data_mut()[offset + 1..offset + 1 + copy_len]
-                            .copy_from_slice(&bytes[..copy_len]);
+                        v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
                     }
                     v.set_null(row, false);
                 }
@@ -140,14 +135,16 @@ impl PhysicalScan {
             Value::Int8(_) | Value::UInt8(_) => PhysicalTypeID::Int8,
             Value::Double(_) => PhysicalTypeID::Double,
             Value::Float(_) => PhysicalTypeID::Float,
-            Value::String(_) | Value::Date(_) | Value::Timestamp(_)
-                | Value::TimestampTz(_) | Value::TimestampNs(_)
-                | Value::TimestampMs(_) | Value::TimestampSec(_)
-                | Value::Interval(_) => PhysicalTypeID::String,
+            Value::String(_)
+            | Value::Date(_)
+            | Value::Timestamp(_)
+            | Value::TimestampTz(_)
+            | Value::TimestampNs(_)
+            | Value::TimestampMs(_)
+            | Value::TimestampSec(_)
+            | Value::Interval(_) => PhysicalTypeID::String,
             Value::Blob(_) => PhysicalTypeID::Blob,
-            Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => {
-                PhysicalTypeID::Int64
-            }
+            Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => PhysicalTypeID::Int64,
         }
     }
 
@@ -155,7 +152,9 @@ impl PhysicalScan {
     fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
         match logical {
             LogicalTypeID::Bool => PhysicalTypeID::Bool,
-            LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial => PhysicalTypeID::Int64,
+            LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial => {
+                PhysicalTypeID::Int64
+            }
             LogicalTypeID::Int32 | LogicalTypeID::UInt32 => PhysicalTypeID::Int32,
             LogicalTypeID::Int16 | LogicalTypeID::UInt16 => PhysicalTypeID::Int16,
             LogicalTypeID::Int8 | LogicalTypeID::UInt8 => PhysicalTypeID::Int8,
@@ -186,7 +185,9 @@ impl PhysicalScan {
 }
 
 impl PhysicalOperatorExec for PhysicalScan {
-    fn operator_type(&self) -> &str { "scan" }
+    fn operator_type(&self) -> &str {
+        "scan"
+    }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
         // If we have real table data, read from it
@@ -214,13 +215,16 @@ impl PhysicalOperatorExec for PhysicalScan {
                 let phys_type = if let Some(col_def) = self.table_columns.get(col_idx) {
                     Self::logical_to_physical(&col_def.logical_type)
                 } else {
-                    col_data.iter().find_map(|v| {
-                        if !matches!(v, Value::Null) {
-                            Some(Self::value_to_physical_type(v))
-                        } else {
-                            None
-                        }
-                    }).unwrap_or(PhysicalTypeID::Int64)
+                    col_data
+                        .iter()
+                        .find_map(|v| {
+                            if !matches!(v, Value::Null) {
+                                Some(Self::value_to_physical_type(v))
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(PhysicalTypeID::Int64)
                 };
 
                 let mut v = ValueVector::new(phys_type, num_rows);
@@ -280,7 +284,7 @@ impl PhysicalFilter {
                     Some(Value::Bool(b)) => mask.push(b),
                     Some(Value::Null) => mask.push(false),
                     Some(_) => mask.push(true), // non-null, non-bool = truthy
-                    None => mask.push(false),    // null = false
+                    None => mask.push(false),   // null = false
                 }
             }
             return Ok(mask);
@@ -335,22 +339,18 @@ impl PhysicalFilter {
 }
 
 impl PhysicalOperatorExec for PhysicalFilter {
-    fn operator_type(&self) -> &str { "filter" }
+    fn operator_type(&self) -> &str {
+        "filter"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let evaluator = self.evaluator.as_ref()
-            .and_then(|e| e.lock().ok());
+        let evaluator = self.evaluator.as_ref().and_then(|e| e.lock().ok());
 
         let mut output = Vec::new();
         for chunk in input {
-            let mask = Self::evaluate_expression(
-                &self.expression,
-                &chunk,
-                evaluator.as_deref(),
-            )?;
+            let mask = Self::evaluate_expression(&self.expression, &chunk, evaluator.as_deref())?;
             // Filter rows based on mask
-            let selected: Vec<usize> = mask.iter().enumerate()
-                .filter(|&(_, v)| *v).map(|(i, _)| i).collect();
+            let selected: Vec<usize> = mask.iter().enumerate().filter(|&(_, v)| *v).map(|(i, _)| i).collect();
 
             if selected.is_empty() {
                 continue;
@@ -379,12 +379,7 @@ impl PhysicalOperatorExec for PhysicalFilter {
     }
 }
 
-fn evaluate_binary_op_legacy(
-    op: &BinaryOp,
-    left: &[bool],
-    right: &[bool],
-    size: usize,
-) -> Result<Vec<bool>, String> {
+fn evaluate_binary_op_legacy(op: &BinaryOp, left: &[bool], right: &[bool], size: usize) -> Result<Vec<bool>, String> {
     let len = left.len().min(right.len()).min(size);
     let result: Vec<bool> = (0..len)
         .map(|i| match op {
@@ -407,7 +402,9 @@ pub struct PhysicalProjection {
 }
 
 impl PhysicalOperatorExec for PhysicalProjection {
-    fn operator_type(&self) -> &str { "projection" }
+    fn operator_type(&self) -> &str {
+        "projection"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         let output: Vec<DataChunk> = input
@@ -424,7 +421,10 @@ impl PhysicalOperatorExec for PhysicalProjection {
             .collect();
 
         if output.is_empty() {
-            Ok(vec![DataChunk { fields: vec![], size: 0 }])
+            Ok(vec![DataChunk {
+                fields: vec![],
+                size: 0,
+            }])
         } else {
             Ok(output)
         }
@@ -440,7 +440,9 @@ pub struct PhysicalLimit {
 }
 
 impl PhysicalOperatorExec for PhysicalLimit {
-    fn operator_type(&self) -> &str { "limit" }
+    fn operator_type(&self) -> &str {
+        "limit"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         let mut remaining = self.limit;
@@ -461,11 +463,7 @@ impl PhysicalOperatorExec for PhysicalLimit {
             }
 
             // Calculate start position within this chunk
-            let start_in_chunk = if skipped < skip {
-                (skip - skipped) as usize
-            } else {
-                0
-            };
+            let start_in_chunk = if skipped < skip { (skip - skipped) as usize } else { 0 };
 
             // Mark this chunk as processed
             skipped += chunk_size;
@@ -515,7 +513,9 @@ pub struct PhysicalOrderBy {
 }
 
 impl PhysicalOperatorExec for PhysicalOrderBy {
-    fn operator_type(&self) -> &str { "order_by" }
+    fn operator_type(&self) -> &str {
+        "order_by"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         if input.is_empty() {
@@ -529,9 +529,7 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
 
         // Collect all values per column as Value (supports all types)
         let num_fields = input[0].num_fields();
-        let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields)
-            .map(|_| Vec::with_capacity(total_rows))
-            .collect();
+        let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
 
         for chunk in &input {
             for row in 0..chunk.size {
@@ -551,7 +549,9 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             indices.sort_by(|a, b| {
                 for &(col, ascending) in &self.sort_keys {
                     let col = col as usize;
-                    if col >= num_fields { continue; }
+                    if col >= num_fields {
+                        continue;
+                    }
                     let va = &all_values[col][*a].0;
                     let vb = &all_values[col][*b].0;
                     let cmp = value_cmp(va, vb);
@@ -639,7 +639,9 @@ pub struct PhysicalAggregate {
 }
 
 impl PhysicalOperatorExec for PhysicalAggregate {
-    fn operator_type(&self) -> &str { "aggregate" }
+    fn operator_type(&self) -> &str {
+        "aggregate"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         if input.is_empty() {
@@ -664,19 +666,21 @@ impl PhysicalOperatorExec for PhysicalAggregate {
 impl PhysicalAggregate {
     /// Compute scalar aggregates (no GROUP BY) across all input chunks.
     fn compute_scalar_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
-        let funcs: Vec<AggregateFunction> = self.aggregate_functions.iter()
+        let funcs: Vec<AggregateFunction> = self
+            .aggregate_functions
+            .iter()
             .map(|name| parse_aggregate_function(name))
             .collect();
 
-        let mut states: Vec<AggValueState> = funcs.iter()
-            .map(|f| AggValueState::new(f))
-            .collect();
+        let mut states: Vec<AggValueState> = funcs.iter().map(|f| AggValueState::new(f)).collect();
 
         for chunk in input {
             for row in 0..chunk.size {
                 for (i, state) in states.iter_mut().enumerate() {
                     let col_idx = i.min(chunk.fields.len().saturating_sub(1));
-                    let val = chunk.fields.get(col_idx)
+                    let val = chunk
+                        .fields
+                        .get(col_idx)
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null);
 
@@ -709,7 +713,9 @@ impl PhysicalAggregate {
 
     /// Compute hash-based GROUP BY aggregates.
     fn compute_grouped_aggregates(&self, input: &[DataChunk]) -> OperatorResult {
-        let funcs: Vec<AggregateFunction> = self.aggregate_functions.iter()
+        let funcs: Vec<AggregateFunction> = self
+            .aggregate_functions
+            .iter()
             .map(|name| parse_aggregate_function(name))
             .collect();
 
@@ -725,13 +731,17 @@ impl PhysicalAggregate {
                 // Build composite key
                 let key = if num_group_cols == 1 {
                     let col = self.group_by_cols[0] as usize;
-                    chunk.fields.get(col)
+                    chunk
+                        .fields
+                        .get(col)
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null)
                 } else {
                     let mut key_vals = Vec::with_capacity(num_group_cols);
                     for &gc in &self.group_by_cols {
-                        let val = chunk.fields.get(gc as usize)
+                        let val = chunk
+                            .fields
+                            .get(gc as usize)
                             .and_then(|f| f.get_value(row))
                             .unwrap_or(Value::Null);
                         key_vals.push(val);
@@ -752,7 +762,9 @@ impl PhysicalAggregate {
                 };
 
                 for (i, state) in states.iter_mut().enumerate() {
-                    let val = chunk.fields.get(i.min(chunk.fields.len().saturating_sub(1)))
+                    let val = chunk
+                        .fields
+                        .get(i.min(chunk.fields.len().saturating_sub(1)))
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null);
 
@@ -775,8 +787,7 @@ impl PhysicalAggregate {
 
         // Collect all groups (flatten buckets)
         let mut group_keys: Vec<Value> = Vec::new();
-        let mut agg_results: Vec<Vec<Value>> = (0..self.aggregate_functions.len())
-            .map(|_| Vec::new()).collect();
+        let mut agg_results: Vec<Vec<Value>> = (0..self.aggregate_functions.len()).map(|_| Vec::new()).collect();
 
         for (_hash, bucket) in &groups {
             for (key, states) in bucket {
@@ -913,7 +924,9 @@ pub struct PhysicalHashJoin {
 }
 
 impl PhysicalOperatorExec for PhysicalHashJoin {
-    fn operator_type(&self) -> &str { "hash_join" }
+    fn operator_type(&self) -> &str {
+        "hash_join"
+    }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         // Expect input chunks from both build and probe sides
@@ -957,7 +970,9 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
 
         for chunk in probe_chunks {
             for row in 0..chunk.size {
-                let probe_key = chunk.fields.get(probe_col)
+                let probe_key = chunk
+                    .fields
+                    .get(probe_col)
                     .and_then(|f| f.get_value(row))
                     .unwrap_or(Value::Null);
                 // SQL semantics: NULL keys never match in a join
@@ -1065,7 +1080,10 @@ impl PhysicalOperatorExec for PhysicalUnwind {
         }
 
         // Create a new ValueVector for the unwound variable
-        let first_type = items.first().map(|v| v.physical_type()).unwrap_or(PhysicalTypeID::Int64);
+        let first_type = items
+            .first()
+            .map(|v| v.physical_type())
+            .unwrap_or(PhysicalTypeID::Int64);
 
         let mut result_chunks = Vec::new();
         // If we have input data, repeat for each input row
@@ -1193,7 +1211,11 @@ impl PhysicalOperatorExec for PhysicalSet {
 }
 
 /// Simple expression evaluator for SET value expressions against a DataChunk row.
-fn evaluate_expression_for_row(expr: &kuzu_parser::ast::Expression, chunk: &DataChunk, row: usize) -> kuzu_common::types::Value {
+fn evaluate_expression_for_row(
+    expr: &kuzu_parser::ast::Expression,
+    chunk: &DataChunk,
+    row: usize,
+) -> kuzu_common::types::Value {
     match expr {
         kuzu_parser::ast::Expression::Constant(c) => match c {
             kuzu_parser::ast::Constant::Null => kuzu_common::types::Value::Null,
@@ -1387,10 +1409,8 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 kuzu_storage::csv_reader::read_csv(path, &catalog_cols, &config)
                     .map_err(|e| format!("CSV read error: {e}"))?
             }
-            "parquet" => {
-                kuzu_storage::parquet_reader::read_parquet(path, &catalog_cols)
-                    .map_err(|e| format!("Parquet read error: {e}"))?
-            }
+            "parquet" => kuzu_storage::parquet_reader::read_parquet(path, &catalog_cols)
+                .map_err(|e| format!("Parquet read error: {e}"))?,
             _ => {
                 return Err(format!(
                     "Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)"
@@ -1415,25 +1435,15 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
         } else if let Some(table) = catalog.get_rel_table_by_name_mut(&self.table_name) {
             for row in &rows {
                 if row.len() < 2 {
-                    return Err(
-                        "RelTable COPY FROM needs at least FROM and TO columns".into(),
-                    );
+                    return Err("RelTable COPY FROM needs at least FROM and TO columns".into());
                 }
                 let from = match &row[0] {
                     Value::Int64(v) => *v as u64,
-                    _ => {
-                        return Err(
-                            "First column of rel table must be FROM node offset (Int64)".into(),
-                        )
-                    }
+                    _ => return Err("First column of rel table must be FROM node offset (Int64)".into()),
                 };
                 let to = match &row[1] {
                     Value::Int64(v) => *v as u64,
-                    _ => {
-                        return Err(
-                            "Second column of rel table must be TO node offset (Int64)".into(),
-                        )
-                    }
+                    _ => return Err("Second column of rel table must be TO node offset (Int64)".into()),
                 };
                 let props: Vec<Value> = row[2..].to_vec();
                 table
@@ -1445,10 +1455,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 self.table_name
             );
         } else {
-            return Err(format!(
-                "Table '{}' not found in storage catalog",
-                self.table_name
-            ));
+            return Err(format!("Table '{}' not found in storage catalog", self.table_name));
         }
 
         // Return success chunk with row count

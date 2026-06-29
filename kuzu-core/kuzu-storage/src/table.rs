@@ -29,10 +29,7 @@ pub struct NodeTable {
 
 impl NodeTable {
     pub fn new(table_id: u64, name: String, columns: Vec<ColumnDefinition>) -> Self {
-        let primary_key_column = columns
-            .iter()
-            .position(|c| c.is_primary_key)
-            .unwrap_or(0);
+        let primary_key_column = columns.iter().position(|c| c.is_primary_key).unwrap_or(0);
         Self {
             table_id,
             name,
@@ -62,8 +59,7 @@ impl NodeTable {
         let num_cols = self.columns.len();
         if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
             let start_offset = self.num_rows;
-            self.node_groups
-                .push(NodeGroup::new(num_cols, start_offset));
+            self.node_groups.push(NodeGroup::new(num_cols, start_offset));
         }
 
         let current = self.node_groups.last_mut().unwrap();
@@ -193,10 +189,7 @@ impl NodeTable {
 
     /// Binary-search for the node group that contains `row`.
     fn find_group(&self, row: u64) -> usize {
-        match self
-            .node_groups
-            .binary_search_by_key(&row, |g| g.start_offset)
-        {
+        match self.node_groups.binary_search_by_key(&row, |g| g.start_offset) {
             Ok(i) => i,
             Err(i) => {
                 if i == 0 {
@@ -268,12 +261,7 @@ impl RelTable {
     ///
     /// Returns an error if the number of values doesn't match the number
     /// of property columns.
-    pub fn insert_rel(
-        &mut self,
-        from: u64,
-        to: u64,
-        values: Vec<Value>,
-    ) -> Result<(), String> {
+    pub fn insert_rel(&mut self, from: u64, to: u64, values: Vec<Value>) -> Result<(), String> {
         if values.len() != self.columns.len() {
             return Err(format!(
                 "Column count mismatch: expected {} values, got {}",
@@ -286,16 +274,10 @@ impl RelTable {
         self.edges.push((from, to));
 
         // Update forward adjacency.
-        self.fwd_adj
-            .entry(from)
-            .or_default()
-            .push((to, edge_idx));
+        self.fwd_adj.entry(from).or_default().push((to, edge_idx));
 
         // Update reverse adjacency.
-        self.rev_adj
-            .entry(to)
-            .or_default()
-            .push((from, edge_idx));
+        self.rev_adj.entry(to).or_default().push((from, edge_idx));
 
         // Store property values.
         for (col_idx, val) in values.into_iter().enumerate() {
@@ -334,10 +316,7 @@ impl RelTable {
     /// Returns a list of `(dst_offset, edge_idx)` pairs, or an empty vec
     /// if the node has no outgoing edges.
     pub fn scan_adj_list(&self, src_offset: u64) -> &[(u64, usize)] {
-        self.fwd_adj
-            .get(&src_offset)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+        self.fwd_adj.get(&src_offset).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Scan the reverse adjacency list for a given destination node.
@@ -345,10 +324,7 @@ impl RelTable {
     /// Returns a list of `(src_offset, edge_idx)` pairs, or an empty vec
     /// if the node has no incoming edges.
     pub fn scan_rev_adj_list(&self, dst_offset: u64) -> &[(u64, usize)] {
-        self.rev_adj
-            .get(&dst_offset)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+        self.rev_adj.get(&dst_offset).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Get all outgoing edges from a source node as `(dst_offset, property_values)`.
@@ -446,9 +422,7 @@ impl TableCatalog {
     }
 
     pub fn get_node_table_by_name(&self, name: &str) -> Option<&NodeTable> {
-        self.node_name_to_id
-            .get(name)
-            .and_then(|id| self.node_tables.get(id))
+        self.node_name_to_id.get(name).and_then(|id| self.node_tables.get(id))
     }
 
     pub fn get_node_table_by_name_mut(&mut self, name: &str) -> Option<&mut NodeTable> {
@@ -465,9 +439,7 @@ impl TableCatalog {
     }
 
     pub fn get_rel_table_by_name(&self, name: &str) -> Option<&RelTable> {
-        self.rel_name_to_id
-            .get(name)
-            .and_then(|id| self.rel_tables.get(id))
+        self.rel_name_to_id.get(name).and_then(|id| self.rel_tables.get(id))
     }
 
     pub fn get_rel_table_by_name_mut(&mut self, name: &str) -> Option<&mut RelTable> {
@@ -485,9 +457,7 @@ impl TableCatalog {
 
     /// Get the number of rows in a node table by name.
     pub fn node_table_num_rows(&self, name: &str) -> u64 {
-        self.get_node_table_by_name(name)
-            .map(|t| t.num_rows)
-            .unwrap_or(0)
+        self.get_node_table_by_name(name).map(|t| t.num_rows).unwrap_or(0)
     }
 }
 
@@ -504,22 +474,50 @@ mod tests {
 
     #[test]
     fn test_node_table_empty() {
-        let table = NodeTable::new(1, "Person".into(), vec![
-            ColumnDefinition { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true },
-            ColumnDefinition { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
+        let table = NodeTable::new(
+            1,
+            "Person".into(),
+            vec![
+                ColumnDefinition {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    name: "age".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        );
         assert_eq!(table.num_rows, 0);
         assert!(table.node_groups.is_empty());
     }
 
     #[test]
     fn test_node_table_insert_and_get() {
-        let mut table = NodeTable::new(1, "Person".into(), vec![
-            ColumnDefinition { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true },
-            ColumnDefinition { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
-        table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
-        table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
+        let mut table = NodeTable::new(
+            1,
+            "Person".into(),
+            vec![
+                ColumnDefinition {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    name: "age".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        );
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+            .unwrap();
 
         assert_eq!(table.num_rows, 2);
         assert_eq!(table.get_value(0, 0), Some(&Value::String("Alice".into())));
@@ -528,9 +526,15 @@ mod tests {
 
     #[test]
     fn test_node_table_scan_column() {
-        let mut table = NodeTable::new(1, "T".into(), vec![
-            ColumnDefinition { name: "val".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
+        let mut table = NodeTable::new(
+            1,
+            "T".into(),
+            vec![ColumnDefinition {
+                name: "val".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+            }],
+        );
         for i in 0..100 {
             table.insert_row(vec![Value::Int64(i)]).unwrap();
         }
@@ -542,10 +546,22 @@ mod tests {
 
     #[test]
     fn test_node_table_to_column_major() {
-        let mut table = NodeTable::new(1, "T".into(), vec![
-            ColumnDefinition { name: "x".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-            ColumnDefinition { name: "y".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
+        let mut table = NodeTable::new(
+            1,
+            "T".into(),
+            vec![
+                ColumnDefinition {
+                    name: "x".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+                ColumnDefinition {
+                    name: "y".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        );
         table.insert_row(vec![Value::Int64(1), Value::Int64(10)]).unwrap();
         table.insert_row(vec![Value::Int64(2), Value::Int64(20)]).unwrap();
 
@@ -557,9 +573,15 @@ mod tests {
 
     #[test]
     fn test_node_table_auto_node_group() {
-        let mut table = NodeTable::new(1, "T".into(), vec![
-            ColumnDefinition { name: "v".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
+        let mut table = NodeTable::new(
+            1,
+            "T".into(),
+            vec![ColumnDefinition {
+                name: "v".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+            }],
+        );
         // Insert NODE_GROUP_SIZE + 1 rows to force a second node group
         for i in 0..NODE_GROUP_SIZE as u64 + 1 {
             table.insert_row(vec![Value::Int64(i as i64)]).unwrap();
@@ -570,16 +592,33 @@ mod tests {
         assert_eq!(table.node_groups[1].num_nodes, 1);
         // Scan should still return all values
         assert_eq!(table.get_value(0, 0), Some(&Value::Int64(0)));
-        assert_eq!(table.get_value(NODE_GROUP_SIZE, 0), Some(&Value::Int64(NODE_GROUP_SIZE as i64)));
+        assert_eq!(
+            table.get_value(NODE_GROUP_SIZE, 0),
+            Some(&Value::Int64(NODE_GROUP_SIZE as i64))
+        );
     }
 
     // ==================== RelTable (CSR) tests ====================
 
     fn make_rel_table() -> RelTable {
-        RelTable::new(1, "Knows".into(), 0, 1, vec![
-            ColumnDefinition { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-            ColumnDefinition { name: "weight".into(), logical_type: LogicalTypeID::Double, is_primary_key: false },
-        ])
+        RelTable::new(
+            1,
+            "Knows".into(),
+            0,
+            1,
+            vec![
+                ColumnDefinition {
+                    name: "since".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+                ColumnDefinition {
+                    name: "weight".into(),
+                    logical_type: LogicalTypeID::Double,
+                    is_primary_key: false,
+                },
+            ],
+        )
     }
 
     #[test]
@@ -594,9 +633,12 @@ mod tests {
     #[test]
     fn test_rel_insert_basic() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
-        rel.insert_rel(0, 2, vec![Value::Int64(2021), Value::Double(0.8)]).unwrap();
-        rel.insert_rel(1, 0, vec![Value::Int64(2020), Value::Double(0.3)]).unwrap();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)])
+            .unwrap();
+        rel.insert_rel(0, 2, vec![Value::Int64(2021), Value::Double(0.8)])
+            .unwrap();
+        rel.insert_rel(1, 0, vec![Value::Int64(2020), Value::Double(0.3)])
+            .unwrap();
 
         assert_eq!(rel.num_rows, 3);
         assert_eq!(rel.edges.len(), 3);
@@ -616,8 +658,10 @@ mod tests {
     #[test]
     fn test_rel_reverse_adjacency() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 5, vec![Value::Int64(2022), Value::Double(1.0)]).unwrap();
-        rel.insert_rel(3, 5, vec![Value::Int64(2023), Value::Double(1.5)]).unwrap();
+        rel.insert_rel(0, 5, vec![Value::Int64(2022), Value::Double(1.0)])
+            .unwrap();
+        rel.insert_rel(3, 5, vec![Value::Int64(2023), Value::Double(1.5)])
+            .unwrap();
 
         // Node 5 has two incoming edges
         let rev = rel.scan_rev_adj_list(5);
@@ -629,8 +673,10 @@ mod tests {
     #[test]
     fn test_rel_get_edge_properties() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
-        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)]).unwrap();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)])
+            .unwrap();
+        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)])
+            .unwrap();
 
         let props0 = rel.get_edge_properties(0);
         assert_eq!(props0, vec![Value::Int64(2020), Value::Double(0.5)]);
@@ -642,8 +688,10 @@ mod tests {
     #[test]
     fn test_rel_get_outgoing_edges() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 10, vec![Value::Int64(2020), Value::Double(1.0)]).unwrap();
-        rel.insert_rel(0, 20, vec![Value::Int64(2021), Value::Double(2.0)]).unwrap();
+        rel.insert_rel(0, 10, vec![Value::Int64(2020), Value::Double(1.0)])
+            .unwrap();
+        rel.insert_rel(0, 20, vec![Value::Int64(2021), Value::Double(2.0)])
+            .unwrap();
 
         let outgoing = rel.get_outgoing_edges(0);
         assert_eq!(outgoing.len(), 2);
@@ -655,8 +703,10 @@ mod tests {
     #[test]
     fn test_rel_get_incoming_edges() {
         let mut rel = make_rel_table();
-        rel.insert_rel(10, 5, vec![Value::Int64(2020), Value::Double(1.0)]).unwrap();
-        rel.insert_rel(20, 5, vec![Value::Int64(2021), Value::Double(2.0)]).unwrap();
+        rel.insert_rel(10, 5, vec![Value::Int64(2020), Value::Double(1.0)])
+            .unwrap();
+        rel.insert_rel(20, 5, vec![Value::Int64(2021), Value::Double(2.0)])
+            .unwrap();
 
         let incoming = rel.get_incoming_edges(5);
         assert_eq!(incoming.len(), 2);
@@ -693,8 +743,10 @@ mod tests {
     #[test]
     fn test_rel_get_column() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(1.5)]).unwrap();
-        rel.insert_rel(1, 2, vec![Value::Int64(2021), Value::Double(2.5)]).unwrap();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(1.5)])
+            .unwrap();
+        rel.insert_rel(1, 2, vec![Value::Int64(2021), Value::Double(2.5)])
+            .unwrap();
 
         let since_col = rel.get_column(0).unwrap();
         assert_eq!(since_col, &[Value::Int64(2020), Value::Int64(2021)]);
@@ -706,8 +758,10 @@ mod tests {
     #[test]
     fn test_rel_to_column_major() {
         let mut rel = make_rel_table();
-        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)]).unwrap();
-        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)]).unwrap();
+        rel.insert_rel(0, 1, vec![Value::Int64(2020), Value::Double(0.5)])
+            .unwrap();
+        rel.insert_rel(2, 3, vec![Value::Int64(2021), Value::Double(0.9)])
+            .unwrap();
 
         let data = rel.to_column_major_data();
         assert_eq!(data.len(), 2);
@@ -720,14 +774,26 @@ mod tests {
     #[test]
     fn test_catalog_create_and_lookup() {
         let mut cat = TableCatalog::new();
-        let node_table = cat.create_node_table("Person".into(), vec![
-            ColumnDefinition { name: "id".into(), logical_type: LogicalTypeID::Int64, is_primary_key: true },
-        ]);
+        let node_table = cat.create_node_table(
+            "Person".into(),
+            vec![ColumnDefinition {
+                name: "id".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: true,
+            }],
+        );
         assert_eq!(node_table.table_id, 0);
 
-        let rel_table = cat.create_rel_table("Knows".into(), 0, 1, vec![
-            ColumnDefinition { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
-        ]);
+        let rel_table = cat.create_rel_table(
+            "Knows".into(),
+            0,
+            1,
+            vec![ColumnDefinition {
+                name: "since".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+            }],
+        );
         assert_eq!(rel_table.table_id, 1);
 
         assert!(cat.get_node_table(0).is_some());

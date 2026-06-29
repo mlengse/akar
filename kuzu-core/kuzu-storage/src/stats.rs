@@ -36,9 +36,7 @@ impl StatsStore {
     }
 
     pub fn get_column_stats(&self, table_id: u64, column_id: u32) -> Option<&ColumnStats> {
-        self.tables
-            .get(&table_id)
-            .and_then(|t| t.columns.get(&column_id))
+        self.tables.get(&table_id).and_then(|t| t.columns.get(&column_id))
     }
 
     pub fn update_table_stats(&mut self, table_id: u64, stats: TableStats) {

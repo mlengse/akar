@@ -128,55 +128,89 @@ pub enum Value {
 // --- From implementations for Value ---
 
 impl From<bool> for Value {
-    fn from(v: bool) -> Self { Value::Bool(v) }
+    fn from(v: bool) -> Self {
+        Value::Bool(v)
+    }
 }
 impl From<i64> for Value {
-    fn from(v: i64) -> Self { Value::Int64(v) }
+    fn from(v: i64) -> Self {
+        Value::Int64(v)
+    }
 }
 impl From<i32> for Value {
-    fn from(v: i32) -> Self { Value::Int32(v) }
+    fn from(v: i32) -> Self {
+        Value::Int32(v)
+    }
 }
 impl From<i16> for Value {
-    fn from(v: i16) -> Self { Value::Int16(v) }
+    fn from(v: i16) -> Self {
+        Value::Int16(v)
+    }
 }
 impl From<i8> for Value {
-    fn from(v: i8) -> Self { Value::Int8(v) }
+    fn from(v: i8) -> Self {
+        Value::Int8(v)
+    }
 }
 impl From<u64> for Value {
-    fn from(v: u64) -> Self { Value::UInt64(v) }
+    fn from(v: u64) -> Self {
+        Value::UInt64(v)
+    }
 }
 impl From<u32> for Value {
-    fn from(v: u32) -> Self { Value::UInt32(v) }
+    fn from(v: u32) -> Self {
+        Value::UInt32(v)
+    }
 }
 impl From<u16> for Value {
-    fn from(v: u16) -> Self { Value::UInt16(v) }
+    fn from(v: u16) -> Self {
+        Value::UInt16(v)
+    }
 }
 impl From<u8> for Value {
-    fn from(v: u8) -> Self { Value::UInt8(v) }
+    fn from(v: u8) -> Self {
+        Value::UInt8(v)
+    }
 }
 impl From<f64> for Value {
-    fn from(v: f64) -> Self { Value::Double(v) }
+    fn from(v: f64) -> Self {
+        Value::Double(v)
+    }
 }
 impl From<f32> for Value {
-    fn from(v: f32) -> Self { Value::Float(v) }
+    fn from(v: f32) -> Self {
+        Value::Float(v)
+    }
 }
 impl From<String> for Value {
-    fn from(v: String) -> Self { Value::String(v) }
+    fn from(v: String) -> Self {
+        Value::String(v)
+    }
 }
 impl From<&str> for Value {
-    fn from(v: &str) -> Self { Value::String(v.to_string()) }
+    fn from(v: &str) -> Self {
+        Value::String(v.to_string())
+    }
 }
 impl From<Date> for Value {
-    fn from(v: Date) -> Self { Value::Date(v) }
+    fn from(v: Date) -> Self {
+        Value::Date(v)
+    }
 }
 impl From<Timestamp> for Value {
-    fn from(v: Timestamp) -> Self { Value::Timestamp(v) }
+    fn from(v: Timestamp) -> Self {
+        Value::Timestamp(v)
+    }
 }
 impl From<Interval> for Value {
-    fn from(v: Interval) -> Self { Value::Interval(v) }
+    fn from(v: Interval) -> Self {
+        Value::Interval(v)
+    }
 }
 impl From<InternalID> for Value {
-    fn from(v: InternalID) -> Self { Value::InternalID(v) }
+    fn from(v: InternalID) -> Self {
+        Value::InternalID(v)
+    }
 }
 
 impl Value {
@@ -234,9 +268,12 @@ pub const fn physical_type_from_logical(logical: LogicalTypeID) -> PhysicalTypeI
         LogicalTypeID::Double => PhysicalTypeID::Double,
         LogicalTypeID::Float => PhysicalTypeID::Float,
         LogicalTypeID::Int128 | LogicalTypeID::Decimal => PhysicalTypeID::Int128,
-        LogicalTypeID::Date | LogicalTypeID::Timestamp
-            | LogicalTypeID::TimestampSec | LogicalTypeID::TimestampMs
-            | LogicalTypeID::TimestampNs | LogicalTypeID::TimestampTz => PhysicalTypeID::Int64,
+        LogicalTypeID::Date
+        | LogicalTypeID::Timestamp
+        | LogicalTypeID::TimestampSec
+        | LogicalTypeID::TimestampMs
+        | LogicalTypeID::TimestampNs
+        | LogicalTypeID::TimestampTz => PhysicalTypeID::Int64,
         LogicalTypeID::Interval => PhysicalTypeID::Interval,
         LogicalTypeID::String | LogicalTypeID::Blob | LogicalTypeID::Uuid => PhysicalTypeID::String,
         LogicalTypeID::InternalID => PhysicalTypeID::Struct,
@@ -285,7 +322,7 @@ mod tests {
         assert_eq!(Value::from(true), Value::Bool(true));
         assert_eq!(Value::from(42i64), Value::Int64(42));
         assert_eq!(Value::from(42i32), Value::Int32(42));
-        assert_eq!(Value::from(3.14f64), Value::Double(3.14));
+        assert_eq!(Value::from(std::f64::consts::PI), Value::Double(std::f64::consts::PI));
         assert_eq!(Value::from("hello"), Value::String("hello".into()));
         assert_eq!(Value::from(Date(100)), Value::Date(Date(100)));
     }
@@ -303,7 +340,10 @@ mod tests {
     fn test_physical_type_from_logical() {
         assert_eq!(physical_type_from_logical(LogicalTypeID::Bool), PhysicalTypeID::Bool);
         assert_eq!(physical_type_from_logical(LogicalTypeID::Int64), PhysicalTypeID::Int64);
-        assert_eq!(physical_type_from_logical(LogicalTypeID::String), PhysicalTypeID::String);
+        assert_eq!(
+            physical_type_from_logical(LogicalTypeID::String),
+            PhysicalTypeID::String
+        );
         assert_eq!(physical_type_from_logical(LogicalTypeID::Date), PhysicalTypeID::Int64);
         assert_eq!(physical_type_from_logical(LogicalTypeID::List), PhysicalTypeID::List);
     }
@@ -322,7 +362,10 @@ mod tests {
 
     #[test]
     fn test_internal_id() {
-        let id = InternalID { table_id: 5, offset: 100 };
+        let id = InternalID {
+            table_id: 5,
+            offset: 100,
+        };
         assert_eq!(id.table_id, 5);
         assert_eq!(id.offset, 100);
     }
@@ -337,7 +380,7 @@ mod tests {
     fn test_value_physical_type() {
         let v: Value = 42i64.into();
         assert_eq!(v.physical_type(), PhysicalTypeID::Int64);
-        let v: Value = 3.14f64.into();
+        let v: Value = std::f64::consts::PI.into();
         assert_eq!(v.physical_type(), PhysicalTypeID::Double);
         let v: Value = "test".into();
         assert_eq!(v.physical_type(), PhysicalTypeID::String);

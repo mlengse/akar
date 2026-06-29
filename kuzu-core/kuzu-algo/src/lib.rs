@@ -34,55 +34,59 @@ impl Extension for AlgoExtension {
         // Register table functions — all use `Custom` variant with algorithm name
         context.register_table_function(
             "page_rank",
-            TableFunction::Custom { name: "page_rank".into() },
+            TableFunction::Custom {
+                name: "page_rank".into(),
+            },
         );
         context.register_table_function(
             "pr",
-            TableFunction::Custom { name: "page_rank".into() },
+            TableFunction::Custom {
+                name: "page_rank".into(),
+            },
         );
         context.register_table_function(
             "weakly_connected_components",
             TableFunction::Custom { name: "wcc".into() },
         );
-        context.register_table_function(
-            "wcc",
-            TableFunction::Custom { name: "wcc".into() },
-        );
+        context.register_table_function("wcc", TableFunction::Custom { name: "wcc".into() });
         context.register_table_function(
             "strongly_connected_components",
-            TableFunction::Custom { name: "scc_tarjan".into() },
+            TableFunction::Custom {
+                name: "scc_tarjan".into(),
+            },
         );
         context.register_table_function(
             "scc",
-            TableFunction::Custom { name: "scc_tarjan".into() },
+            TableFunction::Custom {
+                name: "scc_tarjan".into(),
+            },
         );
         context.register_table_function(
             "strongly_connected_components_kosaraju",
-            TableFunction::Custom { name: "scc_kosaraju".into() },
+            TableFunction::Custom {
+                name: "scc_kosaraju".into(),
+            },
         );
         context.register_table_function(
             "scc_ko",
-            TableFunction::Custom { name: "scc_kosaraju".into() },
+            TableFunction::Custom {
+                name: "scc_kosaraju".into(),
+            },
         );
-        context.register_table_function(
-            "k_core_decomposition",
-            TableFunction::Custom { name: "k_core".into() },
-        );
-        context.register_table_function(
-            "kcore",
-            TableFunction::Custom { name: "k_core".into() },
-        );
-        context.register_table_function(
-            "louvain",
-            TableFunction::Custom { name: "louvain".into() },
-        );
+        context.register_table_function("k_core_decomposition", TableFunction::Custom { name: "k_core".into() });
+        context.register_table_function("kcore", TableFunction::Custom { name: "k_core".into() });
+        context.register_table_function("louvain", TableFunction::Custom { name: "louvain".into() });
         context.register_table_function(
             "spanning_forest",
-            TableFunction::Custom { name: "spanning_forest".into() },
+            TableFunction::Custom {
+                name: "spanning_forest".into(),
+            },
         );
         context.register_table_function(
             "sf",
-            TableFunction::Custom { name: "spanning_forest".into() },
+            TableFunction::Custom {
+                name: "spanning_forest".into(),
+            },
         );
 
         tracing::info!("ALGO extension loaded: 14 function registrations (7 algorithms + 7 aliases)");
@@ -187,8 +191,15 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
     for v in 0..n {
         if indices[v].is_none() {
             strongconnect(
-                v, csr, &mut index, &mut indices, &mut lowlink,
-                &mut on_stack, &mut stack, &mut component, &mut comp_id,
+                v,
+                csr,
+                &mut index,
+                &mut indices,
+                &mut lowlink,
+                &mut on_stack,
+                &mut stack,
+                &mut component,
+                &mut comp_id,
             );
         }
     }
@@ -242,13 +253,7 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     let mut comp_id = 0usize;
     let mut visited2 = vec![false; n];
 
-    fn dfs2(
-        v: usize,
-        rev_adj: &[Vec<usize>],
-        visited: &mut [bool],
-        component: &mut [usize],
-        comp_id: usize,
-    ) {
+    fn dfs2(v: usize, rev_adj: &[Vec<usize>], visited: &mut [bool], component: &mut [usize], comp_id: usize) {
         visited[v] = true;
         component[v] = comp_id;
         for &w in &rev_adj[v] {
@@ -285,7 +290,9 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
 
     loop {
         // Find min degree among active nodes
-        let min_deg = degree.iter().enumerate()
+        let min_deg = degree
+            .iter()
+            .enumerate()
             .filter(|&(i, _)| active[i])
             .map(|(_, &d)| d)
             .min();
@@ -331,7 +338,10 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
 pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     if n == 0 {
-        return AlgoResult { name: "louvain".into(), values: vec![] };
+        return AlgoResult {
+            name: "louvain".into(),
+            values: vec![],
+        };
     }
 
     // Total edge weight (count)
@@ -363,7 +373,8 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
 
         for v in 0..n {
             let current_comm = community[v];
-            let neighbors: Vec<usize> = csr.neighbors(v)
+            let neighbors: Vec<usize> = csr
+                .neighbors(v)
                 .iter()
                 .map(|(_, dst)| dst.offset as usize)
                 .filter(|&w| w < n)
@@ -381,7 +392,8 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
             let ki = degree[v];
 
             // Current modularity contribution
-            let sigma_tot = degree.iter()
+            let sigma_tot = degree
+                .iter()
                 .enumerate()
                 .filter(|&(i, _)| community[i] == current_comm)
                 .map(|(_, &d)| d)
@@ -397,7 +409,8 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
                 if comm == current_comm {
                     continue;
                 }
-                let sigma_tot2 = degree.iter()
+                let sigma_tot2 = degree
+                    .iter()
                     .enumerate()
                     .filter(|&(i, _)| community[i] == comm)
                     .map(|(_, &d)| d)
@@ -443,7 +456,10 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
 pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     if n == 0 {
-        return AlgoResult { name: "spanning_forest".into(), values: vec![] };
+        return AlgoResult {
+            name: "spanning_forest".into(),
+            values: vec![],
+        };
     }
 
     // Union-Find data structure
@@ -516,13 +532,48 @@ mod tests {
         //        |     |
         //        4--5--6
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 4, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 3, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 6, rel_id: 4, rel_table_id: 0 },
-            Edge { src_offset: 4, dst_offset: 5, rel_id: 5, rel_table_id: 0 },
-            Edge { src_offset: 5, dst_offset: 6, rel_id: 6, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 4,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 6,
+                rel_id: 4,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 4,
+                dst_offset: 5,
+                rel_id: 5,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 5,
+                dst_offset: 6,
+                rel_id: 6,
+                rel_table_id: 0,
+            },
         ];
         CSRAdjacency::build(&edges, 7)
     }
@@ -530,8 +581,18 @@ mod tests {
     fn disconnected_csr() -> CSRAdjacency {
         // Two components: 0--1  and  2--3
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 1, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
         ];
         CSRAdjacency::build(&edges, 4)
     }

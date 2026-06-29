@@ -25,9 +25,9 @@ impl Extension for SqliteExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
         #[allow(unused_imports)]
         use kuzu_function::Value;
+        use kuzu_function::registry::{ScalarFunction, TableFunction};
 
         // sqlite_query(path: String, sql: String) → executes SQL against SQLite DB
         #[cfg(feature = "bundled")]
@@ -45,22 +45,19 @@ impl Extension for SqliteExtension {
                     _ => return Err("sqlite_query: second argument must be a SQL string".into()),
                 };
 
-                let conn = rusqlite::Connection::open(&path)
-                    .map_err(|e| format!("Failed to open SQLite DB '{path}': {e}"))?;
+                let conn =
+                    rusqlite::Connection::open(&path).map_err(|e| format!("Failed to open SQLite DB '{path}': {e}"))?;
 
-                let mut stmt = conn.prepare(&sql)
-                    .map_err(|e| format!("SQLite prepare error: {e}"))?;
+                let mut stmt = conn.prepare(&sql).map_err(|e| format!("SQLite prepare error: {e}"))?;
 
                 let col_count = stmt.column_count();
-                let mut rows = stmt.query([])
-                    .map_err(|e| format!("SQLite query error: {e}"))?;
+                let mut rows = stmt.query([]).map_err(|e| format!("SQLite query error: {e}"))?;
 
                 // Collect first row as string result
                 if let Some(row) = rows.next().map_err(|e| format!("SQLite row error: {e}"))? {
                     let mut parts = Vec::with_capacity(col_count);
                     for i in 0..col_count {
-                        let val: String = row.get::<_, String>(i)
-                            .unwrap_or_else(|_| "NULL".into());
+                        let val: String = row.get::<_, String>(i).unwrap_or_else(|_| "NULL".into());
                         parts.push(val);
                     }
                     Ok(Value::String(parts.join(",")))

@@ -6,15 +6,13 @@
 //! If no path is given, runs in `:memory:` mode.
 //! Supports reading SQL/Cypher statements from stdin.
 
-use kuzu_main::{Database, Connection, SystemConfig};
+use kuzu_main::{Connection, Database, SystemConfig};
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
 fn main() {
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::WARN)
-        .init();
+    tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 
     // Parse arguments
     let args: Vec<String> = std::env::args().collect();
@@ -89,9 +87,7 @@ fn run_repl(conn: &Connection, output: &mut dyn Write) {
                     // Print data chunks in a simple tabular format
                     for chunk in &result.chunks {
                         for row in 0..chunk.size {
-                            let vals: Vec<String> = chunk.fields.iter()
-                                .map(|v| format_value(v, row))
-                                .collect();
+                            let vals: Vec<String> = chunk.fields.iter().map(|v| format_value(v, row)).collect();
                             writeln!(output, "| {} |", vals.join(" | ")).ok();
                         }
                     }
@@ -152,16 +148,11 @@ fn format_value(v: &kuzu_common::vector::ValueVector, row: usize) -> String {
     match v.physical_type() {
         kuzu_common::types::PhysicalTypeID::Int64
         | kuzu_common::types::PhysicalTypeID::Int32
-        | kuzu_common::types::PhysicalTypeID::Int16 => {
-            v.get_i64(row).map_or("NULL".into(), |n| n.to_string())
-        }
-        kuzu_common::types::PhysicalTypeID::Double
-        | kuzu_common::types::PhysicalTypeID::Float => {
+        | kuzu_common::types::PhysicalTypeID::Int16 => v.get_i64(row).map_or("NULL".into(), |n| n.to_string()),
+        kuzu_common::types::PhysicalTypeID::Double | kuzu_common::types::PhysicalTypeID::Float => {
             v.get_double(row).map_or("NULL".into(), |n| format!("{:.4}", n))
         }
-        kuzu_common::types::PhysicalTypeID::Bool => {
-            v.get_bool(row).map_or("NULL".into(), |b| b.to_string())
-        }
+        kuzu_common::types::PhysicalTypeID::Bool => v.get_bool(row).map_or("NULL".into(), |b| b.to_string()),
         _ => format!("<{:?}>", v.physical_type()),
     }
 }

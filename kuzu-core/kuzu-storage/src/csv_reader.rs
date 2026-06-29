@@ -45,10 +45,7 @@ impl CsvReaderConfig {
     pub fn from_options(options: &HashMap<String, String>) -> Self {
         let mut config = Self::default();
 
-        if let Some(d) = options
-            .get("HEADER")
-            .or_else(|| options.get("header"))
-        {
+        if let Some(d) = options.get("HEADER").or_else(|| options.get("header")) {
             config.has_header = d.eq_ignore_ascii_case("true");
         }
 
@@ -62,28 +59,19 @@ impl CsvReaderConfig {
             }
         }
 
-        if let Some(q) = options
-            .get("QUOTE")
-            .or_else(|| options.get("quote"))
-        {
+        if let Some(q) = options.get("QUOTE").or_else(|| options.get("quote")) {
             if let Some(c) = q.chars().next() {
                 config.quote = c as u8;
             }
         }
 
-        if let Some(e) = options
-            .get("ESCAPE")
-            .or_else(|| options.get("escape"))
-        {
+        if let Some(e) = options.get("ESCAPE").or_else(|| options.get("escape")) {
             if let Some(c) = e.chars().next() {
                 config.escape = c as u8;
             }
         }
 
-        if let Some(n) = options
-            .get("NULL")
-            .or_else(|| options.get("null"))
-        {
+        if let Some(n) = options.get("NULL").or_else(|| options.get("null")) {
             config.null_str = n.clone();
         }
 
@@ -132,11 +120,7 @@ impl std::fmt::Display for CsvReaderError {
                 "Type coercion error at line {line}, column {column} ('{column_name}'): \
                  cannot coerce '{value}' to {expected_type}: {message}"
             ),
-            CsvReaderError::ColumnCountMismatch {
-                line,
-                expected,
-                actual,
-            } => write!(
+            CsvReaderError::ColumnCountMismatch { line, expected, actual } => write!(
                 f,
                 "Column count mismatch at line {line}: expected {expected} columns, got {actual}"
             ),
@@ -166,11 +150,7 @@ pub type CsvResult<T> = Result<T, CsvReaderError>;
 ///
 /// Returns `CsvReaderError` on I/O errors, CSV parse errors, column count
 /// mismatches, or type coercion failures.
-pub fn read_csv(
-    path: &Path,
-    columns: &[CatalogColumn],
-    config: &CsvReaderConfig,
-) -> CsvResult<Vec<Vec<Value>>> {
+pub fn read_csv(path: &Path, columns: &[CatalogColumn], config: &CsvReaderConfig) -> CsvResult<Vec<Vec<Value>>> {
     let file = std::fs::File::open(path).map_err(CsvReaderError::IoError)?;
     let mut reader = std::io::BufReader::new(file);
 
@@ -179,7 +159,7 @@ pub fn read_csv(
         .has_headers(config.has_header)
         .quote(config.quote)
         .escape(Some(config.escape))
-.flexible(true)
+        .flexible(true)
         .from_reader(&mut reader);
 
     // Get header / column names
@@ -207,8 +187,7 @@ pub fn read_csv(
     let mut line_number: usize = if config.has_header { 2 } else { 1 };
 
     for result in raw_reader.records() {
-        let record =
-            result.map_err(|e| CsvReaderError::CsvError(format!("Line {line_number}: {e}")))?;
+        let record = result.map_err(|e| CsvReaderError::CsvError(format!("Line {line_number}: {e}")))?;
 
         if record.len() != columns.len() {
             return Err(CsvReaderError::ColumnCountMismatch {
@@ -221,8 +200,7 @@ pub fn read_csv(
         let mut row = Vec::with_capacity(columns.len());
         for (col_idx, field) in record.iter().enumerate() {
             let col = &columns[col_idx];
-            let value =
-                coerce_string_to_value(field, col.logical_type, line_number, col_idx, &col.name)?;
+            let value = coerce_string_to_value(field, col.logical_type, line_number, col_idx, &col.name)?;
             row.push(value);
         }
 
@@ -253,46 +231,20 @@ fn coerce_string_to_value(
     match target_type {
         LogicalTypeID::Bool => coerce_bool(trimmed, line, column, column_name),
         LogicalTypeID::Int64 | LogicalTypeID::Serial => {
-            coerce_parse(trimmed, line, column, column_name, "INT64")
-                .map(Value::Int64)
+            coerce_parse(trimmed, line, column, column_name, "INT64").map(Value::Int64)
         }
-        LogicalTypeID::Int32 => {
-            coerce_parse(trimmed, line, column, column_name, "INT32")
-                .map(Value::Int32)
-        }
-        LogicalTypeID::Int16 => {
-            coerce_parse(trimmed, line, column, column_name, "INT16")
-                .map(Value::Int16)
-        }
-        LogicalTypeID::Int8 => {
-            coerce_parse(trimmed, line, column, column_name, "INT8").map(Value::Int8)
-        }
-        LogicalTypeID::UInt64 => {
-            coerce_parse(trimmed, line, column, column_name, "UINT64")
-                .map(Value::UInt64)
-        }
-        LogicalTypeID::UInt32 => {
-            coerce_parse(trimmed, line, column, column_name, "UINT32")
-                .map(Value::UInt32)
-        }
-        LogicalTypeID::UInt16 => {
-            coerce_parse(trimmed, line, column, column_name, "UINT16")
-                .map(Value::UInt16)
-        }
-        LogicalTypeID::UInt8 => {
-            coerce_parse(trimmed, line, column, column_name, "UINT8").map(Value::UInt8)
-        }
-        LogicalTypeID::Double => {
-            coerce_parse::<f64>(trimmed, line, column, column_name, "DOUBLE").map(Value::Double)
-        }
-        LogicalTypeID::Float => {
-            coerce_parse::<f32>(trimmed, line, column, column_name, "FLOAT").map(Value::Float)
-        }
+        LogicalTypeID::Int32 => coerce_parse(trimmed, line, column, column_name, "INT32").map(Value::Int32),
+        LogicalTypeID::Int16 => coerce_parse(trimmed, line, column, column_name, "INT16").map(Value::Int16),
+        LogicalTypeID::Int8 => coerce_parse(trimmed, line, column, column_name, "INT8").map(Value::Int8),
+        LogicalTypeID::UInt64 => coerce_parse(trimmed, line, column, column_name, "UINT64").map(Value::UInt64),
+        LogicalTypeID::UInt32 => coerce_parse(trimmed, line, column, column_name, "UINT32").map(Value::UInt32),
+        LogicalTypeID::UInt16 => coerce_parse(trimmed, line, column, column_name, "UINT16").map(Value::UInt16),
+        LogicalTypeID::UInt8 => coerce_parse(trimmed, line, column, column_name, "UINT8").map(Value::UInt8),
+        LogicalTypeID::Double => coerce_parse::<f64>(trimmed, line, column, column_name, "DOUBLE").map(Value::Double),
+        LogicalTypeID::Float => coerce_parse::<f32>(trimmed, line, column, column_name, "FLOAT").map(Value::Float),
         LogicalTypeID::String => Ok(Value::String(trimmed.to_string())),
         LogicalTypeID::Date => coerce_date(trimmed, line, column, column_name),
-        LogicalTypeID::Timestamp | LogicalTypeID::TimestampMs => {
-            coerce_timestamp(trimmed, line, column, column_name)
-        }
+        LogicalTypeID::Timestamp | LogicalTypeID::TimestampMs => coerce_timestamp(trimmed, line, column, column_name),
         LogicalTypeID::TimestampSec => coerce_timestamp_sec(trimmed, line, column, column_name),
         LogicalTypeID::TimestampNs => coerce_timestamp_ns(trimmed, line, column, column_name),
         LogicalTypeID::TimestampTz => coerce_timestamp_tz(trimmed, line, column, column_name),
@@ -300,21 +252,14 @@ fn coerce_string_to_value(
         LogicalTypeID::Blob => Ok(Value::Blob(parse_blob(trimmed))),
         LogicalTypeID::List => Ok(Value::List(parse_list(trimmed))),
         LogicalTypeID::Map => Ok(Value::Map(parse_map(trimmed))),
-        LogicalTypeID::Struct | LogicalTypeID::Node | LogicalTypeID::Rel => {
-            Ok(Value::Struct(parse_struct(trimmed)))
-        }
+        LogicalTypeID::Struct | LogicalTypeID::Node | LogicalTypeID::Rel => Ok(Value::Struct(parse_struct(trimmed))),
         // Fallback: keep as string
         _ => Ok(Value::String(trimmed.to_string())),
     }
 }
 
 /// Coerce a string to a boolean.
-fn coerce_bool(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_bool(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     match s.to_lowercase().as_str() {
         "true" | "1" | "yes" | "t" => Ok(Value::Bool(true)),
         "false" | "0" | "no" | "f" => Ok(Value::Bool(false)),
@@ -337,116 +282,120 @@ fn coerce_parse<T: std::str::FromStr>(
     column_name: &str,
     type_name: &str,
 ) -> CsvResult<T> {
-    s.parse::<T>()
-        .map_err(|_| CsvReaderError::TypeCoercion {
-            line,
-            column,
-            column_name: column_name.to_string(),
-            value: s.to_string(),
-            expected_type: type_name.to_string(),
-            message: format!("cannot parse '{s}' as {type_name}"),
-        })
+    s.parse::<T>().map_err(|_| CsvReaderError::TypeCoercion {
+        line,
+        column,
+        column_name: column_name.to_string(),
+        value: s.to_string(),
+        expected_type: type_name.to_string(),
+        message: format!("cannot parse '{s}' as {type_name}"),
+    })
 }
 
 /// Parse a date string in `YYYY-MM-DD` format.
-fn coerce_date(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_date(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     // Accept formats: YYYY-MM-DD or YYYY-M-D
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 3 {
-        return Err(coercion_err(s, line, column, column_name, "DATE",
-            "expected YYYY-MM-DD format"));
+        return Err(coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "DATE",
+            "expected YYYY-MM-DD format",
+        ));
     }
-    let year: i32 = parts[0].parse().map_err(|_| {
-        coercion_err(s, line, column, column_name, "DATE", "invalid year")
-    })?;
-    let month: u32 = parts[1].parse().map_err(|_| {
-        coercion_err(s, line, column, column_name, "DATE", "invalid month")
-    })?;
-    let day: u32 = parts[2].parse().map_err(|_| {
-        coercion_err(s, line, column, column_name, "DATE", "invalid day")
-    })?;
+    let year: i32 = parts[0]
+        .parse()
+        .map_err(|_| coercion_err(s, line, column, column_name, "DATE", "invalid year"))?;
+    let month: u32 = parts[1]
+        .parse()
+        .map_err(|_| coercion_err(s, line, column, column_name, "DATE", "invalid month"))?;
+    let day: u32 = parts[2]
+        .parse()
+        .map_err(|_| coercion_err(s, line, column, column_name, "DATE", "invalid day"))?;
 
     // Simple days-since-epoch calculation (from 1970-01-01)
-    let days = naive_date_to_epoch_days(year, month, day).ok_or_else(|| {
-        coercion_err(s, line, column, column_name, "DATE", "invalid calendar date")
-    })?;
+    let days = naive_date_to_epoch_days(year, month, day)
+        .ok_or_else(|| coercion_err(s, line, column, column_name, "DATE", "invalid calendar date"))?;
 
     Ok(Value::Date(Date::from_days_since_epoch(days)))
 }
 
 /// Parse a timestamp string in `YYYY-MM-DD HH:MM:SS[.fraction]` format.
-fn coerce_timestamp(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_timestamp(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     let ts = parse_timestamp_micros(s).ok_or_else(|| {
-        coercion_err(s, line, column, column_name, "TIMESTAMP",
-            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format")
+        coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "TIMESTAMP",
+            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format",
+        )
     })?;
     Ok(Value::Timestamp(Timestamp::from_micros_since_epoch(ts)))
 }
 
 /// Parse a timestamp in seconds resolution.
-fn coerce_timestamp_sec(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_timestamp_sec(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     let micros = parse_timestamp_micros(s).ok_or_else(|| {
-        coercion_err(s, line, column, column_name, "TIMESTAMP_SEC",
-            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format")
+        coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "TIMESTAMP_SEC",
+            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format",
+        )
     })?;
     Ok(Value::TimestampSec(Timestamp(micros / 1_000_000)))
 }
 
 /// Parse a timestamp in nanoseconds resolution.
-fn coerce_timestamp_ns(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_timestamp_ns(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     let micros = parse_timestamp_micros(s).ok_or_else(|| {
-        coercion_err(s, line, column, column_name, "TIMESTAMP_NS",
-            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format")
+        coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "TIMESTAMP_NS",
+            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format",
+        )
     })?;
     // Convert micros to nanos (multiply by 1000)
     Ok(Value::TimestampNs(Timestamp(micros * 1000)))
 }
 
 /// Parse a timestamp with timezone.
-fn coerce_timestamp_tz(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_timestamp_tz(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     let micros = parse_timestamp_micros(s).ok_or_else(|| {
-        coercion_err(s, line, column, column_name, "TIMESTAMP_TZ",
-            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format")
+        coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "TIMESTAMP_TZ",
+            "expected YYYY-MM-DD HH:MM:SS[.ffffff] format",
+        )
     })?;
     Ok(Value::TimestampTz(kuzu_common::types::TimestampTZ(micros)))
 }
 
 /// Parse an interval string like "1 year 2 months 3 days 4 hours 5 minutes 6 seconds".
-fn coerce_interval(
-    s: &str,
-    line: usize,
-    column: usize,
-    column_name: &str,
-) -> CsvResult<Value> {
+fn coerce_interval(s: &str, line: usize, column: usize, column_name: &str) -> CsvResult<Value> {
     match parse_interval_str(s) {
         Some(iv) => Ok(Value::Interval(iv)),
-        None => Err(coercion_err(s, line, column, column_name, "INTERVAL",
-            "expected duration format (e.g. '1 year 2 months 3 days 4 hours 5 minutes 6 seconds')")),
+        None => Err(coercion_err(
+            s,
+            line,
+            column,
+            column_name,
+            "INTERVAL",
+            "expected duration format (e.g. '1 year 2 months 3 days 4 hours 5 minutes 6 seconds')",
+        )),
     }
 }
 
@@ -847,12 +796,7 @@ fn split_top_level(s: &str, delimiter: char) -> Vec<String> {
                 depth_paren -= 1;
                 current.push(ch);
             }
-            c if c == delimiter
-                && !in_quotes
-                && depth_brace == 0
-                && depth_bracket == 0
-                && depth_paren == 0 =>
-            {
+            c if c == delimiter && !in_quotes && depth_brace == 0 && depth_bracket == 0 && depth_paren == 0 => {
                 parts.push(current.trim().to_string());
                 current = String::new();
             }
@@ -921,11 +865,7 @@ mod tests {
     fn test_read_csv_no_header() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("noheader.csv");
-        std::fs::write(
-            &csv_path,
-            "Charlie,40,91.2,true\nDiana,22,88.1,false\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "Charlie,40,91.2,true\nDiana,22,88.1,false\n").unwrap();
 
         let config = CsvReaderConfig {
             has_header: false,
@@ -941,11 +881,7 @@ mod tests {
     fn test_read_csv_custom_delimiter() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("pipes.csv");
-        std::fs::write(
-            &csv_path,
-            "name|age|score|active\nEve|35|77.5|true\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name|age|score|active\nEve|35|77.5|true\n").unwrap();
 
         let config = CsvReaderConfig {
             delimiter: b'|',
@@ -961,11 +897,7 @@ mod tests {
     fn test_read_csv_quoted_fields() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("quoted.csv");
-        std::fs::write(
-            &csv_path,
-            "name,age,score,active\n\"Frank, Jr.\",28,99.9,true\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name,age,score,active\n\"Frank, Jr.\",28,99.9,true\n").unwrap();
 
         let config = CsvReaderConfig::default();
         let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
@@ -977,11 +909,7 @@ mod tests {
     fn test_read_csv_null_values() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("nulls.csv");
-        std::fs::write(
-            &csv_path,
-            "name,age,score,active\nGrace,,,\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name,age,score,active\nGrace,,,\n").unwrap();
 
         let config = CsvReaderConfig::default();
         let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
@@ -996,11 +924,7 @@ mod tests {
     fn test_read_csv_column_count_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("bad_cols.csv");
-        std::fs::write(
-            &csv_path,
-            "name,age,score,active\nAlice,30\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name,age,score,active\nAlice,30\n").unwrap();
 
         let config = CsvReaderConfig::default();
         let result = read_csv(&csv_path, &test_schema(), &config);
@@ -1019,11 +943,7 @@ mod tests {
     fn test_read_csv_type_coercion_error() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("bad_type.csv");
-        std::fs::write(
-            &csv_path,
-            "name,age,score,active\nAlice,not_a_number,95.5,true\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name,age,score,active\nAlice,not_a_number,95.5,true\n").unwrap();
 
         let config = CsvReaderConfig::default();
         let result = read_csv(&csv_path, &test_schema(), &config);
@@ -1188,11 +1108,7 @@ mod tests {
     fn test_read_csv_blob() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("blobs.csv");
-        std::fs::write(
-            &csv_path,
-            "name,data\nBlob1,\\xAA\\xBB\\xCC\\xDD\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "name,data\nBlob1,\\xAA\\xBB\\xCC\\xDD\n").unwrap();
 
         let schema = vec![
             CatalogColumn {
@@ -1223,11 +1139,7 @@ mod tests {
     fn test_read_csv_uint_types() {
         let dir = tempfile::tempdir().unwrap();
         let csv_path = dir.path().join("uints.csv");
-        std::fs::write(
-            &csv_path,
-            "small,medium,large\n100,1000,100000\n",
-        )
-        .unwrap();
+        std::fs::write(&csv_path, "small,medium,large\n100,1000,100000\n").unwrap();
 
         let schema = vec![
             CatalogColumn {

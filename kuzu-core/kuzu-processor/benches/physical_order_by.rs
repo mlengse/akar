@@ -1,6 +1,6 @@
 //! PhysicalOrderBy throughput benchmarks — single-key vs multi-key sorting.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_processor::physical_operator::{PhysicalOperatorExec, PhysicalOrderBy};
@@ -33,8 +33,7 @@ fn make_multi_col_chunk(keys: &[i64], labels: &[&str], scores: &[f64]) -> DataCh
         let len = bytes.len().min(15) as u8;
         let offset = i * 16;
         c1.data_mut()[offset] = len;
-        c1.data_mut()[offset + 1..offset + 1 + bytes.len().min(15)]
-            .copy_from_slice(&bytes[..bytes.len().min(15)]);
+        c1.data_mut()[offset + 1..offset + 1 + bytes.len().min(15)].copy_from_slice(&bytes[..bytes.len().min(15)]);
         c1.set_null(i, false);
     }
     // Column 2: Double
@@ -60,7 +59,9 @@ fn shuffled(n: usize) -> Vec<i64> {
 }
 
 fn bench_order_by_single_key_100(c: &mut Criterion) {
-    let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+    let order = PhysicalOrderBy {
+        sort_keys: vec![(0, true)],
+    };
     let vals = shuffled(100);
     let chunk = make_i64_chunk(&vals);
     c.bench_function("order_by/single_key_100", |b| {
@@ -72,7 +73,9 @@ fn bench_order_by_single_key_100(c: &mut Criterion) {
 }
 
 fn bench_order_by_single_key_1k(c: &mut Criterion) {
-    let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+    let order = PhysicalOrderBy {
+        sort_keys: vec![(0, true)],
+    };
     let vals = shuffled(1_000);
     let chunk = make_i64_chunk(&vals);
     c.bench_function("order_by/single_key_1k", |b| {
@@ -84,7 +87,9 @@ fn bench_order_by_single_key_1k(c: &mut Criterion) {
 }
 
 fn bench_order_by_single_key_10k(c: &mut Criterion) {
-    let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+    let order = PhysicalOrderBy {
+        sort_keys: vec![(0, true)],
+    };
     let vals = shuffled(10_000);
     let chunk = make_i64_chunk(&vals);
     c.bench_function("order_by/single_key_10k", |b| {
@@ -96,17 +101,19 @@ fn bench_order_by_single_key_10k(c: &mut Criterion) {
 }
 
 fn bench_order_by_multi_key(c: &mut Criterion) {
-    let order = PhysicalOrderBy { sort_keys: vec![(0, true), (2, false)] };
+    let order = PhysicalOrderBy {
+        sort_keys: vec![(0, true), (2, false)],
+    };
     let n = 1_000;
     let keys = shuffled(n);
-    let labels: Vec<&str> = (0..n).map(|i| {
-        match i % 4 {
+    let labels: Vec<&str> = (0..n)
+        .map(|i| match i % 4 {
             0 => "alpha",
             1 => "beta",
             2 => "gamma",
             _ => "delta",
-        }
-    }).collect();
+        })
+        .collect();
     let scores: Vec<f64> = (0..n).map(|i| (n - i) as f64 * 0.5).collect();
     let chunk = make_multi_col_chunk(&keys, &labels, &scores);
     c.bench_function("order_by/multi_key_1k", |b| {
@@ -118,7 +125,9 @@ fn bench_order_by_multi_key(c: &mut Criterion) {
 }
 
 fn bench_order_by_descending(c: &mut Criterion) {
-    let order = PhysicalOrderBy { sort_keys: vec![(0, false)] };
+    let order = PhysicalOrderBy {
+        sort_keys: vec![(0, false)],
+    };
     let vals = shuffled(1_000);
     let chunk = make_i64_chunk(&vals);
     c.bench_function("order_by/descending_1k", |b| {

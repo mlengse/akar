@@ -32,21 +32,24 @@ impl Extension for FtsExtension {
         // Register scalar functions
         context.register_scalar_function(
             "stem",
-            ScalarFunction::String { op: StringOp::Substring },
+            ScalarFunction::String {
+                op: StringOp::Substring,
+            },
         );
-        context.register_scalar_function(
-            "tokenize",
-            ScalarFunction::String { op: StringOp::Contains },
-        );
+        context.register_scalar_function("tokenize", ScalarFunction::String { op: StringOp::Contains });
 
         // Register table functions
         context.register_table_function(
             "create_fts_index",
-            TableFunction::ScanJson { path: "fts_index".into() },
+            TableFunction::ScanJson {
+                path: "fts_index".into(),
+            },
         );
         context.register_table_function(
             "query_fts_index",
-            TableFunction::ScanJson { path: "fts_query".into() },
+            TableFunction::ScanJson {
+                path: "fts_query".into(),
+            },
         );
 
         tracing::info!("FTS extension loaded: 4 functions registered");
@@ -174,17 +177,11 @@ fn handle_double_consonant(stem: &str) -> String {
 /// Splits on whitespace and punctuation, lowercases all tokens.
 pub fn tokenize(text: &str) -> Vec<String> {
     let re = regex::Regex::new(r"[a-zA-Z0-9]+([''][a-zA-Z]+)?").unwrap();
-    re.find_iter(text)
-        .map(|m| m.as_str().to_lowercase())
-        .collect()
+    re.find_iter(text).map(|m| m.as_str().to_lowercase()).collect()
 }
 
 /// Compute TF-IDF score for a term in a document.
-pub fn tf_idf(
-    term_freq: f64,
-    doc_count: usize,
-    total_docs: usize,
-) -> f64 {
+pub fn tf_idf(term_freq: f64, doc_count: usize, total_docs: usize) -> f64 {
     if total_docs == 0 || doc_count == 0 {
         return 0.0;
     }
@@ -212,25 +209,20 @@ pub fn bm25(
 
 /// Common English stop words to filter out during indexing.
 pub const STOP_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
-    "for", "of", "by", "with", "from", "as", "is", "was", "are",
-    "were", "be", "been", "being", "have", "has", "had", "do",
-    "does", "did", "will", "would", "can", "could", "shall",
-    "should", "may", "might", "must", "not", "no", "nor", "none",
-    "i", "you", "he", "she", "it", "we", "they", "me", "him",
-    "her", "us", "them", "my", "your", "his", "its", "our",
-    "their", "this", "that", "these", "those", "what", "which",
-    "who", "whom", "whose", "when", "where", "why", "how",
-    "all", "each", "every", "both", "few", "more", "most",
-    "some", "any", "such", "only", "own", "same", "so", "than",
-    "too", "very", "just", "about", "above", "after", "again",
-    "against", "below", "between", "into", "through", "during",
-    "before", "after", "then", "once", "here", "there",
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "by", "with", "from", "as", "is", "was",
+    "are", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
+    "shall", "should", "may", "might", "must", "not", "no", "nor", "none", "i", "you", "he", "she", "it", "we", "they",
+    "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+    "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "all", "each", "every", "both", "few",
+    "more", "most", "some", "any", "such", "only", "own", "same", "so", "than", "too", "very", "just", "about",
+    "above", "after", "again", "against", "below", "between", "into", "through", "during", "before", "after", "then",
+    "once", "here", "there",
 ];
 
 /// Filter stop words from a list of tokens.
 pub fn remove_stop_words(tokens: Vec<String>) -> Vec<String> {
-    tokens.into_iter()
+    tokens
+        .into_iter()
         .filter(|t| !STOP_WORDS.contains(&t.as_str()))
         .collect()
 }
@@ -301,8 +293,10 @@ mod tests {
     #[test]
     fn test_remove_stop_words() {
         let tokens = vec![
-            "the".to_string(), "quick".to_string(),
-            "brown".to_string(), "fox".to_string(),
+            "the".to_string(),
+            "quick".to_string(),
+            "brown".to_string(),
+            "fox".to_string(),
         ];
         let filtered = remove_stop_words(tokens);
         assert_eq!(filtered, vec!["quick", "brown", "fox"]);

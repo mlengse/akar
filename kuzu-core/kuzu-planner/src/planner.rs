@@ -109,9 +109,7 @@ impl QueryPlanner {
                         }
                     }
                     // Mark as optional by appending an OptionalMatch marker
-                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch {
-                        cardinality: 0,
-                    }));
+                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch { cardinality: 0 }));
                 }
                 BoundClause::BoundDelete(d) => {
                     delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
@@ -205,13 +203,30 @@ mod tests {
         catalog.create_node_table(
             "Person".into(),
             vec![
-                CatalogColumn { name: "name".into(), logical_type: LogicalTypeID::String, is_primary_key: true, default_value: None },
-                CatalogColumn { name: "age".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None },
+                CatalogColumn {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                    default_value: None,
+                },
+                CatalogColumn {
+                    name: "age".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                    default_value: None,
+                },
             ],
         );
         catalog.create_rel_table(
-            "Knows".into(), 0, 0,
-            vec![CatalogColumn { name: "since".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None }],
+            "Knows".into(),
+            0,
+            0,
+            vec![CatalogColumn {
+                name: "since".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            }],
         );
         Binder::new(Arc::new(std::sync::Mutex::new(catalog)))
     }
@@ -227,8 +242,14 @@ mod tests {
         assert!(!plan.is_empty());
 
         // Should have ScanNode + Projection
-        let scan_count = plan.iter().filter(|op| matches!(op, LogicalOperator::ScanNode(_))).count();
-        let proj_count = plan.iter().filter(|op| matches!(op, LogicalOperator::Projection(_))).count();
+        let scan_count = plan
+            .iter()
+            .filter(|op| matches!(op, LogicalOperator::ScanNode(_)))
+            .count();
+        let proj_count = plan
+            .iter()
+            .filter(|op| matches!(op, LogicalOperator::Projection(_)))
+            .count();
         assert_eq!(scan_count, 1);
         assert_eq!(proj_count, 1);
     }
@@ -243,9 +264,18 @@ mod tests {
         let plan = planner.plan(bound).unwrap();
         assert!(!plan.is_empty());
 
-        let scan_count = plan.iter().filter(|op| matches!(op, LogicalOperator::ScanNode(_))).count();
-        let filter_count = plan.iter().filter(|op| matches!(op, LogicalOperator::Filter(_))).count();
-        let proj_count = plan.iter().filter(|op| matches!(op, LogicalOperator::Projection(_))).count();
+        let scan_count = plan
+            .iter()
+            .filter(|op| matches!(op, LogicalOperator::ScanNode(_)))
+            .count();
+        let filter_count = plan
+            .iter()
+            .filter(|op| matches!(op, LogicalOperator::Filter(_)))
+            .count();
+        let proj_count = plan
+            .iter()
+            .filter(|op| matches!(op, LogicalOperator::Projection(_)))
+            .count();
         assert_eq!(scan_count, 1);
         assert_eq!(filter_count, 1);
         assert_eq!(proj_count, 1);
@@ -302,12 +332,15 @@ mod tests {
         let plan = planner.plan(bound).unwrap();
 
         // Order should be: scans → filter → projection
-        let positions: Vec<&str> = plan.iter().map(|op| match op {
-            LogicalOperator::ScanNode(_) => "scan",
-            LogicalOperator::Filter(_) => "filter",
-            LogicalOperator::Projection(_) => "proj",
-            _ => "other",
-        }).collect();
+        let positions: Vec<&str> = plan
+            .iter()
+            .map(|op| match op {
+                LogicalOperator::ScanNode(_) => "scan",
+                LogicalOperator::Filter(_) => "filter",
+                LogicalOperator::Projection(_) => "proj",
+                _ => "other",
+            })
+            .collect();
 
         let scan_pos = positions.iter().position(|&p| p == "scan").unwrap();
         let filter_pos = positions.iter().position(|&p| p == "filter").unwrap();

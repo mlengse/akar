@@ -71,9 +71,7 @@ pub struct FileHandle {
 impl FileHandle {
     pub fn new(path: PathBuf, page_size: usize) -> Self {
         let num_pages = if path.exists() {
-            let len = std::fs::metadata(&path)
-                .map(|m| m.len())
-                .unwrap_or(0);
+            let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             len / page_size as u64
         } else {
             0

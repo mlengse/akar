@@ -46,7 +46,9 @@ impl Extension for AzureExtension {
                     // Validate URI scheme
                     let upper = path.to_uppercase();
                     if !upper.starts_with("AZ://") && !upper.starts_with("ABFSS://") {
-                        return Err(format!("azure_scan: path must start with az:// or abfss://, got: {path}"));
+                        return Err(format!(
+                            "azure_scan: path must start with az:// or abfss://, got: {path}"
+                        ));
                     }
 
                     let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;

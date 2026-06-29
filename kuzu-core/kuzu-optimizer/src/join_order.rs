@@ -97,10 +97,7 @@ fn extract_join_conditions_from_tree(op: &LogicalOperator) -> Vec<(String, Strin
 }
 
 /// Recursively find equality join conditions in Filter operators.
-fn extract_conditions_recursive(
-    op: &LogicalOperator,
-    conditions: &mut Vec<(String, String)>,
-) {
+fn extract_conditions_recursive(op: &LogicalOperator, conditions: &mut Vec<(String, String)>) {
     match op {
         LogicalOperator::Filter(f) => {
             if let Some((left, right)) = extract_equality_join(&f.expression) {
@@ -130,11 +127,7 @@ fn extract_conditions_recursive(
 /// Try to extract an equality join condition between two table aliases.
 fn extract_equality_join(expr: &kuzu_parser::ast::Expression) -> Option<(String, String)> {
     match expr {
-        kuzu_parser::ast::Expression::BinaryOp(
-            kuzu_parser::ast::BinaryOp::Equal,
-            left,
-            right,
-        ) => {
+        kuzu_parser::ast::Expression::BinaryOp(kuzu_parser::ast::BinaryOp::Equal, left, right) => {
             let left_var = extract_root_var(left);
             let right_var = extract_root_var(right);
             if let (Some(lv), Some(rv)) = (&left_var, &right_var) {
@@ -198,13 +191,11 @@ pub fn reorder_joins_greedy(root: &LogicalOperator) -> Option<Vec<LogicalOperato
             Box::new(kuzu_parser::ast::Expression::Variable(left_alias.clone())),
             Box::new(kuzu_parser::ast::Expression::Variable(right_alias.clone())),
         );
-        result_ops.push(LogicalOperator::Filter(
-            kuzu_planner::logical_operator::LogicalFilter {
-                expression: expr,
-                children: Vec::new(),
-                cardinality: 0,
-            },
-        ));
+        result_ops.push(LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
+            expression: expr,
+            children: Vec::new(),
+            cardinality: 0,
+        }));
     }
 
     Some(result_ops)
@@ -221,10 +212,15 @@ pub fn reorder_joins_greedy(root: &LogicalOperator) -> Option<Vec<LogicalOperato
 /// or fewer than 2 scans).
 pub fn reorder_joins_greedy_first(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
     // Collect scans with their original positions and cardinalities
-    let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = operators.iter().enumerate()
-        .filter(|(_, op)| matches!(op,
-            LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) | LogicalOperator::TableFunctionCall(_)
-        ))
+    let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = operators
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| {
+            matches!(
+                op,
+                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) | LogicalOperator::TableFunctionCall(_)
+            )
+        })
         .map(|(i, op)| {
             let card = op.cardinality();
             (i, card, op.clone())
@@ -247,9 +243,11 @@ pub fn reorder_joins_greedy_first(operators: &[LogicalOperator]) -> Option<Vec<L
     if already_ordered {
         // Scans already in optimal order — just remove join condition filters
         let mut result: Vec<LogicalOperator> = operators.to_vec();
-        result.retain(|op| !matches!(op, LogicalOperator::Filter(f)
-            if crate::passes::is_join_condition(&f.expression)
-        ));
+        result.retain(|op| {
+            !matches!(op, LogicalOperator::Filter(f)
+                if crate::passes::is_join_condition(&f.expression)
+            )
+        });
         if result.len() < operators.len() {
             return Some(result);
         }
@@ -267,9 +265,11 @@ pub fn reorder_joins_greedy_first(operators: &[LogicalOperator]) -> Option<Vec<L
     }
 
     // Also remove equi-join filter conditions
-    result.retain(|op| !matches!(op, LogicalOperator::Filter(f)
-        if crate::passes::is_join_condition(&f.expression)
-    ));
+    result.retain(|op| {
+        !matches!(op, LogicalOperator::Filter(f)
+            if crate::passes::is_join_condition(&f.expression)
+        )
+    });
 
     Some(result)
 }
@@ -281,7 +281,10 @@ mod tests {
     #[test]
     fn test_collect_scans_empty() {
         let scans = collect_scans_sorted(&LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+            table_name: "A".into(),
+            table_id: 0,
+            alias: None,
+            columns: vec![],
             cardinality: 100,
         }));
         assert_eq!(scans.len(), 1);
@@ -291,11 +294,17 @@ mod tests {
     #[test]
     fn test_collect_scans_sorted_by_cardinality() {
         let small = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Small".into(), table_id: 0, alias: None, columns: vec![],
+            table_name: "Small".into(),
+            table_id: 0,
+            alias: None,
+            columns: vec![],
             cardinality: 10,
         });
         let large = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Large".into(), table_id: 1, alias: None, columns: vec![],
+            table_name: "Large".into(),
+            table_id: 1,
+            alias: None,
+            columns: vec![],
             cardinality: 1000,
         });
         let join = LogicalOperator::HashJoin(LogicalHashJoin {
@@ -315,7 +324,10 @@ mod tests {
     #[test]
     fn test_reorder_no_join_needed() {
         let single = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+            table_name: "A".into(),
+            table_id: 0,
+            alias: None,
+            columns: vec![],
             cardinality: 100,
         });
         assert!(reorder_joins_greedy(&single).is_none());
@@ -354,8 +366,11 @@ mod tests {
     #[test]
     fn test_get_scan_alias() {
         let scan = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Person".into(), table_id: 0, alias: Some("p".into()),
-            columns: vec![], cardinality: 100,
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("p".into()),
+            columns: vec![],
+            cardinality: 100,
         });
         assert_eq!(get_scan_alias(&scan), Some("p".into()));
     }

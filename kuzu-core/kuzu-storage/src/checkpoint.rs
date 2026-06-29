@@ -39,10 +39,7 @@ pub fn flush_table(buffer_manager: &mut BufferManager, file_name: &str) -> std::
 /// 4. Append a `Checkpoint` record to the new WAL
 ///
 /// Returns the number of WAL entries processed and pages flushed.
-pub fn checkpoint(
-    wal: &mut WAL,
-    buffer_manager: &Arc<Mutex<BufferManager>>,
-) -> std::io::Result<CheckpointResult> {
+pub fn checkpoint(wal: &mut WAL, buffer_manager: &Arc<Mutex<BufferManager>>) -> std::io::Result<CheckpointResult> {
     let wal_count = wal.len();
 
     // Step 1: Flush the WAL to disk first (write-ahead: log before data).
@@ -93,7 +90,10 @@ mod tests {
             config,
         )));
 
-        wal.append(WALRecord::Insert { table_id: 1, data: vec![1, 2, 3] });
+        wal.append(WALRecord::Insert {
+            table_id: 1,
+            data: vec![1, 2, 3],
+        });
         wal.append(WALRecord::Commit { transaction_id: 42 });
         assert!(!wal.is_empty());
 
@@ -165,7 +165,8 @@ mod tests {
         // Create a column and write values via BufferManager
         let mut col = Column::new(
             LogicalTypeID::Int64,
-            0, 0,
+            0,
+            0,
             &dir.path().to_path_buf(),
             bm.clone(),
             DEFAULT_PAGE_SIZE,
@@ -218,7 +219,12 @@ mod tests {
         let mut write_count = 0;
         wal.replay(|record| {
             match record {
-                WALRecord::ColumnWrite { table_id, col_id, page_id, data } => {
+                WALRecord::ColumnWrite {
+                    table_id,
+                    col_id,
+                    page_id,
+                    data,
+                } => {
                     assert_eq!(*table_id, 1);
                     assert_eq!(*col_id, 0);
                     write_count += 1;
@@ -234,7 +240,8 @@ mod tests {
                 _ => {}
             }
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(write_count, 2);
     }
 }

@@ -1,6 +1,8 @@
 //! Buffer manager — manages in-memory page cache with Clock eviction policy.
 
-use crate::page::{Frame, PageNum, DEFAULT_PAGE_SIZE};
+#![allow(clippy::trivial_regex, clippy::collapsible_if)]
+
+use crate::page::{DEFAULT_PAGE_SIZE, Frame, PageNum};
 use kuzu_common::memory::MemoryManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -72,11 +74,7 @@ struct FileHandleInfo {
 }
 
 impl BufferManager {
-    pub fn new(
-        db_path: PathBuf,
-        memory_manager: Arc<MemoryManager>,
-        config: BufferManagerConfig,
-    ) -> Self {
+    pub fn new(db_path: PathBuf, memory_manager: Arc<MemoryManager>, config: BufferManagerConfig) -> Self {
         let max_frames = if config.max_memory > 0 {
             (config.max_memory / config.page_size as u64) as usize
         } else {
@@ -116,17 +114,12 @@ impl BufferManager {
     /// Register a database file with the buffer manager.
     pub fn register_file(&mut self, name: &str, path: PathBuf) {
         let num_pages = if path.exists() {
-            let len = std::fs::metadata(&path)
-                .map(|m| m.len())
-                .unwrap_or(0);
+            let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             len / self.page_size as u64
         } else {
             0
         };
-        self.files.insert(
-            name.to_string(),
-            FileHandleInfo { path, num_pages },
-        );
+        self.files.insert(name.to_string(), FileHandleInfo { path, num_pages });
     }
 
     /// Pin a page: bring it into the buffer pool if not already present.
@@ -267,12 +260,9 @@ impl BufferManager {
 
     fn write_to_disk(&self, file_name: &str, page_num: PageNum, data: &[u8]) -> std::io::Result<()> {
         if let Some(fh) = self.files.get(file_name) {
-            use std::io::{Seek, SeekFrom, Write};
             use std::fs::OpenOptions;
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(&fh.path)?;
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = OpenOptions::new().create(true).write(true).open(&fh.path)?;
             file.seek(SeekFrom::Start(page_num * self.page_size as u64))?;
             file.write_all(data)?;
         }
@@ -385,4 +375,3 @@ mod tests {
         assert_eq!(bm.stats().dirty_frames, 0);
     }
 }
-

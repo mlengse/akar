@@ -1,6 +1,6 @@
 //! PhysicalAggregate throughput benchmarks — COUNT, SUM, AVG with/without GROUP BY.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_processor::physical_operator::{PhysicalAggregate, PhysicalOperatorExec};
@@ -50,34 +50,54 @@ fn make_multi_key_chunk(key_a: &[i64], key_b: &[i64], values: &[i64]) -> DataChu
 // ==================== Scalar aggregates (no GROUP BY) ====================
 
 fn bench_count_100(c: &mut Criterion) {
-    let agg = PhysicalAggregate { group_by_cols: vec![], aggregate_functions: vec!["COUNT".into()] };
+    let agg = PhysicalAggregate {
+        group_by_cols: vec![],
+        aggregate_functions: vec!["COUNT".into()],
+    };
     let chunk = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     c.bench_function("aggregate/count_100", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
 fn bench_count_10k(c: &mut Criterion) {
-    let agg = PhysicalAggregate { group_by_cols: vec![], aggregate_functions: vec!["COUNT".into()] };
+    let agg = PhysicalAggregate {
+        group_by_cols: vec![],
+        aggregate_functions: vec!["COUNT".into()],
+    };
     let chunk = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("aggregate/count_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
 fn bench_sum_10k(c: &mut Criterion) {
-    let agg = PhysicalAggregate { group_by_cols: vec![], aggregate_functions: vec!["SUM".into()] };
+    let agg = PhysicalAggregate {
+        group_by_cols: vec![],
+        aggregate_functions: vec!["SUM".into()],
+    };
     let chunk = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("aggregate/sum_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
 fn bench_avg_10k(c: &mut Criterion) {
-    let agg = PhysicalAggregate { group_by_cols: vec![], aggregate_functions: vec!["AVG".into()] };
+    let agg = PhysicalAggregate {
+        group_by_cols: vec![],
+        aggregate_functions: vec!["AVG".into()],
+    };
     let chunk = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("aggregate/avg_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
@@ -88,7 +108,9 @@ fn bench_multi_agg_10k(c: &mut Criterion) {
     };
     let chunk = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("aggregate/multi_func_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
@@ -104,7 +126,9 @@ fn bench_group_by_few(c: &mut Criterion) {
     let vals: Vec<i64> = (0..10_000).collect();
     let chunk = make_grouped_chunk(&keys, &vals);
     c.bench_function("aggregate/group_by_10_groups_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
@@ -118,7 +142,9 @@ fn bench_group_by_many(c: &mut Criterion) {
     let vals: Vec<i64> = (0..10_000).collect();
     let chunk = make_grouped_chunk(&keys, &vals);
     c.bench_function("aggregate/group_by_1k_groups_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
@@ -133,7 +159,9 @@ fn bench_group_by_multi_key(c: &mut Criterion) {
     let vals: Vec<i64> = (0..10_000).collect();
     let chunk = make_multi_key_chunk(&key_a, &key_b, &vals);
     c.bench_function("aggregate/multi_key_group_by_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 
@@ -148,7 +176,9 @@ fn bench_group_by_string_key(c: &mut Criterion) {
     c0.resize(n);
     let mut c1 = ValueVector::new(PhysicalTypeID::Int64, n);
     c1.resize(n);
-    let labels = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa"];
+    let labels = [
+        "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+    ];
     for i in 0..n {
         let label = labels[i % 10];
         let bytes = label.as_bytes();
@@ -160,7 +190,9 @@ fn bench_group_by_string_key(c: &mut Criterion) {
     }
     let chunk = DataChunk::new(vec![c0, c1]);
     c.bench_function("aggregate/group_by_string_key_10k", |b| {
-        b.iter(|| { black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap()); })
+        b.iter(|| {
+            black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
+        })
     });
 }
 

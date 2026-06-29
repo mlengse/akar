@@ -36,51 +36,70 @@ impl Extension for JsonExtension {
         // Register JSON scalar functions
         context.register_scalar_function(
             "json_extract",
-            ScalarFunction::String { op: StringOp::RegexMatches },
+            ScalarFunction::String {
+                op: StringOp::RegexMatches,
+            },
         );
         context.register_scalar_function(
             "json_array_length",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_valid",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
-        context.register_scalar_function(
-            "json_contains",
-            ScalarFunction::String { op: StringOp::Contains },
-        );
+        context.register_scalar_function("json_contains", ScalarFunction::String { op: StringOp::Contains });
         context.register_scalar_function(
             "json_keys",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_structure",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_type",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "to_json",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_quote",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_array",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_object",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "json_merge_patch",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
 
         tracing::info!("JSON extension loaded: 12 functions registered");
@@ -92,8 +111,7 @@ impl Extension for JsonExtension {
 /// Evaluate a JSON path expression on a JSON value.
 /// Supports simple dot-notation paths like `$.name` or `$.items.0` for arrays.
 pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, String> {
-    let value: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     // Parse path: strip leading "$." or "$" if present
     let path_clean = path
@@ -111,10 +129,11 @@ pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, 
     for part in parts {
         // Check for bare array index: "[0]" or "0"
         if part.starts_with('[') && part.ends_with(']') {
-            let idx: usize = part[1..part.len()-1]
+            let idx: usize = part[1..part.len() - 1]
                 .parse()
                 .map_err(|_| format!("Invalid array index: {part}"))?;
-            current = current.get(idx)
+            current = current
+                .get(idx)
                 .ok_or_else(|| format!("Array index out of bounds: {part}"))?;
         }
         // Check for array index: key[0], key[1], etc.
@@ -135,7 +154,8 @@ pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, 
             } else {
                 // Try as array index
                 if let Ok(idx) = part.parse::<usize>() {
-                    current = current.get(idx)
+                    current = current
+                        .get(idx)
                         .ok_or_else(|| format!("Array index out of bounds: {part}"))?;
                 } else {
                     return Err(format!("Path not found: {part}"));
@@ -157,8 +177,7 @@ pub fn is_valid_json(s: &str) -> bool {
 
 /// Get the JSON type name of a value.
 pub fn json_type_of(s: &str) -> Result<&'static str, String> {
-    let value: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid JSON: {e}"))?;
     match value {
         serde_json::Value::Null => Ok("null"),
         serde_json::Value::Bool(_) => Ok("boolean"),
@@ -171,8 +190,7 @@ pub fn json_type_of(s: &str) -> Result<&'static str, String> {
 
 /// Get the structure (schema) of a JSON value.
 pub fn json_structure_of(s: &str) -> Result<String, String> {
-    let value: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid JSON: {e}"))?;
     structure_inner(&value, 0)
 }
 
@@ -205,8 +223,7 @@ fn structure_inner(value: &serde_json::Value, indent: usize) -> Result<String, S
 
 /// Get keys of a JSON object.
 pub fn json_keys_of(s: &str) -> Result<Vec<String>, String> {
-    let value: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid JSON: {e}"))?;
     match value {
         serde_json::Value::Object(map) => Ok(map.keys().cloned().collect()),
         _ => Err("Expected JSON object".into()),
@@ -215,8 +232,7 @@ pub fn json_keys_of(s: &str) -> Result<Vec<String>, String> {
 
 /// Get length of a JSON array.
 pub fn json_array_length_of(s: &str) -> Result<usize, String> {
-    let value: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid JSON: {e}"))?;
     match value {
         serde_json::Value::Array(arr) => Ok(arr.len()),
         _ => Err("Expected JSON array".into()),
@@ -225,10 +241,9 @@ pub fn json_array_length_of(s: &str) -> Result<usize, String> {
 
 /// Check if a JSON value contains a sub-value (string matching).
 pub fn json_contains_value(json: &str, needle: &str) -> Result<bool, String> {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
-    let needle_val: serde_json::Value = serde_json::from_str(needle)
-        .map_err(|e| format!("Invalid needle JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
+    let needle_val: serde_json::Value =
+        serde_json::from_str(needle).map_err(|e| format!("Invalid needle JSON: {e}"))?;
     Ok(contains_inner(&value, &needle_val))
 }
 
@@ -239,16 +254,12 @@ fn contains_inner(haystack: &serde_json::Value, needle: &serde_json::Value) -> b
     match (haystack, needle) {
         (serde_json::Value::Object(h_map), serde_json::Value::Object(n_map)) => {
             // Check if needle is a subset of haystack
-            n_map.iter().all(|(k, v)| {
-                h_map.get(k).map_or(false, |hv| contains_inner(hv, v))
-            })
+            n_map
+                .iter()
+                .all(|(k, v)| h_map.get(k).map_or(false, |hv| contains_inner(hv, v)))
         }
-        (serde_json::Value::Array(arr), _) => {
-            arr.iter().any(|v| contains_inner(v, needle))
-        }
-        (serde_json::Value::Object(map), _) => {
-            map.values().any(|v| contains_inner(v, needle))
-        }
+        (serde_json::Value::Array(arr), _) => arr.iter().any(|v| contains_inner(v, needle)),
+        (serde_json::Value::Object(map), _) => map.values().any(|v| contains_inner(v, needle)),
         _ => false,
     }
 }
@@ -361,10 +372,7 @@ mod tests {
                         if v.is_null() {
                             result.remove(k);
                         } else {
-                            result.insert(k.clone(), merge(
-                                result.get(k).unwrap_or(&serde_json::Value::Null),
-                                v,
-                            ));
+                            result.insert(k.clone(), merge(result.get(k).unwrap_or(&serde_json::Value::Null), v));
                         }
                     }
                     serde_json::Value::Object(result)

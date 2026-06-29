@@ -29,9 +29,9 @@ impl Extension for DuckDbExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::{ScalarFunction, TableFunction};
         #[allow(unused_imports)]
         use kuzu_function::Value;
+        use kuzu_function::registry::{ScalarFunction, TableFunction};
 
         // duckdb_query(sql: String) → executes SQL via DuckDB and returns JSON result
         #[cfg(feature = "bundled")]
@@ -141,8 +141,10 @@ pub fn validate_query(sql: &str) -> Result<(), String> {
     }
     let valid_keywords = ["SELECT", "EXPLAIN", "DESCRIBE", "SHOW", "PRAGMA", "CALL", "WITH"];
     if !valid_keywords.iter().any(|kw| trimmed.starts_with(kw)) {
-        return Err(format!("Query must start with SELECT, EXPLAIN, DESCRIBE, SHOW, PRAGMA, CALL, or WITH. Got: {}", 
-            trimmed.split_whitespace().next().unwrap_or("")));
+        return Err(format!(
+            "Query must start with SELECT, EXPLAIN, DESCRIBE, SHOW, PRAGMA, CALL, or WITH. Got: {}",
+            trimmed.split_whitespace().next().unwrap_or("")
+        ));
     }
     Ok(())
 }

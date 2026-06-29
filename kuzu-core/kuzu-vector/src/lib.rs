@@ -29,19 +29,27 @@ impl Extension for VectorExtension {
 
         context.register_scalar_function(
             "cosine_similarity",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "euclidean_distance",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "dot_product",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
         context.register_scalar_function(
             "l2_distance",
-            ScalarFunction::Utility { op: UtilityOp::Coalesce },
+            ScalarFunction::Utility {
+                op: UtilityOp::Coalesce,
+            },
         );
 
         tracing::info!("Vector extension loaded: 4 functions registered");
@@ -68,7 +76,8 @@ pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
-    a.iter().zip(b.iter())
+    a.iter()
+        .zip(b.iter())
         .map(|(x, y)| (x - y) * (x - y))
         .sum::<f64>()
         .sqrt()

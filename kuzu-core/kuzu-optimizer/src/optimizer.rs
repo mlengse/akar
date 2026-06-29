@@ -28,9 +28,11 @@ impl Optimizer {
             Box::new(ProjectionPushDown),
             // Pass 4: Fold constant expressions
             Box::new(ConstantFolding),
-            // Pass 5: Reorder joins for efficiency
+            // Pass 5: Detect aggregate functions in projections
+            Box::new(AggregateDetection),
+            // Pass 6: Reorder joins for efficiency
             Box::new(JoinOptimization),
-            // Pass 6: Detect and combine top-k patterns (ORDER BY + LIMIT)
+            // Pass 7: Detect and combine top-k patterns (ORDER BY + LIMIT)
             Box::new(TopKOptimization),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
@@ -49,6 +51,7 @@ impl Optimizer {
             Box::new(FilterPushDown),
             Box::new(ProjectionPushDown),
             Box::new(ConstantFolding),
+            Box::new(AggregateDetection),
             Box::new(JoinOptimization),
             Box::new(TopKOptimization),
         ];
@@ -111,7 +114,8 @@ mod tests {
         // Tree passes
         assert!(names.contains(&"cardinality_estimation"));
         assert!(names.contains(&"factorization_rewriting"));
-        assert_eq!(names.len(), 8);
+        assert!(names.contains(&"aggregate_detection"));
+        assert_eq!(names.len(), 9);
     }
 
     #[test]
@@ -124,15 +128,13 @@ mod tests {
     #[test]
     fn test_optimizer_preserves_valid_plan() {
         use kuzu_planner::logical_operator::*;
-        let plan = vec![
-            LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "Person".into(),
-                table_id: 0,
-                alias: Some("a".into()),
-                columns: vec!["name".into()],
-                cardinality: 0,
-            }),
-        ];
+        let plan = vec![LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["name".into()],
+            cardinality: 0,
+        })];
         let opt = Optimizer::new();
         let result = opt.optimize(plan);
         assert_eq!(result.len(), 1);

@@ -3,10 +3,10 @@
 //! Measures BufferManager throughput (pin/unpin), table scan throughput,
 //! and columnar read/write performance.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::memory::MemoryManager;
-use kuzu_main::database::{Database, SystemConfig};
 use kuzu_main::connection::Connection;
+use kuzu_main::database::{Database, SystemConfig};
 use kuzu_storage::buffer_manager::{BufferManager, BufferManagerConfig};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -67,7 +67,8 @@ fn setup_table_with_rows(n: usize) -> (tempfile::TempDir, Arc<Database>, Connect
     let database = Arc::new(Database::new(db_path, config).unwrap());
     let conn = Connection::new(&database);
 
-    conn.query("CREATE NODE TABLE Bench(name STRING, val INT64, PRIMARY KEY (name))").unwrap();
+    conn.query("CREATE NODE TABLE Bench(name STRING, val INT64, PRIMARY KEY (name))")
+        .unwrap();
 
     // Generate CSV with N rows
     let csv_path = dir.path().join("scan_data.csv");

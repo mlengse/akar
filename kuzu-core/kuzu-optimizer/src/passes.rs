@@ -3,6 +3,7 @@
 //! Each pass implements `OptimizationPass` and transforms a logical plan.
 //! Passes are applied in order of registration in the Optimizer.
 
+use kuzu_parser::ast::Expression;
 use kuzu_planner::logical_operator::*;
 use std::collections::HashSet;
 
@@ -90,12 +91,7 @@ impl OptimizationPass for ProjectionPushDown {
             .iter()
             .map(|op| match op {
                 LogicalOperator::ScanNode(s) => {
-                    let cols: Vec<String> = s
-                        .columns
-                        .iter()
-                        .filter(|c| referenced.contains(*c))
-                        .cloned()
-                        .collect();
+                    let cols: Vec<String> = s.columns.iter().filter(|c| referenced.contains(*c)).cloned().collect();
                     LogicalOperator::ScanNode(LogicalScanNode {
                         columns: cols,
                         ..s.clone()
@@ -162,7 +158,78 @@ fn extract_variables(expr: &kuzu_parser::ast::Expression, refs: &mut HashSet<Str
 }
 
 // ========================================================================
-// Pass 3: Join Optimization
+// Pass 5: Aggregate Detection
+// Scans Projection operators for aggregate function calls (COUNT, SUM, AVG,
+// MIN, MAX) and replaces them with Aggregate operators. This is necessary
+// because aggregates must process ALL rows (not per-row like projections).
+// ========================================================================
+
+/// Detect aggregate function calls in projections and replace with Aggregate.
+pub struct AggregateDetection;
+
+impl OptimizationPass for AggregateDetection {
+    fn name(&self) -> &str {
+        "aggregate_detection"
+    }
+
+    fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
+        let mut result = Vec::with_capacity(operators.len());
+
+        for op in operators {
+            match op {
+                LogicalOperator::Projection(proj) => {
+                    // Check if any expression contains an aggregate function call
+                    let aggregates: Vec<(String, Vec<Expression>)> = proj
+                        .expressions
+                        .iter()
+                        .filter_map(|be| extract_aggregate_function(&be.expression))
+                        .collect();
+
+                    if aggregates.is_empty() {
+                        // No aggregates — keep as projection
+                        result.push(op.clone());
+                    } else {
+                        // Replace with Aggregate operator
+                        // Non-aggregate expressions that are GROUP BY keys
+                        // For simple RETURN COUNT(*) there are no GROUP BY keys
+                        let group_by: Vec<Expression> = Vec::new();
+
+                        result.push(LogicalOperator::Aggregate(LogicalAggregate {
+                            group_by,
+                            aggregates,
+                            children: proj.children.clone(),
+                            cardinality: proj.cardinality,
+                        }));
+                    }
+                }
+                _ => {
+                    result.push(op.clone());
+                }
+            }
+        }
+
+        result
+    }
+}
+
+/// Extract an aggregate function from an expression, returning (name, args) if found.
+fn extract_aggregate_function(expr: &Expression) -> Option<(String, Vec<Expression>)> {
+    match expr {
+        Expression::FunctionCall(name, args) => {
+            let upper = name.to_uppercase();
+            match upper.as_str() {
+                "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE" | "COLLECT" => {
+                    Some((upper, args.clone()))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+// ========================================================================
+// Pass 6: Join Optimization
 // Converts filter equality conditions to join conditions.
 // Reorders joins so the smallest tables are joined first (cardinality-aware).
 // ========================================================================
@@ -206,13 +273,10 @@ impl OptimizationPass for JoinOptimization {
 /// Check if an expression is an equality join condition between two variables.
 pub fn is_join_condition(expr: &kuzu_parser::ast::Expression) -> bool {
     match expr {
-        kuzu_parser::ast::Expression::BinaryOp(
-            kuzu_parser::ast::BinaryOp::Equal, left, right,
-        ) => {
+        kuzu_parser::ast::Expression::BinaryOp(kuzu_parser::ast::BinaryOp::Equal, left, right) => {
             let left_var = extract_root_variable(left);
             let right_var = extract_root_variable(right);
-            matches!(left_var, Some(_)) && matches!(right_var, Some(_))
-                && left_var != right_var
+            matches!(left_var, Some(_)) && matches!(right_var, Some(_)) && left_var != right_var
         }
         _ => false,
     }
@@ -307,19 +371,19 @@ pub struct FactorizationRewriting;
 
 impl FactorizationRewriting {
     /// Append LogicalFlatten nodes for each group position that isn't already flat.
-    fn append_flattens(
-        child: &mut LogicalOperator,
-        groups_pos: &[usize],
-    ) {
+    fn append_flattens(child: &mut LogicalOperator, groups_pos: &[usize]) {
         for &group_pos in groups_pos {
             // Wrap the child in a Flatten operator by replacing it in-place.
-            let old = std::mem::replace(child, LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "placeholder".into(),
-                table_id: 0,
-                alias: None,
-                columns: Vec::new(),
-                cardinality: 0,
-            }));
+            let old = std::mem::replace(
+                child,
+                LogicalOperator::ScanNode(LogicalScanNode {
+                    table_name: "placeholder".into(),
+                    table_id: 0,
+                    alias: None,
+                    columns: Vec::new(),
+                    cardinality: 0,
+                }),
+            );
             let flatten = LogicalOperator::Flatten(LogicalFlatten {
                 group_pos,
                 children: vec![old],
@@ -485,9 +549,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
     fn apply_tree(&self, root: &mut LogicalOperator) {
         LogicalOperator::visit_bottom_up(root, &mut |op| {
             let card = match op {
-                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => {
-                    self.estimate_scan_node(op)
-                }
+                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => self.estimate_scan_node(op),
                 LogicalOperator::Filter(f) => {
                     let child_card = f.children.first().map(|c| c.cardinality()).unwrap_or(1);
                     // Conservative filter selectivity estimate
@@ -505,12 +567,8 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     let right_card = cp.right.cardinality();
                     std::cmp::max(1, left_card * right_card)
                 }
-                LogicalOperator::Projection(p) => {
-                    p.children.first().map(|c| c.cardinality()).unwrap_or(1)
-                }
-                LogicalOperator::OrderBy(o) => {
-                    o.children.first().map(|c| c.cardinality()).unwrap_or(1)
-                }
+                LogicalOperator::Projection(p) => p.children.first().map(|c| c.cardinality()).unwrap_or(1),
+                LogicalOperator::OrderBy(o) => o.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::Limit(l) => {
                     // Cardinality is at most the limit value
                     std::cmp::min(l.limit, l.children.first().map(|c| c.cardinality()).unwrap_or(u64::MAX))
@@ -588,17 +646,14 @@ impl OptimizationPass for RemoveUnnecessaryOperators {
 /// Check if a filter expression is a tautology (always true).
 fn is_tautology(expr: &kuzu_parser::ast::Expression) -> bool {
     match expr {
-        kuzu_parser::ast::Expression::Constant(
-            kuzu_parser::ast::Constant::Bool(true),
-        ) => true,
-        kuzu_parser::ast::Expression::BinaryOp(
-            kuzu_parser::ast::BinaryOp::Equal,
-            left, right,
-        ) => {
+        kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Bool(true)) => true,
+        kuzu_parser::ast::Expression::BinaryOp(kuzu_parser::ast::BinaryOp::Equal, left, right) => {
             // `1 = 1` is a tautology
             match (&**left, &**right) {
-                (kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Integer(a)),
-                 kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Integer(b))) => a == b,
+                (
+                    kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Integer(a)),
+                    kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Integer(b)),
+                ) => a == b,
                 _ => false,
             }
         }
@@ -632,7 +687,8 @@ impl OptimizationPass for ConstantFolding {
                     })
                 }
                 LogicalOperator::Projection(p) => {
-                    let exprs: Vec<BoundExpression> = p.expressions
+                    let exprs: Vec<BoundExpression> = p
+                        .expressions
                         .iter()
                         .map(|e| {
                             let folded = fold_expression(&e.expression);
@@ -667,8 +723,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
             let left = fold_expression(left);
             let right = fold_expression(right);
             match (&left, &right) {
-                (Expression::Constant(Constant::Integer(a)),
-                 Expression::Constant(Constant::Integer(b))) => {
+                (Expression::Constant(Constant::Integer(a)), Expression::Constant(Constant::Integer(b))) => {
                     let result = match op {
                         BinaryOp::Add => Some(Constant::Integer(a + b)),
                         BinaryOp::Subtract => Some(Constant::Integer(a - b)),
@@ -687,8 +742,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                         return Expression::Constant(c);
                     }
                 }
-                (Expression::Constant(Constant::Float(a)),
-                 Expression::Constant(Constant::Float(b))) => {
+                (Expression::Constant(Constant::Float(a)), Expression::Constant(Constant::Float(b))) => {
                     let result = match op {
                         BinaryOp::Add => Some(Constant::Float(a + b)),
                         BinaryOp::Subtract => Some(Constant::Float(a - b)),
@@ -706,8 +760,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                         return Expression::Constant(c);
                     }
                 }
-                (Expression::Constant(Constant::Bool(a)),
-                 Expression::Constant(Constant::Bool(b))) => {
+                (Expression::Constant(Constant::Bool(a)), Expression::Constant(Constant::Bool(b))) => {
                     let result = match op {
                         BinaryOp::And => Some(Constant::Bool(*a && *b)),
                         BinaryOp::Or => Some(Constant::Bool(*a || *b)),
@@ -720,8 +773,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                         return Expression::Constant(c);
                     }
                 }
-                (Expression::Constant(Constant::String(a)),
-                 Expression::Constant(Constant::String(b))) => {
+                (Expression::Constant(Constant::String(a)), Expression::Constant(Constant::String(b))) => {
                     if *op == BinaryOp::Concat || *op == BinaryOp::Add {
                         return Expression::Constant(Constant::String(format!("{}{}", a, b)));
                     }
@@ -740,9 +792,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                 (Expression::Constant(Constant::Float(n)), UnaryOp::Negate) => {
                     Expression::Constant(Constant::Float(-n))
                 }
-                (Expression::Constant(Constant::Bool(b)), UnaryOp::Not) => {
-                    Expression::Constant(Constant::Bool(!b))
-                }
+                (Expression::Constant(Constant::Bool(b)), UnaryOp::Not) => Expression::Constant(Constant::Bool(!b)),
                 _ => Expression::UnaryOp(*op, Box::new(inner)),
             }
         }
@@ -754,9 +804,7 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
             let folded_args: Vec<Expression> = args.iter().map(fold_expression).collect();
             Expression::FunctionCall(name.clone(), folded_args)
         }
-        Expression::List(items) => {
-            Expression::List(items.iter().map(fold_expression).collect())
-        }
+        Expression::List(items) => Expression::List(items.iter().map(fold_expression).collect()),
         Expression::Map(entries) => {
             Expression::Map(entries.iter().map(|(k, v)| (k.clone(), fold_expression(v))).collect())
         }
@@ -787,9 +835,7 @@ mod tests {
             expression: Expression::BinaryOp(
                 BinaryOp::GreaterThan,
                 Box::new(Expression::Variable("a".into())),
-                Box::new(Expression::Constant(
-                    kuzu_parser::ast::Constant::Integer(25),
-                )),
+                Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(25))),
             ),
             children: Vec::new(),
             cardinality: 0,
@@ -829,11 +875,7 @@ mod tests {
 
     #[test]
     fn test_filter_push_down() {
-        let plan = vec![
-            make_filter(),
-            make_scan("Person"),
-            make_projection(),
-        ];
+        let plan = vec![make_filter(), make_scan("Person"), make_projection()];
         let pass = FilterPushDown;
         let result = pass.apply(&plan);
         // Filter should be moved before Scan
@@ -843,11 +885,7 @@ mod tests {
 
     #[test]
     fn test_projection_push_down() {
-        let plan = vec![
-            make_scan("Person"),
-            make_filter(),
-            make_projection(),
-        ];
+        let plan = vec![make_scan("Person"), make_filter(), make_projection()];
         let pass = ProjectionPushDown;
         let result = pass.apply(&plan);
         assert_eq!(result.len(), 3);
@@ -855,12 +893,7 @@ mod tests {
 
     #[test]
     fn test_join_optimization() {
-        let plan = vec![
-            make_projection(),
-            make_scan("Person"),
-            make_scan("City"),
-            make_filter(),
-        ];
+        let plan = vec![make_projection(), make_scan("Person"), make_scan("City"), make_filter()];
         let pass = JoinOptimization;
         let result = pass.apply(&plan);
         // JoinOptimization now converts equi-join filters to join conditions
@@ -915,7 +948,8 @@ mod tests {
 
     #[test]
     fn test_fold_integer_add() {
-        let expr = Expression::BinaryOp(BinaryOp::Add,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Add,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(1))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(2))),
         );
@@ -925,7 +959,8 @@ mod tests {
 
     #[test]
     fn test_fold_integer_mul() {
-        let expr = Expression::BinaryOp(BinaryOp::Multiply,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Multiply,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(6))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(7))),
         );
@@ -935,7 +970,8 @@ mod tests {
 
     #[test]
     fn test_fold_boolean_and() {
-        let expr = Expression::BinaryOp(BinaryOp::And,
+        let expr = Expression::BinaryOp(
+            BinaryOp::And,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Bool(true))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Bool(false))),
         );
@@ -945,7 +981,8 @@ mod tests {
 
     #[test]
     fn test_fold_boolean_or() {
-        let expr = Expression::BinaryOp(BinaryOp::Or,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Or,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Bool(true))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Bool(false))),
         );
@@ -955,17 +992,24 @@ mod tests {
 
     #[test]
     fn test_fold_string_concat() {
-        let expr = Expression::BinaryOp(BinaryOp::Concat,
-            Box::new(Expression::Constant(kuzu_parser::ast::Constant::String("hello ".into()))),
+        let expr = Expression::BinaryOp(
+            BinaryOp::Concat,
+            Box::new(Expression::Constant(kuzu_parser::ast::Constant::String(
+                "hello ".into(),
+            ))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::String("world".into()))),
         );
         let result = fold_expression(&expr);
-        assert_eq!(result, Expression::Constant(kuzu_parser::ast::Constant::String("hello world".into())));
+        assert_eq!(
+            result,
+            Expression::Constant(kuzu_parser::ast::Constant::String("hello world".into()))
+        );
     }
 
     #[test]
     fn test_fold_comparison_lt() {
-        let expr = Expression::BinaryOp(BinaryOp::LessThan,
+        let expr = Expression::BinaryOp(
+            BinaryOp::LessThan,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(3))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(5))),
         );
@@ -975,7 +1019,8 @@ mod tests {
 
     #[test]
     fn test_fold_negate() {
-        let expr = Expression::UnaryOp(UnaryOp::Negate,
+        let expr = Expression::UnaryOp(
+            UnaryOp::Negate,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(42))),
         );
         let result = fold_expression(&expr);
@@ -984,7 +1029,8 @@ mod tests {
 
     #[test]
     fn test_fold_not() {
-        let expr = Expression::UnaryOp(UnaryOp::Not,
+        let expr = Expression::UnaryOp(
+            UnaryOp::Not,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Bool(true))),
         );
         let result = fold_expression(&expr);
@@ -994,11 +1040,13 @@ mod tests {
     #[test]
     fn test_fold_nested() {
         // (1 + 2) * 3 → 9
-        let inner = Expression::BinaryOp(BinaryOp::Add,
+        let inner = Expression::BinaryOp(
+            BinaryOp::Add,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(1))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(2))),
         );
-        let outer = Expression::BinaryOp(BinaryOp::Multiply,
+        let outer = Expression::BinaryOp(
+            BinaryOp::Multiply,
             Box::new(inner),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(3))),
         );
@@ -1009,7 +1057,8 @@ mod tests {
     #[test]
     fn test_fold_mixed_types_no_fold() {
         // Variable + constant should NOT be folded
-        let expr = Expression::BinaryOp(BinaryOp::Add,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Add,
             Box::new(Expression::Variable("x".into())),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(1))),
         );
@@ -1023,12 +1072,15 @@ mod tests {
     #[test]
     fn test_is_join_condition() {
         // a.id = b.id is a join condition
-        let expr = Expression::BinaryOp(BinaryOp::Equal,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Equal,
             Box::new(Expression::PropertyAccess(
-                Box::new(Expression::Variable("a".into())), "id".into(),
+                Box::new(Expression::Variable("a".into())),
+                "id".into(),
             )),
             Box::new(Expression::PropertyAccess(
-                Box::new(Expression::Variable("b".into())), "id".into(),
+                Box::new(Expression::Variable("b".into())),
+                "id".into(),
             )),
         );
         assert!(is_join_condition(&expr));
@@ -1037,9 +1089,11 @@ mod tests {
     #[test]
     fn test_is_not_join_condition() {
         // a.age > 25 is NOT a join condition
-        let expr = Expression::BinaryOp(BinaryOp::GreaterThan,
+        let expr = Expression::BinaryOp(
+            BinaryOp::GreaterThan,
             Box::new(Expression::PropertyAccess(
-                Box::new(Expression::Variable("a".into())), "age".into(),
+                Box::new(Expression::Variable("a".into())),
+                "age".into(),
             )),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(25))),
         );
@@ -1049,12 +1103,15 @@ mod tests {
     #[test]
     fn test_is_join_condition_same_var() {
         // a.id = a.id is NOT a join condition (same variable)
-        let expr = Expression::BinaryOp(BinaryOp::Equal,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Equal,
             Box::new(Expression::PropertyAccess(
-                Box::new(Expression::Variable("a".into())), "id".into(),
+                Box::new(Expression::Variable("a".into())),
+                "id".into(),
             )),
             Box::new(Expression::PropertyAccess(
-                Box::new(Expression::Variable("a".into())), "id".into(),
+                Box::new(Expression::Variable("a".into())),
+                "id".into(),
             )),
         );
         assert!(!is_join_condition(&expr));
@@ -1064,11 +1121,7 @@ mod tests {
 
     #[test]
     fn test_top_k_with_projection() {
-        let plan = vec![
-            make_order(),
-            make_projection(),
-            make_limit(),
-        ];
+        let plan = vec![make_order(), make_projection(), make_limit()];
         let pass = TopKOptimization;
         let result = pass.apply(&plan);
         // Should still have 3 operators
@@ -1092,7 +1145,8 @@ mod tests {
     #[test]
     fn test_is_tautology_equal() {
         // 1 = 1 is a tautology
-        let expr = Expression::BinaryOp(BinaryOp::Equal,
+        let expr = Expression::BinaryOp(
+            BinaryOp::Equal,
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(1))),
             Box::new(Expression::Constant(kuzu_parser::ast::Constant::Integer(1))),
         );
@@ -1124,10 +1178,7 @@ mod tests {
 
     #[test]
     fn test_extract_root_variable_property() {
-        let expr = Expression::PropertyAccess(
-            Box::new(Expression::Variable("p".into())),
-            "name".into(),
-        );
+        let expr = Expression::PropertyAccess(Box::new(Expression::Variable("p".into())), "name".into());
         assert_eq!(extract_root_variable(&expr), Some("p".into()));
     }
 
@@ -1141,22 +1192,21 @@ mod tests {
     fn test_join_optimization_removes_equi_join_filter() {
         // Create filter with a.id = b.id (equi-join condition)
         let join_filter = LogicalOperator::Filter(LogicalFilter {
-            expression: Expression::BinaryOp(BinaryOp::Equal,
+            expression: Expression::BinaryOp(
+                BinaryOp::Equal,
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())), "id".into(),
+                    Box::new(Expression::Variable("a".into())),
+                    "id".into(),
                 )),
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("b".into())), "id".into(),
+                    Box::new(Expression::Variable("b".into())),
+                    "id".into(),
                 )),
             ),
             children: Vec::new(),
             cardinality: 0,
         });
-        let plan = vec![
-            make_scan("A"),
-            make_scan("B"),
-            join_filter,
-        ];
+        let plan = vec![make_scan("A"), make_scan("B"), join_filter];
         let pass = JoinOptimization;
         let result = pass.apply(&plan);
         // Equi-join filter should be removed
@@ -1172,11 +1222,17 @@ mod tests {
         let mut root = LogicalOperator::HashJoin(LogicalHashJoin {
             join_keys: vec![],
             build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+                table_name: "A".into(),
+                table_id: 0,
+                alias: None,
+                columns: vec![],
                 cardinality: 0,
             })),
             probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "B".into(), table_id: 1, alias: None, columns: vec![],
+                table_name: "B".into(),
+                table_id: 1,
+                alias: None,
+                columns: vec![],
                 cardinality: 0,
             })),
             cardinality: 0,
@@ -1188,10 +1244,14 @@ mod tests {
         // After rewriting, the hash join's children should be wrapped in Flatten
         match &root {
             LogicalOperator::HashJoin(hj) => {
-                assert!(matches!(&*hj.probe_side, LogicalOperator::Flatten(_)),
-                    "Probe side should be wrapped in Flatten");
-                assert!(matches!(&*hj.build_side, LogicalOperator::Flatten(_)),
-                    "Build side should be wrapped in Flatten");
+                assert!(
+                    matches!(&*hj.probe_side, LogicalOperator::Flatten(_)),
+                    "Probe side should be wrapped in Flatten"
+                );
+                assert!(
+                    matches!(&*hj.build_side, LogicalOperator::Flatten(_)),
+                    "Build side should be wrapped in Flatten"
+                );
             }
             _ => panic!("Expected HashJoin"),
         }
@@ -1200,7 +1260,10 @@ mod tests {
     #[test]
     fn test_cardinality_estimation_scan_node() {
         let mut root = LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: "Person".into(), table_id: 0, alias: None, columns: vec![],
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: None,
+            columns: vec![],
             cardinality: 0,
         });
 
@@ -1218,7 +1281,10 @@ mod tests {
             group_by: vec![],
             aggregates: vec![],
             children: vec![LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "T".into(), table_id: 0, alias: None, columns: vec![],
+                table_name: "T".into(),
+                table_id: 0,
+                alias: None,
+                columns: vec![],
                 cardinality: 0,
             })],
             cardinality: 0,
@@ -1227,8 +1293,11 @@ mod tests {
         let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
-        assert_eq!(root.cardinality(), 1,
-            "Aggregate without GROUP BY should have cardinality 1");
+        assert_eq!(
+            root.cardinality(),
+            1,
+            "Aggregate without GROUP BY should have cardinality 1"
+        );
     }
 
     #[test]
@@ -1238,7 +1307,10 @@ mod tests {
             limit: 10,
             offset: 0,
             children: vec![LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "T".into(), table_id: 0, alias: None, columns: vec![],
+                table_name: "T".into(),
+                table_id: 0,
+                alias: None,
+                columns: vec![],
                 cardinality: 1000,
             })],
             cardinality: 0,
@@ -1247,19 +1319,28 @@ mod tests {
         let pass = CardinalityEstimation::new(None);
         pass.apply_tree(&mut root);
 
-        assert_eq!(root.cardinality(), 10,
-            "Limit should cap cardinality at its limit value");
+        assert_eq!(
+            root.cardinality(),
+            10,
+            "Limit should cap cardinality at its limit value"
+        );
     }
 
     #[test]
     fn test_cardinality_estimation_cross_product() {
         let mut root = LogicalOperator::CrossProduct(LogicalCrossProduct {
             left: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "A".into(), table_id: 0, alias: None, columns: vec![],
+                table_name: "A".into(),
+                table_id: 0,
+                alias: None,
+                columns: vec![],
                 cardinality: 0, // will be overwritten by estimate_scan_node
             })),
             right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "B".into(), table_id: 1, alias: None, columns: vec![],
+                table_name: "B".into(),
+                table_id: 1,
+                alias: None,
+                columns: vec![],
                 cardinality: 0, // will be overwritten by estimate_scan_node
             })),
             cardinality: 0,

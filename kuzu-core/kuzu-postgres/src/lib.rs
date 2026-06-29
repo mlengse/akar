@@ -45,12 +45,11 @@ impl Extension for PostgresExtension {
                 };
 
                 // Create a one-shot tokio runtime for this query
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
+                let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
 
-                let (client, connection) = rt.block_on(async {
-                    tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await
-                }).map_err(|e| format!("PostgreSQL connect error: {e}"))?;
+                let (client, connection) = rt
+                    .block_on(async { tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await })
+                    .map_err(|e| format!("PostgreSQL connect error: {e}"))?;
 
                 // Spawn connection handler
                 rt.spawn(async move {
@@ -59,9 +58,9 @@ impl Extension for PostgresExtension {
                     }
                 });
 
-                let rows = rt.block_on(async {
-                    client.query(&sql, &[]).await
-                }).map_err(|e| format!("PostgreSQL query error: {e}"))?;
+                let rows = rt
+                    .block_on(async { client.query(&sql, &[]).await })
+                    .map_err(|e| format!("PostgreSQL query error: {e}"))?;
 
                 // Collect first row as string result
                 if let Some(row) = rows.first() {

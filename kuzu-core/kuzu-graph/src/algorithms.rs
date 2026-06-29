@@ -177,9 +177,7 @@ pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> V
 /// Compute degree centrality for all nodes.
 pub fn degree_centrality(csr: &CSRAdjacency) -> AlgorithmResult {
     let n = csr.num_nodes();
-    let values: Vec<f64> = (0..n)
-        .map(|i| csr.neighbors(i).len() as f64)
-        .collect();
+    let values: Vec<f64> = (0..n).map(|i| csr.neighbors(i).len() as f64).collect();
 
     AlgorithmResult {
         values,
@@ -194,11 +192,36 @@ mod tests {
 
     fn sample_csr() -> CSRAdjacency {
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 3, rel_table_id: 0 },
-            Edge { src_offset: 3, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 3,
+                dst_offset: 0,
+                rel_id: 4,
+                rel_table_id: 0,
+            },
         ];
         CSRAdjacency::build(&edges, 4)
     }
@@ -243,10 +266,30 @@ mod tests {
     fn test_wcc_disconnected() {
         // Two disconnected triangles
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 3, dst_offset: 4, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 4, dst_offset: 5, rel_id: 3, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 3,
+                dst_offset: 4,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 4,
+                dst_offset: 5,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
         ];
         let csr = CSRAdjacency::build(&edges, 6);
         let result = weakly_connected_components(&csr);

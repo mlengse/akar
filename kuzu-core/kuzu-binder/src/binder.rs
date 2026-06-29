@@ -1,5 +1,7 @@
 //! Binder implementation — resolves symbols and validates semantics.
 
+#![allow(clippy::collapsible_if, clippy::never_loop)]
+
 use crate::bound_statement::*;
 use kuzu_catalog::{Catalog, CatalogColumn, CatalogResult};
 use kuzu_common::types::LogicalTypeID;
@@ -111,10 +113,7 @@ impl Binder {
             clauses.push(bound_clause);
         }
 
-        Ok(BoundStatement::BoundQuery(BoundQuery {
-            clauses,
-            variables,
-        }))
+        Ok(BoundStatement::BoundQuery(BoundQuery { clauses, variables }))
     }
 
     // ==================== MATCH Binding ====================
@@ -128,14 +127,19 @@ impl Binder {
         let mut new_vars = Vec::new();
 
         for pattern in &m.patterns {
-            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned()
-                .chain(new_vars.iter().cloned()).collect();
+            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned().chain(new_vars.iter().cloned()).collect();
             let (bound, nv) = self.bind_pattern(pattern, &all_vars)?;
             patterns.push(bound);
             new_vars.extend(nv);
         }
 
-        Ok((BoundMatchClause { patterns, new_variables: new_vars.clone() }, new_vars))
+        Ok((
+            BoundMatchClause {
+                patterns,
+                new_variables: new_vars.clone(),
+            },
+            new_vars,
+        ))
     }
 
     fn bind_pattern(
@@ -209,9 +213,7 @@ impl Binder {
             }
 
             if let Some(ref v) = edge_var {
-                if existing_vars.iter().any(|bv| bv.name == *v)
-                    || new_vars.iter().any(|bv| bv.name == *v)
-                {
+                if existing_vars.iter().any(|bv| bv.name == *v) || new_vars.iter().any(|bv| bv.name == *v) {
                     return Err(format!("Variable '{}' already defined", v));
                 }
             }
@@ -244,11 +246,7 @@ impl Binder {
 
     // ==================== RETURN Binding ====================
 
-    fn bind_return(
-        &self,
-        r: &ReturnClause,
-        variables: &[BoundVariable],
-    ) -> Result<BoundReturnClause, String> {
+    fn bind_return(&self, r: &ReturnClause, variables: &[BoundVariable]) -> Result<BoundReturnClause, String> {
         let mut expressions = Vec::new();
         for item in &r.expressions {
             let resolved = self.resolve_expression(&item.expression, variables)?;
@@ -259,16 +257,10 @@ impl Binder {
 
     // ==================== WHERE Binding ====================
 
-    fn bind_where(
-        &self,
-        w: &WhereClause,
-        variables: &[BoundVariable],
-    ) -> Result<BoundWhereClause, String> {
+    fn bind_where(&self, w: &WhereClause, variables: &[BoundVariable]) -> Result<BoundWhereClause, String> {
         let resolved = self.resolve_expression(&w.expression, variables)?;
         // WHERE expressions must be boolean
-        if resolved.resolved_type != LogicalTypeID::Bool
-            && resolved.resolved_type != LogicalTypeID::Any
-        {
+        if resolved.resolved_type != LogicalTypeID::Bool && resolved.resolved_type != LogicalTypeID::Any {
             return Err(format!(
                 "WHERE clause must be boolean, got {:?}",
                 resolved.resolved_type
@@ -305,11 +297,7 @@ impl Binder {
 
     // ==================== Expression Resolution ====================
 
-    fn resolve_expression(
-        &self,
-        expr: &Expression,
-        variables: &[BoundVariable],
-    ) -> Result<BoundExpression, String> {
+    fn resolve_expression(&self, expr: &Expression, variables: &[BoundVariable]) -> Result<BoundExpression, String> {
         match expr {
             Expression::Constant(c) => {
                 let typ = match c {
@@ -391,17 +379,13 @@ impl Binder {
                 })
             }
             Expression::FunctionCall(name, args) => {
-                let resolved_args: Result<Vec<BoundExpression>, String> = args
-                    .iter()
-                    .map(|a| self.resolve_expression(a, variables))
-                    .collect();
+                let resolved_args: Result<Vec<BoundExpression>, String> =
+                    args.iter().map(|a| self.resolve_expression(a, variables)).collect();
                 let _args = resolved_args?;
                 let return_type = match name.to_uppercase().as_str() {
                     "COUNT" | "SUM" | "MIN" | "MAX" | "AVG" => LogicalTypeID::Int64,
                     "STARTS_WITH" | "ENDS_WITH" | "CONTAINS" => LogicalTypeID::Bool,
-                    "TO_UPPER" | "TO_LOWER" | "TRIM" | "SUBSTRING" | "REPLACE" => {
-                        LogicalTypeID::String
-                    }
+                    "TO_UPPER" | "TO_LOWER" | "TRIM" | "SUBSTRING" | "REPLACE" => LogicalTypeID::String,
                     "ABS" | "CEIL" | "FLOOR" | "ROUND" => LogicalTypeID::Double,
                     _ => LogicalTypeID::Any,
                 };
@@ -415,16 +399,18 @@ impl Binder {
                 let left = self.resolve_expression(left, variables)?;
                 let right = self.resolve_expression(right, variables)?;
                 let result_type = match op {
-                    BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::LessThan
-                    | BinaryOp::LessThanOrEqual | BinaryOp::GreaterThan
-                    | BinaryOp::GreaterThanOrEqual | BinaryOp::And | BinaryOp::Or
+                    BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::LessThan
+                    | BinaryOp::LessThanOrEqual
+                    | BinaryOp::GreaterThan
+                    | BinaryOp::GreaterThanOrEqual
+                    | BinaryOp::And
+                    | BinaryOp::Or
                     | BinaryOp::Xor => LogicalTypeID::Bool,
-                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply
-                    | BinaryOp::Divide | BinaryOp::Modulo => {
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Modulo => {
                         // Propagate numeric type
-                        if left.resolved_type == LogicalTypeID::Double
-                            || right.resolved_type == LogicalTypeID::Double
-                        {
+                        if left.resolved_type == LogicalTypeID::Double || right.resolved_type == LogicalTypeID::Double {
                             LogicalTypeID::Double
                         } else {
                             LogicalTypeID::Int64
@@ -451,10 +437,8 @@ impl Binder {
                 })
             }
             Expression::List(items) => {
-                let resolved: Result<Vec<BoundExpression>, String> = items
-                    .iter()
-                    .map(|i| self.resolve_expression(i, variables))
-                    .collect();
+                let resolved: Result<Vec<BoundExpression>, String> =
+                    items.iter().map(|i| self.resolve_expression(i, variables)).collect();
                 resolved?;
                 Ok(BoundExpression {
                     expression: expr.clone(),
@@ -477,10 +461,7 @@ impl Binder {
 
     // ==================== DDL Binding ====================
 
-    fn bind_create_node_table(
-        &self,
-        t: CreateNodeTable,
-    ) -> Result<BoundStatement, String> {
+    fn bind_create_node_table(&self, t: CreateNodeTable) -> Result<BoundStatement, String> {
         if t.name.is_empty() {
             return Err("Table name cannot be empty".into());
         }
@@ -502,10 +483,7 @@ impl Binder {
 
         // Verify primary key exists
         if !columns.iter().any(|c| c.is_primary_key) {
-            return Err(format!(
-                "Primary key column '{}' not found in columns",
-                t.primary_key
-            ));
+            return Err(format!("Primary key column '{}' not found in columns", t.primary_key));
         }
 
         // Register with catalog
@@ -525,10 +503,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_rel_table(
-        &self,
-        t: CreateRelTable,
-    ) -> Result<BoundStatement, String> {
+    fn bind_create_rel_table(&self, t: CreateRelTable) -> Result<BoundStatement, String> {
         if t.name.is_empty() {
             return Err("Table name cannot be empty".into());
         }
@@ -575,14 +550,8 @@ impl Binder {
     fn bind_drop_table(&self, t: DropTable) -> Result<BoundStatement, String> {
         let mut catalog = self.catalog.lock().unwrap();
         match catalog.drop_table(&t.name) {
-            CatalogResult::Dropped { .. } => {
-                Ok(BoundStatement::BoundDropTable(BoundDropTable {
-                    name: t.name,
-                }))
-            }
-            CatalogResult::NotFound => {
-                Err(format!("Table '{}' not found", t.name))
-            }
+            CatalogResult::Dropped { .. } => Ok(BoundStatement::BoundDropTable(BoundDropTable { name: t.name })),
+            CatalogResult::NotFound => Err(format!("Table '{}' not found", t.name)),
             _ => Err("Failed to drop table".into()),
         }
     }
@@ -592,9 +561,7 @@ impl Binder {
         match &u.expression {
             kuzu_parser::ast::Expression::List(_) => {}
             kuzu_parser::ast::Expression::Variable(_) => {}
-            _ => return Err(format!(
-                "UNWIND requires a list expression, got: {:?}", u.expression
-            )),
+            _ => return Err(format!("UNWIND requires a list expression, got: {:?}", u.expression)),
         }
         if u.variable.is_empty() {
             return Err("UNWIND requires a variable name".into());
@@ -614,21 +581,22 @@ impl Binder {
         let mut new_vars = Vec::new();
 
         for pattern in &m.patterns {
-            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned()
-                .chain(new_vars.iter().cloned()).collect();
+            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned().chain(new_vars.iter().cloned()).collect();
             let (bound, nv) = self.bind_pattern(pattern, &all_vars)?;
             patterns.push(bound);
             new_vars.extend(nv);
         }
 
-        Ok((BoundMatchClause { patterns, new_variables: new_vars.clone() }, new_vars))
+        Ok((
+            BoundMatchClause {
+                patterns,
+                new_variables: new_vars.clone(),
+            },
+            new_vars,
+        ))
     }
 
-    fn bind_set(
-        &self,
-        s: &kuzu_parser::ast::SetClause,
-        variables: &[BoundVariable],
-    ) -> Result<BoundSetClause, String> {
+    fn bind_set(&self, s: &kuzu_parser::ast::SetClause, variables: &[BoundVariable]) -> Result<BoundSetClause, String> {
         let mut items = Vec::new();
         for item in &s.items {
             // Property must be of form `variable.property`
@@ -636,10 +604,10 @@ impl Binder {
                 kuzu_parser::ast::Expression::PropertyAccess(var_expr, prop_name) => {
                     match var_expr.as_ref() {
                         kuzu_parser::ast::Expression::Variable(var_name) => {
-                            let bound_var = variables.iter().find(|v| v.name == *var_name)
-                                .ok_or_else(|| format!(
-                                    "Variable '{}' not in scope for SET", var_name
-                                ))?;
+                            let bound_var = variables
+                                .iter()
+                                .find(|v| v.name == *var_name)
+                                .ok_or_else(|| format!("Variable '{}' not in scope for SET", var_name))?;
                             items.push(BoundSetItem {
                                 property: item.property.clone(),
                                 value: item.value.clone(),
@@ -667,8 +635,14 @@ impl Binder {
             }
         }
         Ok(BoundStatement::BoundUnion(BoundUnion {
-            left: Box::new(match left { BoundStatement::BoundQuery(q) => q, _ => unreachable!() }),
-            right: Box::new(match right { BoundStatement::BoundQuery(q) => q, _ => unreachable!() }),
+            left: Box::new(match left {
+                BoundStatement::BoundQuery(q) => q,
+                _ => unreachable!(),
+            }),
+            right: Box::new(match right {
+                BoundStatement::BoundQuery(q) => q,
+                _ => unreachable!(),
+            }),
             all: u.all,
         }))
     }
@@ -702,7 +676,10 @@ impl Binder {
                     return Err(format!("Column '{old_name}' not found in table '{}'", a.table_name));
                 }
                 if has_name(&col_names, new_name) {
-                    return Err(format!("Column '{new_name}' already exists in table '{}'", a.table_name));
+                    return Err(format!(
+                        "Column '{new_name}' already exists in table '{}'",
+                        a.table_name
+                    ));
                 }
             }
             kuzu_parser::ast::AlterAction::RenameTable { new_name: _ } => {
@@ -728,10 +705,10 @@ impl Binder {
         for expr in &d.expressions {
             match expr {
                 kuzu_parser::ast::Expression::Variable(var_name) => {
-                    let var = variables.iter().find(|v| v.name == *var_name)
-                        .ok_or_else(|| format!(
-                            "Variable '{}' not found in scope for DELETE", var_name
-                        ))?;
+                    let var = variables
+                        .iter()
+                        .find(|v| v.name == *var_name)
+                        .ok_or_else(|| format!("Variable '{}' not found in scope for DELETE", var_name))?;
                     return Ok(BoundDeleteClause {
                         expressions: d.expressions.clone(),
                         table_name: var.label.clone().unwrap_or_default(),
@@ -739,9 +716,7 @@ impl Binder {
                         primary_key_column: String::new(),
                     });
                 }
-                _ => return Err(format!(
-                    "DELETE only supports variable references, got: {:?}", expr
-                )),
+                _ => return Err(format!("DELETE only supports variable references, got: {:?}", expr)),
             }
         }
         Err("DELETE: no valid expressions".into())
@@ -843,7 +818,9 @@ mod tests {
             ],
         );
         catalog.create_rel_table(
-            "Knows".into(), 0, 0,
+            "Knows".into(),
+            0,
+            0,
             vec![CatalogColumn {
                 name: "since".into(),
                 logical_type: LogicalTypeID::Int64,
@@ -984,14 +961,12 @@ mod tests {
         let sql = "MATCH (a:Person) RETURN COUNT(a)";
         let bound = binder.bind(parse(sql).unwrap()).unwrap();
         match bound {
-            BoundStatement::BoundQuery(q) => {
-                match &q.clauses[1] {
-                    BoundClause::BoundReturn(r) => {
-                        assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
-                    }
-                    _ => panic!("Expected BoundReturn"),
+            BoundStatement::BoundQuery(q) => match &q.clauses[1] {
+                BoundClause::BoundReturn(r) => {
+                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
                 }
-            }
+                _ => panic!("Expected BoundReturn"),
+            },
             _ => panic!("Expected BoundQuery"),
         }
     }
