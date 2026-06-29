@@ -19,6 +19,7 @@ pub enum LogicalOperator {
     Flatten(LogicalFlatten),
     TableFunctionCall(LogicalTableFunctionCall),
     CopyFrom(LogicalCopyFrom),
+    Delete(LogicalDelete),
 }
 
 impl LogicalOperator {
@@ -38,6 +39,7 @@ impl LogicalOperator {
             LogicalOperator::Flatten(s) => s.cardinality,
             LogicalOperator::TableFunctionCall(s) => s.cardinality,
             LogicalOperator::CopyFrom(s) => s.cardinality,
+            LogicalOperator::Delete(s) => s.cardinality,
         }
     }
 
@@ -57,6 +59,7 @@ impl LogicalOperator {
             LogicalOperator::Flatten(s) => s.cardinality = card,
             LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
+            LogicalOperator::Delete(s) => s.cardinality = card,
         }
     }
 
@@ -82,7 +85,8 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
-            LogicalOperator::CopyFrom(_) => vec![],
+            LogicalOperator::CopyFrom(_)
+            | LogicalOperator::Delete(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -101,7 +105,8 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
-            LogicalOperator::CopyFrom(_) => vec![],
+            LogicalOperator::CopyFrom(_)
+            | LogicalOperator::Delete(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -192,6 +197,15 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// DELETE operator — removes rows from a table.
+#[derive(Debug, Clone)]
+pub struct LogicalDelete {
+    pub table_name: String,
+    pub table_id: u64,
+    pub primary_key_column: String,
     pub cardinality: u64,
 }
 

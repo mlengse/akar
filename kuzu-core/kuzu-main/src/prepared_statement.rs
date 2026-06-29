@@ -80,6 +80,7 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                     kuzu_binder::bound_statement::BoundClause::BoundWhere(w) => {
                         collect_params_from_expr(&w.expression.expression, params);
                     }
+                    kuzu_binder::bound_statement::BoundClause::BoundDelete(_) => {}
                 }
             }
         }

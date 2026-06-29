@@ -122,6 +122,12 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                 let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
                 clauses.push(Clause::Where(WhereClause { expression: expr }));
             }
+            Rule::delete_clause => {
+                let expressions: Result<Vec<_>, _> = inner.into_inner()
+                    .map(parse_expression)
+                    .collect();
+                clauses.push(Clause::Delete(DeleteClause { expressions: expressions? }));
+            }
             _ => {}
         }
     }

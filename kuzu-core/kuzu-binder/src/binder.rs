@@ -78,6 +78,10 @@ impl Binder {
                     let (bound, vars) = self.bind_match_create(&c, &variables)?;
                     (BoundClause::BoundMatch(bound), vars)
                 }
+                Clause::Delete(d) => {
+                    let bound = self.bind_delete(&d, &variables)?;
+                    (BoundClause::BoundDelete(bound), Vec::new())
+                }
             };
             variables.extend(new_vars);
             clauses.push(bound_clause);
@@ -557,6 +561,37 @@ impl Binder {
             }
             _ => Err("Failed to drop table".into()),
         }
+    }
+
+    fn bind_delete(
+        &self,
+        d: &kuzu_parser::ast::DeleteClause,
+        variables: &[BoundVariable],
+    ) -> Result<BoundDeleteClause, String> {
+        if d.expressions.is_empty() {
+            return Err("DELETE requires at least one expression".into());
+        }
+
+        for expr in &d.expressions {
+            match expr {
+                kuzu_parser::ast::Expression::Variable(var_name) => {
+                    let var = variables.iter().find(|v| v.name == *var_name)
+                        .ok_or_else(|| format!(
+                            "Variable '{}' not found in scope for DELETE", var_name
+                        ))?;
+                    return Ok(BoundDeleteClause {
+                        expressions: d.expressions.clone(),
+                        table_name: var.label.clone().unwrap_or_default(),
+                        table_id: var.table_id,
+                        primary_key_column: String::new(),
+                    });
+                }
+                _ => return Err(format!(
+                    "DELETE only supports variable references, got: {:?}", expr
+                )),
+            }
+        }
+        Err("DELETE: no valid expressions".into())
     }
 
     fn bind_copy_from(&self, c: kuzu_parser::ast::CopyFrom) -> Result<BoundStatement, String> {

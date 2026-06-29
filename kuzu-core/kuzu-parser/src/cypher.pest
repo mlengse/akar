@@ -33,9 +33,13 @@ delim_option = { "DELIM" ~ string }
 escape_option = { "ESCAPE" ~ string }
 quote_option = { "QUOTE" ~ string }
 
+delete_clause = { "DELETE" ~ expression ~ ("," ~ expression)* }
+
 query_statement = {
     match_clause ~ return_clause
     | match_clause ~ where_clause ~ return_clause
+    | match_clause ~ where_clause ~ delete_clause
+    | match_clause ~ delete_clause
     | match_clause
     | return_clause
 }

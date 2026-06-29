@@ -941,6 +941,69 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
     }
 }
 
+// ==================== Delete ====================
+
+/// Physical operator for DELETE — removes rows from a node table.
+pub struct PhysicalDelete {
+    pub table_name: String,
+    pub table_id: u64,
+    pub primary_key_column: String,
+    /// Row indices to delete (found by the scan/filter pipeline).
+    pub row_indices: Vec<u64>,
+    pub table_catalog: Arc<Mutex<TableCatalog>>,
+}
+
+impl PhysicalOperatorExec for PhysicalDelete {
+    fn operator_type(&self) -> &str {
+        "delete"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        // Collect row indices from input chunks
+        let mut rows_to_delete: Vec<u64> = self.row_indices.clone();
+
+        // If input has data, extract row indices from it
+        for chunk in &input {
+            for row in 0..chunk.size {
+                if let Some(field) = chunk.fields.first() {
+                    if let Some(val) = field.get_i64(row) {
+                        rows_to_delete.push(val as u64);
+                    }
+                }
+            }
+        }
+
+        if rows_to_delete.is_empty() {
+            // No rows to delete — still return success
+            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+            v.resize(1);
+            v.set_i64(0, 0);
+            return Ok(vec![DataChunk::new(vec![v])]);
+        }
+
+        // Delete rows from the table
+        let mut catalog = self.table_catalog.lock().unwrap();
+        let deleted = if let Some(table) = catalog.get_node_table_by_name_mut(&self.table_name) {
+            let mut count = 0u64;
+            for &row_idx in &rows_to_delete {
+                if table.delete_row(row_idx).is_ok() {
+                    count += 1;
+                }
+            }
+            count
+        } else {
+            return Err(format!("Table '{}' not found for DELETE", self.table_name));
+        };
+
+        tracing::info!("DELETE: removed {deleted} rows from '{}'", self.table_name);
+
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+        v.resize(1);
+        v.set_i64(0, deleted as i64);
+        Ok(vec![DataChunk::new(vec![v])])
+    }
+}
+
 /// Compute a hash of a Value for use in hash-based joins.
 /// Hashes the discriminant (variant type) and the payload data.
 fn value_hash(v: &Value) -> u64 {

@@ -23,6 +23,12 @@ pub enum Clause {
     Return(ReturnClause),
     Where(WhereClause),
     Create(CreateClause),
+    Delete(DeleteClause),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteClause {
+    pub expressions: Vec<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

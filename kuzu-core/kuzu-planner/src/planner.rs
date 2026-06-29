@@ -40,6 +40,7 @@ impl QueryPlanner {
         let mut scan_ops: Vec<LogicalOperator> = Vec::new();
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;
+        let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
 
         for clause in query.clauses {
             match clause {
@@ -78,13 +79,25 @@ impl QueryPlanner {
                         cardinality: 0,
                     });
                 }
+                BoundClause::BoundDelete(d) => {
+                    delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
+                        table_name: d.table_name.clone(),
+                        table_id: d.table_id,
+                        primary_key_column: d.primary_key_column.clone(),
+                        cardinality: 0,
+                    }));
+                }
             }
         }
+
+        // Collect delete clauses (added after the main pipeline)
+        let delete_ops: Vec<LogicalOperator> = delete_exprs.drain(..).collect();
 
         // Build operator pipeline bottom-up
         let mut result: Vec<LogicalOperator> = Vec::new();
 
         if scan_ops.is_empty() {
+            result.extend(delete_ops);
             return Ok(result);
         }
 
@@ -111,6 +124,9 @@ impl QueryPlanner {
         if let Some(proj) = projection {
             result.push(LogicalOperator::Projection(proj));
         }
+
+        // Append DELETE operators at the end
+        result.extend(delete_ops);
 
         Ok(result)
     }

@@ -70,6 +70,19 @@ impl ColumnChunk {
         self.values.push(value);
     }
 
+    /// Set a value at a specific index (for in-place updates like DELETE).
+    /// Returns an error if the index is out of bounds.
+    pub fn set_value(&mut self, idx: usize, value: Value) -> Result<(), String> {
+        if idx >= self.values.len() {
+            return Err(format!(
+                "ColumnChunk index {idx} out of bounds (len={})",
+                self.values.len()
+            ));
+        }
+        self.values[idx] = value;
+        Ok(())
+    }
+
     /// Number of buffered values.
     pub fn num_values(&self) -> usize {
         self.values.len()

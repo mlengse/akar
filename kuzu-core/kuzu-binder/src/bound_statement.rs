@@ -46,6 +46,15 @@ pub enum BoundClause {
     BoundMatch(BoundMatchClause),
     BoundReturn(BoundReturnClause),
     BoundWhere(BoundWhereClause),
+    BoundDelete(BoundDeleteClause),
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundDeleteClause {
+    pub expressions: Vec<Expression>,
+    pub table_name: String,
+    pub table_id: u64,
+    pub primary_key_column: String,
 }
 
 #[derive(Debug, Clone)]

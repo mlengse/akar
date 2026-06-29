@@ -193,6 +193,21 @@ impl QueryProcessor {
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Delete(dl) => {
+                    let table_catalog = self.table_catalog.clone()
+                        .ok_or_else(|| "No table catalog available for DELETE".to_string())?;
+
+                    let delete_op = PhysicalDelete {
+                        table_name: dl.table_name.clone(),
+                        table_id: dl.table_id,
+                        primary_key_column: dl.primary_key_column.clone(),
+                        row_indices: Vec::new(),
+                        table_catalog,
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = delete_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::CrossProduct(_)
                 | LogicalOperator::Union(_) => {
                     intermediate_result = Some(vec![]);
