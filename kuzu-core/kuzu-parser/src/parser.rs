@@ -154,8 +154,82 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         }
         Rule::copy_from => parse_copy_from(pair),
         Rule::alter_table => parse_alter_table(pair),
+        Rule::create_vector_index => parse_create_vector_index(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
+}
+
+fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut index_name = String::new();
+    let mut table_name = String::new();
+    let mut column_name = String::new();
+    let mut metric = String::new();
+    let mut dimensions: Option<u64> = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if index_name.is_empty() => {
+                index_name = inner.as_str().to_string();
+            }
+            Rule::identifier if table_name.is_empty() => {
+                // Second identifier is the table name (inside parentheses before dot)
+                table_name = inner.as_str().to_string();
+            }
+            Rule::identifier if column_name.is_empty() => {
+                // Third identifier is the column name (after dot)
+                column_name = inner.as_str().to_string();
+            }
+            Rule::vector_index_options => {
+                for opt in inner.into_inner() {
+                    match opt.as_rule() {
+                        Rule::metric_option => {
+                            for part in opt.into_inner() {
+                                let val = part.as_str().to_lowercase();
+                                if val != "metric" && val != "=" {
+                                    metric = val;
+                                }
+                            }
+                        }
+                        Rule::dimensions_option => {
+                            for part in opt.into_inner() {
+                                if part.as_rule() == Rule::integer {
+                                    dimensions = Some(
+                                        part.as_str().parse::<u64>().map_err(|e| {
+                                            format!("Invalid dimensions value: {e}")
+                                        })?,
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if index_name.is_empty() {
+        return Err("Missing index name for CREATE VECTOR INDEX".into());
+    }
+    if table_name.is_empty() {
+        return Err("Missing table name for CREATE VECTOR INDEX".into());
+    }
+    if column_name.is_empty() {
+        return Err("Missing column name for CREATE VECTOR INDEX".into());
+    }
+    if metric.is_empty() {
+        return Err("Missing metric for CREATE VECTOR INDEX (use: cosine, euclidean, l2, or dot)".into());
+    }
+    let dims = dimensions.ok_or("Missing dimensions for CREATE VECTOR INDEX (use: dims=N)")?;
+
+    Ok(Statement::CreateVectorIndex(CreateVectorIndex {
+        index_name,
+        table_name,
+        column_name,
+        metric,
+        dimensions: dims,
+    }))
 }
 
 fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {

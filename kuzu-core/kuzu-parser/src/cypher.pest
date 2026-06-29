@@ -30,6 +30,7 @@ ddl_statement = {
     | drop_table
     | copy_from
     | alter_table
+    | create_vector_index
 }
 
 // ==================== COPY FROM ====================
@@ -118,6 +119,19 @@ type_name = { "STRING" | "INT64" | "INT32" | "INT16" | "INT8"
     | "DOUBLE" | "FLOAT" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL" }
 
 primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
+
+create_vector_index = {
+    "CREATE" ~ "VECTOR" ~ "INDEX" ~ identifier ~ "ON"
+    ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+    ~ "WITH" ~ "(" ~ vector_index_options ~ ")"
+}
+
+vector_index_options = { vector_index_option ~ ("," ~ vector_index_option)* }
+vector_index_option = {
+    metric_option | dimensions_option
+}
+metric_option = { "metric" ~ "=" ~ ("cosine" | "euclidean" | "l2" | "dot") }
+dimensions_option = { "dims" ~ "=" ~ integer }
 
 // ==================== DML Clauses ====================
 

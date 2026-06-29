@@ -47,11 +47,23 @@ impl RelTableEntry {
     }
 }
 
-/// An entry in the system catalog (either a node table or rel table).
+/// A vector index entry in the catalog.
+#[derive(Debug, Clone)]
+pub struct VectorIndexEntry {
+    pub index_id: u64,
+    pub name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub metric: String,
+    pub dimensions: u64,
+}
+
+/// An entry in the system catalog (node table, rel table, or vector index).
 #[derive(Debug, Clone)]
 pub enum CatalogEntry {
     NodeTable(NodeTableEntry),
     RelTable(RelTableEntry),
+    VectorIndex(VectorIndexEntry),
 }
 
 impl CatalogEntry {
@@ -84,6 +96,10 @@ impl CatalogEntry {
         matches!(self, CatalogEntry::RelTable(_))
     }
 
+    pub fn is_vector_index(&self) -> bool {
+        matches!(self, CatalogEntry::VectorIndex(_))
+    }
+
     pub fn as_node_table(&self) -> Option<&NodeTableEntry> {
         match self {
             CatalogEntry::NodeTable(t) => Some(t),
@@ -94,6 +110,13 @@ impl CatalogEntry {
     pub fn as_rel_table(&self) -> Option<&RelTableEntry> {
         match self {
             CatalogEntry::RelTable(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn as_vector_index(&self) -> Option<&VectorIndexEntry> {
+        match self {
+            CatalogEntry::VectorIndex(v) => Some(v),
             _ => None,
         }
     }

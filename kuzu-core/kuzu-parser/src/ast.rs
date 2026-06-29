@@ -9,6 +9,7 @@ pub enum Statement {
     DropTable(DropTable),
     CopyFrom(CopyFrom),
     AlterTable(AlterTable),
+    CreateVectorIndex(CreateVectorIndex),
     Union(UnionStatement),
     Merge(MergeStatement),
     Call(CallStatement),
@@ -244,6 +245,16 @@ pub struct MergeStatement {
 pub struct CallStatement {
     pub function_name: String,
     pub args: Vec<Expression>,
+}
+
+/// CREATE VECTOR INDEX statement — creates an HNSW index on a vector column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateVectorIndex {
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub metric: String,
+    pub dimensions: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
