@@ -1,0 +1,3 @@
+[submodule "ladybug"]
+	path = ladybug
+	url = https://github.com/mlengse/ladybug
