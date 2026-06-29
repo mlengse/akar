@@ -1,11 +1,21 @@
 //! Vector extension for Kuzu.
 //!
-//! Provides vector similarity search operations:
-//! - Cosine similarity
-//! - Euclidean distance
-//! - Dot product
-//! - L2 distance (squared Euclidean)
-//! - Vector normalization
+//! Provides vector similarity search operations and an HNSW index for
+//! approximate nearest neighbour search.
+//!
+//! # Functions
+//!
+//! - `cosine_similarity(a, b)` — cosine similarity between two vectors
+//! - `euclidean_distance(a, b)` — Euclidean distance between two vectors
+//! - `dot_product(a, b)` — dot product of two vectors
+//! - `l2_distance(a, b)` — L2 squared distance between two vectors
+//!
+//! # Index
+//!
+//! `HnswIndex` — multi-layer navigable small world graph for fast ANN search.
+//! Supports configurable distance metrics (Cosine, Euclidean, L1, L2, Dot).
+
+pub mod hnsw;
 
 use kuzu_extension::{Extension, ExtensionContext};
 
@@ -25,35 +35,101 @@ impl Extension for VectorExtension {
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use kuzu_function::registry::ScalarFunction;
-        use kuzu_function::registry::UtilityOp;
+        use kuzu_common::types::Value;
+        use std::sync::Arc;
 
+        // Register cosine_similarity as a CustomScalar callback
         context.register_scalar_function(
             "cosine_similarity",
-            ScalarFunction::Utility {
-                op: UtilityOp::Coalesce,
-            },
-        );
-        context.register_scalar_function(
-            "euclidean_distance",
-            ScalarFunction::Utility {
-                op: UtilityOp::Coalesce,
-            },
-        );
-        context.register_scalar_function(
-            "dot_product",
-            ScalarFunction::Utility {
-                op: UtilityOp::Coalesce,
-            },
-        );
-        context.register_scalar_function(
-            "l2_distance",
-            ScalarFunction::Utility {
-                op: UtilityOp::Coalesce,
+            ScalarFunction::CustomScalar {
+                name: "cosine_similarity".into(),
+                execute: Arc::new(|args: &[Value]| {
+                    if args.len() < 2 {
+                        return Err("cosine_similarity requires 2 arguments".into());
+                    }
+                    let a = extract_f64_list(&args[0])?;
+                    let b = extract_f64_list(&args[1])?;
+                    let result = crate::cosine_similarity(&a, &b);
+                    Ok(Value::Double(result))
+                }),
             },
         );
 
-        tracing::info!("Vector extension loaded: 4 functions registered");
+        context.register_scalar_function(
+            "euclidean_distance",
+            ScalarFunction::CustomScalar {
+                name: "euclidean_distance".into(),
+                execute: Arc::new(|args: &[Value]| {
+                    if args.len() < 2 {
+                        return Err("euclidean_distance requires 2 arguments".into());
+                    }
+                    let a = extract_f64_list(&args[0])?;
+                    let b = extract_f64_list(&args[1])?;
+                    let result = crate::euclidean_distance(&a, &b);
+                    Ok(Value::Double(result))
+                }),
+            },
+        );
+
+        context.register_scalar_function(
+            "dot_product",
+            ScalarFunction::CustomScalar {
+                name: "dot_product".into(),
+                execute: Arc::new(|args: &[Value]| {
+                    if args.len() < 2 {
+                        return Err("dot_product requires 2 arguments".into());
+                    }
+                    let a = extract_f64_list(&args[0])?;
+                    let b = extract_f64_list(&args[1])?;
+                    let result = crate::dot_product(&a, &b);
+                    Ok(Value::Double(result))
+                }),
+            },
+        );
+
+        context.register_scalar_function(
+            "l2_distance",
+            ScalarFunction::CustomScalar {
+                name: "l2_distance".into(),
+                execute: Arc::new(|args: &[Value]| {
+                    if args.len() < 2 {
+                        return Err("l2_distance requires 2 arguments".into());
+                    }
+                    let a = extract_f64_list(&args[0])?;
+                    let b = extract_f64_list(&args[1])?;
+                    let result = crate::l2_distance(&a, &b);
+                    Ok(Value::Double(result))
+                }),
+            },
+        );
+
+        tracing::info!("Vector extension loaded: 4 functions registered (real callbacks)");
         Ok(())
+    }
+}
+
+/// Helper: extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
+fn extract_f64_list(val: &kuzu_common::types::Value) -> Result<Vec<f64>, String> {
+    match val {
+        kuzu_common::types::Value::List(items) => {
+            let mut result = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    kuzu_common::types::Value::Double(d) => result.push(*d),
+                    kuzu_common::types::Value::Int64(i) => result.push(*i as f64),
+                    kuzu_common::types::Value::Int32(i) => result.push(*i as f64),
+                    kuzu_common::types::Value::Float(f) => result.push(*f as f64),
+                    other => {
+                        return Err(format!(
+                            "Expected numeric value in vector list, got {:?}",
+                            other
+                        ));
+                    }
+                }
+            }
+            Ok(result)
+        }
+        other => Err(format!("Expected List value for vector, got {:?}", other)),
     }
 }
 
