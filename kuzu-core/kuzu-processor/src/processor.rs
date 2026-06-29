@@ -121,6 +121,19 @@ impl QueryProcessor {
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::ArtIndexRangeScan(ars) => {
+                    let scan = PhysicalArtIndexRangeScan {
+                        table_name: ars.table_name.clone(),
+                        table_id: ars.table_id,
+                        lower_bound: ars.lower_bound.clone(),
+                        upper_bound: ars.upper_bound.clone(),
+                        lower_inclusive: ars.lower_inclusive,
+                        upper_inclusive: ars.upper_inclusive,
+                        table_catalog: self.table_catalog.clone(),
+                    };
+                    let result = scan.execute(current.clone())?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Filter(f) => {
                     let evaluator = self
                         .function_registry

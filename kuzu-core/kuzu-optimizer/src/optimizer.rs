@@ -36,6 +36,8 @@ impl Optimizer {
             Box::new(TopKOptimization),
             // Pass 8: Detect vector similarity search patterns and use index
             Box::new(VectorSimilarityDetection),
+            // Pass 9: Detect range scans on PK columns with ART index
+            Box::new(ArtRangeScanDetection),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
@@ -57,6 +59,7 @@ impl Optimizer {
             Box::new(JoinOptimization),
             Box::new(TopKOptimization),
             Box::new(VectorSimilarityDetection),
+            Box::new(ArtRangeScanDetection),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
@@ -119,7 +122,8 @@ mod tests {
         assert!(names.contains(&"factorization_rewriting"));
         assert!(names.contains(&"aggregate_detection"));
         assert!(names.contains(&"vector_similarity_detection"));
-        assert_eq!(names.len(), 10);
+        assert!(names.contains(&"art_range_scan_detection"));
+        assert_eq!(names.len(), 11);
     }
 
     #[test]

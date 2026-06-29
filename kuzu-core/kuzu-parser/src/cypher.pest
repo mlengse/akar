@@ -31,7 +31,19 @@ ddl_statement = {
     | copy_from
     | alter_table
     | create_vector_index
+    | create_index
+    | drop_index
 }
+
+create_index = {
+    "CREATE" ~ index_type ~ "INDEX" ~ if_not_exists? ~ identifier
+    ~ "FOR" ~ "(" ~ identifier ~ ":" ~ identifier ~ ")"
+    ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+}
+
+index_type = { "ART" | "HASH" }
+if_not_exists = { "IF" ~ "NOT" ~ "EXISTS" }
+drop_index = { "DROP" ~ "INDEX" ~ identifier ~ "ON" ~ identifier }
 
 // ==================== COPY FROM ====================
 

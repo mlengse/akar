@@ -829,6 +829,30 @@ impl Connection {
                 let message = lines.join("\n");
                 Ok(Some(QueryResult::success_message(message)))
             }
+            BoundStatement::BoundCreateIndex(idx) => {
+                // Create ART index on the node table
+                self.database
+                    .storage_manager
+                    .create_art_index(&idx.table_name, &idx.index_name)?;
+                tracing::info!("Created '{}' index '{}' on '{}'", idx.index_type.as_str(), idx.index_name, idx.table_name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "{} index '{}' created on table '{}'",
+                    idx.index_type.as_str(),
+                    idx.index_name,
+                    idx.table_name
+                ))))
+            }
+            BoundStatement::BoundDropIndex(idx) => {
+                // Drop ART index from the node table
+                self.database
+                    .storage_manager
+                    .drop_art_index(&idx.table_name, &idx.index_name)?;
+                tracing::info!("Dropped index '{}' from '{}'", idx.index_name, idx.table_name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Index '{}' dropped from table '{}'",
+                    idx.index_name, idx.table_name
+                ))))
+            }
             BoundStatement::BoundQuery(q) => {
                 // Check if this is a FOREACH-only query — handle it directly
                 if q.clauses.len() == 1 {

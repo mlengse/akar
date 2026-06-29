@@ -155,6 +155,8 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         Rule::copy_from => parse_copy_from(pair),
         Rule::alter_table => parse_alter_table(pair),
         Rule::create_vector_index => parse_create_vector_index(pair),
+        Rule::create_index => parse_create_index(pair),
+        Rule::drop_index => parse_drop_index(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
 }
@@ -229,6 +231,98 @@ fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statem
         column_name,
         metric,
         dimensions: dims,
+    }))
+}
+
+/// Parse `CREATE [ART|HASH] INDEX [IF NOT EXISTS] name FOR (var:Label) ON (var.prop)`.
+fn parse_create_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut index_type = String::new();
+    let mut index_name = String::new();
+    let mut table_name = String::new();
+    let mut variable = String::new();
+    let mut property = String::new();
+    let mut conflict_action: Option<String> = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::index_type => {
+                index_type = inner.as_str().to_uppercase();
+            }
+            Rule::identifier if index_name.is_empty() => {
+                index_name = inner.as_str().to_string();
+            }
+            Rule::identifier if table_name.is_empty() => {
+                // Table name inside FOR parentheses
+                table_name = inner.as_str().to_string();
+            }
+            Rule::identifier if variable.is_empty() => {
+                // Variable inside FOR parentheses
+                variable = inner.as_str().to_string();
+            }
+            Rule::identifier if property.is_empty() => {
+                // Property name after the dot
+                property = inner.as_str().to_string();
+            }
+            Rule::if_not_exists => {
+                conflict_action = Some("IF_NOT_EXISTS".into());
+            }
+            _ => {}
+        }
+    }
+
+    if index_type.is_empty() {
+        return Err("Missing index type: use ART or HASH".into());
+    }
+    if index_name.is_empty() {
+        return Err("Missing index name for CREATE INDEX".into());
+    }
+    if table_name.is_empty() {
+        return Err("Missing table name for CREATE INDEX".into());
+    }
+    if variable.is_empty() {
+        return Err("Missing variable for CREATE INDEX".into());
+    }
+    if property.is_empty() {
+        return Err("Missing property for CREATE INDEX".into());
+    }
+
+    Ok(Statement::CreateIndex(CreateIndex {
+        index_type,
+        index_name,
+        table_name,
+        variable,
+        property,
+        conflict_action,
+    }))
+}
+
+/// Parse `DROP INDEX name ON table`.
+fn parse_drop_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut index_name = String::new();
+    let mut table_name = String::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if index_name.is_empty() => {
+                index_name = inner.as_str().to_string();
+            }
+            Rule::identifier if table_name.is_empty() => {
+                table_name = inner.as_str().to_string();
+            }
+            _ => {}
+        }
+    }
+
+    if index_name.is_empty() {
+        return Err("Missing index name for DROP INDEX".into());
+    }
+    if table_name.is_empty() {
+        return Err("Missing table name for DROP INDEX".into());
+    }
+
+    Ok(Statement::DropIndex(DropIndex {
+        index_name,
+        table_name,
     }))
 }
 

@@ -10,6 +10,8 @@ pub enum Statement {
     CopyFrom(CopyFrom),
     AlterTable(AlterTable),
     CreateVectorIndex(CreateVectorIndex),
+    CreateIndex(CreateIndex),
+    DropIndex(DropIndex),
     Union(UnionStatement),
     Merge(MergeStatement),
     Call(CallStatement),
@@ -199,6 +201,24 @@ pub struct CreateRelTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropTable {
     pub name: String,
+}
+
+/// A `CREATE [ART|HASH] INDEX` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateIndex {
+    pub index_type: String,
+    pub index_name: String,
+    pub table_name: String,
+    pub variable: String,
+    pub property: String,
+    pub conflict_action: Option<String>,
+}
+
+/// A `DROP INDEX` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropIndex {
+    pub index_name: String,
+    pub table_name: String,
 }
 
 /// ALTER TABLE statement.

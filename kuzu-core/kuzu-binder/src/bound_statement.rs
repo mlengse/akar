@@ -1,5 +1,6 @@
 //! Bound statement types — AST nodes after semantic analysis.
 
+use kuzu_catalog::IndexType;
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::Expression;
 use std::collections::HashMap;
@@ -15,6 +16,8 @@ pub enum BoundStatement {
     BoundCopyFrom(BoundCopyFrom),
     BoundAlterTable(BoundAlterTable),
     BoundCreateVectorIndex(BoundCreateVectorIndex),
+    BoundCreateIndex(BoundCreateIndex),
+    BoundDropIndex(BoundDropIndex),
     BoundUnion(BoundUnion),
     BoundMerge(BoundMerge),
     BoundCreateDml(BoundCreateDml),
@@ -183,6 +186,22 @@ pub struct BoundCreateVectorIndex {
     pub column_name: String,
     pub metric: String,
     pub dimensions: u64,
+}
+
+/// Bound `CREATE [ART|HASH] INDEX` statement.
+#[derive(Debug, Clone)]
+pub struct BoundCreateIndex {
+    pub index_type: IndexType,
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+}
+
+/// Bound `DROP INDEX` statement.
+#[derive(Debug, Clone)]
+pub struct BoundDropIndex {
+    pub index_name: String,
+    pub table_name: String,
 }
 
 /// Bound CALL statement — invoke a table function.

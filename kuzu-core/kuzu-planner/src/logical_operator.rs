@@ -9,6 +9,7 @@ pub enum LogicalOperator {
     ScanNode(LogicalScanNode),
     ScanRel(LogicalScanRel),
     VectorSimilarityScan(LogicalVectorSimilarityScan),
+    ArtIndexRangeScan(LogicalArtIndexRangeScan),
     Filter(LogicalFilter),
     Projection(LogicalProjection),
     HashJoin(LogicalHashJoin),
@@ -34,6 +35,7 @@ impl LogicalOperator {
             LogicalOperator::ScanNode(s) => s.cardinality,
             LogicalOperator::ScanRel(s) => s.cardinality,
             LogicalOperator::VectorSimilarityScan(s) => s.cardinality,
+            LogicalOperator::ArtIndexRangeScan(s) => s.cardinality,
             LogicalOperator::Filter(s) => s.cardinality,
             LogicalOperator::Projection(s) => s.cardinality,
             LogicalOperator::HashJoin(s) => s.cardinality,
@@ -59,6 +61,7 @@ impl LogicalOperator {
             LogicalOperator::ScanNode(s) => s.cardinality = card,
             LogicalOperator::ScanRel(s) => s.cardinality = card,
             LogicalOperator::VectorSimilarityScan(s) => s.cardinality = card,
+            LogicalOperator::ArtIndexRangeScan(s) => s.cardinality = card,
             LogicalOperator::Filter(s) => s.cardinality = card,
             LogicalOperator::Projection(s) => s.cardinality = card,
             LogicalOperator::HashJoin(s) => s.cardinality = card,
@@ -107,7 +110,8 @@ impl LogicalOperator {
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_) => vec![],
             // Leaf operators have no children
-            LogicalOperator::VectorSimilarityScan(_)
+            LogicalOperator::ArtIndexRangeScan(_)
+            | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
             | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -132,11 +136,23 @@ impl LogicalOperator {
             | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_) => vec![],
-            LogicalOperator::VectorSimilarityScan(_)
+            LogicalOperator::ArtIndexRangeScan(_)
+            | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
             | LogicalOperator::ScanRel(_) => vec![],
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalArtIndexRangeScan {
+    pub table_name: String,
+    pub table_id: u64,
+    pub lower_bound: Option<kuzu_common::types::Value>,
+    pub upper_bound: Option<kuzu_common::types::Value>,
+    pub lower_inclusive: bool,
+    pub upper_inclusive: bool,
+    pub cardinality: u64,
 }
 
 #[derive(Debug, Clone)]

@@ -142,6 +142,33 @@ impl StorageManager {
         self.table_catalog.get_vector_index_by_name_mut(name)
     }
 
+    /// Create an ART (Adaptive Radix Tree) index on a node table.
+    /// Delegates to TableCatalog and registers the index file with BufferManager.
+    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
+        self.table_catalog.create_art_index(table_name, index_name)?;
+
+        // Register the index file with the BufferManager for persistence
+        let mut bm = self.buffer_manager.lock().unwrap();
+        let full_path = self.db_path.join(format!("{index_name}.art"));
+        let file_name = format!("{index_name}");
+        if !bm.is_file_registered(&file_name) {
+            bm.register_file(&file_name, full_path);
+        }
+        drop(bm);
+
+        Ok(())
+    }
+
+    /// Drop an ART index from a node table.
+    pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), String> {
+        self.table_catalog.drop_art_index(table_name)
+    }
+
+    /// Get the ART index for a node table (cloned copy for read-only access).
+    pub fn get_art_index(&self, table_name: &str) -> Option<crate::ArtPrimaryKeyIndex> {
+        self.table_catalog.get_art_index(table_name)
+    }
+
     /// Create a rel table in the catalog.
     pub fn create_rel_table(
         &self,

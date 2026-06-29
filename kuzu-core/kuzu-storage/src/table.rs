@@ -1,5 +1,7 @@
 //! Table storage — columnar node/rel tables with NodeGroup-based storage.
 
+use crate::art_index::ArtPrimaryKeyIndex;
+use crate::art_key::ArtKey;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use crate::vector_index::VectorIndexTable;
@@ -23,6 +25,9 @@ pub struct ColumnDefinition {
 /// Primary key uniqueness is enforced via an in-memory `HashIndex` that maps
 /// PK values to row offsets. For persistent indexes, use `OnDiskHashIndex`
 /// alongside the L1 cache (see `index.rs`).
+///
+/// Optionally, an `ArtPrimaryKeyIndex` can be attached for range-scan
+/// support on the primary key column (see `create_art_index`).
 #[derive(Debug, Clone)]
 pub struct NodeTable {
     pub table_id: u64,
@@ -36,6 +41,9 @@ pub struct NodeTable {
     /// In-memory hash index for primary key → row lookup and dedup.
     /// Stores the PK value (as a string representation) mapped to row offset.
     pub hash_index: HashIndex<String>,
+    /// Optional ART (Adaptive Radix Tree) index for PK range scans.
+    /// When present, `insert_row()` also updates this index automatically.
+    pub art_index: Option<ArtPrimaryKeyIndex>,
 }
 
 impl NodeTable {
@@ -49,6 +57,7 @@ impl NodeTable {
             num_rows: 0,
             node_groups: Vec::new(),
             hash_index: HashIndex::new(),
+            art_index: None,
         }
     }
 
@@ -100,6 +109,13 @@ impl NodeTable {
             let pk_value = &values[self.primary_key_column];
             let pk_key = pk_value_to_string(pk_value);
             self.hash_index.insert(pk_key, self.num_rows - 1);
+
+            // Also update ART index if present
+            if let Some(ref mut art_idx) = self.art_index {
+                if let Some(art_key) = ArtKey::from_value(pk_value) {
+                    art_idx.insert(&art_key, self.num_rows - 1);
+                }
+            }
         }
 
         Ok(())
@@ -112,6 +128,37 @@ impl NodeTable {
     pub fn lookup_by_pk(&self, pk_value: &Value) -> Option<u64> {
         let pk_key = pk_value_to_string(pk_value);
         self.hash_index.lookup(&pk_key)
+    }
+
+    /// Perform a range scan on the primary key column using the ART index.
+    ///
+    /// Returns up to `max_results` row offsets for keys within `[lower, upper]`
+    /// (respecting inclusivity flags). Returns an empty vec if no ART index
+    /// exists or no keys match.
+    ///
+    /// This is the bridge function called by `PhysicalArtIndexRangeScan`.
+    pub fn lookup_by_pk_range(
+        &self,
+        lower: Option<&Value>,
+        lower_inclusive: bool,
+        upper: Option<&Value>,
+        upper_inclusive: bool,
+        max_results: u64,
+    ) -> Vec<u64> {
+        match &self.art_index {
+            Some(idx) => {
+                let lower_key = lower.and_then(ArtKey::from_value);
+                let upper_key = upper.and_then(ArtKey::from_value);
+                idx.range_scan(
+                    lower_key.as_ref(),
+                    lower_inclusive,
+                    upper_key.as_ref(),
+                    upper_inclusive,
+                    max_results,
+                )
+            }
+            None => Vec::new(),
+        }
     }
 
     /// Scan all values for a given column across all node groups.
@@ -633,6 +680,65 @@ impl TableCatalog {
     /// Get all vector indexes.
     pub fn all_vector_indexes(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, VectorIndexTable>> {
         self.vector_indexes.iter().collect()
+    }
+
+    /// Create an ART (Adaptive Radix Tree) index on a node table's PK column.
+    ///
+    /// Creates a new `ArtPrimaryKeyIndex`, backfills it with all existing rows,
+    /// and attaches it to the `NodeTable`.
+    ///
+    /// The `index_name` is used as the BufferManager file name for persistence.
+    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
+        let mut table = self
+            .get_node_table_by_name_mut(table_name)
+            .ok_or_else(|| format!("Node table '{table_name}' not found"))?;
+
+        if table.art_index.is_some() {
+            return Err(format!("Table '{table_name}' already has an ART index"));
+        }
+
+        let mut art_idx = ArtPrimaryKeyIndex::new(index_name);
+
+        // Backfill existing rows
+        let pk_col = table.primary_key_column;
+        // Scan all rows via to_column_major_data for backfill
+        let col_major = table.to_column_major_data();
+        if pk_col < col_major.len() {
+            for (row_offset, pk_val) in col_major[pk_col].iter().enumerate() {
+                if !matches!(pk_val, Value::Null) {
+                    if let Some(art_key) = ArtKey::from_value(pk_val) {
+                        art_idx.insert(&art_key, row_offset as u64);
+                    }
+                }
+            }
+        }
+
+        table.art_index = Some(art_idx);
+        Ok(())
+    }
+
+    /// Drop the ART index from a node table.
+    pub fn drop_art_index(&self, table_name: &str) -> Result<(), String> {
+        let mut table = self
+            .get_node_table_by_name_mut(table_name)
+            .ok_or_else(|| format!("Node table '{table_name}' not found"))?;
+
+        table.art_index = None;
+        Ok(())
+    }
+
+    /// Get a reference to the ART index for a node table (via table name).
+    /// Returns `None` if the table has no ART index or doesn't exist.
+    pub fn get_art_index(&self, table_name: &str) -> Option<ArtPrimaryKeyIndex> {
+        let table = self.get_node_table_by_name(table_name)?;
+        table.art_index.clone()
+    }
+
+    /// Check if a node table has an ART index.
+    pub fn has_art_index(&self, table_name: &str) -> bool {
+        self.get_node_table_by_name(table_name)
+            .map(|t| t.art_index.is_some())
+            .unwrap_or(false)
     }
 
     /// Remove a rel table by name. Returns true if the table existed.

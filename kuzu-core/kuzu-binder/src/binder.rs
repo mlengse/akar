@@ -3,7 +3,7 @@
 #![allow(clippy::collapsible_if, clippy::never_loop)]
 
 use crate::bound_statement::*;
-use kuzu_catalog::{Catalog, CatalogColumn, CatalogResult};
+use kuzu_catalog::{Catalog, CatalogColumn, CatalogResult, IndexType};
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::{Clause, Expression, Statement, *};
 use std::sync::{Arc, Mutex};
@@ -77,6 +77,8 @@ impl Binder {
             Statement::CopyFrom(c) => self.bind_copy_from(c),
             Statement::AlterTable(a) => self.bind_alter_table(a),
             Statement::CreateVectorIndex(v) => self.bind_create_vector_index(v),
+            Statement::CreateIndex(v) => self.bind_create_index(v),
+            Statement::DropIndex(v) => self.bind_drop_index(v),
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
             Statement::Call(c) => self.bind_call(c),
@@ -644,6 +646,70 @@ impl Binder {
             column_name: v.column_name,
             metric: v.metric,
             dimensions: v.dimensions,
+        }))
+    }
+
+    fn bind_create_index(&self, v: kuzu_parser::ast::CreateIndex) -> Result<BoundStatement, String> {
+        if v.index_name.is_empty() {
+            return Err("Index name cannot be empty".into());
+        }
+
+        // Parse index type
+        let index_type = IndexType::from_str(&v.index_type)
+            .ok_or_else(|| format!("Unknown index type '{}'. Use ART or HASH", v.index_type))?;
+
+        // Validate table and column exist
+        {
+            let catalog = self.catalog.lock().unwrap();
+            let entry = catalog
+                .get_entry_by_name(&v.table_name)
+                .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
+
+            // Validate column exists and is PK
+            let col_exists = entry.columns().iter().any(|c| c.name == v.property);
+            if !col_exists {
+                return Err(format!(
+                    "Column '{}' not found in table '{}'",
+                    v.property, v.table_name
+                ));
+            }
+
+            let pk_col = entry.columns().iter().find(|c| c.is_primary_key);
+            if pk_col.map(|c| c.name.as_str()) != Some(v.property.as_str()) {
+                return Err(format!(
+                    "Cannot create index on non-PK column '{}'. Only PK columns are supported.",
+                    v.property
+                ));
+            }
+        }
+
+        // Register with catalog (separate lock for mutable access)
+        let mut catalog = self.catalog.lock().unwrap();
+        catalog.create_index(&v.table_name, v.index_name.clone(), index_type, &v.property)
+            .map_err(|e| e)?;
+
+        Ok(BoundStatement::BoundCreateIndex(BoundCreateIndex {
+            index_type,
+            index_name: v.index_name,
+            table_name: v.table_name,
+            column_name: v.property,
+        }))
+    }
+
+    fn bind_drop_index(&self, v: kuzu_parser::ast::DropIndex) -> Result<BoundStatement, String> {
+        if v.index_name.is_empty() {
+            return Err("Index name cannot be empty".into());
+        }
+
+        let mut catalog = self.catalog.lock().unwrap();
+        match catalog.drop_index(&v.table_name, &v.index_name) {
+            Ok(()) => {}
+            Err(e) => return Err(e),
+        }
+
+        Ok(BoundStatement::BoundDropIndex(BoundDropIndex {
+            index_name: v.index_name,
+            table_name: v.table_name,
         }))
     }
 
