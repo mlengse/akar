@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
+kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-planner = { path = "../kuzu-planner" }
 kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-function = { path = "../kuzu-function" }

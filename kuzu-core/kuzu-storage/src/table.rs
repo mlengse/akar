@@ -424,6 +424,11 @@ impl TableCatalog {
             .and_then(|id| self.rel_tables.get(id))
     }
 
+    pub fn get_rel_table_by_name_mut(&mut self, name: &str) -> Option<&mut RelTable> {
+        let id = self.rel_name_to_id.get(name).copied()?;
+        self.rel_tables.get_mut(&id)
+    }
+
     pub fn all_node_tables(&self) -> impl Iterator<Item = &NodeTable> {
         self.node_tables.values()
     }

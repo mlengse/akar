@@ -8,8 +8,9 @@ use kuzu_common::vector::{physical_type_size, DataChunk, ValueVector};
 use kuzu_function::scalar::AggValueState;
 use kuzu_function::AggregateFunction;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
-use kuzu_storage::table::ColumnDefinition;
+use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::expression_evaluator::ExpressionEvaluator;
@@ -996,4 +997,150 @@ fn value_hash(v: &Value) -> u64 {
         }
     }
     hasher.finish()
+}
+
+// ==================== CopyFrom ====================
+
+/// Physical operator for COPY FROM — loads data from CSV/Parquet files into a table.
+///
+/// Detects file type from extension, calls the appropriate reader,
+/// and inserts rows into the target table via the `TableCatalog`.
+pub struct PhysicalCopyFrom {
+    pub table_name: String,
+    pub table_id: u64,
+    pub file_path: String,
+    pub columns: Vec<ColumnDefinition>,
+    pub options: std::collections::HashMap<String, String>,
+    pub table_catalog: Arc<Mutex<TableCatalog>>,
+}
+
+impl PhysicalOperatorExec for PhysicalCopyFrom {
+    fn operator_type(&self) -> &str {
+        "copy_from"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        let path = Path::new(&self.file_path);
+
+        // 1. Detect file type from extension
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+
+        // 2. Build config and convert column schema
+        let catalog_cols: Vec<kuzu_catalog::CatalogColumn> = self
+            .columns
+            .iter()
+            .map(|c| kuzu_catalog::CatalogColumn {
+                name: c.name.clone(),
+                logical_type: c.logical_type,
+                is_primary_key: c.is_primary_key,
+                default_value: None,
+            })
+            .collect();
+
+        // 3. Read the file
+        let rows = match ext.as_str() {
+            "csv" | "tsv" => {
+                let mut config = kuzu_storage::csv_reader::CsvReaderConfig::default();
+                if ext == "tsv" {
+                    config.delimiter = b'\t';
+                }
+                if let Some(h) = self.options.get("HEADER") {
+                    config.has_header = h.eq_ignore_ascii_case("true");
+                }
+                if let Some(d) = self
+                    .options
+                    .get("DELIM")
+                    .or_else(|| self.options.get("delim"))
+                {
+                    if let Some(c) = d.chars().next() {
+                        config.delimiter = c as u8;
+                    }
+                }
+                if let Some(q) = self
+                    .options
+                    .get("QUOTE")
+                    .or_else(|| self.options.get("quote"))
+                {
+                    if let Some(c) = q.chars().next() {
+                        config.quote = c as u8;
+                    }
+                }
+
+                kuzu_storage::csv_reader::read_csv(path, &catalog_cols, &config)
+                    .map_err(|e| format!("CSV read error: {e}"))?
+            }
+            "parquet" => {
+                kuzu_storage::parquet_reader::read_parquet(path, &catalog_cols)
+                    .map_err(|e| format!("Parquet read error: {e}"))?
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)"
+                ));
+            }
+        };
+
+        // 4. Insert rows into the table
+        let mut catalog = self.table_catalog.lock().unwrap();
+        let num_rows = rows.len();
+
+        if let Some(table) = catalog.get_node_table_by_name_mut(&self.table_name) {
+            for row in &rows {
+                table
+                    .insert_row(row.clone())
+                    .map_err(|e| format!("Insert error: {e}"))?;
+            }
+            tracing::info!(
+                "COPY FROM: inserted {num_rows} rows into node table '{}'",
+                self.table_name
+            );
+        } else if let Some(table) = catalog.get_rel_table_by_name_mut(&self.table_name) {
+            for row in &rows {
+                if row.len() < 2 {
+                    return Err(
+                        "RelTable COPY FROM needs at least FROM and TO columns".into(),
+                    );
+                }
+                let from = match &row[0] {
+                    Value::Int64(v) => *v as u64,
+                    _ => {
+                        return Err(
+                            "First column of rel table must be FROM node offset (Int64)".into(),
+                        )
+                    }
+                };
+                let to = match &row[1] {
+                    Value::Int64(v) => *v as u64,
+                    _ => {
+                        return Err(
+                            "Second column of rel table must be TO node offset (Int64)".into(),
+                        )
+                    }
+                };
+                let props: Vec<Value> = row[2..].to_vec();
+                table
+                    .insert_rel(from, to, props)
+                    .map_err(|e| format!("Insert rel error: {e}"))?;
+            }
+            tracing::info!(
+                "COPY FROM: inserted {num_rows} rows into rel table '{}'",
+                self.table_name
+            );
+        } else {
+            return Err(format!(
+                "Table '{}' not found in storage catalog",
+                self.table_name
+            ));
+        }
+
+        // Return success chunk with row count
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+        v.resize(1);
+        v.set_i64(0, num_rows as i64);
+        Ok(vec![DataChunk::new(vec![v])])
+    }
 }

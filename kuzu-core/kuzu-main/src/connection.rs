@@ -19,6 +19,7 @@ use kuzu_common::types::Value;
 use kuzu_optimizer::Optimizer;
 use kuzu_parser::parse;
 use kuzu_planner::QueryPlanner;
+use kuzu_processor::physical_operator::{PhysicalCopyFrom, PhysicalOperatorExec};
 use kuzu_processor::QueryProcessor;
 use kuzu_storage::table::ColumnDefinition;
 use std::collections::HashMap;
@@ -236,8 +237,35 @@ impl Connection {
             }
             BoundStatement::BoundCopyFrom(c) => {
                 tracing::info!("COPY FROM '{}' from '{}'", c.table_name, c.file_path);
+                // Convert CatalogColumn → ColumnDefinition for physical operator
+                let columns: Vec<ColumnDefinition> = c.columns.iter().map(|col| {
+                    ColumnDefinition {
+                        name: col.name.clone(),
+                        logical_type: col.logical_type,
+                        is_primary_key: col.is_primary_key,
+                    }
+                }).collect();
+
+                let copy_op = PhysicalCopyFrom {
+                    table_name: c.table_name.clone(),
+                    table_id: c.table_id,
+                    file_path: c.file_path.clone(),
+                    columns,
+                    options: c.options.clone(),
+                    table_catalog: self.database.storage_manager.table_catalog(),
+                };
+
+                let chunks = copy_op.execute(Vec::new())
+                    .map_err(|e| format!("COPY FROM error: {e}"))?;
+
+                let row_count = chunks.first()
+                    .and_then(|chunk| chunk.fields.first())
+                    .and_then(|vec| vec.get_value(0))
+                    .and_then(|v| if let Value::Int64(n) = v { Some(n as usize) } else { None })
+                    .unwrap_or(0);
+
                 Ok(Some(QueryResult::success_message(format!(
-                    "Copy from '{}' into table '{}'", c.file_path, c.table_name
+                    "Copied {row_count} rows from '{}' into table '{}'", c.file_path, c.table_name
                 ))))
             }
             BoundStatement::BoundQuery(_) => Ok(None),
