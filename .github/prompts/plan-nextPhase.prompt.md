@@ -4,7 +4,7 @@
 
 **Kondisi saat ini (2026-06-29):** ~28 crate Rust, ~200+ tests, 9 optimizer passes, full storage engine (BufferManager, WAL, Checkpoint, Column, Compression, NodeGroup), 11 extension crates real, full query pipeline (parse→bind→plan→optimize→execute) sudah membaca data storage sungguhan, PreparedStatement, Transaction MVCC, CLI REPL.
 
-**Yang masih kurang:** ~~On-disk HashIndex~~ ✅ (A1), ~~WAL recovery on startup~~ ✅ (A2), Auto-checkpoint wiring, ShadowFile→transaction lifecycle, LocalStorage→commit pipeline, CLI polish (history, auto-complete, multi-line), Benchmarks, tools/rust_api integration, CI/CD, C++ cleanup.
+**Yang masih kurang:** ~~On-disk HashIndex~~ ✅ (A1), ~~WAL recovery on startup~~ ✅ (A2), ~~Auto-checkpoint wiring~~ ✅ (A3), ShadowFile→transaction lifecycle, LocalStorage→commit pipeline, CLI polish (history, auto-complete, multi-line), Benchmarks, tools/rust_api integration, CI/CD, C++ cleanup.
 
 **Pendekatan:** 4 fase paralel + 1 fase final, masing-masing independen kecuali dinyatakan.
 
