@@ -226,7 +226,7 @@ float = { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (^"e" ~ "-"? ~ ASCII_DIGIT+
 boolean_literal = { ^"TRUE" | ^"FALSE" }
 null_literal = { "NULL" }
 
-list_literal = { "[" ~ expression ~ ("," ~ expression)* ~ "]" }
+list_literal = { "[" ~ (expression ~ ("," ~ expression)*)? ~ "]" }
 map_literal = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
 
 // ==================== Identifiers & Variables ====================

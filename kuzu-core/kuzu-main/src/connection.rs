@@ -502,8 +502,66 @@ impl Connection {
                 let message = lines.join("\n");
                 Ok(Some(QueryResult::success_message(message)))
             }
-            BoundStatement::BoundQuery(_) => Ok(None),
+            BoundStatement::BoundQuery(q) => {
+                // Check if this is a FOREACH-only query — handle it directly
+                if q.clauses.len() == 1 {
+                    if let Some(kuzu_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first() {
+                        return self.handle_foreach(fc);
+                    }
+                }
+                Ok(None)
+            }
         }
+    }
+
+    /// Handle FOREACH by evaluating the list and executing sub-statements.
+    fn handle_foreach(&self, fc: &kuzu_binder::bound_statement::BoundForeachClause) -> Result<Option<QueryResult>, String> {
+        tracing::info!("FOREACH '{}'", fc.variable);
+
+        // Evaluate the list expression
+        let list_val = match &fc.expression {
+            kuzu_parser::ast::Expression::List(items) => {
+                let mut vals = Vec::with_capacity(items.len());
+                for item in items {
+                    if let kuzu_parser::ast::Expression::Constant(c) = item {
+                        vals.push(ast_constant_to_value(c));
+                    } else {
+                        vals.push(kuzu_common::types::Value::Null);
+                    }
+                }
+                kuzu_common::types::Value::List(vals)
+            }
+            _ => {
+                return Err(format!("FOREACH requires a list expression"));
+            }
+        };
+
+        let list_items = match &list_val {
+            kuzu_common::types::Value::List(items) => items.clone(),
+            _ => return Ok(Some(QueryResult::success_message("FOREACH: empty list".into()))),
+        };
+
+        if list_items.is_empty() {
+            return Ok(Some(QueryResult::success_message("FOREACH: empty list".into())));
+        }
+
+        // For each list item, substitute the loop variable and execute sub-statements
+        for item_val in &list_items {
+            for sub_stmt in &fc.sub_statements {
+                // Substitute the FOREACH variable with the current item value
+                let substituted = substitute_foreach_var(sub_stmt, &fc.variable, item_val)?;
+                tracing::info!("FOREACH executing sub-statement for item={:?}", item_val);
+                // Execute the sub-statement directly
+                let result = self.handle_ddl(&substituted)?;
+                tracing::info!("FOREACH sub-statement result: {:?}", result);
+            }
+        }
+
+        Ok(Some(QueryResult::success_message(format!(
+            "FOREACH: processed {} items with {} statements",
+            list_items.len(),
+            fc.sub_statements.len()
+        ))))
     }
 
     /// Clear the prepared statement cache.
@@ -566,6 +624,106 @@ fn substitute_in_bound_expr(
         resolved_type: expr.resolved_type,
         is_constant: expr.is_constant,
     })
+}
+
+/// Substitute a FOREACH loop variable with a concrete value in a BoundStatement.
+fn substitute_foreach_var(
+    bound: &BoundStatement,
+    var_name: &str,
+    val: &Value,
+) -> Result<BoundStatement, String> {
+    match bound {
+        BoundStatement::BoundCreateDml(c) => {
+            let new_props: Vec<(String, kuzu_parser::ast::Expression)> = c
+                .properties
+                .iter()
+                .map(|(k, v)| {
+                    let new_v = substitute_var_in_expr(v, var_name, val);
+                    (k.clone(), new_v)
+                })
+                .collect();
+            Ok(BoundStatement::BoundCreateDml(kuzu_binder::bound_statement::BoundCreateDml {
+                table_name: c.table_name.clone(),
+                table_id: c.table_id,
+                properties: new_props,
+            }))
+        }
+        BoundStatement::BoundQuery(q) => {
+            let mut new_clauses = Vec::new();
+            for clause in &q.clauses {
+                match clause {
+                    kuzu_binder::bound_statement::BoundClause::BoundSet(s) => {
+                        let new_items: Vec<_> = s.items.iter().map(|item| {
+                            kuzu_binder::bound_statement::BoundSetItem {
+                                property: substitute_var_in_expr(&item.property, var_name, val),
+                                value: substitute_var_in_expr(&item.value, var_name, val),
+                                column_name: item.column_name.clone(),
+                                column_idx: item.column_idx,
+                                table_name: item.table_name.clone(),
+                                table_id: item.table_id,
+                            }
+                        }).collect();
+                        new_clauses.push(kuzu_binder::bound_statement::BoundClause::BoundSet(
+                            kuzu_binder::bound_statement::BoundSetClause { items: new_items }
+                        ));
+                    }
+                    other => new_clauses.push(other.clone()),
+                }
+            }
+            Ok(BoundStatement::BoundQuery(kuzu_binder::bound_statement::BoundQuery {
+                clauses: new_clauses,
+                variables: q.variables.clone(),
+            }))
+        }
+        // For other statement types, pass through unchanged
+        _ => Ok(bound.clone()),
+    }
+}
+
+/// Substitute a variable reference with a constant Value in an AST expression.
+fn substitute_var_in_expr(expr: &kuzu_parser::ast::Expression, var_name: &str, val: &Value) -> kuzu_parser::ast::Expression {
+    match expr {
+        kuzu_parser::ast::Expression::Variable(name) if name == var_name => {
+            value_to_ast_constant(val)
+        }
+        kuzu_parser::ast::Expression::BinaryOp(op, left, right) => {
+            kuzu_parser::ast::Expression::BinaryOp(
+                *op,
+                Box::new(substitute_var_in_expr(left, var_name, val)),
+                Box::new(substitute_var_in_expr(right, var_name, val)),
+            )
+        }
+        kuzu_parser::ast::Expression::UnaryOp(op, inner) => {
+            kuzu_parser::ast::Expression::UnaryOp(
+                *op,
+                Box::new(substitute_var_in_expr(inner, var_name, val)),
+            )
+        }
+        kuzu_parser::ast::Expression::List(items) => {
+            kuzu_parser::ast::Expression::List(
+                items.iter().map(|i| substitute_var_in_expr(i, var_name, val)).collect(),
+            )
+        }
+        kuzu_parser::ast::Expression::PropertyAccess(obj, prop) => {
+            kuzu_parser::ast::Expression::PropertyAccess(
+                Box::new(substitute_var_in_expr(obj, var_name, val)),
+                prop.clone(),
+            )
+        }
+        other => other.clone(),
+    }
+}
+
+/// Convert a Value to an AST Expression (Constant).
+fn value_to_ast_constant(val: &Value) -> kuzu_parser::ast::Expression {
+    match val {
+        Value::Null => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Null),
+        Value::Bool(b) => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Bool(*b)),
+        Value::Int64(i) => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Integer(*i)),
+        Value::Double(f) => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Float(*f)),
+        Value::String(s) => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s.clone())),
+        _ => kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::Null),
+    }
 }
 
 /// Convert an AST Constant to a Value.
@@ -1496,6 +1654,10 @@ mod foreach_tests {
         // FOREACH should parse and bind correctly
         let result = exec_ok(&conn, "FOREACH (x IN [1,2,3] | CREATE (n:Num {val: x}))");
         assert!(result.is_ok(), "FOREACH should execute: {:?}", result);
+
+        // Verify nodes were created via direct query
+        let r = conn.query("MATCH (n:Num) RETURN n.val ORDER BY n.val").unwrap();
+        assert_eq!(r.num_rows(), 3, "FOREACH should create 3 nodes, got {}", r.num_rows());
     }
 
     #[test]

@@ -660,14 +660,33 @@ impl Binder {
         if f.variable.is_empty() {
             return Err("FOREACH requires a variable name".into());
         }
-        // Bind sub-statements by wrapping in a Query statement
+        // Bind sub-statements
         let mut sub_statements = Vec::new();
         for clause in &f.clauses {
-            let query = kuzu_parser::ast::Query {
-                clauses: vec![clause.clone()],
-            };
-            let bound = self.bind_query(query)?;
-            sub_statements.push(bound);
+            match clause {
+                kuzu_parser::ast::Clause::Create(cc) => {
+                    // Bind as DML CREATE (BoundCreateDml), not as a MATCH clause
+                    let bound = self.bind_create_dml(cc.clone())?;
+                    sub_statements.push(bound);
+                }
+                kuzu_parser::ast::Clause::Set(_sc) => {
+                    // Wrap SET as a BoundQuery
+                    let q = kuzu_parser::ast::Query {
+                        clauses: vec![clause.clone()],
+                    };
+                    sub_statements.push(self.bind_query(q)?);
+                }
+                kuzu_parser::ast::Clause::Delete(_dc) => {
+                    // Wrap DELETE as a BoundQuery
+                    let q = kuzu_parser::ast::Query {
+                        clauses: vec![clause.clone()],
+                    };
+                    sub_statements.push(self.bind_query(q)?);
+                }
+                _ => {
+                    return Err(format!("Unsupported FOREACH sub-clause: {:?}", clause));
+                }
+            }
         }
         Ok(BoundForeachClause {
             variable: f.variable.clone(),

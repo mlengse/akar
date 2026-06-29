@@ -1425,7 +1425,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 let mut v = ValueVector::new(phys_type, 1);
                 v.resize(1);
                 store_value_in_vector(&mut v, 0, item);
-                let chunk = DataChunk::new(vec![v]);
+                let _chunk = DataChunk::new(vec![v]);
 
                 // Execute the sub-plan using the QueryProcessor-like pipeline
                 // Use the processor module directly from the same crate
