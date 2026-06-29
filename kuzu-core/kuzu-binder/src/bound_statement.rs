@@ -14,6 +14,7 @@ pub enum BoundStatement {
     BoundDropTable(BoundDropTable),
     BoundCopyFrom(BoundCopyFrom),
     BoundAlterTable(BoundAlterTable),
+    BoundCreateVectorIndex(BoundCreateVectorIndex),
     BoundUnion(BoundUnion),
     BoundMerge(BoundMerge),
     BoundCreateDml(BoundCreateDml),
@@ -172,6 +173,16 @@ pub struct BoundUnion {
     pub left: Box<BoundQuery>,
     pub right: Box<BoundQuery>,
     pub all: bool,
+}
+
+/// Bound CREATE VECTOR INDEX statement.
+#[derive(Debug, Clone)]
+pub struct BoundCreateVectorIndex {
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub metric: String,
+    pub dimensions: u64,
 }
 
 /// Bound CALL statement — invoke a table function.

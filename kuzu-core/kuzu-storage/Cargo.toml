@@ -9,6 +9,7 @@ repository.workspace = true
 kuzu-common = { path = "../kuzu-common" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-transaction = { path = "../kuzu-transaction" }
+kuzu-vector = { path = "../kuzu-vector" }
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true

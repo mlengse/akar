@@ -76,6 +76,7 @@ impl Binder {
             Statement::DropTable(t) => self.bind_drop_table(t),
             Statement::CopyFrom(c) => self.bind_copy_from(c),
             Statement::AlterTable(a) => self.bind_alter_table(a),
+            Statement::CreateVectorIndex(v) => self.bind_create_vector_index(v),
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
             Statement::Call(c) => self.bind_call(c),
@@ -574,6 +575,75 @@ impl Binder {
             name: t.name,
             columns,
             primary_key: t.primary_key,
+        }))
+    }
+
+    fn bind_create_vector_index(
+        &self,
+        v: kuzu_parser::ast::CreateVectorIndex,
+    ) -> Result<BoundStatement, String> {
+        if v.index_name.is_empty() {
+            return Err("Index name cannot be empty".into());
+        }
+        if v.metric.is_empty() {
+            return Err("Metric must be specified (cosine, euclidean, l2, or dot)".into());
+        }
+        if v.dimensions == 0 {
+            return Err("Dimensions must be greater than 0".into());
+        }
+
+        // Validate the referenced table exists in the catalog
+        let catalog = self.catalog.lock().unwrap();
+        let entry = catalog
+            .get_entry_by_name(&v.table_name)
+            .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
+
+        // Validate the referenced column exists in the table
+        let col_exists = entry.columns().iter().any(|c| c.name == v.column_name);
+        if !col_exists {
+            return Err(format!(
+                "Column '{}' not found in table '{}'",
+                v.column_name, v.table_name
+            ));
+        }
+
+        // Validate metric value
+        match v.metric.to_lowercase().as_str() {
+            "cosine" | "euclidean" | "l2" | "dot" => {}
+            other => {
+                return Err(format!(
+                    "Unknown metric '{other}'. Supported: cosine, euclidean, l2, dot"
+                ));
+            }
+        }
+
+        // Register with catalog
+        let mut catalog = self.catalog.lock().unwrap();
+        match catalog.create_vector_index(
+            v.index_name.clone(),
+            v.table_name.clone(),
+            v.column_name.clone(),
+            v.metric.clone(),
+            v.dimensions,
+        ) {
+            CatalogResult::Created { .. } => {}
+            CatalogResult::AlreadyExists => {
+                return Err(format!("Vector index '{}' already exists", v.index_name));
+            }
+            CatalogResult::NotFound => {
+                return Err(format!("Table '{}' not found", v.table_name));
+            }
+            CatalogResult::Dropped { .. } => {
+                return Err("Unexpected: Dropped result from create_vector_index".into());
+            }
+        }
+
+        Ok(BoundStatement::BoundCreateVectorIndex(BoundCreateVectorIndex {
+            index_name: v.index_name,
+            table_name: v.table_name,
+            column_name: v.column_name,
+            metric: v.metric,
+            dimensions: v.dimensions,
         }))
     }
 

@@ -2,8 +2,10 @@
 
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
+use crate::vector_index::VectorIndexTable;
 use dashmap::DashMap;
 use kuzu_common::types::{LogicalTypeID, Value};
+use kuzu_vector::hnsw::DistanceMetric;
 use std::collections::HashMap;
 
 /// A column definition within a table.
@@ -474,10 +476,13 @@ impl RelTable {
 pub struct TableCatalog {
     node_tables: DashMap<u64, NodeTable>,
     rel_tables: DashMap<u64, RelTable>,
+    vector_indexes: DashMap<u64, VectorIndexTable>,
     /// Map from table name to table ID for node tables.
     node_name_to_id: DashMap<String, u64>,
     /// Map from table name to table ID for rel tables.
     rel_name_to_id: DashMap<String, u64>,
+    /// Map from index name to index ID for vector indexes.
+    vector_index_name_to_id: DashMap<String, u64>,
     next_table_id: std::sync::atomic::AtomicU64,
 }
 
@@ -573,6 +578,61 @@ impl TableCatalog {
         } else {
             false
         }
+    }
+
+    /// Create a new vector index in the catalog.
+    pub fn create_vector_index(
+        &self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: DistanceMetric,
+        dimensions: u32,
+    ) -> VectorIndexTable {
+        let index_id = self.next_table_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let table = VectorIndexTable::new(index_id, name.clone(), table_name, column_name, metric, dimensions);
+        self.vector_index_name_to_id.insert(name, index_id);
+        self.vector_indexes.insert(index_id, table.clone());
+        table
+    }
+
+    /// Get a vector index by its ID.
+    pub fn get_vector_index(&self, index_id: u64) -> Option<dashmap::mapref::one::Ref<'_, u64, VectorIndexTable>> {
+        self.vector_indexes.get(&index_id)
+    }
+
+    /// Get a vector index by name.
+    pub fn get_vector_index_by_name(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, u64, VectorIndexTable>> {
+        let id = self.vector_index_name_to_id.get(name)?;
+        self.vector_indexes.get(&*id)
+    }
+
+    /// Get a mutable vector index by name.
+    pub fn get_vector_index_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+        let id = self.vector_index_name_to_id.get(name)?;
+        self.vector_indexes.get_mut(&*id)
+    }
+
+    /// Get a mutable vector index by ID.
+    pub fn get_vector_index_mut(&self, index_id: u64) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+        self.vector_indexes.get_mut(&index_id)
+    }
+
+    /// Remove a vector index by name. Returns true if the index existed.
+    pub fn drop_vector_index(&self, name: &str) -> bool {
+        if let Some(id) = self.vector_index_name_to_id.get(name) {
+            let index_id = *id;
+            drop(id);
+            self.vector_index_name_to_id.remove(name);
+            self.vector_indexes.remove(&index_id).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Get all vector indexes.
+    pub fn all_vector_indexes(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, VectorIndexTable>> {
+        self.vector_indexes.iter().collect()
     }
 
     /// Remove a rel table by name. Returns true if the table existed.

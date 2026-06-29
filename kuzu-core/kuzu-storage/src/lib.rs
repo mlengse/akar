@@ -18,6 +18,7 @@ pub mod shadow_file;
 pub mod stats;
 pub mod table;
 pub mod update_info;
+pub mod vector_index;
 pub mod version_info;
 pub mod wal;
 
@@ -25,12 +26,14 @@ use buffer_manager::{BufferManager, BufferManagerConfig};
 use checkpoint::checkpoint;
 use kuzu_common::memory::MemoryManager;
 use kuzu_common::types::Value;
+use kuzu_vector::hnsw::DistanceMetric;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
 
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
+pub use vector_index::{extract_f64_list_from_value, VectorIndexTable};
 pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
@@ -102,6 +105,36 @@ impl StorageManager {
     /// Create a node table in the catalog and return its ID.
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
         self.table_catalog.create_node_table(name, columns)
+    }
+
+    /// Create a vector index in the catalog and register its file with the BufferManager.
+    pub fn create_vector_index(
+        &self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: DistanceMetric,
+        dimensions: u32,
+    ) -> VectorIndexTable {
+        let table = self
+            .table_catalog
+            .create_vector_index(name, table_name, column_name, metric, dimensions);
+
+        // Register the index file with the BufferManager
+        let mut bm = self.buffer_manager.lock().unwrap();
+        table.register_file(&mut bm, &self.db_path);
+
+        table
+    }
+
+    /// Get a vector index by name.
+    pub fn get_vector_index_by_name(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, u64, VectorIndexTable>> {
+        self.table_catalog.get_vector_index_by_name(name)
+    }
+
+    /// Get a mutable vector index by name.
+    pub fn get_vector_index_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+        self.table_catalog.get_vector_index_by_name_mut(name)
     }
 
     /// Create a rel table in the catalog.

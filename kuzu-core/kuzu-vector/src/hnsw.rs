@@ -117,6 +117,7 @@ struct HnswNode {
 ///
 /// Stores vectors in a multi-layer navigable small world graph for fast
 /// approximate nearest neighbour search.
+#[derive(Debug, Clone)]
 pub struct HnswIndex {
     /// All nodes in the index.
     nodes: Vec<HnswNode>,
@@ -159,6 +160,11 @@ impl HnswIndex {
     /// Get the entry point node ID (if any).
     pub fn entry_point(&self) -> Option<usize> {
         self.entry_point
+    }
+
+    /// Get the distance metric used by this index.
+    pub fn metric(&self) -> DistanceMetric {
+        self.metric
     }
 
     /// Get a reference to the vectors stored in the index.

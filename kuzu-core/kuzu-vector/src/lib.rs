@@ -39,6 +39,16 @@ impl Extension for VectorExtension {
         use std::sync::Arc;
 
         // Register cosine_similarity as a CustomScalar callback
+        use kuzu_function::registry::TableFunction;
+
+        // Register vector_similarity_scan as a table function (handled by processor)
+        context.register_table_function(
+            "vector_similarity_scan",
+            TableFunction::Custom {
+                name: "vector_similarity_scan".into(),
+            },
+        );
+
         context.register_scalar_function(
             "cosine_similarity",
             ScalarFunction::CustomScalar {
@@ -103,7 +113,7 @@ impl Extension for VectorExtension {
             },
         );
 
-        tracing::info!("Vector extension loaded: 4 functions registered (real callbacks)");
+        tracing::info!("Vector extension loaded: 5 functions registered (4 scalar + 1 table)");
         Ok(())
     }
 }

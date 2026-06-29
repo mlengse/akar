@@ -156,6 +156,7 @@ impl Connection {
             BoundStatement::BoundCreateNodeTable(_)
             | BoundStatement::BoundCreateRelTable(_)
             | BoundStatement::BoundDropTable(_)
+            | BoundStatement::BoundCreateVectorIndex(_)
             | BoundStatement::BoundCreateDml(_)
             | BoundStatement::BoundMerge(_)
             | BoundStatement::BoundCopyFrom(_)
@@ -517,6 +518,62 @@ impl Connection {
                     "Table '{}' dropped",
                     t.name
                 ))))
+            }
+            #[cfg(feature = "vector-extension")]
+            BoundStatement::BoundCreateVectorIndex(idx) => {
+                let metric = match idx.metric.to_lowercase().as_str() {
+                    "cosine" => kuzu_vector::hnsw::DistanceMetric::Cosine,
+                    "euclidean" => kuzu_vector::hnsw::DistanceMetric::Euclidean,
+                    "l2" => kuzu_vector::hnsw::DistanceMetric::L2Squared,
+                    "dot" => kuzu_vector::hnsw::DistanceMetric::DotProduct,
+                    other => return Err(format!("Unknown metric '{other}'")),
+                };
+
+                // Create the vector index in storage
+                self.database.storage_manager.create_vector_index(
+                    idx.index_name.clone(),
+                    idx.table_name.clone(),
+                    idx.column_name.clone(),
+                    metric,
+                    idx.dimensions as u32,
+                );
+
+                // Auto-populate from existing table data
+                let table_catalog = self.database.storage_manager.table_catalog();
+                if let Some(table) = table_catalog.get_node_table_by_name(&idx.table_name) {
+                    let col_idx = table
+                        .columns
+                        .iter()
+                        .position(|c| c.name == idx.column_name);
+                    if let Some(col_idx) = col_idx {
+                        // Scan all rows and extract vectors
+                        for row_id in 0..table.num_rows as usize {
+                            if let Some(val) = table.get_value(row_id, col_idx) {
+                                if let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val) {
+                                    // Get mutable access and insert into HNSW
+                                    if let Some(mut vi) = table_catalog
+                                        .get_vector_index_by_name_mut(&idx.index_name)
+                                    {
+                                        vi.hnsw_mut().insert(vec, row_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                tracing::info!("Created vector index '{}'", idx.index_name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Vector index '{}' created",
+                    idx.index_name
+                ))))
+            }
+            #[cfg(not(feature = "vector-extension"))]
+            BoundStatement::BoundCreateVectorIndex(idx) => {
+                return Err(format!(
+                    "Vector extension not enabled. Enable the 'vector-extension' feature to use CREATE VECTOR INDEX. Index '{}' not created.",
+                    idx.index_name
+                ));
             }
             BoundStatement::BoundUnion(u) => {
                 tracing::info!("UNION ALL query");

@@ -109,6 +109,18 @@ impl QueryProcessor {
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::VectorSimilarityScan(vs) => {
+                    let scan = PhysicalVectorSimilarityScan {
+                        index_name: vs.index_name.clone(),
+                        index_id: vs.index_id,
+                        query_vector: vs.query_vector.clone(),
+                        top_k: vs.top_k,
+                        table_name: vs.table_name.clone(),
+                        table_catalog: self.table_catalog.clone(),
+                    };
+                    let result = scan.execute(current.clone())?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Filter(f) => {
                     let evaluator = self
                         .function_registry
@@ -318,10 +330,20 @@ impl QueryProcessor {
                     | TableFunction::ScanJson { .. }
                     | TableFunction::ListTables
                     | TableFunction::ShowColumns { .. }
-                    | TableFunction::CurrentSetting { .. }
-                    | TableFunction::Custom { .. } => Err(format!(
+                    | TableFunction::CurrentSetting { .. } => Err(format!(
                         "Table function '{}' cannot be executed dynamically (no callback)",
                         func_name
+                    )),
+                    TableFunction::Custom { name } if name == "vector_similarity_scan" => {
+                        // Evaluate args: [table_name, column_name, query_vector, top_k]
+                        // For CALL statement, args are parsed as expressions. We need to evaluate them.
+                        // For now, parse from the function args
+                        drop(reg);
+                        self.execute_vector_similarity_scan(tf)
+                    }
+                    TableFunction::Custom { name } => Err(format!(
+                        "Custom table function '{}' has no registered handler",
+                        name
                     )),
                 }
             } else {
@@ -333,6 +355,100 @@ impl QueryProcessor {
                 func_name
             ))
         }
+    }
+
+    /// Execute a `vector_similarity_scan` table function call.
+    ///
+    /// Expects CALL vector_similarity_scan(table_name, column_name, query_vector, top_k)
+    /// and dispatches to PhysicalVectorSimilarityScan with the processor's TableCatalog.
+    fn execute_vector_similarity_scan(
+        &self,
+        tf: &kuzu_planner::logical_operator::LogicalTableFunctionCall,
+    ) -> Result<Vec<DataChunk>, String> {
+        // Evaluate arguments from expressions (they should be constants or simple vars)
+        if tf.args.len() < 4 {
+            return Err("vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into());
+        }
+
+        // For CALL statements, args arrive as Expression AST nodes.
+        // Evaluate them to Values. The simplest approach: evaluate constants inline.
+        fn eval_expr_to_value(expr: &kuzu_parser::ast::Expression) -> Option<Value> {
+            match expr {
+                kuzu_parser::ast::Expression::Constant(c) => match c {
+                    kuzu_parser::ast::Constant::String(s) => Some(Value::String(s.clone())),
+                    kuzu_parser::ast::Constant::Integer(i) => Some(Value::Int64(*i)),
+                    kuzu_parser::ast::Constant::Float(f) => Some(Value::Double(*f)),
+                    kuzu_parser::ast::Constant::Bool(b) => Some(Value::Bool(*b)),
+                    kuzu_parser::ast::Constant::Null => Some(Value::Null),
+                },
+                kuzu_parser::ast::Expression::List(items) => {
+                    let vals: Vec<Value> = items.iter().filter_map(eval_expr_to_value).collect();
+                    Some(Value::List(vals))
+                }
+                _ => None, // Non-constant expression — skip
+            }
+        }
+
+        let table_name = match eval_expr_to_value(&tf.args[0]) {
+            Some(Value::String(s)) => s,
+            _ => return Err("First argument to vector_similarity_scan must be a table name string".into()),
+        };
+
+        let _column_name = match eval_expr_to_value(&tf.args[1]) {
+            Some(Value::String(s)) => s,
+            _ => return Err("Second argument to vector_similarity_scan must be a column name string".into()),
+        };
+
+        let query_vector = match eval_expr_to_value(&tf.args[2]) {
+            Some(Value::List(items)) => {
+                let mut vec = Vec::with_capacity(items.len());
+                for item in &items {
+                    match item {
+                        Value::Double(d) => vec.push(*d),
+                        Value::Int64(i) => vec.push(*i as f64),
+                        Value::Int32(i) => vec.push(*i as f64),
+                        Value::Float(f) => vec.push(*f as f64),
+                        _ => return Err("query_vector must be a list of numbers".into()),
+                    }
+                }
+                vec
+            }
+            _ => return Err("Third argument to vector_similarity_scan must be a list of numbers".into()),
+        };
+
+        let top_k = match eval_expr_to_value(&tf.args[3]) {
+            Some(Value::Int64(k)) if k > 0 => k as u64,
+            _ => return Err("Fourth argument to vector_similarity_scan must be a positive integer".into()),
+        };
+
+        // Find the vector index on this table
+        let tc = self
+            .table_catalog
+            .clone()
+            .ok_or_else(|| "No table catalog available for vector_similarity_scan".to_string())?;
+
+        // Look for a vector index matching this table name
+        let index_name = {
+            let mut found = None;
+            for entry in tc.all_vector_indexes() {
+                if entry.table_name == table_name {
+                    found = Some(entry.name.clone());
+                    break;
+                }
+            }
+            found.ok_or_else(|| format!("No vector index found on table '{}'", table_name))?
+        };
+
+        // Dispatch to PhysicalVectorSimilarityScan
+        let scan = PhysicalVectorSimilarityScan {
+            index_name,
+            index_id: 0,
+            query_vector,
+            top_k,
+            table_name,
+            table_catalog: Some(tc),
+        };
+        scan.execute(vec![])
     }
 
     /// Execute a single expression against a DataChunk and return a ValueVector of results.

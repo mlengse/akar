@@ -76,7 +76,8 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
-        LogicalOperator::CopyFrom(_)
+        LogicalOperator::VectorSimilarityScan(_)
+        | LogicalOperator::CopyFrom(_)
         | LogicalOperator::Delete(_)
         | LogicalOperator::Set(_)
         | LogicalOperator::OptionalMatch(_)

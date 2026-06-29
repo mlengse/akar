@@ -1442,6 +1442,128 @@ impl PhysicalOperatorExec for PhysicalForeach {
     }
 }
 
+// ==================== VectorSimilarityScan ====================
+
+/// Physical operator for vector similarity search using an HNSW index.
+///
+/// Searches the `VectorIndexTable` for the top-K nearest neighbours and
+/// looks up the corresponding rows from the `NodeTable` to produce
+/// output columns including a `distance` column.
+pub struct PhysicalVectorSimilarityScan {
+    pub index_name: String,
+    pub index_id: u64,
+    pub query_vector: Vec<f64>,
+    pub top_k: u64,
+    pub table_name: String,
+    pub table_catalog: Option<Arc<TableCatalog>>,
+}
+
+impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
+    fn operator_type(&self) -> &str {
+        "vector_similarity_scan"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        let tc = self
+            .table_catalog
+            .clone()
+            .ok_or_else(|| "No table catalog available for VectorSimilarityScan".to_string())?;
+
+        // Resolve the vector index
+        let vi = tc
+            .get_vector_index_by_name(&self.index_name)
+            .ok_or_else(|| format!("Vector index '{}' not found", self.index_name))?;
+
+        // Search the HNSW index for top-K nearest neighbours
+        let results = vi.hnsw().search(&self.query_vector, self.top_k as usize);
+        drop(vi); // Release the DashMap reference
+
+        if results.is_empty() {
+            return Ok(vec![DataChunk::new(vec![])]);
+        }
+
+        // Look up rows from the node table
+        let node_table = tc
+            .get_node_table_by_name(&self.table_name)
+            .ok_or_else(|| format!("Node table '{}' not found", self.table_name))?;
+
+        let num_cols = node_table.columns.len();
+        let num_results = results.len();
+
+        // Build output columns: all table columns + distance column
+        let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols + 1];
+
+        for (dist, row_id) in &results {
+            // Add distance as the last column
+            output_columns[num_cols].push(Value::Double(*dist));
+
+            // Look up each column value from the node table
+            for col_idx in 0..num_cols {
+                match node_table.get_value(*row_id, col_idx) {
+                    Some(val) => output_columns[col_idx].push(val.clone()),
+                    None => output_columns[col_idx].push(Value::Null),
+                }
+            }
+        }
+
+        drop(node_table);
+
+        // Convert column-major Vec<Vec<Value>> to DataChunks
+        use kuzu_common::types::PhysicalTypeID;
+        use kuzu_common::vector::{DataChunk, ValueVector};
+
+        let mut fields = Vec::with_capacity(num_cols + 1);
+
+        // Add table columns
+        for col_idx in 0..num_cols {
+            let col_data = &output_columns[col_idx];
+            let mut v = ValueVector::new(PhysicalTypeID::Double, num_results);
+            v.resize(num_results);
+            for (i, val) in col_data.iter().enumerate() {
+                match val {
+                    Value::Double(d) => v.set_double(i, *d),
+                    Value::Int64(x) => {
+                        let buf = &mut v.data_mut()[i * 8..(i + 1) * 8];
+                        buf.copy_from_slice(&x.to_le_bytes());
+                        v.set_null(i, false);
+                    }
+                    Value::String(s) => {
+                        let bytes = s.as_bytes();
+                        let len = bytes.len().min(15) as u8;
+                        v.data_mut()[i * 16] = len;
+                        let copy_len = bytes.len().min(15);
+                        v.data_mut()[i * 16 + 1..i * 16 + 1 + copy_len]
+                            .copy_from_slice(&bytes[..copy_len]);
+                        v.set_null(i, false);
+                    }
+                    Value::Null => {
+                        v.set_null(i, true);
+                    }
+                    _ => {
+                        v.set_null(i, true);
+                    }
+                }
+            }
+            fields.push(v);
+        }
+
+        // Add distance column
+        let dist_data = &output_columns[num_cols];
+        let mut dist_v = ValueVector::new(PhysicalTypeID::Double, num_results);
+        dist_v.resize(num_results);
+        for (i, val) in dist_data.iter().enumerate() {
+            if let Value::Double(d) = val {
+                dist_v.set_double(i, *d);
+            } else {
+                dist_v.set_null(i, true);
+            }
+        }
+        fields.push(dist_v);
+
+        Ok(vec![DataChunk { fields, size: num_results }])
+    }
+}
+
 // ==================== CopyFrom ====================
 
 /// Physical operator for COPY FROM — loads data from CSV/Parquet files into a table.

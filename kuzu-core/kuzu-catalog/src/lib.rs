@@ -71,6 +71,7 @@ impl CatalogEntry {
         match self {
             CatalogEntry::NodeTable(t) => &t.name,
             CatalogEntry::RelTable(t) => &t.name,
+            CatalogEntry::VectorIndex(v) => &v.name,
         }
     }
 
@@ -78,6 +79,7 @@ impl CatalogEntry {
         match self {
             CatalogEntry::NodeTable(t) => t.table_id,
             CatalogEntry::RelTable(t) => t.table_id,
+            CatalogEntry::VectorIndex(v) => v.index_id,
         }
     }
 
@@ -85,6 +87,7 @@ impl CatalogEntry {
         match self {
             CatalogEntry::NodeTable(t) => &t.columns,
             CatalogEntry::RelTable(t) => &t.columns,
+            CatalogEntry::VectorIndex(_) => &[],
         }
     }
 
@@ -145,6 +148,38 @@ pub struct Catalog {
 impl Catalog {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a vector index entry. Returns error if name already exists.
+    pub fn create_vector_index(
+        &mut self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: String,
+        dimensions: u64,
+    ) -> CatalogResult {
+        if self.name_to_id.contains_key(&name) {
+            return CatalogResult::AlreadyExists;
+        }
+        // Validate that the referenced table exists
+        if !self.name_to_id.contains_key(&table_name) {
+            return CatalogResult::NotFound;
+        }
+        let index_id = self.next_id;
+        self.next_id += 1;
+        let entry = VectorIndexEntry {
+            index_id,
+            name: name.clone(),
+            table_name,
+            column_name,
+            metric,
+            dimensions,
+        };
+        self.entries
+            .insert(index_id, CatalogEntry::VectorIndex(entry));
+        self.name_to_id.insert(name, index_id);
+        CatalogResult::Created { table_id: index_id }
     }
 
     /// Create a node table. Returns error if name already exists.
@@ -238,6 +273,9 @@ impl Catalog {
                 t.columns.push(column);
                 Ok(())
             }
+            CatalogEntry::VectorIndex(_) => {
+                Err("Cannot add column to a vector index".into())
+            }
         }
     }
 
@@ -264,6 +302,9 @@ impl Catalog {
                     .ok_or_else(|| format!("Column '{column_name}' not found"))?;
                 t.columns.remove(pos);
                 Ok(())
+            }
+            CatalogEntry::VectorIndex(_) => {
+                Err("Cannot drop column from a vector index".into())
             }
         }
     }
@@ -296,6 +337,9 @@ impl Catalog {
                 col.name = new_name.to_string();
                 Ok(())
             }
+            CatalogEntry::VectorIndex(_) => {
+                Err("Cannot rename column on a vector index".into())
+            }
         }
     }
 
@@ -312,6 +356,10 @@ impl Catalog {
         match self.entries.get_mut(&id) {
             Some(CatalogEntry::NodeTable(t)) => t.name = new_name.to_string(),
             Some(CatalogEntry::RelTable(t)) => t.name = new_name.to_string(),
+            Some(CatalogEntry::VectorIndex(_)) => {
+                // Vector index rename uses the `rename` method
+                return Err("Use rename method for vector indexes".into());
+            }
             None => return Err("Table not found".into()),
         }
         self.name_to_id.remove(old_name);
@@ -366,6 +414,17 @@ impl Catalog {
             .collect()
     }
 
+    /// Get all vector index entries.
+    pub fn vector_indexes(&self) -> Vec<&VectorIndexEntry> {
+        self.entries
+            .values()
+            .filter_map(|e| match e {
+                CatalogEntry::VectorIndex(v) => Some(v),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Rename a table.
     pub fn rename(&mut self, old_name: &str, new_name: String) -> CatalogResult {
         if !self.name_to_id.contains_key(old_name) {
@@ -382,6 +441,7 @@ impl Catalog {
             match entry {
                 CatalogEntry::NodeTable(t) => t.name = new_name.clone(),
                 CatalogEntry::RelTable(t) => t.name = new_name,
+                CatalogEntry::VectorIndex(v) => v.name = new_name,
             }
         }
         CatalogResult::Created { table_id }

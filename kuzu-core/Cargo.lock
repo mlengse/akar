@@ -1776,6 +1776,7 @@ dependencies = [
  "kuzu-catalog",
  "kuzu-common",
  "kuzu-transaction",
+ "kuzu-vector",
  "parquet",
  "serde",
  "serde_json",

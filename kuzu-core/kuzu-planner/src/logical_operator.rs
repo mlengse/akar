@@ -8,6 +8,7 @@ use kuzu_parser::ast::Expression;
 pub enum LogicalOperator {
     ScanNode(LogicalScanNode),
     ScanRel(LogicalScanRel),
+    VectorSimilarityScan(LogicalVectorSimilarityScan),
     Filter(LogicalFilter),
     Projection(LogicalProjection),
     HashJoin(LogicalHashJoin),
@@ -32,6 +33,7 @@ impl LogicalOperator {
         match self {
             LogicalOperator::ScanNode(s) => s.cardinality,
             LogicalOperator::ScanRel(s) => s.cardinality,
+            LogicalOperator::VectorSimilarityScan(s) => s.cardinality,
             LogicalOperator::Filter(s) => s.cardinality,
             LogicalOperator::Projection(s) => s.cardinality,
             LogicalOperator::HashJoin(s) => s.cardinality,
@@ -56,6 +58,7 @@ impl LogicalOperator {
         match self {
             LogicalOperator::ScanNode(s) => s.cardinality = card,
             LogicalOperator::ScanRel(s) => s.cardinality = card,
+            LogicalOperator::VectorSimilarityScan(s) => s.cardinality = card,
             LogicalOperator::Filter(s) => s.cardinality = card,
             LogicalOperator::Projection(s) => s.cardinality = card,
             LogicalOperator::HashJoin(s) => s.cardinality = card,
@@ -104,7 +107,9 @@ impl LogicalOperator {
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_) => vec![],
             // Leaf operators have no children
-            LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
+            LogicalOperator::VectorSimilarityScan(_)
+            | LogicalOperator::ScanNode(_)
+            | LogicalOperator::ScanRel(_) => vec![],
         }
     }
 
@@ -127,9 +132,21 @@ impl LogicalOperator {
             | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_) => vec![],
-            LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
+            LogicalOperator::VectorSimilarityScan(_)
+            | LogicalOperator::ScanNode(_)
+            | LogicalOperator::ScanRel(_) => vec![],
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalVectorSimilarityScan {
+    pub index_name: String,
+    pub index_id: u64,
+    pub query_vector: Vec<f64>,
+    pub top_k: u64,
+    pub table_name: String,
+    pub cardinality: u64,
 }
 
 #[derive(Debug, Clone)]

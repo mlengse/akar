@@ -448,6 +448,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 // Leaf and Flatten operators: no transformation needed
                 LogicalOperator::ScanNode(_)
                 | LogicalOperator::ScanRel(_)
+                | LogicalOperator::VectorSimilarityScan(_)
                 | LogicalOperator::Flatten(_)
                 | LogicalOperator::TableFunctionCall(_)
                 | LogicalOperator::CopyFrom(_)
@@ -597,6 +598,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     // Table functions produce their own rows; default estimate
                     1000
                 }
+                LogicalOperator::VectorSimilarityScan(vs) => vs.top_k,
                 LogicalOperator::CopyFrom(_) => 0,
                 LogicalOperator::Delete(_) => 0,
                 LogicalOperator::Set(_) => 0,
