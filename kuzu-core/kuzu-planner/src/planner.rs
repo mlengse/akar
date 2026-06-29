@@ -21,8 +21,19 @@ impl QueryPlanner {
     pub fn plan(&self, statement: BoundStatement) -> Result<Vec<LogicalOperator>, String> {
         match statement {
             BoundStatement::BoundQuery(query) => self.plan_query(query),
+            BoundStatement::BoundCopyFrom(c) => self.plan_copy_from(c),
             _ => Ok(Vec::new()),
         }
+    }
+
+    fn plan_copy_from(&self, c: BoundCopyFrom) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CopyFrom(LogicalCopyFrom {
+            table_name: c.table_name,
+            table_id: c.table_id,
+            file_path: c.file_path,
+            options: c.options,
+            cardinality: 0,
+        })])
     }
 
     fn plan_query(&self, query: BoundQuery) -> Result<Vec<LogicalOperator>, String> {

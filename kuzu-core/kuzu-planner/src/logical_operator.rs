@@ -18,6 +18,7 @@ pub enum LogicalOperator {
     Union(LogicalUnion),
     Flatten(LogicalFlatten),
     TableFunctionCall(LogicalTableFunctionCall),
+    CopyFrom(LogicalCopyFrom),
 }
 
 impl LogicalOperator {
@@ -36,6 +37,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => s.cardinality,
             LogicalOperator::Flatten(s) => s.cardinality,
             LogicalOperator::TableFunctionCall(s) => s.cardinality,
+            LogicalOperator::CopyFrom(s) => s.cardinality,
         }
     }
 
@@ -54,6 +56,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => s.cardinality = card,
             LogicalOperator::Flatten(s) => s.cardinality = card,
             LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
+            LogicalOperator::CopyFrom(s) => s.cardinality = card,
         }
     }
 
@@ -79,6 +82,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
+            LogicalOperator::CopyFrom(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -97,6 +101,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
+            LogicalOperator::CopyFrom(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -187,6 +192,18 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// COPY FROM operator — loads data from a file into a table.
+/// This is a leaf-level DML operator (no children) that the processor
+/// resolves into a `PhysicalCopyFrom` for execution.
+#[derive(Debug, Clone)]
+pub struct LogicalCopyFrom {
+    pub table_name: String,
+    pub table_id: u64,
+    pub file_path: String,
+    pub options: std::collections::HashMap<String, String>,
     pub cardinality: u64,
 }
 

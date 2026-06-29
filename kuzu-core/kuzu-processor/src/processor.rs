@@ -197,6 +197,33 @@ impl QueryProcessor {
                 | LogicalOperator::Union(_) => {
                     intermediate_result = Some(vec![]);
                 }
+                LogicalOperator::CopyFrom(cf) => {
+                    let table_catalog = self.table_catalog.clone()
+                        .ok_or_else(|| "No table catalog available for COPY FROM".to_string())?;
+
+                    // Get column definitions from the table catalog
+                    let catalog = table_catalog.lock().unwrap();
+                    let columns = if let Some(node_table) = catalog.get_node_table_by_name(&cf.table_name) {
+                        node_table.columns.clone()
+                    } else if let Some(rel_table) = catalog.get_rel_table_by_name(&cf.table_name) {
+                        rel_table.columns.clone()
+                    } else {
+                        return Err(format!("Table '{}' not found in storage catalog", cf.table_name));
+                    };
+                    drop(catalog);
+
+                    let copy_op = PhysicalCopyFrom {
+                        table_name: cf.table_name.clone(),
+                        table_id: cf.table_id,
+                        file_path: cf.file_path.clone(),
+                        columns,
+                        options: cf.options.clone(),
+                        table_catalog,
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = copy_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::TableFunctionCall(tf) => {
                     let result = self.execute_table_function(tf)?;
                     intermediate_result = Some(result);

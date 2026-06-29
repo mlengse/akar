@@ -76,6 +76,9 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::CopyFrom(_) => {
+            // Leaf operator with no children — nothing to recurse into.
+        }
     }
 }
 

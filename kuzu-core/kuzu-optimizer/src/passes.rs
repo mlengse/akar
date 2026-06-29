@@ -385,7 +385,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 LogicalOperator::ScanNode(_)
                 | LogicalOperator::ScanRel(_)
                 | LogicalOperator::Flatten(_)
-                | LogicalOperator::TableFunctionCall(_) => {}
+                | LogicalOperator::TableFunctionCall(_)
+                | LogicalOperator::CopyFrom(_) => {}
             }
         });
     }
@@ -533,6 +534,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     // Table functions produce their own rows; default estimate
                     1000
                 }
+                LogicalOperator::CopyFrom(_) => 0,
             };
             op.set_cardinality(card);
         });
