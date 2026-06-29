@@ -12,6 +12,32 @@ pub struct CatalogColumn {
     pub default_value: Option<Vec<u8>>,
 }
 
+/// Index type for primary key indexes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexType {
+    /// Default hash index (equality-only lookup).
+    Hash,
+    /// Adaptive Radix Tree index (supports range scans).
+    Art,
+}
+
+impl IndexType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_uppercase().as_str() {
+            "HASH" => Some(IndexType::Hash),
+            "ART" => Some(IndexType::Art),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IndexType::Hash => "HASH",
+            IndexType::Art => "ART",
+        }
+    }
+}
+
 /// A node table entry in the catalog.
 #[derive(Debug, Clone)]
 pub struct NodeTableEntry {
@@ -19,6 +45,10 @@ pub struct NodeTableEntry {
     pub name: String,
     pub columns: Vec<CatalogColumn>,
     pub primary_key_column: usize,
+    /// Type of index used for the primary key.
+    pub index_type: Option<IndexType>,
+    /// Name of the index (if any).
+    pub index_name: Option<String>,
 }
 
 impl NodeTableEntry {
@@ -28,6 +58,16 @@ impl NodeTableEntry {
 
     pub fn num_columns(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Returns `true` if this table has an ART index.
+    pub fn has_art_index(&self) -> bool {
+        matches!(self.index_type, Some(IndexType::Art))
+    }
+
+    /// Returns `true` if this table has any index configured.
+    pub fn has_index(&self) -> bool {
+        self.index_type.is_some()
     }
 }
 
@@ -195,6 +235,8 @@ impl Catalog {
             name: name.clone(),
             columns,
             primary_key_column: pk_col,
+            index_type: None,
+            index_name: None,
         };
         self.entries.insert(table_id, CatalogEntry::NodeTable(entry));
         self.name_to_id.insert(name, table_id);
@@ -307,6 +349,73 @@ impl Catalog {
                 Err("Cannot drop column from a vector index".into())
             }
         }
+    }
+
+    /// Create an index on a node table.
+    pub fn create_index(
+        &mut self,
+        table_name: &str,
+        index_name: String,
+        index_type: IndexType,
+        column_name: &str,
+    ) -> Result<(), String> {
+        let entry = self
+            .get_entry_by_name_mut(table_name)
+            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+        match entry {
+            CatalogEntry::NodeTable(t) => {
+                // Validate column exists
+                if !t.columns.iter().any(|c| c.name == column_name) {
+                    return Err(format!("Column '{column_name}' not found in table '{table_name}'"));
+                }
+                // Validate column is the primary key
+                let pk_col = t.primary_key_column();
+                if pk_col.map(|c| c.name.as_str()) != Some(column_name) {
+                    return Err(format!(
+                        "Cannot create index on non-PK column '{column_name}'. Only PK columns are supported."
+                    ));
+                }
+                t.index_type = Some(index_type);
+                t.index_name = Some(index_name);
+                Ok(())
+            }
+            _ => Err(format!("Table '{table_name}' is not a node table")),
+        }
+    }
+
+    /// Drop an index from a table.
+    pub fn drop_index(&mut self, table_name: &str, index_name: &str) -> Result<(), String> {
+        let entry = self
+            .get_entry_by_name_mut(table_name)
+            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+        match entry {
+            CatalogEntry::NodeTable(t) => {
+                if t.index_name.as_deref() != Some(index_name) {
+                    return Err(format!("Index '{index_name}' not found on table '{table_name}'"));
+                }
+                t.index_type = None;
+                t.index_name = None;
+                Ok(())
+            }
+            _ => Err(format!("Table '{table_name}' is not a node table")),
+        }
+    }
+
+    /// Get index info for a table.
+    pub fn get_index_info(&self, table_name: &str) -> Option<(IndexType, String)> {
+        match self.get_entry_by_name(table_name)? {
+            CatalogEntry::NodeTable(t) => {
+                let idx_type = t.index_type?;
+                let idx_name = t.index_name.clone()?;
+                Some((idx_type, idx_name))
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a table has an ART index.
+    pub fn has_art_index(&self, table_name: &str) -> bool {
+        matches!(self.get_index_info(table_name), Some((IndexType::Art, _)))
     }
 
     /// Rename a column in a table in the catalog.

@@ -2,6 +2,9 @@
 //!
 //! Disk-based columnar storage with buffer management, WAL, compression, and indexing.
 
+pub mod art_index;
+pub mod art_key;
+pub mod art_node;
 pub mod buffer_manager;
 pub mod checkpoint;
 pub mod column;
@@ -31,6 +34,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
 
+pub use art_index::ArtPrimaryKeyIndex;
+pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
 pub use vector_index::{extract_f64_list_from_value, VectorIndexTable};
