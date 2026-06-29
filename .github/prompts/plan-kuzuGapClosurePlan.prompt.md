@@ -24,6 +24,7 @@ Dari 6 rencana sebelumnya (F0-F21), **hampir semua sudah selesai**: optimizer, e
 | CI/CD (Rust) | ✅ Multi-platform GitHub Actions |
 | tools/rust_api | ✅ Dual-mode (default: pure Rust) |
 | Extensions (JSON, FTS, ALGO, NEO4J, LLM) | ✅ Real implementations |
+| Concurrent Multi-Writer (Phase A-C) | ✅ `concurrent_writes=true`, dashmap, LocalWAL, MVCC, checkpoint drain |
 
 ### ❌ Masih Perlu Dibuat
 | Area | Prioritas | Effort |

@@ -2,9 +2,9 @@
 
 ## TL;DR
 
-**Kondisi saat ini (2026-06-29):** ~28 crate Rust, ~600+ tests, 9 optimizer passes, full storage engine (BufferManager, WAL, Checkpoint, Column, Compression, NodeGroup), 11 extension crates real, full query pipeline (parse→bind→plan→optimize→execute) sudah membaca data storage sungguhan, PreparedStatement, Transaction MVCC, CLI REPL.
+**Kondisi saat ini (2026-06-30):** ~28 crate Rust, ~600+ tests, 9 optimizer passes, full storage engine (BufferManager, WAL, Checkpoint, Column, Compression, NodeGroup), 15 extension crates, full query pipeline (parse→bind→plan→optimize→execute) membaca data storage sungguhan, PreparedStatement, **Concurrent Multi-Writer ✅** (MVCC concurrent + dashmap + LocalWAL), CLI REPL.
 
-**Yang sudah selesai:** ✅ On-disk HashIndex (A1), ✅ WAL recovery on startup (A2), ✅ Auto-checkpoint wiring (A3), ✅ ShadowFile+LocalStorage→Commit (A4), ✅ HNSW Vector Index (A5), ✅ MERGE (B1), ✅ CALL (B2), ✅ DML CREATE (B3), ✅ FOREACH & Variable-length Path (B4), ✅ Subquery Support (B5), ✅ CLI Enhancement (C1), ✅ tools/rust_api Integration (C2)
+**Yang sudah selesai:** ✅ On-disk HashIndex (A1), ✅ WAL recovery on startup (A2), ✅ Auto-checkpoint wiring (A3), ✅ ShadowFile+LocalStorage→Commit (A4), ✅ HNSW Vector Index (A5), ✅ MERGE (B1), ✅ CALL (B2), ✅ DML CREATE (B3), ✅ FOREACH & Variable-length Path (B4), ✅ Subquery Support (B5), ✅ CLI Enhancement (C1), ✅ tools/rust_api Integration (C2), ✅ **Concurrent Multi-Writer** (A1-A9, B1-B8, C1-C5)
 
 **Yang masih kurang:** D1 (GitHub Actions CI), D2 (Release Workflow), D3 (Benchmark Infrastructure), D4 (C++ Cleanup).
 
