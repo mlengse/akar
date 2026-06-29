@@ -54,6 +54,11 @@ pub struct Database {
 
 impl Database {
     /// Get the table catalog for programmatic data access.
+    /// Get the catalog (table schema definitions).
+    pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
+        self.catalog.clone()
+    }
+
     pub fn table_catalog(&self) -> std::sync::Arc<std::sync::Mutex<kuzu_storage::TableCatalog>> {
         self.storage_manager.table_catalog()
     }
