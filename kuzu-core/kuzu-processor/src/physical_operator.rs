@@ -303,8 +303,8 @@ impl PhysicalFilter {
                 match op {
                     UnaryOp::Not => Ok(vals.iter().map(|v| !v).collect()),
                     UnaryOp::Negate => {
-                        // Negation as filter doesn't change boolean mask
-                        Ok(vals)
+                        // Negation on a boolean mask inverts it
+                        Ok(vals.iter().map(|v| !v).collect())
                     }
                 }
             }
@@ -939,6 +939,10 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
                     let key = field.get_value(row).unwrap_or(Value::Null);
+                    // SQL semantics: NULL keys never match in a join
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     let hash = value_hash(&key);
                     hash_table.entry(hash).or_default().push((key, vec![(ci, row)]));
                 }
@@ -956,6 +960,10 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
                 let probe_key = chunk.fields.get(probe_col)
                     .and_then(|f| f.get_value(row))
                     .unwrap_or(Value::Null);
+                // SQL semantics: NULL keys never match in a join
+                if matches!(probe_key, Value::Null) {
+                    continue;
+                }
                 let probe_hash = value_hash(&probe_key);
 
                 if let Some(bucket) = hash_table.get(&probe_hash) {

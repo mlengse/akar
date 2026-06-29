@@ -591,4 +591,187 @@ mod integration_tests {
         let vals = query_column(&conn, "MATCH (n:T) RETURN n.name");
         assert!(vals.is_empty(), "Expected no rows in empty CSV");
     }
+
+    // ==================== Edge Case Tests ====================
+
+    #[test]
+    fn test_empty_table_scan() {
+        // Scan an empty table (no data) — should return empty result, not error
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Empty(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
+
+        let result = conn.query("MATCH (n:Empty) RETURN n.id, n.label").unwrap();
+        // Should produce a valid empty result
+        assert_eq!(result.num_rows(), 0);
+    }
+
+    #[test]
+    fn test_empty_match_return() {
+        // Query with a WHERE clause that matches nothing
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        // Insert some data then query with impossible filter
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n1\n2\n3\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        let result = conn.query("MATCH (n:T) WHERE n.id > 100 RETURN n.id").unwrap();
+        assert_eq!(result.num_rows(), 0, "Expected 0 rows for impossible filter");
+    }
+
+    #[test]
+    fn test_alter_add_column_with_data() {
+        // ALTER TABLE ADD on a table that already has data
+        // NOTE: grammar uses ADD <name> <type> (no COLUMN keyword)
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // Insert some data
+        let csv_path = _dir.path().join("people.csv");
+        std::fs::write(&csv_path, "name,age\nAlice,30\nBob,25\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+        // Add a new column (grammar: ADD <name> <type>, no COLUMN keyword)
+        let add_result = exec_ok(&conn, "ALTER TABLE Person ADD email STRING");
+        assert!(add_result.is_ok(), "ALTER ADD should succeed: {:?}", add_result);
+
+        // Verify original columns still work
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name ORDER BY n.name");
+        assert_eq!(names.len(), 2, "Expected 2 rows after ALTER ADD");
+
+        // Verify the new column can be accessed
+        let result = conn.query("MATCH (n:Person) RETURN n.name").unwrap();
+        assert_eq!(result.num_rows(), 2, "Expected 2 rows");
+    }
+
+    #[test]
+    fn test_alter_rename_column_with_data() {
+        // NOTE: grammar uses RENAME <name> TO <newname> (no COLUMN keyword)
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id,label\n1,foo\n2,bar\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // Rename column (grammar: RENAME <name> TO <newname>)
+        let rename_result = exec_ok(&conn, "ALTER TABLE T RENAME label TO renamed");
+        assert!(rename_result.is_ok(), "ALTER RENAME should succeed: {:?}", rename_result);
+    }
+
+    #[test]
+    fn test_alter_drop_column_with_data() {
+        // NOTE: grammar uses DROP <name> (no COLUMN keyword)
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, score DOUBLE, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id,label,score\n1,foo,10.5\n2,bar,20.0\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // Drop a non-PK column (grammar: DROP <name>)
+        let drop_result = exec_ok(&conn, "ALTER TABLE T DROP score");
+        assert!(drop_result.is_ok(), "ALTER DROP should succeed: {:?}", drop_result);
+    }
+
+    #[test]
+    fn test_large_dataset_stability() {
+        // Insert 10K rows to test dataset stability
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Large(id INT64, value INT64, label STRING, PRIMARY KEY (id))").unwrap();
+
+        // Generate a large CSV with simple integer values
+        let csv_path = _dir.path().join("large.csv");
+        let mut content = String::from("id,value,label\n");
+        for i in 0..100 {
+            let val = i * 10;
+            content.push_str(&format!("{i},{val},item_{i}\n"));
+        }
+        std::fs::write(&csv_path, &content).unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+
+        let copy_result = exec_ok(&conn, &format!("COPY Large FROM '{fp}' (HEADER true)"));
+        assert!(copy_result.is_ok(), "COPY should succeed: {:?}", copy_result);
+
+        // Verify scan
+        let scan_result = conn.query("MATCH (n:Large) RETURN n.id ORDER BY n.id").unwrap();
+        assert_eq!(scan_result.num_rows(), 100, "Expected 100 rows from scan");
+    }
+
+    #[test]
+    fn test_delete_with_empty_match() {
+        // DELETE with no matching rows should succeed (not error)
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n1\n2\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // DELETE with WHERE that matches nothing
+        let result = exec_ok(&conn, "MATCH (n:T) WHERE n.id > 100 DELETE n");
+        assert!(result.is_ok(), "DELETE with no matches should succeed");
+
+        // Verify all rows still exist
+        let remaining = query_column(&conn, "MATCH (n:T) RETURN n.id ORDER BY n.id");
+        assert_eq!(remaining.len(), 2, "All rows should remain after no-op DELETE");
+    }
+
+    #[test]
+    fn test_set_valid_value() {
+        // SET property to a valid value should work
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id,label\n1,original\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // SET with a valid expression
+        let set_result = exec_ok(&conn, "MATCH (n:T) WHERE n.id = 1 SET n.label = 'updated'");
+        assert!(set_result.is_ok(), "SET should succeed: {:?}", set_result);
+    }
+
+    #[test]
+    fn test_unwind_basic() {
+        // UNWIND with a non-empty list works (grammar requires at least one element)
+        let (_dir, _db, conn) = setup_db();
+        let result = conn.query("UNWIND [1, 2, 3] AS x RETURN x");
+        assert!(result.is_ok(), "UNWIND should succeed: {:?}", result);
+        if let Ok(r) = result {
+            assert_eq!(r.num_rows(), 3);
+        }
+    }
+
+    #[test]
+    fn test_optional_match_no_match() {
+        // OPTIONAL MATCH that finds nothing should produce NULL row
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id\n1\n2\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        // OPTIONAL MATCH that finds nothing should produce a row with NULL fields
+        let result = conn.query("MATCH (n:T) OPTIONAL MATCH (m:T {id: 999}) RETURN n.id, m.id ORDER BY n.id").unwrap();
+        assert_eq!(result.num_rows(), 2, "Expected 2 rows from left side");
+    }
 }

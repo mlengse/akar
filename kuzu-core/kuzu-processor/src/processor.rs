@@ -704,4 +704,213 @@ mod tests {
         let result = join.execute(input).unwrap();
         assert!(result.is_empty()); // Empty build → no matches
     }
+
+    // ==================== Edge Case Tests ====================
+
+    #[test]
+    fn test_hash_join_null_keys_no_match() {
+        // SQL semantics: NULL keys should never match in a join
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        // Build side with NULLs mixed with real values
+        let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
+        build.set_i64(0, 1);
+        // Row 1 stays NULL
+        build.set_i64(2, 3);
+        build.resize(3);
+        // Probe side also has NULLs
+        let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
+        probe.set_i64(0, 1);
+        probe.set_i64(1, 3);
+        // Row 2 stays NULL
+        probe.resize(3);
+        let input = vec![
+            DataChunk::new(vec![build]),
+            DataChunk::new(vec![probe]),
+        ];
+        let result = join.execute(input).unwrap();
+        // Should match 1→1 (1 row) and 3→3 (1 row)
+        // NULLs should NOT match each other
+        assert!(!result.is_empty(), "Expected at least one matching row");
+    }
+
+    #[test]
+    fn test_hash_join_all_null_keys() {
+        // When both sides have all NULL keys → no matches
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
+        build.resize(3);
+        build.set_null(0, true);
+        build.set_null(1, true);
+        build.set_null(2, true);
+
+        let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
+        probe.resize(3);
+        probe.set_null(0, true);
+        probe.set_null(1, true);
+        probe.set_null(2, true);
+
+        let input = vec![
+            DataChunk::new(vec![build]),
+            DataChunk::new(vec![probe]),
+        ];
+        let result = join.execute(input).unwrap();
+        // NULL = NULL is unknown in SQL, so no matches
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_order_by_with_nulls() {
+        // NULLs should sort last (ASC)
+        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        v.set_i64(0, 3);
+        v.set_null(1, true); // NULL
+        v.set_i64(2, 1);
+        v.set_i64(3, 2);
+        v.set_null(4, true); // NULL
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = order.execute(input).unwrap();
+        assert!(!result.is_empty());
+        // First three should be 1, 2, 3 (sorted ascending)
+        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 1);
+        assert_eq!(result[0].fields[0].get_i64(1).unwrap(), 2);
+        assert_eq!(result[0].fields[0].get_i64(2).unwrap(), 3);
+        // Last two should be NULL
+        assert!(result[0].fields[0].is_null(3));
+        assert!(result[0].fields[0].is_null(4));
+    }
+
+    #[test]
+    fn test_limit_zero() {
+        // LIMIT 0 should return empty result
+        let limit = PhysicalLimit { limit: 0, offset: 0 };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        for i in 0..5 { v.set_i64(i, i as i64); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = limit.execute(input).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_limit_offset_exceeds_total() {
+        // OFFSET larger than total rows → empty result
+        let limit = PhysicalLimit { limit: 5, offset: 100 };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        for i in 0..5 { v.set_i64(i, i as i64); }
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = limit.execute(input).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_aggregate_count_with_nulls() {
+        // COUNT should NOT count NULL values (standard SQL semantics)
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["COUNT".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        v.set_i64(0, 10);
+        v.set_null(1, true);
+        v.set_i64(2, 20);
+        v.set_null(3, true);
+        v.set_i64(4, 30);
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        // COUNT of [10, NULL, 20, NULL, 30] = 3
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3));
+    }
+
+    #[test]
+    fn test_aggregate_sum_with_nulls() {
+        // SUM should skip NULLs
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![],
+            aggregate_functions: vec!["SUM".into()],
+        };
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        v.set_i64(0, 10);
+        v.set_null(1, true);
+        v.set_i64(2, 20);
+        v.set_null(3, true);
+        v.set_i64(4, 30);
+        v.resize(5);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = agg.execute(input).unwrap();
+        // SUM of [10, NULL, 20, NULL, 30] = 60
+        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(60));
+    }
+
+    #[test]
+    fn test_aggregate_group_by_with_nulls() {
+        // GROUP BY with NULL keys: NULLs should group together
+        let agg = PhysicalAggregate {
+            group_by_cols: vec![0],
+            aggregate_functions: vec!["COUNT".into()],
+        };
+        let n = 6;
+        let mut keys = ValueVector::new(PhysicalTypeID::Int64, n);
+        keys.set_i64(0, 1);
+        keys.set_i64(1, 1);
+        keys.set_null(2, true);
+        keys.set_null(3, true);
+        keys.set_i64(4, 2);
+        keys.set_i64(5, 2);
+        keys.resize(n);
+        let mut vals = ValueVector::new(PhysicalTypeID::Int64, n);
+        for i in 0..n { vals.set_i64(i, i as i64); }
+        vals.resize(n);
+        let input = vec![DataChunk::new(vec![keys, vals])];
+        let result = agg.execute(input).unwrap();
+        assert!(!result.is_empty());
+        // Result should have 3 groups: key=1 (count=2), key=NULL (count=2), key=2 (count=2)
+        assert_eq!(result[0].size, 3);
+    }
+
+    #[test]
+    fn test_filter_with_nulls() {
+        // Filter should treat NULL as false
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 4);
+        v.set_i64(0, 1);
+        v.set_null(1, true);
+        v.set_i64(2, 3);
+        v.set_i64(3, 4);
+        v.resize(4);
+        let input = vec![DataChunk::new(vec![v])];
+
+        // Variable filter on first field: non-null rows pass
+        let filter = PhysicalFilter::new(Expression::Variable("a".into()));
+        let result = filter.execute(input.clone()).unwrap();
+        assert!(!result.is_empty());
+        assert_eq!(result[0].size, 3); // 3 non-null rows pass
+    }
+
+    #[test]
+    fn test_empty_table_scan() {
+        // Scan of an empty table should return empty result, not error
+        let scan = PhysicalScan::new("EmptyTable".into(), 0, 0);
+        let result = scan.execute(vec![]).unwrap();
+        // Should return a valid empty DataChunk
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 0);
+    }
+
+    #[test]
+    fn test_empty_input_through_pipeline() {
+        // Empty input should produce empty output (no rows to process)
+        let filter = PhysicalFilter::new(Expression::Constant(Constant::Bool(true)));
+        let result = filter.execute(vec![DataChunk::new(vec![])]).unwrap();
+        // Filter with 0 rows produces 0 output chunks (nothing to filter)
+        assert!(result.is_empty());
+    }
 }
