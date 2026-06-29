@@ -11,7 +11,7 @@
 //! ShadowFile apply → checkpoint). Call it after `TransactionManager::commit()`.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Type of transaction.
@@ -99,11 +99,10 @@ impl Transaction {
     }
 }
 
-/// Result of a commit attempt.
+/// Result of a commit attempt — always succeeds (blocking ensures no abort).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommitResult {
     Committed { commit_ts: u64 },
-    Aborted { reason: String },
 }
 
 /// Configuration for the transaction manager.
@@ -137,6 +136,10 @@ pub struct TransactionManager {
     /// Whether concurrent writes are allowed. Can be toggled at runtime
     /// (e.g., via `SET concurrent_writes=true|false`).
     concurrent_writes: AtomicBool,
+    /// Active write transaction count (used for single-writer blocking).
+    active_write_count: Mutex<u32>,
+    /// Condvar for blocking writers in single-writer mode.
+    writer_condvar: Condvar,
     /// Configuration snapshot kept for reference (used during construction).
     #[allow(dead_code)]
     config: TransactionManagerConfig,
@@ -155,6 +158,8 @@ impl TransactionManager {
             table_locks: Mutex::new(HashMap::new()),
             commit_history: Mutex::new(Vec::new()),
             concurrent_writes: AtomicBool::new(config.concurrent_writes),
+            active_write_count: Mutex::new(0),
+            writer_condvar: Condvar::new(),
             config,
         }
     }
@@ -183,18 +188,17 @@ impl TransactionManager {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(id, TransactionType::Write);
 
-        // In single-writer mode, reject if another writer is active.
+        // In single-writer mode, block until no other writer is active.
         if !self.allow_concurrent_writes() {
-            if let Ok(active) = self.active_transactions.lock() {
-                let has_writer = active
-                    .values()
-                    .any(|t| t.transaction_type == TransactionType::Write && t.is_active());
-                if has_writer {
-                    return Err(
-                        "Only one write transaction allowed (concurrent_writes=false)".into()
-                    );
-                }
+            let mut count = self.active_write_count.lock().unwrap();
+            while *count > 0 {
+                count = self.writer_condvar.wait(count).unwrap();
             }
+            *count = 1;
+        } else {
+            // Track count for multi-writer mode too (for condvar notification).
+            let mut count = self.active_write_count.lock().unwrap();
+            *count += 1;
         }
 
         if let Ok(mut active) = self.active_transactions.lock() {
@@ -238,6 +242,7 @@ impl TransactionManager {
         }
         self.remove_from_active(transaction.transaction_id);
         self.release_locks(transaction.transaction_id);
+        self.decrement_writer_and_notify();
         CommitResult::Committed { commit_ts }
     }
 
@@ -246,6 +251,7 @@ impl TransactionManager {
         let records = transaction.undo_records.clone();
         self.remove_from_active(transaction.transaction_id);
         self.release_locks(transaction.transaction_id);
+        self.decrement_writer_and_notify();
         records
     }
 
@@ -275,6 +281,16 @@ impl TransactionManager {
         if let Ok(mut active) = self.active_transactions.lock() {
             active.remove(&txn_id);
         }
+    }
+
+    /// Decrement the active writer count and notify any blocked writers.
+    fn decrement_writer_and_notify(&self) {
+        let mut count = self.active_write_count.lock().unwrap();
+        if *count > 0 {
+            *count -= 1;
+        }
+        // If count reached 0, wake a waiting writer (single-writer mode).
+        self.writer_condvar.notify_one();
     }
 }
 
@@ -334,16 +350,30 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_writer_limit() {
-        // With concurrent_writes=false, only one writer at a time.
+    fn test_concurrent_writer_limit_single_writer_mode() {
+        // With concurrent_writes=false, a second writer blocks until the first finishes.
         let config = TransactionManagerConfig {
             concurrent_writes: false,
         };
-        let tm = TransactionManager::new_with_config(config);
+        let tm = std::sync::Arc::new(TransactionManager::new_with_config(config));
+        let tm_clone = tm.clone();
+
+        let handle = std::thread::spawn(move || {
+            // This should succeed after tx1 commits (blocking wait)
+            let mut tx2 = tm_clone.begin_write().unwrap();
+            assert!(tx2.is_active());
+            assert_eq!(tx2.transaction_type, TransactionType::Write);
+            tm_clone.commit(&mut tx2);
+        });
+
         let mut tx1 = tm.begin_write().unwrap();
-        assert!(tm.begin_write().is_err());
-        tm.commit(&mut tx1); // Free slot
-        assert!(tm.begin_write().is_ok());
+        assert!(tx1.is_active());
+        // Give the thread time to block on begin_write
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // tx1 is still active — thread is blocked
+        tm.commit(&mut tx1);
+        // Now thread should unblock and succeed
+        handle.join().expect("Thread should complete");
     }
 
     #[test]
@@ -393,10 +423,7 @@ mod tests {
         let tm = TransactionManager::new();
         let mut tx = tm.begin_write().unwrap();
         tx.record_undo(1, 0, 0, vec![0]);
-        let commit_ts = match tm.commit(&mut tx) {
-            CommitResult::Committed { commit_ts } => commit_ts,
-            _ => panic!("Commit failed"),
-        };
+        let CommitResult::Committed { commit_ts } = tm.commit(&mut tx);
         assert!(tm.is_visible(tx.transaction_id, commit_ts));
         assert!(tm.is_visible(tx.transaction_id, commit_ts + 1));
     }
