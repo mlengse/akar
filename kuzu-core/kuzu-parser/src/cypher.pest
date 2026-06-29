@@ -50,6 +50,10 @@ quote_option = { "QUOTE" ~ string }
 set_clause = { "SET" ~ set_item ~ ("," ~ set_item)* }
 set_item = { expression ~ "=" ~ expression }
 
+merge_clause = { "MERGE" ~ pattern ~ on_create_set? ~ on_match_set? }
+on_create_set = { "ON" ~ "CREATE" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
+on_match_set = { "ON" ~ "MATCH" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
+
 delete_clause = { "DELETE" ~ expression ~ ("," ~ expression)* }
 
 unwind_clause = { "UNWIND" ~ expression ~ "AS" ~ variable }
@@ -67,6 +71,7 @@ query_statement = {
     | match_clause ~ optional_match_clause ~ where_clause ~ return_clause
     | match_clause ~ optional_match_clause
     | match_clause ~ with_clause
+    | merge_clause ~ on_create_set? ~ on_match_set? ~ return_clause?
     | match_clause
     | return_clause
     | unwind_clause ~ return_clause

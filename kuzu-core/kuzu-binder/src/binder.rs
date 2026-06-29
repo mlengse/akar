@@ -8,6 +8,55 @@ use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::ast::{Clause, Expression, Statement, *};
 use std::sync::{Arc, Mutex};
 
+/// Resolve SET clause items against the catalog to find column info.
+fn resolve_set_items(
+    catalog: &Catalog,
+    items: &[SetItem],
+) -> Result<Vec<BoundSetItem>, String> {
+    let mut result = Vec::new();
+    for item in items {
+        // Expect property expression like `n.property_name = value`
+        match &item.property {
+            Expression::PropertyAccess(obj, prop_name) => {
+                // Find the variable name by looking at the object
+                let _var_name = match obj.as_ref() {
+                    Expression::Variable(v) => v.clone(),
+                    other => return Err(format!("Unsupported SET target: {:?}", other)),
+                };
+                // Look up the column in the table schema
+                // We need to find which table this variable belongs to.
+                // Since MERGE is a single-pattern operation, we just use the label.
+                let found = catalog.all_entries().find_map(|entry| {
+                    entry.columns().iter().find(|c| c.name == *prop_name).map(|_| (entry.name().to_string(), entry.table_id()))
+                });
+                match found {
+                    Some((table_name, table_id)) => {
+                        let col_idx = catalog
+                            .get_entry_by_name(&table_name)
+                            .and_then(|e| {
+                                e.columns().iter().position(|c| c.name == *prop_name)
+                            })
+                            .unwrap_or(0);
+                        result.push(BoundSetItem {
+                            property: item.property.clone(),
+                            value: item.value.clone(),
+                            column_name: prop_name.clone(),
+                            column_idx: col_idx,
+                            table_name: table_name.to_string(),
+                            table_id,
+                        });
+                    }
+                    None => {
+                        return Err(format!("Property '{}' not found in any table", prop_name));
+                    }
+                }
+            }
+            _ => return Err(format!("Expected property assignment in SET, got: {:?}", item.property)),
+        }
+    }
+    Ok(result)
+}
+
 /// The binder transforms a parsed AST into a bound statement
 /// by resolving symbols against the catalog and validating types.
 pub struct Binder {
@@ -28,6 +77,7 @@ impl Binder {
             Statement::CopyFrom(c) => self.bind_copy_from(c),
             Statement::AlterTable(a) => self.bind_alter_table(a),
             Statement::Union(u) => self.bind_union(u),
+            Statement::Merge(m) => self.bind_merge(m),
         }
     }
 
@@ -644,6 +694,36 @@ impl Binder {
                 _ => unreachable!(),
             }),
             all: u.all,
+        }))
+    }
+
+    fn bind_merge(&self, m: kuzu_parser::ast::MergeStatement) -> Result<BoundStatement, String> {
+        // Validate the pattern has a node with a label (table name)
+        let node = m.pattern.node.as_ref().ok_or("MERGE requires a node pattern")?;
+        let label = node.labels.first().ok_or("MERGE requires a label (table name)")?;
+
+        // Lookup the table in catalog
+        let catalog = self.catalog.lock().unwrap();
+        let entry = catalog
+            .get_entry_by_name(label)
+            .ok_or_else(|| format!("Table '{label}' not found"))?;
+
+        let table_id = entry.table_id();
+        let table_name = label.clone();
+
+        // Get properties for matching/creation
+        let properties: Vec<(String, kuzu_parser::ast::Expression)> = node.properties.clone();
+
+        // Resolve ON CREATE SET items
+        let on_create = resolve_set_items(&catalog, &m.on_create)?;
+        let on_match = resolve_set_items(&catalog, &m.on_match)?;
+
+        Ok(BoundStatement::BoundMerge(BoundMerge {
+            table_name,
+            table_id,
+            properties,
+            on_create,
+            on_match,
         }))
     }
 

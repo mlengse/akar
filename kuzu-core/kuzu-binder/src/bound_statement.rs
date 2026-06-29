@@ -14,6 +14,7 @@ pub enum BoundStatement {
     BoundCopyFrom(BoundCopyFrom),
     BoundAlterTable(BoundAlterTable),
     BoundUnion(BoundUnion),
+    BoundMerge(BoundMerge),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -157,4 +158,17 @@ pub struct BoundUnion {
     pub left: Box<BoundQuery>,
     pub right: Box<BoundQuery>,
     pub all: bool,
+}
+
+/// Bound MERGE statement — match or create a node pattern.
+#[derive(Debug, Clone)]
+pub struct BoundMerge {
+    pub table_name: String,
+    pub table_id: u64,
+    /// Properties from the MERGE pattern (used for matching and creation).
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    /// ON CREATE SET items: resolved column info.
+    pub on_create: Vec<BoundSetItem>,
+    /// ON MATCH SET items: resolved column info.
+    pub on_match: Vec<BoundSetItem>,
 }

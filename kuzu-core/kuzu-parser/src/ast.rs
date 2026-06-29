@@ -10,6 +10,7 @@ pub enum Statement {
     CopyFrom(CopyFrom),
     AlterTable(AlterTable),
     Union(UnionStatement),
+    Merge(MergeStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -213,6 +214,14 @@ pub struct CopyFrom {
     pub table_name: String,
     pub file_path: String,
     pub options: std::collections::HashMap<String, String>,
+}
+
+/// MERGE statement — match or create a pattern with optional ON CREATE / ON MATCH actions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergeStatement {
+    pub pattern: Pattern,
+    pub on_create: Vec<SetItem>,
+    pub on_match: Vec<SetItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -28,8 +28,16 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
             parse_ddl(ddl_inner)
         }
         Rule::query_statement => {
-            let query = parse_query_pairs(inner)?;
-            Ok(Statement::Query(query))
+            // Check if this is a MERGE statement
+            let has_merge = inner.clone().into_inner().any(|c| c.as_rule() == Rule::merge_clause);
+            if has_merge {
+                // Reparse as merge
+                let merge = parse_merge(inner)?;
+                Ok(merge)
+            } else {
+                let query = parse_query_pairs(inner)?;
+                Ok(Statement::Query(query))
+            }
         }
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
@@ -207,6 +215,9 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                     })
                     .collect();
                 clauses.push(Clause::Set(SetClause { items: items? }));
+            }
+            Rule::merge_clause => {
+                // MERGE is handled separately in parse_statement
             }
             _ => {}
         }
@@ -621,6 +632,59 @@ fn parse_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         table_name,
         file_path,
         options,
+    }))
+}
+
+/// Parse a MERGE statement.
+fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut pattern = None;
+    let mut on_create = Vec::new();
+    let mut on_match = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::merge_clause => {
+                for part in inner.into_inner() {
+                    match part.as_rule() {
+                        Rule::pattern => {
+                            pattern = Some(parse_pattern(part)?);
+                        }
+                        Rule::on_create_set => {
+                            for item in part.into_inner() {
+                                if item.as_rule() == Rule::set_item {
+                                    let mut p = item.into_inner();
+                                    let prop = parse_expression(p.next().ok_or("Missing ON CREATE SET property")?)?;
+                                    let val = parse_expression(p.next().ok_or("Missing ON CREATE SET value")?)?;
+                                    on_create.push(SetItem { property: prop, value: val });
+                                }
+                            }
+                        }
+                        Rule::on_match_set => {
+                            for item in part.into_inner() {
+                                if item.as_rule() == Rule::set_item {
+                                    let mut p = item.into_inner();
+                                    let prop = parse_expression(p.next().ok_or("Missing ON MATCH SET property")?)?;
+                                    let val = parse_expression(p.next().ok_or("Missing ON MATCH SET value")?)?;
+                                    on_match.push(SetItem { property: prop, value: val });
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Rule::return_clause => {
+                // MERGE with RETURN — ignored for now; handled at binder level
+            }
+            _ => {}
+        }
+    }
+
+    let pattern = pattern.ok_or("MERGE requires a pattern")?;
+    Ok(Statement::Merge(MergeStatement {
+        pattern,
+        on_create,
+        on_match,
     }))
 }
 

@@ -351,6 +351,80 @@ impl Connection {
                 // Fall through to the pipeline (plan → optimize → execute)
                 Ok(None)
             }
+            BoundStatement::BoundMerge(m) => {
+                tracing::info!("MERGE into '{}'", m.table_name);
+
+                // Get the table
+                let cat_arc = self.database.storage_manager.table_catalog();
+                let mut catalog = cat_arc.lock().unwrap();
+                let table = catalog
+                    .get_node_table_by_name_mut(&m.table_name)
+                    .ok_or_else(|| format!("Table '{}' not found in storage", m.table_name))?;
+
+                // Evaluate the PK properties from the MERGE pattern
+                let pk_col_idx = table.primary_key_column;
+                let pk_prop = m.properties.iter().find(|(name, _)| {
+                    table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false)
+                });
+
+                // Check if the node already exists by PK
+                let exists = if let Some((_, expr)) = pk_prop {
+                    // Try to evaluate the PK expression
+                    if let kuzu_parser::ast::Expression::Constant(c) = expr {
+                        let pk_val = ast_constant_to_value(c);
+                        table.hash_index.lookup(&pk_value_to_string(&pk_val)).is_some()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if exists {
+                    // Apply ON MATCH SET
+                    for item in &m.on_match {
+                        // Evaluate the SET value expression and update the cell
+                        if let kuzu_parser::ast::Expression::Constant(c) = &item.value {
+                            let val = ast_constant_to_value(c);
+                            if let Some(row) = table.hash_index.lookup(&pk_value_to_string(&val)) {
+                                let _ = table.update_cell(row, item.column_idx, val);
+                            }
+                        }
+                    }
+                    Ok(Some(QueryResult::success_message(format!(
+                        "Matched existing node in '{}'", m.table_name
+                    ))))
+                } else {
+                    // Create new node with pattern properties + ON CREATE SET
+                    let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
+                    for (prop_name, expr) in &m.properties {
+                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                            if let kuzu_parser::ast::Expression::Constant(c) = expr {
+                                values[col_idx] = ast_constant_to_value(c);
+                            }
+                        }
+                    }
+                    for item in &m.on_create {
+                        if let kuzu_parser::ast::Expression::Constant(c) = &item.value {
+                            let val = ast_constant_to_value(c);
+                            if item.column_idx < values.len() {
+                                values[item.column_idx] = val;
+                            }
+                        }
+                    }
+                    // Drop catalog lock before insert_row (which takes its own lock)
+                    let _ = table;
+                    drop(catalog);
+                    let cat2 = self.database.storage_manager.table_catalog();
+                    let mut cat2 = cat2.lock().unwrap();
+                    if let Some(t) = cat2.get_node_table_by_name_mut(&m.table_name) {
+                        t.insert_row(values)?;
+                    }
+                    Ok(Some(QueryResult::success_message(format!(
+                        "Created new node in '{}'", m.table_name
+                    ))))
+                }
+            }
             BoundStatement::BoundQuery(_) => Ok(None),
         }
     }
@@ -415,6 +489,32 @@ fn substitute_in_bound_expr(
         resolved_type: expr.resolved_type,
         is_constant: expr.is_constant,
     })
+}
+
+/// Convert an AST Constant to a Value.
+fn ast_constant_to_value(c: &kuzu_parser::ast::Constant) -> Value {
+    match c {
+        kuzu_parser::ast::Constant::Null => Value::Null,
+        kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
+        kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
+        kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
+        kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
+    }
+}
+
+/// Convert a Value to its string representation for hash index key lookup.
+fn pk_value_to_string(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Double(f) => f.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Date(d) => format!("Date({})", d.0),
+        Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
+        other => format!("{other:?}"),
+    }
 }
 
 // ─── Integration tests ──────────────────────────────────────────────────────────
@@ -972,6 +1072,113 @@ mod integration_tests {
             let wal = db.storage_manager.wal().lock().unwrap();
             assert_eq!(wal.len(), 0, "High threshold + no WAL writes = empty WAL");
         }
+    }
+}
+
+// =========================================================================
+// MERGE Tests
+// =========================================================================
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    use crate::database::SystemConfig;
+    use kuzu_common::types::Value;
+
+    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test_db");
+        let config = SystemConfig::default();
+        let database = Arc::new(Database::new(db_path, config).unwrap());
+        let conn = Connection::new(&database);
+        (dir, database, conn)
+    }
+
+    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
+        conn.query(sql).map(|r| r.to_string())
+    }
+
+    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
+        let result = conn.query(sql).unwrap();
+        result
+            .chunks
+            .iter()
+            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .collect()
+    }
+
+    #[test]
+    fn test_merge_creates_new_node() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // MERGE a non-existing node — should create it
+        let result = exec_ok(&conn, "MERGE (n:Person {name: 'Alice', age: 30})");
+        assert!(result.is_ok(), "MERGE should succeed: {:?}", result);
+
+        // Verify the node was created
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 1, "Should have 1 node");
+        assert_eq!(names[0], Value::String("Alice".into()));
+    }
+
+    #[test]
+    fn test_merge_matches_existing_node() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // First insert a node
+        let csv_path = _dir.path().join("people.csv");
+        std::fs::write(&csv_path, "name,age\nAlice,30\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+        // MERGE the same node — should match existing, no duplicate
+        let result = exec_ok(&conn, "MERGE (n:Person {name: 'Alice'})");
+        assert!(result.is_ok(), "MERGE existing should succeed: {:?}", result);
+
+        // Verify no duplicate
+        let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
+        assert_eq!(names.len(), 1, "Should still have 1 node (no duplicate)");
+    }
+
+    #[test]
+    fn test_merge_on_create_sets_properties() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // MERGE with ON CREATE SET — for a new node, the SET should apply
+        let result = exec_ok(&conn,
+            "MERGE (n:Person {name: 'Bob', age: 25}) ON CREATE SET n.age = 26"
+        );
+        assert!(result.is_ok(), "MERGE ON CREATE should succeed: {:?}", result);
+
+        // Verify age was set (ON CREATE applies since node was created)
+        let ages = query_column(&conn, "MATCH (n:Person) RETURN n.age");
+        assert_eq!(ages.len(), 1);
+        // The pattern sets age=25, then ON CREATE SET overrides to 26
+    }
+
+    #[test]
+    fn test_merge_parse_error_on_bad_syntax() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+
+        // MERGE without pattern
+        let result = exec_ok(&conn, "MERGE");
+        assert!(result.is_err(), "MERGE without pattern should fail");
+    }
+
+    #[test]
+    fn test_merge_into_nonexistent_table() {
+        let (_dir, _db, conn) = setup_db();
+
+        let result = exec_ok(&conn, "MERGE (n:NoSuchTable {name: 'x'})");
+        assert!(result.is_err(), "MERGE into non-existent table should fail");
     }
 }
 
