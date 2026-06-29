@@ -1,4 +1,8 @@
 //! Write-Ahead Log for crash recovery.
+//!
+//! Logs all write operations (column writes, table inserts, etc.) before
+//! they are applied to the main storage. During checkpoint, the WAL is
+//! flushed to disk and the storage pages are synchronized.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,6 +13,8 @@ pub enum WALRecord {
     Insert { table_id: u64, data: Vec<u8> },
     Delete { table_id: u64, row_id: u64 },
     Update { table_id: u64, row_id: u64, column: u32, data: Vec<u8> },
+    /// Log a write to a column page: (table_id, col_id, page_id, serialized_data).
+    ColumnWrite { table_id: u64, col_id: u32, page_id: u64, data: Vec<u8> },
     Commit { transaction_id: u64 },
     Rollback { transaction_id: u64 },
     Checkpoint,
@@ -33,11 +39,22 @@ impl WAL {
         let size = match &record {
             WALRecord::Insert { data, .. } => data.len(),
             WALRecord::Update { data, .. } => data.len(),
+            WALRecord::ColumnWrite { data, .. } => data.len(),
             _ => 8,
         };
         self.total_size += size;
         self.is_dirty = true;
         self.records.push(record);
+    }
+
+    /// Log a column page write before it is applied to the BufferManager.
+    pub fn log_column_write(&mut self, table_id: u64, col_id: u32, page_id: u64, data: &[u8]) {
+        self.append(WALRecord::ColumnWrite {
+            table_id,
+            col_id,
+            page_id,
+            data: data.to_vec(),
+        });
     }
 
     pub fn records(&self) -> &[WALRecord] { &self.records }
@@ -80,6 +97,14 @@ impl WAL {
                     table_id.serialize(&mut file)?;
                     row_id.serialize(&mut file)?;
                     column.serialize(&mut file)?;
+                    (data.len() as u32).serialize(&mut file)?;
+                    file.write_all(data)?;
+                }
+                WALRecord::ColumnWrite { table_id, col_id, page_id, data } => {
+                    file.write_all(b"W")?;
+                    table_id.serialize(&mut file)?;
+                    col_id.serialize(&mut file)?;
+                    page_id.serialize(&mut file)?;
                     (data.len() as u32).serialize(&mut file)?;
                     file.write_all(data)?;
                 }
