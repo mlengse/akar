@@ -121,6 +121,13 @@ impl QueryPlanner {
                         cardinality: 0,
                     }));
                 }
+                BoundClause::BoundUnwind(u) => {
+                    delete_exprs.push(LogicalOperator::Unwind(LogicalUnwind {
+                        expression: u.expression.clone(),
+                        variable: u.variable.clone(),
+                        cardinality: 0,
+                    }));
+                }
                 BoundClause::BoundSet(s) => {
                     for item in &s.items {
                         delete_exprs.push(LogicalOperator::Set(LogicalSet {

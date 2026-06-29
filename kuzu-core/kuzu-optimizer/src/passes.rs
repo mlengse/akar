@@ -389,7 +389,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::CopyFrom(_)
                 | LogicalOperator::Delete(_)
                 | LogicalOperator::Set(_)
-                | LogicalOperator::OptionalMatch(_) => {}
+                | LogicalOperator::OptionalMatch(_)
+                | LogicalOperator::Unwind(_) => {}
             }
         });
     }
@@ -541,6 +542,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::Delete(_) => 0,
                 LogicalOperator::Set(_) => 0,
                 LogicalOperator::OptionalMatch(_) => 0,
+                LogicalOperator::Unwind(_) => 0,
             };
             op.set_cardinality(card);
         });

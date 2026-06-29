@@ -87,6 +87,9 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                             collect_params_from_expr(&expr.expression, params);
                         }
                     }
+                    kuzu_binder::bound_statement::BoundClause::BoundUnwind(u) => {
+                        collect_params_from_expr(&u.expression, params);
+                    }
                     kuzu_binder::bound_statement::BoundClause::BoundSet(s) => {
                         for item in &s.items {
                             collect_params_from_expr(&item.value, params);

@@ -92,6 +92,16 @@ impl Binder {
                     let bound = self.bind_set(&s, &variables)?;
                     (BoundClause::BoundSet(bound), Vec::new())
                 }
+                Clause::Unwind(u) => {
+                    let bound = self.bind_unwind(&u)?;
+                    let new_var = BoundVariable {
+                        name: bound.variable.clone(),
+                        table_id: 0,
+                        label: None,
+                        is_node: false,
+                    };
+                    (BoundClause::BoundUnwind(bound), vec![new_var])
+                }
                 Clause::OptionalMatch(m) => {
                     let (bound, vars) = self.bind_optional_match(&m, &variables)?;
                     (BoundClause::BoundOptionalMatch(bound), vars)
@@ -575,6 +585,24 @@ impl Binder {
             }
             _ => Err("Failed to drop table".into()),
         }
+    }
+
+    fn bind_unwind(&self, u: &kuzu_parser::ast::UnwindClause) -> Result<BoundUnwindClause, String> {
+        // Validate the expression is a list literal or variable reference to a list
+        match &u.expression {
+            kuzu_parser::ast::Expression::List(_) => {}
+            kuzu_parser::ast::Expression::Variable(_) => {}
+            _ => return Err(format!(
+                "UNWIND requires a list expression, got: {:?}", u.expression
+            )),
+        }
+        if u.variable.is_empty() {
+            return Err("UNWIND requires a variable name".into());
+        }
+        Ok(BoundUnwindClause {
+            expression: u.expression.clone(),
+            variable: u.variable.clone(),
+        })
     }
 
     fn bind_optional_match(

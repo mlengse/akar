@@ -193,6 +193,15 @@ impl QueryProcessor {
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Unwind(uw) => {
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let unwind = PhysicalUnwind {
+                        expression: uw.expression.clone(),
+                        variable: uw.variable.clone(),
+                    };
+                    let result = unwind.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::OptionalMatch(_) => {
                     // OptionalMatch passes through input chunks but marks that NULLs
                     // should be produced for non-matching optional patterns.

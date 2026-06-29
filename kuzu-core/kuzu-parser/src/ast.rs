@@ -29,6 +29,13 @@ pub enum Clause {
     Set(SetClause),
     OptionalMatch(OptionalMatchClause),
     With(ReturnClause),
+    Unwind(UnwindClause),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnwindClause {
+    pub expression: Expression,
+    pub variable: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -22,6 +22,7 @@ pub enum LogicalOperator {
     Delete(LogicalDelete),
     Set(LogicalSet),
     OptionalMatch(LogicalOptionalMatch),
+    Unwind(LogicalUnwind),
 }
 
 impl LogicalOperator {
@@ -44,6 +45,7 @@ impl LogicalOperator {
             LogicalOperator::Delete(s) => s.cardinality,
             LogicalOperator::Set(s) => s.cardinality,
             LogicalOperator::OptionalMatch(s) => s.cardinality,
+            LogicalOperator::Unwind(s) => s.cardinality,
         }
     }
 
@@ -66,6 +68,7 @@ impl LogicalOperator {
             LogicalOperator::Delete(s) => s.cardinality = card,
             LogicalOperator::Set(s) => s.cardinality = card,
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
+            LogicalOperator::Unwind(s) => s.cardinality = card,
         }
     }
 
@@ -94,7 +97,8 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
-            | LogicalOperator::OptionalMatch(_) => vec![],
+            | LogicalOperator::OptionalMatch(_)
+            | LogicalOperator::Unwind(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
@@ -116,7 +120,8 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
-            | LogicalOperator::OptionalMatch(_) => vec![],
+            | LogicalOperator::OptionalMatch(_)
+            | LogicalOperator::Unwind(_) => vec![],
             LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => vec![],
         }
     }
@@ -207,6 +212,14 @@ pub struct LogicalUnion {
 pub struct LogicalFlatten {
     pub group_pos: usize,
     pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// UNWIND operator — expands a list expression into rows.
+#[derive(Debug, Clone)]
+pub struct LogicalUnwind {
+    pub expression: kuzu_parser::ast::Expression,
+    pub variable: String,
     pub cardinality: u64,
 }
 

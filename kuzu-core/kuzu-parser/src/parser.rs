@@ -143,6 +143,19 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                     .collect();
                 clauses.push(Clause::Delete(DeleteClause { expressions: expressions? }));
             }
+            Rule::unwind_clause => {
+                let mut expr = None;
+                let mut var = String::new();
+                for part in inner.into_inner() {
+                    match part.as_rule() {
+                        Rule::expression => expr = Some(parse_expression(part)?),
+                        Rule::variable => var = part.as_str().to_string(),
+                        _ => {}
+                    }
+                }
+                let expression = expr.ok_or("Missing UNWIND expression")?;
+                clauses.push(Clause::Unwind(UnwindClause { expression, variable: var }));
+            }
             Rule::set_clause => {
                 let items: Result<Vec<SetItem>, String> = inner.into_inner()
                     .filter(|p| p.as_rule() == Rule::set_item)

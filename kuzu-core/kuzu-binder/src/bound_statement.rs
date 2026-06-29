@@ -52,6 +52,7 @@ pub enum BoundClause {
     BoundSet(BoundSetClause),
     BoundOptionalMatch(BoundMatchClause),
     BoundWith(BoundReturnClause),
+    BoundUnwind(BoundUnwindClause),
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,12 @@ pub struct BoundDeleteClause {
     pub table_name: String,
     pub table_id: u64,
     pub primary_key_column: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundUnwindClause {
+    pub expression: kuzu_parser::ast::Expression,
+    pub variable: String,
 }
 
 #[derive(Debug, Clone)]

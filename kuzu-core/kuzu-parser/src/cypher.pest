@@ -52,6 +52,8 @@ set_item = { expression ~ "=" ~ expression }
 
 delete_clause = { "DELETE" ~ expression ~ ("," ~ expression)* }
 
+unwind_clause = { "UNWIND" ~ expression ~ "AS" ~ variable }
+
 query_statement = {
     match_clause ~ with_clause ~ return_clause
     | match_clause ~ where_clause ~ with_clause ~ return_clause
@@ -67,6 +69,8 @@ query_statement = {
     | match_clause ~ with_clause
     | match_clause
     | return_clause
+    | unwind_clause ~ return_clause
+    | unwind_clause
 }
 
 // ==================== DDL ====================
