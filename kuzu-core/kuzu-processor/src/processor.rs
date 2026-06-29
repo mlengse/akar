@@ -157,9 +157,12 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::OrderBy(o) => {
+                    // Build sort_keys: each key is (column_index, ascending)
+                    let sort_keys: Vec<(u32, bool)> = o.sort_keys.iter().enumerate().map(|(i, _s)| {
+                        (i as u32, o.sort_keys.get(i).map(|s| s.1).unwrap_or(true))
+                    }).collect();
                     let order = PhysicalOrderBy {
-                        sort_column: 0,
-                        ascending: o.sort_keys.first().map(|s| s.1).unwrap_or(true),
+                        sort_keys,
                     };
                     let input = intermediate_result.take().unwrap_or_default();
                     let result = order.execute(input)?;
@@ -533,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_order_by_ascending() {
-        let order = PhysicalOrderBy { sort_column: 0, ascending: true };
+        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         let vals = [5, 3, 1, 4, 2];
         for i in 0..5 { v.set_i64(i, vals[i]); }
@@ -547,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_order_by_descending() {
-        let order = PhysicalOrderBy { sort_column: 0, ascending: false };
+        let order = PhysicalOrderBy { sort_keys: vec![(0, false)] };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         let vals = [5, 3, 1, 4, 2];
         for i in 0..5 { v.set_i64(i, vals[i]); }
@@ -561,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_order_by_empty_input() {
-        let order = PhysicalOrderBy { sort_column: 0, ascending: true };
+        let order = PhysicalOrderBy { sort_keys: vec![(0, true)] };
         let result = order.execute(vec![]).unwrap();
         assert!(result.is_empty());
     }

@@ -502,28 +502,25 @@ impl PhysicalOperatorExec for PhysicalLimit {
 // ==================== OrderBy ====================
 
 pub struct PhysicalOrderBy {
-    pub sort_column: u32,
-    pub ascending: bool,
+    pub sort_keys: Vec<(u32, bool)>,
 }
 
 impl PhysicalOperatorExec for PhysicalOrderBy {
     fn operator_type(&self) -> &str { "order_by" }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Collect all rows into a single buffer, sort, then output
         if input.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Count total rows
         let total_rows: usize = input.iter().map(|c| c.size).sum();
         if total_rows == 0 {
             return Ok(input);
         }
 
-        // Collect all field values per column
+        // Collect all values per column as Value (supports all types)
         let num_fields = input[0].num_fields();
-        let mut all_values: Vec<Vec<(i64, bool)>> = (0..num_fields)
+        let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields)
             .map(|_| Vec::with_capacity(total_rows))
             .collect();
 
@@ -531,7 +528,7 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             for row in 0..chunk.size {
                 for col in 0..num_fields {
                     if let Some(field) = chunk.fields.get(col) {
-                        let val = field.get_i64(row).unwrap_or(0);
+                        let val = field.get_value(row).unwrap_or(Value::Null);
                         let is_null = field.is_null(row);
                         all_values[col].push((val, is_null));
                     }
@@ -539,16 +536,22 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             }
         }
 
-        // Sort indices based on sort_column
-        let sort_col = self.sort_column as usize;
+        // Sort indices by composite key
         let mut indices: Vec<usize> = (0..total_rows).collect();
-        if sort_col < num_fields {
-            let vals = &all_values[sort_col];
-            if self.ascending {
-                indices.sort_by(|a, b| vals[*a].0.cmp(&vals[*b].0));
-            } else {
-                indices.sort_by(|a, b| vals[*b].0.cmp(&vals[*a].0));
-            }
+        if !self.sort_keys.is_empty() {
+            indices.sort_by(|a, b| {
+                for &(col, ascending) in &self.sort_keys {
+                    let col = col as usize;
+                    if col >= num_fields { continue; }
+                    let va = &all_values[col][*a].0;
+                    let vb = &all_values[col][*b].0;
+                    let cmp = value_cmp(va, vb);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return if ascending { cmp } else { cmp.reverse() };
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
         }
 
         // Build sorted output chunks (up to 100 rows per chunk)
@@ -559,20 +562,47 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             let size = chunk_end - chunk_start;
             let mut fields = Vec::new();
             for col in 0..num_fields {
-                let mut v = ValueVector::new(PhysicalTypeID::Int64, size);
+                let first_val = &all_values[col][indices[chunk_start]].0;
+                let phys_type = first_val.physical_type();
+                let mut v = ValueVector::new(phys_type, size);
+                v.resize(size);
                 for (out_idx, &src_idx) in indices[chunk_start..chunk_end].iter().enumerate() {
-                    let (val, is_null) = all_values[col][src_idx];
-                    v.set_i64(out_idx, val);
-                    if is_null {
+                    let (ref val, is_null) = all_values[col][src_idx];
+                    if is_null || matches!(val, Value::Null) {
                         v.set_null(out_idx, true);
+                    } else {
+                        store_value_in_vector(&mut v, out_idx, val);
                     }
                 }
-                v.resize(size);
                 fields.push(v);
             }
             output.push(DataChunk::new(fields));
         }
         Ok(output)
+    }
+}
+
+/// Compare two Values for sorting. NULLs sort last.
+fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match (a, b) {
+        (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
+        (Value::Null, _) => std::cmp::Ordering::Greater,
+        (_, Value::Null) => std::cmp::Ordering::Less,
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Int64(x), Value::Int64(y)) => x.cmp(y),
+        (Value::Int32(x), Value::Int32(y)) => x.cmp(y),
+        (Value::Int16(x), Value::Int16(y)) => (*x as i64).cmp(&(*y as i64)),
+        (Value::Int8(x), Value::Int8(y)) => (*x as i64).cmp(&(*y as i64)),
+        (Value::UInt64(x), Value::UInt64(y)) => x.cmp(y),
+        (Value::UInt32(x), Value::UInt32(y)) => (*x as u64).cmp(&(*y as u64)),
+        (Value::UInt16(x), Value::UInt16(y)) => (*x as u64).cmp(&(*y as u64)),
+        (Value::UInt8(x), Value::UInt8(y)) => (*x as u64).cmp(&(*y as u64)),
+        (Value::Double(x), Value::Double(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Date(x), Value::Date(y)) => x.0.cmp(&y.0),
+        (Value::Timestamp(x), Value::Timestamp(y)) => x.0.cmp(&y.0),
+        _ => std::cmp::Ordering::Equal,
     }
 }
 
