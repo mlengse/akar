@@ -47,6 +47,28 @@ impl Connection {
             return Ok(QueryResult::new(Vec::new()));
         }
 
+        // Handle SET concurrent_writes = true|false before parsing
+        if let Some(value) = trimmed
+            .strip_prefix("SET")
+            .and_then(|s| s.trim().strip_prefix("concurrent_writes"))
+            .and_then(|s| s.trim().strip_prefix("="))
+            .map(|s| s.trim())
+        {
+            let enabled = match value.to_lowercase().as_str() {
+                "true" | "1" | "yes" => true,
+                "false" | "0" | "no" => false,
+                _ => return Err(
+                    "Invalid value for concurrent_writes. Use true or false.".into()
+                ),
+            };
+            self.database
+                .transaction_manager
+                .set_concurrent_writes(enabled);
+            return Ok(QueryResult::success_message(format!(
+                "concurrent_writes set to {enabled}"
+            )));
+        }
+
         // 1. Parse
         let statement = parse(trimmed).map_err(|e| format!("Parse error: {e}"))?;
 

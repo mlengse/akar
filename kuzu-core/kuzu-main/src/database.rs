@@ -21,6 +21,9 @@ pub struct SystemConfig {
     pub max_db_size: u64,
     pub auto_checkpoint: bool,
     pub checkpoint_threshold: i64,
+    /// When true, multiple write transactions can run concurrently.
+    /// When false, only one write transaction at a time is allowed.
+    pub concurrent_writes: bool,
 }
 
 impl Default for SystemConfig {
@@ -33,6 +36,7 @@ impl Default for SystemConfig {
             max_db_size: u64::from(u32::MAX),
             auto_checkpoint: true,
             checkpoint_threshold: -1,
+            concurrent_writes: true,
         }
     }
 }
@@ -67,7 +71,12 @@ impl Database {
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));
         let task_system = Arc::new(TaskSystem::new(config.max_num_threads as usize));
         let catalog = Arc::new(Mutex::new(Catalog::new()));
-        let transaction_manager = Arc::new(TransactionManager::new());
+        let transaction_manager = {
+            let tx_config = kuzu_transaction::TransactionManagerConfig {
+                concurrent_writes: config.concurrent_writes,
+            };
+            Arc::new(TransactionManager::new_with_config(tx_config))
+        };
         let function_registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         let storage_manager = Arc::new(StorageManager::new(db_path.clone(), memory_manager.clone()));
         let stats_store = Arc::new(Mutex::new(StatsStore::new()));
