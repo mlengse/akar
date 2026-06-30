@@ -220,6 +220,237 @@ impl ValueVector {
         }
     }
 
+    /// Set a `Value` at the given row index.
+    ///
+    /// Converts the `Value` variant to the vector's physical type.
+    /// Returns an error if the type cannot be converted.
+    pub fn set_value(&mut self, idx: usize, val: &Value) -> Result<(), String> {
+        match (self.physical_type, val) {
+            (_, Value::Null) => {
+                self.set_null(idx, true);
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::Bool, Value::Bool(b)) => {
+                let byte: u8 = if *b { 1 } else { 0 };
+                self.data[idx] = byte;
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Int64(v)) => {
+                self.set_i64(idx, *v);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Int32(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Int16(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Int8(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::UInt64(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::UInt32(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::UInt16(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::UInt8(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Double(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Float(v)) => {
+                self.set_i64(idx, *v as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int32, Value::Int32(v)) => {
+                self.set_i32(idx, *v);
+                Ok(())
+            }
+            (PhysicalTypeID::Int32, Value::Int16(v)) => {
+                self.set_i32(idx, *v as i32);
+                Ok(())
+            }
+            (PhysicalTypeID::Int32, Value::Int8(v)) => {
+                self.set_i32(idx, *v as i32);
+                Ok(())
+            }
+            (PhysicalTypeID::Int32, Value::Int64(v)) => {
+                self.set_i32(idx, *v as i32);
+                Ok(())
+            }
+            (PhysicalTypeID::Double, Value::Double(v)) => {
+                self.set_double(idx, *v);
+                Ok(())
+            }
+            (PhysicalTypeID::Double, Value::Float(v)) => {
+                self.set_double(idx, *v as f64);
+                Ok(())
+            }
+            (PhysicalTypeID::Double, Value::Int64(v)) => {
+                self.set_double(idx, *v as f64);
+                Ok(())
+            }
+            (PhysicalTypeID::Float, Value::Float(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 4].copy_from_slice(&v.to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::Float, Value::Double(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 4].copy_from_slice(&(*v as f32).to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::String, Value::String(s)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                let bytes = s.as_bytes();
+                let len = bytes.len().min(15) as u8;
+                self.data[offset] = len;
+                let copy_len = bytes.len().min(15);
+                self.data[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // UInt64 — accept UInt64 or Int64 values
+            (PhysicalTypeID::UInt64, Value::UInt64(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 8].copy_from_slice(&v.to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::UInt64, Value::Int64(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 8].copy_from_slice(&(*v as u64).to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // UInt32 — accept UInt32 or Int32 values
+            (PhysicalTypeID::UInt32, Value::UInt32(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 4].copy_from_slice(&v.to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::UInt32, Value::Int32(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 4].copy_from_slice(&(*v as u32).to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // UInt16 — accept UInt16 or Int16 values
+            (PhysicalTypeID::UInt16, Value::UInt16(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 2].copy_from_slice(&v.to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::UInt16, Value::Int16(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 2].copy_from_slice(&(*v as u16).to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // UInt8 — accept UInt8 or Int8 values
+            (PhysicalTypeID::UInt8, Value::UInt8(v)) => {
+                self.data[idx] = *v;
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            (PhysicalTypeID::UInt8, Value::Int8(v)) => {
+                self.data[idx] = *v as u8;
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // Int16
+            (PhysicalTypeID::Int16, Value::Int16(v)) => {
+                let type_size = physical_type_size(self.physical_type);
+                let offset = idx * type_size;
+                self.data[offset..offset + 2].copy_from_slice(&v.to_le_bytes());
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            // Int8
+            (PhysicalTypeID::Int8, Value::Int8(v)) => {
+                self.data[idx] = *v as u8;
+                self.null_mask[idx] = true;
+                if idx >= self.size {
+                    self.size = idx + 1;
+                }
+                Ok(())
+            }
+            _ => Err(format!(
+                "Cannot set value {:?} into vector of type {:?}",
+                val, self.physical_type
+            )),
+        }
+    }
+
     /// Push a boolean value to the end of the vector.
     pub fn push_bool(&mut self, val: bool) {
         let idx = self.size;

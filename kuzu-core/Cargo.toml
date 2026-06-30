@@ -36,6 +36,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/kuzudb/kuzu"
+description = "Kùzu graph database — pure Rust embedded graph database"
+keywords = ["graph", "database", "embedded", "cypher", "graph-database"]
+categories = ["database", "database::implementations"]
+authors = ["Kuzu Contributors"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

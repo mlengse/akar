@@ -267,8 +267,21 @@ impl QueryProcessor {
                     let result = delete_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::CrossProduct(_) | LogicalOperator::Union(_) => {
+                LogicalOperator::CrossProduct(_) => {
                     intermediate_result = Some(vec![]);
+                }
+                LogicalOperator::Union(u) => {
+                    // Flatten left and right subtrees into operator sequences
+                    let left_ops = flatten_union_child(&u.left);
+                    let right_ops = flatten_union_child(&u.right);
+
+                    // Execute each side independently
+                    let left_result = self.execute(&left_ops)?;
+                    let right_result = self.execute(&right_ops)?;
+
+                    // Merge: concatenate corresponding columns, dedup if UNION (not ALL)
+                    let merged = merge_union_chunks(left_result, right_result, u.all)?;
+                    intermediate_result = Some(merged);
                 }
                 LogicalOperator::CopyFrom(cf) => {
                     let table_catalog = self
@@ -483,6 +496,165 @@ impl QueryProcessor {
 impl Default for QueryProcessor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UNION helpers
+// ---------------------------------------------------------------------------
+
+/// Flatten a `LogicalUnion` child subtree into a sequence of operators
+/// suitable for `QueryProcessor::execute`.
+///
+/// If the child is a `Projection` with empty expressions (the synthetic
+/// pipeline wrapper created by the planner), extract its children as the
+/// operator sequence. Otherwise, return the single operator as a one-element
+/// vector.
+fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
+    match op {
+        LogicalOperator::Projection(p) if p.expressions.is_empty() => p.children.clone(),
+        other => vec![other.clone()],
+    }
+}
+
+/// Merge left and right result sets from UNION execution.
+///
+/// Column-by-column concatenation using `ValueVector::append`.
+/// For `UNION ALL` (`all = true`), rows are simply concatenated.
+/// For `UNION` distinct (`all = false`), duplicate rows are removed.
+fn merge_union_chunks(
+    left: Vec<DataChunk>,
+    right: Vec<DataChunk>,
+    all: bool,
+) -> Result<Vec<DataChunk>, String> {
+    if left.is_empty() {
+        return Ok(right);
+    }
+    if right.is_empty() {
+        return Ok(left);
+    }
+
+    let num_fields = left[0].num_fields();
+    for chunk in &right {
+        if chunk.num_fields() != num_fields {
+            return Err(format!(
+                "UNION column count mismatch: left has {num_fields} columns, right has {} columns",
+                chunk.num_fields()
+            ));
+        }
+    }
+
+    // --- Step 1: concatenate fields across all chunks ---
+    let mut merged_fields: Vec<ValueVector> = (0..num_fields)
+        .map(|i| {
+            let first_type = left[0].field(i).physical_type();
+            let total_size: usize = left
+                .iter()
+                .map(|c| c.field(i).size())
+                .chain(right.iter().map(|c| c.field(i).size()))
+                .sum();
+            let mut merged = ValueVector::new(first_type, total_size.max(1));
+            for chunk in &left {
+                merged.append(chunk.field(i));
+            }
+            for chunk in &right {
+                merged.append(chunk.field(i));
+            }
+            merged
+        })
+        .collect();
+
+    let total_size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+
+    // --- Step 2: deduplicate if UNION (not ALL) ---
+    if !all && total_size > 1 {
+        // Extract all rows as Vec<Value> for comparison via PartialEq
+        let all_rows = extract_all_rows(&merged_fields);
+        let mut deduped: Vec<Vec<Value>> = Vec::with_capacity(total_size);
+        for row in &all_rows {
+            if !deduped.contains(row) {
+                deduped.push(row.clone());
+            }
+        }
+        // Rebuild column vectors from deduped rows
+        merged_fields = rows_to_columns(&deduped);
+    }
+
+    let final_size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+    Ok(vec![DataChunk {
+        fields: merged_fields,
+        size: final_size,
+    }])
+}
+
+/// Extract all rows from a set of column vectors as `Vec<Vec<Value>>`.
+fn extract_all_rows(fields: &[ValueVector]) -> Vec<Vec<Value>> {
+    let num_rows = fields.first().map(|f| f.size()).unwrap_or(0);
+    let num_cols = fields.len();
+    let mut rows: Vec<Vec<Value>> = Vec::with_capacity(num_rows);
+    for row in 0..num_rows {
+        let mut values: Vec<Value> = Vec::with_capacity(num_cols);
+        for vec in fields {
+            let val = if vec.is_null(row) {
+                Value::Null
+            } else {
+                vec.get_value(row).unwrap_or(Value::Null)
+            };
+            values.push(val);
+        }
+        rows.push(values);
+    }
+    rows
+}
+
+/// Rebuild column vectors from deduplicated rows.
+fn rows_to_columns(rows: &[Vec<Value>]) -> Vec<ValueVector> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let num_cols = rows[0].len();
+    let num_rows = rows.len();
+    (0..num_cols)
+        .map(|col| {
+            // Determine physical type from the first row's value
+            let first_val = &rows[0][col];
+            let phys_type = value_to_physical_type(first_val);
+            let mut vec = ValueVector::new(phys_type, num_rows.max(1));
+            for (row_idx, row) in rows.iter().enumerate() {
+                let val = &row[col];
+                let _ = vec.set_value(row_idx, val);
+            }
+            vec.resize(num_rows);
+            vec
+        })
+        .collect()
+}
+
+/// Map a `Value` to its corresponding `PhysicalTypeID`.
+fn value_to_physical_type(val: &Value) -> PhysicalTypeID {
+    match val {
+        Value::Null => PhysicalTypeID::Any,
+        Value::Bool(_) => PhysicalTypeID::Bool,
+        Value::Int64(_) => PhysicalTypeID::Int64,
+        Value::Int32(_) => PhysicalTypeID::Int32,
+        Value::Int16(_) => PhysicalTypeID::Int16,
+        Value::Int8(_) => PhysicalTypeID::Int8,
+        Value::UInt64(_) => PhysicalTypeID::UInt64,
+        Value::UInt32(_) => PhysicalTypeID::UInt32,
+        Value::UInt16(_) => PhysicalTypeID::UInt16,
+        Value::UInt8(_) => PhysicalTypeID::UInt8,
+        Value::Int128(_) => PhysicalTypeID::Int128,
+        Value::Double(_) => PhysicalTypeID::Double,
+        Value::Float(_) => PhysicalTypeID::Float,
+        Value::String(_) | Value::Blob(_) => PhysicalTypeID::String,
+        Value::Date(_) | Value::Timestamp(_) | Value::TimestampTz(_) | Value::TimestampNs(_)
+        | Value::TimestampMs(_) | Value::TimestampSec(_) | Value::Interval(_) => {
+            PhysicalTypeID::Int64
+        }
+        Value::InternalID(_) => PhysicalTypeID::Int64,
+        Value::List(_) => PhysicalTypeID::List,
+        Value::Map(_) => PhysicalTypeID::Struct,
+        Value::Struct(_) => PhysicalTypeID::Struct,
     }
 }
 
@@ -1067,5 +1239,177 @@ mod tests {
         let result = filter.execute(vec![DataChunk::new(vec![])]).unwrap();
         // Filter with 0 rows produces 0 output chunks (nothing to filter)
         assert!(result.is_empty());
+    }
+
+    // ==================== UNION Tests ====================
+
+    #[test]
+    fn test_union_all_basic() {
+        // UNION ALL: two single-column Int64 vectors concatenated
+        let mut left_v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        left_v.set_i64(0, 1);
+        left_v.set_i64(1, 2);
+        left_v.set_i64(2, 3);
+        left_v.resize(3);
+        let left_data = vec![DataChunk::new(vec![left_v])];
+        let mut right_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        right_v.set_i64(0, 4);
+        right_v.set_i64(1, 5);
+        right_v.resize(2);
+        let right_data = vec![DataChunk::new(vec![right_v])];
+        let result = merge_union_chunks(left_data, right_data, true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 5);
+        // Verify values in order
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].field(0).get_i64(1), Some(2));
+        assert_eq!(result[0].field(0).get_i64(2), Some(3));
+        assert_eq!(result[0].field(0).get_i64(3), Some(4));
+        assert_eq!(result[0].field(0).get_i64(4), Some(5));
+    }
+
+    #[test]
+    fn test_union_all_multiple_chunks() {
+        // UNION ALL: multiple chunks per side
+        let mut v1 = ValueVector::new(PhysicalTypeID::Int64, 2);
+        v1.set_i64(0, 1);
+        v1.set_i64(1, 2);
+        v1.resize(2);
+        let mut v2 = ValueVector::new(PhysicalTypeID::Int64, 1);
+        v2.set_i64(0, 3);
+        v2.resize(1);
+        let left = vec![DataChunk::new(vec![v1]), DataChunk::new(vec![v2])];
+        let mut rv = ValueVector::new(PhysicalTypeID::Int64, 2);
+        rv.set_i64(0, 4);
+        rv.set_i64(1, 5);
+        rv.resize(2);
+        let right = vec![DataChunk::new(vec![rv])];
+        let result = merge_union_chunks(left, right, true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 5);
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].field(0).get_i64(4), Some(5));
+    }
+
+    #[test]
+    fn test_union_distinct_dedup() {
+        // UNION (distinct): duplicates removed
+        let mut lv = ValueVector::new(PhysicalTypeID::Int64, 3);
+        lv.set_i64(0, 1);
+        lv.set_i64(1, 2);
+        lv.set_i64(2, 3);
+        lv.resize(3);
+        let left = vec![DataChunk::new(vec![lv])];
+        let mut rv = ValueVector::new(PhysicalTypeID::Int64, 3);
+        rv.set_i64(0, 2);
+        rv.set_i64(1, 3);
+        rv.set_i64(2, 4);
+        rv.resize(3);
+        let right = vec![DataChunk::new(vec![rv])];
+        let result = merge_union_chunks(left, right, false).unwrap();
+        assert_eq!(result.len(), 1);
+        // Distinct values: {1, 2, 3, 4} → 4 rows
+        assert_eq!(result[0].size, 4);
+    }
+
+    #[test]
+    fn test_union_column_mismatch() {
+        // Column count mismatch should produce an error
+        let left = vec![DataChunk::new(vec![
+            ValueVector::new(PhysicalTypeID::Int64, 1),
+            ValueVector::new(PhysicalTypeID::Int64, 1),
+        ])];
+        let right = vec![DataChunk::new(vec![
+            ValueVector::new(PhysicalTypeID::Int64, 1),
+        ])];
+        let result = merge_union_chunks(left, right, true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("column count mismatch"));
+    }
+
+    #[test]
+    fn test_union_empty_left() {
+        let left = vec![];
+        let mut rv = ValueVector::new(PhysicalTypeID::Int64, 2);
+        rv.set_i64(0, 42);
+        rv.set_i64(1, 43);
+        rv.resize(2);
+        let right = vec![DataChunk::new(vec![rv])];
+        let result = merge_union_chunks(left, right, true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 2);
+        assert_eq!(result[0].field(0).get_i64(0), Some(42));
+    }
+
+    #[test]
+    fn test_union_empty_right() {
+        let mut lv = ValueVector::new(PhysicalTypeID::Int64, 2);
+        lv.set_i64(0, 99);
+        lv.set_i64(1, 100);
+        lv.resize(2);
+        let left = vec![DataChunk::new(vec![lv])];
+        let right = vec![];
+        let result = merge_union_chunks(left, right, true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 2);
+    }
+
+    #[test]
+    fn test_union_all_multi_column() {
+        // UNION ALL with multiple columns
+        let mut left_v1 = ValueVector::new(PhysicalTypeID::Int64, 2);
+        left_v1.set_i64(0, 1);
+        left_v1.set_i64(1, 2);
+        left_v1.resize(2);
+        let mut left_v2 = ValueVector::new(PhysicalTypeID::String, 2);
+        left_v2.push_string("hello");
+        left_v2.push_string("world");
+        let left = vec![DataChunk::new(vec![left_v1, left_v2])];
+
+        let mut right_v1 = ValueVector::new(PhysicalTypeID::Int64, 1);
+        right_v1.set_i64(0, 3);
+        right_v1.resize(1);
+        let mut right_v2 = ValueVector::new(PhysicalTypeID::String, 1);
+        right_v2.push_string("foo");
+        let right = vec![DataChunk::new(vec![right_v1, right_v2])];
+
+        let result = merge_union_chunks(left, right, true).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 3);
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].field(0).get_i64(1), Some(2));
+        assert_eq!(result[0].field(0).get_i64(2), Some(3));
+    }
+
+    #[test]
+    fn test_union_distinct_all_duplicates() {
+        // All rows identical → single row after dedup
+        let mut lv = ValueVector::new(PhysicalTypeID::Int64, 2);
+        lv.set_i64(0, 1);
+        lv.set_i64(1, 1);
+        lv.resize(2);
+        let left = vec![DataChunk::new(vec![lv])];
+        let mut rv = ValueVector::new(PhysicalTypeID::Int64, 2);
+        rv.set_i64(0, 1);
+        rv.set_i64(1, 1);
+        rv.resize(2);
+        let right = vec![DataChunk::new(vec![rv])];
+        let result = merge_union_chunks(left, right, false).unwrap();
+        assert_eq!(result[0].size, 1);
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+    }
+
+    #[test]
+    fn test_union_all_empty_chunks() {
+        // Empty DataChunks should be handled gracefully
+        let empty = ValueVector::new(PhysicalTypeID::Int64, 0);
+        let left = vec![DataChunk::new(vec![empty])];
+        let mut rv = ValueVector::new(PhysicalTypeID::Int64, 1);
+        rv.set_i64(0, 42);
+        rv.resize(1);
+        let right = vec![DataChunk::new(vec![rv])];
+        let result = merge_union_chunks(left, right, true).unwrap();
+        assert_eq!(result[0].size, 1);
+        assert_eq!(result[0].field(0).get_i64(0), Some(42));
     }
 }
