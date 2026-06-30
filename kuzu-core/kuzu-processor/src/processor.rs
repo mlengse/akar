@@ -101,7 +101,7 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::ScanRel(s) => {
-                    let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
+                    let (data, columns, _num_rows) = self.resolve_scan_data(&s.table_name);
                     let scan = PhysicalScanRel {
                         table_name: s.table_name.clone(),
                         table_id: s.table_id,
