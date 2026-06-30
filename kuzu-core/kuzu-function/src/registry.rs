@@ -91,6 +91,15 @@ pub enum ArithmeticOp {
     Sin,
     Cos,
     Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Degrees,
+    Radians,
+    Sign,
+    Pi,
+    Rand,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,6 +132,9 @@ pub enum StringOp {
     Substring,
     RegexMatches,
     RegexReplace,
+    Split,
+    Head,
+    Tail,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -320,6 +332,15 @@ impl FunctionRegistry {
         self.register_scalar("sin", ScalarFunction::Arithmetic { op: ArithmeticOp::Sin });
         self.register_scalar("cos", ScalarFunction::Arithmetic { op: ArithmeticOp::Cos });
         self.register_scalar("tan", ScalarFunction::Arithmetic { op: ArithmeticOp::Tan });
+        self.register_scalar("asin", ScalarFunction::Arithmetic { op: ArithmeticOp::Asin });
+        self.register_scalar("acos", ScalarFunction::Arithmetic { op: ArithmeticOp::Acos });
+        self.register_scalar("atan", ScalarFunction::Arithmetic { op: ArithmeticOp::Atan });
+        self.register_scalar("atan2", ScalarFunction::Arithmetic { op: ArithmeticOp::Atan2 });
+        self.register_scalar("degrees", ScalarFunction::Arithmetic { op: ArithmeticOp::Degrees });
+        self.register_scalar("radians", ScalarFunction::Arithmetic { op: ArithmeticOp::Radians });
+        self.register_scalar("sign", ScalarFunction::Arithmetic { op: ArithmeticOp::Sign });
+        self.register_scalar("pi", ScalarFunction::Arithmetic { op: ArithmeticOp::Pi });
+        self.register_scalar("rand", ScalarFunction::Arithmetic { op: ArithmeticOp::Rand });
 
         // --- Comparison ---
         self.register_scalar("=", ScalarFunction::Comparison { op: ComparisonOp::Eq });
@@ -381,6 +402,24 @@ impl FunctionRegistry {
             "regex_replace",
             ScalarFunction::String {
                 op: StringOp::RegexReplace,
+            },
+        );
+        self.register_scalar(
+            "split",
+            ScalarFunction::String {
+                op: StringOp::Split,
+            },
+        );
+        self.register_scalar(
+            "head",
+            ScalarFunction::String {
+                op: StringOp::Head,
+            },
+        );
+        self.register_scalar(
+            "tail",
+            ScalarFunction::String {
+                op: StringOp::Tail,
             },
         );
 

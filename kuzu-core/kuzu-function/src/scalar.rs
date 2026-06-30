@@ -94,6 +94,44 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             let v = numeric_to_f64(&args[0])?;
             Ok(Value::Double(v.tan()))
         }
+        ArithmeticOp::Asin => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.asin()))
+        }
+        ArithmeticOp::Acos => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.acos()))
+        }
+        ArithmeticOp::Atan => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.atan()))
+        }
+        ArithmeticOp::Atan2 => {
+            if args.len() < 2 {
+                return Err("Atan2 requires 2 arguments".into());
+            }
+            let y = numeric_to_f64(&args[0])?;
+            let x = numeric_to_f64(&args[1])?;
+            Ok(Value::Double(y.atan2(x)))
+        }
+        ArithmeticOp::Degrees => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.to_degrees()))
+        }
+        ArithmeticOp::Radians => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.to_radians()))
+        }
+        ArithmeticOp::Sign => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Int64(if v > 0.0 { 1 } else if v < 0.0 { -1 } else { 0 }))
+        }
+        ArithmeticOp::Pi => {
+            Ok(Value::Double(std::f64::consts::PI))
+        }
+        ArithmeticOp::Rand => {
+            Ok(Value::Double(rand::random::<f64>()))
+        }
         ArithmeticOp::Power => {
             if args.len() < 2 {
                 return Err("Power requires 2 arguments".into());
@@ -331,6 +369,28 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             let repl = get_string(&args[2])?;
             let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
             Ok(Value::String(re.replace_all(&s, repl).to_string()))
+        }
+        StringOp::Split => {
+            let s = get_string(&args[0])?;
+            let delim = if args.len() > 1 { get_string(&args[1])? } else { ",".to_string() };
+            let parts: Vec<Value> = s.split(&delim).map(|p| Value::String(p.to_string())).collect();
+            Ok(Value::List(parts))
+        }
+        StringOp::Head => {
+            let s = get_string(&args[0])?;
+            let n = if args.len() > 1 {
+                match &args[1] { Value::Int64(x) => *x as usize, _ => 1 }
+            } else { 1 };
+            Ok(Value::String(s.chars().take(n).collect()))
+        }
+        StringOp::Tail => {
+            let s = get_string(&args[0])?;
+            let n = if args.len() > 1 {
+                match &args[1] { Value::Int64(x) => *x as usize, _ => 1 }
+            } else { 1 };
+            let chars: String = s.chars().collect();
+            let start = chars.len().saturating_sub(n);
+            Ok(Value::String(chars.chars().skip(start).collect()))
         }
     }
 }
