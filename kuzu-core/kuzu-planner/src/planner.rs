@@ -23,6 +23,7 @@ impl QueryPlanner {
             BoundStatement::BoundQuery(query) => self.plan_query(query),
             BoundStatement::BoundCopyFrom(c) => self.plan_copy_from(c),
             BoundStatement::BoundUnion(u) => self.plan_union(u),
+            BoundStatement::BoundMerge(m) => self.plan_merge(m),
             _ => Ok(Vec::new()),
         }
     }
@@ -33,6 +34,47 @@ impl QueryPlanner {
             table_id: c.table_id,
             file_path: c.file_path,
             options: c.options,
+            cardinality: 0,
+        })])
+    }
+
+    /// Plan a MERGE statement.
+    ///
+    /// Converts the bound merge into a `LogicalMerge` operator with
+    /// ON MATCH SET and ON CREATE SET as `LogicalSet` sub-operators.
+    fn plan_merge(&self, m: BoundMerge) -> Result<Vec<LogicalOperator>, String> {
+        let on_match: Vec<LogicalSet> = m
+            .on_match
+            .iter()
+            .map(|item| LogicalSet {
+                table_name: item.table_name.clone(),
+                table_id: item.table_id,
+                column_name: item.column_name.clone(),
+                column_idx: item.column_idx,
+                value: item.value.clone(),
+                cardinality: 0,
+            })
+            .collect();
+
+        let on_create: Vec<LogicalSet> = m
+            .on_create
+            .iter()
+            .map(|item| LogicalSet {
+                table_name: item.table_name.clone(),
+                table_id: item.table_id,
+                column_name: item.column_name.clone(),
+                column_idx: item.column_idx,
+                value: item.value.clone(),
+                cardinality: 0,
+            })
+            .collect();
+
+        Ok(vec![LogicalOperator::Merge(LogicalMerge {
+            table_name: m.table_name,
+            table_id: m.table_id,
+            properties: m.properties,
+            on_match,
+            on_create,
             cardinality: 0,
         })])
     }

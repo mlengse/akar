@@ -268,7 +268,10 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::CrossProduct(_) => {
-                    intermediate_result = Some(vec![]);
+                    let cross = PhysicalCrossProduct;
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = cross.execute(input)?;
+                    intermediate_result = Some(result);
                 }
                 LogicalOperator::Union(u) => {
                     // Flatten left and right subtrees into operator sequences
@@ -325,6 +328,112 @@ impl QueryProcessor {
                     };
                     let result = foreach_op.execute(input)?;
                     intermediate_result = Some(result);
+                }
+                LogicalOperator::Merge(m) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for MERGE".to_string())?;
+
+                    // Helper: evaluate a constant expression to a Value
+                    let eval_const = |expr: &kuzu_parser::ast::Expression| -> Value {
+                        match expr {
+                            kuzu_parser::ast::Expression::Constant(c) => match c {
+                                kuzu_parser::ast::Constant::Null => Value::Null,
+                                kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
+                                kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
+                                kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
+                                kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
+                            },
+                            _ => Value::Null,
+                        }
+                    };
+
+                    // Get table info to build the row
+                    let num_cols = {
+                        let tbl = table_catalog.get_node_table_by_name(&m.table_name)
+                            .ok_or_else(|| format!("Table '{}' not found for MERGE", m.table_name))?;
+                        tbl.columns.len()
+                    };
+
+                    // Build values from properties
+                    let mut new_values: Vec<Value> = Vec::new();
+                    let table_info = table_catalog.get_node_table_by_name(&m.table_name)
+                        .ok_or_else(|| format!("Table '{}' not found", m.table_name))?;
+                    for col_idx in 0..num_cols {
+                        let col_name = &table_info.columns[col_idx].name;
+                        if let Some((_, expr)) = m.properties.iter().find(|(n, _)| n == col_name) {
+                            new_values.push(eval_const(expr));
+                        } else if table_info.columns[col_idx].is_primary_key {
+                            return Err(format!("MERGE requires primary key '{}'", col_name));
+                        } else {
+                            new_values.push(Value::Null);
+                        }
+                    }
+                    drop(table_info);
+
+                    // Simple match detection: scan the PK column for a match
+                    let mut matched = false;
+                    if let Some(tbl) = table_catalog.get_node_table_by_name(&m.table_name) {
+                        if let Some((prop_name, first_expr)) = m.properties.first() {
+                            let first_val = eval_const(first_expr);
+                            // Find which column index this property maps to
+                            if let Some(prop_col) = tbl.columns.iter().position(|c| &c.name == prop_name) {
+                                let _ = prop_col; // Column index for matching
+                                // Scan the column for matching values
+                                for row_idx in 0..tbl.num_rows as usize {
+                                    if let Some(val) = tbl.get_value(row_idx, prop_col) {
+                                        if val == &first_val {
+                                            matched = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if matched {
+                        // Apply ON MATCH SET
+                        for set_item in &m.on_match {
+                            let set_op = PhysicalSet {
+                                table_name: set_item.table_name.clone(),
+                                table_id: set_item.table_id,
+                                column_name: set_item.column_name.clone(),
+                                column_idx: set_item.column_idx,
+                                value: set_item.value.clone(),
+                                table_catalog: table_catalog.clone(),
+                            };
+                            let _ = set_op.execute(vec![])?;
+                        }
+                        intermediate_result = Some(vec![DataChunk {
+                            fields: vec![],
+                            size: 1,
+                        }]);
+                    } else {
+                        // CREATE new node
+                        if let Some(mut tbl) = table_catalog.get_node_table_by_name_mut(&m.table_name) {
+                            tbl.insert_row(new_values)
+                                .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
+                        }
+
+                        // Apply ON CREATE SET
+                        for set_item in &m.on_create {
+                            let set_op = PhysicalSet {
+                                table_name: set_item.table_name.clone(),
+                                table_id: set_item.table_id,
+                                column_name: set_item.column_name.clone(),
+                                column_idx: set_item.column_idx,
+                                value: set_item.value.clone(),
+                                table_catalog: table_catalog.clone(),
+                            };
+                            let _ = set_op.execute(vec![])?;
+                        }
+                        intermediate_result = Some(vec![DataChunk {
+                            fields: vec![],
+                            size: 1,
+                        }]);
+                    }
                 }
             }
         }
@@ -1243,6 +1352,15 @@ mod tests {
 
     // ==================== UNION Tests ====================
 
+    fn make_i64_chunk(values: &[i64]) -> DataChunk {
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, values.len().max(1));
+        for (i, val) in values.iter().enumerate() {
+            v.set_i64(i, *val);
+        }
+        v.resize(values.len());
+        DataChunk::new(vec![v])
+    }
+
     #[test]
     fn test_union_all_basic() {
         // UNION ALL: two single-column Int64 vectors concatenated
@@ -1411,5 +1529,89 @@ mod tests {
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result[0].size, 1);
         assert_eq!(result[0].field(0).get_i64(0), Some(42));
+    }
+
+    // ==================== CrossProduct Tests ====================
+
+    #[test]
+    fn test_cross_product_basic() {
+        let cross = PhysicalCrossProduct;
+        // Left: [1, 2, 3], Right: [4, 5]
+        let left_v = make_i64_chunk(&[1, 2, 3]);
+        let right_v = make_i64_chunk(&[4, 5]);
+        let input = vec![left_v, right_v];
+        let result = cross.execute(input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 6); // 3 × 2 = 6
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].field(0).get_i64(1), Some(1));
+        assert_eq!(result[0].field(0).get_i64(2), Some(2));
+        assert_eq!(result[0].field(0).get_i64(3), Some(2));
+        assert_eq!(result[0].field(0).get_i64(4), Some(3));
+        assert_eq!(result[0].field(0).get_i64(5), Some(3));
+    }
+
+    #[test]
+    fn test_cross_product_multi_column() {
+        let cross = PhysicalCrossProduct;
+        // Left: [{1, "a"}, {2, "b"}], Right: [{10}, {20}]
+        let mut l1 = ValueVector::new(PhysicalTypeID::Int64, 2);
+        l1.set_i64(0, 1); l1.set_i64(1, 2); l1.resize(2);
+        let mut l2 = ValueVector::new(PhysicalTypeID::String, 2);
+        l2.push_string("a"); l2.push_string("b");
+        let left = DataChunk::new(vec![l1, l2]);
+
+        let mut r1 = ValueVector::new(PhysicalTypeID::Int64, 2);
+        r1.set_i64(0, 10); r1.set_i64(1, 20); r1.resize(2);
+        let right = DataChunk::new(vec![r1]);
+
+        let input = vec![left, right];
+        let result = cross.execute(input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 4); // 2 × 2 = 4
+        // Row 0: left(1,"a") × right(10) → [1, "a", 10]
+        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        // Row 1: left(1,"a") × right(20) → [1, "a", 20]
+        assert_eq!(result[0].field(0).get_i64(1), Some(1));
+        // Row 2: left(2,"b") × right(10) → [2, "b", 10]
+        assert_eq!(result[0].field(0).get_i64(2), Some(2));
+        // Row 3: left(2,"b") × right(20) → [2, "b", 20]
+        assert_eq!(result[0].field(0).get_i64(3), Some(2));
+        // Column 2 should have right-side values: [10, 20, 10, 20]
+        assert_eq!(result[0].field(2).get_i64(0), Some(10));
+        assert_eq!(result[0].field(2).get_i64(1), Some(20));
+        assert_eq!(result[0].field(2).get_i64(2), Some(10));
+        assert_eq!(result[0].field(2).get_i64(3), Some(20));
+    }
+
+    #[test]
+    fn test_cross_product_empty_left() {
+        let cross = PhysicalCrossProduct;
+        let left = make_i64_chunk(&[]);
+        let right = make_i64_chunk(&[1, 2]);
+        let result = cross.execute(vec![left, right]).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_cross_product_empty_right() {
+        let cross = PhysicalCrossProduct;
+        let left = make_i64_chunk(&[1, 2, 3]);
+        let right = make_i64_chunk(&[]);
+        let result = cross.execute(vec![left, right]).unwrap();
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_cross_product_multi_chunk() {
+        let cross = PhysicalCrossProduct;
+        // Left: two chunks [1,2] and [3]
+        let left1 = make_i64_chunk(&[1, 2]);
+        let left2 = make_i64_chunk(&[3]);
+        // Right: one chunk [4,5]
+        let right = make_i64_chunk(&[4, 5]);
+        let input = vec![left1, left2, right];
+        let result = cross.execute(input).unwrap();
+        assert_eq!(result[0].size, 6); // 3 × 2 = 6
     }
 }

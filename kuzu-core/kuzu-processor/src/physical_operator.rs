@@ -917,6 +917,110 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
     }
 }
 
+// ==================== CrossProduct ====================
+
+/// Physical cross product (Cartesian product) operator.
+///
+/// Combines every row from the left side with every row from the right side.
+/// The left side is the first half of input chunks, the right side is the
+/// second half.
+pub struct PhysicalCrossProduct;
+
+impl PhysicalOperatorExec for PhysicalCrossProduct {
+    fn operator_type(&self) -> &str {
+        "cross_product"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        if input.len() < 2 {
+            return Ok(input);
+        }
+
+        let mid = input.len() / 2;
+        let left_chunks = &input[..mid];
+        let right_chunks = &input[mid..];
+
+        // Count total rows on each side
+        let left_rows: usize = left_chunks.iter().map(|c| c.size).sum();
+        let right_rows: usize = right_chunks.iter().map(|c| c.size).sum();
+
+        if left_rows == 0 || right_rows == 0 {
+            return Ok(vec![]);
+        }
+
+        // Collect left and right values into column-major Vec<Vec<Value>>
+        let num_left_cols = left_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let num_right_cols = right_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let total_cols = num_left_cols + num_right_cols;
+        let total_rows = left_rows * right_rows;
+
+        let mut left_values: Vec<Vec<Value>> = (0..num_left_cols).map(|_| Vec::with_capacity(left_rows)).collect();
+        for chunk in left_chunks {
+            for col in 0..num_left_cols {
+                if let Some(field) = chunk.fields.get(col) {
+                    for row in 0..chunk.size {
+                        left_values[col].push(field.get_value(row).unwrap_or(Value::Null));
+                    }
+                }
+            }
+        }
+
+        let mut right_values: Vec<Vec<Value>> = (0..num_right_cols).map(|_| Vec::with_capacity(right_rows)).collect();
+        for chunk in right_chunks {
+            for col in 0..num_right_cols {
+                if let Some(field) = chunk.fields.get(col) {
+                    for row in 0..chunk.size {
+                        right_values[col].push(field.get_value(row).unwrap_or(Value::Null));
+                    }
+                }
+            }
+        }
+
+        // Build physical types for output columns
+        let mut output_types: Vec<PhysicalTypeID> = Vec::with_capacity(total_cols);
+        for col in 0..num_left_cols {
+            if let Some(field) = left_chunks[0].fields.get(col) {
+                output_types.push(field.physical_type());
+            }
+        }
+        for col in 0..num_right_cols {
+            if let Some(field) = right_chunks[0].fields.get(col) {
+                output_types.push(field.physical_type());
+            }
+        }
+
+        // Build output vectors
+        let mut output_fields: Vec<ValueVector> = output_types
+            .iter()
+            .map(|t| ValueVector::new(*t, total_rows.max(1)))
+            .collect();
+
+        let mut out_row = 0usize;
+        for lr in 0..left_rows {
+            for rr in 0..right_rows {
+                for col in 0..num_left_cols {
+                    let val = &left_values[col][lr];
+                    let _ = output_fields[col].set_value(out_row, val);
+                }
+                for col in 0..num_right_cols {
+                    let val = &right_values[col][rr];
+                    let _ = output_fields[num_left_cols + col].set_value(out_row, val);
+                }
+                out_row += 1;
+            }
+        }
+
+        for field in &mut output_fields {
+            field.resize(total_rows);
+        }
+
+        Ok(vec![DataChunk {
+            fields: output_fields,
+            size: total_rows,
+        }])
+    }
+}
+
 // ==================== HashJoin ====================
 
 pub struct PhysicalHashJoin {

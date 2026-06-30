@@ -26,6 +26,7 @@ pub enum LogicalOperator {
     OptionalMatch(LogicalOptionalMatch),
     Unwind(LogicalUnwind),
     Foreach(LogicalForeach),
+    Merge(LogicalMerge),
 }
 
 impl LogicalOperator {
@@ -52,6 +53,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => s.cardinality,
             LogicalOperator::Unwind(s) => s.cardinality,
             LogicalOperator::Foreach(s) => s.cardinality,
+            LogicalOperator::Merge(s) => s.cardinality,
         }
     }
 
@@ -78,6 +80,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
             LogicalOperator::Unwind(s) => s.cardinality = card,
             LogicalOperator::Foreach(s) => s.cardinality = card,
+            LogicalOperator::Merge(s) => s.cardinality = card,
         }
     }
 
@@ -108,7 +111,8 @@ impl LogicalOperator {
             | LogicalOperator::Set(_)
             | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
-            | LogicalOperator::Foreach(_) => vec![],
+            | LogicalOperator::Foreach(_)
+            | LogicalOperator::Merge(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
@@ -135,7 +139,8 @@ impl LogicalOperator {
             | LogicalOperator::Set(_)
             | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
-            | LogicalOperator::Foreach(_) => vec![],
+            | LogicalOperator::Foreach(_)
+            | LogicalOperator::Merge(_) => vec![],
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
@@ -319,5 +324,23 @@ pub struct LogicalForeach {
 pub struct LogicalTableFunctionCall {
     pub function_name: String,
     pub args: Vec<kuzu_parser::ast::Expression>,
+    pub cardinality: u64,
+}
+
+/// MERGE operator — match or create a node/pattern.
+///
+/// The processor first attempts to match a node with the given properties.
+/// If found, applies `ON MATCH SET` operations. If not found, creates a
+/// new node with the pattern properties and applies `ON CREATE SET`.
+#[derive(Debug, Clone)]
+pub struct LogicalMerge {
+    pub table_name: String,
+    pub table_id: u64,
+    /// Properties from the MERGE pattern (name, expression pairs).
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    /// SET operations to apply when the node already exists (matched).
+    pub on_match: Vec<LogicalSet>,
+    /// SET operations to apply when a new node is created.
+    pub on_create: Vec<LogicalSet>,
     pub cardinality: u64,
 }
