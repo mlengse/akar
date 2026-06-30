@@ -18,6 +18,7 @@ pub mod node_group;
 pub mod page;
 pub mod parquet_reader;
 pub mod shadow_file;
+pub mod spiller;
 pub mod stats;
 pub mod table;
 pub mod update_info;
