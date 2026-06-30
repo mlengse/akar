@@ -227,6 +227,15 @@ impl QueryProcessor {
                     let result = anti.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Explain(ex) => {
+                    // Serialize the inner plan tree to a string
+                    let plan_str = serialize_plan_tree(&ex.inner, 0);
+                    let explain = PhysicalExplain {
+                        inner_plan: plan_str,
+                    };
+                    let result = explain.execute(vec![])?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Unwind(uw) => {
                     let input = intermediate_result.take().unwrap_or_default();
                     let unwind = PhysicalUnwind {
@@ -846,6 +855,67 @@ fn value_to_physical_type(val: &Value) -> PhysicalTypeID {
         Value::Map(_) => PhysicalTypeID::Struct,
         Value::Struct(_) => PhysicalTypeID::Struct,
     }
+}
+
+/// Serialize a logical operator tree to a human-readable string.
+///
+/// Prints the operator tree with indentation showing parent-child relationships.
+/// Each operator is printed as:
+/// ```ignore
+/// OperatorType [cardinality=N]
+///   ├─ ChildOperator1 [cardinality=N]
+///   └─ ChildOperator2 [cardinality=N]
+/// ```
+fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
+    let indent = "  ".repeat(depth);
+    let prefix = if depth > 0 { "├─ " } else { "" };
+
+    let op_name = match op {
+        LogicalOperator::ScanNode(s) => format!("ScanNode({})", s.table_name),
+        LogicalOperator::ScanRel(s) => format!("ScanRel({})", s.table_name),
+        LogicalOperator::Filter(_) => "Filter".to_string(),
+        LogicalOperator::Projection(p) => format!("Projection({} cols)", p.expressions.len()),
+        LogicalOperator::HashJoin(hj) => format!("HashJoin({} keys)", hj.join_keys.len()),
+        LogicalOperator::CrossProduct(_) => "CrossProduct".to_string(),
+        LogicalOperator::OrderBy(ob) => format!("OrderBy({} keys)", ob.sort_keys.len()),
+        LogicalOperator::Limit(l) => format!("Limit({})", l.limit),
+        LogicalOperator::Aggregate(a) => {
+            format!("Aggregate({} aggs, {} group_by)", a.aggregates.len(), a.group_by.len())
+        }
+        LogicalOperator::Union(u) => format!("Union({})", if u.all { "ALL" } else { "DISTINCT" }),
+        LogicalOperator::Flatten(_) => "Flatten".to_string(),
+        LogicalOperator::TableFunctionCall(tf) => format!("TableFunctionCall({})", tf.function_name),
+        LogicalOperator::CopyFrom(cf) => format!("CopyFrom({})", cf.table_name),
+        LogicalOperator::Delete(dl) => format!("Delete({})", dl.table_name),
+        LogicalOperator::Set(sl) => format!("Set({}.{})", sl.table_name, sl.column_name),
+        LogicalOperator::OptionalMatch(_) => "OptionalMatch".to_string(),
+        LogicalOperator::Unwind(uw) => format!("Unwind({})", uw.variable),
+        LogicalOperator::Foreach(fe) => format!("Foreach({})", fe.variable),
+        LogicalOperator::Merge(m) => format!("Merge({})", m.table_name),
+        LogicalOperator::SemiJoin(_) => "SemiJoin".to_string(),
+        LogicalOperator::AntiJoin(_) => "AntiJoin".to_string(),
+        LogicalOperator::VectorSimilarityScan(vs) => format!("VectorSimilarityScan(k={})", vs.top_k),
+        LogicalOperator::ArtIndexRangeScan(ars) => format!("ArtIndexRangeScan({})", ars.table_name),
+        LogicalOperator::Explain(_) => "Explain".to_string(),
+    };
+
+    let card_str = format!("[cardinality={}]", op.cardinality());
+    let mut result = format!("{indent}{prefix}{op_name} {card_str}\n");
+
+    // Recurse into children
+    let children = op.children();
+    for (i, child) in children.iter().enumerate() {
+        let child_str = serialize_plan_tree(child, depth + 1);
+        // For the last child, change the prefix
+        if i == children.len() - 1 {
+            let adjusted = child_str.replacen("├─ ", "└─ ", 1);
+            result.push_str(&adjusted);
+        } else {
+            result.push_str(&child_str);
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

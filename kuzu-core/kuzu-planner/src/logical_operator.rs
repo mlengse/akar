@@ -29,6 +29,7 @@ pub enum LogicalOperator {
     Merge(LogicalMerge),
     SemiJoin(LogicalSemiJoin),
     AntiJoin(LogicalAntiJoin),
+    Explain(LogicalExplain),
 }
 
 impl LogicalOperator {
@@ -58,6 +59,7 @@ impl LogicalOperator {
             LogicalOperator::Merge(s) => s.cardinality,
             LogicalOperator::SemiJoin(s) => s.cardinality,
             LogicalOperator::AntiJoin(s) => s.cardinality,
+            LogicalOperator::Explain(s) => s.cardinality,
         }
     }
 
@@ -87,6 +89,7 @@ impl LogicalOperator {
             LogicalOperator::Merge(s) => s.cardinality = card,
             LogicalOperator::SemiJoin(s) => s.cardinality = card,
             LogicalOperator::AntiJoin(s) => s.cardinality = card,
+            LogicalOperator::Explain(s) => s.cardinality = card,
         }
     }
 
@@ -114,6 +117,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::SemiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::AntiJoin(s) => vec![&mut *s.left, &mut *s.right],
+            LogicalOperator::Explain(s) => vec![&mut *s.inner],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -144,6 +148,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => vec![&*s.left, &*s.right],
             LogicalOperator::SemiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::AntiJoin(s) => vec![&*s.left, &*s.right],
+            LogicalOperator::Explain(s) => vec![&*s.inner],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -236,6 +241,20 @@ pub struct LogicalAntiJoin {
     pub join_keys: Vec<Expression>,
     pub left: Box<LogicalOperator>,
     pub right: Box<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// EXPLAIN operator — wraps a child plan and produces a textual plan description.
+///
+/// Unlike other operators, Explain does not execute its child; instead it
+/// serializes the operator tree to a human-readable string.
+#[derive(Debug, Clone)]
+pub struct LogicalExplain {
+    /// The inner operator tree to explain.
+    pub inner: Box<LogicalOperator>,
+    /// The type of explain output.
+    pub explain_type: kuzu_parser::ast::ExplainType,
+    /// Cardinality (always 1 — one row with the plan string).
     pub cardinality: u64,
 }
 

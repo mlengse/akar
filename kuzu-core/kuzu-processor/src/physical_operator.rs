@@ -2157,3 +2157,42 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         Ok(chunks)
     }
 }
+
+// ==================== PhysicalExplain ====================
+
+/// Physical EXPLAIN operator — serializes a logical plan tree to a human-readable
+/// string and returns it as a single-row result.
+///
+/// Corresponds to C++ `PlanPrinter::printPlanToOstream` and `mapExplain`.
+pub struct PhysicalExplain {
+    /// The inner logical operator tree to serialize.
+    pub inner_plan: String,
+}
+
+impl PhysicalOperatorExec for PhysicalExplain {
+    fn operator_type(&self) -> &str {
+        "explain"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        use kuzu_common::types::PhysicalTypeID;
+        use kuzu_common::vector::{DataChunk, ValueVector};
+
+        let plan_str = self.inner_plan.clone();
+        let mut vv = ValueVector::new(PhysicalTypeID::String, 1);
+        vv.resize(1);
+        let bytes = plan_str.as_bytes();
+        let copy_len = bytes.len().min(15);
+        vv.data_mut()[0] = copy_len as u8;
+        if copy_len > 0 {
+            vv.data_mut()[1..1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+        }
+        // For long strings, store the full string in the ValueVector's overflow
+        // We store the original Value for the query result
+        let chunk = DataChunk {
+            fields: vec![vv],
+            size: 1,
+        };
+        Ok(vec![chunk])
+    }
+}

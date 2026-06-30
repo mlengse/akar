@@ -1,5 +1,25 @@
 //! Abstract Syntax Tree (AST) types for Cypher queries.
 
+/// EXPLAIN type — what kind of plan to show.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExplainType {
+    /// `EXPLAIN` — show the physical plan (default).
+    PhysicalPlan,
+    /// `EXPLAIN LOGICAL` — show the logical plan.
+    LogicalPlan,
+    /// `EXPLAIN PROFILE` — execute and show profile.
+    Profile,
+}
+
+/// EXPLAIN statement wrapper.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplainStatement {
+    /// The statement being explained.
+    pub statement: Box<Statement>,
+    /// The type of explain output.
+    pub explain_type: ExplainType,
+}
+
 /// A Cypher statement (top-level AST node).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -16,6 +36,7 @@ pub enum Statement {
     Merge(MergeStatement),
     Call(CallStatement),
     CreateDml(CreateClause),
+    Explain(ExplainStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -129,6 +150,16 @@ pub enum EdgeDirection {
     LeftToRight,
     RightToLeft,
     Both,
+}
+
+impl ExplainStatement {
+    /// Create a new EXPLAIN statement wrapping the given inner statement.
+    pub fn new(statement: Statement, explain_type: ExplainType) -> Self {
+        Self {
+            statement: Box::new(statement),
+            explain_type,
+        }
+    }
 }
 
 /// An expression in a Cypher query.

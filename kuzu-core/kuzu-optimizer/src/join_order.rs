@@ -92,7 +92,8 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::OptionalMatch(_)
         | LogicalOperator::Unwind(_)
         | LogicalOperator::Foreach(_)
-        | LogicalOperator::Merge(_) => {
+        | LogicalOperator::Merge(_)
+        | LogicalOperator::Explain(_) => {
             // Leaf operator with no children — nothing to recurse into.
         }
     }

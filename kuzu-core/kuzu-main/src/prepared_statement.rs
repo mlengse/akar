@@ -104,6 +104,9 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                 }
             }
         }
+        BoundStatement::BoundExplain(e) => {
+            collect_params_from_statement(&e.inner, params);
+        }
         _ => {}
     }
 }

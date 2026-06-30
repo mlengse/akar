@@ -24,8 +24,36 @@ impl QueryPlanner {
             BoundStatement::BoundCopyFrom(c) => self.plan_copy_from(c),
             BoundStatement::BoundUnion(u) => self.plan_union(u),
             BoundStatement::BoundMerge(m) => self.plan_merge(m),
+            BoundStatement::BoundExplain(e) => self.plan_explain(e),
             _ => Ok(Vec::new()),
         }
+    }
+
+    /// Plan an EXPLAIN statement.
+    ///
+    /// Plans the inner statement first, then wraps the result in a
+    /// LogicalExplain operator that will serialize the plan tree to text.
+    fn plan_explain(&self, e: BoundExplain) -> Result<Vec<LogicalOperator>, String> {
+        let inner_plan = self.plan(*e.inner)?;
+        // Take the last operator of the inner plan as the tree root to explain
+        let inner_op = if inner_plan.is_empty() {
+            return Err("Cannot EXPLAIN an empty plan".into());
+        } else if inner_plan.len() == 1 {
+            inner_plan.into_iter().next().unwrap()
+        } else {
+            // Wrap multi-operator pipeline in a projection root
+            LogicalOperator::Projection(LogicalProjection {
+                expressions: Vec::new(),
+                children: inner_plan,
+                cardinality: 0,
+            })
+        };
+
+        Ok(vec![LogicalOperator::Explain(LogicalExplain {
+            inner: Box::new(inner_op),
+            explain_type: e.explain_type,
+            cardinality: 1,
+        })])
     }
 
     fn plan_copy_from(&self, c: BoundCopyFrom) -> Result<Vec<LogicalOperator>, String> {

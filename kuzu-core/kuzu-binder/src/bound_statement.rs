@@ -21,6 +21,7 @@ pub enum BoundStatement {
     BoundUnion(BoundUnion),
     BoundMerge(BoundMerge),
     BoundCreateDml(BoundCreateDml),
+    BoundExplain(BoundExplain),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -90,6 +91,15 @@ pub struct BoundDeleteClause {
 pub struct BoundUnwindClause {
     pub expression: kuzu_parser::ast::Expression,
     pub variable: String,
+}
+
+/// Bound EXPLAIN statement — wraps an inner bound statement.
+#[derive(Debug, Clone)]
+pub struct BoundExplain {
+    /// The inner bound statement to explain.
+    pub inner: Box<BoundStatement>,
+    /// The type of explain output.
+    pub explain_type: kuzu_parser::ast::ExplainType,
 }
 
 /// Bound FOREACH clause — iterate over list and execute sub-statements.

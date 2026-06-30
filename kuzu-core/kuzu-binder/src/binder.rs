@@ -83,6 +83,7 @@ impl Binder {
             Statement::Merge(m) => self.bind_merge(m),
             Statement::Call(c) => self.bind_call(c),
             Statement::CreateDml(c) => self.bind_create_dml(c),
+            Statement::Explain(e) => self.bind_explain(e),
         }
     }
 
@@ -962,6 +963,15 @@ impl Binder {
         Ok(BoundStatement::BoundCall(BoundCall {
             function_name: c.function_name,
             args: c.args,
+        }))
+    }
+
+    fn bind_explain(&self, e: kuzu_parser::ast::ExplainStatement) -> Result<BoundStatement, String> {
+        // Bind the inner statement recursively
+        let inner = self.bind(*e.statement)?;
+        Ok(BoundStatement::BoundExplain(BoundExplain {
+            inner: Box::new(inner),
+            explain_type: e.explain_type,
         }))
     }
 

@@ -10,6 +10,20 @@ pub struct CypherParser;
 
 pub fn parse(input: &str) -> Result<Statement, String> {
     let trimmed = input.trim();
+
+    // Handle EXPLAIN prefix before PEG parsing to avoid grammar recursion
+    if let Some(rest) = trimmed.strip_prefix("EXPLAIN").map(|s| s.trim()) {
+        let (explain_type, inner_sql) = if let Some(rest) = rest.strip_prefix("LOGICAL").map(|s| s.trim()) {
+            (ExplainType::LogicalPlan, rest)
+        } else if let Some(rest) = rest.strip_prefix("PROFILE").map(|s| s.trim()) {
+            (ExplainType::Profile, rest)
+        } else {
+            (ExplainType::PhysicalPlan, rest)
+        };
+        let inner_stmt = parse(inner_sql)?;
+        return Ok(Statement::Explain(ExplainStatement::new(inner_stmt, explain_type)));
+    }
+
     let mut pairs = CypherParser::parse(Rule::statement, trimmed).map_err(|e| format!("Parse error: {e}"))?;
     let pair = pairs.next().ok_or("Empty input")?;
     parse_statement(pair)
@@ -1242,6 +1256,56 @@ mod tests {
                 assert!(c.file_path.contains("path/to/data.csv"));
             }
             _ => panic!("Expected CopyFrom"),
+        }
+    }
+
+    // --- EXPLAIN tests ---
+    #[test]
+    fn test_explain_query() {
+        let sql = "EXPLAIN MATCH (a:Person) RETURN a";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Explain(e) => {
+                assert_eq!(e.explain_type, ExplainType::PhysicalPlan);
+                assert!(matches!(*e.statement, Statement::Query(_)));
+            }
+            _ => panic!("Expected Explain, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_explain_logical() {
+        let sql = "EXPLAIN LOGICAL MATCH (a:Person) RETURN a";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Explain(e) => {
+                assert_eq!(e.explain_type, ExplainType::LogicalPlan);
+            }
+            _ => panic!("Expected Explain(Logical)"),
+        }
+    }
+
+    #[test]
+    fn test_explain_profile() {
+        let sql = "EXPLAIN PROFILE MATCH (a:Person) RETURN a";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Explain(e) => {
+                assert_eq!(e.explain_type, ExplainType::Profile);
+            }
+            _ => panic!("Expected Explain(Profile)"),
+        }
+    }
+
+    #[test]
+    fn test_explain_create_table() {
+        let sql = "EXPLAIN CREATE NODE TABLE Test(id INT64, PRIMARY KEY (id))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Explain(e) => {
+                assert!(matches!(*e.statement, Statement::CreateNodeTable(_)));
+            }
+            _ => panic!("Expected Explain(CreateNodeTable)"),
         }
     }
 }

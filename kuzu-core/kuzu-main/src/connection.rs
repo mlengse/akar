@@ -161,6 +161,7 @@ impl Connection {
             | BoundStatement::BoundMerge(_)
             | BoundStatement::BoundCopyFrom(_)
             | BoundStatement::BoundAlterTable(_) => true,
+            BoundStatement::BoundExplain(_) => false,
             BoundStatement::BoundQuery(q) => {
                 // Check for write clauses like SET
                 q.clauses.iter().any(|c| matches!(c, BoundClause::BoundSet(_)))
@@ -488,6 +489,10 @@ impl Connection {
     /// Returns `Ok(Some(result))` if DDL, `Ok(None)` if DML (continue).
     fn handle_ddl(&self, bound: &BoundStatement) -> Result<Option<QueryResult>, String> {
         match bound {
+            BoundStatement::BoundExplain(_) => {
+                // EXPLAIN is handled by the query processor pipeline
+                Ok(None)
+            }
             BoundStatement::BoundCreateNodeTable(t) => {
                 // Also create a storage table with in-memory data capacity
                 let columns: Vec<ColumnDefinition> = t
