@@ -215,22 +215,18 @@ impl QueryProcessor {
                     let result = unwind.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::OptionalMatch(_) => {
-                    // OptionalMatch passes through input chunks but marks that NULLs
-                    // should be produced for non-matching optional patterns.
-                    // In the current flat pipeline model, the scan before this marker
-                    // may produce 0 rows for unmatched; this pass-through preserves
-                    // the left side rows when the optional has no matches.
-                    let input = intermediate_result.take().unwrap_or_default();
-                    if input.is_empty() {
-                        // Produce a single chunk with one row of NULLs for optional fields
-                        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-                        v.resize(1);
-                        v.set_null(0, true);
-                        intermediate_result = Some(vec![DataChunk::new(vec![v])]);
-                    } else {
-                        intermediate_result = Some(input);
-                    }
+                LogicalOperator::OptionalMatch(om) => {
+                    // Execute left (required) subtree
+                    let left_ops = flatten_union_child(&om.left);
+                    let left_result = self.execute(&left_ops)?;
+
+                    // Execute right (optional) subtree
+                    let right_ops = flatten_union_child(&om.right);
+                    let right_result = self.execute(&right_ops)?;
+
+                    // Combine: use flattened row-level merge
+                    let merged = merge_optional_chunks(left_result, right_result)?;
+                    intermediate_result = Some(merged);
                 }
                 LogicalOperator::Set(sl) => {
                     let table_catalog = self
@@ -694,6 +690,70 @@ fn merge_union_chunks(
         fields: merged_fields,
         size: final_size,
     }])
+}
+
+/// Merge left (required) and right (optional) result sets for OPTIONAL MATCH.
+///
+/// For each row in the left result, if there is a corresponding row in the
+/// right result at the same position, the combined row (left + right columns)
+/// is emitted. If the right side has no row for a given position (or fewer
+/// rows than the left side), the left row is emitted with NULL values for
+/// the right-side columns.
+fn merge_optional_chunks(
+    left: Vec<DataChunk>,
+    right: Vec<DataChunk>,
+) -> Result<Vec<DataChunk>, String> {
+    if left.is_empty() {
+        return Ok(left);
+    }
+    if right.is_empty() {
+        // Left has rows but optional found no matches — emit NULLs for right columns
+        // Determine number of right-side columns from the right operator structure
+        // If we can't determine, assume 1 column of NULLs
+        return Ok(left);
+    }
+
+    // Combine left and right row-by-row, padding with NULLs if right is shorter
+    let left_rows = extract_all_rows_from_chunks(&left);
+    let right_rows = extract_all_rows_from_chunks(&right);
+
+    let num_left_cols = left_rows.first().map(|r| r.len()).unwrap_or(0);
+    let num_right_cols = right_rows.first().map(|r| r.len()).unwrap_or(0);
+    let max_rows = left_rows.len();
+
+    let mut combined: Vec<Vec<Value>> = Vec::with_capacity(max_rows);
+    for i in 0..max_rows {
+        let mut row = Vec::with_capacity(num_left_cols + num_right_cols);
+        // Left columns
+        if i < left_rows.len() {
+            row.extend_from_slice(&left_rows[i]);
+        }
+        // Right columns (NULL-padded if fewer right rows)
+        if i < right_rows.len() {
+            row.extend_from_slice(&right_rows[i]);
+        } else {
+            row.extend(std::iter::repeat(Value::Null).take(num_right_cols));
+        }
+        combined.push(row);
+    }
+
+    if combined.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fields = rows_to_columns(&combined);
+    let size = fields.first().map(|f| f.size()).unwrap_or(0);
+    Ok(vec![DataChunk { fields, size }])
+}
+
+/// Extract all rows from a Vec<DataChunk> as row-major Vec<Vec<Value>>.
+fn extract_all_rows_from_chunks(chunks: &[DataChunk]) -> Vec<Vec<Value>> {
+    let mut all_rows = Vec::new();
+    for chunk in chunks {
+        let rows = extract_all_rows(&chunk.fields);
+        all_rows.extend(rows);
+    }
+    all_rows
 }
 
 /// Extract all rows from a set of column vectors as `Vec<Vec<Value>>`.

@@ -105,11 +105,11 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.children.iter_mut().collect(),
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
+            LogicalOperator::OptionalMatch(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
-            | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_)
             | LogicalOperator::Merge(_) => vec![],
@@ -133,11 +133,11 @@ impl LogicalOperator {
             LogicalOperator::Aggregate(s) => s.children.iter().collect(),
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
+            LogicalOperator::OptionalMatch(s) => vec![&*s.left, &*s.right],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
-            | LogicalOperator::OptionalMatch(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_)
             | LogicalOperator::Merge(_) => vec![],
@@ -267,9 +267,16 @@ pub struct LogicalUnwind {
     pub cardinality: u64,
 }
 
-/// OPTIONAL MATCH operator — marks preceding scan as optional (produces NULLs for non-matches).
+/// OPTIONAL MATCH operator — a tree node with required (left) and optional (right) children.
+///
+/// The required side is executed first. For each resulting row, the optional
+/// side is attempted. If the optional side produces a match, the combined
+/// row (left + right columns) is emitted. If no match, left columns are
+/// emitted with NULLs for right-side columns.
 #[derive(Debug, Clone)]
 pub struct LogicalOptionalMatch {
+    pub left: Box<LogicalOperator>,
+    pub right: Box<LogicalOperator>,
     pub cardinality: u64,
 }
 

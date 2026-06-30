@@ -317,6 +317,9 @@ impl FunctionRegistry {
         self.register_scalar("sqrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Sqrt });
         self.register_scalar("log", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
         self.register_scalar("exp", ScalarFunction::Arithmetic { op: ArithmeticOp::Exp });
+        self.register_scalar("sin", ScalarFunction::Arithmetic { op: ArithmeticOp::Sin });
+        self.register_scalar("cos", ScalarFunction::Arithmetic { op: ArithmeticOp::Cos });
+        self.register_scalar("tan", ScalarFunction::Arithmetic { op: ArithmeticOp::Tan });
 
         // --- Comparison ---
         self.register_scalar("=", ScalarFunction::Comparison { op: ComparisonOp::Eq });

@@ -168,9 +168,51 @@ impl QueryPlanner {
                     }));
                 }
                 BoundClause::BoundOptionalMatch(om) => {
+                    // Build the current required-side pipeline (left child)
+                    let mut left_pipeline: Vec<LogicalOperator> = Vec::new();
+                    if !scan_ops.is_empty() {
+                        if scan_ops.len() == 1 {
+                            left_pipeline.push(scan_ops.into_iter().next().unwrap());
+                        } else {
+                            let join_plan = build_join_tree(scan_ops, filter_expr.as_ref());
+                            let flattened = flatten_join_plan(&join_plan);
+                            left_pipeline.extend(flattened);
+                        }
+                    }
+                    if let Some(expr) = filter_expr.take() {
+                        left_pipeline.push(LogicalOperator::Filter(LogicalFilter {
+                            expression: expr.expression,
+                            children: Vec::new(),
+                            cardinality: 0,
+                        }));
+                    }
+                    if let Some(proj) = projection.take() {
+                        left_pipeline.push(LogicalOperator::Projection(proj));
+                    }
+                    let left_op = if left_pipeline.len() == 1 {
+                        left_pipeline.into_iter().next().unwrap()
+                    } else if left_pipeline.is_empty() {
+                        // Empty left side — use a dummy scan
+                        LogicalOperator::ScanNode(LogicalScanNode {
+                            table_name: String::new(),
+                            table_id: 0,
+                            alias: None,
+                            columns: Vec::new(),
+                            cardinality: 0,
+                        })
+                    } else {
+                        LogicalOperator::Projection(LogicalProjection {
+                            expressions: Vec::new(),
+                            children: left_pipeline,
+                            cardinality: 0,
+                        })
+                    };
+
+                    // Build the optional-side pipeline (right child)
+                    let mut right_ops: Vec<LogicalOperator> = Vec::new();
                     for pattern in &om.patterns {
                         if let Some(label) = &pattern.node_label {
-                            delete_exprs.push(LogicalOperator::ScanNode(LogicalScanNode {
+                            right_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                 table_name: label.clone(),
                                 table_id: pattern.node_table_id.unwrap_or(0),
                                 alias: pattern.node_variable.clone(),
@@ -180,7 +222,7 @@ impl QueryPlanner {
                         }
                         if let Some(edge) = &pattern.edge {
                             if let Some(rel_label) = &edge.label {
-                                delete_exprs.push(LogicalOperator::ScanRel(LogicalScanRel {
+                                right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
                                     table_name: rel_label.clone(),
                                     table_id: edge.rel_table_id.unwrap_or(0),
                                     direction: edge.direction.clone(),
@@ -189,8 +231,37 @@ impl QueryPlanner {
                             }
                         }
                     }
-                    // Mark as optional by appending an OptionalMatch marker
-                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch { cardinality: 0 }));
+                    let right_op = if right_ops.len() == 1 {
+                        right_ops.into_iter().next().unwrap()
+                    } else if right_ops.is_empty() {
+                        LogicalOperator::ScanNode(LogicalScanNode {
+                            table_name: String::new(),
+                            table_id: 0,
+                            alias: None,
+                            columns: Vec::new(),
+                            cardinality: 0,
+                        })
+                    } else {
+                        LogicalOperator::Projection(LogicalProjection {
+                            expressions: Vec::new(),
+                            children: right_ops,
+                            cardinality: 0,
+                        })
+                    };
+
+                    // Create the OptionalMatch tree node.
+                    // The left side is the entire pipeline built so far (scans + filter + projection).
+                    // The right side is the optional pattern scans.
+                    // Push to delete_exprs so it gets appended at the end of the pipeline.
+                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch {
+                        left: Box::new(left_op),
+                        right: Box::new(right_op),
+                        cardinality: 0,
+                    }));
+                    // Reset pipeline state — subsequent clauses (DELETE, SET, etc.) build fresh
+                    scan_ops = Vec::new();
+                    filter_expr = None;
+                    projection = None;
                 }
                 BoundClause::BoundDelete(d) => {
                     delete_exprs.push(LogicalOperator::Delete(LogicalDelete {

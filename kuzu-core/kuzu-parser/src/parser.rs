@@ -43,6 +43,10 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
                 Ok(Statement::Query(query))
             }
         }
+        Rule::union_statement => {
+            let inner_clone = inner.clone();
+            parse_ddl(inner_clone)
+        }
         Rule::call_statement => {
             let call = parse_call(inner)?;
             Ok(Statement::Call(call))

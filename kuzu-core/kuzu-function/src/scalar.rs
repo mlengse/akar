@@ -82,6 +82,18 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             let v = numeric_to_f64(&args[0])?;
             Ok(Value::Double(v.exp()))
         }
+        ArithmeticOp::Sin => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.sin()))
+        }
+        ArithmeticOp::Cos => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.cos()))
+        }
+        ArithmeticOp::Tan => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.tan()))
+        }
         ArithmeticOp::Power => {
             if args.len() < 2 {
                 return Err("Power requires 2 arguments".into());
