@@ -29,6 +29,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Boolean { op } => evaluate_boolean(*op, args),
         ScalarFunction::Utility { op } => evaluate_utility(*op, args),
         ScalarFunction::Schema { op } => evaluate_schema(*op, args),
+        ScalarFunction::Array { op } => evaluate_array(*op, args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
     }
 }
@@ -748,6 +749,43 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
             list.reverse();
             Ok(Value::List(list))
         }
+        ListOp::Slice => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let start = match &args[1] {
+                Value::Int64(i) => {
+                    if *i < 1 {
+                        return Err("Slice start index must be >= 1".into());
+                    }
+                    (*i - 1) as usize
+                }
+                _ => return Err("Slice start must be integer".into()),
+            };
+            if start >= list.len() {
+                return Err("Slice start index out of bounds".into());
+            }
+            if args.len() >= 3 {
+                // Explicit end (1-based inclusive)
+                let end = match &args[2] {
+                    Value::Int64(i) => {
+                        if *i < 1 {
+                            return Err("Slice end index must be >= 1".into());
+                        }
+                        (*i - 1) as usize
+                    }
+                    _ => return Err("Slice end must be integer".into()),
+                };
+                if end >= list.len() || end < start {
+                    return Err("Slice end index out of bounds".into());
+                }
+                Ok(Value::List(list[start..=end].to_vec()))
+            } else {
+                // No end specified — slice to the end of the list
+                Ok(Value::List(list[start..].to_vec()))
+            }
+        }
     }
 }
 
@@ -1146,6 +1184,73 @@ fn evaluate_schema(op: SchemaOp, args: &[Value]) -> Result<Value, String> {
                     other.logical_type()
                 )),
             }
+        }
+    }
+}
+
+// ==================== Array Math Functions ====================
+
+/// Evaluate an array math function: cosine_similarity, distance, inner_product,
+/// cross_product, squared_distance.
+fn evaluate_array(op: ArrayOp, args: &[Value]) -> Result<Value, String> {
+    if args.len() < 2 {
+        return Err(format!("Array function {:?} requires 2 arguments", op));
+    }
+
+    /// Extract a Vec<f64> from a Value::List or return an error.
+    fn extract_f64s(v: &Value) -> Result<Vec<f64>, String> {
+        match v {
+            Value::List(items) => {
+                items.iter().map(|item| match item {
+                    Value::Int64(i) => Ok(*i as f64),
+                    Value::Double(f) => Ok(*f),
+                    Value::Float(f) => Ok(*f as f64),
+                    _ => Err(format!("Expected numeric value in array, got {:?}", item.logical_type())),
+                }).collect()
+            }
+            _ => Err("Expected list/array".into()),
+        }
+    }
+
+    let a = extract_f64s(&args[0])?;
+    let b = extract_f64s(&args[1])?;
+
+    if a.len() != b.len() {
+        return Err("Arrays must have the same length".into());
+    }
+
+    match op {
+        ArrayOp::CosineSimilarity => {
+            let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+            let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+            let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+            if norm_a == 0.0 || norm_b == 0.0 {
+                return Ok(Value::Double(1.0));
+            }
+            Ok(Value::Double(dot / (norm_a * norm_b)))
+        }
+        ArrayOp::Distance => {
+            let sum_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
+            Ok(Value::Double(sum_sq.sqrt()))
+        }
+        ArrayOp::InnerProduct => {
+            let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+            Ok(Value::Double(dot))
+        }
+        ArrayOp::CrossProduct => {
+            if a.len() != 3 || b.len() != 3 {
+                return Err("Cross product requires 3D arrays".into());
+            }
+            let result = vec![
+                Value::Double(a[1] * b[2] - a[2] * b[1]),
+                Value::Double(a[2] * b[0] - a[0] * b[2]),
+                Value::Double(a[0] * b[1] - a[1] * b[0]),
+            ];
+            Ok(Value::List(result))
+        }
+        ArrayOp::SquaredDistance => {
+            let sum_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
+            Ok(Value::Double(sum_sq))
         }
     }
 }
@@ -2289,5 +2394,142 @@ mod tests {
         assert!(reg.contains("START_NODE"));
         assert!(reg.contains("END_NODE"));
         assert!(reg.contains("LABEL"));
+    }
+
+    // --- Array function tests ---
+    #[test]
+    fn test_array_cosine_similarity() {
+        let func = ScalarFunction::Array { op: ArrayOp::CosineSimilarity };
+        let a = Value::List(vec![Value::Double(1.0), Value::Double(0.0)]);
+        let b = Value::List(vec![Value::Double(0.0), Value::Double(1.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        if let Value::Double(x) = result {
+            assert!((x - 0.0).abs() < 1e-10);
+        } else {
+            panic!("Expected Double");
+        }
+    }
+
+    #[test]
+    fn test_array_cosine_identical() {
+        let func = ScalarFunction::Array { op: ArrayOp::CosineSimilarity };
+        let a = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        if let Value::Double(x) = result {
+            assert!((x - 1.0).abs() < 1e-10);
+        } else {
+            panic!("Expected Double");
+        }
+    }
+
+    #[test]
+    fn test_array_distance() {
+        let func = ScalarFunction::Array { op: ArrayOp::Distance };
+        let a = Value::List(vec![Value::Double(0.0), Value::Double(0.0)]);
+        let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        if let Value::Double(x) = result {
+            assert!((x - 5.0).abs() < 1e-10);
+        } else {
+            panic!("Expected Double");
+        }
+    }
+
+    #[test]
+    fn test_array_inner_product() {
+        let func = ScalarFunction::Array { op: ArrayOp::InnerProduct };
+        let a = Value::List(vec![Value::Double(1.0), Value::Double(2.0)]);
+        let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        assert_eq!(result, Value::Double(11.0));
+    }
+
+    #[test]
+    fn test_array_cross_product() {
+        let func = ScalarFunction::Array { op: ArrayOp::CrossProduct };
+        let a = Value::List(vec![Value::Double(1.0), Value::Double(0.0), Value::Double(0.0)]);
+        let b = Value::List(vec![Value::Double(0.0), Value::Double(1.0), Value::Double(0.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        match result {
+            Value::List(items) => {
+                assert_eq!(items.len(), 3);
+                if let Value::Double(z) = &items[2] {
+                    assert!((z - 1.0).abs() < 1e-10);
+                } else {
+                    panic!("Expected Double for z-component");
+                }
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_array_cross_product_wrong_dim() {
+        let func = ScalarFunction::Array { op: ArrayOp::CrossProduct };
+        let a = Value::List(vec![Value::Double(1.0), Value::Double(2.0)]);
+        let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        assert!(evaluate_scalar(&func, &[a, b]).is_err());
+    }
+
+    #[test]
+    fn test_array_squared_distance() {
+        let func = ScalarFunction::Array { op: ArrayOp::SquaredDistance };
+        let a = Value::List(vec![Value::Double(0.0), Value::Double(0.0)]);
+        let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
+        let result = evaluate_scalar(&func, &[a, b]).unwrap();
+        assert_eq!(result, Value::Double(25.0));
+    }
+
+    #[test]
+    fn test_array_diff_length() {
+        let func = ScalarFunction::Array { op: ArrayOp::Distance };
+        let a = Value::List(vec![Value::Double(1.0)]);
+        let b = Value::List(vec![Value::Double(1.0), Value::Double(2.0)]);
+        assert!(evaluate_scalar(&func, &[a, b]).is_err());
+    }
+
+    #[test]
+    fn test_list_slice() {
+        let func = ScalarFunction::List { op: ListOp::Slice };
+        let list = Value::List(vec![
+            Value::Int64(10), Value::Int64(20), Value::Int64(30), Value::Int64(40), Value::Int64(50),
+        ]);
+        let result = evaluate_scalar(&func, &[list, Value::Int64(2), Value::Int64(4)]).unwrap();
+        match result {
+            Value::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0], Value::Int64(20));
+                assert_eq!(items[2], Value::Int64(40));
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_list_slice_single_arg() {
+        let func = ScalarFunction::List { op: ListOp::Slice };
+        let list = Value::List(vec![Value::Int64(10), Value::Int64(20), Value::Int64(30)]);
+        let result = evaluate_scalar(&func, &[list, Value::Int64(2)]).unwrap();
+        match result {
+            Value::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], Value::Int64(20));
+                assert_eq!(items[1], Value::Int64(30));
+            }
+            _ => panic!("Expected List"),
+        }
+    }
+
+    #[test]
+    fn test_array_registry_contains() {
+        let reg = FunctionRegistry::new();
+        assert!(reg.contains("array_cosine_similarity"));
+        assert!(reg.contains("array_distance"));
+        assert!(reg.contains("array_inner_product"));
+        assert!(reg.contains("array_cross_product"));
+        assert!(reg.contains("array_squared_distance"));
+        assert!(reg.contains("list_slice"));
+        assert!(reg.contains("list_prepend"));
     }
 }

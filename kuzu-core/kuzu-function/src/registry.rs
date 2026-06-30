@@ -49,6 +49,9 @@ pub enum ScalarFunction {
     Schema {
         op: SchemaOp,
     },
+    Array {
+        op: ArrayOp,
+    },
     /// Extension-provided scalar function with a callback closure.
     /// The closure receives input values and returns an output value.
     CustomScalar {
@@ -71,6 +74,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Boolean { op } => f.debug_struct("Boolean").field("op", op).finish(),
             Self::Utility { op } => f.debug_struct("Utility").field("op", op).finish(),
             Self::Schema { op } => f.debug_struct("Schema").field("op", op).finish(),
+            Self::Array { op } => f.debug_struct("Array").field("op", op).finish(),
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
         }
     }
@@ -180,6 +184,7 @@ pub enum ListOp {
     Contains,
     Append,
     Prepend,
+    Slice,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -227,6 +232,23 @@ pub enum SchemaOp {
     StartNode,
     EndNode,
     Label,
+}
+
+/// Array math functions — element-wise operations on numeric lists.
+///
+/// These correspond to the C++ array functions in `function/array/`:
+/// - `array_cosine_similarity(a, b)` → cosine similarity between two arrays
+/// - `array_distance(a, b)` → Euclidean distance between two arrays
+/// - `array_inner_product(a, b)` → dot/inner product of two arrays
+/// - `array_cross_product(a, b)` → 3D cross product of two arrays
+/// - `array_squared_distance(a, b)` → squared Euclidean distance
+#[derive(Debug, Clone, Copy)]
+pub enum ArrayOp {
+    CosineSimilarity,
+    Distance,
+    InnerProduct,
+    CrossProduct,
+    SquaredDistance,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -509,6 +531,8 @@ impl FunctionRegistry {
         self.register_scalar("list_reverse", ScalarFunction::List { op: ListOp::Reverse });
         self.register_scalar("list_contains", ScalarFunction::List { op: ListOp::Contains });
         self.register_scalar("list_append", ScalarFunction::List { op: ListOp::Append });
+        self.register_scalar("list_prepend", ScalarFunction::List { op: ListOp::Prepend });
+        self.register_scalar("list_slice", ScalarFunction::List { op: ListOp::Slice });
 
         // --- Map ---
         self.register_scalar("map_creation", ScalarFunction::Map { op: MapOp::Creation });
@@ -542,6 +566,13 @@ impl FunctionRegistry {
         self.register_scalar("START_NODE", ScalarFunction::Schema { op: SchemaOp::StartNode });
         self.register_scalar("END_NODE", ScalarFunction::Schema { op: SchemaOp::EndNode });
         self.register_scalar("LABEL", ScalarFunction::Schema { op: SchemaOp::Label });
+
+        // --- Array ---
+        self.register_scalar("array_cosine_similarity", ScalarFunction::Array { op: ArrayOp::CosineSimilarity });
+        self.register_scalar("array_distance", ScalarFunction::Array { op: ArrayOp::Distance });
+        self.register_scalar("array_inner_product", ScalarFunction::Array { op: ArrayOp::InnerProduct });
+        self.register_scalar("array_cross_product", ScalarFunction::Array { op: ArrayOp::CrossProduct });
+        self.register_scalar("array_squared_distance", ScalarFunction::Array { op: ArrayOp::SquaredDistance });
 
         // --- Aggregate ---
         self.register_aggregate("COUNT", AggregateFunction::Count);
