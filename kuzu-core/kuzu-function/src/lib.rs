@@ -5,7 +5,7 @@ pub mod scalar;
 
 pub use registry::{
     AggregateFunction, ArithmeticOp, BooleanOp, CastTarget, ComparisonOp, DateOp, FunctionRegistry, ListOp, MapOp,
-    ResolvedFunction, ScalarFunction, StringOp, StructOp, TableFunction, UtilityOp,
+    ResolvedFunction, ScalarFunction, SchemaOp, StringOp, StructOp, TableFunction, UtilityOp,
 };
 pub use scalar::{evaluate_aggregate, evaluate_scalar};
 

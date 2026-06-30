@@ -28,6 +28,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Struct { op } => evaluate_struct(*op, args),
         ScalarFunction::Boolean { op } => evaluate_boolean(*op, args),
         ScalarFunction::Utility { op } => evaluate_utility(*op, args),
+        ScalarFunction::Schema { op } => evaluate_schema(*op, args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
     }
 }
@@ -1029,6 +1030,122 @@ fn evaluate_utility(op: UtilityOp, args: &[Value]) -> Result<Value, String> {
                 return Ok(Value::String("NULL".into()));
             }
             Ok(Value::String(format!("{:?}", args[0].logical_type())))
+        }
+    }
+}
+
+// ==================== Schema Functions ====================
+
+/// Evaluate a schema function: OFFSET, ID, START_NODE, END_NODE, LABEL.
+fn evaluate_schema(op: SchemaOp, args: &[Value]) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err(format!("Schema function {:?} requires an argument", op));
+    }
+
+    match op {
+        SchemaOp::Offset => {
+            // OFFSET(v) → returns the internal offset (row number) of a node/rel ID
+            match &args[0] {
+                Value::InternalID(id) => Ok(Value::Int64(id.offset as i64)),
+                Value::Struct(entries) => {
+                    // Try to extract offset from a struct with "_id" field
+                    for (k, v) in entries {
+                        if k == "_id" {
+                            if let Value::InternalID(inner) = v {
+                                return Ok(Value::Int64(inner.offset as i64));
+                            }
+                        }
+                    }
+                    Err("OFFSET: argument struct has no _id field".into())
+                }
+                other => Err(format!(
+                    "OFFSET requires a node/rel value, got {:?}",
+                    other.logical_type()
+                )),
+            }
+        }
+        SchemaOp::Id => {
+            // ID(v) → returns the InternalID (offset + table_id)
+            match &args[0] {
+                Value::InternalID(id) => Ok(Value::InternalID(*id)),
+                Value::Struct(entries) => {
+                    // Try to extract id from a struct with "_id" field
+                    for (k, v) in entries {
+                        if k == "_id" {
+                            return Ok(v.clone());
+                        }
+                    }
+                    Err("ID: argument struct has no _id field".into())
+                }
+                other => Err(format!(
+                    "ID requires a node/rel value, got {:?}",
+                    other.logical_type()
+                )),
+            }
+        }
+        SchemaOp::StartNode => {
+            // START_NODE(r) → returns the source node of a relationship
+            match &args[0] {
+                Value::Struct(entries) => {
+                    for (k, v) in entries {
+                        if k == "_src" {
+                            return Ok(v.clone());
+                        }
+                    }
+                    Err("START_NODE: rel struct has no _src field".into())
+                }
+                other => Err(format!(
+                    "START_NODE requires a relationship value, got {:?}",
+                    other.logical_type()
+                )),
+            }
+        }
+        SchemaOp::EndNode => {
+            // END_NODE(r) → returns the target node of a relationship
+            match &args[0] {
+                Value::Struct(entries) => {
+                    for (k, v) in entries {
+                        if k == "_dst" {
+                            return Ok(v.clone());
+                        }
+                    }
+                    Err("END_NODE: rel struct has no _dst field".into())
+                }
+                other => Err(format!(
+                    "END_NODE requires a relationship value, got {:?}",
+                    other.logical_type()
+                )),
+            }
+        }
+        SchemaOp::Label => {
+            // LABEL(v) → returns the table/label name as a string
+            match &args[0] {
+                Value::String(s) => Ok(Value::String(s.clone())),
+                Value::Struct(entries) => {
+                    // Try _label field first
+                    for (k, v) in entries {
+                        if k == "_label" {
+                            return Ok(v.clone());
+                        }
+                    }
+                    // Fallback: try _id and look up by table_id
+                    for (k, v) in entries {
+                        if k == "_id" {
+                            if let Value::InternalID(id) = v {
+                                return Ok(Value::String(format!("Table({})", id.table_id)));
+                            }
+                        }
+                    }
+                    Err("LABEL: argument struct has no _label field".into())
+                }
+                Value::InternalID(id) => {
+                    Ok(Value::String(format!("Table({})", id.table_id)))
+                }
+                other => Err(format!(
+                    "LABEL requires a node/rel/string value, got {:?}",
+                    other.logical_type()
+                )),
+            }
         }
     }
 }
@@ -2057,5 +2174,120 @@ mod tests {
             Value::Double(x) => assert!((x - 2.66666).abs() < 0.001),
             _ => panic!("Expected double"),
         }
+    }
+
+    // --- Schema function tests ---
+    #[test]
+    fn test_schema_offset_internal_id() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Offset };
+        let id = kuzu_common::types::InternalID { table_id: 1, offset: 42 };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::InternalID(id)]).unwrap(),
+            Value::Int64(42)
+        );
+    }
+
+    #[test]
+    fn test_schema_offset_struct() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Offset };
+        let id = kuzu_common::types::InternalID { table_id: 1, offset: 99 };
+        let node = Value::Struct(vec![("_id".into(), Value::InternalID(id))]);
+        assert_eq!(
+            evaluate_scalar(&func, &[node]).unwrap(),
+            Value::Int64(99)
+        );
+    }
+
+    #[test]
+    fn test_schema_offset_error() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Offset };
+        assert!(evaluate_scalar(&func, &[Value::Int64(42)]).is_err());
+    }
+
+    #[test]
+    fn test_schema_id_internal_id() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Id };
+        let id = kuzu_common::types::InternalID { table_id: 5, offset: 100 };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::InternalID(id)]).unwrap(),
+            Value::InternalID(id)
+        );
+    }
+
+    #[test]
+    fn test_schema_id_from_struct() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Id };
+        let id = kuzu_common::types::InternalID { table_id: 2, offset: 77 };
+        let node = Value::Struct(vec![("_id".into(), Value::InternalID(id))]);
+        assert_eq!(
+            evaluate_scalar(&func, &[node]).unwrap(),
+            Value::InternalID(id)
+        );
+    }
+
+    #[test]
+    fn test_schema_start_end_node() {
+        let start_func = ScalarFunction::Schema { op: SchemaOp::StartNode };
+        let end_func = ScalarFunction::Schema { op: SchemaOp::EndNode };
+        let src_id = kuzu_common::types::InternalID { table_id: 1, offset: 10 };
+        let dst_id = kuzu_common::types::InternalID { table_id: 1, offset: 20 };
+        let rel = Value::Struct(vec![
+            ("_src".into(), Value::InternalID(src_id)),
+            ("_dst".into(), Value::InternalID(dst_id)),
+        ]);
+        assert_eq!(
+            evaluate_scalar(&start_func, &[rel.clone()]).unwrap(),
+            Value::InternalID(src_id)
+        );
+        assert_eq!(
+            evaluate_scalar(&end_func, &[rel]).unwrap(),
+            Value::InternalID(dst_id)
+        );
+    }
+
+    #[test]
+    fn test_schema_label_string() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Label };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("Person".into())]).unwrap(),
+            Value::String("Person".into())
+        );
+    }
+
+    #[test]
+    fn test_schema_label_struct() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Label };
+        let node = Value::Struct(vec![("_label".into(), Value::String("Person".into()))]);
+        assert_eq!(
+            evaluate_scalar(&func, &[node]).unwrap(),
+            Value::String("Person".into())
+        );
+    }
+
+    #[test]
+    fn test_schema_label_internal_id() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Label };
+        let id = kuzu_common::types::InternalID { table_id: 3, offset: 0 };
+        let result = evaluate_scalar(&func, &[Value::InternalID(id)]).unwrap();
+        assert!(matches!(result, Value::String(_)));
+        if let Value::String(s) = result {
+            assert!(s.contains("3"));
+        }
+    }
+
+    #[test]
+    fn test_schema_empty_args() {
+        let func = ScalarFunction::Schema { op: SchemaOp::Label };
+        assert!(evaluate_scalar(&func, &[]).is_err());
+    }
+
+    #[test]
+    fn test_schema_registry_contains() {
+        let reg = FunctionRegistry::new();
+        assert!(reg.contains("OFFSET"));
+        assert!(reg.contains("ID"));
+        assert!(reg.contains("START_NODE"));
+        assert!(reg.contains("END_NODE"));
+        assert!(reg.contains("LABEL"));
     }
 }

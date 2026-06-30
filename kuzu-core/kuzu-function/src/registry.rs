@@ -46,6 +46,9 @@ pub enum ScalarFunction {
     Utility {
         op: UtilityOp,
     },
+    Schema {
+        op: SchemaOp,
+    },
     /// Extension-provided scalar function with a callback closure.
     /// The closure receives input values and returns an output value.
     CustomScalar {
@@ -67,6 +70,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Struct { op } => f.debug_struct("Struct").field("op", op).finish(),
             Self::Boolean { op } => f.debug_struct("Boolean").field("op", op).finish(),
             Self::Utility { op } => f.debug_struct("Utility").field("op", op).finish(),
+            Self::Schema { op } => f.debug_struct("Schema").field("op", op).finish(),
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
         }
     }
@@ -206,6 +210,23 @@ pub enum UtilityOp {
     Coalesce,
     IfNull,
     TypeOf,
+}
+
+/// Schema functions — access metadata about nodes, relationships, and values.
+///
+/// These correspond to the C++ schema functions in `function/schema/`:
+/// - `OFFSET(v)` → returns the internal offset of a node/rel ID (INT64)
+/// - `ID(v)` → returns the internal ID (offset + table_id) as InternalID
+/// - `START_NODE(r)` → returns the source node of a relationship
+/// - `END_NODE(r)` → returns the target node of a relationship
+/// - `LABEL(v)` → returns the table name as a string
+#[derive(Debug, Clone, Copy)]
+pub enum SchemaOp {
+    Offset,
+    Id,
+    StartNode,
+    EndNode,
+    Label,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -514,6 +535,13 @@ impl FunctionRegistry {
         );
         self.register_scalar("ifnull", ScalarFunction::Utility { op: UtilityOp::IfNull });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
+
+        // --- Schema ---
+        self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
+        self.register_scalar("ID", ScalarFunction::Schema { op: SchemaOp::Id });
+        self.register_scalar("START_NODE", ScalarFunction::Schema { op: SchemaOp::StartNode });
+        self.register_scalar("END_NODE", ScalarFunction::Schema { op: SchemaOp::EndNode });
+        self.register_scalar("LABEL", ScalarFunction::Schema { op: SchemaOp::Label });
 
         // --- Aggregate ---
         self.register_aggregate("COUNT", AggregateFunction::Count);
