@@ -962,13 +962,15 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     1000
                 }
                 LogicalOperator::VectorSimilarityScan(vs) => vs.top_k,
-                LogicalOperator::CopyFrom(_) => 0,
-                LogicalOperator::Delete(_) => 0,
-                LogicalOperator::Set(_) => 0,
-                LogicalOperator::OptionalMatch(_) => 0,
-                LogicalOperator::Unwind(_) => 0,
-                LogicalOperator::Foreach(_) => 0,
-                LogicalOperator::Merge(_) => 0,
+                LogicalOperator::CopyFrom(_) => 10000, // batch insert
+                LogicalOperator::Delete(_) => 1000,     // estimated rows affected
+                LogicalOperator::Set(_) => 1000,        // estimated rows updated
+                LogicalOperator::OptionalMatch(om) => {
+                    om.left.cardinality() // same as left (nullable)
+                }
+                LogicalOperator::Unwind(_) => 10, // list expansion estimate
+                LogicalOperator::Foreach(_) => 1,
+                LogicalOperator::Merge(_) => 1,   // single matched/created node
             };
             op.set_cardinality(card);
         });
@@ -1738,5 +1740,94 @@ mod tests {
         // Both ScanNodes get default cardinality of 1000.
         // Cross product: 1000 * 1000 = 1,000,000
         assert_eq!(root.cardinality(), 1_000_000);
+    }
+}
+
+// ========================================================================
+// Pass 10: Limit Push-Down
+// Pushes Limit operators below Filter/Projection when safe.
+// ========================================================================
+
+pub struct LimitPushDown;
+
+impl OptimizationPass for LimitPushDown {
+    fn name(&self) -> &str {
+        "limit_push_down"
+    }
+
+    fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
+        let mut result: Vec<LogicalOperator> = Vec::with_capacity(operators.len());
+        let mut i = 0;
+        while i < operators.len() {
+            if i + 1 < operators.len() {
+                if matches!(operators[i], LogicalOperator::Limit(_))
+                    && matches!(operators[i + 1], LogicalOperator::Filter(_))
+                {
+                    // Swap: push Limit below Filter
+                    result.push(operators[i + 1].clone()); // Filter first
+                    result.push(operators[i].clone());     // then Limit
+                    i += 2;
+                    continue;
+                }
+                if matches!(operators[i], LogicalOperator::Limit(_))
+                    && matches!(operators[i + 1], LogicalOperator::Projection(_))
+                {
+                    // Swap: push Limit below Projection (safe for simple projections)
+                    result.push(operators[i + 1].clone());
+                    result.push(operators[i].clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            result.push(operators[i].clone());
+            i += 1;
+        }
+        result
+    }
+}
+
+// ========================================================================
+// Pass 11: Common Subexpression Elimination (CSE)
+// Detects duplicate expressions in Projection and caches results.
+// ========================================================================
+
+pub struct CommonSubexpressionElimination;
+
+impl OptimizationPass for CommonSubexpressionElimination {
+    fn name(&self) -> &str {
+        "common_subexpression_elimination"
+    }
+
+    fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
+        operators.iter().map(|op| {
+            match op {
+                LogicalOperator::Projection(p) => {
+                    // Check for duplicate expressions
+                    let mut seen_exprs: Vec<&kuzu_binder::bound_statement::BoundExpression> = Vec::new();
+                    let mut unique_exprs: Vec<kuzu_binder::bound_statement::BoundExpression> = Vec::new();
+                    let mut mapping: Vec<usize> = Vec::new();
+                    for expr in &p.expressions {
+                        if let Some(pos) = seen_exprs.iter().position(|e| e.expression == expr.expression) {
+                            mapping.push(pos);
+                        } else {
+                            seen_exprs.push(expr);
+                            unique_exprs.push(expr.clone());
+                            mapping.push(unique_exprs.len() - 1);
+                        }
+                    }
+                    // Only rewrite if dedup happened
+                    if unique_exprs.len() < p.expressions.len() {
+                        LogicalOperator::Projection(LogicalProjection {
+                            expressions: unique_exprs,
+                            children: p.children.clone(),
+                            cardinality: p.cardinality,
+                        })
+                    } else {
+                        op.clone()
+                    }
+                }
+                _ => op.clone(),
+            }
+        }).collect()
     }
 }

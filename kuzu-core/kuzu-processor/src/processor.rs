@@ -102,10 +102,13 @@ impl QueryProcessor {
                 }
                 LogicalOperator::ScanRel(s) => {
                     let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
-                    let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
-                    if let Some(d) = data {
-                        scan = scan.with_data(d, columns);
-                    }
+                    let scan = PhysicalScanRel {
+                        table_name: s.table_name.clone(),
+                        table_id: s.table_id,
+                        direction: s.direction.clone(),
+                        table_data: data,
+                        table_columns: columns,
+                    };
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }

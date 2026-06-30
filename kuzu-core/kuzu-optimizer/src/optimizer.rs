@@ -38,6 +38,10 @@ impl Optimizer {
             Box::new(VectorSimilarityDetection),
             // Pass 9: Detect range scans on PK columns with ART index
             Box::new(ArtRangeScanDetection),
+            // Pass 10: Push Limit below Filter/Projection (reduces data early)
+            Box::new(LimitPushDown),
+            // Pass 11: Eliminate duplicate expressions in projections
+            Box::new(CommonSubexpressionElimination),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
@@ -60,6 +64,8 @@ impl Optimizer {
             Box::new(TopKOptimization),
             Box::new(VectorSimilarityDetection),
             Box::new(ArtRangeScanDetection),
+            Box::new(LimitPushDown),
+            Box::new(CommonSubexpressionElimination),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
@@ -123,7 +129,9 @@ mod tests {
         assert!(names.contains(&"aggregate_detection"));
         assert!(names.contains(&"vector_similarity_detection"));
         assert!(names.contains(&"art_range_scan_detection"));
-        assert_eq!(names.len(), 11);
+        assert!(names.contains(&"limit_push_down"));
+        assert!(names.contains(&"common_subexpression_elimination"));
+        assert_eq!(names.len(), 13);
     }
 
     #[test]
