@@ -27,6 +27,8 @@ pub enum LogicalOperator {
     Unwind(LogicalUnwind),
     Foreach(LogicalForeach),
     Merge(LogicalMerge),
+    SemiJoin(LogicalSemiJoin),
+    AntiJoin(LogicalAntiJoin),
 }
 
 impl LogicalOperator {
@@ -54,6 +56,8 @@ impl LogicalOperator {
             LogicalOperator::Unwind(s) => s.cardinality,
             LogicalOperator::Foreach(s) => s.cardinality,
             LogicalOperator::Merge(s) => s.cardinality,
+            LogicalOperator::SemiJoin(s) => s.cardinality,
+            LogicalOperator::AntiJoin(s) => s.cardinality,
         }
     }
 
@@ -81,6 +85,8 @@ impl LogicalOperator {
             LogicalOperator::Unwind(s) => s.cardinality = card,
             LogicalOperator::Foreach(s) => s.cardinality = card,
             LogicalOperator::Merge(s) => s.cardinality = card,
+            LogicalOperator::SemiJoin(s) => s.cardinality = card,
+            LogicalOperator::AntiJoin(s) => s.cardinality = card,
         }
     }
 
@@ -106,6 +112,8 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
             LogicalOperator::OptionalMatch(s) => vec![&mut *s.left, &mut *s.right],
+            LogicalOperator::SemiJoin(s) => vec![&mut *s.left, &mut *s.right],
+            LogicalOperator::AntiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -134,6 +142,8 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
             LogicalOperator::OptionalMatch(s) => vec![&*s.left, &*s.right],
+            LogicalOperator::SemiJoin(s) => vec![&*s.left, &*s.right],
+            LogicalOperator::AntiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -206,6 +216,26 @@ pub struct LogicalHashJoin {
     pub join_keys: Vec<Expression>,
     pub build_side: Box<LogicalOperator>,
     pub probe_side: Box<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// Semi-join: returns left rows that have a matching key in the right side.
+/// Like HashJoin but only emits left columns for matching rows.
+#[derive(Debug, Clone)]
+pub struct LogicalSemiJoin {
+    pub join_keys: Vec<Expression>,
+    pub left: Box<LogicalOperator>,
+    pub right: Box<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// Anti-join: returns left rows that have NO matching key in the right side.
+/// Like SemiJoin but inverts the match condition.
+#[derive(Debug, Clone)]
+pub struct LogicalAntiJoin {
+    pub join_keys: Vec<Expression>,
+    pub left: Box<LogicalOperator>,
+    pub right: Box<LogicalOperator>,
     pub cardinality: u64,
 }
 

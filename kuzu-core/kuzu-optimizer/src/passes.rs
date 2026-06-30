@@ -788,6 +788,14 @@ impl TreeOptimizationPass for FactorizationRewriting {
                     Self::append_flattens(&mut cp.left, &[0]);
                     Self::append_flattens(&mut cp.right, &[0]);
                 }
+                LogicalOperator::SemiJoin(sj) => {
+                    Self::append_flattens(&mut sj.left, &[0]);
+                    Self::append_flattens(&mut sj.right, &[0]);
+                }
+                LogicalOperator::AntiJoin(aj) => {
+                    Self::append_flattens(&mut aj.left, &[0]);
+                    Self::append_flattens(&mut aj.right, &[0]);
+                }
                 // Leaf and Flatten operators: no transformation needed
                 LogicalOperator::ArtIndexRangeScan(_)
                 | LogicalOperator::ScanNode(_)
@@ -914,6 +922,15 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     let left_card = cp.left.cardinality();
                     let right_card = cp.right.cardinality();
                     std::cmp::max(1, left_card * right_card)
+                }
+                LogicalOperator::SemiJoin(sj) => {
+                    let left_card = sj.left.cardinality();
+                    let right_card = sj.right.cardinality();
+                    std::cmp::min(left_card, right_card)
+                }
+                LogicalOperator::AntiJoin(aj) => {
+                    let left_card = aj.left.cardinality();
+                    std::cmp::max(1, (left_card as f64 * 0.1) as u64)
                 }
                 LogicalOperator::Projection(p) => p.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::OrderBy(o) => o.children.first().map(|c| c.cardinality()).unwrap_or(1),

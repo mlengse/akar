@@ -1021,6 +1021,178 @@ impl PhysicalOperatorExec for PhysicalCrossProduct {
     }
 }
 
+// ==================== SemiJoin ====================
+
+/// Physical semi-join: Returns left rows that have a matching join key in the right side.
+/// Only left-side columns are emitted (no right columns in output).
+pub struct PhysicalSemiJoin {
+    pub build_columns: Vec<u32>,
+    pub probe_columns: Vec<u32>,
+}
+
+impl PhysicalOperatorExec for PhysicalSemiJoin {
+    fn operator_type(&self) -> &str {
+        "semi_join"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        if input.len() < 2 {
+            return Ok(input);
+        }
+        let mid = input.len() / 2;
+        let build_chunks = &input[..mid];
+        let probe_chunks = &input[mid..];
+
+        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
+        let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
+
+        // Build hash set of right-side keys
+        let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for chunk in build_chunks {
+            for row in 0..chunk.size {
+                if let Some(field) = chunk.fields.get(build_col) {
+                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) { continue; }
+                    hash_set.insert(value_hash(&key));
+                }
+            }
+        }
+
+        // Probe: emit left rows whose key is in hash_set
+        let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
+        if let Some(first) = probe_chunks.first() {
+            for col in 0..first.num_fields() {
+                probe_types.push(first.field(col).physical_type());
+            }
+        }
+
+        // Count matching rows first
+        let mut match_rows: Vec<(usize, usize)> = Vec::new();
+        for (ci, chunk) in probe_chunks.iter().enumerate() {
+            for row in 0..chunk.size {
+                if let Some(field) = chunk.fields.get(probe_col) {
+                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) { continue; }
+                    if hash_set.contains(&value_hash(&key)) {
+                        match_rows.push((ci, row));
+                    }
+                }
+            }
+        }
+
+        if match_rows.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Build output with only left-side columns
+        let num_left_cols = probe_types.len();
+        let mut output_fields: Vec<ValueVector> = probe_types
+            .iter()
+            .map(|t| ValueVector::new(*t, match_rows.len().max(1)))
+            .collect();
+
+        for (out_idx, (ci, row)) in match_rows.iter().enumerate() {
+            if let Some(chunk) = probe_chunks.get(*ci) {
+                for col in 0..num_left_cols {
+                    if let Some(field) = chunk.fields.get(col) {
+                        let val = field.get_value(*row).unwrap_or(Value::Null);
+                        let _ = output_fields[col].set_value(out_idx, &val);
+                    }
+                }
+            }
+        }
+        for field in &mut output_fields {
+            field.resize(match_rows.len());
+        }
+        Ok(vec![DataChunk { fields: output_fields, size: match_rows.len() }])
+    }
+}
+
+// ==================== AntiJoin ====================
+
+/// Physical anti-join: Returns left rows that have NO matching join key in the right side.
+/// Only left-side columns are emitted.
+pub struct PhysicalAntiJoin {
+    pub build_columns: Vec<u32>,
+    pub probe_columns: Vec<u32>,
+}
+
+impl PhysicalOperatorExec for PhysicalAntiJoin {
+    fn operator_type(&self) -> &str {
+        "anti_join"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        if input.len() < 2 {
+            return Ok(input);
+        }
+        let mid = input.len() / 2;
+        let build_chunks = &input[..mid];
+        let probe_chunks = &input[mid..];
+
+        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
+        let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
+
+        // Build hash set of right-side keys
+        let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for chunk in build_chunks {
+            for row in 0..chunk.size {
+                if let Some(field) = chunk.fields.get(build_col) {
+                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) { continue; }
+                    hash_set.insert(value_hash(&key));
+                }
+            }
+        }
+
+        let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
+        if let Some(first) = probe_chunks.first() {
+            for col in 0..first.num_fields() {
+                probe_types.push(first.field(col).physical_type());
+            }
+        }
+
+        // Probe: emit left rows whose key is NOT in hash_set
+        let mut non_match_rows: Vec<(usize, usize)> = Vec::new();
+        for (ci, chunk) in probe_chunks.iter().enumerate() {
+            for row in 0..chunk.size {
+                if let Some(field) = chunk.fields.get(probe_col) {
+                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) { continue; }
+                    if !hash_set.contains(&value_hash(&key)) {
+                        non_match_rows.push((ci, row));
+                    }
+                }
+            }
+        }
+
+        if non_match_rows.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let num_left_cols = probe_types.len();
+        let mut output_fields: Vec<ValueVector> = probe_types
+            .iter()
+            .map(|t| ValueVector::new(*t, non_match_rows.len().max(1)))
+            .collect();
+
+        for (out_idx, (ci, row)) in non_match_rows.iter().enumerate() {
+            if let Some(chunk) = probe_chunks.get(*ci) {
+                for col in 0..num_left_cols {
+                    if let Some(field) = chunk.fields.get(col) {
+                        let val = field.get_value(*row).unwrap_or(Value::Null);
+                        let _ = output_fields[col].set_value(out_idx, &val);
+                    }
+                }
+            }
+        }
+        for field in &mut output_fields {
+            field.resize(non_match_rows.len());
+        }
+        Ok(vec![DataChunk { fields: output_fields, size: non_match_rows.len() }])
+    }
+}
+
 // ==================== HashJoin ====================
 
 pub struct PhysicalHashJoin {

@@ -76,6 +76,14 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::SemiJoin(sj) => {
+            collect_scans_recursive(&sj.left, scans);
+            collect_scans_recursive(&sj.right, scans);
+        }
+        LogicalOperator::AntiJoin(aj) => {
+            collect_scans_recursive(&aj.left, scans);
+            collect_scans_recursive(&aj.right, scans);
+        }
         LogicalOperator::ArtIndexRangeScan(_)
         | LogicalOperator::VectorSimilarityScan(_)
         | LogicalOperator::CopyFrom(_)

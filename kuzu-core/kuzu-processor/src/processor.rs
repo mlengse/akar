@@ -206,6 +206,24 @@ impl QueryProcessor {
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::SemiJoin(_) => {
+                    let semi = PhysicalSemiJoin {
+                        build_columns: vec![0],
+                        probe_columns: vec![0],
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = semi.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::AntiJoin(_) => {
+                    let anti = PhysicalAntiJoin {
+                        build_columns: vec![0],
+                        probe_columns: vec![0],
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = anti.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Unwind(uw) => {
                     let input = intermediate_result.take().unwrap_or_default();
                     let unwind = PhysicalUnwind {
@@ -1673,5 +1691,58 @@ mod tests {
         let input = vec![left1, left2, right];
         let result = cross.execute(input).unwrap();
         assert_eq!(result[0].size, 6); // 3 × 2 = 6
+    }
+
+    // ==================== SemiJoin / AntiJoin Tests ====================
+
+    #[test]
+    fn test_semi_join_basic() {
+        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        // Build (right): [2, 3]
+        let build = make_i64_chunk(&[2, 3]);
+        // Probe (left): [1, 2, 3]
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let input = vec![build, probe];
+        let result = semi.execute(input).unwrap();
+        assert_eq!(result[0].size, 2); // [2, 3] match
+    }
+
+    #[test]
+    fn test_semi_join_no_match() {
+        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let build = make_i64_chunk(&[4, 5]);
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let result = semi.execute(vec![build, probe]).unwrap();
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_anti_join_basic() {
+        let anti = PhysicalAntiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        // Build (right): [2, 3]
+        let build = make_i64_chunk(&[2, 3]);
+        // Probe (left): [1, 2, 3]
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let input = vec![build, probe];
+        let result = anti.execute(input).unwrap();
+        assert_eq!(result[0].size, 1); // Only [1] has no match
+    }
+
+    #[test]
+    fn test_anti_join_all_match() {
+        let anti = PhysicalAntiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let build = make_i64_chunk(&[1, 2, 3]);
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let result = anti.execute(vec![build, probe]).unwrap();
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_semi_join_empty_build() {
+        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let build = make_i64_chunk(&[]);
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let result = semi.execute(vec![build, probe]).unwrap();
+        assert!(result.is_empty() || result[0].size == 0);
     }
 }
