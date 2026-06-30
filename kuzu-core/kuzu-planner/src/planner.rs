@@ -22,6 +22,7 @@ impl QueryPlanner {
         match statement {
             BoundStatement::BoundQuery(query) => self.plan_query(query),
             BoundStatement::BoundCopyFrom(c) => self.plan_copy_from(c),
+            BoundStatement::BoundUnion(u) => self.plan_union(u),
             _ => Ok(Vec::new()),
         }
     }
@@ -32,6 +33,44 @@ impl QueryPlanner {
             table_id: c.table_id,
             file_path: c.file_path,
             options: c.options,
+            cardinality: 0,
+        })])
+    }
+
+    /// Plan a UNION or UNION ALL statement.
+    ///
+    /// Plans left and right sub-queries independently, then wraps each
+    /// side's pipeline (potentially multiple operators) into a synthetic
+    /// projection root so that `LogicalUnion` can store them as tree children.
+    fn plan_union(&self, u: BoundUnion) -> Result<Vec<LogicalOperator>, String> {
+        let left_plan = self.plan_query(*u.left)?;
+        let right_plan = self.plan_query(*u.right)?;
+
+        let left_op = if left_plan.len() == 1 {
+            left_plan.into_iter().next().unwrap()
+        } else {
+            // Wrap multi-operator pipeline in a projection root
+            LogicalOperator::Projection(LogicalProjection {
+                expressions: Vec::new(),
+                children: left_plan,
+                cardinality: 0,
+            })
+        };
+
+        let right_op = if right_plan.len() == 1 {
+            right_plan.into_iter().next().unwrap()
+        } else {
+            LogicalOperator::Projection(LogicalProjection {
+                expressions: Vec::new(),
+                children: right_plan,
+                cardinality: 0,
+            })
+        };
+
+        Ok(vec![LogicalOperator::Union(LogicalUnion {
+            left: Box::new(left_op),
+            right: Box::new(right_op),
+            all: u.all,
             cardinality: 0,
         })])
     }

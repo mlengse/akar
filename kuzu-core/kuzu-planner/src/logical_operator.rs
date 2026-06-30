@@ -238,6 +238,7 @@ pub struct LogicalAggregate {
 pub struct LogicalUnion {
     pub left: Box<LogicalOperator>,
     pub right: Box<LogicalOperator>,
+    pub all: bool,
     pub cardinality: u64,
 }
 
