@@ -13,4 +13,3 @@ thiserror.workspace = true
 hashbrown.workspace = true
 regex.workspace = true
 time.workspace = true
-rand.workspace = true

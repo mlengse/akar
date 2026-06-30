@@ -130,7 +130,25 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             Ok(Value::Double(std::f64::consts::PI))
         }
         ArithmeticOp::Rand => {
-            Ok(Value::Double(rand::random::<f64>()))
+            // Simple LCG using std::time as seed (WASM-compatible, no external dep)
+            use std::cell::Cell;
+            use std::time::SystemTime;
+            thread_local! {
+                static RNG_STATE: Cell<u64> = Cell::new(
+                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(12345)
+                );
+            }
+            let val = RNG_STATE.with(|state| {
+                let old = state.get();
+                // LCG constants (Numerical Recipes)
+                let new = old.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                state.set(new);
+                // Convert to f64 in [0, 1)
+                (new >> 11) as f64 / (1u64 << 53) as f64
+            });
+            Ok(Value::Double(val))
         }
         ArithmeticOp::Power => {
             if args.len() < 2 {
