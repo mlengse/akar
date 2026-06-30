@@ -44,6 +44,7 @@ pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
 pub use shadow_file::ShadowFile;
+pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 
 /// The storage manager — root of the storage engine.

@@ -193,9 +193,7 @@ impl Spiller {
             values.push(value);
         }
 
-        let mut chunk = ColumnChunk::from(values);
-        // Ensure the restored chunk reports the correct number of nodes
-        // (ColumnChunk::from sets capacity = max(num_values, NODE_GROUP_SIZE))
+        let chunk = ColumnChunk::from(values);
         Ok(chunk)
     }
 
@@ -526,8 +524,6 @@ enum MergeSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::column_chunk::NODE_GROUP_SIZE;
-
     #[test]
     fn test_spill_and_restore_single_column() {
         let tmp = tempfile::tempdir().unwrap();

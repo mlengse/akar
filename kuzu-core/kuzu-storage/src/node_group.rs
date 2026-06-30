@@ -12,8 +12,10 @@
 
 use crate::column::Column;
 use crate::column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
+use crate::spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 use crate::version_info::VersionInfo;
 use kuzu_common::types::Value;
+use std::sync::Arc;
 
 /// A node group stores up to `NODE_GROUP_SIZE` rows in columnar format.
 ///
@@ -23,6 +25,13 @@ use kuzu_common::types::Value;
 ///
 /// `version_info` tracks MVCC insert/delete visibility for concurrent
 /// writers. It is `None` for single-writer mode (backward compat).
+///
+/// # Disk Spilling
+///
+/// When `spiller` is set and the memory threshold is exceeded, the group
+/// automatically spills its contents to temp files during `append_row()`.
+/// After ingestion is complete, call `flush_with_spiller()` instead of
+/// `flush()` to merge all spills + final in-memory data into the columns.
 #[derive(Debug, Clone)]
 pub struct NodeGroup {
     /// One in-memory ColumnChunk per column of the table.
@@ -33,6 +42,12 @@ pub struct NodeGroup {
     pub num_nodes: u64,
     /// Optional MVCC version tracker for this group.
     pub version_info: Option<VersionInfo>,
+    /// Optional spiller for disk-based memory management.
+    #[allow(dead_code)]
+    spiller: Option<Arc<Spiller>>,
+    /// List of spill files created during append operations.
+    #[allow(dead_code)]
+    spill_files: Vec<SpillFile>,
 }
 
 impl NodeGroup {
@@ -48,6 +63,8 @@ impl NodeGroup {
             start_offset,
             num_nodes: 0,
             version_info: None,
+            spiller: None,
+            spill_files: Vec::new(),
         }
     }
 
@@ -59,7 +76,25 @@ impl NodeGroup {
             start_offset,
             num_nodes: 0,
             version_info: None,
+            spiller: None,
+            spill_files: Vec::new(),
         }
+    }
+
+    /// Attach a spiller to this node group for disk-based memory management.
+    ///
+    /// When a spiller is attached, `append_row()` automatically spills the
+    /// current buffer to disk when the memory threshold is exceeded, then
+    /// continues appending. Call `flush_with_spiller()` instead of `flush()`
+    /// to merge all spill files + final in-memory data.
+    pub fn with_spiller(mut self, spiller: Arc<Spiller>) -> Self {
+        self.spiller = Some(spiller);
+        self
+    }
+
+    /// Set the spiller on an existing node group.
+    pub fn set_spiller(&mut self, spiller: Arc<Spiller>) {
+        self.spiller = Some(spiller);
     }
 
     /// Enable MVCC version tracking for this node group.
@@ -86,6 +121,11 @@ impl NodeGroup {
     }
 
     /// Append a row with an optional transaction ID for MVCC tracking.
+    ///
+    /// If a spiller is attached and the in-memory data exceeds the configured
+    /// memory threshold, the current buffer is automatically spilled to disk
+    /// before appending the new row. This keeps memory usage bounded during
+    /// large batch operations like `COPY FROM`.
     pub fn append_row_with_txn(&mut self, row: Vec<Value>, txn_id: Option<u64>) -> Result<(), String> {
         if row.len() != self.columns.len() {
             return Err(format!(
@@ -97,6 +137,14 @@ impl NodeGroup {
         if self.is_full() {
             return Err("node group is already full".to_string());
         }
+
+        // Auto-spill if the memory threshold is exceeded
+        if let Some(ref spiller) = self.spiller {
+            if !self.columns.is_empty() && spiller.should_spill(&self.columns[0]) {
+                self.spill_and_clear()?;
+            }
+        }
+
         for (col_idx, value) in row.into_iter().enumerate() {
             self.columns[col_idx].append(value);
         }
@@ -108,6 +156,91 @@ impl NodeGroup {
         }
         self.num_nodes += 1;
         Ok(())
+    }
+
+    /// Spill all column chunks to disk and reset the group to empty.
+    ///
+    /// The spill file is tracked so that `flush_with_spiller()` can later
+    /// merge all spilled data back into the persistent columns.
+    pub fn spill_and_clear(&mut self) -> Result<(), String> {
+        let spiller = self
+            .spiller
+            .as_ref()
+            .ok_or_else(|| "No spiller attached to NodeGroup".to_string())?;
+
+        if self.is_empty() {
+            return Ok(());
+        }
+
+        let spill = spiller.spill_columns(&mut self.columns)?;
+        if let Some(sf) = spill {
+            self.spill_files.push(sf);
+        }
+        self.num_nodes = 0;
+        Ok(())
+    }
+
+    /// Flush all data to persistent columns, merging any spilled data.
+    ///
+    /// This is the spill-aware alternative to `flush()`. It merges all
+    /// previously spilled files + the current in-memory buffer into the
+    /// target columns using a streaming merge. If no spilling occurred,
+    /// this falls back to the regular `flush()`.
+    ///
+    /// The optional `sort_key_column` is the column index to use for
+    /// merge ordering and PK deduplication. Pass `None` for unordered
+    /// append (no dedup).
+    pub fn flush_with_spiller(
+        &mut self,
+        columns: &mut [Column],
+        sort_key_column: Option<usize>,
+        dedup: bool,
+    ) -> std::io::Result<usize> {
+        if self.spill_files.is_empty() {
+            // No spilling occurred — regular flush
+            return self.flush(columns);
+        }
+
+        assert_eq!(
+            columns.len(),
+            self.columns.len(),
+            "NodeGroup::flush_with_spiller: column count mismatch"
+        );
+
+        // Capture in-memory rows before clearing
+        let in_memory_rows = self.scan();
+        self.clear();
+
+        // Build the merger
+        let sort_col = sort_key_column.unwrap_or(0);
+        let mut merger = MultiWayStreamMerge::new(
+            &self.spill_files,
+            Some(in_memory_rows),
+            sort_col,
+            dedup,
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Stream all merged rows into the target columns
+        let mut total: usize = 0;
+        while let Some(row) = merger.next() {
+            for (col_idx, value) in row.into_iter().enumerate() {
+                if col_idx < columns.len() {
+                    columns[col_idx].append_value(&value)?;
+                }
+            }
+            total += 1;
+        }
+
+        // Clean up spill files
+        if let Some(ref spiller) = self.spiller {
+            let files = std::mem::take(&mut self.spill_files);
+            for sf in &files {
+                let _ = spiller.cleanup(sf);
+            }
+        }
+
+        Ok(total)
     }
 
     /// Whether the group has reached capacity.

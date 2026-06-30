@@ -9,6 +9,7 @@ use kuzu_storage::StorageManager;
 use kuzu_storage::stats::StatsStore;
 use kuzu_transaction::TransactionManager;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Configuration for the database.
@@ -24,6 +25,16 @@ pub struct SystemConfig {
     /// When true, multiple write transactions can run concurrently.
     /// When false, only one write transaction at a time is allowed.
     pub concurrent_writes: bool,
+    /// Memory threshold (in bytes) for triggering disk spilling during
+    /// bulk ingest (COPY FROM, large batch inserts).
+    ///
+    /// When a NodeGroup's estimated in-memory size exceeds this value,
+    /// its data is spilled to a temp file and the in-memory buffer is
+    /// cleared. After all rows are ingested, spilled files are merged
+    /// back into persistent storage.
+    ///
+    /// Default: 80% of `buffer_pool_size`. Set to 0 to disable spilling.
+    pub spill_threshold: u64,
 }
 
 impl Default for SystemConfig {
@@ -37,6 +48,8 @@ impl Default for SystemConfig {
             auto_checkpoint: true,
             checkpoint_threshold: -1,
             concurrent_writes: true,
+            // Default: 80% of buffer_pool_size, or 0 if not set
+            spill_threshold: 0,
         }
     }
 }
@@ -54,11 +67,51 @@ pub struct Database {
     pub(crate) stats_store: Arc<Mutex<StatsStore>>,
     /// Configuration used at database creation time.
     pub(crate) config: SystemConfig,
+    /// Runtime-overridable spill threshold via `SET spill_threshold`.
+    /// 0 means "use config default".
+    spill_threshold_override: AtomicU64,
 }
 
 impl Database {
-    /// Get the table catalog for programmatic data access.
-    /// Get the catalog (table schema definitions).
+    /// Override the spill threshold at runtime (via `SET spill_threshold`).
+    pub fn set_spill_threshold(&self, bytes: u64) {
+        self.spill_threshold_override.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Get the effective spill threshold in bytes.
+    ///
+    /// Priority:
+    /// 1. Runtime override (via `SET spill_threshold`)
+    /// 2. `config.spill_threshold`
+    /// 3. 80% of `buffer_pool_size`
+    /// 4. 0 (disabled)
+    pub fn effective_spill_threshold(&self) -> u64 {
+        let override_val = self.spill_threshold_override.load(Ordering::Relaxed);
+        if override_val > 0 {
+            return override_val;
+        }
+        if self.config.spill_threshold > 0 {
+            return self.config.spill_threshold;
+        }
+        if self.config.buffer_pool_size > 0 {
+            return (self.config.buffer_pool_size as f64 * 0.8) as u64;
+        }
+        0
+    }
+
+    /// Create a `Spiller` instance using the current database configuration.
+    ///
+    /// Returns `None` if spilling is disabled (threshold is 0).
+    pub fn spiller(&self) -> Option<std::sync::Arc<kuzu_storage::Spiller>> {
+        let threshold = self.effective_spill_threshold();
+        if threshold == 0 {
+            return None;
+        }
+        let spill_dir = self.storage_manager.db_path().join("spill");
+        Some(std::sync::Arc::new(kuzu_storage::Spiller::new(spill_dir, threshold)))
+    }
+
+    /// Get a reference to the table catalog for programmatic data access.
     pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
         self.catalog.clone()
     }
@@ -90,6 +143,7 @@ impl Database {
             memory_manager,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
+            spill_threshold_override: AtomicU64::new(0),
             config,
         };
 

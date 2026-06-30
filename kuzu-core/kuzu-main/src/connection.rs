@@ -230,6 +230,22 @@ impl Connection {
             return Ok(QueryResult::success_message("Checkpoint completed".into()));
         }
 
+        // Handle SET spill_threshold
+        if let Some(value) = trimmed
+            .strip_prefix("SET")
+            .and_then(|s| s.trim().strip_prefix("spill_threshold"))
+            .and_then(|s| s.trim().strip_prefix("="))
+            .map(|s| s.trim())
+        {
+            let bytes: u64 = value
+                .parse()
+                .map_err(|_| format!("Invalid spill_threshold value '{value}'. Expected a positive integer (bytes)."))?;
+            self.database.set_spill_threshold(bytes);
+            return Ok(QueryResult::success_message(format!(
+                "spill_threshold set to {bytes} bytes"
+            )));
+        }
+
         if let Some(value) = trimmed
             .strip_prefix("SET")
             .and_then(|s| s.trim().strip_prefix("concurrent_writes"))
