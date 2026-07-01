@@ -46,7 +46,9 @@ impl Optimizer {
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
             Box::new(FactorizationRewriting),
-            // Tree pass 2: Annotate operators with estimated row counts (static heuristics)
+            // Tree pass 2: Remove redundant GROUP BY keys (functional dependency analysis)
+            Box::new(AggKeyDependency),
+            // Tree pass 3: Annotate operators with estimated row counts (static heuristics)
             Box::new(CardinalityEstimation::new(None)),
         ];
         Self { passes, tree_passes }
@@ -69,6 +71,8 @@ impl Optimizer {
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
+            // Remove redundant GROUP BY keys (functional dependency analysis)
+            Box::new(AggKeyDependency),
             // Use storage-backed cardinality estimation with real stats
             Box::new(CardinalityEstimation::new(Some(stats))),
         ];
@@ -131,7 +135,8 @@ mod tests {
         assert!(names.contains(&"art_range_scan_detection"));
         assert!(names.contains(&"limit_push_down"));
         assert!(names.contains(&"common_subexpression_elimination"));
-        assert_eq!(names.len(), 13);
+        assert!(names.contains(&"agg_key_dependency"));
+        assert_eq!(names.len(), 14);
     }
 
     #[test]

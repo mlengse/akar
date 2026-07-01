@@ -1236,12 +1236,124 @@ fn fold_query(query: &kuzu_parser::ast::Query) -> kuzu_parser::ast::Query {
     kuzu_parser::ast::Query { clauses }
 }
 
+// ========================================================================
+// Pass: Agg Key Dependency Optimization
+// Removes redundant GROUP BY keys that are functionally dependent on others.
+//
+// Ported from C++ `agg_key_dependency_optimizer.cpp`.
+//
+// If a GROUP BY contains both `a.id` (the primary key) and `a.name`,
+// then `a.name` is functionally dependent on `a.id` and can be removed.
+// This reduces the hash table size in the aggregate operator.
+//
+// Uses a naming heuristic: properties named "id", "_id", "ID" etc.
+// are treated as primary keys. Other properties of the same variable
+// are removed from GROUP BY.
+// ========================================================================
+
+pub struct AggKeyDependency;
+
+impl AggKeyDependency {
+    /// Check if a property name looks like a primary key identifier.
+    fn is_id_property(name: &str) -> bool {
+        matches!(name.to_lowercase().as_str(), "id" | "_id")
+    }
+}
+
+impl TreeOptimizationPass for AggKeyDependency {
+    fn name(&self) -> &str {
+        "agg_key_dependency"
+    }
+
+    fn apply_tree(&self, root: &mut LogicalOperator) {
+        LogicalOperator::visit_bottom_up(root, &mut |op| {
+            if let LogicalOperator::Aggregate(agg) = op {
+                if agg.group_by.len() <= 1 {
+                    return; // Nothing to optimize
+                }
+
+                let original_count = agg.group_by.len();
+
+                // Phase 1: Identify which PropertyAccess expressions are "keys"
+                // (primary identifiers) and which are "dependent" (redundant).
+                // A key is one where:
+                //   - The property is named "id", "_id", "ID" (heuristic PK), OR
+                //   - It's the first PropertyAccess encountered for that variable
+                //
+                // Every other PropertyAccess for the same variable is dependent
+                // (functionally determined by the key).
+
+                // Maps variable → property names that are keys
+                let mut var_key_props: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+
+                // First pass: find ID properties (these take priority as keys)
+                for key in &agg.group_by {
+                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key {
+                        if let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref() {
+                            if Self::is_id_property(prop) {
+                                var_key_props.entry(var.clone()).or_insert_with(|| prop.clone());
+                            }
+                        }
+                    }
+                }
+
+                // Second pass: for variables without an ID property, use the first
+                // PropertyAccess as the key.
+                for key in &agg.group_by {
+                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key {
+                        if let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref() {
+                            if !var_key_props.contains_key(var) {
+                                var_key_props.insert(var.clone(), prop.clone());
+                            }
+                        }
+                    }
+                }
+
+                // Phase 2: Filter keys — keep key expressions and non-property
+                // expressions. Remove dependent property expressions.
+                let mut new_keys: Vec<kuzu_parser::ast::Expression> = Vec::new();
+                for key in agg.group_by.drain(..) {
+                    let is_dependent = match &key {
+                        kuzu_parser::ast::Expression::PropertyAccess(obj, prop) => {
+                            if let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref() {
+                                // If this variable has a registered key property,
+                                // and this expression is NOT that key → dependent
+                                if let Some(key_prop) = var_key_props.get(var) {
+                                    prop != key_prop
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    if !is_dependent {
+                        new_keys.push(key);
+                    }
+                }
+                agg.group_by = new_keys;
+
+                if agg.group_by.len() < original_count {
+                    tracing::debug!(
+                        "AggKeyDependency: reduced group_by from {} to {} keys",
+                        original_count,
+                        agg.group_by.len()
+                    );
+                }
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use kuzu_binder::bound_statement::BoundExpression;
     use kuzu_common::types::LogicalTypeID;
-    use kuzu_parser::ast::{BinaryOp, Expression, UnaryOp};
+    use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 
     fn make_scan(name: &str) -> LogicalOperator {
         LogicalOperator::ScanNode(LogicalScanNode {
@@ -1775,6 +1887,171 @@ mod tests {
         // Both ScanNodes get default cardinality of 1000.
         // Cross product: 1000 * 1000 = 1,000,000
         assert_eq!(root.cardinality(), 1_000_000);
+    }
+
+    // --- AggKeyDependency tests ---
+
+    fn make_aggregate(group_by: Vec<Expression>, child: LogicalOperator) -> LogicalOperator {
+        LogicalOperator::Aggregate(LogicalAggregate {
+            group_by,
+            aggregates: vec![("COUNT".into(), vec![Expression::Constant(Constant::Integer(1))])],
+            children: vec![child],
+            cardinality: 0,
+        })
+    }
+
+    #[test]
+    fn test_agg_key_dependency_pk_only() {
+        // GROUP BY a.id, a.name, a.age
+        // With only a.id as PK → a.name and a.age are dependent.
+        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["id".into(), "name".into(), "age".into()],
+            cardinality: 0,
+        });
+        let agg = make_aggregate(
+            vec![
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "id".into(),
+                ),
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "name".into(),
+                ),
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "age".into(),
+                ),
+            ],
+            scan,
+        );
+
+        let pass = AggKeyDependency;
+        let mut plan = agg;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::Aggregate(ref a) => {
+                assert_eq!(a.group_by.len(), 1, "Should keep only a.id");
+                // Only a.id should remain
+                assert_eq!(a.group_by[0],
+                    Expression::PropertyAccess(
+                        Box::new(Expression::Variable("a".into())),
+                        "id".into(),
+                    ),
+                );
+            }
+            _ => panic!("Expected Aggregate"),
+        }
+    }
+
+    #[test]
+    fn test_agg_key_dependency_no_pk_in_keys() {
+        // GROUP BY a.name, a.age (no a.id)
+        // First property (a.name) is treated as key, a.age is dependent.
+        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["name".into(), "age".into()],
+            cardinality: 0,
+        });
+        let agg = make_aggregate(
+            vec![
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "name".into(),
+                ),
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "age".into(),
+                ),
+            ],
+            scan,
+        );
+
+        let pass = AggKeyDependency;
+        let mut plan = agg;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::Aggregate(ref a) => {
+                assert_eq!(a.group_by.len(), 1, "Should keep only first property");
+                assert_eq!(a.group_by[0],
+                    Expression::PropertyAccess(
+                        Box::new(Expression::Variable("a".into())),
+                        "name".into(),
+                    ),
+                );
+            }
+            _ => panic!("Expected Aggregate"),
+        }
+    }
+
+    #[test]
+    fn test_agg_key_dependency_non_property_keys_unchanged() {
+        // GROUP BY 1, 2 (constant expressions — no properties)
+        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["id".into()],
+            cardinality: 0,
+        });
+        let agg = make_aggregate(
+            vec![
+                Expression::Constant(Constant::Integer(1)),
+                Expression::Constant(Constant::Integer(2)),
+            ],
+            scan,
+        );
+
+        let pass = AggKeyDependency;
+        let mut plan = agg;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::Aggregate(ref a) => {
+                // Constants are not dependent on each other — both stay
+                assert_eq!(a.group_by.len(), 2, "Both constant keys should remain");
+            }
+            _ => panic!("Expected Aggregate"),
+        }
+    }
+
+    #[test]
+    fn test_agg_key_dependency_single_key_unchanged() {
+        // GROUP BY a.id only (single key — nothing to optimize)
+        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["id".into()],
+            cardinality: 0,
+        });
+        let agg = make_aggregate(
+            vec![
+                Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "id".into(),
+                ),
+            ],
+            scan,
+        );
+
+        let pass = AggKeyDependency;
+        let mut plan = agg;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::Aggregate(ref a) => {
+                assert_eq!(a.group_by.len(), 1, "Single key should remain unchanged");
+            }
+            _ => panic!("Expected Aggregate"),
+        }
     }
 }
 
