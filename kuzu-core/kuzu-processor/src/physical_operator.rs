@@ -2158,8 +2158,11 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 kuzu_storage::csv_reader::read_csv(path, &catalog_cols, &config)
                     .map_err(|e| format!("CSV read error: {e}"))?
             }
+            #[cfg(feature = "parquet")]
             "parquet" => kuzu_storage::parquet_reader::read_parquet(path, &catalog_cols)
                 .map_err(|e| format!("Parquet read error: {e}"))?,
+            #[cfg(not(feature = "parquet"))]
+            "parquet" => return Err("Parquet support not enabled (feature 'parquet' in kuzu-storage)".into()),
             _ => {
                 return Err(format!(
                     "Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)"

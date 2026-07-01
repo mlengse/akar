@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+default = ["parquet"]
+parquet = ["kuzu-storage/parquet"]
+
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
 kuzu-catalog = { path = "../kuzu-catalog" }

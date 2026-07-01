@@ -254,14 +254,14 @@ impl Database {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "httpfs-extension")]
+        #[cfg(all(feature = "httpfs-extension", not(kuzu_wasm)))]
         {
             let ext = Box::new(kuzu_httpfs::HttpfsExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "duckdb-extension")]
+        #[cfg(all(feature = "duckdb-extension", not(kuzu_wasm)))]
         {
             let ext = Box::new(kuzu_duckdb::DuckDbExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
@@ -289,7 +289,7 @@ impl Database {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "sqlite-extension")]
+        #[cfg(all(feature = "sqlite-extension", not(kuzu_wasm)))]
         {
             let ext = Box::new(kuzu_sqlite::SqliteExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
@@ -317,7 +317,7 @@ impl Database {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "postgres-extension")]
+        #[cfg(all(feature = "postgres-extension", not(kuzu_wasm)))]
         {
             let ext = Box::new(kuzu_postgres::PostgresExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {

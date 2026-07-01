@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+default = ["parquet"]
+parquet = ["dep:arrow", "dep:parquet"]
+
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
 kuzu-catalog = { path = "../kuzu-catalog" }
@@ -18,8 +22,8 @@ thiserror.workspace = true
 hashbrown.workspace = true
 bytes.workspace = true
 csv.workspace = true
-arrow.workspace = true
-parquet.workspace = true
+arrow = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
 dashmap = "6"
 
 [dev-dependencies]

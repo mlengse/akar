@@ -16,6 +16,7 @@ pub mod local_storage;
 pub mod local_wal;
 pub mod node_group;
 pub mod page;
+#[cfg(feature = "parquet")]
 pub mod parquet_reader;
 pub mod shadow_file;
 pub mod spiller;
