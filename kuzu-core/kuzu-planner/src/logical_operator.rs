@@ -1,6 +1,7 @@
 //! Logical operator types for query planning.
 
 use kuzu_binder::bound_statement::BoundExpression;
+use kuzu_catalog::CatalogColumn;
 use kuzu_parser::ast::Expression;
 
 /// A logical operator in the query plan.
@@ -32,6 +33,17 @@ pub enum LogicalOperator {
     Intersect(LogicalIntersect),
     Explain(LogicalExplain),
     RecursiveExtend(LogicalRecursiveExtend),
+    // DDL operators
+    CreateNodeTable(LogicalCreateNodeTable),
+    CreateRelTable(LogicalCreateRelTable),
+    DropTable(LogicalDropTable),
+    AlterTable(LogicalAlterTable),
+    CreateIndex(LogicalCreateIndex),
+    DropIndex(LogicalDropIndex),
+    CreateVectorIndex(LogicalCreateVectorIndex),
+    CreateSequence(LogicalCreateSequence),
+    DropSequence(LogicalDropSequence),
+    CreateDml(LogicalCreateDml),
 }
 
 impl LogicalOperator {
@@ -64,6 +76,17 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality,
             LogicalOperator::Explain(s) => s.cardinality,
             LogicalOperator::RecursiveExtend(s) => s.cardinality,
+            // DDL operators
+            LogicalOperator::CreateNodeTable(s) => s.cardinality,
+            LogicalOperator::CreateRelTable(s) => s.cardinality,
+            LogicalOperator::DropTable(s) => s.cardinality,
+            LogicalOperator::AlterTable(s) => s.cardinality,
+            LogicalOperator::CreateIndex(s) => s.cardinality,
+            LogicalOperator::DropIndex(s) => s.cardinality,
+            LogicalOperator::CreateVectorIndex(s) => s.cardinality,
+            LogicalOperator::CreateSequence(s) => s.cardinality,
+            LogicalOperator::DropSequence(s) => s.cardinality,
+            LogicalOperator::CreateDml(s) => s.cardinality,
         }
     }
 
@@ -96,6 +119,17 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality = card,
             LogicalOperator::Explain(s) => s.cardinality = card,
             LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
+            // DDL operators
+            LogicalOperator::CreateNodeTable(s) => s.cardinality = card,
+            LogicalOperator::CreateRelTable(s) => s.cardinality = card,
+            LogicalOperator::DropTable(s) => s.cardinality = card,
+            LogicalOperator::AlterTable(s) => s.cardinality = card,
+            LogicalOperator::CreateIndex(s) => s.cardinality = card,
+            LogicalOperator::DropIndex(s) => s.cardinality = card,
+            LogicalOperator::CreateVectorIndex(s) => s.cardinality = card,
+            LogicalOperator::CreateSequence(s) => s.cardinality = card,
+            LogicalOperator::DropSequence(s) => s.cardinality = card,
+            LogicalOperator::CreateDml(s) => s.cardinality = card,
         }
     }
 
@@ -137,7 +171,17 @@ impl LogicalOperator {
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
-            | LogicalOperator::ScanRel(_) => vec![],
+            | LogicalOperator::ScanRel(_)
+            | LogicalOperator::CreateNodeTable(_)
+            | LogicalOperator::CreateRelTable(_)
+            | LogicalOperator::DropTable(_)
+            | LogicalOperator::AlterTable(_)
+            | LogicalOperator::CreateIndex(_)
+            | LogicalOperator::DropIndex(_)
+            | LogicalOperator::CreateVectorIndex(_)
+            | LogicalOperator::CreateSequence(_)
+            | LogicalOperator::DropSequence(_)
+            | LogicalOperator::CreateDml(_) => vec![],
         }
     }
 
@@ -169,12 +213,20 @@ impl LogicalOperator {
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
-            | LogicalOperator::ScanRel(_) => vec![],
+            | LogicalOperator::ScanRel(_)
+            | LogicalOperator::CreateNodeTable(_)
+            | LogicalOperator::CreateRelTable(_)
+            | LogicalOperator::DropTable(_)
+            | LogicalOperator::AlterTable(_)
+            | LogicalOperator::CreateIndex(_)
+            | LogicalOperator::DropIndex(_)
+            | LogicalOperator::CreateVectorIndex(_)
+            | LogicalOperator::CreateSequence(_)
+            | LogicalOperator::DropSequence(_)
+            | LogicalOperator::CreateDml(_) => vec![],
         }
     }
 }
-
-// (RecursiveExtend is also a leaf — handled in children_mut)
 
 #[derive(Debug, Clone)]
 pub struct LogicalArtIndexRangeScan {
@@ -462,5 +514,101 @@ pub struct LogicalMerge {
     pub on_match: Vec<LogicalSet>,
     /// SET operations to apply when a new node is created.
     pub on_create: Vec<LogicalSet>,
+    pub cardinality: u64,
+}
+
+// ==================== DDL Operators ====================
+
+/// Logical operator for CREATE NODE TABLE.
+#[derive(Debug, Clone)]
+pub struct LogicalCreateNodeTable {
+    pub name: String,
+    pub columns: Vec<CatalogColumn>,
+    pub primary_key: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for CREATE REL TABLE.
+#[derive(Debug, Clone)]
+pub struct LogicalCreateRelTable {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub columns: Vec<CatalogColumn>,
+    pub cardinality: u64,
+}
+
+/// Logical operator for DROP TABLE.
+#[derive(Debug, Clone)]
+pub struct LogicalDropTable {
+    pub name: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for ALTER TABLE.
+#[derive(Debug, Clone)]
+pub struct LogicalAlterTable {
+    pub table_name: String,
+    pub action: kuzu_parser::ast::AlterAction,
+    pub cardinality: u64,
+}
+
+/// Logical operator for CREATE [ART|HASH] INDEX.
+#[derive(Debug, Clone)]
+pub struct LogicalCreateIndex {
+    pub index_type: kuzu_catalog::IndexType,
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for DROP INDEX.
+#[derive(Debug, Clone)]
+pub struct LogicalDropIndex {
+    pub index_name: String,
+    pub table_name: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for CREATE VECTOR INDEX.
+#[derive(Debug, Clone)]
+pub struct LogicalCreateVectorIndex {
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub metric: String,
+    pub dimensions: u64,
+    pub cardinality: u64,
+}
+
+/// Logical operator for CREATE SEQUENCE.
+#[derive(Debug, Clone)]
+pub struct LogicalCreateSequence {
+    pub name: String,
+    pub if_not_exists: bool,
+    pub or_replace: bool,
+    pub start_with: i64,
+    pub increment: i64,
+    pub min_value: i64,
+    pub max_value: i64,
+    pub cycle: bool,
+    pub cardinality: u64,
+}
+
+/// Logical operator for DROP SEQUENCE.
+#[derive(Debug, Clone)]
+pub struct LogicalDropSequence {
+    pub name: String,
+    pub if_exists: bool,
+    pub cardinality: u64,
+}
+
+/// Logical operator for CREATE DML (node creation with properties).
+#[derive(Debug, Clone)]
+pub struct LogicalCreateDml {
+    pub table_name: String,
+    pub table_id: u64,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
     pub cardinality: u64,
 }

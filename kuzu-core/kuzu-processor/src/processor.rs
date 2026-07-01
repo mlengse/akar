@@ -483,6 +483,22 @@ impl QueryProcessor {
                         }]);
                     }
                 }
+                // DDL operators — produce a single-row success result
+                LogicalOperator::CreateNodeTable(_)
+                | LogicalOperator::CreateRelTable(_)
+                | LogicalOperator::DropTable(_)
+                | LogicalOperator::AlterTable(_)
+                | LogicalOperator::CreateIndex(_)
+                | LogicalOperator::DropIndex(_)
+                | LogicalOperator::CreateVectorIndex(_)
+                | LogicalOperator::CreateSequence(_)
+                | LogicalOperator::DropSequence(_)
+                | LogicalOperator::CreateDml(_) => {
+                    intermediate_result = Some(vec![DataChunk {
+                        fields: vec![],
+                        size: 0,
+                    }]);
+                }
             }
         }
 
@@ -923,6 +939,17 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::RecursiveExtend(re) => {
             format!("RecursiveExtend({}..{})", re.lower_bound, re.upper_bound)
         }
+        // DDL operators
+        LogicalOperator::CreateNodeTable(ct) => format!("CreateNodeTable({})", ct.name),
+        LogicalOperator::CreateRelTable(ct) => format!("CreateRelTable({})", ct.name),
+        LogicalOperator::DropTable(dt) => format!("DropTable({})", dt.name),
+        LogicalOperator::AlterTable(at) => format!("AlterTable({})", at.table_name),
+        LogicalOperator::CreateIndex(ci) => format!("CreateIndex({})", ci.index_name),
+        LogicalOperator::DropIndex(di) => format!("DropIndex({})", di.index_name),
+        LogicalOperator::CreateVectorIndex(vi) => format!("CreateVectorIndex({})", vi.index_name),
+        LogicalOperator::CreateSequence(cs) => format!("CreateSequence({})", cs.name),
+        LogicalOperator::DropSequence(ds) => format!("DropSequence({})", ds.name),
+        LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());

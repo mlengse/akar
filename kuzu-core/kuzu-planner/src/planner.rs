@@ -25,6 +25,16 @@ impl QueryPlanner {
             BoundStatement::BoundUnion(u) => self.plan_union(u),
             BoundStatement::BoundMerge(m) => self.plan_merge(m),
             BoundStatement::BoundExplain(e) => self.plan_explain(e),
+            BoundStatement::BoundCreateNodeTable(t) => self.plan_create_node_table(t),
+            BoundStatement::BoundCreateRelTable(t) => self.plan_create_rel_table(t),
+            BoundStatement::BoundDropTable(t) => self.plan_drop_table(t),
+            BoundStatement::BoundAlterTable(a) => self.plan_alter_table(a),
+            BoundStatement::BoundCreateIndex(idx) => self.plan_create_index(idx),
+            BoundStatement::BoundDropIndex(idx) => self.plan_drop_index(idx),
+            BoundStatement::BoundCreateVectorIndex(idx) => self.plan_create_vector_index(idx),
+            BoundStatement::BoundCreateSequence(s) => self.plan_create_sequence(s),
+            BoundStatement::BoundDropSequence(s) => self.plan_drop_sequence(s),
+            BoundStatement::BoundCreateDml(c) => self.plan_create_dml(c),
             _ => Ok(Vec::new()),
         }
     }
@@ -63,6 +73,102 @@ impl QueryPlanner {
             file_path: c.file_path,
             options: c.options,
             cardinality: 0,
+        })])
+    }
+
+    // ==================== DDL Planning ====================
+
+    fn plan_create_node_table(&self, t: BoundCreateNodeTable) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateNodeTable(LogicalCreateNodeTable {
+            name: t.name,
+            columns: t.columns,
+            primary_key: t.primary_key,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_create_rel_table(&self, t: BoundCreateRelTable) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateRelTable(LogicalCreateRelTable {
+            name: t.name,
+            from: t.from,
+            to: t.to,
+            columns: t.columns,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_drop_table(&self, t: BoundDropTable) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::DropTable(LogicalDropTable {
+            name: t.name,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_alter_table(&self, a: BoundAlterTable) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::AlterTable(LogicalAlterTable {
+            table_name: a.table_name,
+            action: a.action,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_create_index(&self, idx: BoundCreateIndex) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateIndex(LogicalCreateIndex {
+            index_type: idx.index_type,
+            index_name: idx.index_name,
+            table_name: idx.table_name,
+            column_name: idx.column_name,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_drop_index(&self, idx: BoundDropIndex) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::DropIndex(LogicalDropIndex {
+            index_name: idx.index_name,
+            table_name: idx.table_name,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_create_vector_index(&self, idx: BoundCreateVectorIndex) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateVectorIndex(LogicalCreateVectorIndex {
+            index_name: idx.index_name,
+            table_name: idx.table_name,
+            column_name: idx.column_name,
+            metric: idx.metric,
+            dimensions: idx.dimensions,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_create_sequence(&self, s: BoundCreateSequence) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateSequence(LogicalCreateSequence {
+            name: s.name,
+            if_not_exists: s.if_not_exists,
+            or_replace: s.or_replace,
+            start_with: s.start_with,
+            increment: s.increment,
+            min_value: s.min_value,
+            max_value: s.max_value,
+            cycle: s.cycle,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_drop_sequence(&self, s: BoundDropSequence) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::DropSequence(LogicalDropSequence {
+            name: s.name,
+            if_exists: s.if_exists,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_create_dml(&self, c: BoundCreateDml) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::CreateDml(LogicalCreateDml {
+            table_name: c.table_name,
+            table_id: c.table_id,
+            properties: c.properties,
+            cardinality: 1,
         })])
     }
 
@@ -544,7 +650,13 @@ mod tests {
         let bound = binder.bind(stmt).unwrap();
         let planner = QueryPlanner::new();
         let plan = planner.plan(bound).unwrap();
-        assert!(plan.is_empty()); // DDL produces no logical plan
+        assert!(!plan.is_empty()); // DDL now produces a logical plan
+        match &plan[0] {
+            LogicalOperator::CreateNodeTable(ct) => {
+                assert_eq!(ct.name, "City");
+            }
+            _ => panic!("Expected CreateNodeTable"),
+        }
     }
 
     #[test]

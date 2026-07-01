@@ -812,7 +812,17 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::Merge(_)
                 | LogicalOperator::Explain(_)
                 | LogicalOperator::Intersect(_)
-                | LogicalOperator::RecursiveExtend(_) => {}
+                | LogicalOperator::RecursiveExtend(_)
+                | LogicalOperator::CreateNodeTable(_)
+                | LogicalOperator::CreateRelTable(_)
+                | LogicalOperator::DropTable(_)
+                | LogicalOperator::AlterTable(_)
+                | LogicalOperator::CreateIndex(_)
+                | LogicalOperator::DropIndex(_)
+                | LogicalOperator::CreateVectorIndex(_)
+                | LogicalOperator::CreateSequence(_)
+                | LogicalOperator::DropSequence(_)
+                | LogicalOperator::CreateDml(_) => {}
             }
         });
     }
@@ -981,6 +991,17 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     let src_card = 100;
                     re.upper_bound.saturating_mul(src_card)
                 }
+                // DDL operators produce exactly one row (success message)
+                LogicalOperator::CreateNodeTable(_)
+                | LogicalOperator::CreateRelTable(_)
+                | LogicalOperator::DropTable(_)
+                | LogicalOperator::AlterTable(_)
+                | LogicalOperator::CreateIndex(_)
+                | LogicalOperator::DropIndex(_)
+                | LogicalOperator::CreateVectorIndex(_)
+                | LogicalOperator::CreateSequence(_)
+                | LogicalOperator::DropSequence(_)
+                | LogicalOperator::CreateDml(_) => 1,
             };
             op.set_cardinality(card);
         });

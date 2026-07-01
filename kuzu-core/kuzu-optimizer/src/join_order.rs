@@ -95,7 +95,17 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::Merge(_)
         | LogicalOperator::Explain(_)
         | LogicalOperator::Intersect(_)
-        | LogicalOperator::RecursiveExtend(_) => {
+        | LogicalOperator::RecursiveExtend(_)
+        | LogicalOperator::CreateNodeTable(_)
+        | LogicalOperator::CreateRelTable(_)
+        | LogicalOperator::DropTable(_)
+        | LogicalOperator::AlterTable(_)
+        | LogicalOperator::CreateIndex(_)
+        | LogicalOperator::DropIndex(_)
+        | LogicalOperator::CreateVectorIndex(_)
+        | LogicalOperator::CreateSequence(_)
+        | LogicalOperator::DropSequence(_)
+        | LogicalOperator::CreateDml(_) => {
             // Leaf operator with no children — nothing to recurse into.
         }
     }

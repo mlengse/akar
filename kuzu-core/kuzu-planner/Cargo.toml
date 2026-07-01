@@ -10,6 +10,7 @@ publish = false
 kuzu-common = { path = "../kuzu-common" }
 kuzu-binder = { path = "../kuzu-binder" }
 kuzu-parser = { path = "../kuzu-parser" }
+kuzu-catalog = { path = "../kuzu-catalog" }
 tracing.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true
