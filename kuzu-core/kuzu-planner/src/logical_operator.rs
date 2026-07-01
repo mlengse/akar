@@ -29,6 +29,7 @@ pub enum LogicalOperator {
     Merge(LogicalMerge),
     SemiJoin(LogicalSemiJoin),
     AntiJoin(LogicalAntiJoin),
+    Intersect(LogicalIntersect),
     Explain(LogicalExplain),
 }
 
@@ -59,6 +60,7 @@ impl LogicalOperator {
             LogicalOperator::Merge(s) => s.cardinality,
             LogicalOperator::SemiJoin(s) => s.cardinality,
             LogicalOperator::AntiJoin(s) => s.cardinality,
+            LogicalOperator::Intersect(s) => s.cardinality,
             LogicalOperator::Explain(s) => s.cardinality,
         }
     }
@@ -89,6 +91,7 @@ impl LogicalOperator {
             LogicalOperator::Merge(s) => s.cardinality = card,
             LogicalOperator::SemiJoin(s) => s.cardinality = card,
             LogicalOperator::AntiJoin(s) => s.cardinality = card,
+            LogicalOperator::Intersect(s) => s.cardinality = card,
             LogicalOperator::Explain(s) => s.cardinality = card,
         }
     }
@@ -117,6 +120,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::SemiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::AntiJoin(s) => vec![&mut *s.left, &mut *s.right],
+            LogicalOperator::Intersect(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Explain(s) => vec![&mut *s.inner],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
@@ -148,6 +152,7 @@ impl LogicalOperator {
             LogicalOperator::OptionalMatch(s) => vec![&*s.left, &*s.right],
             LogicalOperator::SemiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::AntiJoin(s) => vec![&*s.left, &*s.right],
+            LogicalOperator::Intersect(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Explain(s) => vec![&*s.inner],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
@@ -313,6 +318,25 @@ pub struct LogicalFlatten {
 pub struct LogicalUnwind {
     pub expression: kuzu_parser::ast::Expression,
     pub variable: String,
+    pub cardinality: u64,
+}
+
+/// INTERSECT operator — finds common keys across multiple build sides.
+///
+/// Used for multi-pattern matching like `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)`
+/// where `a` is the shared key. Intersect probes multiple build hash tables
+/// and outputs combined payloads only for keys present in all build sides.
+#[derive(Debug, Clone)]
+pub struct LogicalIntersect {
+    /// Number of build sides (hash tables to probe).
+    pub num_build_sides: u32,
+    /// Key expressions for each build side.
+    pub build_key_exprs: Vec<Expression>,
+    /// Probe side — produces the shared key value to look up.
+    pub left: Box<LogicalOperator>,
+    /// Build side — produces hash tables for each pattern.
+    pub right: Box<LogicalOperator>,
+    /// Estimated cardinality.
     pub cardinality: u64,
 }
 

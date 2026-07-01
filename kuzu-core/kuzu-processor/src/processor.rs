@@ -227,6 +227,16 @@ impl QueryProcessor {
                     let result = anti.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Intersect(ic) => {
+                    let intersect = PhysicalIntersect {
+                        num_build_sides: ic.num_build_sides,
+                        probe_key_col: 0,
+                        build_key_col: 0,
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = intersect.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Explain(ex) => {
                     // Serialize the inner plan tree to a string
                     let plan_str = serialize_plan_tree(&ex.inner, 0);
@@ -897,6 +907,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::VectorSimilarityScan(vs) => format!("VectorSimilarityScan(k={})", vs.top_k),
         LogicalOperator::ArtIndexRangeScan(ars) => format!("ArtIndexRangeScan({})", ars.table_name),
         LogicalOperator::Explain(_) => "Explain".to_string(),
+        LogicalOperator::Intersect(_) => "Intersect".to_string(),
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());
@@ -1817,5 +1828,97 @@ mod tests {
         let probe = make_i64_chunk(&[1, 2, 3]);
         let result = semi.execute(vec![build, probe]).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    // --- Intersect tests ---
+
+    #[test]
+    fn test_intersect_basic() {
+        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        // Two build sides with overlapping keys
+        let build1 = make_i64_chunk(&[1, 2, 3]);
+        let build2 = make_i64_chunk(&[2, 3, 4]);
+        // Probe with keys that should match across both builds
+        let probe = make_i64_chunk(&[2, 3]);
+        let input = vec![build1, build2, probe];
+        let result = intersect.execute(input).unwrap();
+        // Keys 2 and 3 exist in both build sides → both should produce output
+        assert!(!result.is_empty(), "Expected non-empty result");
+        assert!(result[0].size > 0, "Expected at least one output row");
+    }
+
+    #[test]
+    fn test_intersect_no_common() {
+        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        // Build sides have no overlapping keys
+        let build1 = make_i64_chunk(&[1, 2, 3]);
+        let build2 = make_i64_chunk(&[4, 5, 6]);
+        let probe = make_i64_chunk(&[1, 2, 3, 4, 5, 6]);
+        let input = vec![build1, build2, probe];
+        let result = intersect.execute(input).unwrap();
+        // No key appears in ALL build sides → empty
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_intersect_probe_key_missing() {
+        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        // Build sides share key 3, but probe doesn't probe for 3
+        let build1 = make_i64_chunk(&[1, 3]);
+        let build2 = make_i64_chunk(&[3, 5]);
+        let probe = make_i64_chunk(&[1, 5]); // probes for 1 and 5 — only 1 is in build1, only 5 is in build2
+        let input = vec![build1, build2, probe];
+        let result = intersect.execute(input).unwrap();
+        // No key appears in ALL build sides → empty (1 not in build2, 5 not in build1)
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_intersect_single_build_side() {
+        let intersect = PhysicalIntersect { num_build_sides: 1, probe_key_col: 0, build_key_col: 0 };
+        // Single build side — acts like semi-join
+        let build = make_i64_chunk(&[2, 3]);
+        let probe = make_i64_chunk(&[1, 2, 3, 4]);
+        let input = vec![build, probe];
+        let result = intersect.execute(input).unwrap();
+        assert!(!result.is_empty(), "Expected non-empty result for single build side");
+        assert!(result[0].size > 0, "Expected matching rows");
+    }
+
+    #[test]
+    fn test_intersect_empty_build() {
+        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let build1 = make_i64_chunk(&[]);
+        let build2 = make_i64_chunk(&[1, 2, 3]);
+        let probe = make_i64_chunk(&[1, 2, 3]);
+        let input = vec![build1, build2, probe];
+        let result = intersect.execute(input).unwrap();
+        // Empty build side → empty result
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_intersect_no_probe() {
+        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let build1 = make_i64_chunk(&[1, 2, 3]);
+        let build2 = make_i64_chunk(&[2, 3, 4]);
+        let probe = make_i64_chunk(&[]); // empty probe
+        let input = vec![build1, build2, probe];
+        let result = intersect.execute(input).unwrap();
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_intersect_three_build_sides() {
+        let intersect = PhysicalIntersect { num_build_sides: 3, probe_key_col: 0, build_key_col: 0 };
+        // Three build sides: key 3 appears in all
+        let build1 = make_i64_chunk(&[1, 3, 5]);
+        let build2 = make_i64_chunk(&[2, 3, 6]);
+        let build3 = make_i64_chunk(&[3, 4, 7]);
+        let probe = make_i64_chunk(&[3]);
+        let input = vec![build1, build2, build3, probe];
+        let result = intersect.execute(input).unwrap();
+        assert!(!result.is_empty(), "Expected match for key 3 in all three build sides");
+        assert!(result[0].size > 0);
     }
 }

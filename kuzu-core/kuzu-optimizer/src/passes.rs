@@ -810,7 +810,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::Unwind(_)
                 | LogicalOperator::Foreach(_)
                 | LogicalOperator::Merge(_)
-                | LogicalOperator::Explain(_) => {}
+                | LogicalOperator::Explain(_)
+                | LogicalOperator::Intersect(_) => {}
             }
         });
     }
@@ -973,6 +974,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::Foreach(_) => 1,
                 LogicalOperator::Merge(_) => 1,   // single matched/created node
                 LogicalOperator::Explain(_) => 1, // one row with plan text
+                LogicalOperator::Intersect(_) => 10, // estimate: intersection reduces cardinality
             };
             op.set_cardinality(card);
         });
