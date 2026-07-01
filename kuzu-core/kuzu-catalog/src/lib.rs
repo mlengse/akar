@@ -181,13 +181,34 @@ pub struct VectorIndexEntry {
     pub dimensions: u64,
 }
 
-/// An entry in the system catalog (node table, rel table, or vector index).
+/// A foreign table entry in the catalog for externally-attached tables.
+///
+/// Foreign tables represent tables from external catalogs (e.g., DuckDB, Postgres, SQLite)
+/// that are attached to the current database. They behave like read-only tables with
+/// a source type identifying the external engine.
+#[derive(Debug, Clone)]
+pub struct ForeignTableEntry {
+    pub table_id: u64,
+    pub name: String,
+    pub columns: Vec<CatalogColumn>,
+    /// The type of external data source (e.g., "duckdb", "postgres", "sqlite").
+    pub source_type: String,
+}
+
+impl ForeignTableEntry {
+    pub fn num_columns(&self) -> usize {
+        self.columns.len()
+    }
+}
+
+/// An entry in the system catalog (node table, rel table, vector index, sequence, or foreign table).
 #[derive(Debug, Clone)]
 pub enum CatalogEntry {
     NodeTable(NodeTableEntry),
     RelTable(RelTableEntry),
     VectorIndex(VectorIndexEntry),
     Sequence(SequenceEntry),
+    Foreign(ForeignTableEntry),
 }
 
 impl CatalogEntry {
@@ -197,6 +218,7 @@ impl CatalogEntry {
             CatalogEntry::RelTable(t) => &t.name,
             CatalogEntry::VectorIndex(v) => &v.name,
             CatalogEntry::Sequence(s) => &s.name,
+            CatalogEntry::Foreign(f) => &f.name,
         }
     }
 
@@ -206,6 +228,7 @@ impl CatalogEntry {
             CatalogEntry::RelTable(t) => t.table_id,
             CatalogEntry::VectorIndex(v) => v.index_id,
             CatalogEntry::Sequence(s) => s.sequence_id,
+            CatalogEntry::Foreign(f) => f.table_id,
         }
     }
 
@@ -215,6 +238,7 @@ impl CatalogEntry {
             CatalogEntry::RelTable(t) => &t.columns,
             CatalogEntry::VectorIndex(_) => &[],
             CatalogEntry::Sequence(_) => &[],
+            CatalogEntry::Foreign(f) => &f.columns,
         }
     }
 
@@ -234,6 +258,10 @@ impl CatalogEntry {
         matches!(self, CatalogEntry::Sequence(_))
     }
 
+    pub fn is_foreign_table(&self) -> bool {
+        matches!(self, CatalogEntry::Foreign(_))
+    }
+
     pub fn as_node_table(&self) -> Option<&NodeTableEntry> {
         match self {
             CatalogEntry::NodeTable(t) => Some(t),
@@ -251,6 +279,13 @@ impl CatalogEntry {
     pub fn as_vector_index(&self) -> Option<&VectorIndexEntry> {
         match self {
             CatalogEntry::VectorIndex(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_foreign_table(&self) -> Option<&ForeignTableEntry> {
+        match self {
+            CatalogEntry::Foreign(f) => Some(f),
             _ => None,
         }
     }
@@ -412,6 +447,9 @@ impl Catalog {
             CatalogEntry::Sequence(_) => {
                 Err("Cannot add column to a sequence".into())
             }
+            CatalogEntry::Foreign(_) => {
+                Err("Cannot add column to a foreign table".into())
+            }
         }
     }
 
@@ -444,6 +482,9 @@ impl Catalog {
             }
             CatalogEntry::Sequence(_) => {
                 Err("Cannot drop column from a sequence".into())
+            }
+            CatalogEntry::Foreign(_) => {
+                Err("Cannot drop column from a foreign table".into())
             }
         }
     }
@@ -543,6 +584,62 @@ impl Catalog {
             .collect()
     }
 
+    /// Create a foreign table entry in the catalog.
+    pub fn create_foreign_table(
+        &mut self,
+        name: String,
+        columns: Vec<CatalogColumn>,
+        source_type: String,
+    ) -> CatalogResult {
+        if self.name_to_id.contains_key(&name) {
+            return CatalogResult::AlreadyExists;
+        }
+        let table_id = self.next_id;
+        self.next_id += 1;
+        let entry = ForeignTableEntry {
+            table_id,
+            name: name.clone(),
+            columns,
+            source_type,
+        };
+        self.entries
+            .insert(table_id, CatalogEntry::Foreign(entry));
+        self.name_to_id.insert(name, table_id);
+        CatalogResult::Created { table_id }
+    }
+
+    /// Get a foreign table entry by name.
+    pub fn get_foreign_table(&self, name: &str) -> Option<&ForeignTableEntry> {
+        self.name_to_id.get(name).and_then(|id| {
+            match self.entries.get(id) {
+                Some(CatalogEntry::Foreign(f)) => Some(f),
+                _ => None,
+            }
+        })
+    }
+
+    /// Drop a foreign table by name.
+    pub fn drop_foreign_table(&mut self, name: &str) -> CatalogResult {
+        if let Some(&table_id) = self.name_to_id.get(name) {
+            self.entries.remove(&table_id);
+            self.name_to_id.remove(name);
+            CatalogResult::Dropped { table_id }
+        } else {
+            CatalogResult::NotFound
+        }
+    }
+
+    /// List all foreign table entries.
+    pub fn foreign_tables(&self) -> Vec<&ForeignTableEntry> {
+        self.entries
+            .values()
+            .filter_map(|e| match e {
+                CatalogEntry::Foreign(f) => Some(f),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Drop an index from a table.
     pub fn drop_index(&mut self, table_name: &str, index_name: &str) -> Result<(), String> {
         let entry = self
@@ -612,6 +709,9 @@ impl Catalog {
             CatalogEntry::Sequence(_) => {
                 Err("Cannot rename column on a sequence".into())
             }
+            CatalogEntry::Foreign(_) => {
+                Err("Cannot rename column on a foreign table".into())
+            }
         }
     }
 
@@ -633,6 +733,7 @@ impl Catalog {
                 return Err("Use rename method for vector indexes".into());
             }
             Some(CatalogEntry::Sequence(s)) => s.name = new_name.to_string(),
+            Some(CatalogEntry::Foreign(f)) => f.name = new_name.to_string(),
             None => return Err("Table not found".into()),
         }
         self.name_to_id.remove(old_name);
@@ -715,7 +816,8 @@ impl Catalog {
                 CatalogEntry::NodeTable(t) => t.name = new_name.clone(),
                 CatalogEntry::RelTable(t) => t.name = new_name,
                 CatalogEntry::VectorIndex(v) => v.name = new_name,
-                CatalogEntry::Sequence(s) => s.name = new_name,
+                CatalogEntry::Sequence(s) => s.name = new_name.clone(),
+                CatalogEntry::Foreign(f) => f.name = new_name,
             }
         }
         CatalogResult::Created { table_id }
@@ -980,5 +1082,186 @@ mod tests {
         assert_eq!(seq.curr_val(), 42);
         assert_eq!(seq.increment, 2);
         assert_eq!(seq.cycle, true);
+    }
+
+    // --- Foreign table tests ---
+
+    #[test]
+    fn test_create_foreign_table_basic() {
+        let mut cat = Catalog::new();
+        let result = cat.create_foreign_table(
+            "ext_table".into(),
+            vec![
+                CatalogColumn {
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                    default_value: None,
+                },
+                CatalogColumn {
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                    default_value: None,
+                },
+            ],
+            "duckdb".into(),
+        );
+        assert!(matches!(result, CatalogResult::Created { .. }));
+        assert_eq!(cat.len(), 1);
+    }
+
+    #[test]
+    fn test_create_foreign_table_duplicate() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table("ext".into(), vec![], "duckdb".into());
+        let result = cat.create_foreign_table("ext".into(), vec![], "postgres".into());
+        assert_eq!(result, CatalogResult::AlreadyExists);
+    }
+
+    #[test]
+    fn test_get_foreign_table() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table(
+            "pg_orders".into(),
+            vec![CatalogColumn {
+                name: "amount".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            }],
+            "postgres".into(),
+        );
+        let ft = cat.get_foreign_table("pg_orders");
+        assert!(ft.is_some());
+        let ft = ft.unwrap();
+        assert_eq!(ft.name, "pg_orders");
+        assert_eq!(ft.source_type, "postgres");
+        assert_eq!(ft.num_columns(), 1);
+    }
+
+    #[test]
+    fn test_get_foreign_table_nonexistent() {
+        let cat = Catalog::new();
+        assert!(cat.get_foreign_table("ghost").is_none());
+    }
+
+    #[test]
+    fn test_drop_foreign_table() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table("to_drop".into(), vec![], "duckdb".into());
+        assert!(cat.get_foreign_table("to_drop").is_some());
+        let result = cat.drop_foreign_table("to_drop");
+        assert!(matches!(result, CatalogResult::Dropped { .. }));
+        assert!(cat.get_foreign_table("to_drop").is_none());
+    }
+
+    #[test]
+    fn test_foreign_table_helpers() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table("f1".into(), vec![], "sqlite".into());
+        let entry = cat.get_entry_by_name("f1").unwrap();
+        assert!(entry.is_foreign_table());
+        assert!(!entry.is_node_table());
+        assert!(!entry.is_rel_table());
+        assert!(!entry.is_sequence());
+        assert!(entry.as_foreign_table().is_some());
+        assert!(entry.as_node_table().is_none());
+    }
+
+    #[test]
+    fn test_foreign_tables_filter() {
+        let mut cat = Catalog::new();
+        cat.create_node_table("Person".into(), sample_node_columns());
+        cat.create_foreign_table("ext".into(), vec![], "duckdb".into());
+        let foreign = cat.foreign_tables();
+        assert_eq!(foreign.len(), 1);
+        assert_eq!(foreign[0].source_type, "duckdb");
+        let nodes = cat.node_tables();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(cat.len(), 2);
+    }
+
+    #[test]
+    fn test_foreign_table_columns_access() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table(
+            "ext".into(),
+            vec![
+                CatalogColumn {
+                    name: "a".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                    default_value: None,
+                },
+                CatalogColumn {
+                    name: "b".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                    default_value: None,
+                },
+            ],
+            "duckdb".into(),
+        );
+        let entry = cat.get_entry_by_name("ext").unwrap();
+        assert_eq!(entry.columns().len(), 2);
+        assert_eq!(entry.columns()[0].name, "a");
+        assert_eq!(entry.columns()[1].name, "b");
+    }
+
+    #[test]
+    fn test_foreign_table_cannot_add_column() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table("ext".into(), vec![], "duckdb".into());
+        let result = cat.add_column(
+            "ext",
+            CatalogColumn {
+                name: "new_col".into(),
+                logical_type: LogicalTypeID::String,
+                is_primary_key: false,
+                default_value: None,
+            },
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("foreign table"));
+    }
+
+    #[test]
+    fn test_foreign_table_cannot_drop_column() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table(
+            "ext".into(),
+            vec![CatalogColumn {
+                name: "col1".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            }],
+            "duckdb".into(),
+        );
+        let result = cat.drop_column("ext", "col1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("foreign table"));
+    }
+
+    #[test]
+    fn test_foreign_table_rename() {
+        let mut cat = Catalog::new();
+        cat.create_foreign_table("old_name".into(), vec![], "duckdb".into());
+        assert!(matches!(
+            cat.rename("old_name", "new_name".into()),
+            CatalogResult::Created { .. }
+        ));
+        assert!(cat.contains("new_name"));
+        assert!(!cat.contains("old_name"));
+        let ft = cat.get_foreign_table("new_name");
+        assert!(ft.is_some());
+        assert_eq!(ft.unwrap().name, "new_name");
+    }
+
+    #[test]
+    fn test_drop_foreign_table_nonexistent() {
+        let mut cat = Catalog::new();
+        assert_eq!(cat.drop_foreign_table("ghost"), CatalogResult::NotFound);
     }
 }
