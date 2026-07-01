@@ -2386,3 +2386,163 @@ impl PhysicalOperatorExec for PhysicalExplain {
         Ok(vec![chunk])
     }
 }
+
+// ==================== RecursiveExtend ====================
+
+/// Physical operator for variable-length path matching (BFS traversal).
+///
+/// For each source node, performs BFS up to `upper_bound` depth and emits
+/// result rows for all nodes reachable at depths between `lower_bound` and
+/// `upper_bound`.
+///
+/// Produces a DataChunk with columns: (src_offset, dst_offset, length).
+pub struct PhysicalRecursiveExtend {
+    pub source_table_id: u64,
+    pub rel_table_ids: Vec<u64>,
+    pub lower_bound: u64,
+    pub upper_bound: u64,
+    pub direction: kuzu_common::enums::ExtendDirection,
+    pub table_catalog: Option<Arc<TableCatalog>>,
+}
+
+impl PhysicalOperatorExec for PhysicalRecursiveExtend {
+    fn operator_type(&self) -> &str {
+        "recursive_extend"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        use kuzu_common::enums::ExtendDirection;
+        use kuzu_common::vector::ValueVector;
+        use std::collections::{HashMap, VecDeque};
+
+        let catalog = self
+            .table_catalog
+            .as_ref()
+            .ok_or_else(|| "No table catalog available for RecursiveExtend".to_string())?;
+
+        // Build adjacency from all rel tables
+        let mut fwd_adj: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut rev_adj: HashMap<u64, Vec<u64>> = HashMap::new();
+
+        for &rel_table_id in &self.rel_table_ids {
+            if let Some(rel_table) = catalog.get_rel_table(rel_table_id) {
+                for (&src, neighbors) in rel_table.fwd_adj.iter() {
+                    fwd_adj.entry(src).or_default().extend(neighbors.iter().map(|(dst, _)| *dst));
+                }
+                for (&dst, neighbors) in rel_table.rev_adj.iter() {
+                    rev_adj.entry(dst).or_default().extend(neighbors.iter().map(|(src, _)| *src));
+                }
+            }
+        }
+
+        // Collect source node offsets from input
+        let source_offsets: Vec<i64> = if input.is_empty() || input[0].fields.is_empty() {
+            // No input: scan all nodes from source table
+            // Use all nodes with edges in fwd_adj
+            let mut all: Vec<i64> = fwd_adj.keys().chain(rev_adj.keys()).copied().map(|k| k as i64).collect();
+            all.sort();
+            all.dedup();
+            all
+        } else {
+            // Extract first column (assumed to be source node offset)
+            let field = &input[0].fields[0];
+            let num_rows = input[0].size;
+            let mut offsets = Vec::with_capacity(num_rows);
+            for i in 0..num_rows {
+                if !field.is_null(i) {
+                    let offset = i64::from_le_bytes(
+                        field.data()[i * 8..i * 8 + 8].try_into().unwrap(),
+                    );
+                    offsets.push(offset);
+                }
+            }
+            offsets
+        };
+
+        if source_offsets.is_empty() {
+            return Ok(vec![DataChunk::new(vec![])]);
+        }
+
+        // BFS from each source node
+        let mut result_src = Vec::new();
+        let mut result_dst = Vec::new();
+        let mut result_len = Vec::new();
+
+        for &src in &source_offsets {
+            let src_u = src as u64;
+            // BFS: (node_offset, depth)
+            let mut queue = VecDeque::new();
+            let mut visited = HashMap::new();
+            queue.push_back((src_u, 0u64));
+            visited.insert(src_u, 0u64);
+
+            while let Some((node, depth)) = queue.pop_front() {
+                if depth >= self.upper_bound {
+                    continue;
+                }
+
+                // Get neighbors based on direction
+                let neighbors: Vec<u64> = match self.direction {
+                    ExtendDirection::Fwd => {
+                        fwd_adj.get(&node).cloned().unwrap_or_default()
+                    }
+                    ExtendDirection::Bwd => {
+                        rev_adj.get(&node).cloned().unwrap_or_default()
+                    }
+                    ExtendDirection::Both => {
+                        let mut nbrs: Vec<u64> = fwd_adj.get(&node).cloned().unwrap_or_default();
+                        if let Some(bwd) = rev_adj.get(&node) {
+                            nbrs.extend(bwd.iter().copied());
+                        }
+                        nbrs
+                    }
+                };
+
+                for nbr in neighbors {
+                    if !visited.contains_key(&nbr) {
+                        let new_depth = depth + 1;
+                        visited.insert(nbr, new_depth);
+                        queue.push_back((nbr, new_depth));
+                    }
+                }
+            }
+
+            // Emit results for nodes at valid depths
+            for (&node, &depth) in &visited {
+                if depth >= self.lower_bound && depth <= self.upper_bound {
+                    result_src.push(src);
+                    result_dst.push(node as i64);
+                    result_len.push(depth as i64);
+                }
+            }
+        }
+
+        // Build output DataChunk
+        let num_results = result_src.len();
+        if num_results == 0 {
+            return Ok(vec![DataChunk::new(vec![])]);
+        }
+
+        let mut src_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
+        let mut dst_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
+        let mut len_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
+
+        for i in 0..num_results {
+            let offset = i * 8;
+            src_v.data_mut()[offset..offset + 8].copy_from_slice(&result_src[i].to_le_bytes());
+            src_v.set_null(i, false);
+            dst_v.data_mut()[offset..offset + 8].copy_from_slice(&result_dst[i].to_le_bytes());
+            dst_v.set_null(i, false);
+            len_v.data_mut()[offset..offset + 8].copy_from_slice(&result_len[i].to_le_bytes());
+            len_v.set_null(i, false);
+        }
+        src_v.resize(num_results);
+        dst_v.resize(num_results);
+        len_v.resize(num_results);
+
+        Ok(vec![DataChunk {
+            fields: vec![src_v, dst_v, len_v],
+            size: num_results,
+        }])
+    }
+}

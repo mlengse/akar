@@ -150,12 +150,73 @@ impl QueryPlanner {
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;
         let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
+        // Flag to skip destination node pattern consumed by RecursiveExtend
+        let mut skip_next_node = false;
 
         for clause in query.clauses {
             match clause {
                 BoundClause::BoundMatch(m) => {
-                    for pattern in m.patterns {
-                        // Scan node table
+                    let mut patterns_iter = m.patterns.into_iter().peekable();
+                    while let Some(pattern) = patterns_iter.next() {
+                        // If the previous pattern's RecursiveExtend consumed this dest node, skip
+                        if skip_next_node {
+                            skip_next_node = false;
+                            continue;
+                        }
+
+                        // Check if this pattern has a var-length edge → create RecursiveExtend
+                        if let Some(ref edge) = pattern.edge {
+                            let is_var_length = edge.lower_bound.is_some() || edge.upper_bound.is_some();
+                            if is_var_length {
+                                let lb = edge.lower_bound.unwrap_or(0);
+                                let ub = edge.upper_bound.unwrap_or(1);
+                                let direction = match edge.direction {
+                                    kuzu_parser::ast::EdgeDirection::LeftToRight =>
+                                        kuzu_common::enums::ExtendDirection::Fwd,
+                                    kuzu_parser::ast::EdgeDirection::RightToLeft =>
+                                        kuzu_common::enums::ExtendDirection::Bwd,
+                                    kuzu_parser::ast::EdgeDirection::Both =>
+                                        kuzu_common::enums::ExtendDirection::Both,
+                                };
+
+                                // Scan source node
+                                let node_var = &pattern.node_variable;
+                                if let Some(label) = pattern.node_label {
+                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                        table_name: label,
+                                        table_id: pattern.node_table_id.unwrap_or(0),
+                                        alias: node_var.clone(),
+                                        columns: Vec::new(),
+                                        cardinality: 0,
+                                    }));
+                                }
+
+                                // Create RecursiveExtend (consumes destination node pattern)
+                                let rel_table_ids = edge.rel_table_id.map_or(vec![], |id| vec![id]);
+                                let rel_labels = edge.label.as_ref().map_or(vec![], |l| vec![l.clone()]);
+                                let target_var = patterns_iter.peek()
+                                    .and_then(|p| p.node_variable.clone())
+                                    .unwrap_or_default();
+                                scan_ops.push(LogicalOperator::RecursiveExtend(LogicalRecursiveExtend {
+                                    source_var: node_var.clone().unwrap_or_default(),
+                                    source_table_id: pattern.node_table_id.unwrap_or(0),
+                                    edge_var: edge.variable.clone(),
+                                    target_var,
+                                    rel_table_ids,
+                                    rel_labels,
+                                    lower_bound: lb,
+                                    upper_bound: ub,
+                                    direction,
+                                    semantic: kuzu_common::enums::PathSemantic::Walk,
+                                    cardinality: 0,
+                                }));
+                                // Skip the destination node pattern (consumed by RecursiveExtend)
+                                skip_next_node = true;
+                                continue;
+                            }
+                        }
+
+                        // Regular (non-var-length) pattern: Scan node
                         if let Some(label) = pattern.node_label {
                             scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                 table_name: label,
@@ -165,7 +226,7 @@ impl QueryPlanner {
                                 cardinality: 0,
                             }));
                         }
-                        // Scan rel table
+                        // Regular edge: ScanRel
                         if let Some(edge) = pattern.edge {
                             if let Some(rel_label) = edge.label {
                                 scan_ops.push(LogicalOperator::ScanRel(LogicalScanRel {

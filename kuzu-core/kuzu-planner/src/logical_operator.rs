@@ -31,6 +31,7 @@ pub enum LogicalOperator {
     AntiJoin(LogicalAntiJoin),
     Intersect(LogicalIntersect),
     Explain(LogicalExplain),
+    RecursiveExtend(LogicalRecursiveExtend),
 }
 
 impl LogicalOperator {
@@ -62,6 +63,7 @@ impl LogicalOperator {
             LogicalOperator::AntiJoin(s) => s.cardinality,
             LogicalOperator::Intersect(s) => s.cardinality,
             LogicalOperator::Explain(s) => s.cardinality,
+            LogicalOperator::RecursiveExtend(s) => s.cardinality,
         }
     }
 
@@ -93,6 +95,7 @@ impl LogicalOperator {
             LogicalOperator::AntiJoin(s) => s.cardinality = card,
             LogicalOperator::Intersect(s) => s.cardinality = card,
             LogicalOperator::Explain(s) => s.cardinality = card,
+            LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
         }
     }
 
@@ -122,6 +125,7 @@ impl LogicalOperator {
             LogicalOperator::AntiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Intersect(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Explain(s) => vec![&mut *s.inner],
+            LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -154,6 +158,7 @@ impl LogicalOperator {
             LogicalOperator::AntiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Intersect(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Explain(s) => vec![&*s.inner],
+            LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -168,6 +173,8 @@ impl LogicalOperator {
         }
     }
 }
+
+// (RecursiveExtend is also a leaf — handled in children_mut)
 
 #[derive(Debug, Clone)]
 pub struct LogicalArtIndexRangeScan {
@@ -336,6 +343,39 @@ pub struct LogicalIntersect {
     pub left: Box<LogicalOperator>,
     /// Build side — produces hash tables for each pattern.
     pub right: Box<LogicalOperator>,
+    /// Estimated cardinality.
+    pub cardinality: u64,
+}
+
+/// Variable-length path (recursive extend) operator.
+///
+/// Corresponds to `MATCH (a)-[e*1..3]->(b)` — traverses the graph
+/// up to `upper_bound` hops from source nodes and produces results
+/// for each path whose length is between `lower_bound` and `upper_bound`.
+///
+/// This is a leaf operator that executes BFS traversal during query execution.
+#[derive(Debug, Clone)]
+pub struct LogicalRecursiveExtend {
+    /// Source node variable name.
+    pub source_var: String,
+    /// Source node table ID.
+    pub source_table_id: u64,
+    /// Edge variable name (optional).
+    pub edge_var: Option<String>,
+    /// Destination node variable name.
+    pub target_var: String,
+    /// Relationship table ID(s) to traverse.
+    pub rel_table_ids: Vec<u64>,
+    /// Relationship label(s).
+    pub rel_labels: Vec<String>,
+    /// Minimum path length.
+    pub lower_bound: u64,
+    /// Maximum path length.
+    pub upper_bound: u64,
+    /// Traversal direction.
+    pub direction: kuzu_common::enums::ExtendDirection,
+    /// Path semantic (WALK / TRAIL / ACYCLIC).
+    pub semantic: kuzu_common::enums::PathSemantic,
     /// Estimated cardinality.
     pub cardinality: u64,
 }

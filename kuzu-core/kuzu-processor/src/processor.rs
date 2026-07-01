@@ -137,6 +137,18 @@ impl QueryProcessor {
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::RecursiveExtend(re) => {
+                    let scan = PhysicalRecursiveExtend {
+                        source_table_id: re.source_table_id,
+                        rel_table_ids: re.rel_table_ids.clone(),
+                        lower_bound: re.lower_bound,
+                        upper_bound: re.upper_bound,
+                        direction: re.direction,
+                        table_catalog: self.table_catalog.clone(),
+                    };
+                    let result = scan.execute(current.clone())?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::Filter(f) => {
                     let evaluator = self
                         .function_registry
@@ -908,6 +920,9 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::ArtIndexRangeScan(ars) => format!("ArtIndexRangeScan({})", ars.table_name),
         LogicalOperator::Explain(_) => "Explain".to_string(),
         LogicalOperator::Intersect(_) => "Intersect".to_string(),
+        LogicalOperator::RecursiveExtend(re) => {
+            format!("RecursiveExtend({}..{})", re.lower_bound, re.upper_bound)
+        }
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());
