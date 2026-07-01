@@ -144,6 +144,7 @@ impl QueryProcessor {
                         lower_bound: re.lower_bound,
                         upper_bound: re.upper_bound,
                         direction: re.direction,
+                        semantic: re.semantic,
                         table_catalog: self.table_catalog.clone(),
                     };
                     let result = scan.execute(current.clone())?;

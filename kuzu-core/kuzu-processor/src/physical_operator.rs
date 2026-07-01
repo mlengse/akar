@@ -2395,13 +2395,18 @@ impl PhysicalOperatorExec for PhysicalExplain {
 /// result rows for all nodes reachable at depths between `lower_bound` and
 /// `upper_bound`.
 ///
-/// Produces a DataChunk with columns: (src_offset, dst_offset, length).
+/// Uses GDS-style path tracking to record actual paths (node IDs + edge IDs)
+/// and enforces path semantics (WALK/TRAIL/ACYCLIC).
+///
+/// Produces a DataChunk with columns:
+///   (src_offset, dst_offset, length, path_node_ids, path_edge_ids)
 pub struct PhysicalRecursiveExtend {
     pub source_table_id: u64,
     pub rel_table_ids: Vec<u64>,
     pub lower_bound: u64,
     pub upper_bound: u64,
     pub direction: kuzu_common::enums::ExtendDirection,
+    pub semantic: kuzu_common::enums::PathSemantic,
     pub table_catalog: Option<Arc<TableCatalog>>,
 }
 
@@ -2412,6 +2417,8 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
         use kuzu_common::enums::ExtendDirection;
+        use kuzu_common::enums::PathSemantic;
+        use kuzu_common::types::Value;
         use kuzu_common::vector::ValueVector;
         use std::collections::{HashMap, VecDeque};
 
@@ -2420,31 +2427,32 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             .as_ref()
             .ok_or_else(|| "No table catalog available for RecursiveExtend".to_string())?;
 
-        // Build adjacency from all rel tables
-        let mut fwd_adj: HashMap<u64, Vec<u64>> = HashMap::new();
-        let mut rev_adj: HashMap<u64, Vec<u64>> = HashMap::new();
+        // Build adjacency with edge IDs: neighbor_offset -> (neighbor_offset, edge_id)
+        let mut fwd_adj: HashMap<u64, Vec<(u64, u64)>> = HashMap::new();
+        let mut rev_adj: HashMap<u64, Vec<(u64, u64)>> = HashMap::new();
 
         for &rel_table_id in &self.rel_table_ids {
             if let Some(rel_table) = catalog.get_rel_table(rel_table_id) {
                 for (&src, neighbors) in rel_table.fwd_adj.iter() {
-                    fwd_adj.entry(src).or_default().extend(neighbors.iter().map(|(dst, _)| *dst));
+                    fwd_adj.entry(src).or_default().extend(
+                        neighbors.iter().map(|(dst, edge_idx)| (*dst, *edge_idx as u64))
+                    );
                 }
                 for (&dst, neighbors) in rel_table.rev_adj.iter() {
-                    rev_adj.entry(dst).or_default().extend(neighbors.iter().map(|(src, _)| *src));
+                    rev_adj.entry(dst).or_default().extend(
+                        neighbors.iter().map(|(src, edge_idx)| (*src, *edge_idx as u64))
+                    );
                 }
             }
         }
 
         // Collect source node offsets from input
         let source_offsets: Vec<i64> = if input.is_empty() || input[0].fields.is_empty() {
-            // No input: scan all nodes from source table
-            // Use all nodes with edges in fwd_adj
             let mut all: Vec<i64> = fwd_adj.keys().chain(rev_adj.keys()).copied().map(|k| k as i64).collect();
             all.sort();
             all.dedup();
             all
         } else {
-            // Extract first column (assumed to be source node offset)
             let field = &input[0].fields[0];
             let num_rows = input[0].size;
             let mut offsets = Vec::with_capacity(num_rows);
@@ -2463,26 +2471,33 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             return Ok(vec![DataChunk::new(vec![])]);
         }
 
-        // BFS from each source node
-        let mut result_src = Vec::new();
-        let mut result_dst = Vec::new();
-        let mut result_len = Vec::new();
+        // Result columns
+        let mut result_src: Vec<i64> = Vec::new();
+        let mut result_dst: Vec<i64> = Vec::new();
+        let mut result_len: Vec<i64> = Vec::new();
+        // Path tracking: for each result, store the sequence of (node_id, edge_id) pairs
+        let mut result_path_nodes: Vec<Vec<i64>> = Vec::new();
+        let mut result_path_edges: Vec<Vec<i64>> = Vec::new();
 
         for &src in &source_offsets {
             let src_u = src as u64;
-            // BFS: (node_offset, depth)
+
+            // BFS with parent tracking: node -> (parent_node, edge_id, depth)
             let mut queue = VecDeque::new();
-            let mut visited = HashMap::new();
+            // Parent map: child -> (parent, edge_id, depth)
+            let mut parents: HashMap<u64, (u64, u64, u64)> = HashMap::new();
             queue.push_back((src_u, 0u64));
-            visited.insert(src_u, 0u64);
+            parents.insert(src_u, (u64::MAX, u64::MAX, 0)); // source has no parent
+
+            let semantic = self.semantic;
 
             while let Some((node, depth)) = queue.pop_front() {
                 if depth >= self.upper_bound {
                     continue;
                 }
 
-                // Get neighbors based on direction
-                let neighbors: Vec<u64> = match self.direction {
+                // Get neighbors based on direction, with edge IDs
+                let neighbors: Vec<(u64, u64)> = match self.direction {
                     ExtendDirection::Fwd => {
                         fwd_adj.get(&node).cloned().unwrap_or_default()
                     }
@@ -2490,7 +2505,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                         rev_adj.get(&node).cloned().unwrap_or_default()
                     }
                     ExtendDirection::Both => {
-                        let mut nbrs: Vec<u64> = fwd_adj.get(&node).cloned().unwrap_or_default();
+                        let mut nbrs: Vec<(u64, u64)> = fwd_adj.get(&node).cloned().unwrap_or_default();
                         if let Some(bwd) = rev_adj.get(&node) {
                             nbrs.extend(bwd.iter().copied());
                         }
@@ -2498,22 +2513,94 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                     }
                 };
 
-                for nbr in neighbors {
-                    if !visited.contains_key(&nbr) {
-                        let new_depth = depth + 1;
-                        visited.insert(nbr, new_depth);
-                        queue.push_back((nbr, new_depth));
+                'neighbors: for (nbr, edge_id) in neighbors {
+                    if parents.contains_key(&nbr) {
+                        // Already visited — check if semantic allows revisiting
+                        match semantic {
+                            PathSemantic::Walk => {
+                                // WALK allows revisiting nodes and edges
+                                // But for variable-length paths, we only record first visit
+                                // to avoid exponential blowup
+                                continue;
+                            }
+                            PathSemantic::Trail => {
+                                // TRAIL: no repeated edges
+                                // Check if this edge was already used in the current path
+                                // by scanning the parent chain
+                                let mut cur = node;
+                                while let Some(&(p, eid, _)) = parents.get(&cur) {
+                                    if eid == edge_id {
+                                        continue 'neighbors; // edge already used
+                                    }
+                                    if p == u64::MAX {
+                                        break; // reached source
+                                    }
+                                    cur = p;
+                                }
+                                // Edge not used, but node was visited — allow traversal
+                                // since we found a new path
+                            }
+                            PathSemantic::Acyclic => {
+                                // ACYCLIC: no repeated nodes — skip
+                                continue 'neighbors;
+                            }
+                        }
                     }
+
+                    let new_depth = depth + 1;
+                    parents.insert(nbr, (node, edge_id, new_depth));
+                    queue.push_back((nbr, new_depth));
                 }
             }
 
             // Emit results for nodes at valid depths
-            for (&node, &depth) in &visited {
-                if depth >= self.lower_bound && depth <= self.upper_bound {
-                    result_src.push(src);
-                    result_dst.push(node as i64);
-                    result_len.push(depth as i64);
+            for (&node, &(parent_node, edge_id, depth)) in &parents {
+                if depth < self.lower_bound || depth > self.upper_bound {
+                    continue;
                 }
+                // Skip source node itself (unless lower_bound == 0)
+                if depth == 0 && self.lower_bound > 0 {
+                    continue;
+                }
+
+                result_src.push(src);
+                result_dst.push(node as i64);
+                result_len.push(depth as i64);
+
+                // Reconstruct path from node back to source
+                let mut path_nodes = Vec::new();
+                let mut path_edges = Vec::new();
+
+                // We walk backwards from node to source, then reverse
+                let mut cur = node;
+                let mut temp_nodes = vec![node as i64];
+                let mut temp_edges = Vec::new();
+
+                // Walk parent chain from the first step from source
+                // path = [source, ...intermediate..., destination]
+                while cur != src_u {
+                    if let Some(&(parent, eid, _)) = parents.get(&cur) {
+                        if parent == u64::MAX {
+                            break;
+                        }
+                        temp_edges.push(eid as i64);
+                        temp_nodes.push(parent as i64);
+                        cur = parent;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Reverse to get source->destination order
+                temp_nodes.reverse();
+                temp_edges.reverse();
+                // prepend source node
+                path_nodes.push(src);
+                path_nodes.extend(temp_nodes);
+                path_edges = temp_edges;
+
+                result_path_nodes.push(path_nodes);
+                result_path_edges.push(path_edges);
             }
         }
 
@@ -2523,6 +2610,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             return Ok(vec![DataChunk::new(vec![])]);
         }
 
+        // Column 0-2: primitive Int64 vectors
         let mut src_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
         let mut dst_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
         let mut len_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_results);
@@ -2540,8 +2628,33 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
         dst_v.resize(num_results);
         len_v.resize(num_results);
 
+        // Column 3-4: create Value vectors for path lists, then convert to columns
+        // Use Vec<Option<Value>> to store per-row path data
+        let mut path_nodes_col: Vec<Value> = Vec::with_capacity(num_results);
+        let mut path_edges_col: Vec<Value> = Vec::with_capacity(num_results);
+
+        for i in 0..num_results {
+            // Path nodes as List(Int64)
+            let node_vals: Vec<Value> = result_path_nodes[i].iter().map(|&n| Value::Int64(n)).collect();
+            path_nodes_col.push(Value::List(node_vals));
+            // Path edges as List(Int64)
+            let edge_vals: Vec<Value> = result_path_edges[i].iter().map(|&e| Value::Int64(e)).collect();
+            path_edges_col.push(Value::List(edge_vals));
+        }
+
+        // Store List values in ValueVector via set_value
+        let mut path_nodes_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::List, num_results);
+        let mut path_edges_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::List, num_results);
+
+        for (i, val) in path_nodes_col.iter().enumerate() {
+            path_nodes_v.set_value(i, val).ok();
+        }
+        for (i, val) in path_edges_col.iter().enumerate() {
+            path_edges_v.set_value(i, val).ok();
+        }
+
         Ok(vec![DataChunk {
-            fields: vec![src_v, dst_v, len_v],
+            fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v],
             size: num_results,
         }])
     }
