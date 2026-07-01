@@ -48,7 +48,9 @@ impl Optimizer {
             Box::new(FactorizationRewriting),
             // Tree pass 2: Acc Hash Join — accumulate selective probe sides for SIP
             Box::new(AccHashJoinOptimization),
-            // Tree pass 3: Remove redundant GROUP BY keys (functional dependency analysis)
+            // Tree pass 3: Correlated Subquery Unnesting
+            Box::new(CorrelatedSubqueryUnnesting),
+            // Tree pass 4: Remove redundant GROUP BY keys (functional dependency analysis)
             Box::new(AggKeyDependency),
             // Tree pass 4: Annotate operators with estimated row counts (static heuristics)
             Box::new(CardinalityEstimation::new(None)),
@@ -74,6 +76,7 @@ impl Optimizer {
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
             Box::new(AccHashJoinOptimization),
+            Box::new(CorrelatedSubqueryUnnesting),
             // Remove redundant GROUP BY keys (functional dependency analysis)
             Box::new(AggKeyDependency),
             // Use storage-backed cardinality estimation with real stats
@@ -140,7 +143,8 @@ mod tests {
         assert!(names.contains(&"common_subexpression_elimination"));
         assert!(names.contains(&"agg_key_dependency"));
         assert!(names.contains(&"acc_hash_join"));
-        assert_eq!(names.len(), 15);
+        assert!(names.contains(&"correlated_subquery_unnesting"));
+        assert_eq!(names.len(), 16);
     }
 
     #[test]
