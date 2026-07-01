@@ -585,6 +585,7 @@ impl FunctionRegistry {
         self.register_scalar("array_contains", ScalarFunction::List { op: ListOp::Contains });
         self.register_scalar("array_has", ScalarFunction::List { op: ListOp::Contains });
         self.register_scalar("array_slice", ScalarFunction::List { op: ListOp::Slice });
+        self.register_scalar("array_value", ScalarFunction::List { op: ListOp::Creation });
 
         // --- Aggregate ---
         self.register_aggregate("COUNT", AggregateFunction::Count);

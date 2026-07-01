@@ -1909,6 +1909,26 @@ mod tests {
     }
 
     #[test]
+    fn test_array_value() {
+        // array_value is an alias for ListOp::Creation
+        let func = ScalarFunction::List { op: ListOp::Creation };
+        let result = evaluate_scalar(&func, &[
+            Value::Int64(10),
+            Value::Int64(20),
+            Value::Int64(30),
+            Value::Int64(40),
+        ]).unwrap();
+        match result {
+            Value::List(items) => {
+                assert_eq!(items.len(), 4);
+                assert_eq!(items[0], Value::Int64(10));
+                assert_eq!(items[2], Value::Int64(30));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
     fn test_list_concat() {
         let func = ScalarFunction::List { op: ListOp::Concat };
         let l1 = Value::List(vec![Value::Int64(1), Value::Int64(2)]);
