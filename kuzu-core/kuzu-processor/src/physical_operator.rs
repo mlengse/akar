@@ -9,7 +9,7 @@ use kuzu_function::AggregateFunction;
 use kuzu_function::scalar::AggValueState;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -18,10 +18,109 @@ use crate::expression_evaluator::ExpressionEvaluator;
 /// Result of executing a physical operator.
 pub type OperatorResult = Result<Vec<DataChunk>, String>;
 
+// ==================== SemiMask (SIP) Types ====================
+
+/// A semi-mask tracks which node offsets match a join condition.
+/// Used for Sideways Information Passing (SIP) optimization.
+/// Collects node IDs from the build side of a hash join and pushes
+/// them down to the scan side to skip irrelevant nodes.
+#[derive(Debug, Clone)]
+pub struct NodeSemiMask {
+    /// The set of matching node offsets.
+    pub masked_offsets: Arc<Mutex<HashSet<u64>>>,
+    /// Table ID that this mask applies to.
+    pub table_id: u64,
+    /// Whether the mask has been populated.
+    pub initialized: bool,
+}
+
+impl NodeSemiMask {
+    pub fn new(table_id: u64) -> Self {
+        Self {
+            masked_offsets: Arc::new(Mutex::new(HashSet::new())),
+            table_id,
+            initialized: false,
+        }
+    }
+
+    /// Add a node offset to the mask.
+    pub fn mask(&self, offset: u64) {
+        if let Ok(mut guard) = self.masked_offsets.lock() {
+            guard.insert(offset);
+        }
+    }
+
+    /// Check if a node offset is in the mask.
+    pub fn is_masked(&self, offset: u64) -> bool {
+        if !self.initialized {
+            return true; // No mask = pass all
+        }
+        self.masked_offsets
+            .lock()
+            .map(|guard| guard.contains(&offset))
+            .unwrap_or(true)
+    }
+
+    /// Finalize the mask (called after all data is collected).
+    pub fn finalize(&mut self) {
+        self.initialized = true;
+    }
+}
+
 /// Trait shared by all physical operators.
 pub trait PhysicalOperatorExec {
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult;
     fn operator_type(&self) -> &str;
+}
+
+// ==================== SemiMasker (SIP) ====================
+
+/// Physical operator that collects node IDs from its child and stores them
+/// in a shared `NodeSemiMask`. This mask can then be pushed down to a
+/// `PhysicalScan` to skip irrelevant nodes during scanning.
+///
+/// This is the Rust port of C++ `SingleTableSemiMasker`, simplified to
+/// handle single-table masking (the common case for hash join SIP).
+pub struct PhysicalSemiMasker {
+    /// Column index containing the node ID (INTERNAL_ID) to collect.
+    pub key_column: usize,
+    /// The shared mask to populate.
+    pub mask: NodeSemiMask,
+}
+
+impl PhysicalOperatorExec for PhysicalSemiMasker {
+    fn operator_type(&self) -> &str {
+        "semi_masker"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        if input.is_empty() || input[0].fields.is_empty() {
+            return Ok(input);
+        }
+        let chunk = &input[0];
+        if self.key_column >= chunk.fields.len() {
+            return Err(format!(
+                "SemiMasker: key_column {} out of bounds ({} fields)",
+                self.key_column,
+                chunk.fields.len()
+            ));
+        }
+        let field = &chunk.fields[self.key_column];
+        let num_rows = chunk.size;
+
+        for i in 0..num_rows {
+            if !field.is_null(i) {
+                // Extract the offset from the INTERNAL_ID value
+                let offset = u64::from_le_bytes(
+                    field.data()[i * 8..i * 8 + 8].try_into().unwrap_or([0u8; 8]),
+                );
+                self.mask.mask(offset);
+            }
+        }
+
+        // Pass through the input unchanged
+        Ok(input)
+    }
 }
 
 // ==================== Scan ====================
@@ -37,6 +136,12 @@ pub struct PhysicalScan {
     pub table_data: Option<Vec<Vec<Value>>>,
     /// Column definitions to map column names to physical types.
     pub table_columns: Vec<ColumnDefinition>,
+    /// Optional semi-mask for SIP optimization. If present, only rows whose
+    /// internal node ID offset is in the mask will be emitted.
+    pub semi_mask: Option<NodeSemiMask>,
+    /// Column index of the internal ID field to test against the mask.
+    /// Only used when `semi_mask` is `Some`.
+    pub mask_id_column: usize,
 }
 
 impl PhysicalScan {
@@ -48,6 +153,8 @@ impl PhysicalScan {
             estimated_cardinality,
             table_data: None,
             table_columns: Vec::new(),
+            semi_mask: None,
+            mask_id_column: 0,
         }
     }
 
@@ -61,6 +168,14 @@ impl PhysicalScan {
     pub fn with_data(mut self, data: Vec<Vec<Value>>, columns: Vec<ColumnDefinition>) -> Self {
         self.table_data = Some(data);
         self.table_columns = columns;
+        self
+    }
+
+    /// Attach a semi-mask for SIP optimization.
+    /// When set, only rows whose internal node ID at `mask_id_column` is in the mask will be emitted.
+    pub fn with_semi_mask(mut self, mask: NodeSemiMask, mask_id_column: usize) -> Self {
+        self.semi_mask = Some(mask);
+        self.mask_id_column = mask_id_column;
         self
     }
 
@@ -197,6 +312,34 @@ impl PhysicalOperatorExec for PhysicalScan {
             }
 
             let num_rows = data[0].len();
+
+            // Build a row inclusion mask if semi_mask is active
+            let row_filter: Option<Vec<bool>> = if let Some(ref mask) = self.semi_mask {
+                if self.mask_id_column < data.len() {
+                    Some(
+                        (0..num_rows)
+                            .map(|row| {
+                                if let Value::InternalID(id) = &data[self.mask_id_column][row] {
+                                    mask.is_masked(id.offset)
+                                } else {
+                                    true
+                                }
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Count valid rows
+            let valid_count = row_filter
+                .as_ref()
+                .map(|f| f.iter().filter(|&&b| b).count())
+                .unwrap_or(num_rows);
+
             // Use column_ids if specified, otherwise scan all columns
             let cols_to_scan: Vec<usize> = if self.column_ids.is_empty() {
                 (0..data.len()).collect()
@@ -227,12 +370,27 @@ impl PhysicalOperatorExec for PhysicalScan {
                         .unwrap_or(PhysicalTypeID::Int64)
                 };
 
-                let mut v = ValueVector::new(phys_type, num_rows);
-                v.resize(num_rows);
-                for (row, val) in col_data.iter().enumerate() {
-                    Self::write_value_to_vector(&mut v, row, val);
+                if let Some(ref row_filter) = row_filter {
+                    // Write only valid rows
+                    let mut v = ValueVector::new(phys_type, valid_count);
+                    v.resize(valid_count);
+                    let mut write_row = 0;
+                    for (row, val) in col_data.iter().enumerate() {
+                        if row < num_rows && row_filter[row] {
+                            Self::write_value_to_vector(&mut v, write_row, val);
+                            write_row += 1;
+                        }
+                    }
+                    fields.push(v);
+                } else {
+                    // No filtering: write all rows
+                    let mut v = ValueVector::new(phys_type, num_rows);
+                    v.resize(num_rows);
+                    for (row, val) in col_data.iter().enumerate() {
+                        Self::write_value_to_vector(&mut v, row, val);
+                    }
+                    fields.push(v);
                 }
-                fields.push(v);
             }
 
             let chunk = DataChunk::new(fields);
@@ -1444,6 +1602,26 @@ impl PhysicalOperatorExec for PhysicalIntersect {
 pub struct PhysicalHashJoin {
     pub build_columns: Vec<u32>,
     pub probe_columns: Vec<u32>,
+    /// Optional semi-mask for SIP optimization.
+    /// When populated, the build-side keys are collected into this mask
+    /// and can be used by downstream scan operators to filter nodes.
+    pub semi_mask: Option<NodeSemiMask>,
+}
+
+impl PhysicalHashJoin {
+    pub fn new(build_columns: Vec<u32>, probe_columns: Vec<u32>) -> Self {
+        Self {
+            build_columns,
+            probe_columns,
+            semi_mask: None,
+        }
+    }
+
+    /// Attach a semi-mask for SIP optimization.
+    pub fn with_semi_mask(mut self, mask: NodeSemiMask) -> Self {
+        self.semi_mask = Some(mask);
+        self
+    }
 }
 
 impl PhysicalOperatorExec for PhysicalHashJoin {
@@ -1471,9 +1649,22 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
         type HashBucket = Vec<(Value, Vec<(usize, usize)>)>;
         let mut hash_table: HashMap<u64, HashBucket> = HashMap::new();
 
+        // If semi_mask is active, also collect build-side node offsets
+        let mask = &self.semi_mask;
+
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
+                    // If semi_mask is active, extract node offset from INTERNAL_ID
+                    if let Some(m) = mask {
+                        if let Some(val) = field.get_value(row) {
+                            if let Value::InternalID(id) = val {
+                                m.mask(id.offset);
+                            } else if let Value::Int64(offset) = val {
+                                m.mask(offset as u64);
+                            }
+                        }
+                    }
                     let key = field.get_value(row).unwrap_or(Value::Null);
                     // SQL semantics: NULL keys never match in a join
                     if matches!(key, Value::Null) {

@@ -5,6 +5,25 @@ use kuzu_catalog::CatalogColumn;
 use kuzu_parser::ast::Expression;
 
 /// A logical operator in the query plan.
+/// A logical semi-masker operator for Sideways Information Passing (SIP).
+///
+/// SIP is an optimization where the build-side keys of a hash join are
+/// collected into a mask, which is then pushed down to the probe-side
+/// scan to filter out irrelevant rows early.
+///
+/// Simplified Rust port of C++ `LogicalSemiMasker`.
+#[derive(Debug, Clone)]
+pub struct LogicalSemiMasker {
+    /// The table ID that this mask applies to.
+    pub table_id: u64,
+    /// Column index of the key (node ID) to collect.
+    pub key_column: usize,
+    /// Children (the build-side pipeline).
+    pub children: Vec<LogicalOperator>,
+    /// Estimated cardinality.
+    pub cardinality: u64,
+}
+
 #[derive(Debug, Clone)]
 pub enum LogicalOperator {
     ScanNode(LogicalScanNode),
@@ -33,6 +52,7 @@ pub enum LogicalOperator {
     Intersect(LogicalIntersect),
     Explain(LogicalExplain),
     RecursiveExtend(LogicalRecursiveExtend),
+    SemiMasker(LogicalSemiMasker),
     // DDL operators
     CreateNodeTable(LogicalCreateNodeTable),
     CreateRelTable(LogicalCreateRelTable),
@@ -78,6 +98,7 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality,
             LogicalOperator::Explain(s) => s.cardinality,
             LogicalOperator::RecursiveExtend(s) => s.cardinality,
+            LogicalOperator::SemiMasker(s) => s.cardinality,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality,
             LogicalOperator::CreateRelTable(s) => s.cardinality,
@@ -123,6 +144,7 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality = card,
             LogicalOperator::Explain(s) => s.cardinality = card,
             LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
+            LogicalOperator::SemiMasker(s) => s.cardinality = card,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality = card,
             LogicalOperator::CreateRelTable(s) => s.cardinality = card,
@@ -166,6 +188,7 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Explain(s) => vec![&mut *s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
+            LogicalOperator::SemiMasker(s) => s.children.iter_mut().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -211,6 +234,7 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Explain(s) => vec![&*s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
+            LogicalOperator::SemiMasker(s) => s.children.iter().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)

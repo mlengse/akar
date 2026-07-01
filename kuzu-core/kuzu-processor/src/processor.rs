@@ -10,7 +10,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_function::registry::{FunctionRegistry, ScalarFunction, TableFunction};
+use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::sync::{Arc, Mutex};
@@ -235,6 +235,7 @@ impl QueryProcessor {
                     let join = PhysicalHashJoin {
                         build_columns: Vec::new(),
                         probe_columns: Vec::new(),
+                        semi_mask: None,
                     };
                     let input = intermediate_result.take().unwrap_or_default();
                     let result = join.execute(input)?;
@@ -501,6 +502,20 @@ impl QueryProcessor {
                             size: 1,
                         }]);
                     }
+                }
+                LogicalOperator::SemiMasker(sm) => {
+                    // Create a semi-masker that collects node IDs from the build side
+                    let mask = NodeSemiMask::new(sm.table_id);
+                    let semi_masker = PhysicalSemiMasker {
+                        key_column: sm.key_column,
+                        mask: mask.clone(),
+                    };
+                    let input = intermediate_result.take().unwrap_or_default();
+                    let result = semi_masker.execute(input)?;
+
+                    // Store the mask for downstream use via processor state
+                    // For now, pass result through — the mask is collected during hash join
+                    intermediate_result = Some(result);
                 }
                 // DDL operators — produce a single-row success result
                 LogicalOperator::CreateNodeTable(_)
@@ -960,6 +975,9 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::RecursiveExtend(re) => {
             format!("RecursiveExtend({}..{})", re.lower_bound, re.upper_bound)
         }
+        LogicalOperator::SemiMasker(sm) => {
+            format!("SemiMasker(table={}, col={})", sm.table_id, sm.key_column)
+        }
         // DDL operators
         LogicalOperator::CreateNodeTable(ct) => format!("CreateNodeTable({})", ct.name),
         LogicalOperator::CreateRelTable(ct) => format!("CreateRelTable({})", ct.name),
@@ -1309,6 +1327,7 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
+            semi_mask: None,
         };
         // Build side: keys [1, 2, 3]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -1333,6 +1352,7 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
+            semi_mask: None,
         };
         // Build: [1, 2]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 2);
@@ -1354,6 +1374,7 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
+            semi_mask: None,
         };
         let build = ValueVector::new(PhysicalTypeID::Int64, 0);
         let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -1374,6 +1395,7 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
+            semi_mask: None,
         };
         // Build side with NULLs mixed with real values
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -1400,6 +1422,7 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
+            semi_mask: None,
         };
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
         build.resize(3);
@@ -1417,6 +1440,122 @@ mod tests {
         let result = join.execute(input).unwrap();
         // NULL = NULL is unknown in SQL, so no matches
         assert!(result.is_empty());
+    }
+
+    // ==================== SemiMasker (SIP) Tests ====================
+
+    #[test]
+    fn test_semi_masker_basic() {
+        // Create a semi-masker that collects Int64 values (node offsets)
+        let mask = NodeSemiMask::new(0);
+        let masker = PhysicalSemiMasker {
+            key_column: 0,
+            mask: mask.clone(),
+        };
+
+        // Input: chunk with Int64 values representing node offsets
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        v.resize(3);
+        v.set_i64(0, 10);
+        v.set_i64(1, 20);
+        v.set_i64(2, 30);
+        let input = vec![DataChunk::new(vec![v])];
+        let result = masker.execute(input).unwrap();
+        assert_eq!(result.len(), 1, "SemiMasker should pass through input");
+
+        // Verify mask collected offsets by checking the underlying shared set
+        let collected = mask.masked_offsets.lock().unwrap();
+        assert!(collected.contains(&10), "Offset 10 should be masked");
+        assert!(collected.contains(&20), "Offset 20 should be masked");
+        assert!(collected.contains(&30), "Offset 30 should be masked");
+        assert!(!collected.contains(&40), "Offset 40 should NOT be masked");
+    }
+
+    #[test]
+    fn test_scan_with_semi_mask() {
+        // Create a semi-mask with offsets 1, 3 (only allow these)
+        let mut mask = NodeSemiMask::new(0);
+        mask.mask(1);
+        mask.mask(3);
+        mask.finalize();
+
+        // Create scan with 4 rows: offsets 0..3
+        let mut scan = PhysicalScan::new("test".into(), 0, 10);
+        let data = vec![
+            vec![
+                Value::InternalID(kuzu_common::types::InternalID { offset: 0, table_id: 0 }),
+                Value::InternalID(kuzu_common::types::InternalID { offset: 1, table_id: 0 }),
+                Value::InternalID(kuzu_common::types::InternalID { offset: 2, table_id: 0 }),
+                Value::InternalID(kuzu_common::types::InternalID { offset: 3, table_id: 0 }),
+            ],
+            vec![
+                Value::Int64(100),
+                Value::Int64(200),
+                Value::Int64(300),
+                Value::Int64(400),
+            ],
+        ];
+        let columns = vec![
+            ColumnDefinition { name: "id".into(), logical_type: LogicalTypeID::InternalID, is_primary_key: false },
+            ColumnDefinition { name: "val".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+        ];
+        scan = scan.with_data(data, columns);
+        scan = scan.with_semi_mask(mask, 0); // mask on column 0 (InternalID)
+
+        let result = scan.execute(vec![]).unwrap();
+        assert_eq!(result.len(), 1, "Should produce one chunk");
+        assert_eq!(result[0].size, 2, "Should have 2 rows (offsets 1 and 3)");
+
+        // Verify the values
+        let val_field = &result[0].fields[1];
+        assert_eq!(val_field.get_value(0), Some(Value::Int64(200)));
+        assert_eq!(val_field.get_value(1), Some(Value::Int64(400)));
+    }
+
+    #[test]
+    fn test_semi_mask_uninitialized_passes_all() {
+        // An uninitialized mask should pass all rows (initialized = false)
+        let mask = NodeSemiMask::new(0);
+        // Don't call finalize — mask is not initialized
+
+        assert!(mask.is_masked(999), "Uninitialized mask should pass all offsets");
+    }
+
+    #[test]
+    fn test_hash_join_with_semi_mask_collects_build_keys() {
+        // When a PhysicalHashJoin has a semi_mask, build-side keys are collected
+        let mask = NodeSemiMask::new(0);
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+            semi_mask: Some(mask.clone()),
+        };
+
+        // Build side with Int64 keys
+        let mut build_v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        build_v.set_i64(0, 5);
+        build_v.set_i64(1, 15);
+        build_v.set_i64(2, 25);
+        build_v.resize(3);
+
+        // Probe side
+        let mut probe_v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        probe_v.set_i64(0, 5);
+        probe_v.set_i64(1, 15);
+        probe_v.set_i64(2, 35);
+        probe_v.resize(3);
+
+        let input = vec![DataChunk::new(vec![build_v]), DataChunk::new(vec![probe_v])];
+        let result = join.execute(input).unwrap();
+
+        // Should match 5→5 and 15→15 (2 rows). 35 has no build match.
+        assert!(!result.is_empty(), "Expected 2 matching rows");
+
+        // Verify mask collected build-side keys via underlying shared set
+        let collected = mask.masked_offsets.lock().unwrap();
+        assert!(collected.contains(&5), "Offset 5 should be in mask");
+        assert!(collected.contains(&15), "Offset 15 should be in mask");
+        assert!(collected.contains(&25), "Offset 25 should be in mask");
     }
 
     #[test]

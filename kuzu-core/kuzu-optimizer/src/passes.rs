@@ -796,6 +796,12 @@ impl TreeOptimizationPass for FactorizationRewriting {
                     Self::append_flattens(&mut aj.left, &[0]);
                     Self::append_flattens(&mut aj.right, &[0]);
                 }
+                // SemiMasker: flatten children
+                LogicalOperator::SemiMasker(s) => {
+                    for child in &mut s.children {
+                        Self::append_flattens(child, &[0]);
+                    }
+                }
                 // Leaf and Flatten operators: no transformation needed
                 LogicalOperator::ArtIndexRangeScan(_)
                 | LogicalOperator::ScanNode(_)
@@ -822,7 +828,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::CreateVectorIndex(_)
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
-                | LogicalOperator::CreateDml(_) => {}
+                | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_) => {}
             }
@@ -992,6 +998,10 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     // estimate: upper_bound * source cardinality
                     let src_card = 100;
                     re.upper_bound.saturating_mul(src_card)
+                }
+                LogicalOperator::SemiMasker(sm) => {
+                    // SemiMasker passes through cardinality from its child
+                    sm.children.first().map(|c| c.cardinality()).unwrap_or(1)
                 }
                 // DDL operators produce exactly one row (success message)
                 LogicalOperator::CreateNodeTable(_)
