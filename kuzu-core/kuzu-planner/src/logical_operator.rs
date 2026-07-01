@@ -5,6 +5,20 @@ use kuzu_catalog::CatalogColumn;
 use kuzu_parser::ast::Expression;
 
 /// A logical operator in the query plan.
+/// A logical expressions scan operator that reads correlated variables
+/// from an outer accumulate (for correlated subquery execution).
+///
+/// Ported from C++ `LogicalExpressionsScan`.
+#[derive(Debug, Clone)]
+pub struct LogicalExpressionsScan {
+    /// Names of the expressions/variables to scan from the outer context.
+    pub expressions: Vec<String>,
+    /// Index of the outer accumulate operator in the plan (set by optimizer).
+    pub outer_accumulate_idx: Option<usize>,
+    /// Estimated cardinality.
+    pub cardinality: u64,
+}
+
 /// A logical accumulate operator that materializes all input into memory.
 ///
 /// Used as the build-side input for hash joins (via SIP/acc-hash-join)
@@ -75,6 +89,7 @@ pub enum LogicalOperator {
     RecursiveExtend(LogicalRecursiveExtend),
     SemiMasker(LogicalSemiMasker),
     Accumulate(LogicalAccumulate),
+    ExpressionsScan(LogicalExpressionsScan),
     // DDL operators
     CreateNodeTable(LogicalCreateNodeTable),
     CreateRelTable(LogicalCreateRelTable),
@@ -122,6 +137,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(s) => s.cardinality,
             LogicalOperator::SemiMasker(s) => s.cardinality,
             LogicalOperator::Accumulate(s) => s.cardinality,
+            LogicalOperator::ExpressionsScan(s) => s.cardinality,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality,
             LogicalOperator::CreateRelTable(s) => s.cardinality,
@@ -169,6 +185,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
             LogicalOperator::SemiMasker(s) => s.cardinality = card,
             LogicalOperator::Accumulate(s) => s.cardinality = card,
+            LogicalOperator::ExpressionsScan(s) => s.cardinality = card,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality = card,
             LogicalOperator::CreateRelTable(s) => s.cardinality = card,
@@ -214,6 +231,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter_mut().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter_mut().collect(),
+            LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -261,6 +279,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter().collect(),
+            LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)

@@ -524,6 +524,11 @@ impl QueryProcessor {
                     // For now, pass result through — the mask is collected during hash join
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::ExpressionsScan(_es) => {
+                    // ExpressionsScan reads correlated variables from outer context.
+                    // Returns empty data (variables resolved at runtime via ExpressionEvaluator).
+                    intermediate_result = Some(vec![DataChunk::new(vec![])]);
+                }
                 // DDL operators — produce a single-row success result
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)
@@ -984,6 +989,9 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         }
         LogicalOperator::Accumulate(ac) => {
             format!("Accumulate({:?})", ac.accumulate_type)
+        }
+        LogicalOperator::ExpressionsScan(es) => {
+            format!("ExpressionsScan({} vars)", es.expressions.len())
         }
         LogicalOperator::SemiMasker(sm) => {
             format!("SemiMasker(table={}, col={})", sm.table_id, sm.key_column)
