@@ -1,9 +1,10 @@
 //! Graph data structures and traversal algorithms.
 //!
 //! Features CSR adjacency format, BFS, PageRank, WCC,
-//! shortest path, and degree centrality.
+//! shortest path, degree centrality, and GDS (Graph Data Science) framework.
 
 pub mod algorithms;
+pub mod gds;
 pub mod graph;
 
 pub use algorithms::{

@@ -1578,6 +1578,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "kuzu-common",
  "kuzu-storage",
+ "rayon",
  "tracing",
 ]
 
