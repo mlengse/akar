@@ -1950,6 +1950,7 @@ mod tests {
                 cardinality: 0,
             })),
             cardinality: 0,
+            push_down_eligible: false,
         });
 
         let pass = FactorizationRewriting;

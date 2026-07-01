@@ -346,6 +346,7 @@ mod tests {
             probe_side: Box::new(large),
             build_side: Box::new(small),
             cardinality: 0,
+            push_down_eligible: false,
         });
 
         let scans = collect_scans_sorted(&join);

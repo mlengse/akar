@@ -365,6 +365,10 @@ pub struct LogicalHashJoin {
     pub build_side: Box<LogicalOperator>,
     pub probe_side: Box<LogicalOperator>,
     pub cardinality: u64,
+    /// Whether this join is eligible for foreign join push-down optimization.
+    /// Set by the ForeignJoinPushDown optimizer pass when all tables in the
+    /// pattern belong to the same foreign database.
+    pub push_down_eligible: bool,
 }
 
 /// Semi-join: returns left rows that have a matching key in the right side.

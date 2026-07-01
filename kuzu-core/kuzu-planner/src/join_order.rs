@@ -174,6 +174,7 @@ fn flatten_plan(plan: &JoinPlan, ops: &mut Vec<LogicalOperator>) {
                     cardinality: 0,
                 })),
                 cardinality: 0,
+                push_down_eligible: false,
             }));
         }
         JoinPlan::CrossProduct { left, right } => {
