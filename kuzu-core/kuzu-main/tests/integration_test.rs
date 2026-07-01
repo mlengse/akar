@@ -619,6 +619,69 @@ fn test_create_table_with_serial_column() {
     assert_eq!(seq.unwrap().curr_val(), 0, "SERIAL should start at 0");
 }
 
+// ==================== CREATE MACRO Integration Tests ====================
+
+#[test]
+fn test_create_macro_basic() {
+    let (_db, conn) = setup_db();
+    let msg = exec(&conn, "CREATE MACRO double(x) AS x * 2");
+    assert!(
+        msg.contains("created"),
+        "CREATE MACRO should succeed: {msg}"
+    );
+
+    // Verify the macro was stored in the catalog
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    let macro_entry = cat.get_macro("double");
+    assert!(macro_entry.is_some(), "Macro 'double' should exist");
+    let m = macro_entry.unwrap();
+    assert_eq!(m.positional_args, vec!["x"]);
+    assert!(m.default_args.is_empty());
+}
+
+#[test]
+fn test_create_macro_duplicate_fails() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE MACRO double(x) AS x * 2");
+    let result = conn.query("CREATE MACRO double(x) AS x * 3");
+    assert!(
+        result.is_err(),
+        "Duplicate macro should fail"
+    );
+    // Verify only one macro exists
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    assert_eq!(cat.macros().len(), 1, "Should have exactly 1 macro");
+}
+
+#[test]
+fn test_create_macro_no_params() {
+    let (_db, conn) = setup_db();
+    let msg = exec(&conn, "CREATE MACRO answer() AS 42");
+    assert!(msg.contains("created"));
+
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    let m = cat.get_macro("answer").unwrap();
+    assert!(m.positional_args.is_empty());
+    assert!(m.default_args.is_empty());
+}
+
+#[test]
+fn test_create_macro_with_default() {
+    let (_db, conn) = setup_db();
+    let msg = exec(&conn, "CREATE MACRO inc(x, y = 1) AS x + y");
+    assert!(msg.contains("created"));
+
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    let m = cat.get_macro("inc").unwrap();
+    assert_eq!(m.positional_args, vec!["x"]);
+    assert_eq!(m.default_args.len(), 1);
+    assert_eq!(m.default_args[0].0, "y");
+}
+
 #[test]
 fn test_serial_auto_increment_on_insert() {
     let (_db, conn) = setup_db();

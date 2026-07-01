@@ -86,6 +86,7 @@ impl Binder {
             Statement::Explain(e) => self.bind_explain(e),
             Statement::CreateSequence(s) => self.bind_create_sequence(s),
             Statement::DropSequence(s) => self.bind_drop_sequence(s),
+            Statement::CreateMacro(m) => self.bind_create_macro(m),
             Statement::ExportDatabase(e) => self.bind_export_database(e),
             Statement::ImportDatabase(i) => self.bind_import_database(i),
         }
@@ -1034,6 +1035,20 @@ impl Binder {
         }))
     }
 
+    fn bind_create_macro(&self, m: kuzu_parser::ast::CreateMacro) -> Result<BoundStatement, String> {
+        // Convert default args to strings
+        let default_args: Vec<(String, String)> = m.default_args.iter()
+            .map(|(name, expr)| (name.clone(), expr_to_debug_string(expr)))
+            .collect();
+        let expression_str = expr_to_debug_string(&m.expression);
+        Ok(BoundStatement::BoundCreateMacro(BoundCreateMacro {
+            name: m.name,
+            positional_args: m.positional_args,
+            default_args,
+            expression: expression_str,
+        }))
+    }
+
     fn bind_export_database(&self, e: kuzu_parser::ast::ExportDatabase) -> Result<BoundStatement, String> {
         let file_type = e.options.get("FORMAT").map(|s| s.to_lowercase()).unwrap_or_else(|| "csv".to_string());
         if file_type != "csv" && file_type != "parquet" {
@@ -1228,6 +1243,12 @@ impl Binder {
             columns,
         }))
     }
+}
+
+/// Convert an Expression AST to a debug string for storage.
+/// Used by macro definition storage.
+fn expr_to_debug_string(expr: &kuzu_parser::ast::Expression) -> String {
+    format!("{:?}", expr)
 }
 
 #[cfg(test)]

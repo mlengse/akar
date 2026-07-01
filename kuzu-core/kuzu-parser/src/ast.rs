@@ -55,6 +55,7 @@ pub enum Statement {
     Explain(ExplainStatement),
     CreateSequence(CreateSequence),
     DropSequence(DropSequence),
+    CreateMacro(CreateMacro),
     ExportDatabase(ExportDatabase),
     ImportDatabase(ImportDatabase),
 }
@@ -351,6 +352,26 @@ pub struct CreateSequence {
 pub struct DropSequence {
     pub name: String,
     pub if_exists: bool,
+}
+
+/// CREATE MACRO statement — defines a Cypher scalar macro.
+///
+/// Syntax: `CREATE MACRO macroName(param1, param2, ...) AS expression`
+///
+/// Macros are expanded at binding time: macro invocations are replaced
+/// with the macro body expression (with parameters substituted).
+///
+/// Ported from C++ `parser/create_macro.h`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateMacro {
+    /// The macro name.
+    pub name: String,
+    /// Positional parameter names (no default value).
+    pub positional_args: Vec<String>,
+    /// Parameters with default values (name, default expression).
+    pub default_args: Vec<(String, Expression)>,
+    /// The macro body expression.
+    pub expression: Box<Expression>,
 }
 
 /// CREATE VECTOR INDEX statement — creates an HNSW index on a vector column.

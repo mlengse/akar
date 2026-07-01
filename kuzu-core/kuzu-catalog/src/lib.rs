@@ -201,6 +201,40 @@ impl ForeignTableEntry {
     }
 }
 
+/// A scalar macro entry in the catalog.
+///
+/// Stores a macro definition: `CREATE MACRO name(params) AS expression`.
+/// Macros are expanded at binding time via parameter substitution.
+///
+/// Ported from C++ `scalar_macro_catalog_entry.h`.
+#[derive(Debug, Clone)]
+pub struct ScalarMacroEntry {
+    pub macro_id: u64,
+    pub name: String,
+    /// Positional parameter names (no default value).
+    pub positional_args: Vec<String>,
+    /// Parameters with default values (name, default expression as string).
+    pub default_args: Vec<(String, String)>,
+    /// The macro body expression (serialized as string).
+    pub expression: String,
+}
+
+impl ScalarMacroEntry {
+    pub fn new(
+        macro_id: u64,
+        name: String,
+        positional_args: Vec<String>,
+        default_args: Vec<(String, String)>,
+        expression: String,
+    ) -> Self {
+        Self { macro_id, name, positional_args, default_args, expression }
+    }
+
+    pub fn total_args(&self) -> usize {
+        self.positional_args.len() + self.default_args.len()
+    }
+}
+
 /// An entry in the system catalog (node table, rel table, vector index, sequence, or foreign table).
 #[derive(Debug, Clone)]
 pub enum CatalogEntry {
@@ -209,6 +243,7 @@ pub enum CatalogEntry {
     VectorIndex(VectorIndexEntry),
     Sequence(SequenceEntry),
     Foreign(ForeignTableEntry),
+    Macro(ScalarMacroEntry),
 }
 
 impl CatalogEntry {
@@ -219,6 +254,7 @@ impl CatalogEntry {
             CatalogEntry::VectorIndex(v) => &v.name,
             CatalogEntry::Sequence(s) => &s.name,
             CatalogEntry::Foreign(f) => &f.name,
+            CatalogEntry::Macro(m) => &m.name,
         }
     }
 
@@ -229,6 +265,7 @@ impl CatalogEntry {
             CatalogEntry::VectorIndex(v) => v.index_id,
             CatalogEntry::Sequence(s) => s.sequence_id,
             CatalogEntry::Foreign(f) => f.table_id,
+            CatalogEntry::Macro(m) => m.macro_id,
         }
     }
 
@@ -239,6 +276,7 @@ impl CatalogEntry {
             CatalogEntry::VectorIndex(_) => &[],
             CatalogEntry::Sequence(_) => &[],
             CatalogEntry::Foreign(f) => &f.columns,
+            CatalogEntry::Macro(_) => &[],
         }
     }
 
@@ -260,6 +298,10 @@ impl CatalogEntry {
 
     pub fn is_foreign_table(&self) -> bool {
         matches!(self, CatalogEntry::Foreign(_))
+    }
+
+    pub fn is_macro(&self) -> bool {
+        matches!(self, CatalogEntry::Macro(_))
     }
 
     pub fn as_node_table(&self) -> Option<&NodeTableEntry> {
@@ -286,6 +328,13 @@ impl CatalogEntry {
     pub fn as_foreign_table(&self) -> Option<&ForeignTableEntry> {
         match self {
             CatalogEntry::Foreign(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    pub fn as_macro(&self) -> Option<&ScalarMacroEntry> {
+        match self {
+            CatalogEntry::Macro(m) => Some(m),
             _ => None,
         }
     }
@@ -450,6 +499,9 @@ impl Catalog {
             CatalogEntry::Foreign(_) => {
                 Err("Cannot add column to a foreign table".into())
             }
+            CatalogEntry::Macro(_) => {
+                Err("Cannot add column to a macro".into())
+            }
         }
     }
 
@@ -485,6 +537,9 @@ impl Catalog {
             }
             CatalogEntry::Foreign(_) => {
                 Err("Cannot drop column from a foreign table".into())
+            }
+            CatalogEntry::Macro(_) => {
+                Err("Cannot drop column from a macro".into())
             }
         }
     }
@@ -601,6 +656,82 @@ impl Catalog {
     pub fn drop_serial_sequence(&mut self, table_name: &str, column_name: &str) -> CatalogResult {
         let seq_name = SequenceEntry::get_serial_name(table_name, column_name);
         self.drop_sequence(&seq_name)
+    }
+
+    // ==================== Macro methods ====================
+
+    /// Create a scalar macro entry in the catalog.
+    ///
+    /// Ported from C++ `ScalarMacroCatalogEntry`.
+    pub fn create_macro(
+        &mut self,
+        name: String,
+        positional_args: Vec<String>,
+        default_args: Vec<(String, String)>,
+        expression: String,
+    ) -> CatalogResult {
+        let macro_name_upper = name.to_uppercase();
+        if self.name_to_id.contains_key(&macro_name_upper) {
+            return CatalogResult::AlreadyExists;
+        }
+        let macro_id = self.next_id;
+        self.next_id += 1;
+        let entry = ScalarMacroEntry::new(macro_id, name.clone(), positional_args, default_args, expression);
+        self.entries
+            .insert(macro_id, CatalogEntry::Macro(entry));
+        self.name_to_id.insert(macro_name_upper, macro_id);
+        CatalogResult::Created { table_id: macro_id }
+    }
+
+    /// Get a macro entry by name (case-insensitive lookup).
+    pub fn get_macro(&self, name: &str) -> Option<&ScalarMacroEntry> {
+        let upper = name.to_uppercase();
+        self.name_to_id.get(&upper).and_then(|id| {
+            match self.entries.get(id) {
+                Some(CatalogEntry::Macro(m)) => Some(m),
+                _ => None,
+            }
+        })
+    }
+
+    /// Get a mutable macro entry by name (case-insensitive).
+    pub fn get_macro_mut(&mut self, name: &str) -> Option<&mut ScalarMacroEntry> {
+        let upper = name.to_uppercase();
+        let id = self.name_to_id.get(&upper).copied()?;
+        match self.entries.get_mut(&id) {
+            Some(CatalogEntry::Macro(m)) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Drop a macro by name (case-insensitive).
+    pub fn drop_macro(&mut self, name: &str) -> CatalogResult {
+        let upper = name.to_uppercase();
+        if let Some(&macro_id) = self.name_to_id.get(&upper) {
+            self.entries.remove(&macro_id);
+            self.name_to_id.remove(&upper);
+            CatalogResult::Dropped { table_id: macro_id }
+        } else {
+            CatalogResult::NotFound
+        }
+    }
+
+    /// List all macro entries.
+    pub fn macros(&self) -> Vec<&ScalarMacroEntry> {
+        self.entries
+            .values()
+            .filter_map(|e| match e {
+                CatalogEntry::Macro(m) => Some(m),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Check if a macro with the given name exists (case-insensitive).
+    pub fn contains_macro(&self, name: &str) -> bool {
+        let upper = name.to_uppercase();
+        self.name_to_id.contains_key(&upper)
+            && matches!(self.entries.get(self.name_to_id.get(&upper).unwrap()), Some(CatalogEntry::Macro(_)))
     }
 
     /// Create a foreign table entry in the catalog.
@@ -731,6 +862,9 @@ impl Catalog {
             CatalogEntry::Foreign(_) => {
                 Err("Cannot rename column on a foreign table".into())
             }
+            CatalogEntry::Macro(_) => {
+                Err("Cannot rename column on a macro".into())
+            }
         }
     }
 
@@ -753,6 +887,7 @@ impl Catalog {
             }
             Some(CatalogEntry::Sequence(s)) => s.name = new_name.to_string(),
             Some(CatalogEntry::Foreign(f)) => f.name = new_name.to_string(),
+            Some(CatalogEntry::Macro(m)) => m.name = new_name.to_string(),
             None => return Err("Table not found".into()),
         }
         self.name_to_id.remove(old_name);
@@ -837,6 +972,7 @@ impl Catalog {
                 CatalogEntry::VectorIndex(v) => v.name = new_name,
                 CatalogEntry::Sequence(s) => s.name = new_name.clone(),
                 CatalogEntry::Foreign(f) => f.name = new_name,
+                CatalogEntry::Macro(m) => m.name = new_name,
             }
         }
         CatalogResult::Created { table_id }

@@ -987,6 +987,26 @@ impl Connection {
                     _ => Err("Failed to drop sequence".into()),
                 }
             }
+            BoundStatement::BoundCreateMacro(m) => {
+                let mut catalog = self.database.catalog.lock().unwrap();
+                match catalog.create_macro(
+                    m.name.clone(),
+                    m.positional_args.clone(),
+                    m.default_args.clone(),
+                    m.expression.clone(),
+                ) {
+                    kuzu_catalog::CatalogResult::Created { .. } => {
+                        tracing::info!("Created macro '{}'", m.name);
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Macro '{}' created", m.name
+                        ))))
+                    }
+                    kuzu_catalog::CatalogResult::AlreadyExists => {
+                        Err(format!("Macro '{}' already exists", m.name))
+                    }
+                    _ => Err("Failed to create macro".into()),
+                }
+            }
             BoundStatement::BoundExportDatabase(e) => self.execute_export_database(e),
             BoundStatement::BoundImportDatabase(i) => self.execute_import_database(i),
             BoundStatement::BoundQuery(q) => {

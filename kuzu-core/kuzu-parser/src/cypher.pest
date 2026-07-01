@@ -40,7 +40,17 @@ ddl_statement = {
     | drop_index
     | create_sequence
     | drop_sequence
+    | create_macro
 }
+
+// ==================== CREATE MACRO ====================
+
+create_macro = {
+    "CREATE" ~ "MACRO" ~ identifier ~ "(" ~ macro_params? ~ ")" ~ "AS" ~ expression
+}
+
+macro_params = { macro_param ~ ("," ~ macro_param)* }
+macro_param = { identifier ~ ("=" ~ literal)? }
 
 // ==================== CREATE / DROP SEQUENCE ====================
 

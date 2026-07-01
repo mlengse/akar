@@ -179,6 +179,7 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         Rule::drop_index => parse_drop_index(pair),
         Rule::create_sequence => parse_create_sequence(pair),
         Rule::drop_sequence => parse_drop_sequence(pair),
+        Rule::create_macro => parse_create_macro(pair),
         Rule::export_database => parse_export_database(pair),
         Rule::import_database => parse_import_database(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
@@ -526,6 +527,62 @@ fn parse_drop_sequence(pair: pest::iterators::Pair<Rule>) -> Result<Statement, S
     }
 
     Ok(Statement::DropSequence(DropSequence { name, if_exists }))
+}
+
+/// Parse `CREATE MACRO name(params) AS expression`.
+fn parse_create_macro(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    let mut positional_args: Vec<String> = Vec::new();
+    let mut default_args: Vec<(String, Expression)> = Vec::new();
+    let mut expression: Option<Expression> = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if name.is_empty() => {
+                name = inner.as_str().to_string();
+            }
+            Rule::macro_params => {
+                for param in inner.into_inner() {
+                    if param.as_rule() == Rule::macro_param {
+                        let mut arg_name = String::new();
+                        let mut default_val: Option<Expression> = None;
+                        for part in param.into_inner() {
+                            match part.as_rule() {
+                                Rule::identifier if arg_name.is_empty() => {
+                                    arg_name = part.as_str().to_string();
+                                }
+                                Rule::literal => {
+                                    // literal wraps inner token types (integer, string, etc.)
+                                    if let Some(inner) = part.into_inner().next() {
+                                        default_val = Some(parse_literal(inner)?);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Some(expr) = default_val {
+                            default_args.push((arg_name, expr));
+                        } else if !arg_name.is_empty() {
+                            positional_args.push(arg_name);
+                        }
+                    }
+                }
+            }
+            Rule::expression => {
+                expression = Some(parse_expression(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    let expr = expression.ok_or_else(|| "CREATE MACRO requires an AS expression".to_string())?;
+
+    Ok(Statement::CreateMacro(CreateMacro {
+        name,
+        positional_args,
+        default_args,
+        expression: Box::new(expr),
+    }))
 }
 
 fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {
@@ -1671,6 +1728,84 @@ mod tests {
                 assert_eq!(i.file_path, "/tmp/export");
             }
             _ => panic!("Expected ImportDatabase"),
+        }
+    }
+
+    // ==================== CREATE MACRO tests ====================
+
+    #[test]
+    fn test_create_macro_no_args() {
+        let sql = "CREATE MACRO my_macro() AS 42";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateMacro(m) => {
+                assert_eq!(m.name, "my_macro");
+                assert!(m.positional_args.is_empty());
+                assert!(m.default_args.is_empty());
+            }
+            _ => panic!("Expected CreateMacro"),
+        }
+    }
+
+    #[test]
+    fn test_create_macro_positional_args() {
+        let sql = "CREATE MACRO double(x) AS x * 2";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateMacro(m) => {
+                assert_eq!(m.name, "double");
+                assert_eq!(m.positional_args, vec!["x"]);
+                assert!(m.default_args.is_empty());
+            }
+            _ => panic!("Expected CreateMacro"),
+        }
+    }
+
+    #[test]
+    fn test_create_macro_multiple_positional_args() {
+        let sql = "CREATE MACRO add(x, y) AS x + y";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateMacro(m) => {
+                assert_eq!(m.name, "add");
+                assert_eq!(m.positional_args, vec!["x", "y"]);
+            }
+            _ => panic!("Expected CreateMacro"),
+        }
+    }
+
+    #[test]
+    fn test_create_macro_with_default_arg() {
+        let sql = "CREATE MACRO inc(x, y = 1) AS x + y";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateMacro(m) => {
+                assert_eq!(m.name, "inc");
+                assert_eq!(m.positional_args, vec!["x"]);
+                assert_eq!(m.default_args.len(), 1);
+                assert_eq!(m.default_args[0].0, "y");
+            }
+            _ => panic!("Expected CreateMacro"),
+        }
+    }
+
+    #[test]
+    fn test_create_macro_expression_body() {
+        let sql = "CREATE MACRO square(x) AS x * x";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateMacro(m) => {
+                assert_eq!(m.name, "square");
+                assert_eq!(m.positional_args, vec!["x"]);
+                // Expression should be BinaryOp(Mul, Variable("x"), Variable("x"))
+                match &*m.expression {
+                    Expression::BinaryOp(op, _, _) => {
+                        assert_eq!(*op, BinaryOp::Multiply);
+                    }
+                    _ => panic!("Expected BinaryOp in macro body"),
+                }
+            }
+            _ => panic!("Expected CreateMacro"),
         }
     }
 }

@@ -24,6 +24,7 @@ pub enum BoundStatement {
     BoundExplain(BoundExplain),
     BoundCreateSequence(BoundCreateSequence),
     BoundDropSequence(BoundDropSequence),
+    BoundCreateMacro(BoundCreateMacro),
     BoundExportDatabase(BoundExportDatabase),
     BoundImportDatabase(BoundImportDatabase),
 }
@@ -260,6 +261,15 @@ pub struct BoundCreateSequence {
 pub struct BoundDropSequence {
     pub name: String,
     pub if_exists: bool,
+}
+
+/// Bound CREATE MACRO statement.
+#[derive(Debug, Clone)]
+pub struct BoundCreateMacro {
+    pub name: String,
+    pub positional_args: Vec<String>,
+    pub default_args: Vec<(String, String)>,
+    pub expression: String,
 }
 
 /// Bound CREATE DML statement — create a node with properties.
