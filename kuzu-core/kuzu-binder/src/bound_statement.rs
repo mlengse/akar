@@ -22,6 +22,8 @@ pub enum BoundStatement {
     BoundMerge(BoundMerge),
     BoundCreateDml(BoundCreateDml),
     BoundExplain(BoundExplain),
+    BoundCreateSequence(BoundCreateSequence),
+    BoundDropSequence(BoundDropSequence),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -221,12 +223,32 @@ pub struct BoundCall {
     pub args: Vec<kuzu_parser::ast::Expression>,
 }
 
+/// Bound CREATE SEQUENCE statement.
+#[derive(Debug, Clone)]
+pub struct BoundCreateSequence {
+    pub name: String,
+    pub if_not_exists: bool,
+    pub or_replace: bool,
+    pub start_with: i64,
+    pub increment: i64,
+    pub min_value: i64,
+    pub max_value: i64,
+    pub cycle: bool,
+}
+
+/// Bound DROP SEQUENCE statement.
+#[derive(Debug, Clone)]
+pub struct BoundDropSequence {
+    pub name: String,
+    pub if_exists: bool,
+}
+
 /// Bound CREATE DML statement — create a node with properties.
 #[derive(Debug, Clone)]
 pub struct BoundCreateDml {
     pub table_name: String,
     pub table_id: u64,
-    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub properties: Vec<(String, Expression)>,
 }
 
 /// Bound MERGE statement — match or create a node pattern.

@@ -84,6 +84,8 @@ impl Binder {
             Statement::Call(c) => self.bind_call(c),
             Statement::CreateDml(c) => self.bind_create_dml(c),
             Statement::Explain(e) => self.bind_explain(e),
+            Statement::CreateSequence(s) => self.bind_create_sequence(s),
+            Statement::DropSequence(s) => self.bind_drop_sequence(s),
         }
     }
 
@@ -972,6 +974,61 @@ impl Binder {
         Ok(BoundStatement::BoundExplain(BoundExplain {
             inner: Box::new(inner),
             explain_type: e.explain_type,
+        }))
+    }
+
+    fn bind_create_sequence(&self, s: kuzu_parser::ast::CreateSequence) -> Result<BoundStatement, String> {
+        // Compute defaults matching C++ behavior:
+        // - START WITH: 1 for increment > 0, max_value for increment < 0
+        // - INCREMENT: 1 (default)
+        // - MINVALUE: 1 for increment > 0, i64::MIN for increment < 0
+        // - MAXVALUE: i64::MAX for increment > 0, -1 for increment < 0
+        // - CYCLE: false (default)
+        let increment = s.increment.unwrap_or(1);
+        if increment == 0 {
+            return Err("INCREMENT must not be zero".into());
+        }
+        let start_with = s.start_with.unwrap_or_else(|| {
+            if increment > 0 { 1 } else { -1 }
+        });
+        let min_value = s.min_value.unwrap_or_else(|| {
+            if increment > 0 { 1 } else { i64::MIN }
+        });
+        let max_value = s.max_value.unwrap_or_else(|| {
+            if increment > 0 { i64::MAX } else { -1 }
+        });
+        let cycle = s.cycle.unwrap_or(false);
+
+        // Validate min/max/start consistency
+        if min_value > max_value {
+            return Err(format!(
+                "MINVALUE ({}) cannot be greater than MAXVALUE ({})",
+                min_value, max_value
+            ));
+        }
+        if start_with < min_value || start_with > max_value {
+            return Err(format!(
+                "START WITH ({}) must be between MINVALUE ({}) and MAXVALUE ({})",
+                start_with, min_value, max_value
+            ));
+        }
+
+        Ok(BoundStatement::BoundCreateSequence(BoundCreateSequence {
+            name: s.name,
+            if_not_exists: s.if_not_exists,
+            or_replace: s.or_replace,
+            start_with,
+            increment,
+            min_value,
+            max_value,
+            cycle,
+        }))
+    }
+
+    fn bind_drop_sequence(&self, s: kuzu_parser::ast::DropSequence) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundDropSequence(BoundDropSequence {
+            name: s.name,
+            if_exists: s.if_exists,
         }))
     }
 

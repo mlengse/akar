@@ -37,6 +37,8 @@ pub enum Statement {
     Call(CallStatement),
     CreateDml(CreateClause),
     Explain(ExplainStatement),
+    CreateSequence(CreateSequence),
+    DropSequence(DropSequence),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -296,6 +298,41 @@ pub struct MergeStatement {
 pub struct CallStatement {
     pub function_name: String,
     pub args: Vec<Expression>,
+}
+
+/// CREATE SEQUENCE statement — creates a sequence for auto-incrementing counters.
+///
+/// Syntax:
+/// ```sql
+/// CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS] name
+///   [START WITH value]
+///   [INCREMENT [BY] value]
+///   [MINVALUE value | NO MINVALUE]
+///   [MAXVALUE value | NO MAXVALUE]
+///   [CYCLE | NO CYCLE]
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateSequence {
+    pub name: String,
+    pub if_not_exists: bool,
+    pub or_replace: bool,
+    /// START WITH value. Default: 1 for increment > 0, max_value for increment < 0.
+    pub start_with: Option<i64>,
+    /// INCREMENT BY value. Default: 1.
+    pub increment: Option<i64>,
+    /// MINVALUE. Auto-computed from defaults if None.
+    pub min_value: Option<i64>,
+    /// MAXVALUE. Auto-computed from defaults if None.
+    pub max_value: Option<i64>,
+    /// CYCLE behavior. Default: false (NO CYCLE).
+    pub cycle: Option<bool>,
+}
+
+/// DROP SEQUENCE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropSequence {
+    pub name: String,
+    pub if_exists: bool,
 }
 
 /// CREATE VECTOR INDEX statement — creates an HNSW index on a vector column.

@@ -33,7 +33,28 @@ ddl_statement = {
     | create_vector_index
     | create_index
     | drop_index
+    | create_sequence
+    | drop_sequence
 }
+
+// ==================== CREATE / DROP SEQUENCE ====================
+
+create_sequence = {
+    "CREATE" ~ or_replace? ~ "SEQUENCE" ~ if_not_exists? ~ identifier
+    ~ (sequence_start_with | sequence_increment_by | sequence_minvalue
+       | sequence_maxvalue | sequence_cycle)*
+}
+
+or_replace = { "OR" ~ "REPLACE" }
+
+sequence_start_with = { "START" ~ "WITH"? ~ minus? ~ integer }
+sequence_increment_by = { "INCREMENT" ~ "BY"? ~ minus? ~ integer }
+sequence_minvalue = { ("NO" ~ "MINVALUE") | ("MINVALUE" ~ minus? ~ integer) }
+sequence_maxvalue = { ("NO" ~ "MAXVALUE") | ("MAXVALUE" ~ minus? ~ integer) }
+sequence_cycle = { ("NO" ~ "CYCLE") | "CYCLE" }
+minus = { "-" }
+
+drop_sequence = { "DROP" ~ "SEQUENCE" ~ if_exists? ~ identifier }
 
 create_index = {
     "CREATE" ~ index_type ~ "INDEX" ~ if_not_exists? ~ identifier
@@ -43,6 +64,7 @@ create_index = {
 
 index_type = { "ART" | "HASH" }
 if_not_exists = { "IF" ~ "NOT" ~ "EXISTS" }
+if_exists = { "IF" ~ "EXISTS" }
 drop_index = { "DROP" ~ "INDEX" ~ identifier ~ "ON" ~ identifier }
 
 // ==================== COPY FROM ====================

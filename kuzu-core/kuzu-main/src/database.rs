@@ -162,6 +162,63 @@ impl Database {
             }
         }
 
+        // Register built-in sequence functions (nextval/currval)
+        // These use CustomScalar closures that capture the catalog
+        {
+            use kuzu_common::types::Value;
+            use kuzu_function::registry::ScalarFunction;
+            use std::sync::Arc;
+
+            let catalog_seq = db.catalog.clone();
+            let reg = db.function_registry.clone();
+            let mut reg = reg.lock().unwrap();
+
+            // currval(seq_name: string) -> int64
+            let curr_catalog = catalog_seq.clone();
+            reg.register_scalar(
+                "currval",
+                ScalarFunction::CustomScalar {
+                    name: "currval".into(),
+                    execute: Arc::new(move |args: &[Value]| -> Result<Value, String> {
+                        if args.is_empty() {
+                            return Err("currval requires a sequence name argument".into());
+                        }
+                        let seq_name = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            other => return Err(format!("currval expects a string, got {:?}", other.logical_type())),
+                        };
+                        let cat = curr_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                        let seq = cat.get_sequence(&seq_name)
+                            .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                        Ok(Value::Int64(seq.curr_val()))
+                    }),
+                },
+            );
+
+            // nextval(seq_name: string) -> int64
+            let next_catalog = catalog_seq.clone();
+            reg.register_scalar(
+                "nextval",
+                ScalarFunction::CustomScalar {
+                    name: "nextval".into(),
+                    execute: Arc::new(move |args: &[Value]| -> Result<Value, String> {
+                        if args.is_empty() {
+                            return Err("nextval requires a sequence name argument".into());
+                        }
+                        let seq_name = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            other => return Err(format!("nextval expects a string, got {:?}", other.logical_type())),
+                        };
+                        let mut cat = next_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                        let seq = cat.get_sequence_mut(&seq_name)
+                            .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                        let result = seq.next_k_val(1);
+                        Ok(Value::Int64(result))
+                    }),
+                },
+            );
+        }
+
         // Attempt WAL recovery from a previous session
         if let Err(e) = db.storage_manager.recover() {
             tracing::warn!(

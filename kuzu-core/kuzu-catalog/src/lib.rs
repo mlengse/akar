@@ -87,6 +87,89 @@ impl RelTableEntry {
     }
 }
 
+/// A sequence entry in the catalog for auto-incrementing counters.
+///
+/// Supports `CREATE SEQUENCE` DDL and `SERIAL` column auto-increment.
+/// Thread-safe via internal Mutex for concurrent `nextval`/`currval` access.
+#[derive(Debug, Clone)]
+pub struct SequenceEntry {
+    pub sequence_id: u64,
+    pub name: String,
+    pub usage_count: u64,
+    pub curr_val: i64,
+    pub increment: i64,
+    pub start_value: i64,
+    pub min_value: i64,
+    pub max_value: i64,
+    pub cycle: bool,
+}
+
+impl SequenceEntry {
+    pub fn new(name: String, start_value: i64, increment: i64, min_value: i64, max_value: i64, cycle: bool, sequence_id: u64) -> Self {
+        Self {
+            sequence_id,
+            name,
+            usage_count: 0,
+            curr_val: start_value,
+            start_value,
+            increment,
+            min_value,
+            max_value,
+            cycle,
+        }
+    }
+
+    /// Get the current value without advancing.
+    pub fn curr_val(&self) -> i64 {
+        self.curr_val
+    }
+
+    /// Advance the sequence by `count` steps and return the next value.
+    pub fn next_k_val(&mut self, count: u64) -> i64 {
+        let result = self.curr_val;
+        self.usage_count += count;
+        let delta = self.increment * (count as i64);
+        let new_val = self.curr_val.checked_add(delta);
+        match new_val {
+            Some(v) => {
+                if v > self.max_value {
+                    if self.cycle {
+                        self.curr_val = self.min_value;
+                    } else {
+                        self.curr_val = v;
+                    }
+                } else if v < self.min_value {
+                    if self.cycle {
+                        self.curr_val = self.max_value;
+                    } else {
+                        self.curr_val = v;
+                    }
+                } else {
+                    self.curr_val = v;
+                }
+            }
+            None => {
+                // Overflow: cycle if enabled, otherwise clamp
+                if self.cycle {
+                    self.curr_val = if delta > 0 { self.min_value } else { self.max_value };
+                }
+            }
+        }
+        result
+    }
+
+    /// Rollback the sequence to a previous state (for transaction rollback).
+    pub fn rollback_val(&mut self, usage_count: u64, curr_val: i64) {
+        self.usage_count = usage_count;
+        self.curr_val = curr_val;
+    }
+
+    /// Generate the auto-generated sequence name for a SERIAL column.
+    pub fn get_serial_name(table_name: &str, property_name: &str) -> String {
+        format!("{}_{}_serial", table_name, property_name)
+    }
+}
+
 /// A vector index entry in the catalog.
 #[derive(Debug, Clone)]
 pub struct VectorIndexEntry {
@@ -104,6 +187,7 @@ pub enum CatalogEntry {
     NodeTable(NodeTableEntry),
     RelTable(RelTableEntry),
     VectorIndex(VectorIndexEntry),
+    Sequence(SequenceEntry),
 }
 
 impl CatalogEntry {
@@ -112,6 +196,7 @@ impl CatalogEntry {
             CatalogEntry::NodeTable(t) => &t.name,
             CatalogEntry::RelTable(t) => &t.name,
             CatalogEntry::VectorIndex(v) => &v.name,
+            CatalogEntry::Sequence(s) => &s.name,
         }
     }
 
@@ -120,6 +205,7 @@ impl CatalogEntry {
             CatalogEntry::NodeTable(t) => t.table_id,
             CatalogEntry::RelTable(t) => t.table_id,
             CatalogEntry::VectorIndex(v) => v.index_id,
+            CatalogEntry::Sequence(s) => s.sequence_id,
         }
     }
 
@@ -128,6 +214,7 @@ impl CatalogEntry {
             CatalogEntry::NodeTable(t) => &t.columns,
             CatalogEntry::RelTable(t) => &t.columns,
             CatalogEntry::VectorIndex(_) => &[],
+            CatalogEntry::Sequence(_) => &[],
         }
     }
 
@@ -141,6 +228,10 @@ impl CatalogEntry {
 
     pub fn is_vector_index(&self) -> bool {
         matches!(self, CatalogEntry::VectorIndex(_))
+    }
+
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, CatalogEntry::Sequence(_))
     }
 
     pub fn as_node_table(&self) -> Option<&NodeTableEntry> {
@@ -318,6 +409,9 @@ impl Catalog {
             CatalogEntry::VectorIndex(_) => {
                 Err("Cannot add column to a vector index".into())
             }
+            CatalogEntry::Sequence(_) => {
+                Err("Cannot add column to a sequence".into())
+            }
         }
     }
 
@@ -347,6 +441,9 @@ impl Catalog {
             }
             CatalogEntry::VectorIndex(_) => {
                 Err("Cannot drop column from a vector index".into())
+            }
+            CatalogEntry::Sequence(_) => {
+                Err("Cannot drop column from a sequence".into())
             }
         }
     }
@@ -381,6 +478,69 @@ impl Catalog {
             }
             _ => Err(format!("Table '{table_name}' is not a node table")),
         }
+    }
+
+    /// Create a sequence in the catalog.
+    pub fn create_sequence(
+        &mut self,
+        name: String,
+        start_value: i64,
+        increment: i64,
+        min_value: i64,
+        max_value: i64,
+        cycle: bool,
+    ) -> CatalogResult {
+        if self.name_to_id.contains_key(&name) {
+            return CatalogResult::AlreadyExists;
+        }
+        let sequence_id = self.next_id;
+        self.next_id += 1;
+        let entry = SequenceEntry::new(name.clone(), start_value, increment, min_value, max_value, cycle, sequence_id);
+        self.entries
+            .insert(sequence_id, CatalogEntry::Sequence(entry));
+        self.name_to_id.insert(name, sequence_id);
+        CatalogResult::Created { table_id: sequence_id }
+    }
+
+    /// Get a sequence entry by name.
+    pub fn get_sequence(&self, name: &str) -> Option<&SequenceEntry> {
+        self.name_to_id.get(name).and_then(|id| {
+            match self.entries.get(id) {
+                Some(CatalogEntry::Sequence(s)) => Some(s),
+                _ => None,
+            }
+        })
+    }
+
+    /// Get a mutable sequence entry by name.
+    pub fn get_sequence_mut(&mut self, name: &str) -> Option<&mut SequenceEntry> {
+        let id = self.name_to_id.get(name).copied()?;
+        match self.entries.get_mut(&id) {
+            Some(CatalogEntry::Sequence(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Drop a sequence by name.
+    pub fn drop_sequence(&mut self, name: &str) -> CatalogResult {
+        if let Some(&seq_id) = self.name_to_id.get(name) {
+            self.entries.remove(&seq_id);
+            self.name_to_id.remove(name);
+            CatalogResult::Dropped { table_id: seq_id }
+        } else {
+            CatalogResult::NotFound
+        }
+    }
+
+    /// List all sequence entries.
+    pub fn sequences(&self) -> Vec<&SequenceEntry> {
+        self.entries
+            .values()
+            .filter_map(|e| match e {
+                CatalogEntry::Sequence(s) => Some(s),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Drop an index from a table.
@@ -449,6 +609,9 @@ impl Catalog {
             CatalogEntry::VectorIndex(_) => {
                 Err("Cannot rename column on a vector index".into())
             }
+            CatalogEntry::Sequence(_) => {
+                Err("Cannot rename column on a sequence".into())
+            }
         }
     }
 
@@ -469,6 +632,7 @@ impl Catalog {
                 // Vector index rename uses the `rename` method
                 return Err("Use rename method for vector indexes".into());
             }
+            Some(CatalogEntry::Sequence(s)) => s.name = new_name.to_string(),
             None => return Err("Table not found".into()),
         }
         self.name_to_id.remove(old_name);
@@ -551,6 +715,7 @@ impl Catalog {
                 CatalogEntry::NodeTable(t) => t.name = new_name.clone(),
                 CatalogEntry::RelTable(t) => t.name = new_name,
                 CatalogEntry::VectorIndex(v) => v.name = new_name,
+                CatalogEntry::Sequence(s) => s.name = new_name,
             }
         }
         CatalogResult::Created { table_id }
@@ -713,5 +878,107 @@ mod tests {
         cat.create_node_table("A".into(), vec![]);
         cat.create_node_table("B".into(), vec![]);
         assert_eq!(cat.all_entries().count(), 2);
+    }
+
+    // --- Sequence tests ---
+
+    #[test]
+    fn test_create_sequence_basic() {
+        let mut cat = Catalog::new();
+        let result = cat.create_sequence("my_seq".into(), 1, 1, 1, i64::MAX, false);
+        assert!(matches!(result, CatalogResult::Created { .. }));
+        assert_eq!(cat.len(), 1);
+    }
+
+    #[test]
+    fn test_create_sequence_duplicate() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("my_seq".into(), 1, 1, 1, i64::MAX, false);
+        let result = cat.create_sequence("my_seq".into(), 1, 1, 1, i64::MAX, false);
+        assert_eq!(result, CatalogResult::AlreadyExists);
+    }
+
+    #[test]
+    fn test_get_sequence() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("my_seq".into(), 100, 5, 1, i64::MAX, false);
+        let seq = cat.get_sequence("my_seq");
+        assert!(seq.is_some());
+        let seq = seq.unwrap();
+        assert_eq!(seq.name, "my_seq");
+        assert_eq!(seq.curr_val(), 100);
+        assert_eq!(seq.increment, 5);
+    }
+
+    #[test]
+    fn test_get_sequence_nonexistent() {
+        let cat = Catalog::new();
+        assert!(cat.get_sequence("ghost").is_none());
+    }
+
+    #[test]
+    fn test_sequence_next_k_val() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("seq1".into(), 1, 1, 1, i64::MAX, false);
+        let seq = cat.get_sequence_mut("seq1").unwrap();
+        let v1 = seq.next_k_val(1);
+        assert_eq!(v1, 1); // First call returns start value
+        assert_eq!(seq.curr_val(), 2); // Advanced by increment
+        let v2 = seq.next_k_val(1);
+        assert_eq!(v2, 2);
+        assert_eq!(seq.curr_val(), 3);
+    }
+
+    #[test]
+    fn test_sequence_next_k_val_count() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("seq2".into(), 0, 10, 0, i64::MAX, false);
+        let seq = cat.get_sequence_mut("seq2").unwrap();
+        let v = seq.next_k_val(3);
+        assert_eq!(v, 0); // First call returns start
+        assert_eq!(seq.curr_val(), 30); // Advanced by 10 * 3 = 30
+    }
+
+    #[test]
+    fn test_sequence_drop() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("to_drop".into(), 1, 1, 1, i64::MAX, false);
+        assert!(cat.get_sequence("to_drop").is_some());
+        let result = cat.drop_sequence("to_drop");
+        assert!(matches!(result, CatalogResult::Dropped { .. }));
+        assert!(cat.get_sequence("to_drop").is_none());
+    }
+
+    #[test]
+    fn test_sequence_drop_nonexistent() {
+        let mut cat = Catalog::new();
+        assert_eq!(cat.drop_sequence("ghost"), CatalogResult::NotFound);
+    }
+
+    #[test]
+    fn test_sequence_rollback() {
+        let mut cat = Catalog::new();
+        cat.create_sequence("rb_seq".into(), 0, 1, 0, i64::MAX, false);
+        let seq = cat.get_sequence_mut("rb_seq").unwrap();
+        seq.next_k_val(10); // Advance 10 times → curr_val = 10
+        seq.rollback_val(0, 0); // Rollback to initial state
+        assert_eq!(seq.usage_count, 0);
+        assert_eq!(seq.curr_val, 0);
+    }
+
+    #[test]
+    fn test_sequence_serial_name() {
+        let name = SequenceEntry::get_serial_name("Person", "id");
+        assert_eq!(name, "Person_id_serial");
+    }
+
+    #[test]
+    fn test_sequence_entry_new() {
+        let seq = SequenceEntry::new("test_seq".into(), 42, 2, 1, 100, true, 99);
+        assert_eq!(seq.name, "test_seq");
+        assert_eq!(seq.sequence_id, 99);
+        assert_eq!(seq.curr_val(), 42);
+        assert_eq!(seq.increment, 2);
+        assert_eq!(seq.cycle, true);
     }
 }

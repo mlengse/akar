@@ -58,6 +58,7 @@ pub enum ScalarFunction {
         name: String,
         execute: Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>,
     },
+
 }
 
 impl std::fmt::Debug for ScalarFunction {

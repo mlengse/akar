@@ -175,6 +175,8 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         Rule::create_vector_index => parse_create_vector_index(pair),
         Rule::create_index => parse_create_index(pair),
         Rule::drop_index => parse_drop_index(pair),
+        Rule::create_sequence => parse_create_sequence(pair),
+        Rule::drop_sequence => parse_drop_sequence(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
 }
@@ -342,6 +344,142 @@ fn parse_drop_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Stri
         index_name,
         table_name,
     }))
+}
+
+/// Parse `CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS] name [START WITH n] [INCREMENT [BY] n] [MINVALUE n|NO MINVALUE] [MAXVALUE n|NO MAXVALUE] [CYCLE|NO CYCLE]`.
+fn parse_create_sequence(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    let mut if_not_exists = false;
+    let mut or_replace = false;
+    let mut start_with: Option<i64> = None;
+    let mut increment: Option<i64> = None;
+    let mut min_value: Option<i64> = None;
+    let mut max_value: Option<i64> = None;
+    let mut cycle: Option<bool> = None;
+
+    /// Parse a single sequence option from its pair.
+    fn parse_opt(
+        p: pest::iterators::Pair<Rule>,
+        start_with: &mut Option<i64>,
+        increment: &mut Option<i64>,
+        min_value: &mut Option<i64>,
+        max_value: &mut Option<i64>,
+        cycle: &mut Option<bool>,
+    ) -> Result<(), String> {
+        /// Extract an i64 from the inner tokens, handling optional minus prefix.
+        fn extract_int<'a>(parts: impl Iterator<Item = pest::iterators::Pair<'a, Rule>>) -> Result<i64, String> {
+            let mut neg = false;
+            let mut val: Option<i64> = None;
+            for part in parts {
+                match part.as_rule() {
+                    Rule::minus => neg = true,
+                    Rule::integer => {
+                        let raw = part.as_str().trim();
+                        let v = raw.parse::<i64>()
+                            .map_err(|e| format!("Invalid integer '{raw}': {e}"))?;
+                        val = Some(if neg { -v } else { v });
+                    }
+                    _ => {}
+                }
+            }
+            val.ok_or_else(|| "Missing integer value".into())
+        }
+
+        match p.as_rule() {
+            Rule::sequence_start_with => {
+                let v = extract_int(p.into_inner())?;
+                *start_with = Some(v);
+            }
+            Rule::sequence_increment_by => {
+                let v = extract_int(p.into_inner())?;
+                *increment = Some(v);
+            }
+            Rule::sequence_minvalue => {
+                let text = p.as_str().to_uppercase();
+                if text.starts_with("NO") {
+                    *min_value = None;
+                } else {
+                    let v = extract_int(p.into_inner())?;
+                    *min_value = Some(v);
+                }
+            }
+            Rule::sequence_maxvalue => {
+                let text = p.as_str().to_uppercase();
+                if text.starts_with("NO") {
+                    *max_value = None;
+                } else {
+                    let v = extract_int(p.into_inner())?;
+                    *max_value = Some(v);
+                }
+            }
+            Rule::sequence_cycle => {
+                let text = p.as_str().to_uppercase();
+                *cycle = Some(!text.starts_with("NO"));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if name.is_empty() => {
+                name = inner.as_str().to_string();
+            }
+            Rule::if_not_exists => {
+                if_not_exists = true;
+            }
+            Rule::or_replace => {
+                or_replace = true;
+            }
+            Rule::sequence_start_with | Rule::sequence_increment_by
+            | Rule::sequence_minvalue | Rule::sequence_maxvalue
+            | Rule::sequence_cycle => {
+                parse_opt(inner, &mut start_with, &mut increment,
+                    &mut min_value, &mut max_value, &mut cycle)?;
+            }
+            _ => {}
+        }
+    }
+
+    if name.is_empty() {
+        return Err("Missing sequence name".into());
+    }
+
+    Ok(Statement::CreateSequence(CreateSequence {
+        name,
+        if_not_exists,
+        or_replace,
+        start_with,
+        increment,
+        min_value,
+        max_value,
+        cycle,
+    }))
+}
+
+/// Parse `DROP SEQUENCE [IF EXISTS] name`.
+fn parse_drop_sequence(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    let mut if_exists = false;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier => {
+                name = inner.as_str().to_string();
+            }
+            Rule::if_exists => {
+                if_exists = true;
+            }
+            _ => {}
+        }
+    }
+
+    if name.is_empty() {
+        return Err("Missing sequence name for DROP SEQUENCE".into());
+    }
+
+    Ok(Statement::DropSequence(DropSequence { name, if_exists }))
 }
 
 fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {
@@ -1306,6 +1444,162 @@ mod tests {
                 assert!(matches!(*e.statement, Statement::CreateNodeTable(_)));
             }
             _ => panic!("Expected Explain(CreateNodeTable)"),
+        }
+    }
+
+    // --- Sequence tests ---
+
+    #[test]
+    fn test_create_sequence_basic() {
+        let sql = "CREATE SEQUENCE my_seq";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert!(!s.if_not_exists);
+                assert!(!s.or_replace);
+                assert_eq!(s.start_with, None);
+                assert_eq!(s.increment, None);
+            }
+            _ => panic!("Expected CreateSequence, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_if_not_exists() {
+        let sql = "CREATE SEQUENCE IF NOT EXISTS my_seq";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert!(s.if_not_exists);
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_or_replace() {
+        let sql = "CREATE OR REPLACE SEQUENCE my_seq";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert!(s.or_replace);
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_start_with() {
+        let sql = "CREATE SEQUENCE my_seq START 100";
+        let result = parse(sql);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+        let stmt = result.unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert_eq!(s.start_with, Some(100));
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_start_with_with() {
+        let sql = "CREATE SEQUENCE my_seq START WITH 100";
+        let result = parse(sql);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+        let stmt = result.unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert_eq!(s.start_with, Some(100));
+            }
+            _ => panic!("Expected CreateSequence, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_full_options() {
+        let sql = "CREATE SEQUENCE my_seq START 100 INCREMENT 5 MINVALUE 1 MAXVALUE 1000 CYCLE";
+        let result = parse(sql);
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+        let stmt = result.unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert_eq!(s.start_with, Some(100));
+                assert_eq!(s.increment, Some(5));
+                assert_eq!(s.min_value, Some(1));
+                assert_eq!(s.max_value, Some(1000));
+                assert_eq!(s.cycle, Some(true));
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_no_cycle() {
+        let sql = "CREATE SEQUENCE my_seq NO CYCLE";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.cycle, Some(false));
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_no_minvalue() {
+        let sql = "CREATE SEQUENCE my_seq NO MINVALUE";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.min_value, None);
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_create_sequence_negative_increment() {
+        let sql = "CREATE SEQUENCE my_seq INCREMENT -1 START 100";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateSequence(s) => {
+                assert_eq!(s.increment, Some(-1));
+                assert_eq!(s.start_with, Some(100));
+            }
+            _ => panic!("Expected CreateSequence"),
+        }
+    }
+
+    #[test]
+    fn test_drop_sequence() {
+        let sql = "DROP SEQUENCE my_seq";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::DropSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert!(!s.if_exists);
+            }
+            _ => panic!("Expected DropSequence"),
+        }
+    }
+
+    #[test]
+    fn test_drop_sequence_if_exists() {
+        let sql = "DROP SEQUENCE IF EXISTS my_seq";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::DropSequence(s) => {
+                assert_eq!(s.name, "my_seq");
+                assert!(s.if_exists);
+            }
+            _ => panic!("Expected DropSequence"),
         }
     }
 }

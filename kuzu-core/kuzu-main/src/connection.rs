@@ -874,6 +874,50 @@ impl Connection {
                     idx.index_name, idx.table_name
                 ))))
             }
+            BoundStatement::BoundCreateSequence(s) => {
+                let mut catalog = self.database.catalog.lock().unwrap();
+                let result = catalog.create_sequence(s.name.clone(), s.start_with, s.increment, s.min_value, s.max_value, s.cycle);
+                match result {
+                    kuzu_catalog::CatalogResult::Created { .. } => {
+                        tracing::info!("Created sequence '{}'", s.name);
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Sequence '{}' created", s.name
+                        ))))
+                    }
+                    kuzu_catalog::CatalogResult::AlreadyExists => {
+                        if s.if_not_exists {
+                            Ok(Some(QueryResult::success_message(format!(
+                                "Sequence '{}' already exists", s.name
+                            ))))
+                        } else {
+                            Err(format!("Sequence '{}' already exists", s.name))
+                        }
+                    }
+                    _ => Err("Failed to create sequence".into()),
+                }
+            }
+            BoundStatement::BoundDropSequence(s) => {
+                let mut catalog = self.database.catalog.lock().unwrap();
+                let result = catalog.drop_sequence(&s.name);
+                match result {
+                    kuzu_catalog::CatalogResult::Dropped { .. } => {
+                        tracing::info!("Dropped sequence '{}'", s.name);
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Sequence '{}' dropped", s.name
+                        ))))
+                    }
+                    kuzu_catalog::CatalogResult::NotFound => {
+                        if s.if_exists {
+                            Ok(Some(QueryResult::success_message(format!(
+                                "Sequence '{}' not found", s.name
+                            ))))
+                        } else {
+                            Err(format!("Sequence '{}' not found", s.name))
+                        }
+                    }
+                    _ => Err("Failed to drop sequence".into()),
+                }
+            }
             BoundStatement::BoundQuery(q) => {
                 // Check if this is a FOREACH-only query — handle it directly
                 if q.clauses.len() == 1 {
