@@ -1417,6 +1417,39 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_sequence_nextval_currval_query_e2e() {
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE SEQUENCE my_seq START 10 INCREMENT 2").unwrap();
+
+        let r1 = query_column(&conn, "RETURN nextval('my_seq')");
+        assert_eq!(r1, vec![Value::Int64(10)]);
+
+        let r2 = query_column(&conn, "RETURN nextval('my_seq')");
+        assert_eq!(r2, vec![Value::Int64(12)]);
+
+        // currval should not advance.
+        let c1 = query_column(&conn, "RETURN currval('my_seq')");
+        assert_eq!(c1, vec![Value::Int64(14)]);
+
+        let c2 = query_column(&conn, "RETURN currval('my_seq')");
+        assert_eq!(c2, vec![Value::Int64(14)]);
+
+        let r3 = query_column(&conn, "RETURN nextval('my_seq')");
+        assert_eq!(r3, vec![Value::Int64(14)]);
+    }
+
+    #[test]
+    fn test_sequence_missing_error_query_e2e() {
+        let (_dir, _db, conn) = setup_db();
+        let err = conn.query("RETURN nextval('does_not_exist')").unwrap_err();
+        assert!(
+            err.contains("Sequence 'does_not_exist' not found"),
+            "Unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn test_copy_csv_with_header() {
         let (dir, _db, conn) = setup_db();
         let db_path = dir.path().join("test_db");
@@ -1661,6 +1694,67 @@ mod integration_tests {
 
         let result = conn.query("MATCH (n:T) WHERE n.id > 100 RETURN n.id").unwrap();
         assert_eq!(result.num_rows(), 0, "Expected 0 rows for impossible filter");
+    }
+
+    #[test]
+    fn test_return_star_basic() {
+        // RETURN * with MATCH should expand to all variables in scope
+        let (_dir, _db, conn) = setup_db();
+
+        exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
+
+        let csv_path = _dir.path().join("data.csv");
+        std::fs::write(&csv_path, "id,label\n1,alice\n2,bob\n").unwrap();
+        let fp = csv_path.to_string_lossy().replace('\\', "/");
+        exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
+
+        let result = conn.query("MATCH (n:T) RETURN *");
+        assert!(result.is_ok(), "RETURN * should succeed: {:?}", result);
+        if let Ok(r) = result {
+            assert!(r.num_rows() > 0, "RETURN * should return rows");
+        }
+    }
+
+    #[test]
+    fn test_return_star_no_variables() {
+        // RETURN * with no MATCH should fail with clear error
+        let (_dir, _db, conn) = setup_db();
+        let result = conn.query("RETURN *");
+        assert!(result.is_err(), "RETURN * without variables should error");
+    }
+
+    #[test]
+    fn test_lower_function_alias() {
+        let (_dir, _db, conn) = setup_db();
+        let result = conn.query("RETURN lower('HELLO') AS v");
+        assert!(result.is_ok(), "lower() should work: {:?}", result);
+    }
+
+    #[test]
+    fn test_upper_function_alias() {
+        let (_dir, _db, conn) = setup_db();
+        let result = conn.query("RETURN upper('hello') AS v");
+        assert!(result.is_ok(), "upper() should work: {:?}", result);
+    }
+
+    #[test]
+    fn test_ceiling_function_alias() {
+        let (_dir, _db, conn) = setup_db();
+        // Test standard function calls
+        let str_result = conn.query("RETURN lower('HELLO') AS v");
+        assert!(str_result.is_ok(), "lower('HELLO') should work: {:?}", str_result);
+        let ceil_result = conn.query("RETURN ceil(3) AS v");
+        assert!(ceil_result.is_ok(), "ceil() should work: {:?}", ceil_result);
+        // Test ceiling alias
+        let ceiling_result = conn.query("RETURN ceiling(3) AS v");
+        assert!(ceiling_result.is_ok(), "ceiling() alias should work: {:?}", ceiling_result);
+        // Test upper/lower aliases
+        let upper_result = conn.query("RETURN upper('hello') AS v");
+        assert!(upper_result.is_ok(), "upper() should work: {:?}", upper_result);
+        let ucase_result = conn.query("RETURN ucase('hello') AS v");
+        assert!(ucase_result.is_ok(), "ucase() should work: {:?}", ucase_result);
+        let lcase_result = conn.query("RETURN lcase('HELLO') AS v");
+        assert!(lcase_result.is_ok(), "lcase() should work: {:?}", lcase_result);
     }
 
     #[test]

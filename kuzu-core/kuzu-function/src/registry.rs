@@ -162,6 +162,7 @@ pub enum CastTarget {
     Bool,
     Date,
     Timestamp,
+    Interval,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -358,6 +359,8 @@ impl FunctionRegistry {
         self.register_scalar("%", ScalarFunction::Arithmetic { op: ArithmeticOp::Mod });
         self.register_scalar("abs", ScalarFunction::Arithmetic { op: ArithmeticOp::Abs });
         self.register_scalar("ceil", ScalarFunction::Arithmetic { op: ArithmeticOp::Ceil });
+        // Standard SQL alias
+        self.register_scalar("ceiling", ScalarFunction::Arithmetic { op: ArithmeticOp::Ceil });
         self.register_scalar(
             "floor",
             ScalarFunction::Arithmetic {
@@ -429,6 +432,11 @@ impl FunctionRegistry {
         self.register_scalar("ends_with", ScalarFunction::String { op: StringOp::EndsWith });
         self.register_scalar("to_upper", ScalarFunction::String { op: StringOp::ToUpper });
         self.register_scalar("to_lower", ScalarFunction::String { op: StringOp::ToLower });
+        // Standard SQL aliases
+        self.register_scalar("upper", ScalarFunction::String { op: StringOp::ToUpper });
+        self.register_scalar("lower", ScalarFunction::String { op: StringOp::ToLower });
+        self.register_scalar("ucase", ScalarFunction::String { op: StringOp::ToUpper });
+        self.register_scalar("lcase", ScalarFunction::String { op: StringOp::ToLower });
         self.register_scalar("trim", ScalarFunction::String { op: StringOp::Trim });
         self.register_scalar("ltrim", ScalarFunction::String { op: StringOp::LTrim });
         self.register_scalar("rtrim", ScalarFunction::String { op: StringOp::RTrim });
@@ -532,6 +540,17 @@ impl FunctionRegistry {
                 target_type: CastTarget::Bool,
             },
         );
+        // Cast function name aliases (Cypher/SQL standard)
+        self.register_scalar("date", ScalarFunction::Cast { target_type: CastTarget::Date });
+        self.register_scalar("timestamp", ScalarFunction::Cast { target_type: CastTarget::Timestamp });
+        self.register_scalar("float", ScalarFunction::Cast { target_type: CastTarget::Double });
+        self.register_scalar("double", ScalarFunction::Cast { target_type: CastTarget::Double });
+        self.register_scalar("int64", ScalarFunction::Cast { target_type: CastTarget::Int64 });
+        self.register_scalar("int", ScalarFunction::Cast { target_type: CastTarget::Int64 });
+        self.register_scalar("bool", ScalarFunction::Cast { target_type: CastTarget::Bool });
+        self.register_scalar("boolean", ScalarFunction::Cast { target_type: CastTarget::Bool });
+        self.register_scalar("string", ScalarFunction::Cast { target_type: CastTarget::String });
+        self.register_scalar("blob", ScalarFunction::Cast { target_type: CastTarget::String });
 
         // --- List ---
         self.register_scalar("list_creation", ScalarFunction::List { op: ListOp::Creation });

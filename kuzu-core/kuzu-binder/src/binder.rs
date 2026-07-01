@@ -322,8 +322,32 @@ impl Binder {
     fn bind_return(&self, r: &ReturnClause, variables: &[BoundVariable]) -> Result<BoundReturnClause, String> {
         let mut expressions = Vec::new();
         for item in &r.expressions {
-            let resolved = self.resolve_expression(&item.expression, variables)?;
-            expressions.push(resolved);
+            match &item.expression {
+                Expression::Star => {
+                    // Expand * to all variables in scope
+                    if variables.is_empty() {
+                        return Err(
+                            "RETURN or WITH * is not allowed when there are no variables in scope."
+                                .to_string(),
+                        );
+                    }
+                    for var in variables {
+                        expressions.push(BoundExpression {
+                            expression: Expression::Variable(var.name.clone()),
+                            resolved_type: if var.is_node {
+                                LogicalTypeID::Node
+                            } else {
+                                LogicalTypeID::Rel
+                            },
+                            is_constant: false,
+                        });
+                    }
+                }
+                _ => {
+                    let resolved = self.resolve_expression(&item.expression, variables)?;
+                    expressions.push(resolved);
+                }
+            }
         }
         Ok(BoundReturnClause { expressions })
     }
@@ -459,8 +483,11 @@ impl Binder {
                     "COUNT" | "SUM" | "MIN" | "MAX" | "AVG" => LogicalTypeID::Int64,
                     "NEXTVAL" | "CURRVAL" => LogicalTypeID::Int64,
                     "STARTS_WITH" | "ENDS_WITH" | "CONTAINS" => LogicalTypeID::Bool,
-                    "TO_UPPER" | "TO_LOWER" | "TRIM" | "SUBSTRING" | "REPLACE" => LogicalTypeID::String,
-                    "ABS" | "CEIL" | "FLOOR" | "ROUND" => LogicalTypeID::Double,
+                    "TO_UPPER" | "TO_LOWER" | "UPPER" | "LOWER" | "UCASE" | "LCASE" | "TRIM" | "SUBSTRING" | "REPLACE" => LogicalTypeID::String,
+                    "ABS" | "CEIL" | "CEILING" | "FLOOR" | "ROUND" | "SQRT" | "LOG" | "EXP" | "SIN" | "COS" | "TAN" => LogicalTypeID::Double,
+                    "DATE" | "TIMESTAMP" => LogicalTypeID::Date,
+                    "INT64" | "INT" => LogicalTypeID::Int64,
+                    "FLOAT" | "DOUBLE" | "BOOL" | "BOOLEAN" | "STRING" | "BLOB" => LogicalTypeID::String,
                     _ => LogicalTypeID::Any,
                 };
                 Ok(BoundExpression {
@@ -481,7 +508,12 @@ impl Binder {
                     | BinaryOp::GreaterThanOrEqual
                     | BinaryOp::And
                     | BinaryOp::Or
-                    | BinaryOp::Xor => LogicalTypeID::Bool,
+                    | BinaryOp::Xor
+                    | BinaryOp::In
+                    | BinaryOp::NotIn
+                    | BinaryOp::StartsWith
+                    | BinaryOp::EndsWith
+                    | BinaryOp::Contains => LogicalTypeID::Bool,
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Modulo => {
                         // Propagate numeric type
                         if left.resolved_type == LogicalTypeID::Double || right.resolved_type == LogicalTypeID::Double {
@@ -501,7 +533,7 @@ impl Binder {
             Expression::UnaryOp(op, inner) => {
                 let inner = self.resolve_expression(inner, variables)?;
                 let result_type = match op {
-                    UnaryOp::Not => LogicalTypeID::Bool,
+                    UnaryOp::Not | UnaryOp::IsNull | UnaryOp::IsNotNull => LogicalTypeID::Bool,
                     UnaryOp::Negate => inner.resolved_type,
                 };
                 Ok(BoundExpression {
@@ -537,6 +569,41 @@ impl Binder {
                 Ok(BoundExpression {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Bool,
+                    is_constant: false,
+                })
+            }
+            Expression::Case(case_expr) => {
+                // Bind subject (if any), all WHEN/THEN expressions, and ELSE.
+                // Return type is inferred from the first THEN branch.
+                if let Some(subj) = &case_expr.subject {
+                    self.resolve_expression(subj, variables)?;
+                }
+                let mut result_type = LogicalTypeID::Any;
+                for alt in &case_expr.alternatives {
+                    self.resolve_expression(&alt.when, variables)?;
+                    let then_bound = self.resolve_expression(&alt.then, variables)?;
+                    if result_type == LogicalTypeID::Any {
+                        result_type = then_bound.resolved_type;
+                    }
+                }
+                if let Some(else_e) = &case_expr.else_expr {
+                    let else_bound = self.resolve_expression(else_e, variables)?;
+                    if result_type == LogicalTypeID::Any {
+                        result_type = else_bound.resolved_type;
+                    }
+                }
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: result_type,
+                    is_constant: false,
+                })
+            }
+            Expression::Star => {
+                // Star should be expanded by bind_return before reaching here.
+                // If reached, return Any type.
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: LogicalTypeID::Any,
                     is_constant: false,
                 })
             }

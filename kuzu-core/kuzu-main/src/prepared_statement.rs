@@ -155,6 +155,19 @@ fn collect_params_from_expr(expr: &Expression, params: &mut Vec<String>) {
                 }
             }
         }
+        Expression::Case(case_expr) => {
+            if let Some(subj) = &case_expr.subject {
+                collect_params_from_expr(subj, params);
+            }
+            for alt in &case_expr.alternatives {
+                collect_params_from_expr(&alt.when, params);
+                collect_params_from_expr(&alt.then, params);
+            }
+            if let Some(else_e) = &case_expr.else_expr {
+                collect_params_from_expr(else_e, params);
+            }
+        }
+        Expression::Star => {}
     }
 }
 
@@ -200,6 +213,27 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
         Expression::ExistsSubquery(q) => {
             Ok(Expression::ExistsSubquery(Box::new(substitute_params_in_query(q, param_values)?)))
         }
+        Expression::Case(case_expr) => {
+            use kuzu_parser::ast::{CaseAlternative, CaseExpr};
+            let subject = if let Some(subj) = &case_expr.subject {
+                Some(Box::new(substitute_params(subj, param_values)?))
+            } else {
+                None
+            };
+            let alternatives: Result<Vec<CaseAlternative>, String> = case_expr.alternatives.iter()
+                .map(|alt| Ok(CaseAlternative {
+                    when: substitute_params(&alt.when, param_values)?,
+                    then: substitute_params(&alt.then, param_values)?,
+                }))
+                .collect();
+            let else_expr = if let Some(e) = &case_expr.else_expr {
+                Some(Box::new(substitute_params(e, param_values)?))
+            } else {
+                None
+            };
+            Ok(Expression::Case(CaseExpr { subject, alternatives: alternatives?, else_expr }))
+        }
+        Expression::Star => Ok(expr.clone()),
     }
 }
 

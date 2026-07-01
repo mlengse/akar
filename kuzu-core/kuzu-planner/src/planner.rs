@@ -531,6 +531,9 @@ impl QueryPlanner {
 
         if scan_ops.is_empty() {
             result.extend(delete_ops);
+            if let Some(proj) = projection {
+                result.push(LogicalOperator::Projection(proj));
+            }
             return Ok(result);
         }
 
@@ -634,6 +637,33 @@ mod tests {
             .count();
         assert_eq!(scan_count, 1);
         assert_eq!(proj_count, 1);
+    }
+
+    #[test]
+    fn test_plan_return_only_projection() {
+        let binder = setup_binder();
+        let sql = "RETURN 1";
+        let stmt = parse(sql).unwrap();
+        let bound = binder.bind(stmt).unwrap();
+        let planner = QueryPlanner::new();
+        let plan = planner.plan(bound).unwrap();
+
+        assert_eq!(plan.len(), 1);
+        assert!(matches!(plan[0], LogicalOperator::Projection(_)));
+    }
+
+    #[test]
+    fn test_plan_unwind_then_projection_without_scan() {
+        let binder = setup_binder();
+        let sql = "UNWIND [1, 2, 3] AS x RETURN x";
+        let stmt = parse(sql).unwrap();
+        let bound = binder.bind(stmt).unwrap();
+        let planner = QueryPlanner::new();
+        let plan = planner.plan(bound).unwrap();
+
+        assert_eq!(plan.len(), 2);
+        assert!(matches!(plan[0], LogicalOperator::Unwind(_)));
+        assert!(matches!(plan[1], LogicalOperator::Projection(_)));
     }
 
     #[test]

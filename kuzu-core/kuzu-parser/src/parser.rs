@@ -871,14 +871,48 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
     let rule = pair.as_rule();
     let children: Vec<_> = pair.clone().into_inner().collect();
 
+    // Handle CASE expression
+    if rule == Rule::case_expr {
+        return parse_case_expr(pair);
+    }
+
+    // Handle comparison_expr specially — it can have 1, 2, or 3 children depending
+    // on which operator is used (IS NULL, IN, STARTS WITH, =, etc.)
+    if rule == Rule::comparison_expr {
+        if children.len() == 1 {
+            return parse_expression(children[0].clone());
+        }
+        let left = parse_expression(children[0].clone())?;
+        if children.len() == 2 {
+            // Postfix/special operators (IS NULL, IN, STARTS WITH, ...)
+            return parse_comparison_suffix(children[1].clone(), left);
+        }
+        if children.len() == 3 {
+            // Standard comparison: left comparison_op right
+            let op_str = children[1].as_str();
+            let op = match op_str {
+                "=" => BinaryOp::Equal,
+                "<>" => BinaryOp::NotEqual,
+                "<" => BinaryOp::LessThan,
+                ">" => BinaryOp::GreaterThan,
+                "<=" => BinaryOp::LessThanOrEqual,
+                ">=" => BinaryOp::GreaterThanOrEqual,
+                _ => return Err(format!("Unknown comparison_op: {}", op_str)),
+            };
+            let right = parse_expression(children[2].clone())?;
+            return Ok(Expression::BinaryOp(op, Box::new(left), Box::new(right)));
+        }
+        return Err(format!("Unexpected comparison_expr with {} children", children.len()));
+    }
+
     // Unwrap single-child wrappers (priority/precedence levels)
     if matches!(
         rule,
         Rule::expression
             | Rule::or_expr
+            | Rule::xor_expr
             | Rule::and_expr
             | Rule::not_expr
-            | Rule::comparison_expr
             | Rule::additive_expr
             | Rule::multiplicative_expr
             | Rule::unary_expr
@@ -893,13 +927,8 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             while i + 1 < children.len() {
                 let op = match children[i].as_str() {
                     "OR" => BinaryOp::Or,
+                    "XOR" => BinaryOp::Xor,
                     "AND" => BinaryOp::And,
-                    "=" => BinaryOp::Equal,
-                    "<>" => BinaryOp::NotEqual,
-                    "<" => BinaryOp::LessThan,
-                    ">" => BinaryOp::GreaterThan,
-                    "<=" => BinaryOp::LessThanOrEqual,
-                    ">=" => BinaryOp::GreaterThanOrEqual,
                     "+" => BinaryOp::Add,
                     "-" => BinaryOp::Subtract,
                     "*" => BinaryOp::Multiply,
@@ -1019,6 +1048,113 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             }
         }
     }
+}
+
+/// Parse a comparison suffix operator node into an expression given the left-hand side.
+fn parse_comparison_suffix(
+    pair: pest::iterators::Pair<Rule>,
+    left: Expression,
+) -> Result<Expression, String> {
+    /// Find the additive_expr child inside an operator rule.
+    fn get_rhs(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
+        let rhs_pair = pair
+            .into_inner()
+            .find(|p| p.as_rule() == Rule::additive_expr)
+            .ok_or_else(|| "Operator missing right-hand expression".to_string())?;
+        parse_expression(rhs_pair)
+    }
+
+    match pair.as_rule() {
+        Rule::is_null_op => Ok(Expression::UnaryOp(UnaryOp::IsNull, Box::new(left))),
+        Rule::is_not_null_op => Ok(Expression::UnaryOp(UnaryOp::IsNotNull, Box::new(left))),
+        Rule::in_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::In, Box::new(left), Box::new(right)))
+        }
+        Rule::not_in_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::NotIn, Box::new(left), Box::new(right)))
+        }
+        Rule::starts_with_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::StartsWith, Box::new(left), Box::new(right)))
+        }
+        Rule::not_starts_with_op => {
+            let right = get_rhs(pair)?;
+            let inner = Expression::BinaryOp(BinaryOp::StartsWith, Box::new(left), Box::new(right));
+            Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(inner)))
+        }
+        Rule::ends_with_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::EndsWith, Box::new(left), Box::new(right)))
+        }
+        Rule::not_ends_with_op => {
+            let right = get_rhs(pair)?;
+            let inner = Expression::BinaryOp(BinaryOp::EndsWith, Box::new(left), Box::new(right));
+            Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(inner)))
+        }
+        Rule::contains_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::Contains, Box::new(left), Box::new(right)))
+        }
+        Rule::not_contains_op => {
+            let right = get_rhs(pair)?;
+            let inner = Expression::BinaryOp(BinaryOp::Contains, Box::new(left), Box::new(right));
+            Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(inner)))
+        }
+        r => Err(format!("Unknown comparison suffix: {:?}", r)),
+    }
+}
+
+/// Parse a `CASE [subject] WHEN ... THEN ... [ELSE ...] END` expression.
+fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
+    let mut subject: Option<Expression> = None;
+    let mut alternatives: Vec<CaseAlternative> = Vec::new();
+    let mut else_expr: Option<Expression> = None;
+
+    for child in pair.into_inner() {
+        match child.as_rule() {
+            Rule::case_subject => {
+                // case_subject wraps a single expression (with lookahead to skip WHEN)
+                if let Some(expr_pair) = child.into_inner().next() {
+                    subject = Some(parse_expression(expr_pair)?);
+                }
+            }
+            Rule::case_when => {
+                // case_when contains exactly two expression children: WHEN expr, THEN expr
+                let mut exprs = child
+                    .into_inner()
+                    .filter(|p| p.as_rule() == Rule::expression)
+                    .map(parse_expression)
+                    .collect::<Result<Vec<_>, _>>()?;
+                if exprs.len() < 2 {
+                    return Err("CASE WHEN clause requires both WHEN and THEN expressions".into());
+                }
+                let then = exprs.remove(1);
+                let when = exprs.remove(0);
+                alternatives.push(CaseAlternative { when, then });
+            }
+            Rule::case_else => {
+                if let Some(expr_pair) = child
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::expression)
+                {
+                    else_expr = Some(parse_expression(expr_pair)?);
+                }
+            }
+            _ => {} // Skip "CASE", "END" keyword tokens
+        }
+    }
+
+    if alternatives.is_empty() {
+        return Err("CASE expression requires at least one WHEN clause".into());
+    }
+
+    Ok(Expression::Case(CaseExpr {
+        subject: subject.map(Box::new),
+        alternatives,
+        else_expr: else_expr.map(Box::new),
+    }))
 }
 
 fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
@@ -1326,6 +1462,18 @@ mod tests {
     #[test]
     fn test_rel_pattern() {
         let sql = "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a, b";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_lower_upper_parse() {
+        let sql = "RETURN lower('HELLO'), upper('hello')";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_cast_aliases_parse() {
+        let sql = "RETURN date('2024-01-01'), float('3.14'), bool('true')";
         assert!(parse(sql).is_ok());
     }
 

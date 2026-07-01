@@ -153,6 +153,18 @@ fn extract_variables(expr: &kuzu_parser::ast::Expression, refs: &mut HashSet<Str
                 extract_variables(v, refs);
             }
         }
+        kuzu_parser::ast::Expression::Case(case_expr) => {
+            if let Some(subj) = &case_expr.subject {
+                extract_variables(subj, refs);
+            }
+            for alt in &case_expr.alternatives {
+                extract_variables(&alt.when, refs);
+                extract_variables(&alt.then, refs);
+            }
+            if let Some(else_e) = &case_expr.else_expr {
+                extract_variables(else_e, refs);
+            }
+        }
         _ => {} // Constant, etc. — no variable refs
     }
 }
@@ -1445,6 +1457,17 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
         Expression::ExistsSubquery(query) => {
             Expression::ExistsSubquery(Box::new(fold_query(query)))
         }
+        Expression::Case(case_expr) => {
+            use kuzu_parser::ast::{CaseAlternative, CaseExpr};
+            let subject = case_expr.subject.as_ref().map(|s| Box::new(fold_expression(s)));
+            let alternatives = case_expr.alternatives.iter().map(|alt| CaseAlternative {
+                when: fold_expression(&alt.when),
+                then: fold_expression(&alt.then),
+            }).collect();
+            let else_expr = case_expr.else_expr.as_ref().map(|e| Box::new(fold_expression(e)));
+            Expression::Case(CaseExpr { subject, alternatives, else_expr })
+        }
+        Expression::Star => expr.clone(),
     }
 }
 

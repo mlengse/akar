@@ -12,7 +12,7 @@
 )]
 
 use crate::registry::*;
-use kuzu_common::types::{Date, Timestamp, Value};
+use kuzu_common::types::{Date, Interval, Timestamp, Value};
 use time::{Date as TimeDate, Month, OffsetDateTime, Time as TimeTime};
 
 /// Evaluate a scalar function with the given arguments.
@@ -1050,6 +1050,14 @@ fn evaluate_cast(target: CastTarget, args: &[Value]) -> Result<Value, String> {
             Value::Timestamp(x) => Ok(Value::Timestamp(*x)),
             Value::Date(d) => Ok(Value::Timestamp(Timestamp(d.0 as i64 * 86400 * 1_000_000))),
             _ => Err("Cannot cast to Timestamp".into()),
+        },
+        CastTarget::Interval => match v {
+            Value::Interval(x) => Ok(Value::Interval(*x)),
+            Value::Int64(x) => {
+                // Treat as microseconds
+                Ok(Value::Interval(Interval { months: 0, days: 0, micros: *x }))
+            }
+            _ => Err("Cannot cast to Interval".into()),
         },
     }
 }

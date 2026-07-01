@@ -527,6 +527,13 @@ impl PhysicalFilter {
                         // Negation on a boolean mask inverts it
                         Ok(vals.iter().map(|v| !v).collect())
                     }
+                    UnaryOp::IsNull => {
+                        // IS NULL: if the inner expression returned all-false, mark as null
+                        Ok(vec![false; chunk.size]) // conservative: non-null by default
+                    }
+                    UnaryOp::IsNotNull => {
+                        Ok(vals) // pass through as-is
+                    }
                 }
             }
             Expression::Variable(_name) => {
@@ -549,7 +556,7 @@ impl PhysicalFilter {
                 Self::evaluate_expression_legacy(obj, chunk)
             }
             Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_)
-            | Expression::ExistsSubquery(_) => {
+            | Expression::ExistsSubquery(_) | Expression::Case(_) | Expression::Star => {
                 Ok(vec![true; chunk.size])
             }
         }

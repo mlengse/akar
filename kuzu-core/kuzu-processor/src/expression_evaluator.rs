@@ -93,6 +93,8 @@ impl ExpressionEvaluator {
                 }
                 Ok(v)
             }
+            Expression::Case(case_expr) => self.evaluate_case(case_expr, chunk),
+            Expression::Star => Err("STAR expression should be expanded by the binder before reaching the evaluator".into()),
         }
     }
 
@@ -198,34 +200,10 @@ impl ExpressionEvaluator {
             return self.evaluate_sequence_op(name, &func, &arg_vectors, num_rows);
         }
 
-        // For each row, extract values, call evaluate_scalar, and store result
-        // First, determine the output type by evaluating the first non-null row
-        let result_type = {
-            let mut result = None;
-            for row in 0..num_rows {
-                let arg_values: Vec<Value> = arg_vectors
-                    .iter()
-                    .map(|vec| {
-                        if row < vec.size() && !vec.is_null(row) {
-                            vec.get_value(row).unwrap_or(Value::Null)
-                        } else {
-                            Value::Null
-                        }
-                    })
-                    .collect();
-
-                if let Ok(val) = evaluate_scalar(&func, &arg_values) {
-                    if val != Value::Null {
-                        result = Some(val.physical_type());
-                        break;
-                    }
-                }
-            }
-            result.unwrap_or(kuzu_common::types::PhysicalTypeID::Int64)
-        };
-
-        let mut result_vec = ValueVector::new(result_type, num_rows);
-        result_vec.resize(num_rows);
+        // Evaluate each row exactly once, then infer result type from cached values.
+        // This avoids double-invoking side-effecting functions (e.g., nextval custom scalar).
+        let mut row_results: Vec<Value> = Vec::with_capacity(num_rows);
+        let mut first_error: Option<String> = None;
 
         for row in 0..num_rows {
             let arg_values: Vec<Value> = arg_vectors
@@ -241,21 +219,36 @@ impl ExpressionEvaluator {
 
             // If any argument is null, the result is null (SQL NULL semantics)
             if arg_values.iter().any(|v| matches!(v, Value::Null)) {
-                result_vec.set_null(row, true);
+                row_results.push(Value::Null);
                 continue;
             }
 
             match evaluate_scalar(&func, &arg_values) {
-                Ok(val) => {
-                    store_value_in_vector(&mut result_vec, row, &val);
-                }
+                Ok(val) => row_results.push(val),
                 Err(e) => {
-                    // On error, set null
-                    result_vec.set_null(row, true);
-                    if row == 0 {
-                        return Err(e);
+                    row_results.push(Value::Null);
+                    if first_error.is_none() {
+                        first_error = Some(e);
                     }
                 }
+            }
+        }
+
+        let result_type = row_results
+            .iter()
+            .find(|v| !matches!(v, Value::Null))
+            .map(|v| v.physical_type())
+            .unwrap_or(kuzu_common::types::PhysicalTypeID::Int64);
+
+        let mut result_vec = ValueVector::new(result_type, num_rows);
+        result_vec.resize(num_rows);
+        for (row, val) in row_results.iter().enumerate() {
+            store_value_in_vector(&mut result_vec, row, val);
+        }
+
+        if row_results.iter().all(|v| matches!(v, Value::Null)) {
+            if let Some(e) = first_error {
+                return Err(e);
             }
         }
 
@@ -287,6 +280,13 @@ impl ExpressionEvaluator {
             BinaryOp::Or => "OR",
             BinaryOp::Xor => "XOR",
             BinaryOp::Concat => "concat",
+            // Handled inline — not mapped to scalar function
+            BinaryOp::In | BinaryOp::NotIn => {
+                return self.evaluate_in_op(op, left, right, chunk);
+            }
+            BinaryOp::StartsWith => "starts_with",
+            BinaryOp::EndsWith => "ends_with",
+            BinaryOp::Contains => "contains",
         };
 
         // Treat as a function call with two arguments
@@ -298,7 +298,124 @@ impl ExpressionEvaluator {
         match op {
             UnaryOp::Not => self.evaluate_function_call("NOT", &[inner.clone()], chunk),
             UnaryOp::Negate => self.evaluate_function_call("-", &[inner.clone()], chunk),
+            UnaryOp::IsNull => {
+                let vec = self.evaluate(inner, chunk)?;
+                let num_rows = vec.size();
+                let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, num_rows);
+                result.resize(num_rows);
+                for i in 0..num_rows {
+                    let is_null = vec.is_null(i) || matches!(vec.get_value(i), Some(Value::Null) | None);
+                    store_value_in_vector_simple(&mut result, i, &Value::Bool(is_null));
+                }
+                Ok(result)
+            }
+            UnaryOp::IsNotNull => {
+                let vec = self.evaluate(inner, chunk)?;
+                let num_rows = vec.size();
+                let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, num_rows);
+                result.resize(num_rows);
+                for i in 0..num_rows {
+                    let is_null = vec.is_null(i) || matches!(vec.get_value(i), Some(Value::Null) | None);
+                    store_value_in_vector_simple(&mut result, i, &Value::Bool(!is_null));
+                }
+                Ok(result)
+            }
         }
+    }
+
+    /// Evaluate `x IN list` and `x NOT IN list` operators.
+    fn evaluate_in_op(
+        &self,
+        op: &BinaryOp,
+        left: &Expression,
+        right: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        let left_vec = self.evaluate(left, chunk)?;
+        let right_vec = self.evaluate(right, chunk)?;
+        let num_rows = chunk.size;
+        let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, num_rows);
+        result.resize(num_rows);
+        for row in 0..num_rows {
+            let lv = left_vec.get_value(row).unwrap_or(Value::Null);
+            let rv = right_vec.get_value(row).unwrap_or(Value::Null);
+            if matches!(lv, Value::Null) {
+                result.set_null(row, true);
+                continue;
+            }
+            let in_list = match &rv {
+                Value::List(items) => items.contains(&lv),
+                _ => lv == rv,
+            };
+            let result_val = if *op == BinaryOp::NotIn { !in_list } else { in_list };
+            store_value_in_vector_simple(&mut result, row, &Value::Bool(result_val));
+        }
+        Ok(result)
+    }
+
+    /// Evaluate a `CASE [subject] WHEN ... THEN ... [ELSE ...] END` expression.
+    fn evaluate_case(
+        &self,
+        case_expr: &kuzu_parser::ast::CaseExpr,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        let num_rows = chunk.size;
+        // Evaluate subject (if any)
+        let subject_vec = if let Some(subj) = &case_expr.subject {
+            Some(self.evaluate(subj, chunk)?)
+        } else {
+            None
+        };
+
+        // We need to find the result type first by speculatively checking THEN exprs
+        // Strategy: evaluate all WHEN/THEN in order per row
+        // Determine result type from first THEN expr evaluation
+        let result_type = {
+            let first_then = self.evaluate(&case_expr.alternatives[0].then, chunk)?;
+            first_then.physical_type()
+        };
+
+        let mut result = ValueVector::new(result_type, num_rows);
+        result.resize(num_rows);
+
+        // For each row, find the matching branch
+        for row in 0..num_rows {
+            let subject_val = subject_vec.as_ref().and_then(|sv| sv.get_value(row));
+
+            let mut matched = false;
+            for alt in &case_expr.alternatives {
+                let when_vec = self.evaluate(&alt.when, chunk)?;
+                let when_val = when_vec.get_value(row).unwrap_or(Value::Null);
+
+                // Simple CASE: compare subject == when_val
+                // Searched CASE: when_val is a boolean condition
+                let branch_taken = if let Some(ref sv) = subject_val {
+                    when_val != Value::Null && when_val == *sv
+                } else {
+                    matches!(when_val, Value::Bool(true))
+                };
+
+                if branch_taken {
+                    let then_vec = self.evaluate(&alt.then, chunk)?;
+                    let then_val = then_vec.get_value(row).unwrap_or(Value::Null);
+                    store_value_in_vector(&mut result, row, &then_val);
+                    matched = true;
+                    break;
+                }
+            }
+
+            if !matched {
+                if let Some(else_e) = &case_expr.else_expr {
+                    let else_vec = self.evaluate(else_e, chunk)?;
+                    let else_val = else_vec.get_value(row).unwrap_or(Value::Null);
+                    store_value_in_vector(&mut result, row, &else_val);
+                } else {
+                    result.set_null(row, true);
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// Evaluate a list literal expression.

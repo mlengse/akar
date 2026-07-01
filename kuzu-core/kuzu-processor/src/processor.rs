@@ -10,6 +10,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_parser::ast::Expression;
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
@@ -84,6 +85,20 @@ impl QueryProcessor {
             }
         }
         (None, Vec::new(), 0)
+    }
+
+    fn projection_needs_expression_eval(expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::FunctionCall(_, _)
+                | Expression::Constant(_)
+                | Expression::BinaryOp(_, _, _)
+                | Expression::UnaryOp(_, _)
+                | Expression::List(_)
+                | Expression::Map(_)
+                | Expression::Parameter(_)
+                | Expression::ExistsSubquery(_)
+        )
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
@@ -190,11 +205,53 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Projection(p) => {
-                    let proj = PhysicalProjection {
-                        column_indices: (0..p.expressions.len()).collect(),
+                    // If projection is the first operator (e.g. RETURN 1 or RETURN nextval(...)),
+                    // synthesize a single-row empty input so scalar expressions are evaluated once.
+                    let input = match intermediate_result.take() {
+                        Some(v) => v,
+                        None => vec![DataChunk {
+                            fields: vec![],
+                            size: 1,
+                        }],
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = proj.execute(input)?;
+
+                    let needs_eval = p
+                        .expressions
+                        .iter()
+                        .any(|be| Self::projection_needs_expression_eval(&be.expression));
+
+                    let result = if needs_eval {
+                        let registry = self
+                            .function_registry
+                            .clone()
+                            .ok_or_else(|| {
+                                "No function registry available for expression projection"
+                                    .to_string()
+                            })?;
+
+                        let mut eval = ExpressionEvaluator::new(registry);
+                        if let Some(ref seq_fn) = self.sequence_fn {
+                            eval = eval.with_sequence_fn(seq_fn.clone());
+                        }
+
+                        let mut output = Vec::with_capacity(input.len());
+                        for chunk in input {
+                            let mut fields = Vec::with_capacity(p.expressions.len());
+                            for be in &p.expressions {
+                                let result_vec = eval.evaluate(&be.expression, &chunk)?;
+                                fields.push(result_vec);
+                            }
+                            let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
+                            output.push(DataChunk { fields, size });
+                        }
+                        output
+                    } else {
+                        let proj = PhysicalProjection {
+                            column_indices: (0..p.expressions.len()).collect(),
+                        };
+                        proj.execute(input)?
+                    };
+
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Limit(l) => {
@@ -1033,6 +1090,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hashbrown::HashMap;
     use kuzu_binder::bound_statement::BoundExpression;
     use kuzu_common::types::{LogicalTypeID, Value};
     use kuzu_parser::ast::{Constant, Expression};
@@ -1210,6 +1268,77 @@ mod tests {
         let input = vec![DataChunk::new(vec![v1, v2])];
         let result = proj.execute(input).unwrap();
         assert_eq!(result[0].num_fields(), 1); // Only first column
+    }
+
+    #[test]
+    fn test_projection_evaluates_function_call_no_input_source() {
+        let state = Arc::new(Mutex::new(HashMap::new()));
+        state.lock().unwrap().insert("s".to_string(), 1_i64);
+        let state_for_fn = state.clone();
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
+            move |seq_name: &str, is_nextval: bool| {
+                let mut m = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
+                let v = m
+                    .get_mut(seq_name)
+                    .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                if is_nextval {
+                    let out = *v;
+                    *v += 1;
+                    Ok(Value::Int64(out))
+                } else {
+                    Ok(Value::Int64(*v))
+                }
+            },
+        );
+
+        let proc = QueryProcessor::with_registry(Arc::new(Mutex::new(FunctionRegistry::new())))
+            .with_sequence_fn(seq_fn);
+
+        let plan = vec![LogicalOperator::Projection(
+            kuzu_planner::logical_operator::LogicalProjection {
+                expressions: vec![BoundExpression {
+                    expression: Expression::FunctionCall(
+                        "nextval".into(),
+                        vec![Expression::Constant(Constant::String("s".into()))],
+                    ),
+                    resolved_type: LogicalTypeID::Int64,
+                    is_constant: false,
+                }],
+                children: vec![],
+                cardinality: 1,
+            },
+        )];
+
+        let result = proc.execute(&plan).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 1);
+        assert_eq!(result[0].fields[0].get_value(0), Some(Value::Int64(1)));
+    }
+
+    #[test]
+    fn test_projection_sequence_missing_callback_errors() {
+        let proc = QueryProcessor::with_registry(Arc::new(Mutex::new(FunctionRegistry::new())));
+
+        let plan = vec![LogicalOperator::Projection(
+            kuzu_planner::logical_operator::LogicalProjection {
+                expressions: vec![BoundExpression {
+                    expression: Expression::FunctionCall(
+                        "nextval".into(),
+                        vec![Expression::Constant(Constant::String("s".into()))],
+                    ),
+                    resolved_type: LogicalTypeID::Int64,
+                    is_constant: false,
+                }],
+                children: vec![],
+                cardinality: 1,
+            },
+        )];
+
+        let err = proc.execute(&plan).unwrap_err();
+        assert!(
+            err.contains("No sequence callback configured"),
+            "Unexpected error: {err}"
+        );
     }
 
     // ==================== OrderBy Tests ====================

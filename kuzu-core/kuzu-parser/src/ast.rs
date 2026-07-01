@@ -198,6 +198,31 @@ pub enum Expression {
     Map(Vec<(String, Expression)>),
     /// EXISTS { MATCH ... WHERE ... } — returns true if the pattern matches.
     ExistsSubquery(Box<Query>),
+    /// CASE [subject] WHEN ... THEN ... [ELSE ...] END
+    Case(CaseExpr),
+    /// STAR expression — represents `*` in `RETURN *`.
+    /// The binder expands this to all variables in scope.
+    Star,
+}
+
+/// A single WHEN ... THEN ... branch inside a CASE expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaseAlternative {
+    /// The WHEN expression (a value for simple CASE, or a condition for searched CASE).
+    pub when: Expression,
+    /// The THEN expression returned when WHEN matches.
+    pub then: Expression,
+}
+
+/// A CASE expression (simple or searched).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaseExpr {
+    /// Optional subject expression for simple CASE: `CASE x WHEN v THEN ...`
+    pub subject: Option<Box<Expression>>,
+    /// The WHEN/THEN branches.
+    pub alternatives: Vec<CaseAlternative>,
+    /// Optional ELSE expression returned when no branch matches.
+    pub else_expr: Option<Box<Expression>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -226,12 +251,26 @@ pub enum BinaryOp {
     Or,
     Xor,
     Concat,
+    /// x IN [list] — true if x equals any element of the list
+    In,
+    /// x NOT IN [list] — true if x equals no element of the list
+    NotIn,
+    /// x STARTS WITH prefix — true if string x starts with prefix
+    StartsWith,
+    /// x ENDS WITH suffix — true if string x ends with suffix
+    EndsWith,
+    /// x CONTAINS substr — true if string x contains substr
+    Contains,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     Not,
     Negate,
+    /// x IS NULL — true if x evaluates to null
+    IsNull,
+    /// x IS NOT NULL — true if x does not evaluate to null
+    IsNotNull,
 }
 
 // DDL statements
