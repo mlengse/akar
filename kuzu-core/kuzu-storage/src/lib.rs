@@ -11,6 +11,7 @@ pub mod column;
 pub mod column_chunk;
 pub mod compression;
 pub mod csv_reader;
+pub mod free_space_manager;
 pub mod index;
 pub mod local_storage;
 pub mod local_wal;
