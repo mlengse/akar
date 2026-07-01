@@ -493,7 +493,9 @@ impl QueryProcessor {
                 | LogicalOperator::CreateVectorIndex(_)
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
-                | LogicalOperator::CreateDml(_) => {
+                | LogicalOperator::CreateDml(_)
+                | LogicalOperator::ExportDatabase(_)
+                | LogicalOperator::ImportDatabase(_) => {
                     intermediate_result = Some(vec![DataChunk {
                         fields: vec![],
                         size: 0,
@@ -950,6 +952,8 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::CreateSequence(cs) => format!("CreateSequence({})", cs.name),
         LogicalOperator::DropSequence(ds) => format!("DropSequence({})", ds.name),
         LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
+        LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
+        LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());

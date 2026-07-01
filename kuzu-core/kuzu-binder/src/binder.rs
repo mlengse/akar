@@ -86,6 +86,8 @@ impl Binder {
             Statement::Explain(e) => self.bind_explain(e),
             Statement::CreateSequence(s) => self.bind_create_sequence(s),
             Statement::DropSequence(s) => self.bind_drop_sequence(s),
+            Statement::ExportDatabase(e) => self.bind_export_database(e),
+            Statement::ImportDatabase(i) => self.bind_import_database(i),
         }
     }
 
@@ -1029,6 +1031,63 @@ impl Binder {
         Ok(BoundStatement::BoundDropSequence(BoundDropSequence {
             name: s.name,
             if_exists: s.if_exists,
+        }))
+    }
+
+    fn bind_export_database(&self, e: kuzu_parser::ast::ExportDatabase) -> Result<BoundStatement, String> {
+        let file_type = e.options.get("FORMAT").map(|s| s.to_lowercase()).unwrap_or_else(|| "csv".to_string());
+        if file_type != "csv" && file_type != "parquet" {
+            return Err(format!("Unsupported export format '{file_type}'. Supported: csv, parquet"));
+        }
+        let schema_only = e.options.get("SCHEMA_ONLY").map(|s| s == "true").unwrap_or(false);
+        Ok(BoundStatement::BoundExportDatabase(BoundExportDatabase {
+            file_path: e.file_path,
+            file_type,
+            schema_only,
+            options: e.options,
+        }))
+    }
+
+    fn bind_import_database(&self, i: kuzu_parser::ast::ImportDatabase) -> Result<BoundStatement, String> {
+        // Validate the import directory exists and read the schema/cypher files
+        let path = std::path::Path::new(&i.file_path);
+        if !path.exists() {
+            return Err(format!("Import directory '{}' not found", i.file_path));
+        }
+        if !path.is_dir() {
+            return Err(format!("'{}' is not a directory", i.file_path));
+        }
+
+        let schema_path = path.join("schema.cypher");
+        let copy_path = path.join("copy.cypher");
+        let index_path = path.join("index.cypher");
+
+        if !schema_path.exists() {
+            return Err(format!("schema.cypher not found in '{}'", i.file_path));
+        }
+
+        let query = if copy_path.exists() {
+            let schema = std::fs::read_to_string(&schema_path)
+                .map_err(|e| format!("Cannot read schema.cypher: {e}"))?;
+            let copy = std::fs::read_to_string(&copy_path)
+                .map_err(|e| format!("Cannot read copy.cypher: {e}"))?;
+            format!("{schema}\n{copy}")
+        } else {
+            std::fs::read_to_string(&schema_path)
+                .map_err(|e| format!("Cannot read schema.cypher: {e}"))?
+        };
+
+        let index_query = if index_path.exists() {
+            std::fs::read_to_string(&index_path)
+                .map_err(|e| format!("Cannot read index.cypher: {e}"))?
+        } else {
+            String::new()
+        };
+
+        Ok(BoundStatement::BoundImportDatabase(BoundImportDatabase {
+            file_path: i.file_path,
+            query,
+            index_query,
         }))
     }
 

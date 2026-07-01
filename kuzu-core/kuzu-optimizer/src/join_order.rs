@@ -105,7 +105,9 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::CreateVectorIndex(_)
         | LogicalOperator::CreateSequence(_)
         | LogicalOperator::DropSequence(_)
-        | LogicalOperator::CreateDml(_) => {
+        | LogicalOperator::CreateDml(_)
+        | LogicalOperator::ExportDatabase(_)
+        | LogicalOperator::ImportDatabase(_) => {
             // Leaf operator with no children — nothing to recurse into.
         }
     }

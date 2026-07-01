@@ -65,6 +65,8 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
             let call = parse_call(inner)?;
             Ok(Statement::Call(call))
         }
+        Rule::export_database => parse_export_database(inner),
+        Rule::import_database => parse_import_database(inner),
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
 }
@@ -177,8 +179,52 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         Rule::drop_index => parse_drop_index(pair),
         Rule::create_sequence => parse_create_sequence(pair),
         Rule::drop_sequence => parse_drop_sequence(pair),
+        Rule::export_database => parse_export_database(pair),
+        Rule::import_database => parse_import_database(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
+}
+
+fn parse_export_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut file_path = String::new();
+    let mut options = std::collections::HashMap::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::string => {
+                let raw = inner.as_str().trim();
+                file_path = raw.trim_matches('\'').to_string();
+            }
+            Rule::export_option => {
+                let mut key = String::new();
+                let mut val = String::new();
+                for part in inner.into_inner() {
+                    match part.as_rule() {
+                        Rule::identifier => key = part.as_str().to_string(),
+                        Rule::literal => {
+                            let raw = part.as_str();
+                            val = raw.trim_matches('\'').to_string();
+                        }
+                        _ => {}
+                    }
+                }
+                if !key.is_empty() {
+                    options.insert(key.to_uppercase(), val);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(Statement::ExportDatabase(ExportDatabase { file_path, options }))
+}
+
+fn parse_import_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut file_path = String::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::string {
+            file_path = inner.as_str().trim().trim_matches('\'').to_string();
+        }
+    }
+    Ok(Statement::ImportDatabase(ImportDatabase { file_path }))
 }
 
 fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
@@ -1600,6 +1646,31 @@ mod tests {
                 assert!(s.if_exists);
             }
             _ => panic!("Expected DropSequence"),
+        }
+    }
+
+    #[test]
+    fn test_export_database_basic() {
+        let sql = "EXPORT DATABASE '/tmp/export'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::ExportDatabase(e) => {
+                assert_eq!(e.file_path, "/tmp/export");
+                assert!(e.options.is_empty());
+            }
+            _ => panic!("Expected ExportDatabase"),
+        }
+    }
+
+    #[test]
+    fn test_import_database_basic() {
+        let sql = "IMPORT DATABASE '/tmp/export'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::ImportDatabase(i) => {
+                assert_eq!(i.file_path, "/tmp/export");
+            }
+            _ => panic!("Expected ImportDatabase"),
         }
     }
 }

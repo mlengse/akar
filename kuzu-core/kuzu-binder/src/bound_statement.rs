@@ -24,6 +24,8 @@ pub enum BoundStatement {
     BoundExplain(BoundExplain),
     BoundCreateSequence(BoundCreateSequence),
     BoundDropSequence(BoundDropSequence),
+    BoundExportDatabase(BoundExportDatabase),
+    BoundImportDatabase(BoundImportDatabase),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -221,6 +223,23 @@ pub struct BoundDropIndex {
 pub struct BoundCall {
     pub function_name: String,
     pub args: Vec<kuzu_parser::ast::Expression>,
+}
+
+/// Bound EXPORT DATABASE statement.
+#[derive(Debug, Clone)]
+pub struct BoundExportDatabase {
+    pub file_path: String,
+    pub file_type: String,
+    pub schema_only: bool,
+    pub options: std::collections::HashMap<String, String>,
+}
+
+/// Bound IMPORT DATABASE statement.
+#[derive(Debug, Clone)]
+pub struct BoundImportDatabase {
+    pub file_path: String,
+    pub query: String,
+    pub index_query: String,
 }
 
 /// Bound CREATE SEQUENCE statement.

@@ -6,7 +6,12 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // ==================== Top Level ====================
 
-statement = { call_statement | union_statement | ddl_statement | create_dml_statement | query_statement }
+statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement }
+
+export_database = { "EXPORT" ~ "DATABASE" ~ string ~ export_options? }
+export_options = { "(" ~ export_option ~ ("," ~ export_option)* ~ ")" }
+export_option = { identifier ~ "=" ~ literal }
+import_database = { "IMPORT" ~ "DATABASE" ~ string }
 
 create_dml_statement = { "CREATE" ~ pattern ~ return_clause? }
 call_statement = { call_clause ~ return_clause? }

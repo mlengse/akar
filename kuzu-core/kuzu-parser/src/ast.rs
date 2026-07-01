@@ -11,6 +11,22 @@ pub enum ExplainType {
     Profile,
 }
 
+/// EXPORT DATABASE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportDatabase {
+    /// Path to the export directory.
+    pub file_path: String,
+    /// Export options (format, schema_only, etc.).
+    pub options: std::collections::HashMap<String, String>,
+}
+
+/// IMPORT DATABASE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDatabase {
+    /// Path to the import directory (previously exported).
+    pub file_path: String,
+}
+
 /// EXPLAIN statement wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainStatement {
@@ -39,6 +55,8 @@ pub enum Statement {
     Explain(ExplainStatement),
     CreateSequence(CreateSequence),
     DropSequence(DropSequence),
+    ExportDatabase(ExportDatabase),
+    ImportDatabase(ImportDatabase),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).

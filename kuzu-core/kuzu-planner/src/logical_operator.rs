@@ -44,6 +44,8 @@ pub enum LogicalOperator {
     CreateSequence(LogicalCreateSequence),
     DropSequence(LogicalDropSequence),
     CreateDml(LogicalCreateDml),
+    ExportDatabase(LogicalExportDatabase),
+    ImportDatabase(LogicalImportDatabase),
 }
 
 impl LogicalOperator {
@@ -87,6 +89,8 @@ impl LogicalOperator {
             LogicalOperator::CreateSequence(s) => s.cardinality,
             LogicalOperator::DropSequence(s) => s.cardinality,
             LogicalOperator::CreateDml(s) => s.cardinality,
+            LogicalOperator::ExportDatabase(s) => s.cardinality,
+            LogicalOperator::ImportDatabase(s) => s.cardinality,
         }
     }
 
@@ -130,6 +134,8 @@ impl LogicalOperator {
             LogicalOperator::CreateSequence(s) => s.cardinality = card,
             LogicalOperator::DropSequence(s) => s.cardinality = card,
             LogicalOperator::CreateDml(s) => s.cardinality = card,
+            LogicalOperator::ExportDatabase(s) => s.cardinality = card,
+            LogicalOperator::ImportDatabase(s) => s.cardinality = card,
         }
     }
 
@@ -181,7 +187,9 @@ impl LogicalOperator {
             | LogicalOperator::CreateVectorIndex(_)
             | LogicalOperator::CreateSequence(_)
             | LogicalOperator::DropSequence(_)
-            | LogicalOperator::CreateDml(_) => vec![],
+            | LogicalOperator::CreateDml(_)
+            | LogicalOperator::ExportDatabase(_)
+            | LogicalOperator::ImportDatabase(_) => vec![],
         }
     }
 
@@ -223,7 +231,9 @@ impl LogicalOperator {
             | LogicalOperator::CreateVectorIndex(_)
             | LogicalOperator::CreateSequence(_)
             | LogicalOperator::DropSequence(_)
-            | LogicalOperator::CreateDml(_) => vec![],
+            | LogicalOperator::CreateDml(_)
+            | LogicalOperator::ExportDatabase(_)
+            | LogicalOperator::ImportDatabase(_) => vec![],
         }
     }
 }
@@ -610,5 +620,24 @@ pub struct LogicalCreateDml {
     pub table_name: String,
     pub table_id: u64,
     pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub cardinality: u64,
+}
+
+/// Logical operator for EXPORT DATABASE.
+#[derive(Debug, Clone)]
+pub struct LogicalExportDatabase {
+    pub file_path: String,
+    pub file_type: String,
+    pub schema_only: bool,
+    pub options: std::collections::HashMap<String, String>,
+    pub cardinality: u64,
+}
+
+/// Logical operator for IMPORT DATABASE.
+#[derive(Debug, Clone)]
+pub struct LogicalImportDatabase {
+    pub file_path: String,
+    pub query: String,
+    pub index_query: String,
     pub cardinality: u64,
 }

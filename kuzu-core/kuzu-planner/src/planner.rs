@@ -35,6 +35,8 @@ impl QueryPlanner {
             BoundStatement::BoundCreateSequence(s) => self.plan_create_sequence(s),
             BoundStatement::BoundDropSequence(s) => self.plan_drop_sequence(s),
             BoundStatement::BoundCreateDml(c) => self.plan_create_dml(c),
+            BoundStatement::BoundExportDatabase(e) => self.plan_export_database(e),
+            BoundStatement::BoundImportDatabase(i) => self.plan_import_database(i),
             _ => Ok(Vec::new()),
         }
     }
@@ -168,6 +170,25 @@ impl QueryPlanner {
             table_name: c.table_name,
             table_id: c.table_id,
             properties: c.properties,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_export_database(&self, e: BoundExportDatabase) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::ExportDatabase(LogicalExportDatabase {
+            file_path: e.file_path,
+            file_type: e.file_type,
+            schema_only: e.schema_only,
+            options: e.options,
+            cardinality: 1,
+        })])
+    }
+
+    fn plan_import_database(&self, i: BoundImportDatabase) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::ImportDatabase(LogicalImportDatabase {
+            file_path: i.file_path,
+            query: i.query,
+            index_query: i.index_query,
             cardinality: 1,
         })])
     }

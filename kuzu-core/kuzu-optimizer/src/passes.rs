@@ -823,6 +823,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
                 | LogicalOperator::CreateDml(_) => {}
+                | LogicalOperator::ExportDatabase(_)
+                | LogicalOperator::ImportDatabase(_) => {}
             }
         });
     }
@@ -1001,7 +1003,9 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::CreateVectorIndex(_)
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
-                | LogicalOperator::CreateDml(_) => 1,
+                | LogicalOperator::CreateDml(_)
+                | LogicalOperator::ExportDatabase(_)
+                | LogicalOperator::ImportDatabase(_) => 1,
             };
             op.set_cardinality(card);
         });
