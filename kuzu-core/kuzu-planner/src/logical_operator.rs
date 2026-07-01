@@ -5,6 +5,27 @@ use kuzu_catalog::CatalogColumn;
 use kuzu_parser::ast::Expression;
 
 /// A logical operator in the query plan.
+/// A logical accumulate operator that materializes all input into memory.
+///
+/// Used as the build-side input for hash joins (via SIP/acc-hash-join)
+/// and for correlated subquery execution. Collects all input rows into
+/// an in-memory table for later probe.
+///
+/// Ported from C++ `LogicalAccumulate`.
+#[derive(Debug, Clone)]
+pub struct LogicalAccumulate {
+    /// Accumulate type (Regular or Optional).
+    pub accumulate_type: kuzu_common::enums::AccumulateType,
+    /// Expressions to flatten before accumulating.
+    pub flat_exprs: Vec<kuzu_parser::ast::Expression>,
+    /// Optional mark expression (for OPTIONAL MATCH).
+    pub mark: Option<kuzu_parser::ast::Expression>,
+    /// Child operator.
+    pub children: Vec<LogicalOperator>,
+    /// Estimated cardinality.
+    pub cardinality: u64,
+}
+
 /// A logical semi-masker operator for Sideways Information Passing (SIP).
 ///
 /// SIP is an optimization where the build-side keys of a hash join are
@@ -53,6 +74,7 @@ pub enum LogicalOperator {
     Explain(LogicalExplain),
     RecursiveExtend(LogicalRecursiveExtend),
     SemiMasker(LogicalSemiMasker),
+    Accumulate(LogicalAccumulate),
     // DDL operators
     CreateNodeTable(LogicalCreateNodeTable),
     CreateRelTable(LogicalCreateRelTable),
@@ -99,6 +121,7 @@ impl LogicalOperator {
             LogicalOperator::Explain(s) => s.cardinality,
             LogicalOperator::RecursiveExtend(s) => s.cardinality,
             LogicalOperator::SemiMasker(s) => s.cardinality,
+            LogicalOperator::Accumulate(s) => s.cardinality,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality,
             LogicalOperator::CreateRelTable(s) => s.cardinality,
@@ -145,6 +168,7 @@ impl LogicalOperator {
             LogicalOperator::Explain(s) => s.cardinality = card,
             LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
             LogicalOperator::SemiMasker(s) => s.cardinality = card,
+            LogicalOperator::Accumulate(s) => s.cardinality = card,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality = card,
             LogicalOperator::CreateRelTable(s) => s.cardinality = card,
@@ -189,6 +213,7 @@ impl LogicalOperator {
             LogicalOperator::Explain(s) => vec![&mut *s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter_mut().collect(),
+            LogicalOperator::Accumulate(s) => s.children.iter_mut().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)
@@ -235,6 +260,7 @@ impl LogicalOperator {
             LogicalOperator::Explain(s) => vec![&*s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter().collect(),
+            LogicalOperator::Accumulate(s) => s.children.iter().collect(),
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::Delete(_)

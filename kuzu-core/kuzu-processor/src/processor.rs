@@ -149,6 +149,13 @@ impl QueryProcessor {
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Accumulate(_ac) => {
+                    // Accumulate passes through its input (collects all rows in memory)
+                    // For now, treat as pass-through since we don't have PhysicalAccumulate yet.
+                    // The input is already fully materialized by earlier operators.
+                    let input = intermediate_result.take().unwrap_or_default();
+                    intermediate_result = Some(input);
+                }
                 LogicalOperator::RecursiveExtend(re) => {
                     let scan = PhysicalRecursiveExtend {
                         source_table_id: re.source_table_id,
@@ -974,6 +981,9 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::Intersect(_) => "Intersect".to_string(),
         LogicalOperator::RecursiveExtend(re) => {
             format!("RecursiveExtend({}..{})", re.lower_bound, re.upper_bound)
+        }
+        LogicalOperator::Accumulate(ac) => {
+            format!("Accumulate({:?})", ac.accumulate_type)
         }
         LogicalOperator::SemiMasker(sm) => {
             format!("SemiMasker(table={}, col={})", sm.table_id, sm.key_column)

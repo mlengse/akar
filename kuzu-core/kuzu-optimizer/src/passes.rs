@@ -796,6 +796,12 @@ impl TreeOptimizationPass for FactorizationRewriting {
                     Self::append_flattens(&mut aj.left, &[0]);
                     Self::append_flattens(&mut aj.right, &[0]);
                 }
+                // Accumulate: flatten children
+                LogicalOperator::Accumulate(ac) => {
+                    for child in &mut ac.children {
+                        Self::append_flattens(child, &[0]);
+                    }
+                }
                 // SemiMasker: flatten children
                 LogicalOperator::SemiMasker(s) => {
                     for child in &mut s.children {
@@ -819,6 +825,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::Explain(_)
                 | LogicalOperator::Intersect(_)
                 | LogicalOperator::RecursiveExtend(_)
+                | LogicalOperator::Accumulate(_)
                 | LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)
                 | LogicalOperator::DropTable(_)
@@ -998,6 +1005,9 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     // estimate: upper_bound * source cardinality
                     let src_card = 100;
                     re.upper_bound.saturating_mul(src_card)
+                }
+                LogicalOperator::Accumulate(ac) => {
+                    ac.children.first().map(|c| c.cardinality()).unwrap_or(1)
                 }
                 LogicalOperator::SemiMasker(sm) => {
                     // SemiMasker passes through cardinality from its child

@@ -101,6 +101,7 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::Explain(_)
         | LogicalOperator::Intersect(_)
         | LogicalOperator::RecursiveExtend(_)
+        | LogicalOperator::Accumulate(_)
         | LogicalOperator::CreateNodeTable(_)
         | LogicalOperator::CreateRelTable(_)
         | LogicalOperator::DropTable(_)

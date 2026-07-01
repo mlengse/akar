@@ -36,6 +36,18 @@ pub enum PathSemantic {
     Acyclic,
 }
 
+/// Accumulate type for the LogicalAccumulate operator.
+///
+/// Controls how the accumulate materializes input data:
+/// - `Regular`: Standard materialization (all rows are collected).
+/// - `Optional`: Used for OPTIONAL MATCH — produces a mark indicating
+///   whether at least one row was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccumulateType {
+    Regular,
+    Optional,
+}
+
 /// Edge traversal direction for recursive extend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtendDirection {
