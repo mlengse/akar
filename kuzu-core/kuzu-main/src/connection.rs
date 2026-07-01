@@ -338,10 +338,7 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Execute
-        let processor = QueryProcessor::with_catalog(
-            self.database.function_registry.clone(),
-            self.database.storage_manager.table_catalog(),
-        );
+        let processor = self.create_processor();
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -433,10 +430,7 @@ impl Connection {
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Execute
-        let processor = QueryProcessor::with_catalog(
-            self.database.function_registry.clone(),
-            self.database.storage_manager.table_catalog(),
-        );
+        let processor = self.create_processor();
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -455,6 +449,35 @@ impl Connection {
     /// auto_checkpoint_worker) acquires the drain gate and performs the
     /// actual checkpoint asynchronously.
     ///
+    /// Create a QueryProcessor configured with the sequence callback.
+    fn create_processor(&self) -> QueryProcessor {
+        let catalog = self.database.catalog.clone();
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
+            move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
+                let mut catalog = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                if is_nextval {
+                    match catalog.get_sequence_mut(seq_name) {
+                        Some(entry) => {
+                            let val = entry.next_k_val(1);
+                            Ok(Value::Int64(val))
+                        }
+                        None => Err(format!("Sequence '{}' not found", seq_name)),
+                    }
+                } else {
+                    match catalog.get_sequence(seq_name) {
+                        Some(entry) => Ok(Value::Int64(entry.curr_val())),
+                        None => Err(format!("Sequence '{}' not found", seq_name)),
+                    }
+                }
+            },
+        );
+        QueryProcessor::with_catalog(
+            self.database.function_registry.clone(),
+            self.database.storage_manager.table_catalog(),
+        )
+        .with_sequence_fn(seq_fn)
+    }
+
     /// The checkpoint_threshold config controls this:
     /// - -1 (default): signal checkpoint after every write (every DML/DDL).
     /// - 0: never auto-checkpoint (manual only via `CHECKPOINT`).
@@ -657,10 +680,7 @@ impl Connection {
                     .plan(BoundStatement::BoundQuery(*u.left.clone()))
                     .map_err(|e| format!("Plan left UNION: {e}"))?;
                 let left_optimized = optimizer.optimize(left_plan);
-                let processor = QueryProcessor::with_catalog(
-                    self.database.function_registry.clone(),
-                    self.database.storage_manager.table_catalog(),
-                );
+                let processor = self.create_processor();
                 let left_chunks = processor
                     .execute(&left_optimized)
                     .map_err(|e| format!("Execute left UNION: {e}"))?;
@@ -670,10 +690,7 @@ impl Connection {
                     .plan(BoundStatement::BoundQuery(*u.right.clone()))
                     .map_err(|e| format!("Plan right UNION: {e}"))?;
                 let right_optimized = optimizer.optimize(right_plan);
-                let processor = QueryProcessor::with_catalog(
-                    self.database.function_registry.clone(),
-                    self.database.storage_manager.table_catalog(),
-                );
+                let processor = self.create_processor();
                 let right_chunks = processor
                     .execute(&right_optimized)
                     .map_err(|e| format!("Execute right UNION: {e}"))?;

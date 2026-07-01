@@ -13,7 +13,7 @@
 
 use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_function::registry::FunctionRegistry;
+use kuzu_function::registry::{FunctionRegistry, ScalarFunction};
 use kuzu_function::scalar::evaluate_scalar;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, Query, UnaryOp};
 use std::sync::{Arc, Mutex};
@@ -24,6 +24,9 @@ pub struct ExpressionEvaluator {
     /// Optional callback to execute subqueries at evaluation time.
     /// Takes a parsed Query and returns DataChunks.
     pub subquery_fn: Option<Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>,
+    /// Optional callback for sequence operations (nextval/currval).
+    /// Takes (sequence_name, is_nextval) and returns the resulting value.
+    pub sequence_fn: Option<Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>>,
 }
 
 impl ExpressionEvaluator {
@@ -31,12 +34,19 @@ impl ExpressionEvaluator {
         Self {
             registry,
             subquery_fn: None,
+            sequence_fn: None,
         }
     }
 
     /// Set the subquery execution callback.
     pub fn with_subquery_fn(mut self, f: Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>) -> Self {
         self.subquery_fn = Some(f);
+        self
+    }
+
+    /// Set the sequence operation callback (for nextval/currval).
+    pub fn with_sequence_fn(mut self, f: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>) -> Self {
+        self.sequence_fn = Some(f);
         self
     }
 
@@ -182,6 +192,11 @@ impl ExpressionEvaluator {
             Some(f) => f,
             None => return Err(format!("Unknown function: '{}'", name)),
         };
+
+        // Handle SequenceOp (nextval/currval) via callback with catalog access
+        if matches!(func, ScalarFunction::SequenceOp { .. }) {
+            return self.evaluate_sequence_op(name, &func, &arg_vectors, num_rows);
+        }
 
         // For each row, extract values, call evaluate_scalar, and store result
         // First, determine the output type by evaluating the first non-null row
@@ -440,6 +455,56 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
             // For complex types (List, Struct, etc.), store as null
             v.set_null(row, true);
         }
+    }
+}
+
+impl ExpressionEvaluator {
+    /// Evaluate a sequence operation (nextval/currval) using the sequence callback.
+    /// Extracts the first string argument as the sequence name and delegates to the callback.
+    fn evaluate_sequence_op(
+        &self,
+        name: &str,
+        func: &ScalarFunction,
+        arg_vectors: &[ValueVector],
+        num_rows: usize,
+    ) -> Result<ValueVector, String> {
+        let is_nextval = match func {
+            ScalarFunction::SequenceOp { is_nextval } => *is_nextval,
+            _ => return Err(format!("Internal error: expected SequenceOp for '{}'", name)),
+        };
+
+        let seq_fn = self.sequence_fn.as_ref().ok_or_else(|| {
+            format!("No sequence callback configured for '{}'", name)
+        })?;
+
+        let mut result_vec = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_rows);
+        result_vec.resize(num_rows);
+
+        for row in 0..num_rows {
+            let seq_name = if row < arg_vectors[0].size() && !arg_vectors[0].is_null(row) {
+                match arg_vectors[0].get_value(row) {
+                    Some(Value::String(s)) => s,
+                    _ => return Err("nextval/currval requires a string argument (sequence name)".into()),
+                }
+            } else {
+                result_vec.set_null(row, true);
+                continue;
+            };
+
+            match seq_fn(&seq_name, is_nextval) {
+                Ok(val) => {
+                    store_value_in_vector(&mut result_vec, row, &val);
+                }
+                Err(e) => {
+                    result_vec.set_null(row, true);
+                    if row == 0 {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Ok(result_vec)
     }
 }
 

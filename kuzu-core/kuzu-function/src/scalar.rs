@@ -31,6 +31,9 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Schema { op } => evaluate_schema(*op, args),
         ScalarFunction::Array { op } => evaluate_array(*op, args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
+        ScalarFunction::SequenceOp { .. } => {
+            Err("Sequence operations (nextval/currval) require catalog access — handle at connection/processor level".into())
+        }
     }
 }
 

@@ -58,6 +58,11 @@ pub enum ScalarFunction {
         name: String,
         execute: Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>,
     },
+    /// Sequence operation (nextval/currval) — requires catalog access.
+    /// Resolved at the connection/processor level where the catalog is available.
+    SequenceOp {
+        is_nextval: bool,
+    },
 
 }
 
@@ -77,6 +82,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Schema { op } => f.debug_struct("Schema").field("op", op).finish(),
             Self::Array { op } => f.debug_struct("Array").field("op", op).finish(),
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
+            Self::SequenceOp { is_nextval } => f.debug_struct("SequenceOp").field("is_nextval", is_nextval).finish(),
         }
     }
 }
@@ -486,6 +492,10 @@ impl FunctionRegistry {
         );
         self.register_scalar("year", ScalarFunction::Date { op: DateOp::Year });
         self.register_scalar("month", ScalarFunction::Date { op: DateOp::Month });
+
+        // Sequence functions (require catalog access at connection level)
+        self.register_scalar("nextval", ScalarFunction::SequenceOp { is_nextval: true });
+        self.register_scalar("currval", ScalarFunction::SequenceOp { is_nextval: false });
         self.register_scalar("day", ScalarFunction::Date { op: DateOp::Day });
         self.register_scalar("hour", ScalarFunction::Date { op: DateOp::Hour });
         self.register_scalar("minute", ScalarFunction::Date { op: DateOp::Minute });

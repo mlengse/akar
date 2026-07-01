@@ -10,7 +10,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_function::registry::{FunctionRegistry, TableFunction};
+use kuzu_function::registry::{FunctionRegistry, ScalarFunction, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,9 @@ use std::sync::{Arc, Mutex};
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     table_catalog: Option<Arc<TableCatalog>>,
+    /// Callback for sequence operations (nextval/currval).
+    /// Takes (sequence_name, is_nextval) and returns the resulting value.
+    sequence_fn: Option<Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>>,
 }
 
 impl QueryProcessor {
@@ -26,6 +29,7 @@ impl QueryProcessor {
         Self {
             function_registry: None,
             table_catalog: None,
+            sequence_fn: None,
         }
     }
 
@@ -34,6 +38,7 @@ impl QueryProcessor {
         Self {
             function_registry: Some(registry),
             table_catalog: None,
+            sequence_fn: None,
         }
     }
 
@@ -42,7 +47,14 @@ impl QueryProcessor {
         Self {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
+            sequence_fn: None,
         }
+    }
+
+    /// Set the sequence operation callback (for nextval/currval).
+    pub fn with_sequence_fn(mut self, f: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>) -> Self {
+        self.sequence_fn = Some(f);
+        self
     }
 
     /// Resolve table data and column definitions for a scan node.
@@ -154,7 +166,13 @@ impl QueryProcessor {
                     let evaluator = self
                         .function_registry
                         .clone()
-                        .map(|reg| Arc::new(Mutex::new(ExpressionEvaluator::new(reg))));
+                        .map(|reg| {
+                            let mut eval = ExpressionEvaluator::new(reg);
+                            if let Some(ref seq_fn) = self.sequence_fn {
+                                eval = eval.with_sequence_fn(seq_fn.clone());
+                            }
+                            Arc::new(Mutex::new(eval))
+                        });
                     let filter = if let Some(eval) = evaluator {
                         PhysicalFilter::with_evaluator(f.expression.clone(), eval)
                     } else {
