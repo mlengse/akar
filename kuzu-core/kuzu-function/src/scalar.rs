@@ -2531,5 +2531,15 @@ mod tests {
         assert!(reg.contains("array_squared_distance"));
         assert!(reg.contains("list_slice"));
         assert!(reg.contains("list_prepend"));
+        // Array utility aliases
+        assert!(reg.contains("array_concat"), "array_concat should be registered");
+        assert!(reg.contains("array_cat"), "array_cat should be registered");
+        assert!(reg.contains("array_append"), "array_append should be registered");
+        assert!(reg.contains("array_push_back"), "array_push_back should be registered");
+        assert!(reg.contains("array_prepend"), "array_prepend should be registered");
+        assert!(reg.contains("array_push_front"), "array_push_front should be registered");
+        assert!(reg.contains("array_contains"), "array_contains should be registered");
+        assert!(reg.contains("array_has"), "array_has should be registered");
+        assert!(reg.contains("array_slice"), "array_slice should be registered");
     }
 }

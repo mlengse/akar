@@ -575,6 +575,17 @@ impl FunctionRegistry {
         self.register_scalar("array_cross_product", ScalarFunction::Array { op: ArrayOp::CrossProduct });
         self.register_scalar("array_squared_distance", ScalarFunction::Array { op: ArrayOp::SquaredDistance });
 
+        // --- Array utility aliases (delegate to list functions) ---
+        self.register_scalar("array_concat", ScalarFunction::List { op: ListOp::Concat });
+        self.register_scalar("array_cat", ScalarFunction::List { op: ListOp::Concat });
+        self.register_scalar("array_append", ScalarFunction::List { op: ListOp::Append });
+        self.register_scalar("array_push_back", ScalarFunction::List { op: ListOp::Append });
+        self.register_scalar("array_prepend", ScalarFunction::List { op: ListOp::Prepend });
+        self.register_scalar("array_push_front", ScalarFunction::List { op: ListOp::Prepend });
+        self.register_scalar("array_contains", ScalarFunction::List { op: ListOp::Contains });
+        self.register_scalar("array_has", ScalarFunction::List { op: ListOp::Contains });
+        self.register_scalar("array_slice", ScalarFunction::List { op: ListOp::Slice });
+
         // --- Aggregate ---
         self.register_aggregate("COUNT", AggregateFunction::Count);
         self.register_aggregate("COUNT(*)", AggregateFunction::CountStar);
