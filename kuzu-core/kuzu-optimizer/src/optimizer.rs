@@ -46,13 +46,15 @@ impl Optimizer {
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
             Box::new(FactorizationRewriting),
-            // Tree pass 2: Acc Hash Join — accumulate selective probe sides for SIP
+            // Tree pass 2: Detect foreign join push-down opportunities
+            Box::new(ForeignJoinPushDown),
+            // Tree pass 3: Acc Hash Join — accumulate selective probe sides for SIP
             Box::new(AccHashJoinOptimization),
-            // Tree pass 3: Correlated Subquery Unnesting
+            // Tree pass 4: Correlated Subquery Unnesting
             Box::new(CorrelatedSubqueryUnnesting),
-            // Tree pass 4: Remove redundant GROUP BY keys (functional dependency analysis)
+            // Tree pass 5: Remove redundant GROUP BY keys (functional dependency analysis)
             Box::new(AggKeyDependency),
-            // Tree pass 4: Annotate operators with estimated row counts (static heuristics)
+            // Tree pass 6: Annotate operators with estimated row counts (static heuristics)
             Box::new(CardinalityEstimation::new(None)),
         ];
         Self { passes, tree_passes }
@@ -75,6 +77,7 @@ impl Optimizer {
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
+            Box::new(ForeignJoinPushDown),
             Box::new(AccHashJoinOptimization),
             Box::new(CorrelatedSubqueryUnnesting),
             // Remove redundant GROUP BY keys (functional dependency analysis)
@@ -144,7 +147,8 @@ mod tests {
         assert!(names.contains(&"agg_key_dependency"));
         assert!(names.contains(&"acc_hash_join"));
         assert!(names.contains(&"correlated_subquery_unnesting"));
-        assert_eq!(names.len(), 16);
+        assert!(names.contains(&"foreign_join_push_down"));
+        assert_eq!(names.len(), 17);
     }
 
     #[test]
