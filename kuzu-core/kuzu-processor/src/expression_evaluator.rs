@@ -511,6 +511,7 @@ impl ExpressionEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hashbrown::HashMap;
     use kuzu_common::types::PhysicalTypeID;
     use kuzu_common::vector::ValueVector;
     use kuzu_function::registry::FunctionRegistry;
@@ -644,5 +645,75 @@ mod tests {
         assert_eq!(result.get_value(0), Some(Value::Bool(false)));
         assert_eq!(result.get_value(1), Some(Value::Bool(true)));
         assert_eq!(result.get_value(2), Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_sequence_nextval_currval_with_callback() {
+        let state = Arc::new(Mutex::new(HashMap::new()));
+        state.lock().unwrap().insert("my_seq".to_string(), 10_i64);
+
+        let state_for_fn = state.clone();
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
+            move |seq_name: &str, is_nextval: bool| {
+                let mut map = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
+                let current = map
+                    .get_mut(seq_name)
+                    .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                if is_nextval {
+                    let out = *current;
+                    *current += 2;
+                    Ok(Value::Int64(out))
+                } else {
+                    Ok(Value::Int64(*current))
+                }
+            },
+        );
+
+        let eval = ExpressionEvaluator::new(make_registry()).with_sequence_fn(seq_fn);
+        let chunk = make_chunk(&[1, 2, 3]);
+
+        let nextval_expr = Expression::FunctionCall(
+            "nextval".into(),
+            vec![Expression::Constant(Constant::String("my_seq".into()))],
+        );
+        let nextvals = eval.evaluate(&nextval_expr, &chunk).unwrap();
+        assert_eq!(nextvals.get_value(0), Some(Value::Int64(10)));
+        assert_eq!(nextvals.get_value(1), Some(Value::Int64(12)));
+        assert_eq!(nextvals.get_value(2), Some(Value::Int64(14)));
+
+        let currval_expr = Expression::FunctionCall(
+            "currval".into(),
+            vec![Expression::Constant(Constant::String("my_seq".into()))],
+        );
+        let curr = eval.evaluate(&currval_expr, &make_chunk(&[1])).unwrap();
+        assert_eq!(curr.get_value(0), Some(Value::Int64(16)));
+    }
+
+    #[test]
+    fn test_sequence_requires_callback() {
+        let eval = ExpressionEvaluator::new(make_registry());
+        let expr = Expression::FunctionCall(
+            "nextval".into(),
+            vec![Expression::Constant(Constant::String("my_seq".into()))],
+        );
+        let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
+        assert!(err.contains("No sequence callback configured"), "Unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_sequence_requires_string_arg() {
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+            Arc::new(|_seq_name: &str, _is_nextval: bool| Ok(Value::Int64(1)));
+        let eval = ExpressionEvaluator::new(make_registry()).with_sequence_fn(seq_fn);
+
+        let expr = Expression::FunctionCall(
+            "nextval".into(),
+            vec![Expression::Constant(Constant::Integer(42))],
+        );
+        let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
+        assert!(
+            err.contains("requires a string argument"),
+            "Unexpected error: {err}"
+        );
     }
 }

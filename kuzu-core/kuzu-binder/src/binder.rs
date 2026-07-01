@@ -457,6 +457,7 @@ impl Binder {
                 let _args = resolved_args?;
                 let return_type = match name.to_uppercase().as_str() {
                     "COUNT" | "SUM" | "MIN" | "MAX" | "AVG" => LogicalTypeID::Int64,
+                    "NEXTVAL" | "CURRVAL" => LogicalTypeID::Int64,
                     "STARTS_WITH" | "ENDS_WITH" | "CONTAINS" => LogicalTypeID::Bool,
                     "TO_UPPER" | "TO_LOWER" | "TRIM" | "SUBSTRING" | "REPLACE" => LogicalTypeID::String,
                     "ABS" | "CEIL" | "FLOOR" | "ROUND" => LogicalTypeID::Double,
@@ -1429,6 +1430,24 @@ mod tests {
             BoundStatement::BoundQuery(q) => match &q.clauses[1] {
                 BoundClause::BoundReturn(r) => {
                     assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
+                }
+                _ => panic!("Expected BoundReturn"),
+            },
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_sequence_function_return_type() {
+        let binder = setup_binder();
+        let sql = "RETURN nextval('my_seq'), currval('my_seq')";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => match &q.clauses[0] {
+                BoundClause::BoundReturn(r) => {
+                    assert_eq!(r.expressions.len(), 2);
+                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
+                    assert_eq!(r.expressions[1].resolved_type, LogicalTypeID::Int64);
                 }
                 _ => panic!("Expected BoundReturn"),
             },

@@ -922,7 +922,24 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
     }
 
     match rule {
-        Rule::primary => parse_expression(children.into_iter().next().ok_or("Empty primary")?),
+        Rule::primary => {
+            // Handle function calls encoded by grammar as: variable ~ function_args?
+            // e.g. nextval('seq') or COUNT(a)
+            if children.len() == 2
+                && children[0].as_rule() == Rule::variable
+                && children[1].as_rule() == Rule::function_args
+            {
+                let name = children[0].as_str().to_string();
+                let args = children[1]
+                    .clone()
+                    .into_inner()
+                    .filter(|c| c.as_rule() == Rule::expression)
+                    .map(parse_expression)
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Expression::FunctionCall(name, args));
+            }
+            parse_expression(children.into_iter().next().ok_or("Empty primary")?)
+        }
         Rule::literal => parse_literal(children.into_iter().next().ok_or("Empty literal")?),
         Rule::string => Ok(Expression::Constant(Constant::String(unescape_string(pair.as_str())))),
         Rule::integer => {
@@ -1316,6 +1333,34 @@ mod tests {
     fn test_function_call() {
         let sql = "MATCH (a:Person) RETURN COUNT(a)";
         assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_function_call_ast_nextval_currval() {
+        let sql = "RETURN nextval('my_seq'), currval('my_seq')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(q.clauses.len(), 1);
+                match &q.clauses[0] {
+                    Clause::Return(r) => {
+                        assert_eq!(r.expressions.len(), 2);
+                        assert!(matches!(
+                            &r.expressions[0].expression,
+                            Expression::FunctionCall(name, args)
+                            if name == "nextval" && args.len() == 1
+                        ));
+                        assert!(matches!(
+                            &r.expressions[1].expression,
+                            Expression::FunctionCall(name, args)
+                            if name == "currval" && args.len() == 1
+                        ));
+                    }
+                    _ => panic!("Expected Return clause"),
+                }
+            }
+            _ => panic!("Expected Query"),
+        }
     }
 
     #[test]
