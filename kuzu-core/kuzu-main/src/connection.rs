@@ -508,6 +508,30 @@ impl Connection {
                     })
                     .collect();
                 self.database.storage_manager.create_node_table(t.name.clone(), columns);
+
+                // Auto-create backing sequences for SERIAL columns
+                {
+                    let mut catalog = self.database.catalog.lock().unwrap();
+                    for col in &t.columns {
+                        if col.logical_type == kuzu_common::types::LogicalTypeID::Serial {
+                            match catalog.create_serial_sequence(&t.name, &col.name) {
+                                kuzu_catalog::CatalogResult::Created { .. } => {
+                                    tracing::info!(
+                                        "Created serial sequence for {}.{}",
+                                        t.name, col.name
+                                    );
+                                }
+                                other => {
+                                    tracing::warn!(
+                                        "Failed to create serial sequence for {}.{}: {:?}",
+                                        t.name, col.name, other
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
                 tracing::info!("Created node table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Node table '{}' created",
@@ -537,6 +561,30 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundDropTable(t) => {
+                // Drop auto-created serial sequences for the table
+                {
+                    let mut catalog = self.database.catalog.lock().unwrap();
+                    // Find and drop any sequences matching `{name}_*_serial`
+                    let serial_seqs: Vec<String> = catalog
+                        .sequences()
+                        .iter()
+                        .filter(|s| s.name.ends_with("_serial"))
+                        .filter(|s| {
+                            // Match format: {table_name}_{column_name}_serial
+                            s.name.starts_with(&format!("{}_", t.name))
+                        })
+                        .map(|s| s.name.clone())
+                        .collect();
+                    for seq_name in serial_seqs {
+                        match catalog.drop_sequence(&seq_name) {
+                            kuzu_catalog::CatalogResult::Dropped { .. } => {
+                                tracing::info!("Dropped serial sequence '{}'", seq_name);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
                 tracing::info!("Dropped table '{}'", t.name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Table '{}' dropped",
@@ -706,6 +754,24 @@ impl Connection {
                     if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
                         if let kuzu_parser::ast::Expression::Constant(con) = expr {
                             values[col_idx] = ast_constant_to_value(con);
+                        }
+                    }
+                }
+
+                // Auto-generate SERIAL column values for null entries
+                {
+                    let mut sys_catalog = self.database.catalog.lock().unwrap();
+                    for (col_idx, col) in table.columns.iter().enumerate() {
+                        if col.logical_type == kuzu_common::types::LogicalTypeID::Serial {
+                            if matches!(values[col_idx], Value::Null) {
+                                let seq_name = kuzu_catalog::SequenceEntry::get_serial_name(
+                                    &c.table_name, &col.name,
+                                );
+                                if let Some(seq) = sys_catalog.get_sequence_mut(&seq_name) {
+                                    let next_val = seq.next_k_val(1);
+                                    values[col_idx] = Value::Int64(next_val);
+                                }
+                            }
                         }
                     }
                 }

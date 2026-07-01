@@ -155,7 +155,8 @@ column_def = { identifier ~ type_name }
 type_name = { "STRING" | "INT64" | "INT32" | "INT16" | "INT8"
     | "UINT64" | "UINT32" | "UINT16" | "UINT8"
     | "BOOL" | "BOOLEAN"
-    | "DOUBLE" | "FLOAT" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL" }
+    | "DOUBLE" | "FLOAT" | "BLOB" | "DATE" | "TIMESTAMP" | "INTERVAL"
+    | "SERIAL" }
 
 primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
 

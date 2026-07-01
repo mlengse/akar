@@ -584,6 +584,25 @@ impl Catalog {
             .collect()
     }
 
+    /// Auto-create a sequence backing a SERIAL column.
+    ///
+    /// The sequence is named `{table_name}_{column_name}_serial` with:
+    /// - start = 0, increment = 1, min = 0, max = i64::MAX, no cycle
+    ///
+    /// This matches C++ behavior in `Catalog::createSerialSequence()`.
+    pub fn create_serial_sequence(&mut self, table_name: &str, column_name: &str) -> CatalogResult {
+        let seq_name = SequenceEntry::get_serial_name(table_name, column_name);
+        self.create_sequence(seq_name, 0, 1, 0, i64::MAX, false)
+    }
+
+    /// Drop the auto-created sequence for a SERIAL column.
+    ///
+    /// Called when a table with SERIAL columns is dropped.
+    pub fn drop_serial_sequence(&mut self, table_name: &str, column_name: &str) -> CatalogResult {
+        let seq_name = SequenceEntry::get_serial_name(table_name, column_name);
+        self.drop_sequence(&seq_name)
+    }
+
     /// Create a foreign table entry in the catalog.
     pub fn create_foreign_table(
         &mut self,

@@ -594,3 +594,128 @@ fn test_optional_match_no_match() {
     // Should return 1 row with p.name='Alice' and pet.name=NULL
     assert_eq!(result.num_rows(), 1, "OPTIONAL MATCH should return left-side row");
 }
+
+// ==================== SERIAL Auto-Increment Tests ====================
+
+#[test]
+fn test_create_table_with_serial_column() {
+    let (_db, conn) = setup_db();
+
+    // Create a table with SERIAL column
+    let msg = exec(
+        &conn,
+        "CREATE NODE TABLE Person(id SERIAL, name STRING, PRIMARY KEY (id))",
+    );
+    assert!(
+        msg.contains("created"),
+        "CREATE NODE TABLE with SERIAL should succeed: {msg}"
+    );
+
+    // SERIAL sequence should exist
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    let seq = cat.get_sequence("Person_id_serial");
+    assert!(seq.is_some(), "SERIAL sequence 'Person_id_serial' should exist");
+    assert_eq!(seq.unwrap().curr_val(), 0, "SERIAL should start at 0");
+}
+
+#[test]
+fn test_serial_auto_increment_on_insert() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id SERIAL, name STRING, PRIMARY KEY (id))",
+    );
+
+    // Insert without specifying the SERIAL column
+    exec(&conn, "CREATE (:Person {name: 'Alice'})");
+
+    // Use raw storage to verify the auto-generated id
+    {
+        let catalog = _db.table_catalog();
+        let table = catalog.get_node_table_by_name("Person").unwrap();
+        assert_eq!(table.num_rows, 1, "Should have 1 row");
+        if let Some(val) = table.get_value(0, 0) {
+            assert_eq!(*val, kuzu_common::types::Value::Int64(0), "First SERIAL value should be 0");
+        } else {
+            panic!("Column 0 should have a value");
+        }
+    }
+
+    // Insert another row
+    exec(&conn, "CREATE (:Person {name: 'Bob'})");
+    {
+        let catalog = _db.table_catalog();
+        let table = catalog.get_node_table_by_name("Person").unwrap();
+        assert_eq!(table.num_rows, 2, "Should have 2 rows");
+        if let Some(val) = table.get_value(1, 0) {
+            assert_eq!(*val, kuzu_common::types::Value::Int64(1), "Second SERIAL value should be 1");
+        } else {
+            panic!("Column 0 should have a value");
+        }
+    }
+}
+
+#[test]
+fn test_serial_multiple_columns() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Event(id1 SERIAL, id2 SERIAL, name STRING, PRIMARY KEY (id1))",
+    );
+
+    // Insert without specifying SERIAL columns
+    exec(&conn, "CREATE (:Event {name: 'First'})");
+
+    {
+        let catalog = _db.table_catalog();
+        let table = catalog.get_node_table_by_name("Event").unwrap();
+        assert_eq!(table.num_rows, 1);
+        if let Some(val1) = table.get_value(0, 0) {
+            assert_eq!(*val1, kuzu_common::types::Value::Int64(0), "id1 should be 0");
+        }
+        if let Some(val2) = table.get_value(0, 1) {
+            assert_eq!(*val2, kuzu_common::types::Value::Int64(0), "id2 should be 0");
+        }
+    }
+
+    // Insert another row — both sequences advance independently
+    exec(&conn, "CREATE (:Event {name: 'Second'})");
+    {
+        let catalog = _db.table_catalog();
+        let table = catalog.get_node_table_by_name("Event").unwrap();
+        assert_eq!(table.num_rows, 2);
+        if let Some(val1) = table.get_value(1, 0) {
+            assert_eq!(*val1, kuzu_common::types::Value::Int64(1), "id1 should be 1");
+        }
+        if let Some(val2) = table.get_value(1, 1) {
+            assert_eq!(*val2, kuzu_common::types::Value::Int64(1), "id2 should be 1");
+        }
+    }
+}
+
+#[test]
+fn test_serial_with_explicit_value() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id SERIAL, name STRING, PRIMARY KEY (id))",
+    );
+
+    // Insert with explicit SERIAL value — should NOT auto-increment
+    exec(&conn, "CREATE (:Person {id: 42, name: 'Alice'})");
+    {
+        let catalog = _db.table_catalog();
+        let table = catalog.get_node_table_by_name("Person").unwrap();
+        assert_eq!(table.num_rows, 1);
+        if let Some(val) = table.get_value(0, 0) {
+            assert_eq!(*val, kuzu_common::types::Value::Int64(42), "Explicit SERIAL value should be 42");
+        }
+    }
+
+    // The internal sequence should NOT have advanced (stays at 0)
+    let cat = _db.catalog();
+    let cat = cat.lock().unwrap();
+    let seq = cat.get_sequence("Person_id_serial").unwrap();
+    assert_eq!(seq.curr_val(), 0, "Sequence should not advance when explicit value provided");
+}
