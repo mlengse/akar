@@ -89,7 +89,33 @@ impl Extension for AlgoExtension {
             },
         );
 
-        tracing::info!("ALGO extension loaded: 14 function registrations (7 algorithms + 7 aliases)");
+        // Shortest path algorithms
+        context.register_table_function(
+            "shortest_path",
+            TableFunction::Custom {
+                name: "shortest_path".into(),
+            },
+        );
+        context.register_table_function(
+            "sp",
+            TableFunction::Custom {
+                name: "shortest_path".into(),
+            },
+        );
+        context.register_table_function(
+            "weighted_shortest_path",
+            TableFunction::Custom {
+                name: "weighted_shortest_path".into(),
+            },
+        );
+        context.register_table_function(
+            "all_sp_destinations",
+            TableFunction::Custom {
+                name: "all_sp_destinations".into(),
+            },
+        );
+
+        tracing::info!("ALGO extension loaded: 17 function registrations (10 algorithms + 7 aliases)");
 
         Ok(())
     }
@@ -520,6 +546,167 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
     }
 }
 
+// ==================== Shortest Path Algorithms ====================
+
+/// Compute shortest path distances from a source node using BFS (unweighted).
+///
+/// Returns `(distances, parents)` where:
+/// - `distances[i]` = shortest distance (number of hops) from source to node i,
+///   or `None` if node i is unreachable.
+/// - `parents[i]` = predecessor node on the shortest path, or `None` for source/unreachable.
+pub fn shortest_path_bfs(csr: &CSRAdjacency, source: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
+    let n = csr.num_nodes();
+    if source >= n {
+        return (vec![None; n], vec![None; n]);
+    }
+    let mut distance = vec![None; n];
+    let mut parent = vec![None; n];
+    let mut queue = std::collections::VecDeque::new();
+
+    distance[source] = Some(0);
+    queue.push_back(source);
+
+    while let Some(node) = queue.pop_front() {
+        let dist = distance[node].unwrap();
+        for (_rel, dst) in csr.neighbors(node) {
+            let neighbor = dst.offset as usize;
+            if neighbor < n && distance[neighbor].is_none() {
+                distance[neighbor] = Some(dist + 1);
+                parent[neighbor] = Some(node);
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    (distance, parent)
+}
+
+/// Compute shortest path distances and return as `AlgoResult`.
+///
+/// Each node gets its shortest distance from the source node.
+/// Unreachable nodes get distance `f64::MAX`.
+pub fn compute_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
+    let (distance, _parent) = shortest_path_bfs(csr, source);
+    let values: Vec<f64> = distance
+        .iter()
+        .map(|d| d.map(|v| v as f64).unwrap_or(f64::MAX))
+        .collect();
+    AlgoResult {
+        name: "shortest_path".into(),
+        values,
+    }
+}
+
+/// Compute weighted shortest path from a source node using Dijkstra's algorithm.
+///
+/// The `weight_fn` maps a node index and its neighbor offset to the edge weight.
+/// Returns `(distances, parents)`.
+/// A min-heap entry for Dijkstra: (distance, node).
+/// Uses `f64::total_cmp` for total ordering of floats.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DistNode(f64, usize);
+
+impl Eq for DistNode {}
+
+impl PartialOrd for DistNode {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DistNode {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse so BinaryHeap becomes a min-heap
+        other.0.total_cmp(&self.0).then_with(|| self.1.cmp(&other.1))
+    }
+}
+
+pub fn weighted_shortest_path<F>(
+    csr: &CSRAdjacency,
+    source: usize,
+    weight_fn: F,
+) -> (Vec<Option<f64>>, Vec<Option<usize>>)
+where
+    F: Fn(usize, usize) -> f64,
+{
+    use std::collections::BinaryHeap;
+
+    let n = csr.num_nodes();
+    if source >= n {
+        return (vec![None; n], vec![None; n]);
+    }
+
+    let mut distance: Vec<Option<f64>> = vec![None; n];
+    let mut parent: Vec<Option<usize>> = vec![None; n];
+    let mut heap = BinaryHeap::new();
+
+    distance[source] = Some(0.0);
+    heap.push(DistNode(0.0, source));
+
+    while let Some(DistNode(dist, node)) = heap.pop() {
+        if let Some(best) = distance[node] {
+            if dist > best {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
+        for (_rel, dst) in csr.neighbors(node) {
+            let neighbor = dst.offset as usize;
+            if neighbor >= n {
+                continue;
+            }
+            let weight = weight_fn(node, neighbor);
+            let new_dist = dist + weight;
+
+            match distance[neighbor] {
+                Some(best) if new_dist >= best => {}
+                _ => {
+                    distance[neighbor] = Some(new_dist);
+                    parent[neighbor] = Some(node);
+                    heap.push(DistNode(new_dist, neighbor));
+                }
+            }
+        }
+    }
+
+    (distance, parent)
+}
+
+/// Compute weighted shortest path distances and return as `AlgoResult`.
+///
+/// Uses unit weights (equivalent to BFS shortest path).
+pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
+    let (distance, _parent) = weighted_shortest_path(csr, source, |_from, _to| 1.0);
+    let values: Vec<f64> = distance
+        .iter()
+        .map(|d| d.unwrap_or(f64::MAX))
+        .collect();
+    AlgoResult {
+        name: "weighted_shortest_path".into(),
+        values,
+    }
+}
+
+/// Compute all-pairs shortest path destinations using repeated BFS.
+///
+/// Returns the number of reachable nodes from each source (destination count).
+pub fn compute_all_sp_destinations(csr: &CSRAdjacency) -> AlgoResult {
+    let n = csr.num_nodes();
+    let values: Vec<f64> = (0..n)
+        .map(|source| {
+            let (distance, _) = shortest_path_bfs(csr, source);
+            // Count reachable nodes (excluding source itself)
+            distance.iter().filter(|d| d.is_some()).count().saturating_sub(1) as f64
+        })
+        .collect();
+    AlgoResult {
+        name: "all_sp_destinations".into(),
+        values,
+    }
+}
+
 // ==================== Tests ====================
 
 #[cfg(test)]
@@ -687,9 +874,100 @@ mod tests {
 
     #[test]
     fn test_algo_extension_registration() {
-        // Verify the extension registers without error
-        // (requires full Database context, so test just the struct)
         let ext = AlgoExtension::new();
         assert_eq!(ext.name(), "ALGO");
+    }
+
+    // ==================== Shortest Path Tests ====================
+
+    #[test]
+    fn test_shortest_path_bfs_direct() {
+        let csr = small_csr();
+        let (dist, parent) = shortest_path_bfs(&csr, 0);
+        // 0→1→2→3: distance to node 3 is 3
+        assert_eq!(dist[3], Some(3));
+        // 0→4→5→6: distance to node 6 is 3
+        assert_eq!(dist[6], Some(3));
+        // 0 to itself: distance 0
+        assert_eq!(dist[0], Some(0));
+        // Parent chain: 3's parent should be 2
+        assert_eq!(parent[3], Some(2));
+    }
+
+    #[test]
+    fn test_shortest_path_bfs_unreachable() {
+        let csr = disconnected_csr();
+        let (dist, _parent) = shortest_path_bfs(&csr, 0);
+        assert_eq!(dist[0], Some(0));
+        assert_eq!(dist[1], Some(1));
+        assert_eq!(dist[2], None); // unreachable
+        assert_eq!(dist[3], None); // unreachable
+    }
+
+    #[test]
+    fn test_shortest_path_bfs_out_of_range_source() {
+        let csr = small_csr();
+        let (dist, parent) = shortest_path_bfs(&csr, 100);
+        assert!(dist.iter().all(|d| d.is_none()));
+        assert!(parent.iter().all(|p| p.is_none()));
+    }
+
+    #[test]
+    fn test_compute_shortest_path() {
+        let csr = small_csr();
+        let result = compute_shortest_path(&csr, 0);
+        assert_eq!(result.values[0], 0.0);
+        assert_eq!(result.values[3], 3.0);
+        assert_eq!(result.values[6], 3.0);
+        assert_eq!(result.name, "shortest_path");
+    }
+
+    #[test]
+    fn test_weighted_shortest_path_unit_weights() {
+        let csr = small_csr();
+        let (dist, _parent) = weighted_shortest_path(&csr, 0, |_from, _to| 1.0);
+        assert_eq!(dist[0], Some(0.0));
+        assert_eq!(dist[3], Some(3.0));
+        assert_eq!(dist[6], Some(3.0));
+    }
+
+    #[test]
+    fn test_weighted_shortest_path_custom_weights() {
+        let csr = small_csr();
+        // Assign weight = 10 to all edges, so distances are scaled
+        let (dist, _parent) = weighted_shortest_path(&csr, 0, |_from, _to| 10.0);
+        assert_eq!(dist[0], Some(0.0));
+        assert_eq!(dist[3], Some(30.0)); // 3 hops × 10
+    }
+
+    #[test]
+    fn test_compute_weighted_shortest_path() {
+        let csr = small_csr();
+        let result = compute_weighted_shortest_path(&csr, 0);
+        assert_eq!(result.values[0], 0.0);
+        assert_eq!(result.values[3], 3.0);
+        assert_eq!(result.name, "weighted_shortest_path");
+    }
+
+    #[test]
+    fn test_all_sp_destinations() {
+        let csr = small_csr();
+        let result = compute_all_sp_destinations(&csr);
+        // Each node can reach 6 others (all 7 nodes minus itself)
+        for &v in &result.values {
+            assert_eq!(v, 6.0);
+        }
+    }
+
+    #[test]
+    fn test_all_sp_destinations_disconnected() {
+        let csr = disconnected_csr();
+        let result = compute_all_sp_destinations(&csr);
+        // Nodes 0 and 1 can reach each other (1 destination each)
+        assert_eq!(result.values[0], 1.0);
+        assert_eq!(result.values[1], 1.0);
+        // Nodes 2 and 3 can reach each other (1 destination each)
+        assert_eq!(result.values[2], 1.0);
+        assert_eq!(result.values[3], 1.0);
     }
 }
