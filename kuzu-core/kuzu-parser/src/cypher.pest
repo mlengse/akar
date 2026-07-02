@@ -228,7 +228,7 @@ where_clause = {
 with_clause = { "WITH" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit? }
 
 return_clause = {
-    "RETURN" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit?
+    "RETURN" ~ ( "*" | return_item ~ ("," ~ return_item)* ) ~ order_by? ~ limit?
 }
 
 return_item = {
@@ -247,10 +247,15 @@ offset = { "SKIP" ~ integer }
 
 expression = { or_expr }
 
-or_expr = { xor_expr ~ ("OR" ~ xor_expr)* }
-xor_expr = { and_expr ~ ("XOR" ~ and_expr)* }
-and_expr = { not_expr ~ ("AND" ~ not_expr)* }
-not_expr = { ("NOT")? ~ comparison_expr }
+or_kw = @{ ^"OR" ~ !(ASCII_ALPHANUMERIC | "_") }
+and_kw = @{ ^"AND" ~ !(ASCII_ALPHANUMERIC | "_") }
+not_kw = @{ ^"NOT" ~ !(ASCII_ALPHANUMERIC | "_") }
+xor_kw = @{ ^"XOR" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+or_expr = { xor_expr ~ (or_kw ~ xor_expr)* }
+xor_expr = { and_expr ~ (xor_kw ~ and_expr)* }
+and_expr = { not_expr ~ (and_kw ~ not_expr)* }
+not_expr = { (not_kw)? ~ comparison_expr }
 
 comparison_expr = {
     additive_expr ~ (
