@@ -81,6 +81,10 @@ pub enum ScalarFunction {
     Blob {
         op: BlobOp,
     },
+    /// Union functions — UNION_VALUE, UNION_TAG, UNION_EXTRACT.
+    Union {
+        op: UnionOp,
+    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -105,6 +109,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Hash { op } => f.debug_struct("Hash").field("op", op).finish(),
             Self::Interval { op } => f.debug_struct("Interval").field("op", op).finish(),
             Self::Blob { op } => f.debug_struct("Blob").field("op", op).finish(),
+            Self::Union { op } => f.debug_struct("Union").field("op", op).finish(),
         }
     }
 }
@@ -381,6 +386,19 @@ pub enum BlobOp {
     Encode,
     Decode,
     OctetLength,
+}
+
+/// Union functions — ported from C++ `function/union/`.
+///
+/// Union is stored internally as Struct with a `"tag"` field (UInt16) prepended.
+/// - `UNION_VALUE(val)` → create a union wrapping a value
+/// - `UNION_TAG(u)` → return active tag name as string
+/// - `UNION_EXTRACT(u, key)` → extract value by field name
+#[derive(Debug, Clone, Copy)]
+pub enum UnionOp {
+    UnionValue,
+    UnionTag,
+    UnionExtract,
 }
 
 // ==================== Aggregate Function Types ====================

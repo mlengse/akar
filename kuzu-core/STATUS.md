@@ -359,7 +359,7 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 
 | # | Grup | Fungsi | Alasan |
 |---|------|--------|--------|
-| **10** | **Union** (3) | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | `Union` type ✅ ada — tapi perlu `UnionOp` enum, tag-based dispatch, validasi tag |
+| **10** | **Union** (3) ✅ sudah | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | `Union` type ✅ ada — tapi perlu `UnionOp` enum, tag-based dispatch, validasi tag |
 | **11** | **List** (14) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | Paling banyak fungsi, perlu `LogicalType::List` handling, existing `ListOp` enum mungkin perlu diperluas |
 
 ---

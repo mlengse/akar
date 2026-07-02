@@ -98,6 +98,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Hash { op } => evaluate_hash(*op, args),
         ScalarFunction::Interval { op } => evaluate_interval(*op, args),
         ScalarFunction::Blob { op } => evaluate_blob(*op, args),
+        ScalarFunction::Union { op } => evaluate_union(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => {
@@ -1535,6 +1536,58 @@ fn evaluate_interval(op: IntervalOp, args: &[Value]) -> Result<Value, String> {
         IntervalOp::ToMicroseconds => Interval::new(0, 0, n),
     };
     Ok(Value::Interval(interval))
+}
+
+// ==================== Union functions ====================
+
+/// Evaluate a union function.
+fn evaluate_union(op: UnionOp, args: &[Value]) -> Result<Value, String> {
+    match op {
+        UnionOp::UnionValue => {
+            // UNION_VALUE(val) → create a union wrapping the value as a single variant
+            let val = args[0].clone();
+            Ok(Value::Struct(vec![
+                ("tag".to_string(), Value::UInt16(0)),
+                ("_value".to_string(), val),
+            ]))
+        }
+        UnionOp::UnionTag => {
+            // UNION_TAG(union) → return the active tag name as a string
+            let entries = match &args[0] {
+                Value::Struct(entries) => entries,
+                _ => return Err("UNION_TAG requires a union argument".into()),
+            };
+            // Find the tag field (should be first entry)
+            let tag_val = entries.iter().find(|(k, _)| k == "tag")
+                .ok_or("Union has no tag field".to_string())?;
+            let tag_idx = match &tag_val.1 {
+                Value::UInt16(x) => *x as usize,
+                _ => return Err("Invalid tag field type".into()),
+            };
+            // The active variant name is at entries[tag_idx + 1]
+            let field_idx = tag_idx + 1;
+            if field_idx >= entries.len() {
+                return Err(format!("Union tag index {} out of range", tag_idx));
+            }
+            Ok(Value::String(entries[field_idx].0.clone()))
+        }
+        UnionOp::UnionExtract => {
+            // UNION_EXTRACT(union, key) → same as struct_extract
+            let struct_val = &args[0];
+            let key = get_string(&args[1])?;
+            match struct_val {
+                Value::Struct(entries) => {
+                    for (k, v) in entries {
+                        if *k == key {
+                            return Ok(v.clone());
+                        }
+                    }
+                    Err(format!("Key '{}' not found in union", key))
+                }
+                _ => Err("UNION_EXTRACT requires a union argument".into()),
+            }
+        }
+    }
 }
 
 // ==================== Blob functions ====================
@@ -3182,6 +3235,51 @@ mod tests {
         // Empty blob
         let result = evaluate_scalar(&func, &[Value::Blob(vec![])]).unwrap();
         assert_eq!(result, Value::Int64(0));
+    }
+
+    // --- Union function tests ---
+
+    #[test]
+    fn test_union_value() {
+        let func = ScalarFunction::Union { op: UnionOp::UnionValue };
+        let result = evaluate_scalar(&func, &[Value::Int64(42)]).unwrap();
+        // Should produce a union wrapping the value
+        assert_eq!(result, Value::Struct(vec![
+            ("tag".to_string(), Value::UInt16(0)),
+            ("_value".to_string(), Value::Int64(42)),
+        ]));
+    }
+
+    #[test]
+    fn test_union_tag() {
+        // Create a union with tag=1 (second variant active)
+        let union_val = Value::Struct(vec![
+            ("tag".to_string(), Value::UInt16(1)),
+            ("a".to_string(), Value::Int64(10)),
+            ("b".to_string(), Value::String("hello".into())),
+        ]);
+        let func = ScalarFunction::Union { op: UnionOp::UnionTag };
+        let result = evaluate_scalar(&func, &[union_val]).unwrap();
+        assert_eq!(result, Value::String("b".into()));
+    }
+
+    #[test]
+    fn test_union_extract() {
+        let union_val = Value::Struct(vec![
+            ("tag".to_string(), Value::UInt16(0)),
+            ("a".to_string(), Value::Int64(10)),
+            ("b".to_string(), Value::String("hello".into())),
+        ]);
+        let func = ScalarFunction::Union { op: UnionOp::UnionExtract };
+        // Extract field "a"
+        let result = evaluate_scalar(&func, &[union_val.clone(), Value::String("a".into())]).unwrap();
+        assert_eq!(result, Value::Int64(10));
+        // Extract field "b"
+        let result = evaluate_scalar(&func, &[union_val.clone(), Value::String("b".into())]).unwrap();
+        assert_eq!(result, Value::String("hello".into()));
+        // Non-existent key
+        let result = evaluate_scalar(&func, &[union_val, Value::String("c".into())]);
+        assert!(result.is_err());
     }
 
     // --- List function tests ---
