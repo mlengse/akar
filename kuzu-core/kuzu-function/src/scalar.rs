@@ -165,6 +165,35 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             let exp = numeric_to_f64(&args[1])?;
             Ok(Value::Double(base.powf(exp)))
         }
+        // Math functions (f64-based, single argument)
+        ArithmeticOp::Cbrt => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.cbrt()))
+        }
+        ArithmeticOp::Cot => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(1.0 / v.tan()))
+        }
+        ArithmeticOp::Log2 => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.log2()))
+        }
+        ArithmeticOp::Even => {
+            let v = args[0].clone();
+            match v {
+                Value::Int64(x) => {
+                    // Round up to nearest even integer
+                    let rounded = if x % 2 == 0 { x } else { x + 1 };
+                    Ok(Value::Int64(rounded))
+                }
+                Value::Double(x) => {
+                    let rounded = x.ceil() as i64;
+                    let result = if rounded % 2 == 0 { rounded } else { rounded + 1 };
+                    Ok(Value::Int64(result))
+                }
+                _ => Err("Even requires numeric argument".into()),
+            }
+        }
         // Bitwise operations (int64-only, matching C++ hardcoded int64_t)
         ArithmeticOp::BitwiseAnd => {
             if args.len() < 2 {
@@ -1708,6 +1737,55 @@ mod tests {
             op: ArithmeticOp::Negate,
         };
         assert_eq!(evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(), Value::Int64(-42));
+    }
+
+    // --- Light Math tests ---
+
+    #[test]
+    fn test_cbrt() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Cbrt };
+        let get_f64 = |v: Value| -> f64 {
+            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+        };
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(27.0)]).unwrap()) - 3.0).abs() < 1e-10);
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(8.0)]).unwrap()) - 2.0).abs() < 1e-10);
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Int64(27)]).unwrap()) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cot() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Cot };
+        // cot(pi/4) = 1
+        let pi_4 = std::f64::consts::PI / 4.0;
+        let result = evaluate_scalar(&func, &[Value::Double(pi_4)]).unwrap();
+        if let Value::Double(v) = result {
+            assert!((v - 1.0).abs() < 1e-10);
+        } else {
+            panic!("Expected Double");
+        }
+    }
+
+    #[test]
+    fn test_log2() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Log2 };
+        let get_f64 = |v: Value| -> f64 {
+            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+        };
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(8.0)]).unwrap()) - 3.0).abs() < 1e-10);
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Int64(16)]).unwrap()) - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_even() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Even };
+        // Int64: even numbers unchanged, odd rounded up
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(4)]).unwrap(), Value::Int64(4));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(5)]).unwrap(), Value::Int64(6));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(-2)]).unwrap(), Value::Int64(-2));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(-3)]).unwrap(), Value::Int64(-2));
+        // Double
+        assert_eq!(evaluate_scalar(&func, &[Value::Double(2.3)]).unwrap(), Value::Int64(4));
+        assert_eq!(evaluate_scalar(&func, &[Value::Double(3.8)]).unwrap(), Value::Int64(4));
     }
 
     // --- Bitwise tests ---

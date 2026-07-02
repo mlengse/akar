@@ -314,6 +314,56 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 
 **Estimasi:** ~5-7 hari untuk porting semua fungsi scalar yang tersisa
 
+
+#### 🔴 Prioritas 1
+
+| Kelompok | Fungsi | Estimasi |
+|----------|--------|----------|
+| **Interval** (8 func) | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | ~2 hari |
+| **List** (14 func) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | ~2 hari |
+| **Hash** (3 func) | `MD5`, `SHA256`, `HASH` | ~1 hari |
+| **Timestamp** (4 func) | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | ~1 hari |
+| **Blob** (3 func) | `ENCODE`, `DECODE`, `OCTET_LENGTH` | ~1 hari |
+| **Bitwise** (4 func) | `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` | ~1 hari |
+| **String** (7 func) | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN`, `INITCAP`, `CONCAT_WS` | ~1 hari |
+| **Math** (6 func) | `CBRT`, `COT`, `EVEN`, `FACTORIAL`, `GAMMA`, `LGAMMA`, `LN`, `LOG2` | ~1 hari |
+| **Union** (3 func) | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | ~1 hari |
+
+#### Urutan Berdasarkan Dependency (Termudah → Tersulit)
+
+##### 🥇 Level 0 — Zero External Dependency
+
+| # | Grup | Fungsi | Alasan |
+|---|------|--------|--------|
+| **1** | **Bitwise** (5) ✅ sudah | `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` | Pure `i64` ops via `\| & ^ << >>` — tidak perlu tipe khusus, tidak perlu external crate |
+| **2** | **Math ringan** (4) ✅ sudah | `CBRT`, `COT`, `LN`, `LOG2`, `EVEN` | `f64::cbrt()`, `f64::ln()`, `f64::log2()`, `1.0 / f64::tan()`, `x.ceil().even()` — semua stdlib |
+| **3** | **String basic** (5) | `INITCAP`, `CONCAT_WS`, `STRING_SPLIT` / `SPLIT_PART`, `ARRAY_EXTRACT` | Pure `String`/`char` ops — `regex` sudah di workspace ✅ |
+
+##### 🥈 Level 1 — Butuh External Crate (Perlu Cek/Tambah)
+
+| # | Grup | Fungsi | Alasan |
+|---|------|--------|--------|
+| **4** | **Math berat** (4) | `FACTORIAL`, `GAMMA`, `LGAMMA`, `SET_SEED` | `GAMMA`/`LGAMMA` perlu `std::f64::ln_gamma()` atau crate `gamma`; `SET_SEED` perlu `rand` crate |
+| **5** | **Hash** (3) | `MD5`, `SHA256`, `HASH` | Butuh `md-5` dan `sha2` crate — **belum** di workspace ❌ |
+| **6** | **String regex** (4) | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN` | `regex` ✅ sudah ada; Levenshtein bisa pure Rust tanpa crate |
+
+##### 🥉 Level 2 — Bergantung pada Tipe Data yang Ada
+
+| # | Grup | Fungsi | Alasan |
+|---|------|--------|--------|
+| **7** | **Timestamp** (4) | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | `DateOp` sudah ada ✅ — tinggal tambah variant ke enum + `evaluate_date()` |
+| **8** | **Interval** (8) | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | `Interval` type ✅ sudah di types.rs — perlu enum `IntervalOp` baru + evaluator |
+| **9** | **Blob** (3) | `ENCODE`, `DECODE`, `OCTET_LENGTH` | `Blob` type ✅ sudah ada — encoding/decoding via `_base64` crate |
+
+##### 🏆 Level 3 — Paling Kompleks
+
+| # | Grup | Fungsi | Alasan |
+|---|------|--------|--------|
+| **10** | **Union** (3) | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | `Union` type ✅ ada — tapi perlu `UnionOp` enum, tag-based dispatch, validasi tag |
+| **11** | **List** (14) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | Paling banyak fungsi, perlu `LogicalType::List` handling, existing `ListOp` enum mungkin perlu diperluas |
+
+---
+
 ### 3.2 🟡 Optimizer Enhancements
 
 | Item | Detail | Estimasi |

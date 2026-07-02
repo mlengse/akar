@@ -123,6 +123,11 @@ pub enum ArithmeticOp {
     Sign,
     Pi,
     Rand,
+    /// Math functions (f64-based, single argument)
+    Cbrt,
+    Cot,
+    Log2,
+    Even,
     /// Bitwise operations (int64-only, matching C++ hardcoded int64_t)
     BitwiseAnd,
     BitwiseOr,
@@ -415,7 +420,13 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("sqrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Sqrt });
+        // Math aliases
+        self.register_scalar("cbrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Cbrt });
+        self.register_scalar("cot", ScalarFunction::Arithmetic { op: ArithmeticOp::Cot });
         self.register_scalar("log", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
+        self.register_scalar("ln", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
+        self.register_scalar("log2", ScalarFunction::Arithmetic { op: ArithmeticOp::Log2 });
+        self.register_scalar("even", ScalarFunction::Arithmetic { op: ArithmeticOp::Even });
         self.register_scalar("exp", ScalarFunction::Arithmetic { op: ArithmeticOp::Exp });
         self.register_scalar("sin", ScalarFunction::Arithmetic { op: ArithmeticOp::Sin });
         self.register_scalar("cos", ScalarFunction::Arithmetic { op: ArithmeticOp::Cos });
