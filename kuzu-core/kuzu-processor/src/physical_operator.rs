@@ -565,7 +565,8 @@ impl PhysicalFilter {
                 Self::evaluate_expression_legacy(obj, chunk)
             }
             Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_)
-            | Expression::ExistsSubquery(_) | Expression::Case(_) | Expression::Star => {
+            | Expression::ExistsSubquery(_) | Expression::Case(_) | Expression::Star
+            | Expression::ListPredicate { .. } => {
                 Ok(vec![true; chunk.size])
             }
         }

@@ -416,8 +416,8 @@ Cypher: ANY(x IN [1,2,3] WHERE x > 5)
 │ 1. Grammar (cypher.pest)       ← Rule baru: list_predicate │
 │ 2. AST (ast.rs)                ← Variant: ListPredicate    │
 │ 3. Parser (parser.rs)          ← Parse ke AST baru         │
-│ 4. Binder (binder.rs)          ← Resolve lambda + variable │
-│ 5. Processor (processor.rs)    ← Evaluasi predicate per-elem│
+│ 4. Binder (binder.rs) ⚠️ Perlu perubahan arsitektur │
+│ 5. Processor (processor.rs) ⚠️ Yang paling kompleks │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -425,7 +425,7 @@ Cypher: ANY(x IN [1,2,3] WHERE x > 5)
 
 ### Detail per Layer
 
-#### Layer 1: Grammar (`cypher.pest`) — ✅ Bisa ditambahkan
+#### Layer 1: Grammar (`cypher.pest`) — ✅ sudah 
 
 Rule baru di `primary`:
 ```pest
@@ -445,7 +445,7 @@ lambda_expr = { variable ~ "->" ~ expression }
 
 Saat ini grammar **tidak memiliki rule untuk `list_predicate`** — perlu ditambahkan.
 
-#### Layer 2: AST (`ast.rs`) — ✅ Bisa ditambahkan
+#### Layer 2: AST (`ast.rs`) — ✅ Sudah
 
 Variant baru di `Expression`:
 ```rust
@@ -502,10 +502,10 @@ Untuk lambda, perlu mekanisme yang bisa **mengevaluasi predicate untuk setiap el
 
 | Layer | Status | Yang Perlu Dibangun |
 |-------|--------|---------------------|
-| `cypher.pest` | ❌ | Rule `list_predicate` + `lambda_expr` |
-| `ast.rs` | ❌ | `Expression::ListPredicate` + `Quantifier` enum |
-| `parser.rs` | ❌ | Parse list predicate + lambda |
-| `binder.rs` | ❌ | `BoundLambdaExpression` + variable scope |
+| `cypher.pest` | ✅ sudah  | Rule `list_predicate` + `lambda_expr` |
+| `ast.rs` | ✅ sudah  | `Expression::ListPredicate` + `Quantifier` enum |
+| `parser.rs` | ✅ sudah  | Parse list predicate + lambda |
+| `binder.rs` | ⚠️ Perlu perubahan arsitektur | `BoundLambdaExpression` + variable scope |
 | registry.rs | ❌ | `ScalarFunction::ListLambda` variant |
 | scalar.rs | ⚠️ Ada | Versi truthy-check saja (`is_truthy()`) |
 | `expression_evaluator.rs` | ❌ | Iterasi + evaluasi predicate per elemen |

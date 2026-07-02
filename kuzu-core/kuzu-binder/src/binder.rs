@@ -607,6 +607,16 @@ impl Binder {
                     is_constant: false,
                 })
             }
+            Expression::ListPredicate { list, predicate, .. } => {
+                // Bind both list and predicate expressions
+                self.resolve_expression(list, variables)?;
+                self.resolve_expression(predicate, variables)?;
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: LogicalTypeID::Bool,
+                    is_constant: false,
+                })
+            }
         }
     }
 

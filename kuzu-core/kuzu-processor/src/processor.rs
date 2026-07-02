@@ -102,6 +102,7 @@ impl QueryProcessor {
                 | Expression::Map(_)
                 | Expression::Parameter(_)
                 | Expression::ExistsSubquery(_)
+                | Expression::ListPredicate { .. }
         )
     }
 

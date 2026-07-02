@@ -1536,6 +1536,14 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
             Expression::Case(CaseExpr { subject, alternatives, else_expr })
         }
         Expression::Star => expr.clone(),
+        Expression::ListPredicate { quantifier, list, var_name, predicate } => {
+            Expression::ListPredicate {
+                quantifier: *quantifier,
+                list: Box::new(fold_expression(list)),
+                var_name: var_name.clone(),
+                predicate: Box::new(fold_expression(predicate)),
+            }
+        }
     }
 }
 

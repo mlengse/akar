@@ -95,6 +95,9 @@ impl ExpressionEvaluator {
             }
             Expression::Case(case_expr) => self.evaluate_case(case_expr, chunk),
             Expression::Star => Err("STAR expression should be expanded by the binder before reaching the evaluator".into()),
+            Expression::ListPredicate { quantifier, list, var_name, predicate } => {
+                self.evaluate_list_predicate(quantifier, list, var_name, predicate, chunk)
+            }
         }
     }
 
@@ -491,6 +494,69 @@ impl ExpressionEvaluator {
         }
 
         Ok(result_vec)
+    }
+
+    /// Evaluate an ANY/ALL/NONE/SINGLE list predicate.
+    /// Evaluates the list expression, then for each element evaluates the
+    /// predicate and applies the quantifier logic.
+    fn evaluate_list_predicate(
+        &self,
+        quantifier: &kuzu_parser::ast::Quantifier,
+        list: &Expression,
+        _var_name: &str,
+        predicate: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        // Evaluate the list expression to get a ValueVector
+        let list_vec = self.evaluate(list, chunk)?;
+        let num_rows = chunk.size;
+        let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, num_rows);
+        result.resize(num_rows);
+
+        for row in 0..num_rows {
+            let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
+            let items = match list_val {
+                Value::List(ref items) => items.clone(),
+                _ => {
+                    // Not a list → false for all quantifiers
+                    store_value_in_vector(&mut result, row, &Value::Bool(false));
+                    continue;
+                }
+            };
+
+            // For each element, create a mini-chunk with the variable bound
+            // and evaluate the predicate
+            let mut true_count = 0u64;
+            for item in &items {
+                // Create a single-row chunk with the variable as first field
+                let mut elem_vec = ValueVector::new(
+                    item.physical_type(),
+                    1,
+                );
+                elem_vec.resize(1);
+                store_value_in_vector(&mut elem_vec, 0, item);
+                let mini_chunk = DataChunk::new(vec![elem_vec]);
+
+                let pred_vec = self.evaluate(predicate, &mini_chunk)?;
+                let pred_val = pred_vec.get_value(0).unwrap_or(Value::Null);
+
+                if matches!(pred_val, Value::Bool(true)) {
+                    true_count += 1;
+                }
+            }
+
+            // Apply quantifier logic
+            let elem_count = items.len() as u64;
+            let bool_result = match quantifier {
+                kuzu_parser::ast::Quantifier::Any => true_count > 0,
+                kuzu_parser::ast::Quantifier::All => !items.is_empty() && true_count == elem_count,
+                kuzu_parser::ast::Quantifier::None => true_count == 0,
+                kuzu_parser::ast::Quantifier::Single => true_count == 1,
+            };
+            store_value_in_vector(&mut result, row, &Value::Bool(bool_result));
+        }
+
+        Ok(result)
     }
 }
 

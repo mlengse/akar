@@ -168,6 +168,10 @@ fn collect_params_from_expr(expr: &Expression, params: &mut Vec<String>) {
             }
         }
         Expression::Star => {}
+        Expression::ListPredicate { list, predicate, .. } => {
+            collect_params_from_expr(list, params);
+            collect_params_from_expr(predicate, params);
+        }
     }
 }
 
@@ -234,6 +238,16 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
             Ok(Expression::Case(CaseExpr { subject, alternatives: alternatives?, else_expr }))
         }
         Expression::Star => Ok(expr.clone()),
+        Expression::ListPredicate { quantifier, list, var_name, predicate } => {
+            let new_list = substitute_params(list, param_values)?;
+            let new_predicate = substitute_params(predicate, param_values)?;
+            Ok(Expression::ListPredicate {
+                quantifier: *quantifier,
+                list: Box::new(new_list),
+                var_name: var_name.clone(),
+                predicate: Box::new(new_predicate),
+            })
+        }
     }
 }
 
