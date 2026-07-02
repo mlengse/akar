@@ -4,6 +4,16 @@
   - `[x]` Refactor `derive_join_column_indices`
   - `[x]` Processor: recursively execute sub-plans via `execute`.
   - `[x]` Tests passing.
-- `[ ]` SIP/SemiMask Optimization Verification
-- `[ ]` Weighted RecursiveExtend cost & Intersect enhancements
-- `[ ]` Maintenance: Cleanup clippy warnings
+- `[x]` SIP/SemiMask Optimization Verification
+  - `[x`] Added SIP optimization test (verifies SemiMasker injection on filtered build side)
+  - `[x]` Added negative test (no SemiMasker when build side has no filter)
+- `[x]` Weighted RecursiveExtend cost & Intersect enhancements
+  - `[x]` Intersect: refactored to `execute_binary` pattern (like HashJoin/CrossProduct)
+  - `[x]` RecursiveExtend: added `weight_property` field for Dijkstra traversal
+  - `[x]` RecursiveExtend: added `cost_output_name` and cost column in output
+- `[x]` Maintenance: Cleanup clippy warnings
+  - `[x]` Fixed `acc_idx` dead_code warning
+  - `[x]` Fixed `mut mask` unused_mut warning
+  - `[x]` Fixed unused variables in RecursiveExtend BFS
+  - `[x]` Fixed Rust 2024 match ergonomics (`ref sm` → `sm`)
+  - `[x]` Fixed float/integer literal parsing order (`float` before `integer`)

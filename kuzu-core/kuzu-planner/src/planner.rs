@@ -335,6 +335,8 @@ impl QueryPlanner {
                                     upper_bound: ub,
                                     direction,
                                     semantic: kuzu_common::enums::PathSemantic::Walk,
+                                    weight_property: None,
+                                    cost_output_name: None,
                                     cardinality: 0,
                                 }));
                                 // Skip the destination node pattern (consumed by RecursiveExtend)

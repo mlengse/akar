@@ -488,7 +488,10 @@ pub struct LogicalIntersect {
 /// up to `upper_bound` hops from source nodes and produces results
 /// for each path whose length is between `lower_bound` and `upper_bound`.
 ///
-/// This is a leaf operator that executes BFS traversal during query execution.
+/// Supports both unweighted BFS and weighted shortest path (Dijkstra)
+/// when `weight_property` is specified.
+///
+/// This is a leaf operator that executes BFS/Dijkstra traversal during query execution.
 #[derive(Debug, Clone)]
 pub struct LogicalRecursiveExtend {
     /// Source node variable name.
@@ -511,6 +514,13 @@ pub struct LogicalRecursiveExtend {
     pub direction: kuzu_common::enums::ExtendDirection,
     /// Path semantic (WALK / TRAIL / ACYCLIC).
     pub semantic: kuzu_common::enums::PathSemantic,
+    /// Optional edge weight property name for weighted shortest path.
+    /// When `Some(prop_name)`, traversal uses Dijkstra's algorithm instead of BFS,
+    /// and results are sorted by cumulative path cost.
+    pub weight_property: Option<String>,
+    /// Optional name for the cost output column (e.g., "cost" or "totalWeight").
+    /// Only used when `weight_property` is set.
+    pub cost_output_name: Option<String>,
     /// Estimated cardinality.
     pub cardinality: u64,
 }

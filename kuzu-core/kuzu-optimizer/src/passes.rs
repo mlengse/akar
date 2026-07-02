@@ -1117,9 +1117,9 @@ impl TreeOptimizationPass for CorrelatedSubqueryUnnesting {
     fn apply_tree(&self, root: &mut LogicalOperator) {
         // First pass: collect (accumulate_idx, build_side_ptr) pairs
         // to avoid borrow conflicts with the closure
+        #[allow(dead_code)]
         struct AccHashJoinInfo {
             build_side_idx: usize,
-            acc_idx: usize,
         }
 
         let mut infos: Vec<AccHashJoinInfo> = Vec::new();
@@ -1130,7 +1130,6 @@ impl TreeOptimizationPass for CorrelatedSubqueryUnnesting {
                 if is_accumulate(&hj.probe_side) {
                     infos.push(AccHashJoinInfo {
                         build_side_idx: acc_counter,
-                        acc_idx: acc_counter,
                     });
                     acc_counter += 1;
                 }
@@ -2371,6 +2370,112 @@ mod tests {
                 assert_eq!(a.group_by.len(), 1, "Single key should remain unchanged");
             }
             _ => panic!("Expected Aggregate"),
+        }
+    }
+
+    // ==================== SIP Optimization Tests ====================
+
+    #[test]
+    fn test_sip_optimization_triggers_on_filtered_build_side() {
+        // Build a HashJoin where the build side has a filter.
+        // SIP should inject a SemiMasker wrapping the build side.
+        let filtered_build = LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                BinaryOp::GreaterThan,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "age".into(),
+                )),
+                Box::new(Expression::Constant(Constant::Integer(25))),
+            ),
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "User".into(),
+                table_id: 1,
+                alias: Some("a".into()),
+                columns: vec!["age".into()],
+                cardinality: 100,
+            })],
+            cardinality: 10,
+        });
+
+        let probe_side = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "User".into(),
+            table_id: 1,
+            alias: Some("a".into()),
+            columns: vec!["age".into()],
+            cardinality: 100,
+        });
+
+        let hash_join = LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![],
+            build_side: Box::new(filtered_build),
+            probe_side: Box::new(probe_side),
+            cardinality: 50,
+            push_down_eligible: false,
+        });
+
+        let pass = SIPOptimization;
+        let mut plan = hash_join;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::HashJoin(ref hj) => {
+                match &*hj.build_side {
+                    LogicalOperator::SemiMasker(sm) => {
+                        assert_eq!(sm.table_id, 1, "SemiMasker should target table_id 1");
+                        assert_eq!(sm.key_column, 0, "SemiMasker should target key column 0 (INTERNAL_ID)");
+                        // Verify the SemiMasker wraps the original filtered build side
+                        assert_eq!(sm.children.len(), 1, "SemiMasker should have one child");
+                        match &sm.children[0] {
+                            LogicalOperator::Filter(_) => {}, // OK — original filter preserved
+                            _ => panic!("SemiMasker child should be the original Filter"),
+                        }
+                    }
+                    _ => panic!("SIP should have injected a SemiMasker on the build side"),
+                }
+            }
+            _ => panic!("Expected HashJoin"),
+        }
+    }
+
+    #[test]
+    fn test_sip_optimization_no_filter_no_semi_masker() {
+        // Build a HashJoin with NO filter on build side — SIP should NOT trigger.
+        let build_side = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "User".into(),
+            table_id: 1,
+            alias: Some("a".into()),
+            columns: vec!["id".into()],
+            cardinality: 100,
+        });
+
+        let probe_side = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Post".into(),
+            table_id: 2,
+            alias: Some("p".into()),
+            columns: vec!["id".into()],
+            cardinality: 200,
+        });
+
+        let hash_join = LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![],
+            build_side: Box::new(build_side),
+            probe_side: Box::new(probe_side),
+            cardinality: 50,
+            push_down_eligible: false,
+        });
+
+        let pass = SIPOptimization;
+        let mut plan = hash_join;
+        pass.apply_tree(&mut plan);
+
+        match plan {
+            LogicalOperator::HashJoin(ref hj) => {
+                // Build side should NOT have a SemiMasker (no filter present)
+                assert!(!matches!(&*hj.build_side, LogicalOperator::SemiMasker(_)),
+                    "SIP should NOT inject SemiMasker when build side has no filter");
+            }
+            _ => panic!("Expected HashJoin"),
         }
     }
 }

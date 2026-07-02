@@ -320,8 +320,8 @@ function_args = { "(" ~ expression ~ ("," ~ expression)* ~ ")" }
 
 literal = {
     string
-    | integer
     | float
+    | integer
     | boolean_literal
     | null_literal
 }

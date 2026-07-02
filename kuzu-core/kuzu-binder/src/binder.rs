@@ -981,8 +981,9 @@ impl Binder {
     }
 
     fn bind_merge(&self, m: kuzu_parser::ast::MergeStatement) -> Result<BoundStatement, String> {
-        // Validate the pattern has a node with a label (table name)
-        let node = m.pattern.node.as_ref().ok_or("MERGE requires a node pattern")?;
+        // Use the first pattern from the patterns vector
+        let pattern = m.patterns.first().ok_or("MERGE requires at least one pattern")?;
+        let node = pattern.node.as_ref().ok_or("MERGE requires a node pattern")?;
         let label = node.labels.first().ok_or("MERGE requires a label (table name)")?;
 
         // Lookup the table in catalog

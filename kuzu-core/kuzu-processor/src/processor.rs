@@ -187,7 +187,7 @@ impl QueryProcessor {
                     }
                 }
                 LogicalOperator::SemiMasker(s) => {
-                    let mut mask = NodeSemiMask::new(s.table_id);
+                    let mask = NodeSemiMask::new(s.table_id);
                     let masker = PhysicalSemiMasker {
                         key_column: s.key_column,
                         mask: mask.clone(),
@@ -263,6 +263,8 @@ impl QueryProcessor {
                         direction: re.direction,
                         semantic: re.semantic,
                         table_catalog: self.table_catalog.clone(),
+                        weight_property: re.weight_property.clone(),
+                        cost_output_name: re.cost_output_name.clone(),
                     };
                     let result = scan.execute(current.clone())?;
                     intermediate_result = Some(result);
@@ -425,13 +427,18 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Intersect(ic) => {
+                    let left_ops = flatten_union_child(&ic.left);
+                    let right_ops = flatten_union_child(&ic.right);
+
+                    let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
+                    let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
+
                     let intersect = PhysicalIntersect {
                         num_build_sides: ic.num_build_sides,
                         probe_key_col: 0,
                         build_key_col: 0,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = intersect.execute(input)?;
+                    let result = intersect.execute_binary(&build_chunks, &probe_chunks)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Explain(ex) => {
@@ -1796,7 +1803,7 @@ mod tests {
     #[test]
     fn test_scan_with_semi_mask() {
         // Create a semi-mask with offsets 1, 3 (only allow these)
-        let mut mask = NodeSemiMask::new(0);
+        let mask = NodeSemiMask::new(0);
         mask.mask(1);
         mask.mask(3);
         mask.finalize();
@@ -2361,8 +2368,9 @@ mod tests {
         let build2 = make_i64_chunk(&[2, 3, 4]);
         // Probe with keys that should match across both builds
         let probe = make_i64_chunk(&[2, 3]);
-        let input = vec![build1, build2, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         // Keys 2 and 3 exist in both build sides → both should produce output
         assert!(!result.is_empty(), "Expected non-empty result");
         assert!(result[0].size > 0, "Expected at least one output row");
@@ -2375,8 +2383,9 @@ mod tests {
         let build1 = make_i64_chunk(&[1, 2, 3]);
         let build2 = make_i64_chunk(&[4, 5, 6]);
         let probe = make_i64_chunk(&[1, 2, 3, 4, 5, 6]);
-        let input = vec![build1, build2, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         // No key appears in ALL build sides → empty
         assert!(result.is_empty() || result[0].size == 0);
     }
@@ -2388,8 +2397,9 @@ mod tests {
         let build1 = make_i64_chunk(&[1, 3]);
         let build2 = make_i64_chunk(&[3, 5]);
         let probe = make_i64_chunk(&[1, 5]); // probes for 1 and 5 — only 1 is in build1, only 5 is in build2
-        let input = vec![build1, build2, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         // No key appears in ALL build sides → empty (1 not in build2, 5 not in build1)
         assert!(result.is_empty() || result[0].size == 0);
     }
@@ -2400,8 +2410,9 @@ mod tests {
         // Single build side — acts like semi-join
         let build = make_i64_chunk(&[2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3, 4]);
-        let input = vec![build, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         assert!(!result.is_empty(), "Expected non-empty result for single build side");
         assert!(result[0].size > 0, "Expected matching rows");
     }
@@ -2412,8 +2423,9 @@ mod tests {
         let build1 = make_i64_chunk(&[]);
         let build2 = make_i64_chunk(&[1, 2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let input = vec![build1, build2, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         // Empty build side → empty result
         assert!(result.is_empty() || result[0].size == 0);
     }
@@ -2423,9 +2435,9 @@ mod tests {
         let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
         let build1 = make_i64_chunk(&[1, 2, 3]);
         let build2 = make_i64_chunk(&[2, 3, 4]);
-        let probe = make_i64_chunk(&[]); // empty probe
-        let input = vec![build1, build2, probe];
-        let result = intersect.execute(input).unwrap();
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![make_i64_chunk(&[])];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -2436,9 +2448,10 @@ mod tests {
         let build1 = make_i64_chunk(&[1, 3, 5]);
         let build2 = make_i64_chunk(&[2, 3, 6]);
         let build3 = make_i64_chunk(&[3, 4, 7]);
+        let build_chunks = vec![build1, build2, build3];
         let probe = make_i64_chunk(&[3]);
-        let input = vec![build1, build2, build3, probe];
-        let result = intersect.execute(input).unwrap();
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
         assert!(!result.is_empty(), "Expected match for key 3 in all three build sides");
         assert!(result[0].size > 0);
     }
