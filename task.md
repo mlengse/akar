@@ -1,3 +1,7 @@
+> ⚠️ **Digantikan oleh `kuzu-core/STATUS.md`** (2026-07-02)
+>
+> Semua item di bawah sudah selesai. Lihat STATUS.md untuk status lengkap dan prioritas ke depan.
+
 - `[x]` **Prioritas 0**: Fix binary operators (HashJoin, CrossProduct, SemiJoin, AntiJoin)
   - `[x]` Planner: Revert flattening for binary joins.
   - `[x]` Processor: `PhysicalOperatorExec` → `execute_binary`.
@@ -5,7 +9,7 @@
   - `[x]` Processor: recursively execute sub-plans via `execute`.
   - `[x]` Tests passing.
 - `[x]` SIP/SemiMask Optimization Verification
-  - `[x`] Added SIP optimization test (verifies SemiMasker injection on filtered build side)
+  - `[x]` Added SIP optimization test (verifies SemiMasker injection on filtered build side)
   - `[x]` Added negative test (no SemiMasker when build side has no filter)
 - `[x]` Weighted RecursiveExtend cost & Intersect enhancements
   - `[x]` Intersect: refactored to `execute_binary` pattern (like HashJoin/CrossProduct)

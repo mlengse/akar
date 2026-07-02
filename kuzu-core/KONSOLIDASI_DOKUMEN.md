@@ -1,4 +1,9 @@
-﻿# Konsolidasi Dokumen Markdown dan Teks
+﻿# KONSOLIDASI_DOKUMEN.md — ⚠️ DOKUMEN INI SUDAH BASI
+
+> **Status:** Digantikan oleh `STATUS.md` (2026-07-02)
+> **Alasan:** Dokumen ini ditulis 2026-07-01. Sejak saat itu 20+ commit telah mendarat
+> yang menutup hampir semua gap yang didokumentasikan sebagai "KRITIS" atau "TIDAK ADA".
+> Lihat `STATUS.md` untuk status termutakhir yang diverifikasi terhadap kode.
 
 # Audit Komparasi Lengkap: Kuzu C++ (Vela) vs LadybugDB vs Kuzu Rust
 
