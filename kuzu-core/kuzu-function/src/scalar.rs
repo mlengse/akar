@@ -522,6 +522,92 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             let pad_repeat = pad.repeat((pad_needed / pad.len()) + 1);
             Ok(Value::String(format!("{}{}", s, &pad_repeat[..pad_needed])))
         }
+        // --- String basic (C++ port) ---
+        StringOp::InitCap => {
+            let s = get_string(&args[0])?;
+            let lower = s.to_lowercase();
+            let mut chars = lower.chars();
+            match chars.next() {
+                None => Ok(Value::String(String::new())),
+                Some(c) => Ok(Value::String(c.to_uppercase().collect::<String>() + chars.as_str())),
+            }
+        }
+        StringOp::ConcatWs => {
+            if args.len() < 2 {
+                return Err("concat_ws requires at least 2 arguments (separator + strings)".into());
+            }
+            let separator = get_string(&args[0])?;
+            let mut result = String::new();
+            let mut first = true;
+            for i in 1..args.len() {
+                match &args[i] {
+                    Value::Null => {
+                        // Skip NULL elements (no separator before or after)
+                        continue;
+                    }
+                    Value::String(s) => {
+                        if !first {
+                            result.push_str(&separator);
+                        }
+                        result.push_str(s);
+                        first = false;
+                    }
+                    _ => {
+                        if !first {
+                            result.push_str(&separator);
+                        }
+                        result.push_str(&format!("{:?}", args[i]));
+                        first = false;
+                    }
+                }
+            }
+            Ok(Value::String(result))
+        }
+        StringOp::SplitPart => {
+            if args.len() < 3 {
+                return Err("split_part requires 3 arguments (string, delimiter, index)".into());
+            }
+            let s = get_string(&args[0])?;
+            let delim = get_string(&args[1])?;
+            let idx = match &args[2] {
+                Value::Int64(x) => *x,
+                _ => return Err("split_part index must be integer".into()),
+            };
+            // 1-based index, matching C++ semantics
+            let parts: Vec<&str> = s.split(&delim).collect();
+            if idx <= 0 || (idx as usize) > parts.len() {
+                Ok(Value::String(String::new()))
+            } else {
+                Ok(Value::String(parts[(idx - 1) as usize].to_string()))
+            }
+        }
+        StringOp::ArrayExtract => {
+            if args.len() < 2 {
+                return Err("array_extract requires 2 arguments (string, index)".into());
+            }
+            let s = get_string(&args[0])?;
+            let idx = match &args[1] {
+                Value::Int64(x) => *x,
+                _ => return Err("array_extract index must be integer".into()),
+            };
+            let chars: Vec<char> = s.chars().collect();
+            if idx == 0 || chars.is_empty() {
+                Ok(Value::String(String::new()))
+            } else if idx > 0 {
+                // 1-based: clamp to string length
+                let pos = (idx as usize).saturating_sub(1).min(chars.len() - 1);
+                Ok(Value::String(chars[pos].to_string()))
+            } else {
+                // Negative: from end (-1 = last char)
+                let abs_idx = (-idx) as usize;
+                if abs_idx > chars.len() {
+                    Ok(Value::String(String::new()))
+                } else {
+                    let pos = chars.len() - abs_idx;
+                    Ok(Value::String(chars[pos].to_string()))
+                }
+            }
+        }
     }
 }
 
@@ -2190,6 +2276,133 @@ mod tests {
         assert_eq!(
             evaluate_scalar(&rtrim, &[Value::String("hello  ".into())]).unwrap(),
             Value::String("hello".into())
+        );
+    }
+
+    // --- String basic tests (C++ port) ---
+
+    #[test]
+    fn test_initcap() {
+        let func = ScalarFunction::String { op: StringOp::InitCap };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello world".into())]).unwrap(),
+            Value::String("Hello world".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("HELLO".into())]).unwrap(),
+            Value::String("Hello".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("".into())]).unwrap(),
+            Value::String("".into())
+        );
+    }
+
+    #[test]
+    fn test_concat_ws() {
+        let func = ScalarFunction::String { op: StringOp::ConcatWs };
+        // Basic concat
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String(",".into()),
+                Value::String("a".into()),
+                Value::String("b".into()),
+                Value::String("c".into()),
+            ]).unwrap(),
+            Value::String("a,b,c".into())
+        );
+        // Skip NULL
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("-".into()),
+                Value::String("a".into()),
+                Value::Null,
+                Value::String("b".into()),
+            ]).unwrap(),
+            Value::String("a-b".into())
+        );
+        // Single element (no separator)
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String(",".into()),
+                Value::String("only".into()),
+            ]).unwrap(),
+            Value::String("only".into())
+        );
+    }
+
+    #[test]
+    fn test_split_part() {
+        let func = ScalarFunction::String { op: StringOp::SplitPart };
+        // Normal case
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("a,b,c".into()),
+                Value::String(",".into()),
+                Value::Int64(2),
+            ]).unwrap(),
+            Value::String("b".into())
+        );
+        // Out of range (too high)
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("a,b".into()),
+                Value::String(",".into()),
+                Value::Int64(5),
+            ]).unwrap(),
+            Value::String("".into())
+        );
+        // Index <= 0
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("a,b".into()),
+                Value::String(",".into()),
+                Value::Int64(0),
+            ]).unwrap(),
+            Value::String("".into())
+        );
+    }
+
+    #[test]
+    fn test_array_extract() {
+        let func = ScalarFunction::String { op: StringOp::ArrayExtract };
+        // Positive 1-based index
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello".into()),
+                Value::Int64(1),
+            ]).unwrap(),
+            Value::String("h".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello".into()),
+                Value::Int64(5),
+            ]).unwrap(),
+            Value::String("o".into())
+        );
+        // Index 0 returns empty
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello".into()),
+                Value::Int64(0),
+            ]).unwrap(),
+            Value::String("".into())
+        );
+        // Negative index (from end)
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello".into()),
+                Value::Int64(-1),
+            ]).unwrap(),
+            Value::String("o".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello".into()),
+                Value::Int64(-2),
+            ]).unwrap(),
+            Value::String("l".into())
         );
     }
 

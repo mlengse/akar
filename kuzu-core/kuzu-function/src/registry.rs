@@ -173,6 +173,11 @@ pub enum StringOp {
     Right,
     Lpad,
     Rpad,
+    /// String basic functions (C++ port)
+    InitCap,
+    ConcatWs,
+    SplitPart,
+    ArrayExtract,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -610,6 +615,32 @@ impl FunctionRegistry {
             "rpad",
             ScalarFunction::String {
                 op: StringOp::Rpad,
+            },
+        );
+
+        // --- String basic (C++ port) ---
+        self.register_scalar(
+            "initcap",
+            ScalarFunction::String {
+                op: StringOp::InitCap,
+            },
+        );
+        self.register_scalar(
+            "concat_ws",
+            ScalarFunction::String {
+                op: StringOp::ConcatWs,
+            },
+        );
+        self.register_scalar(
+            "split_part",
+            ScalarFunction::String {
+                op: StringOp::SplitPart,
+            },
+        );
+        self.register_scalar(
+            "array_extract",
+            ScalarFunction::String {
+                op: StringOp::ArrayExtract,
             },
         );
 
