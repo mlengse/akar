@@ -234,17 +234,17 @@ pub fn reorder_joins_greedy(root: &LogicalOperator) -> Option<Vec<LogicalOperato
     Some(result_ops)
 }
 
-/// Flat-list entry point: reorder scans in a flat plan by cardinality.
-///
-/// Scans are sorted ascending by cardinality (smallest first).
-/// Non-scan operators (filter, projection, etc.) are preserved.
-/// Equi-join filter conditions between different table aliases are removed
-/// (they become implicit join conditions).
-///
-/// Returns `None` if no reordering is needed (scans already in order,
-/// or fewer than 2 scans).
-pub fn reorder_joins_greedy_first(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
-    // Collect scans with their original positions and cardinalities
+const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.1;
+
+#[derive(Clone, Debug)]
+struct DpState {
+    cost: f64,
+    cardinality: f64,
+    prev_mask: usize,
+    last_idx: usize,
+}
+
+pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
     let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = operators
         .iter()
         .enumerate()
@@ -260,49 +260,142 @@ pub fn reorder_joins_greedy_first(operators: &[LogicalOperator]) -> Option<Vec<L
         })
         .collect();
 
-    if scans_with_pos.len() < 2 {
+    let n = scans_with_pos.len();
+    if n < 2 {
         return None;
     }
 
-    // Check if scans are already in cardinality order (ascending)
-    let already_ordered = scans_with_pos.windows(2).all(|w| w[0].1 <= w[1].1);
-
-    // Sort by cardinality ascending (smallest first)
-    scans_with_pos.sort_by_key(|(_, card, _)| *card);
-
-    // Get original scan positions and their reordered positions
-    let original_positions: Vec<usize> = scans_with_pos.iter().map(|(pos, _, _)| *pos).collect();
-
-    if already_ordered {
-        // Scans already in optimal order — just remove join condition filters
+    // Fallback to greedy if N > 32 to prevent bitmask overflow / exponential explosion
+    if n > 32 {
+        scans_with_pos.sort_by_key(|(_, card, _)| *card);
         let mut result: Vec<LogicalOperator> = operators.to_vec();
-        result.retain(|op| {
-            !matches!(op, LogicalOperator::Filter(f)
-                if crate::passes::is_join_condition(&f.expression)
-            )
-        });
-        if result.len() < operators.len() {
-            return Some(result);
-        }
-        return None;
-    }
-
-    // Reorder scans: put smallest first
-    let mut result: Vec<LogicalOperator> = operators.to_vec();
-
-    // Replace scans at original positions with reordered versions
-    for (new_idx, &old_pos) in original_positions.iter().enumerate() {
-        if new_idx < scans_with_pos.len() {
+        let original_positions: Vec<usize> = scans_with_pos.iter().map(|(pos, _, _)| *pos).collect();
+        for (new_idx, &old_pos) in original_positions.iter().enumerate() {
             result[old_pos] = scans_with_pos[new_idx].2.clone();
         }
+        result.retain(|op| {
+            !matches!(op, LogicalOperator::Filter(f) if crate::passes::is_join_condition(&f.expression))
+        });
+        return Some(result);
     }
 
-    // Also remove equi-join filter conditions
+    // Extract join conditions to build adjacency matrix
+    let mut conditions = Vec::new();
+    for op in operators {
+        if let LogicalOperator::Filter(f) = op {
+            if let Some((left, right)) = extract_equality_join(&f.expression) {
+                conditions.push((left, right));
+            }
+        }
+    }
+
+    // Map aliases to scan indices
+    let mut alias_to_idx = HashMap::new();
+    for (i, (_, _, op)) in scans_with_pos.iter().enumerate() {
+        if let Some(alias) = get_scan_alias(op) {
+            alias_to_idx.insert(alias, i);
+        }
+    }
+
+    // Adjacency matrix for joins
+    let mut adj_mask = vec![0usize; n];
+    for (left, right) in &conditions {
+        if let (Some(&i), Some(&j)) = (alias_to_idx.get(left), alias_to_idx.get(right)) {
+            adj_mask[i] |= 1 << j;
+            adj_mask[j] |= 1 << i;
+        }
+    }
+
+    // DP over subsets
+    let max_mask = 1 << n;
+    let mut dp = vec![None; max_mask];
+
+    // Base cases (size 1)
+    for i in 0..n {
+        dp[1 << i] = Some(DpState {
+            cost: 0.0,
+            cardinality: scans_with_pos[i].1 as f64,
+            prev_mask: 0,
+            last_idx: i,
+        });
+    }
+
+    // DP transitions
+    for mask in 1..max_mask {
+        let k = mask.count_ones();
+        if k < 2 {
+            continue;
+        }
+        
+        let mut best_state: Option<DpState> = None;
+
+        for i in 0..n {
+            if (mask & (1 << i)) != 0 {
+                let prev_mask = mask ^ (1 << i);
+                if let Some(prev_state) = &dp[prev_mask] {
+                    // Check if there is a join condition between prev_mask and i
+                    let mut has_edge = false;
+                    for j in 0..n {
+                        if (prev_mask & (1 << j)) != 0 && (adj_mask[j] & (1 << i)) != 0 {
+                            has_edge = true;
+                            break;
+                        }
+                    }
+
+                    let card_i = scans_with_pos[i].1 as f64;
+                    let (new_card, new_cost) = if has_edge {
+                        let c = prev_state.cardinality * card_i * EQUALITY_PREDICATE_SELECTIVITY;
+                        (c, prev_state.cost + c)
+                    } else {
+                        // Cross product (heavily penalized)
+                        let c = prev_state.cardinality * card_i;
+                        (c, prev_state.cost + c + 1e9)
+                    };
+
+                    if best_state.as_ref().map_or(true, |b| new_cost < b.cost) {
+                        best_state = Some(DpState {
+                            cost: new_cost,
+                            cardinality: new_card,
+                            prev_mask,
+                            last_idx: i,
+                        });
+                    }
+                }
+            }
+        }
+        dp[mask] = best_state;
+    }
+
+    // Reconstruct optimal order
+    let mut order = Vec::with_capacity(n);
+    let mut curr_mask = max_mask - 1;
+    while curr_mask != 0 {
+        let state = dp[curr_mask].as_ref().unwrap();
+        order.push(state.last_idx);
+        curr_mask = state.prev_mask;
+    }
+    order.reverse(); // Left-deep tree, so start from the smallest base mask
+
+    // Check if the order is the same as the original (ascending)
+    let already_ordered = order.windows(2).all(|w| w[0] <= w[1]);
+    
+    let original_positions: Vec<usize> = scans_with_pos.iter().map(|(pos, _, _)| *pos).collect();
+
+    let mut result: Vec<LogicalOperator> = operators.to_vec();
+    for (new_idx, &old_pos) in original_positions.iter().enumerate() {
+        let ordered_idx = order[new_idx];
+        result[old_pos] = scans_with_pos[ordered_idx].2.clone();
+    }
+
     result.retain(|op| {
         !matches!(op, LogicalOperator::Filter(f)
             if crate::passes::is_join_condition(&f.expression)
         )
     });
+
+    if already_ordered && result.len() == operators.len() {
+        return None;
+    }
 
     Some(result)
 }
@@ -407,5 +500,64 @@ mod tests {
             cardinality: 100,
         });
         assert_eq!(get_scan_alias(&scan), Some("p".into()));
+    }
+
+    #[test]
+    fn test_reorder_joins_dp_prefers_join_over_cross_product() {
+        let scan_a = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "A".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec![],
+            cardinality: 100,
+        });
+        let scan_b = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "B".into(),
+            table_id: 1,
+            alias: Some("b".into()),
+            columns: vec![],
+            cardinality: 200,
+        });
+        let scan_c = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "C".into(),
+            table_id: 2,
+            alias: Some("c".into()),
+            columns: vec![],
+            cardinality: 300,
+        });
+        
+        let filter_ac = LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
+            expression: kuzu_parser::ast::Expression::BinaryOp(
+                kuzu_parser::ast::BinaryOp::Equal,
+                Box::new(kuzu_parser::ast::Expression::Variable("a".into())),
+                Box::new(kuzu_parser::ast::Expression::Variable("c".into())),
+            ),
+            children: vec![],
+            cardinality: 0,
+        });
+        
+        let filter_bc = LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
+            expression: kuzu_parser::ast::Expression::BinaryOp(
+                kuzu_parser::ast::BinaryOp::Equal,
+                Box::new(kuzu_parser::ast::Expression::Variable("b".into())),
+                Box::new(kuzu_parser::ast::Expression::Variable("c".into())),
+            ),
+            children: vec![],
+            cardinality: 0,
+        });
+        
+        let operators = vec![scan_a, scan_b, scan_c, filter_ac, filter_bc];
+        let result = reorder_joins_dp_first(&operators);
+        assert!(result.is_some());
+        
+        let reordered = result.unwrap();
+        // The scans could be C, A, B or A, C, B since both have same cost
+        assert_eq!(reordered.len(), 3); // filters removed
+        let first = get_scan_alias(&reordered[0]).unwrap();
+        let second = get_scan_alias(&reordered[1]).unwrap();
+        let third = get_scan_alias(&reordered[2]).unwrap();
+        
+        assert!((first == "a" && second == "c") || (first == "c" && second == "a"));
+        assert_eq!(third, "b");
     }
 }

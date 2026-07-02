@@ -986,12 +986,16 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
                 && children[1].as_rule() == Rule::function_args
             {
                 let name = children[0].as_str().to_string();
-                let args = children[1]
-                    .clone()
-                    .into_inner()
-                    .filter(|c| c.as_rule() == Rule::expression)
-                    .map(parse_expression)
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut args = Vec::new();
+                let args_text = children[1].as_str().replace(" ", "");
+                for c in children[1].clone().into_inner() {
+                    if c.as_rule() == Rule::expression {
+                        args.push(parse_expression(c)?);
+                    }
+                }
+                if args.is_empty() && args_text == "(*)" {
+                    args.push(Expression::Star);
+                }
                 return Ok(Expression::FunctionCall(name, args));
             }
             parse_expression(children.into_iter().next().ok_or("Empty primary")?)
@@ -1641,7 +1645,7 @@ mod tests {
 
     #[test]
     fn test_var_length_path_with_rel_variable() {
-        let sql = "MATCH (a:Person)-[r:*1..3]->(b:Person) RETURN a, b";
+        let sql = "MATCH (a:Person)-[r*1..3]->(b:Person) RETURN a, b";
         assert!(parse(sql).is_ok());
     }
 

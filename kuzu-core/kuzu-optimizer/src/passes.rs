@@ -255,7 +255,7 @@ impl OptimizationPass for JoinOptimization {
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
         // Try cardinality-aware join reordering
-        if let Some(reordered) = crate::join_order::reorder_joins_greedy_first(operators) {
+        if let Some(reordered) = crate::join_order::reorder_joins_dp_first(operators) {
             return reordered;
         }
 
