@@ -13,6 +13,8 @@
 
 use crate::registry::*;
 use kuzu_common::types::{Date, Interval, Timestamp, Value};
+use md5::{Digest, Md5};
+use sha2::Sha256;
 use time::{Date as TimeDate, Month, OffsetDateTime, Time as TimeTime};
 
 // ==================== Module-level utilities ====================
@@ -93,6 +95,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Schema { op } => evaluate_schema(*op, args),
         ScalarFunction::Array { op } => evaluate_array(*op, args),
         ScalarFunction::Path { op } => evaluate_path(*op, args),
+        ScalarFunction::Hash { op } => evaluate_hash(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => {
@@ -1327,6 +1330,85 @@ fn evaluate_uuid(_args: &[Value]) -> Result<Value, String> {
     )))
 }
 
+// ==================== Hash functions ====================
+
+/// Simple non-cryptographic hash for any Value (matching C++ murmurhash64 semantics).
+fn hash_value(v: &Value) -> u64 {
+    match v {
+        Value::Null => u64::MAX,
+        Value::Bool(b) => murmur64(*b as u64),
+        Value::Int64(x) => murmur64(*x as u64),
+        Value::Int32(x) => murmur64(*x as u64),
+        Value::Double(x) => {
+            if *x == 0.0 { murmur64(0) } else { murmur64(x.to_bits()) }
+        }
+        Value::String(s) => hash_string(s),
+        Value::List(items) => {
+            let mut h: u64 = 0;
+            for item in items {
+                h = combine_hash(h, hash_value(item));
+            }
+            h
+        }
+        _ => {
+            let s = format!("{:?}", v);
+            hash_string(&s)
+        }
+    }
+}
+
+fn murmur64(mut x: u64) -> u64 {
+    x ^= x >> 32;
+    x = x.wrapping_mul(0xd6e8feb86659fd93);
+    x ^= x >> 32;
+    x = x.wrapping_mul(0xd6e8feb86659fd93);
+    x ^= x >> 32;
+    x
+}
+
+fn combine_hash(a: u64, b: u64) -> u64 {
+    a.wrapping_mul(0xbf58476d1ce4e5b9) ^ b
+}
+
+fn hash_string(s: &str) -> u64 {
+    let bytes = s.as_bytes();
+    let mut h: u64 = 0;
+    for chunk in bytes.chunks(8) {
+        let mut val: u64 = 0;
+        for (i, &b) in chunk.iter().enumerate() {
+            val |= (b as u64) << (i * 8);
+        }
+        h = combine_hash(h, murmur64(val));
+    }
+    h
+}
+
+fn evaluate_hash(op: HashOp, args: &[Value]) -> Result<Value, String> {
+    match op {
+        HashOp::Md5 => {
+            let s = get_string(&args[0])?;
+            let mut hasher = Md5::new();
+            hasher.update(s.as_bytes());
+            let result = hasher.finalize();
+            Ok(Value::String(format!("{:x}", result)))
+        }
+        HashOp::Sha256 => {
+            let s = get_string(&args[0])?;
+            let mut hasher = Sha256::new();
+            hasher.update(s.as_bytes());
+            let result = hasher.finalize();
+            Ok(Value::String(format!("{:x}", result)))
+        }
+        HashOp::Hash => {
+            if args.is_empty() {
+                return Err("hash requires at least one argument".into());
+            }
+            let h = hash_value(&args[0]);
+            Ok(Value::Int64(h as i64))
+        }
+    }
+}
+
 fn evaluate_boolean(op: BooleanOp, args: &[Value]) -> Result<Value, String> {
     if args.len() < 2 && !matches!(op, BooleanOp::Not) {
         return Err("Boolean op requires 2 arguments".into());
@@ -2030,6 +2112,50 @@ mod tests {
         );
         let second = evaluate_scalar(&rand_func, &[]).unwrap();
         assert_eq!(first, second);
+    }
+
+    // --- Hash function tests ---
+
+    #[test]
+    fn test_md5() {
+        let func = ScalarFunction::Hash { op: HashOp::Md5 };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello".into())]).unwrap(),
+            Value::String("5d41402abc4b2a76b9719d911017c592".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("".into())]).unwrap(),
+            Value::String("d41d8cd98f00b204e9800998ecf8427e".into())
+        );
+    }
+
+    #[test]
+    fn test_sha256() {
+        let func = ScalarFunction::Hash { op: HashOp::Sha256 };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello".into())]).unwrap(),
+            Value::String(
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".into()
+            )
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("".into())]).unwrap(),
+            Value::String(
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into()
+            )
+        );
+    }
+
+    #[test]
+    fn test_hash_generic() {
+        let func = ScalarFunction::Hash { op: HashOp::Hash };
+        let h1 = evaluate_scalar(&func, &[Value::Int64(42)]).unwrap();
+        let h2 = evaluate_scalar(&func, &[Value::Int64(42)]).unwrap();
+        assert_eq!(h1, h2);
+        let h3 = evaluate_scalar(&func, &[Value::Int64(43)]).unwrap();
+        assert_ne!(h1, h3);
+        let hs = evaluate_scalar(&func, &[Value::String("test".into())]).unwrap();
+        assert!(matches!(hs, Value::Int64(_)));
     }
 
     // --- Bitwise tests ---

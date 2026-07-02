@@ -69,7 +69,10 @@ pub enum ScalarFunction {
     SequenceOp {
         is_nextval: bool,
     },
-
+    /// Hash functions — MD5, SHA256, generic HASH.
+    Hash {
+        op: HashOp,
+    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -91,6 +94,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Uuid => f.debug_struct("Uuid").finish(),
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
             Self::SequenceOp { is_nextval } => f.debug_struct("SequenceOp").field("is_nextval", is_nextval).finish(),
+            Self::Hash { op } => f.debug_struct("Hash").field("op", op).finish(),
         }
     }
 }
@@ -308,6 +312,18 @@ pub enum ArrayOp {
     InnerProduct,
     CrossProduct,
     SquaredDistance,
+}
+
+/// Hash functions — ported from C++ `function/hash/`.
+///
+/// - `MD5(str)` → 32-char hex string
+/// - `SHA256(str)` → 64-char hex string
+/// - `HASH(val)` → Int64 hash of any value
+#[derive(Debug, Clone, Copy)]
+pub enum HashOp {
+    Md5,
+    Sha256,
+    Hash,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -673,6 +689,11 @@ impl FunctionRegistry {
                 op: StringOp::ArrayExtract,
             },
         );
+
+        // --- Hash functions ---
+        self.register_scalar("md5", ScalarFunction::Hash { op: HashOp::Md5 });
+        self.register_scalar("sha256", ScalarFunction::Hash { op: HashOp::Sha256 });
+        self.register_scalar("hash", ScalarFunction::Hash { op: HashOp::Hash });
 
         // --- Date/Time ---
         self.register_scalar("date_part", ScalarFunction::Date { op: DateOp::DatePart });
