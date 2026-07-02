@@ -1213,6 +1213,183 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 Ok(Value::List(list[start..].to_vec()))
             }
         }
+        // --- List functions (C++ port) ---
+        ListOp::Range => {
+            let step = if args.len() >= 3 {
+                match &args[2] { Value::Int64(s) => *s, _ => 1i64 }
+            } else { 1i64 };
+            let (start, end) = if args.len() >= 2 {
+                match (&args[0], &args[1]) {
+                    (Value::Int64(s), Value::Int64(e)) => (*s, *e),
+                    _ => return Err("RANGE requires integer arguments".into()),
+                }
+            } else {
+                match &args[0] {
+                    Value::Int64(e) => (0i64, *e),
+                    _ => return Err("RANGE requires integer arguments".into()),
+                }
+            };
+            if step == 0 {
+                return Err("Step of range cannot be 0".into());
+            }
+            if (end - start).signum() != step.signum() && end != start {
+                Ok(Value::List(vec![]))
+            } else {
+                let size = ((end - start).unsigned_abs() / step.unsigned_abs()) + 1;
+                let items: Vec<Value> = (0..size)
+                    .map(|i| Value::Int64(start + step * i as i64))
+                    .collect();
+                Ok(Value::List(items))
+            }
+        }
+        ListOp::Distinct => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let mut seen = hashbrown::HashSet::new();
+            let mut result = Vec::new();
+            for item in list {
+                if !matches!(item, Value::Null) && seen.insert(format!("{:?}", item)) {
+                    result.push(item.clone());
+                }
+            }
+            Ok(Value::List(result))
+        }
+        ListOp::Unique => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let mut seen = hashbrown::HashSet::new();
+            for item in list {
+                if !matches!(item, Value::Null) {
+                    seen.insert(format!("{:?}", item));
+                }
+            }
+            Ok(Value::Int64(seen.len() as i64))
+        }
+        ListOp::Sum => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let mut sum: f64 = 0.0;
+            let mut is_int = true;
+            for item in list {
+                match item {
+                    Value::Null => continue,
+                    Value::Int64(x) => sum += *x as f64,
+                    Value::Double(x) => { sum += x; is_int = false; }
+                    _ => return Err("LIST_SUM requires numeric list".into()),
+                }
+            }
+            if is_int {
+                Ok(Value::Int64(sum as i64))
+            } else {
+                Ok(Value::Double(sum))
+            }
+        }
+        ListOp::Product => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let mut prod: f64 = 1.0;
+            let mut is_int = true;
+            for item in list {
+                match item {
+                    Value::Null => continue,
+                    Value::Int64(x) => prod *= *x as f64,
+                    Value::Double(x) => { prod *= x; is_int = false; }
+                    _ => return Err("LIST_PRODUCT requires numeric list".into()),
+                }
+            }
+            if is_int {
+                Ok(Value::Int64(prod as i64))
+            } else {
+                Ok(Value::Double(prod))
+            }
+        }
+        ListOp::AnyValue => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            // Return first non-null element
+            match list.iter().find(|v| !matches!(v, Value::Null)) {
+                Some(v) => Ok(v.clone()),
+                None => Ok(Value::Null),
+            }
+        }
+        ListOp::ToString => {
+            // Parameters: (delimiter: STRING, list: LIST)
+            if args.len() < 2 {
+                return Err("list_to_string requires delimiter and list arguments".into());
+            }
+            let delim = get_string(&args[0])?;
+            let list = match &args[1] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let mut result = String::new();
+            let mut first = true;
+            for item in list {
+                if matches!(item, Value::Null) { continue; }
+                if !first { result.push_str(&delim); }
+                match item {
+                    Value::String(s) => result.push_str(s),
+                    other => result.push_str(&format!("{:?}", other)),
+                }
+                first = false;
+            }
+            Ok(Value::String(result))
+        }
+        ListOp::Position => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let target = &args[1];
+            // 1-based index, returns 0 if not found
+            for (i, item) in list.iter().enumerate() {
+                if item == target {
+                    return Ok(Value::Int64((i + 1) as i64));
+                }
+            }
+            Ok(Value::Int64(0))
+        }
+        ListOp::HasAll => {
+            let left = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let right = match &args[1] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            for target in right {
+                if matches!(target, Value::Null) { continue; }
+                if !left.contains(target) {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
+        }
+        ListOp::ReverseSort => {
+            let mut list = match args[0].clone() {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            // Sort descending
+            list.sort_by(|a, b| {
+                match compare_values_for_sort(a, b) {
+                    Ok(ord) => ord.reverse(),
+                    Err(_) => std::cmp::Ordering::Equal,
+                }
+            });
+            Ok(Value::List(list))
+        }
     }
 }
 
@@ -3946,5 +4123,138 @@ mod tests {
         assert!(reg.contains("array_contains"), "array_contains should be registered");
         assert!(reg.contains("array_has"), "array_has should be registered");
         assert!(reg.contains("array_slice"), "array_slice should be registered");
+    }
+
+    // --- List functions (C++ port) tests ---
+
+    #[test]
+    fn test_range() {
+        let func = ScalarFunction::List { op: ListOp::Range };
+        // 1-arg: range(end) → [0, 1, ..., end]
+        let result = evaluate_scalar(&func, &[Value::Int64(3)]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int64(0), Value::Int64(1), Value::Int64(2), Value::Int64(3),
+        ]));
+        // 2-arg: range(start, end)
+        let result = evaluate_scalar(&func, &[Value::Int64(2), Value::Int64(5)]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int64(2), Value::Int64(3), Value::Int64(4), Value::Int64(5),
+        ]));
+        // 3-arg: range(start, end, step)
+        let result = evaluate_scalar(&func, &[Value::Int64(0), Value::Int64(6), Value::Int64(2)]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int64(0), Value::Int64(2), Value::Int64(4), Value::Int64(6),
+        ]));
+        // Zero step → error
+        assert!(evaluate_scalar(&func, &[Value::Int64(0), Value::Int64(5), Value::Int64(0)]).is_err());
+    }
+
+    #[test]
+    fn test_list_distinct() {
+        let func = ScalarFunction::List { op: ListOp::Distinct };
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(1), Value::Int64(2), Value::Int64(1), Value::Int64(3),
+        ])]).unwrap();
+        if let Value::List(items) = result {
+            assert_eq!(items.len(), 3);
+            assert!(items.contains(&Value::Int64(1)));
+            assert!(items.contains(&Value::Int64(2)));
+            assert!(items.contains(&Value::Int64(3)));
+        } else { panic!("Expected list"); }
+    }
+
+    #[test]
+    fn test_list_unique() {
+        let func = ScalarFunction::List { op: ListOp::Unique };
+        // All unique → count = 3
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(1), Value::Int64(2), Value::Int64(3),
+        ])]).unwrap();
+        assert_eq!(result, Value::Int64(3));
+        // Duplicates → count = 2
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(1), Value::Int64(2), Value::Int64(1),
+        ])]).unwrap();
+        assert_eq!(result, Value::Int64(2));
+    }
+
+    #[test]
+    fn test_list_sum() {
+        let func = ScalarFunction::List { op: ListOp::Sum };
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(1), Value::Int64(2), Value::Int64(3),
+        ])]).unwrap();
+        assert_eq!(result, Value::Int64(6));
+    }
+
+    #[test]
+    fn test_list_product() {
+        let func = ScalarFunction::List { op: ListOp::Product };
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(2), Value::Int64(3), Value::Int64(4),
+        ])]).unwrap();
+        assert_eq!(result, Value::Int64(24));
+    }
+
+    #[test]
+    fn test_list_any_value() {
+        let func = ScalarFunction::List { op: ListOp::AnyValue };
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(42), Value::Int64(100),
+        ])]).unwrap();
+        assert_eq!(result, Value::Int64(42));
+    }
+
+    #[test]
+    fn test_list_to_string() {
+        let func = ScalarFunction::List { op: ListOp::ToString };
+        let result = evaluate_scalar(&func, &[
+            Value::String(",".into()),
+            Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]),
+        ]).unwrap();
+        assert_eq!(result, Value::String("Int64(1),Int64(2),Int64(3)".into()));
+    }
+
+    #[test]
+    fn test_list_position() {
+        let func = ScalarFunction::List { op: ListOp::Position };
+        let list = Value::List(vec![
+            Value::String("a".into()), Value::String("b".into()), Value::String("c".into()),
+        ]);
+        // Found → 1-based index
+        let result = evaluate_scalar(&func, &[list.clone(), Value::String("b".into())]).unwrap();
+        assert_eq!(result, Value::Int64(2));
+        // Not found → 0
+        let result = evaluate_scalar(&func, &[list.clone(), Value::String("z".into())]).unwrap();
+        assert_eq!(result, Value::Int64(0));
+    }
+
+    #[test]
+    fn test_list_has_all() {
+        let func = ScalarFunction::List { op: ListOp::HasAll };
+        let left = Value::List(vec![
+            Value::Int64(1), Value::Int64(2), Value::Int64(3),
+        ]);
+        let right_yes = Value::List(vec![Value::Int64(1), Value::Int64(3)]);
+        let right_no = Value::List(vec![Value::Int64(1), Value::Int64(99)]);
+        assert_eq!(
+            evaluate_scalar(&func, &[left.clone(), right_yes]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[left, right_no]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_list_reverse_sort() {
+        let func = ScalarFunction::List { op: ListOp::ReverseSort };
+        let result = evaluate_scalar(&func, &[Value::List(vec![
+            Value::Int64(3), Value::Int64(1), Value::Int64(2),
+        ])]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::Int64(3), Value::Int64(2), Value::Int64(1),
+        ]));
     }
 }

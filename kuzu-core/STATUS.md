@@ -362,6 +362,33 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 | **10** | **Union** (3) ✅ sudah | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | `Union` type ✅ ada — tapi perlu `UnionOp` enum, tag-based dispatch, validasi tag |
 | **11** | **List** (14) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | Paling banyak fungsi, perlu `LogicalType::List` handling, existing `ListOp` enum mungkin perlu diperluas |
 
+##### Iterasi 1 ✅ (10 fungsi — langsung bisa) ✅ sudah 
+
+| Fungsi | Kompleksitas | Implementasi |
+|--------|-------------|--------------|
+| `RANGE(start, end, step?)` | ⭐ | `(start..=end).step_by(step)` → List |
+| `LIST_DISTINCT(list)` | ⭐ | Dedup via `HashSet` |
+| `LIST_UNIQUE(list)` | ⭐ | `len == distinct_len ? 1 : 0` |
+| `LIST_SUM(list)` | ⭐ | Sum numeric elements |
+| `LIST_PRODUCT(list)` | ⭐ | Product numeric elements |
+| `LIST_ANY_VALUE(list)` | ⭐ | `list.first().cloned()` |
+| `LIST_TO_STRING(list, sep)` | ⭐ | `join` elements by separator |
+| `LIST_POSITION(list, val)` | ⭐ | `position()` — 1-based |
+| `LIST_HAS_ALL(list1, list2)` | ⭐ | `list1.contains_all(list2)` |
+| `LIST_REVERSE_SORT(list)` | ⭐ | `sort().reverse()` |
+
+##### Iterasi 2 ⏳ (4 fungsi — perlu riset lebih)
+
+| Fungsi | Kompleksitas | Alasan |
+|--------|-------------|--------|
+| `ANY(list, pred)` | ⭐⭐ | Predicate evaluation — butuh expression handling |
+| `ALL(list, pred)` | ⭐⭐ | Sama |
+| `NONE(list, pred)` | ⭐⭐ | Sama |
+| `SINGLE(list, pred)` | ⭐⭐ | Sama — perlu cek C++ bagaimana implementasinya |
+
+ANY/ALL/NONE/SINGLE dengan predicate mungkin membutuhkan evaluasi ekspresi di runtime, bukan sekadar transformasi value → value.
+
+
 ---
 
 ### 3.2 🟡 Optimizer Enhancements

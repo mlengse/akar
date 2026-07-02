@@ -262,6 +262,17 @@ pub enum ListOp {
     Append,
     Prepend,
     Slice,
+    /// List functions (C++ port)
+    Range,
+    Distinct,
+    Unique,
+    Sum,
+    Product,
+    AnyValue,
+    ToString,
+    Position,
+    HasAll,
+    ReverseSort,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -888,6 +899,19 @@ impl FunctionRegistry {
         self.register_scalar("list_append", ScalarFunction::List { op: ListOp::Append });
         self.register_scalar("list_prepend", ScalarFunction::List { op: ListOp::Prepend });
         self.register_scalar("list_slice", ScalarFunction::List { op: ListOp::Slice });
+
+        // --- List functions (C++ port) ---
+        self.register_scalar("range", ScalarFunction::List { op: ListOp::Range });
+        self.register_scalar("list_distinct", ScalarFunction::List { op: ListOp::Distinct });
+        self.register_scalar("list_unique", ScalarFunction::List { op: ListOp::Unique });
+        self.register_scalar("list_sum", ScalarFunction::List { op: ListOp::Sum });
+        self.register_scalar("list_product", ScalarFunction::List { op: ListOp::Product });
+        self.register_scalar("list_any_value", ScalarFunction::List { op: ListOp::AnyValue });
+        self.register_scalar("list_to_string", ScalarFunction::List { op: ListOp::ToString });
+        self.register_scalar("list_position", ScalarFunction::List { op: ListOp::Position });
+        self.register_scalar("list_indexof", ScalarFunction::List { op: ListOp::Position });
+        self.register_scalar("list_has_all", ScalarFunction::List { op: ListOp::HasAll });
+        self.register_scalar("list_reverse_sort", ScalarFunction::List { op: ListOp::ReverseSort });
 
         // --- Map ---
         self.register_scalar("map_creation", ScalarFunction::Map { op: MapOp::Creation });
