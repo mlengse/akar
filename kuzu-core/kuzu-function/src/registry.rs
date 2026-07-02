@@ -818,6 +818,16 @@ impl FunctionRegistry {
         self.register_scalar("sha256", ScalarFunction::Hash { op: HashOp::Sha256 });
         self.register_scalar("hash", ScalarFunction::Hash { op: HashOp::Hash });
 
+        // --- Interval ---
+        self.register_scalar("to_years", ScalarFunction::Interval { op: IntervalOp::ToYears });
+        self.register_scalar("to_months", ScalarFunction::Interval { op: IntervalOp::ToMonths });
+        self.register_scalar("to_days", ScalarFunction::Interval { op: IntervalOp::ToDays });
+        self.register_scalar("to_hours", ScalarFunction::Interval { op: IntervalOp::ToHours });
+        self.register_scalar("to_minutes", ScalarFunction::Interval { op: IntervalOp::ToMinutes });
+        self.register_scalar("to_seconds", ScalarFunction::Interval { op: IntervalOp::ToSeconds });
+        self.register_scalar("to_milliseconds", ScalarFunction::Interval { op: IntervalOp::ToMilliseconds });
+        self.register_scalar("to_microseconds", ScalarFunction::Interval { op: IntervalOp::ToMicroseconds });
+
         // --- Date/Time ---
         self.register_scalar("date_part", ScalarFunction::Date { op: DateOp::DatePart });
         self.register_scalar("date_trunc", ScalarFunction::Date { op: DateOp::DateTrunc });
@@ -849,6 +859,10 @@ impl FunctionRegistry {
         self.register_scalar("monthname", ScalarFunction::Date { op: DateOp::MonthName });
         self.register_scalar("last_day", ScalarFunction::Date { op: DateOp::LastDay });
         self.register_scalar("make_date", ScalarFunction::Date { op: DateOp::MakeDate });
+        self.register_scalar("century", ScalarFunction::Date { op: DateOp::Century });
+        self.register_scalar("epoch_ms", ScalarFunction::Date { op: DateOp::EpochMs });
+        self.register_scalar("to_timestamp", ScalarFunction::Date { op: DateOp::ToTimestamp });
+        self.register_scalar("to_epoch_ms", ScalarFunction::Date { op: DateOp::ToEpochMs });
 
         // --- Cast ---
         self.register_scalar(
@@ -893,6 +907,11 @@ impl FunctionRegistry {
         self.register_scalar("string", ScalarFunction::Cast { target_type: CastTarget::String });
         self.register_scalar("blob", ScalarFunction::Cast { target_type: CastTarget::String });
 
+        // --- Blob ---
+        self.register_scalar("encode", ScalarFunction::Blob { op: BlobOp::Encode });
+        self.register_scalar("decode", ScalarFunction::Blob { op: BlobOp::Decode });
+        self.register_scalar("octet_length", ScalarFunction::Blob { op: BlobOp::OctetLength });
+
         // --- List ---
         self.register_scalar("list_creation", ScalarFunction::List { op: ListOp::Creation });
         self.register_scalar("list_extract", ScalarFunction::List { op: ListOp::Extract });
@@ -933,6 +952,11 @@ impl FunctionRegistry {
         // --- Struct ---
         self.register_scalar("struct_creation", ScalarFunction::Struct { op: StructOp::Creation });
         self.register_scalar("struct_extract", ScalarFunction::Struct { op: StructOp::Extract });
+
+        // --- Union ---
+        self.register_scalar("union_value", ScalarFunction::Union { op: UnionOp::UnionValue });
+        self.register_scalar("union_extract", ScalarFunction::Union { op: UnionOp::UnionExtract });
+        self.register_scalar("union_tag", ScalarFunction::Union { op: UnionOp::UnionTag });
 
         // --- Boolean ---
         self.register_scalar("AND", ScalarFunction::Boolean { op: BooleanOp::And });
