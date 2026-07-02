@@ -293,7 +293,8 @@ postfix_expr = { primary ~ (property_access | "[" ~ expression ~ "]" )* }
 property_access = { "." ~ identifier }
 
 primary = {
-    case_expr
+    list_predicate
+    | case_expr
     | literal
     | exists_subquery
     | variable ~ function_args?
@@ -301,6 +302,11 @@ primary = {
     | list_literal
     | map_literal
     | "(" ~ expression ~ ")"
+}
+
+list_predicate = {
+    ("ANY" | "ALL" | "NONE" | "SINGLE") ~
+    "(" ~ variable ~ "IN" ~ expression ~ "WHERE" ~ expression ~ ")"
 }
 
 // CASE expression — simple: CASE x WHEN v THEN e ... [ELSE e] END

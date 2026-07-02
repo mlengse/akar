@@ -405,6 +405,114 @@ C++ original menggunakan **lambda/predicate expression** (`isListLambda = true`)
 
 ---
 
+## Hasil Riset: Lambda Infrastructure untuk Rust Kuzu
+
+### Ringkasan: 5 Layer yang Perlu Dibangun
+
+```
+Cypher: ANY(x IN [1,2,3] WHERE x > 5)
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Grammar (cypher.pest)       ← Rule baru: list_predicate │
+│ 2. AST (ast.rs)                ← Variant: ListPredicate    │
+│ 3. Parser (parser.rs)          ← Parse ke AST baru         │
+│ 4. Binder (binder.rs)          ← Resolve lambda + variable │
+│ 5. Processor (processor.rs)    ← Evaluasi predicate per-elem│
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Detail per Layer
+
+#### Layer 1: Grammar (`cypher.pest`) — ✅ Bisa ditambahkan
+
+Rule baru di `primary`:
+```pest
+list_predicate = {
+    ("ANY" | "ALL" | "NONE" | "SINGLE") ~
+    "(" ~ variable ~ "IN" ~ expression ~ "WHERE" ~ expression ~ ")"
+}
+```
+
+Serta `LambdaExpression` untuk fungsi `list_filter`/`list_transform`:
+```pest
+lambda_function_args = {
+    "(" ~ expression ~ "," ~ lambda_expr ~ ")"
+}
+lambda_expr = { variable ~ "->" ~ expression }
+```
+
+Saat ini grammar **tidak memiliki rule untuk `list_predicate`** — perlu ditambahkan.
+
+#### Layer 2: AST (`ast.rs`) — ✅ Bisa ditambahkan
+
+Variant baru di `Expression`:
+```rust
+pub enum Expression {
+    // ... existing ...
+    /// ANY/ALL/NONE/SINGLE list predicates
+    ListPredicate {
+        quantifier: Quantifier,       // Any | All | None | Single
+        list: Box<Expression>,
+        var_name: String,             // iteration variable (x)
+        predicate: Box<Expression>,   // x > 5
+    },
+}
+
+pub enum Quantifier { Any, All, None, Single }
+```
+
+Saat ini **tidak ada variant `ListPredicate` atau `Quantifier`**.
+
+#### Layer 3: Parser (`parser.rs`) — ✅ Bisa ditambahkan
+
+Parse `list_predicate` rule menjadi `Expression::ListPredicate { ... }`.
+
+Saat ini **tidak ada kode parsing untuk list predicates**.
+
+#### Layer 4: Binder (`binder.rs`) — ⚠️ Perlu perubahan arsitektur
+
+Saat ini `BoundExpression` hanyalah wrapper:
+```rust
+pub struct BoundExpression {
+    pub expression: Expression,       // AST asli (opaque)
+    pub resolved_type: LogicalTypeID,
+    pub is_constant: bool,
+}
+```
+
+Untuk lambda, perlu:
+- **`BoundLambdaExpression`** baru dengan `var_name`, `body_expression`, `resolved_var_type`
+- **`resolve_list_predicate()`** untuk bind list + variable + predicate secara terpisah
+- Variabel `x` perlu dimasukkan ke scope sementara untuk predicate resolution
+
+#### Layer 5: Processor (`expression_evaluator.rs`) — ⚠️ Yang paling kompleks
+
+Saat ini `evaluate_scalar` hanya menerima `&[Value]`:
+```rust
+pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, String>
+```
+
+Untuk lambda, perlu mekanisme yang bisa **mengevaluasi predicate untuk setiap elemen list**.
+
+---
+
+### Status Saat Ini
+
+| Layer | Status | Yang Perlu Dibangun |
+|-------|--------|---------------------|
+| `cypher.pest` | ❌ | Rule `list_predicate` + `lambda_expr` |
+| `ast.rs` | ❌ | `Expression::ListPredicate` + `Quantifier` enum |
+| `parser.rs` | ❌ | Parse list predicate + lambda |
+| `binder.rs` | ❌ | `BoundLambdaExpression` + variable scope |
+| registry.rs | ❌ | `ScalarFunction::ListLambda` variant |
+| scalar.rs | ⚠️ Ada | Versi truthy-check saja (`is_truthy()`) |
+| `expression_evaluator.rs` | ❌ | Iterasi + evaluasi predicate per elemen |
+
+
+---
+
 ### 3.2 🟡 Optimizer Enhancements
 
 | Item | Detail | Estimasi |

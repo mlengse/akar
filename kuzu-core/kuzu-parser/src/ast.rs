@@ -203,6 +203,23 @@ pub enum Expression {
     /// STAR expression — represents `*` in `RETURN *`.
     /// The binder expands this to all variables in scope.
     Star,
+    /// ANY/ALL/NONE/SINGLE list predicates.
+    /// Example: ANY(x IN [1,2,3] WHERE x > 5)
+    ListPredicate {
+        quantifier: Quantifier,
+        list: Box<Expression>,
+        var_name: String,
+        predicate: Box<Expression>,
+    },
+}
+
+/// Quantifier for list predicates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Quantifier {
+    Any,
+    All,
+    None,
+    Single,
 }
 
 /// A single WHEN ... THEN ... branch inside a CASE expression.

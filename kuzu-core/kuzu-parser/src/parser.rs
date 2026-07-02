@@ -1039,6 +1039,34 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             }
             Err("EXISTS subquery requires a query statement".into())
         }
+        Rule::list_predicate => {
+            // ANY(x IN list WHERE predicate), ALL/NONE/SINGLE
+            // Parse tree has: variable, expression(list), expression(predicate)
+            // Quantifier is extracted from the matched string prefix.
+            let children: Vec<_> = pair.clone().into_inner().collect();
+            if children.len() < 3 {
+                return Err(format!("Invalid list predicate syntax: {} children", children.len()));
+            }
+            // Extract quantifier from the raw token: the first word of the pair
+            let full_text = pair.as_str();
+            let quantifier_str = full_text.split('(').next().unwrap_or("").to_uppercase();
+            let quantifier = match quantifier_str.as_str() {
+                "ANY" => Quantifier::Any,
+                "ALL" => Quantifier::All,
+                "NONE" => Quantifier::None,
+                "SINGLE" => Quantifier::Single,
+                _ => return Err(format!("Unknown quantifier: {}", quantifier_str)),
+            };
+            let var_name = children[0].as_str().to_string();
+            let list = parse_expression(children[1].clone())?;
+            let predicate = parse_expression(children[2].clone())?;
+            Ok(Expression::ListPredicate {
+                quantifier,
+                list: Box::new(list),
+                var_name,
+                predicate: Box::new(predicate),
+            })
+        }
         Rule::function_args => {
             // function_call can appear as child of postfix_expr
             // The parent variable is the function name
@@ -2029,5 +2057,63 @@ mod tests {
             }
             _ => panic!("Expected CreateMacro"),
         }
+    }
+
+    // --- List predicate tests ---
+
+    #[test]
+    fn test_list_predicate_any() {
+        let sql = "RETURN ANY(x IN [1,2,3] WHERE x > 2)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                match &q.clauses[0] {
+                    Clause::Return(r) => {
+                        assert_eq!(r.expressions.len(), 1);
+                        match &r.expressions[0].expression {
+                            Expression::ListPredicate { quantifier, var_name, list, predicate } => {
+                                assert_eq!(*quantifier, Quantifier::Any);
+                                assert_eq!(var_name, "x");
+                                assert!(matches!(&**list, Expression::List(_)));
+                                assert!(matches!(&**predicate, Expression::BinaryOp(_, _, _)));
+                            }
+                            _ => panic!("Expected ListPredicate"),
+                        }
+                    }
+                    _ => panic!("Expected Return clause"),
+                }
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_list_predicate_all() {
+        let sql = "RETURN ALL(x IN list WHERE x > 0)";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_list_predicate_none() {
+        let sql = "MATCH (n) WHERE NONE(x IN n.list WHERE x = 0) RETURN n";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_list_predicate_single() {
+        let sql = "MATCH (n) WHERE SINGLE(x IN n.list WHERE x < 0) RETURN n";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_list_predicate_in_return() {
+        let sql = "RETURN ALL(x IN [true, false] WHERE x)";
+        assert!(parse(sql).is_ok());
+    }
+
+    #[test]
+    fn test_list_predicate_nested() {
+        let sql = "RETURN ANY(x IN [1,2,3] WHERE x > 0 AND x < 5)";
+        assert!(parse(sql).is_ok());
     }
 }
