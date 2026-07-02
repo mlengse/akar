@@ -1,10 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
 > **Tanggal:** 2026-07-02
-> **Menggantikan:** `KONSOLIDASI_DOKUMEN.md` (2026-07-01), `RENCANA_LANJUTAN.md` (2026-07-02 rev.2),
-> `implementation_plan.md`, `task.md`, `walkthrough.md`
-> **Verifikasi:** Langsung terhadap kode (`git show`/`cargo check`/`cargo test`, bukan asumsi dokumen lama)
-> **Commit HEAD:** `ed94a16` — Port missing functions
 
 ---
 
@@ -22,7 +18,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Logical operators** | **34** variants |
 | **Extensions** | **15** |
 
-### Perubahan Besar Sejak KONSOLIDASI_DOKUMEN.md (2026-07-01)
+### Perubahan Besar Sejak 2026-07-01
 
 | Item | Status Lama | Status Baru | Commit |
 |------|------------|------------|--------|
@@ -396,7 +392,6 @@ Port 18+ fungsi scalar yang masih missing:
 
 ## 7. Catatan
 
-- **KONSOLIDASI_DOKUMEN.md & RENCANA_LANJUTAN.md sudah basi** — jangan dipakai sebagai acuan.
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`git show`/`cargo check`/`grep`).
 - 14 kegagalan test di kuzu-main adalah **pre-existing** (parser belum support `RETURN *`, FOREACH end-to-end, MERGE end-to-end, subquery end-to-end, dll.) — bukan regresi.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

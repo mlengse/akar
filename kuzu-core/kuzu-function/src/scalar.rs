@@ -165,6 +165,52 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             let exp = numeric_to_f64(&args[1])?;
             Ok(Value::Double(base.powf(exp)))
         }
+        // Bitwise operations (int64-only, matching C++ hardcoded int64_t)
+        ArithmeticOp::BitwiseAnd => {
+            if args.len() < 2 {
+                return Err("Bitwise AND requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x & y)),
+                _ => Err("Bitwise AND requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::BitwiseOr => {
+            if args.len() < 2 {
+                return Err("Bitwise OR requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x | y)),
+                _ => Err("Bitwise OR requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::BitwiseXor => {
+            if args.len() < 2 {
+                return Err("Bitwise XOR requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x ^ y)),
+                _ => Err("Bitwise XOR requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::BitShiftLeft => {
+            if args.len() < 2 {
+                return Err("Bit shift left requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x << y)),
+                _ => Err("Bit shift left requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::BitShiftRight => {
+            if args.len() < 2 {
+                return Err("Bit shift right requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x >> y)),
+                _ => Err("Bit shift right requires integer arguments".into()),
+            }
+        }
         // Binary arithmetic ops
         _ => {
             if args.len() < 2 {
@@ -1662,6 +1708,81 @@ mod tests {
             op: ArithmeticOp::Negate,
         };
         assert_eq!(evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(), Value::Int64(-42));
+    }
+
+    // --- Bitwise tests ---
+
+    #[test]
+    fn test_bitwise_and() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseAnd };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
+            Value::Int64(2)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(0xFF), Value::Int64(0x0F)]).unwrap(),
+            Value::Int64(0x0F)
+        );
+        // Error: non-integer
+        assert!(evaluate_scalar(&func, &[Value::Double(1.0), Value::Int64(2)]).is_err());
+        // Error: wrong number of args
+        assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
+    }
+
+    #[test]
+    fn test_bitwise_or() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseOr };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
+            Value::Int64(7)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(0xF0), Value::Int64(0x0F)]).unwrap(),
+            Value::Int64(0xFF)
+        );
+        assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
+    }
+
+    #[test]
+    fn test_bitwise_xor() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseXor };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
+            Value::Int64(5)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(0xFF), Value::Int64(0x0F)]).unwrap(),
+            Value::Int64(0xF0)
+        );
+        assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
+    }
+
+    #[test]
+    fn test_bit_shift_left() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitShiftLeft };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(1), Value::Int64(3)]).unwrap(),
+            Value::Int64(8)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(0xFF), Value::Int64(4)]).unwrap(),
+            Value::Int64(0xFF0)
+        );
+        assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
+    }
+
+    #[test]
+    fn test_bit_shift_right() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitShiftRight };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(8), Value::Int64(3)]).unwrap(),
+            Value::Int64(1)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(0xFF0), Value::Int64(4)]).unwrap(),
+            Value::Int64(0xFF)
+        );
+        assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
     }
 
     #[test]

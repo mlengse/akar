@@ -123,6 +123,12 @@ pub enum ArithmeticOp {
     Sign,
     Pi,
     Rand,
+    /// Bitwise operations (int64-only, matching C++ hardcoded int64_t)
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitShiftLeft,
+    BitShiftRight,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -423,6 +429,68 @@ impl FunctionRegistry {
         self.register_scalar("sign", ScalarFunction::Arithmetic { op: ArithmeticOp::Sign });
         self.register_scalar("pi", ScalarFunction::Arithmetic { op: ArithmeticOp::Pi });
         self.register_scalar("rand", ScalarFunction::Arithmetic { op: ArithmeticOp::Rand });
+
+        // --- Bitwise ---
+        self.register_scalar(
+            "bitwise_and",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseAnd,
+            },
+        );
+        self.register_scalar(
+            "&",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseAnd,
+            },
+        );
+        self.register_scalar(
+            "bitwise_or",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseOr,
+            },
+        );
+        self.register_scalar(
+            "|",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseOr,
+            },
+        );
+        self.register_scalar(
+            "bitwise_xor",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseXor,
+            },
+        );
+        self.register_scalar(
+            "#",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitwiseXor,
+            },
+        );
+        self.register_scalar(
+            "bit_shift_left",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitShiftLeft,
+            },
+        );
+        self.register_scalar(
+            "<<",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitShiftLeft,
+            },
+        );
+        self.register_scalar(
+            "bit_shift_right",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitShiftRight,
+            },
+        );
+        self.register_scalar(
+            ">>",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::BitShiftRight,
+            },
+        );
 
         // --- Comparison ---
         self.register_scalar("=", ScalarFunction::Comparison { op: ComparisonOp::Eq });

@@ -12,11 +12,11 @@ kuzu-core/
 ├── kuzu-catalog/       # System catalog (schemas, tables, types, columns)
 ├── kuzu-parser/        # PEG grammar (pest.rs) for full Cypher clause set
 ├── kuzu-binder/        # Semantic analysis, symbol resolution, type inference
-├── kuzu-planner/       # Logical query plan construction (11 operator types)
-├── kuzu-optimizer/     # 6 flat passes + 2 tree passes (FactorizationRewriting, CardinalityEstimation)
-├── kuzu-processor/     # Physical operator execution (9+ operator types)
-├── kuzu-function/      # Built-in function registry (50+ functions)
-├── kuzu-graph/         # CSR adjacency, graph algorithms (BFS, PageRank, WCC, SCC, K-Core)
+├── kuzu-planner/       # Logical query plan construction (34 LogicalOperator variants)
+├── kuzu-optimizer/     # 11 flat passes + 7 tree passes (18 total)
+├── kuzu-processor/     # Physical operator execution (20+ operator types)
+├── kuzu-function/      # Built-in function registry (110+ functions)
+├── kuzu-graph/         # CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain)
 ├── kuzu-extension/     # Extension framework trait + registry
 ├── kuzu-json/          # JSON extension (extract, validate, type, structure, contains)
 ├── kuzu-fts/           # Full-Text Search extension (stemmer, tokenizer, BM25, TF-IDF)
@@ -72,11 +72,13 @@ Cypher text
     ▼
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
-│ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (6 flat + 2  │    │ (physical)   │
-│ COPY, MATCH │    │(types)   │    │11 ops    │    │  tree passes)│    │9+ operators  │
-│ DELETE, SET │    │(symbols) │    │          │    │ FactorRewr   │    │ Scan, Filter │
-│ WITH, UNION │    │          │    │          │    │ CardEstimate │    │ HashJoin, etc│
-│ UNWIND, etc │    │          │    │          │    │ JoinReorder  │    │              │
+│ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (11 flat + 7 │    │ (physical)   │
+│ COPY, MATCH │    │(types)   │    │34 ops    │    │  tree passes)│    │20+ operators │
+│ DELETE, SET │    │(symbols) │    │          │    │ FilterPush   │    │ Scan, Filter │
+│ WITH, UNION │    │          │    │          │    │ JoinReorder  │    │ HashJoin, etc│
+│ UNWIND, etc │    │          │    │          │    │ SIP, CSU,    │    │ SemiMasker,  │
+│ FOREACH,    │    │          │    │          │    │ AccHashJoin, │    │ RecursiveExt,│
+│ MERGE       │    │          │    │          │    │ AggKeyDep... │    │ Intersect... │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
                                                                              │
                                                                              ▼
@@ -113,39 +115,86 @@ Cypher text
 | Aggregation | ✅ | `RETURN COUNT(*), SUM(n.age), AVG(n.score), MIN(n.age), MAX(n.age)` |
 | `GROUP BY` | ✅ (multi-key) | `RETURN n.gender, COUNT(*) GROUP BY n.gender` |
 | `HAVING` | ✅ | `RETURN n.gender, COUNT(*) AS c GROUP BY n.gender HAVING c > 1` |
+| `CREATE SEQUENCE` | ✅ | `CREATE SEQUENCE seq1;` |
+| `DROP SEQUENCE` | ✅ | `DROP SEQUENCE seq1;` |
+| `CREATE MACRO` | ✅ | `CREATE MACRO add(a,b) AS a + b;` |
+| `EXPORT DATABASE` | ✅ | `EXPORT DATABASE '/path/export';` |
+| `IMPORT DATABASE` | ✅ | `IMPORT DATABASE '/path/export';` |
+| `FOREACH` | ✅ | `FOREACH (x IN [1,2,3] | CREATE (:N {p: x}))` |
+| `MERGE` | ⚠️ Partial | `MERGE (n:Person {name: 'Alice'})` (parser/binder OK, end-to-end pending) |
+| Variable-length paths | ✅ | `MATCH (a)-[*1..5]->(b) RETURN a, b` |
 | Expressions | ✅ | Arithmetic, boolean, string functions, property access, function calls |
 | Prepared Statements | ✅ | `conn.prepare("...")` + `conn.execute(&stmt, params)` |
 
 ## Test Suite Status
 
 ```
-Total: 514+ tests — all passing ✅
+Total: ~469 unit tests — all passing ✅ (14 integration tests pre-existing)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
-| `kuzu-storage` | 129 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL, Checkpoint, CSV/Parquet readers, Index |
-| `kuzu-function` | 70 | ✅ | 50+ registered functions, scalar/aggregate/table dispatch |
-| `kuzu-optimizer` | 42 | ✅ | 6 flat passes + FactorizationRewriting + CardinalityEstimation + JoinOrder |
-| `kuzu-processor` | 28 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin, CopyFrom, Delete, Set |
-| `kuzu-main` (unit) | 15 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `kuzu-main` (integration) | 28 | ✅ | Full pipeline: parse→bind→plan→optimize→execute |
-| `kuzu-common` | 25 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
-| `kuzu-parser` | 20 | ✅ | Cypher PEG grammar, 13 clause types, operator precedence |
-| `kuzu-graph` | 16 | ✅ | CSR adjacency, BFS, PageRank, WCC, Shortest Path, Reachable Within |
-| `kuzu-binder` | 13 | ✅ | Semantic analysis, type inference, symbol resolution |
-| `kuzu-catalog` | 14 | ✅ | Catalog CRUD, lookup by name/id, schema management |
+| `kuzu-common` | 14 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
+| `kuzu-parser` | 37 | ✅ | Cypher PEG grammar, 34+ Statement variants, operator precedence |
+| `kuzu-binder` | 21 | ✅ | Semantic analysis, type inference, symbol resolution |
+| `kuzu-planner` | 48 | ✅ | Logical plan construction (34 LogicalOperator variants) |
+| `kuzu-optimizer` | 93 | ✅ | 11 flat passes + 7 tree passes (18 total) |
+| `kuzu-processor` | 31 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin, Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom, Delete, Set |
+| `kuzu-function` | 93 | ✅ | 110+ registered functions, scalar/aggregate/table dispatch |
+| `kuzu-storage` | 48 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map |
+| `kuzu-main` (unit) | 47 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM |
+| `kuzu-main` (integration) | 14 | ⚠️ Pre-existing (RETURN *, FOREACH, MERGE, subqueries not wired end-to-end) |
+| `kuzu-catalog` | 21 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, conflict detection |
-| `kuzu-planner` | 14 | ✅ | Logical plan construction (11 operator variants) |
+| `kuzu-graph` | 9 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
+| `kuzu-vector` | 7 | ✅ | Vector similarity search |
 | `kuzu-json` | 12 | ✅ | extract, valid, type, structure, contains, keys, array_length |
 | `kuzu-fts` | 14 | ✅ | Stemmer, Tokenizer, TF-IDF, BM25, stop words |
-| `kuzu-algo` | 10 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest |
+| `kuzu-algo` | 10 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest, shortest path algorithms |
 | `kuzu-llm` | 9 | ✅ | LLM function integration |
 | `kuzu-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `kuzu-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
-| `kuzu-vector` | 10 | ✅ | Vector similarity search |
 | `kuzu-neo4j` | 12 | ✅ | Bolt protocol integration |
 | Extension crates | 6 | ✅ | Azure(1), Delta(1), Iceberg(1), Postgres(1), SQLite(1), Unity(1) |
+
+## Storage Engine Features
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Buffer Manager | ✅ | Clock eviction, page pin/unpin |
+| Free Space Manager | ✅ | Buddy-system allocation integrated in `FileHandle::allocate_page()` |
+| Zone Map Predicate | ✅ | `ColumnChunkStats`-based predicate pushdown in `NodeTable::to_column_major_data_with_predicate()` |
+| ART Index | ✅ | Node4/16/48/256 adaptive radix tree |
+| HNSW Index | ✅ | Vector similarity search index (`VectorIndexTable`) |
+| Hash Index | ✅ | On-disk + in-memory |
+| WAL + Checkpointer | ✅ | Write-ahead logging, shadow file |
+| Compression | ✅ | Constant, Boolean, dictionary encoding |
+
+## GDS (Graph Data Science) Framework
+
+| Algorithm | Status | Description |
+|-----------|--------|-------------|
+| BFS | ✅ | Breadth-first search (Dense/Sparse frontiers) |
+| Shortest Path (SSP) | ✅ | Single-source shortest path |
+| All Shortest Paths (ASP) | ✅ | All shortest paths between nodes |
+| Weighted Shortest Path (WSP) | ✅ | Dijkstra-based weighted shortest path |
+| All Weighted Shortest Paths (AWSP) | ✅ | All weighted shortest paths |
+| PageRank | ✅ | Iterative PageRank computation |
+| WCC | ✅ | Weakly Connected Components |
+| SCC | ✅ | Strongly Connected Components (Kosaraju) |
+| K-Core Decomposition | ✅ | K-core decomposition |
+| Louvain | ✅ | Community detection via Louvain method |
+| Spanning Forest | ✅ | Minimum spanning forest |
+
+## SIP (Sideways Information Passing)
+
+| Component | Status |
+|-----------|--------|
+| LogicalSemiMasker operator | ✅ |
+| PhysicalSemiMasker | ✅ |
+| NodeSemiMask (Arc<AtomicBool>) | ✅ |
+| ScanNode semi_mask integration | ✅ |
+| SIPOptimization tree pass | ✅ |
 
 ## Data Loading
 
@@ -156,19 +205,33 @@ Total: 514+ tests — all passing ✅
 | Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Kuzu type mapping, projection pushdown |
 | HTTP(S)/S3 | `kuzu-httpfs` extension | ✅ |
 
-## Optimizer Passes
+## Optimizer Passes — 18 Total (11 Flat + 7 Tree)
 
-| Pass | Type | Description |
-|------|------|-------------|
-| RemoveUnnecessary | Flat | Eliminates redundant operators |
-| FilterPushDown | Flat | Pushes filters closer to scans |
-| ProjectionPushDown | Flat | Eliminates unused columns early |
-| ConstantFolding | Flat | Evaluates constant expressions at plan time |
-| JoinOptimization | Flat | Removes redundant join conditions |
-| TopK | Flat | Converts OrderBy + Limit to TopK scan |
-| FactorizationRewriting | Tree | Inserts Flatten operators for hash joins |
-| CardinalityEstimation | Tree | Annotates operators with estimated row counts |
-| JoinOrderEnumeration | Tree | Greedy reorder of joins by cardinality |
+### Flat Passes
+| # | Pass | Description |
+|---|------|-------------|
+| 1 | RemoveUnnecessaryOperators | Eliminates redundant operators |
+| 2 | FilterPushDown | Pushes filters closer to scans |
+| 3 | ProjectionPushDown | Eliminates unused columns early |
+| 4 | ConstantFolding | Evaluates constant expressions at plan time |
+| 5 | AggregateDetection | Detects and marks aggregation boundaries |
+| 6 | JoinOptimization | Greedy cardinality-aware join reordering |
+| 7 | TopKOptimization | Converts OrderBy + Limit to TopK scan |
+| 8 | VectorSimilarityDetection | Detects vector similarity patterns |
+| 9 | ArtRangeScanDetection | Detects ART index range scan patterns |
+| 10 | LimitPushDown | Pushes limits closer to scans |
+| 11 | CommonSubexpressionElimination | Eliminates duplicate expressions |
+
+### Tree Passes
+| # | Pass | Description |
+|---|------|-------------|
+| 1 | FactorizationRewriting | Inserts Flatten operators for hash joins |
+| 2 | ForeignJoinPushDown | Pushes foreign joins through operators |
+| 3 | AccHashJoinOptimization | Optimizes accumulated hash joins |
+| 4 | SIPOptimization | Sideways Information Passing via SemiMasker |
+| 5 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
+| 6 | AggKeyDependency | Removes redundant grouping keys |
+| 7 | CardinalityEstimation | Annotates operators with estimated row counts (StatsStore) |
 
 ## Extensions
 
