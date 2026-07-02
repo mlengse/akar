@@ -10,7 +10,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_parser::ast::Expression;
+use kuzu_parser::ast::{BinaryOp, Expression};
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
 use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
@@ -107,6 +107,7 @@ impl QueryProcessor {
             return Ok(vec![DataChunk {
                 fields: vec![],
                 size: 0,
+                field_names: vec![],
             }]);
         }
 
@@ -125,7 +126,12 @@ impl QueryProcessor {
                         scan = scan.with_data(d, columns);
                     }
                     let result = scan.execute(current.clone())?;
-                    intermediate_result = Some(result);
+                    // Accumulate: extend rather than replace so multiple scans feeding a
+                    // HashJoin/CrossProduct all appear in the same input batch.
+                    match &mut intermediate_result {
+                        Some(existing) => existing.extend(result),
+                        None => intermediate_result = Some(result),
+                    }
                 }
                 LogicalOperator::ScanRel(s) => {
                     let (data, columns, _num_rows) = self.resolve_scan_data(&s.table_name);
@@ -137,7 +143,11 @@ impl QueryProcessor {
                         table_columns: columns,
                     };
                     let result = scan.execute(current.clone())?;
-                    intermediate_result = Some(result);
+                    // Accumulate: extend rather than replace.
+                    match &mut intermediate_result {
+                        Some(existing) => existing.extend(result),
+                        None => intermediate_result = Some(result),
+                    }
                 }
                 LogicalOperator::VectorSimilarityScan(vs) => {
                     let scan = PhysicalVectorSimilarityScan {
@@ -212,6 +222,7 @@ impl QueryProcessor {
                         None => vec![DataChunk {
                             fields: vec![],
                             size: 1,
+                            field_names: vec![],
                         }],
                     };
 
@@ -242,7 +253,7 @@ impl QueryProcessor {
                                 fields.push(result_vec);
                             }
                             let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
-                            output.push(DataChunk { fields, size });
+                            output.push(DataChunk { fields, size, field_names: vec![] });
                         }
                         output
                     } else {
@@ -295,13 +306,17 @@ impl QueryProcessor {
                     let result = agg.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::HashJoin(_h) => {
+                LogicalOperator::HashJoin(h) => {
+                    let input = intermediate_result.take().unwrap_or_default();
+                    // Derive actual join column indices from the join key expressions
+                    // and the field names embedded in the accumulated input chunks.
+                    let (build_cols, probe_cols) =
+                        derive_join_column_indices(&h.join_keys, &input);
                     let join = PhysicalHashJoin {
-                        build_columns: Vec::new(),
-                        probe_columns: Vec::new(),
+                        build_columns: build_cols,
+                        probe_columns: probe_cols,
                         semi_mask: None,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
                     let result = join.execute(input)?;
                     intermediate_result = Some(result);
                 }
@@ -541,6 +556,7 @@ impl QueryProcessor {
                         intermediate_result = Some(vec![DataChunk {
                             fields: vec![],
                             size: 1,
+                            field_names: vec![],
                         }]);
                     } else {
                         // CREATE new node
@@ -564,6 +580,7 @@ impl QueryProcessor {
                         intermediate_result = Some(vec![DataChunk {
                             fields: vec![],
                             size: 1,
+                            field_names: vec![],
                         }]);
                     }
                 }
@@ -602,6 +619,7 @@ impl QueryProcessor {
                     intermediate_result = Some(vec![DataChunk {
                         fields: vec![],
                         size: 0,
+                        field_names: vec![],
                     }]);
                 }
             }
@@ -781,6 +799,75 @@ impl Default for QueryProcessor {
 // UNION helpers
 // ---------------------------------------------------------------------------
 
+/// Derive build-side and probe-side column indices for a `PhysicalHashJoin`
+/// from its join-key expressions and the accumulated input chunks.
+///
+/// The `input` slice is split at `input.len() / 2`: the first half is the
+/// build side (left sub-plan) and the second half is the probe side (right
+/// sub-plan).  For each equality condition `left_expr = right_expr`, the
+/// property names are extracted and looked up in the field names carried by
+/// the respective chunks.  Falls back to column 0 when a name is not found.
+fn derive_join_column_indices(
+    join_keys: &[Expression],
+    input: &[DataChunk],
+) -> (Vec<u32>, Vec<u32>) {
+    let mid = if input.len() >= 2 { input.len() / 2 } else { 0 };
+    let build_chunks = &input[..mid];
+    let probe_chunks = &input[mid..];
+
+    let build_names: Vec<&str> = build_chunks
+        .first()
+        .map(|c| c.field_names.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+    let probe_names: Vec<&str> = probe_chunks
+        .first()
+        .map(|c| c.field_names.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+
+    let mut build_cols: Vec<u32> = Vec::new();
+    let mut probe_cols: Vec<u32> = Vec::new();
+
+    for key in join_keys {
+        if let Expression::BinaryOp(BinaryOp::Equal, left, right) = key {
+            let left_prop = extract_join_prop(left);
+            let right_prop = extract_join_prop(right);
+
+            if let (Some(lp), Some(rp)) = (left_prop, right_prop) {
+                // Try lp in build names first; fall back to rp (handles reversed conditions).
+                let build_idx = build_names
+                    .iter()
+                    .position(|&n| n == lp)
+                    .or_else(|| build_names.iter().position(|&n| n == rp))
+                    .unwrap_or(0) as u32;
+                // Try rp in probe names first; fall back to lp.
+                let probe_idx = probe_names
+                    .iter()
+                    .position(|&n| n == rp)
+                    .or_else(|| probe_names.iter().position(|&n| n == lp))
+                    .unwrap_or(0) as u32;
+                build_cols.push(build_idx);
+                probe_cols.push(probe_idx);
+            }
+        }
+    }
+
+    if build_cols.is_empty() {
+        (vec![0], vec![0])
+    } else {
+        (build_cols, probe_cols)
+    }
+}
+
+/// Extract the property/column name from a join key sub-expression.
+/// Handles `PropertyAccess(_, prop)` → `prop` and `Variable(name)` → `name`.
+fn extract_join_prop(expr: &Expression) -> Option<&str> {
+    match expr {
+        Expression::PropertyAccess(_, prop) => Some(prop.as_str()),
+        Expression::Variable(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 /// Flatten a `LogicalUnion` child subtree into a sequence of operators
 /// suitable for `QueryProcessor::execute`.
 ///
@@ -862,6 +949,7 @@ fn merge_union_chunks(
     Ok(vec![DataChunk {
         fields: merged_fields,
         size: final_size,
+        field_names: vec![],
     }])
 }
 
@@ -916,7 +1004,7 @@ fn merge_optional_chunks(
 
     let fields = rows_to_columns(&combined);
     let size = fields.first().map(|f| f.size()).unwrap_or(0);
-    Ok(vec![DataChunk { fields, size }])
+    Ok(vec![DataChunk { fields, size, field_names: vec![] }])
 }
 
 /// Extract all rows from a Vec<DataChunk> as row-major Vec<Vec<Value>>.
@@ -2271,5 +2359,186 @@ mod tests {
         let result = intersect.execute(input).unwrap();
         assert!(!result.is_empty(), "Expected match for key 3 in all three build sides");
         assert!(result[0].size > 0);
+    }
+
+    // ==================== Bug-regression: property access & join correctness ====================
+
+    /// Bug 0.1 regression: `evaluate_property_access` must resolve the named column,
+    /// not always return the first column.
+    #[test]
+    fn test_property_access_resolves_named_column() {
+        use kuzu_common::types::PhysicalTypeID;
+        use kuzu_common::vector::{DataChunk, ValueVector};
+        use kuzu_function::registry::FunctionRegistry;
+        use kuzu_parser::ast::Expression;
+        use crate::expression_evaluator::ExpressionEvaluator;
+        use std::sync::{Arc, Mutex};
+
+        // Build a chunk with two columns: col 0 = id (Int64), col 1 = name (String)
+        // field_names = ["id", "name"]
+        let mut id_col = ValueVector::new(PhysicalTypeID::Int64, 2);
+        id_col.set_i64(0, 10);
+        id_col.set_i64(1, 20);
+        id_col.resize(2);
+
+        let mut name_col = ValueVector::new(PhysicalTypeID::String, 2);
+        name_col.push_string("alice");
+        name_col.push_string("bob");
+
+        let chunk = DataChunk::new(vec![id_col, name_col])
+            .with_names(vec!["id".into(), "name".into()]);
+
+        let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
+        let eval = ExpressionEvaluator::new(registry);
+
+        // Requesting "name" should return the String column (col 1), not "id" (col 0).
+        let expr = Expression::PropertyAccess(
+            Box::new(Expression::Variable("t".into())),
+            "name".into(),
+        );
+        let result = eval.evaluate(&expr, &chunk).unwrap();
+        assert_eq!(result.physical_type(), PhysicalTypeID::String,
+            "PropertyAccess('name') must return the String column, not Int64");
+
+        // Requesting "id" should return the Int64 column (col 0).
+        let expr_id = Expression::PropertyAccess(
+            Box::new(Expression::Variable("t".into())),
+            "id".into(),
+        );
+        let result_id = eval.evaluate(&expr_id, &chunk).unwrap();
+        assert_eq!(result_id.physical_type(), PhysicalTypeID::Int64,
+            "PropertyAccess('id') must return the Int64 column");
+        assert_eq!(result_id.get_i64(0), Some(10));
+        assert_eq!(result_id.get_i64(1), Some(20));
+    }
+
+    /// Bug 0.2 regression: HashJoin with non-overlapping IDs must return 0 rows.
+    /// Previously, the second Scan overwrote the first so HashJoin only saw one table
+    /// and pass-through'd — returning wrong results.
+    #[test]
+    fn test_hash_join_non_overlapping_ids_returns_zero_rows() {
+        use kuzu_common::types::PhysicalTypeID;
+        use kuzu_common::vector::{DataChunk, ValueVector};
+
+        // Build side: id = [1, 2]
+        let mut build_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_id.set_i64(0, 1);
+        build_id.set_i64(1, 2);
+        build_id.resize(2);
+        let build_chunk = DataChunk::new(vec![build_id])
+            .with_names(vec!["id".into()]);
+
+        // Probe side: id = [3, 4] — no overlap
+        let mut probe_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe_id.set_i64(0, 3);
+        probe_id.set_i64(1, 4);
+        probe_id.resize(2);
+        let probe_chunk = DataChunk::new(vec![probe_id])
+            .with_names(vec!["id".into()]);
+
+        let join = PhysicalHashJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+            semi_mask: None,
+        };
+        let result = join.execute(vec![build_chunk, probe_chunk]).unwrap();
+        // Must be empty — no rows share the same id.
+        assert!(result.is_empty() || result.iter().all(|c| c.size == 0),
+            "HashJoin on non-overlapping IDs must produce 0 rows, got {:?}",
+            result.iter().map(|c| c.size).collect::<Vec<_>>());
+    }
+
+    /// Bug 0.2 regression: scan accumulation — two scans feeding a HashJoin must both
+    /// appear in the operator's input (not one overwriting the other).
+    #[test]
+    fn test_scan_accumulation_both_scans_reach_join() {
+        use kuzu_common::types::{LogicalTypeID, Value};
+        use kuzu_planner::logical_operator::{LogicalHashJoin, LogicalOperator, LogicalScanNode};
+        use kuzu_parser::ast::{BinaryOp, Expression};
+        use kuzu_storage::table::{ColumnDefinition, TableCatalog};
+
+        let col_id = ColumnDefinition {
+            name: "id".into(),
+            logical_type: LogicalTypeID::Int64,
+            is_primary_key: true,
+        };
+
+        // Create tables in the catalog and populate them.
+        let catalog = TableCatalog::new();
+        catalog.create_node_table("A".into(), vec![col_id.clone()]);
+        catalog.create_node_table("B".into(), vec![col_id.clone()]);
+
+        {
+            let mut tbl_a = catalog.get_node_table_by_name_mut("A").unwrap();
+            tbl_a.insert_row(vec![Value::Int64(1)]).unwrap();
+            tbl_a.insert_row(vec![Value::Int64(2)]).unwrap();
+        }
+        {
+            let mut tbl_b = catalog.get_node_table_by_name_mut("B").unwrap();
+            tbl_b.insert_row(vec![Value::Int64(2)]).unwrap(); // overlaps with A
+            tbl_b.insert_row(vec![Value::Int64(3)]).unwrap();
+        }
+
+        use kuzu_function::registry::FunctionRegistry;
+        use std::sync::{Arc, Mutex};
+        let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
+        let proc = QueryProcessor::with_catalog(registry, Arc::new(catalog));
+
+        // Plan: ScanNode(A), ScanNode(B), HashJoin{join_keys: [a.id = b.id]}
+        let join_key = Expression::BinaryOp(
+            BinaryOp::Equal,
+            Box::new(Expression::PropertyAccess(
+                Box::new(Expression::Variable("a".into())),
+                "id".into(),
+            )),
+            Box::new(Expression::PropertyAccess(
+                Box::new(Expression::Variable("b".into())),
+                "id".into(),
+            )),
+        );
+        let plan = vec![
+            LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "A".into(),
+                table_id: 1,
+                alias: Some("a".into()),
+                columns: vec![],
+                cardinality: 2,
+            }),
+            LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "B".into(),
+                table_id: 2,
+                alias: Some("b".into()),
+                columns: vec![],
+                cardinality: 2,
+            }),
+            LogicalOperator::HashJoin(LogicalHashJoin {
+                join_keys: vec![join_key],
+                build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                    table_name: "join_build".into(),
+                    table_id: 0,
+                    alias: None,
+                    columns: vec![],
+                    cardinality: 0,
+                })),
+                probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                    table_name: "join_probe".into(),
+                    table_id: 0,
+                    alias: None,
+                    columns: vec![],
+                    cardinality: 0,
+                })),
+                cardinality: 0,
+                push_down_eligible: false,
+            }),
+        ];
+
+        let result = proc.execute(&plan).unwrap();
+        // A has ids [1,2], B has ids [2,3]. Join on id → exactly 1 matching row (id=2).
+        let total_rows: usize = result.iter().map(|c| c.size).sum();
+        assert_eq!(
+            total_rows, 1,
+            "HashJoin A.id=B.id should produce exactly 1 row (id=2 matches), got {} rows",
+            total_rows
+        );
     }
 }

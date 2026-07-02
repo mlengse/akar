@@ -43,7 +43,7 @@ pub fn duckdb_results_to_kuzu(results: Vec<Vec<duckdb::types::Value>>) -> Result
         fields.push(vec);
     }
 
-    Ok(vec![DataChunk { fields, size: num_rows }])
+    Ok(vec![DataChunk { fields, size: num_rows, field_names: vec![] }])
 }
 
 #[cfg(test)]

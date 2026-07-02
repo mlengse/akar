@@ -153,15 +153,26 @@ impl ExpressionEvaluator {
         }
     }
 
-    /// Evaluate a property access expression.
-    /// For now, evaluate the object expression and return it (simplified).
+    /// Evaluate a property access expression — resolves the property name to a
+    /// column index using `chunk.field_names`, then returns that column's data.
+    ///
+    /// Falls back to evaluating the object expression (legacy behaviour) if no
+    /// `field_names` are available on the chunk.
     fn evaluate_property_access(
         &self,
         obj: &Expression,
-        _prop: &str,
+        prop: &str,
         chunk: &DataChunk,
     ) -> Result<ValueVector, String> {
-        // Simplified: evaluate the object expression
+        // Fast path: look up the property by name in the chunk's field names.
+        if !chunk.field_names.is_empty() {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n == prop) {
+                return chunk.fields.get(idx).cloned().ok_or_else(|| {
+                    format!("Column '{}' (index {}) not found in chunk", prop, idx)
+                });
+            }
+        }
+        // Fallback: evaluate the object expression (returns first column — legacy behaviour).
         self.evaluate(obj, chunk)
     }
 

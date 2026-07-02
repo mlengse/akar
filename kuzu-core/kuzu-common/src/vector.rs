@@ -505,6 +505,8 @@ impl ValueVector {
 pub struct DataChunk {
     pub fields: Vec<ValueVector>,
     pub size: usize,
+    /// Column names parallel to `fields`. Empty when names are not tracked.
+    pub field_names: Vec<String>,
 }
 
 /// Resize a DataChunk to the given number of rows.
@@ -518,7 +520,13 @@ pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
 impl DataChunk {
     pub fn new(fields: Vec<ValueVector>) -> Self {
         let size = fields.first().map(|f| f.size()).unwrap_or(0);
-        Self { fields, size }
+        Self { fields, size, field_names: vec![] }
+    }
+
+    /// Attach column names to this chunk (builder pattern).
+    pub fn with_names(mut self, names: Vec<String>) -> Self {
+        self.field_names = names;
+        self
     }
 
     pub fn field(&self, idx: usize) -> &ValueVector {

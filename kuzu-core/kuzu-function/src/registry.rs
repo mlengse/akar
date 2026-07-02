@@ -729,6 +729,7 @@ impl FunctionRegistry {
                 let mut chunk = DataChunk {
                     fields: Vec::new(),
                     size: 0,
+                    field_names: vec![],
                 };
                 execute(args, &mut chunk).map(|_| {
                     let mut rows = Vec::new();

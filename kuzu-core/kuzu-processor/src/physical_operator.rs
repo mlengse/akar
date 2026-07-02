@@ -393,7 +393,11 @@ impl PhysicalOperatorExec for PhysicalScan {
                 }
             }
 
-            let chunk = DataChunk::new(fields);
+            let names: Vec<String> = cols_to_scan
+                .iter()
+                .filter_map(|&ci| self.table_columns.get(ci).map(|c| c.name.clone()))
+                .collect();
+            let chunk = DataChunk::new(fields).with_names(names);
             return Ok(vec![chunk]);
         }
 
@@ -454,7 +458,10 @@ impl PhysicalOperatorExec for PhysicalScanRel {
                 v.resize(num_rows);
                 fields.push(v);
             }
-            Ok(vec![DataChunk { fields, size: num_rows }])
+            let names: Vec<String> = (0..num_cols)
+                .filter_map(|ci| self.table_columns.get(ci).map(|c| c.name.clone()))
+                .collect();
+            Ok(vec![DataChunk { fields, size: num_rows, field_names: names }])
         } else {
             Ok(vec![DataChunk::new(vec![])])
         }
@@ -641,7 +648,7 @@ impl PhysicalOperatorExec for PhysicalProjection {
                     .filter_map(|&i| chunk.fields.get(i).cloned())
                     .collect();
                 let size = fields.first().map(|f| f.size()).unwrap_or(0);
-                DataChunk { fields, size }
+                DataChunk { fields, size, field_names: vec![] }
             })
             .collect();
 
@@ -649,6 +656,7 @@ impl PhysicalOperatorExec for PhysicalProjection {
             Ok(vec![DataChunk {
                 fields: vec![],
                 size: 0,
+                field_names: vec![],
             }])
         } else {
             Ok(output)
@@ -1238,9 +1246,17 @@ impl PhysicalOperatorExec for PhysicalCrossProduct {
             field.resize(total_rows);
         }
 
+        // Propagate field names from left ++ right sides
+        let mut output_names: Vec<String> = left_chunks.first()
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default();
+        output_names.extend(right_chunks.first()
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default());
         Ok(vec![DataChunk {
             fields: output_fields,
             size: total_rows,
+            field_names: output_names,
         }])
     }
 }
@@ -1328,7 +1344,7 @@ impl PhysicalOperatorExec for PhysicalSemiJoin {
         for field in &mut output_fields {
             field.resize(match_rows.len());
         }
-        Ok(vec![DataChunk { fields: output_fields, size: match_rows.len() }])
+        Ok(vec![DataChunk { fields: output_fields, size: match_rows.len(), field_names: vec![] }])
     }
 }
 
@@ -1413,7 +1429,7 @@ impl PhysicalOperatorExec for PhysicalAntiJoin {
         for field in &mut output_fields {
             field.resize(non_match_rows.len());
         }
-        Ok(vec![DataChunk { fields: output_fields, size: non_match_rows.len() }])
+        Ok(vec![DataChunk { fields: output_fields, size: non_match_rows.len(), field_names: vec![] }])
     }
 }
 
@@ -1600,6 +1616,7 @@ impl PhysicalOperatorExec for PhysicalIntersect {
         Ok(vec![DataChunk {
             fields: output_fields,
             size: output_size,
+            field_names: vec![],
         }])
     }
 }
@@ -1771,7 +1788,15 @@ impl PhysicalOperatorExec for PhysicalHashJoin {
             }
             result_fields.push(v);
         }
-        Ok(vec![DataChunk::new(result_fields)])
+        // Propagate field names from both sides: build_names ++ probe_names
+        let mut output_names: Vec<String> = build_chunks.first()
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default();
+        output_names.extend(probe_chunks.first()
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default());
+        let result = DataChunk::new(result_fields).with_names(output_names);
+        Ok(vec![result])
     }
 }
 
@@ -2299,7 +2324,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         }
         fields.push(dist_v);
 
-        Ok(vec![DataChunk { fields, size: num_results }])
+        Ok(vec![DataChunk { fields, size: num_results, field_names: vec![] }])
     }
 }
 
@@ -2539,7 +2564,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 fields.push(vv);
             }
 
-            chunks.push(DataChunk { fields, size: count });
+            chunks.push(DataChunk { fields, size: count, field_names: vec![] });
         }
 
         Ok(chunks)
@@ -2580,6 +2605,7 @@ impl PhysicalOperatorExec for PhysicalExplain {
         let chunk = DataChunk {
             fields: vec![vv],
             size: 1,
+            field_names: vec![],
         };
         Ok(vec![chunk])
     }
@@ -2854,6 +2880,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
         Ok(vec![DataChunk {
             fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v],
             size: num_results,
+            field_names: vec![],
         }])
     }
 }
