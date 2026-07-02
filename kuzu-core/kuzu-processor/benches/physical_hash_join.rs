@@ -3,7 +3,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_processor::physical_operator::{PhysicalHashJoin, PhysicalOperatorExec};
+use kuzu_processor::physical_operator::PhysicalHashJoin;
 
 /// Create a single-column Int64 DataChunk with values start..start+count.
 fn make_i64_chunk(values: &[i64]) -> DataChunk {

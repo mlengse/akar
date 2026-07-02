@@ -238,8 +238,8 @@ fn test_verification_var_length_path_parse_and_bind() {
     assert!(result.is_ok(), "Var-length path [*1..3] should parse & bind: {:?}", result.err());
 
     // Var-length path with rel variable
-    let result = conn.query("MATCH (a:Person)-[r:*]->(b:Person) RETURN a.name, b.name");
-    assert!(result.is_ok(), "Var-length path [r:*] should parse & bind: {:?}", result.err());
+    let result = conn.query("MATCH (a:Person)-[r*]->(b:Person) RETURN a.name, b.name");
+    assert!(result.is_ok(), "Var-length path [r*] should parse & bind: {:?}", result.err());
 }
 
 // ============================================================================

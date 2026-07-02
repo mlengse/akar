@@ -305,7 +305,7 @@ impl RJOutputWriter for SPPathsOutputWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gds::bfs_graph::DenseBFSGraph;
+
 
     #[test]
     fn test_paths_output_writer_info_default() {
