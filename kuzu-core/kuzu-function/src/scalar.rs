@@ -15,6 +15,68 @@ use crate::registry::*;
 use kuzu_common::types::{Date, Interval, Timestamp, Value};
 use time::{Date as TimeDate, Month, OffsetDateTime, Time as TimeTime};
 
+// ==================== Module-level utilities ====================
+
+thread_local! {
+    static RNG_STATE: std::cell::Cell<u64> = std::cell::Cell::new(
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(12345)
+    );
+}
+
+/// Get next random f64 in [0, 1) from the thread-local LCG.
+fn rng_next() -> f64 {
+    RNG_STATE.with(|state| {
+        let old = state.get();
+        let new = old.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state.set(new);
+        (new >> 11) as f64 / (1u64 << 53) as f64
+    })
+}
+
+/// Set the thread-local RNG seed.
+pub fn set_rng_seed(seed: u64) {
+    RNG_STATE.with(|state| state.set(seed));
+}
+
+/// Lanczos approximation for log-gamma ln(|Γ(x)|).
+#[allow(clippy::excessive_precision)]
+fn log_gamma(x: f64) -> f64 {
+    if x < 0.5 {
+        let pi = std::f64::consts::PI;
+        let reflection = pi / (pi * x).sin();
+        reflection.abs().ln() - log_gamma(1.0 - x)
+    } else {
+        let xm1 = x - 1.0;
+        let g = 7.0;
+        let c = [
+            0.99999999999980993,
+            676.5203681218851,
+            -1259.1392167224028,
+            771.32342877765313,
+            -176.61502916214059,
+            12.507343278686905,
+            -0.13857109526572012,
+            9.9843695780195716e-6,
+            1.5056327351493116e-7,
+        ];
+        let t = xm1 + g + 0.5;
+        let mut s = c[0];
+        for (i, &ci) in c[1..].iter().enumerate() {
+            s += ci / (xm1 + (i as f64) + 1.0);
+        }
+        let sqrt_2pi = (2.0 * std::f64::consts::PI).sqrt();
+        (sqrt_2pi * s).ln() + (xm1 + 0.5) * t.ln() - t
+    }
+}
+
+/// Lanczos approximation for Gamma(x) — computed via exp(log_gamma(x)).
+fn gamma_func(x: f64) -> f64 {
+    log_gamma(x).exp()
+}
+
 /// Evaluate a scalar function with the given arguments.
 pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, String> {
     match func {
@@ -42,7 +104,9 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
 // ==================== Arithmetic ====================
 
 fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String> {
-    if args.is_empty() {
+    // Allow empty args for ops that take no arguments (Pi, Rand)
+    let needs_args = !matches!(op, ArithmeticOp::Pi | ArithmeticOp::Rand);
+    if args.is_empty() && needs_args {
         return Err("Arithmetic requires at least one argument".into());
     }
 
@@ -137,25 +201,7 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
             Ok(Value::Double(std::f64::consts::PI))
         }
         ArithmeticOp::Rand => {
-            // Simple LCG using std::time as seed (WASM-compatible, no external dep)
-            use std::cell::Cell;
-            use std::time::SystemTime;
-            thread_local! {
-                static RNG_STATE: Cell<u64> = Cell::new(
-                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(12345)
-                );
-            }
-            let val = RNG_STATE.with(|state| {
-                let old = state.get();
-                // LCG constants (Numerical Recipes)
-                let new = old.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                state.set(new);
-                // Convert to f64 in [0, 1)
-                (new >> 11) as f64 / (1u64 << 53) as f64
-            });
-            Ok(Value::Double(val))
+            Ok(Value::Double(rng_next()))
         }
         ArithmeticOp::Power => {
             if args.len() < 2 {
@@ -193,6 +239,46 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
                 }
                 _ => Err("Even requires numeric argument".into()),
             }
+        }
+        // Heavy math functions (C++ port)
+        ArithmeticOp::Factorial => {
+            let n = match &args[0] {
+                Value::Int64(x) if *x >= 0 => *x,
+                Value::Int64(_) => return Err("Factorial requires non-negative integer".into()),
+                _ => return Err("Factorial requires integer argument".into()),
+            };
+            let mut result: i64 = 1;
+            for i in 2..=n {
+                result = result.wrapping_mul(i);
+            }
+            Ok(Value::Int64(result))
+        }
+        ArithmeticOp::Gamma => {
+            let v = numeric_to_f64(&args[0])?;
+            // Poles at non-positive integers
+            if v <= 0.0 && (v - v.round()).abs() < 1e-12 {
+                return Ok(Value::Double(f64::INFINITY));
+            }
+            Ok(Value::Double(gamma_func(v)))
+        }
+        ArithmeticOp::Lgamma => {
+            let v = numeric_to_f64(&args[0])?;
+            // Poles at non-positive integers: return infinity
+            if v <= 0.0 && (v - v.round()).abs() < 1e-12 {
+                return Ok(Value::Double(f64::INFINITY));
+            }
+            Ok(Value::Double(log_gamma(v)))
+        }
+        ArithmeticOp::SetSeed => {
+            let v = match &args[0] {
+                Value::Double(x) => x,
+                Value::Int64(x) => &(*x as f64),
+                _ => return Err("SetSeed requires numeric argument".into()),
+            };
+            let seed = (v * (u64::MAX as f64)) as u64;
+            set_rng_seed(seed);
+            // Return INT32(0) to match C++ semantics
+            Ok(Value::Int32(0))
         }
         // Bitwise operations (int64-only, matching C++ hardcoded int64_t)
         ArithmeticOp::BitwiseAnd => {
@@ -539,8 +625,8 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             let separator = get_string(&args[0])?;
             let mut result = String::new();
             let mut first = true;
-            for i in 1..args.len() {
-                match &args[i] {
+            for arg in args.iter().skip(1) {
+                match arg {
                     Value::Null => {
                         // Skip NULL elements (no separator before or after)
                         continue;
@@ -556,7 +642,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
                         if !first {
                             result.push_str(&separator);
                         }
-                        result.push_str(&format!("{:?}", args[i]));
+                        result.push_str(&format!("{:?}", arg));
                         first = false;
                     }
                 }
@@ -1872,6 +1958,78 @@ mod tests {
         // Double
         assert_eq!(evaluate_scalar(&func, &[Value::Double(2.3)]).unwrap(), Value::Int64(4));
         assert_eq!(evaluate_scalar(&func, &[Value::Double(3.8)]).unwrap(), Value::Int64(4));
+    }
+
+    // --- Heavy Math tests ---
+
+    #[test]
+    fn test_factorial() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Factorial };
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(0)]).unwrap(), Value::Int64(1));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(1)]).unwrap(), Value::Int64(1));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(5)]).unwrap(), Value::Int64(120));
+        assert_eq!(evaluate_scalar(&func, &[Value::Int64(10)]).unwrap(), Value::Int64(3628800));
+        // Negative input
+        assert!(evaluate_scalar(&func, &[Value::Int64(-1)]).is_err());
+    }
+
+    #[test]
+    fn test_gamma() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Gamma };
+        let get_f64 = |v: Value| -> f64 {
+            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+        };
+        // Gamma(1) = 1
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(1.0)]).unwrap()) - 1.0).abs() < 1e-10);
+        // Gamma(2) = 1
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(2.0)]).unwrap()) - 1.0).abs() < 1e-10);
+        // Gamma(3) = 2! = 2
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(3.0)]).unwrap()) - 2.0).abs() < 1e-8);
+        // Non-positive integer → infinity
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Double(0.0)]).unwrap(),
+            Value::Double(f64::INFINITY)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Double(-1.0)]).unwrap(),
+            Value::Double(f64::INFINITY)
+        );
+    }
+
+    #[test]
+    fn test_lgamma() {
+        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Lgamma };
+        let get_f64 = |v: Value| -> f64 {
+            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+        };
+        // ln(Gamma(1)) = ln(1) = 0
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(1.0)]).unwrap()) - 0.0).abs() < 1e-10);
+        // ln(Gamma(2)) = ln(1) = 0
+        assert!((get_f64(evaluate_scalar(&func, &[Value::Double(2.0)]).unwrap()) - 0.0).abs() < 1e-10);
+        // Non-positive integer → infinity
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Double(0.0)]).unwrap(),
+            Value::Double(f64::INFINITY)
+        );
+    }
+
+    #[test]
+    fn test_set_seed() {
+        let set_seed = ScalarFunction::Arithmetic { op: ArithmeticOp::SetSeed };
+        let rand_func = ScalarFunction::Arithmetic { op: ArithmeticOp::Rand };
+        // Set seed to known value
+        assert_eq!(
+            evaluate_scalar(&set_seed, &[Value::Double(0.5)]).unwrap(),
+            Value::Int32(0)
+        );
+        let first = evaluate_scalar(&rand_func, &[]).unwrap();
+        // Same seed should produce same sequence
+        assert_eq!(
+            evaluate_scalar(&set_seed, &[Value::Double(0.5)]).unwrap(),
+            Value::Int32(0)
+        );
+        let second = evaluate_scalar(&rand_func, &[]).unwrap();
+        assert_eq!(first, second);
     }
 
     // --- Bitwise tests ---

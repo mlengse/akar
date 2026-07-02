@@ -128,6 +128,12 @@ pub enum ArithmeticOp {
     Cot,
     Log2,
     Even,
+    /// Heavy math functions (C++ port)
+    Factorial,
+    Gamma,
+    Lgamma,
+    /// Seeding the RNG
+    SetSeed,
     /// Bitwise operations (int64-only, matching C++ hardcoded int64_t)
     BitwiseAnd,
     BitwiseOr,
@@ -432,6 +438,30 @@ impl FunctionRegistry {
         self.register_scalar("ln", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
         self.register_scalar("log2", ScalarFunction::Arithmetic { op: ArithmeticOp::Log2 });
         self.register_scalar("even", ScalarFunction::Arithmetic { op: ArithmeticOp::Even });
+        self.register_scalar(
+            "factorial",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Factorial,
+            },
+        );
+        self.register_scalar(
+            "gamma",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Gamma,
+            },
+        );
+        self.register_scalar(
+            "lgamma",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Lgamma,
+            },
+        );
+        self.register_scalar(
+            "set_seed",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::SetSeed,
+            },
+        );
         self.register_scalar("exp", ScalarFunction::Arithmetic { op: ArithmeticOp::Exp });
         self.register_scalar("sin", ScalarFunction::Arithmetic { op: ArithmeticOp::Sin });
         self.register_scalar("cos", ScalarFunction::Arithmetic { op: ArithmeticOp::Cos });

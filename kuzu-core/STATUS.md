@@ -337,7 +337,7 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 |---|------|--------|--------|
 | **1** | **Bitwise** (5) ✅ sudah | `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` | Pure `i64` ops via `\| & ^ << >>` — tidak perlu tipe khusus, tidak perlu external crate |
 | **2** | **Math ringan** (4) ✅ sudah | `CBRT`, `COT`, `LN`, `LOG2`, `EVEN` | `f64::cbrt()`, `f64::ln()`, `f64::log2()`, `1.0 / f64::tan()`, `x.ceil().even()` — semua stdlib |
-| **3** | **String basic** (5) | `INITCAP`, `CONCAT_WS`, `STRING_SPLIT` / `SPLIT_PART`, `ARRAY_EXTRACT` | Pure `String`/`char` ops — `regex` sudah di workspace ✅ |
+| **3** | **String basic** (5) ✅ sudah | `INITCAP`, `CONCAT_WS`, `STRING_SPLIT` / `SPLIT_PART`, `ARRAY_EXTRACT` | Pure `String`/`char` ops — `regex` sudah di workspace ✅ |
 
 ##### 🥈 Level 1 — Butuh External Crate (Perlu Cek/Tambah)
 
