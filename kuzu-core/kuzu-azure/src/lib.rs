@@ -16,6 +16,12 @@ use std::sync::Arc;
 /// The Azure Blob Storage extension enables reading from Azure Storage from Kuzu.
 pub struct AzureExtension;
 
+impl Default for AzureExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AzureExtension {
     pub fn new() -> Self {
         Self

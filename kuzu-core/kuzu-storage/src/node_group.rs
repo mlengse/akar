@@ -139,21 +139,19 @@ impl NodeGroup {
         }
 
         // Auto-spill if the memory threshold is exceeded
-        if let Some(ref spiller) = self.spiller {
-            if !self.columns.is_empty() && spiller.should_spill(&self.columns[0]) {
+        if let Some(ref spiller) = self.spiller
+            && !self.columns.is_empty() && spiller.should_spill(&self.columns[0]) {
                 self.spill_and_clear()?;
             }
-        }
 
         for (col_idx, value) in row.into_iter().enumerate() {
             self.columns[col_idx].append(value);
         }
         // Record insert in version info if MVCC tracking is enabled
-        if let Some(ref vi) = self.version_info {
-            if let Some(txn) = txn_id {
+        if let Some(ref vi) = self.version_info
+            && let Some(txn) = txn_id {
                 vi.insert(txn, self.num_nodes as u32);
             }
-        }
         self.num_nodes += 1;
         Ok(())
     }
@@ -219,7 +217,7 @@ impl NodeGroup {
             sort_col,
             dedup,
         )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(|e| std::io::Error::other(e))?;
 
         // Stream all merged rows into the target columns
         let mut total: usize = 0;
@@ -374,11 +372,10 @@ impl NodeGroup {
         commit_history: &[(u64, u64)],
     ) -> Option<&Value> {
         // Check version info visibility (inserts/deletes)
-        if let Some(ts) = snapshot_ts {
-            if !self.is_row_visible(local_row, ts, commit_history) {
+        if let Some(ts) = snapshot_ts
+            && !self.is_row_visible(local_row, ts, commit_history) {
                 return None;
             }
-        }
         // Get value with update version chain check
         self.columns.get(col_idx).and_then(|chunk| {
             chunk.get_value_with_snapshot(local_row, snapshot_ts, commit_history)

@@ -111,11 +111,10 @@ impl NodeTable {
             self.hash_index.insert(pk_key, self.num_rows - 1);
 
             // Also update ART index if present
-            if let Some(ref mut art_idx) = self.art_index {
-                if let Some(art_key) = ArtKey::from_value(pk_value) {
+            if let Some(ref mut art_idx) = self.art_index
+                && let Some(art_key) = ArtKey::from_value(pk_value) {
                     art_idx.insert(&art_key, self.num_rows - 1);
                 }
-            }
         }
 
         Ok(())
@@ -302,14 +301,13 @@ impl NodeTable {
         let mut result = vec![Vec::new(); num_cols]; // Avoid allocating self.num_rows if we skip chunks
 
         for group in &self.node_groups {
-            if let Some((col_idx, op, val)) = predicate {
-                if let Some(col_chunk) = group.columns.get(col_idx) {
+            if let Some((col_idx, op, val)) = predicate
+                && let Some(col_chunk) = group.columns.get(col_idx) {
                     use crate::predicate::{check_zone_map, ZoneMapCheckResult};
                     if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
                         continue; // Skip this entire node group
                     }
                 }
-            }
 
             for row in 0..group.num_nodes as usize {
                 for col in 0..num_cols {
@@ -723,11 +721,10 @@ impl TableCatalog {
         let col_major = table.to_column_major_data();
         if pk_col < col_major.len() {
             for (row_offset, pk_val) in col_major[pk_col].iter().enumerate() {
-                if !matches!(pk_val, Value::Null) {
-                    if let Some(art_key) = ArtKey::from_value(pk_val) {
+                if !matches!(pk_val, Value::Null)
+                    && let Some(art_key) = ArtKey::from_value(pk_val) {
                         art_idx.insert(&art_key, row_offset as u64);
                     }
-                }
             }
         }
 

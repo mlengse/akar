@@ -75,11 +75,10 @@ impl VectorVersionInfo {
         // deleted this row, it's not visible.
         if let Ok(del) = self.deleted.lock() {
             for (&txn_id, rows) in del.iter() {
-                if rows.contains(&row_in_vector) {
-                    if is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
+                if rows.contains(&row_in_vector)
+                    && is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
                         return false;
                     }
-                }
             }
         }
 

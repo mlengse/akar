@@ -14,6 +14,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The FTS extension adds full-text search capabilities to Kuzu.
 pub struct FtsExtension;
 
+impl Default for FtsExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FtsExtension {
     pub fn new() -> Self {
         Self
@@ -73,7 +79,7 @@ pub fn stem_word(word: &str) -> String {
 
     // Rule 1a: -sses → -ss, -ies → -i, -es → -e, -s → (remove s if not -ss)
     let w = if w.ends_with("sses") {
-        format!("{}", &w[..w.len() - 2])
+        (&w[..w.len() - 2]).to_string()
     } else if w.ends_with("ies") && w.len() > 4 {
         format!("{}i", &w[..w.len() - 3])
     } else if w.ends_with("es") && w.len() > 4 && !w.ends_with("aes") && !w.ends_with("ees") && !w.ends_with("oes") {
@@ -106,7 +112,9 @@ pub fn stem_word(word: &str) -> String {
     };
 
     // Rule 2: -ational → -ate, -ization → -ize, -iveness → -ive, etc.
-    let w = if w.ends_with("ational") && w.len() > 7 {
+    
+
+    if w.ends_with("ational") && w.len() > 7 {
         format!("{}ate", &w[..w.len() - 7])
     } else if w.ends_with("ization") && w.len() > 8 {
         format!("{}ize", &w[..w.len() - 8])
@@ -148,9 +156,7 @@ pub fn stem_word(word: &str) -> String {
         w[..w.len() - 2].to_string()
     } else {
         w
-    };
-
-    w
+    }
 }
 
 /// Check if a string slice contains a vowel.

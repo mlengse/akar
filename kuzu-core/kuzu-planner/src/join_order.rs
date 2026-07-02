@@ -109,19 +109,16 @@ fn collect_equality_conditions(expr: &Expression, conditions: &mut Vec<(Option<S
         Expression::BinaryOp(BinaryOp::Equal, left, right) => {
             let left_var = extract_variable_alias(left);
             let right_var = extract_variable_alias(right);
-            if let (Some(lv), Some(rv)) = (&left_var, &right_var) {
-                if lv != rv {
+            if let (Some(lv), Some(rv)) = (&left_var, &right_var)
+                && lv != rv {
                     // This is a potential join condition between two different variables
                     conditions.push((left_var, right_var, expr.clone()));
-                    return;
                 }
-            }
             // Fall through to check children
         }
         Expression::BinaryOp(BinaryOp::And, left, right) => {
             collect_equality_conditions(left, conditions);
             collect_equality_conditions(right, conditions);
-            return;
         }
         _ => {}
     }

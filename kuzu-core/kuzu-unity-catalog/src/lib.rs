@@ -14,6 +14,12 @@ use std::sync::Arc;
 /// The Unity Catalog extension enables querying Unity Catalog from Kuzu.
 pub struct UnityCatalogExtension;
 
+impl Default for UnityCatalogExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnityCatalogExtension {
     pub fn new() -> Self {
         Self

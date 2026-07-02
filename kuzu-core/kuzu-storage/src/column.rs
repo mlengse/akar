@@ -396,7 +396,7 @@ impl Column {
     }
 
     /// Deserialise a Value from a byte slice starting at the tag byte.
-    fn deserialize_value<'a>(data: &'a [u8], pos: &mut usize) -> std::io::Result<Value> {
+    fn deserialize_value(data: &[u8], pos: &mut usize) -> std::io::Result<Value> {
         if *pos >= data.len() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,

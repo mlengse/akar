@@ -175,13 +175,12 @@ impl ExpressionEvaluator {
         };
 
         // Fast path: look up the property by name in the chunk's field names.
-        if !chunk.field_names.is_empty() {
-            if let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop) {
+        if !chunk.field_names.is_empty()
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop) {
                 return chunk.fields.get(idx).cloned().ok_or_else(|| {
                     format!("Column '{}' (index {}) not found in chunk", prop, idx)
                 });
             }
-        }
         // Fallback: evaluate the object expression (returns first column — legacy behaviour).
         self.evaluate(obj, chunk)
     }
@@ -267,11 +266,10 @@ impl ExpressionEvaluator {
             store_value_in_vector(&mut result_vec, row, val);
         }
 
-        if row_results.iter().all(|v| matches!(v, Value::Null)) {
-            if let Some(e) = first_error {
+        if row_results.iter().all(|v| matches!(v, Value::Null))
+            && let Some(e) = first_error {
                 return Err(e);
             }
-        }
 
         Ok(result_vec)
     }

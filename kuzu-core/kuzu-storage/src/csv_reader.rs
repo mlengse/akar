@@ -53,23 +53,19 @@ impl CsvReaderConfig {
             .get("DELIM")
             .or_else(|| options.get("delim"))
             .or_else(|| options.get("DELIMITER"))
-        {
-            if let Some(c) = d.chars().next() {
+            && let Some(c) = d.chars().next() {
                 config.delimiter = c as u8;
             }
-        }
 
-        if let Some(q) = options.get("QUOTE").or_else(|| options.get("quote")) {
-            if let Some(c) = q.chars().next() {
+        if let Some(q) = options.get("QUOTE").or_else(|| options.get("quote"))
+            && let Some(c) = q.chars().next() {
                 config.quote = c as u8;
             }
-        }
 
-        if let Some(e) = options.get("ESCAPE").or_else(|| options.get("escape")) {
-            if let Some(c) = e.chars().next() {
+        if let Some(e) = options.get("ESCAPE").or_else(|| options.get("escape"))
+            && let Some(c) = e.chars().next() {
                 config.escape = c as u8;
             }
-        }
 
         if let Some(n) = options.get("NULL").or_else(|| options.get("null")) {
             config.null_str = n.clone();
@@ -424,7 +420,7 @@ fn coercion_err(
 /// Convert a calendar date to days since Unix epoch (1970-01-01).
 /// Returns `None` for invalid dates.
 fn naive_date_to_epoch_days(year: i32, month: u32, day: u32) -> Option<i32> {
-    if month < 1 || month > 12 || day < 1 || day > 31 {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
 

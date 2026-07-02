@@ -15,6 +15,12 @@ use std::sync::Arc;
 /// The Apache Iceberg extension enables querying Iceberg tables from Kuzu.
 pub struct IcebergExtension;
 
+impl Default for IcebergExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IcebergExtension {
     pub fn new() -> Self {
         Self

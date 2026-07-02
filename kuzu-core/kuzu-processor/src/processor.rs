@@ -131,9 +131,9 @@ impl QueryProcessor {
                 kuzu_parser::ast::BinaryOp::NotEqual => "!=",
                 _ => return None,
             };
-            if let Expression::Variable(var_name) = &**left {
-                if let Expression::Constant(c) = &**right {
-                    let col_name = var_name.split('.').last().unwrap_or(var_name);
+            if let Expression::Variable(var_name) = &**left
+                && let Expression::Constant(c) = &**right {
+                    let col_name = var_name.split('.').next_back().unwrap_or(var_name);
                     if let Some(col_idx) = columns.iter().position(|c| c == col_name) {
                         let val = match c {
                             kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
@@ -145,7 +145,6 @@ impl QueryProcessor {
                         return Some((col_idx, op_str.to_string(), val));
                     }
                 }
-            }
         }
         None
     }
@@ -637,24 +636,22 @@ impl QueryProcessor {
 
                     // Simple match detection: scan the PK column for a match
                     let mut matched = false;
-                    if let Some(tbl) = table_catalog.get_node_table_by_name(&m.table_name) {
-                        if let Some((prop_name, first_expr)) = m.properties.first() {
+                    if let Some(tbl) = table_catalog.get_node_table_by_name(&m.table_name)
+                        && let Some((prop_name, first_expr)) = m.properties.first() {
                             let first_val = eval_const(first_expr);
                             // Find which column index this property maps to
                             if let Some(prop_col) = tbl.columns.iter().position(|c| &c.name == prop_name) {
                                 let _ = prop_col; // Column index for matching
                                 // Scan the column for matching values
                                 for row_idx in 0..tbl.num_rows as usize {
-                                    if let Some(val) = tbl.get_value(row_idx, prop_col) {
-                                        if val == &first_val {
+                                    if let Some(val) = tbl.get_value(row_idx, prop_col)
+                                        && val == &first_val {
                                             matched = true;
                                             break;
                                         }
-                                    }
                                 }
                             }
                         }
-                    }
 
                     if matched {
                         // Apply ON MATCH SET
@@ -1100,7 +1097,7 @@ fn merge_optional_chunks(
         if i < right_rows.len() {
             row.extend_from_slice(&right_rows[i]);
         } else {
-            row.extend(std::iter::repeat(Value::Null).take(num_right_cols));
+            row.extend(std::iter::repeat_n(Value::Null, num_right_cols));
         }
         combined.push(row);
     }

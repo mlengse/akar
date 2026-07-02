@@ -356,8 +356,8 @@ impl QueryPlanner {
                             }));
                         }
                         // Regular edge: ScanRel
-                        if let Some(edge) = pattern.edge {
-                            if let Some(rel_label) = edge.label {
+                        if let Some(edge) = pattern.edge
+                            && let Some(rel_label) = edge.label {
                                 scan_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
                                     table_name: rel_label,
                                     table_id: edge.rel_table_id.unwrap_or(0),
@@ -365,7 +365,6 @@ impl QueryPlanner {
                                     cardinality: 0,
                                 }));
                             }
-                        }
                     }
                 }
                 BoundClause::BoundWhere(w) => {
@@ -438,8 +437,8 @@ impl QueryPlanner {
                                 cardinality: 0,
                             }));
                         }
-                        if let Some(edge) = &pattern.edge {
-                            if let Some(rel_label) = &edge.label {
+                        if let Some(edge) = &pattern.edge
+                            && let Some(rel_label) = &edge.label {
                                 right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
                                     table_name: rel_label.clone(),
                                     table_id: edge.rel_table_id.unwrap_or(0),
@@ -447,7 +446,6 @@ impl QueryPlanner {
                                     cardinality: 0,
                                 }));
                             }
-                        }
                     }
                     let right_op = if right_ops.len() == 1 {
                         right_ops.into_iter().next().unwrap()
@@ -526,7 +524,7 @@ impl QueryPlanner {
         }
 
         // Collect delete/set clauses (added after the main pipeline)
-        let delete_ops: Vec<LogicalOperator> = delete_exprs.drain(..).collect();
+        let delete_ops: Vec<LogicalOperator> = std::mem::take(&mut delete_exprs);
 
         // Build operator pipeline bottom-up
         let mut result: Vec<LogicalOperator> = Vec::new();

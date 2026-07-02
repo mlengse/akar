@@ -648,11 +648,8 @@ impl Connection {
                         .map(|s| s.name.clone())
                         .collect();
                     for seq_name in serial_seqs {
-                        match catalog.drop_sequence(&seq_name) {
-                            kuzu_catalog::CatalogResult::Dropped { .. } => {
-                                tracing::info!("Dropped serial sequence '{}'", seq_name);
-                            }
-                            _ => {}
+                        if let kuzu_catalog::CatalogResult::Dropped { .. } = catalog.drop_sequence(&seq_name) {
+                            tracing::info!("Dropped serial sequence '{}'", seq_name);
                         }
                     }
                 }
@@ -714,10 +711,10 @@ impl Connection {
             }
             #[cfg(not(feature = "vector-extension"))]
             BoundStatement::BoundCreateVectorIndex(idx) => {
-                return Err(format!(
+                Err(format!(
                     "Vector extension not enabled. Enable the 'vector-extension' feature to use CREATE VECTOR INDEX. Index '{}' not created.",
                     idx.index_name
-                ));
+                ))
             }
             BoundStatement::BoundUnion(u) => {
                 tracing::info!("UNION ALL query");
@@ -817,19 +814,18 @@ impl Connection {
                 // Build values from pattern properties, defaulting to Null
                 let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                 for (prop_name, expr) in &c.properties {
-                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
-                        if let kuzu_parser::ast::Expression::Constant(con) = expr {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
+                        && let kuzu_parser::ast::Expression::Constant(con) = expr {
                             values[col_idx] = ast_constant_to_value(con);
                         }
-                    }
                 }
 
                 // Auto-generate SERIAL column values for null entries
                 {
                     let mut sys_catalog = self.database.catalog.lock().unwrap();
                     for (col_idx, col) in table.columns.iter().enumerate() {
-                        if col.logical_type == kuzu_common::types::LogicalTypeID::Serial {
-                            if matches!(values[col_idx], Value::Null) {
+                        if col.logical_type == kuzu_common::types::LogicalTypeID::Serial
+                            && matches!(values[col_idx], Value::Null) {
                                 let seq_name = kuzu_catalog::SequenceEntry::get_serial_name(
                                     &c.table_name, &col.name,
                                 );
@@ -838,7 +834,6 @@ impl Connection {
                                     values[col_idx] = Value::Int64(next_val);
                                 }
                             }
-                        }
                     }
                 }
 
@@ -854,19 +849,16 @@ impl Connection {
                     .collect();
 
                 for (index_name, col_name) in &vec_indexes_on_table {
-                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name) {
-                        if let Some(val) = table.get_value(row_id, col_idx) {
-                            if let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val) {
-                                if let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name) {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name)
+                        && let Some(val) = table.get_value(row_id, col_idx)
+                            && let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val)
+                                && let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name) {
                                     vi.hnsw_mut().insert(vec, row_id);
                                     tracing::debug!(
                                         "Auto-populated vector index '{}' with row {}",
                                         index_name, row_id
                                     );
                                 }
-                            }
-                        }
-                    }
                 }
 
                 Ok(Some(QueryResult::success_message(format!(
@@ -919,11 +911,10 @@ impl Connection {
                     // Create new node with pattern properties + ON CREATE SET
                     let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                     for (prop_name, expr) in &m.properties {
-                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
-                            if let kuzu_parser::ast::Expression::Constant(c) = expr {
+                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
+                            && let kuzu_parser::ast::Expression::Constant(c) = expr {
                                 values[col_idx] = ast_constant_to_value(c);
                             }
-                        }
                     }
                     for item in &m.on_create {
                         if let kuzu_parser::ast::Expression::Constant(c) = &item.value {
@@ -953,7 +944,7 @@ impl Connection {
                     }
                     _ => {
                         // Evaluate AST arguments to Values
-                        let args: Vec<Value> = c.args.iter().map(|expr| eval_ast_expr_to_value(expr)).collect();
+                        let args: Vec<Value> = c.args.iter().map(eval_ast_expr_to_value).collect();
                         let registry = self.database.function_registry.lock().unwrap();
                         registry.execute_table_function(&c.function_name, &args)
                     }
@@ -1077,11 +1068,10 @@ impl Connection {
             BoundStatement::BoundImportDatabase(i) => self.execute_import_database(i),
             BoundStatement::BoundQuery(q) => {
                 // Check if this is a FOREACH-only query — handle it directly
-                if q.clauses.len() == 1 {
-                    if let Some(kuzu_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first() {
+                if q.clauses.len() == 1
+                    && let Some(kuzu_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first() {
                         return self.handle_foreach(fc);
                     }
-                }
                 Ok(None)
             }
         }
@@ -1204,7 +1194,7 @@ impl Connection {
                 kuzu_common::types::Value::List(vals)
             }
             _ => {
-                return Err(format!("FOREACH requires a list expression"));
+                return Err("FOREACH requires a list expression".to_string());
             }
         };
 

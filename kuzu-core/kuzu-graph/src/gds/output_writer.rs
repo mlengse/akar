@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Output writers for GDS algorithm results.
 //!
 //! Ported from C++ `rj_output_writer.h` / `output_writer.cpp`.

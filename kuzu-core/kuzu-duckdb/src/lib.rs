@@ -17,6 +17,12 @@ use std::sync::Arc;
 /// The DuckDB extension enables querying DuckDB from Kuzu.
 pub struct DuckDbExtension;
 
+impl Default for DuckDbExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DuckDbExtension {
     pub fn new() -> Self {
         Self

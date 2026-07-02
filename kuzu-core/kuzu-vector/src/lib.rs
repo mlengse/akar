@@ -22,6 +22,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The Vector extension adds embedding/vector support to Kuzu.
 pub struct VectorExtension;
 
+impl Default for VectorExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VectorExtension {
     pub fn new() -> Self {
         Self

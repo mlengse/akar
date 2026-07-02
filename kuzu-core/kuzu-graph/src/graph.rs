@@ -173,6 +173,12 @@ impl Graph {
 /// On-disk graph that reads adjacency from storage tables.
 pub struct OnDiskGraph;
 
+impl Default for OnDiskGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OnDiskGraph {
     pub fn new() -> Self {
         Self

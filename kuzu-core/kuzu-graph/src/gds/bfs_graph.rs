@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! BFS graph for parent tracking in path-aware algorithms.
 //!
 //! Ported from C++ `bfs_graph.h` / `bfs_graph.cpp`.

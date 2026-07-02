@@ -136,11 +136,10 @@ fn check_constant_predicate<T: PartialOrd>(
                 return ZoneMapCheckResult::SkipScan;
             }
         }
-        "<=" => {
-            if constant < min {
+        "<="
+            if constant < min => {
                 return ZoneMapCheckResult::SkipScan;
             }
-        }
         _ => {}
     }
     ZoneMapCheckResult::AlwaysScan

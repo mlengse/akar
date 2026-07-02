@@ -224,7 +224,7 @@ impl Spiller {
 
         Ok(columns
             .into_iter()
-            .map(|vals| ColumnChunk::from(vals))
+            .map(ColumnChunk::from)
             .collect())
     }
 

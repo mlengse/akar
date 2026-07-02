@@ -53,7 +53,7 @@ pub trait VertexCompute: Send + Sync {
     }
 
     /// Process a single node.
-    fn vertex_compute(&mut self, offset: u64, _table_id: u64) {}
+    fn vertex_compute(&mut self, _offset: u64, _table_id: u64) {}
 
     /// Create a boxed clone.
     fn box_clone(&self) -> Box<dyn VertexCompute>;

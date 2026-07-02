@@ -14,6 +14,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The Neo4j migration extension.
 pub struct Neo4jExtension;
 
+impl Default for Neo4jExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Neo4jExtension {
     pub fn new() -> Self {
         Self
@@ -191,7 +197,7 @@ fn extract_label(s: &str) -> Result<String, String> {
         .find(':')
         .ok_or_else(|| format!("Missing ':' in label: {s}"))?;
     let label_end = after_paren[colon_pos + 1..]
-        .find(|c: char| c == ')' || c == ' ' || c == '\n')
+        .find([')', ' ', '\n'])
         .unwrap_or_else(|| after_paren[colon_pos + 1..].len());
     Ok(after_paren[colon_pos + 1..][..label_end].trim().to_string())
 }
@@ -377,11 +383,10 @@ fn parse_properties(s: &str) -> Result<Vec<(String, String)>, String> {
         }
         current.push(c);
     }
-    if !current.is_empty() {
-        if let Some((k, v)) = parse_property_pair(&current) {
+    if !current.is_empty()
+        && let Some((k, v)) = parse_property_pair(&current) {
             props.push((k, v));
         }
-    }
 
     Ok(props)
 }

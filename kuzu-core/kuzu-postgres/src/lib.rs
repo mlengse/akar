@@ -14,6 +14,12 @@ use std::sync::Arc;
 /// The PostgreSQL extension enables querying PostgreSQL databases from Kuzu.
 pub struct PostgresExtension;
 
+impl Default for PostgresExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PostgresExtension {
     pub fn new() -> Self {
         Self

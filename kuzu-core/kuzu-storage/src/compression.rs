@@ -316,7 +316,7 @@ fn decompress_constant(data: &[u8], expected_size: usize) -> Vec<u8> {
 
 /// Boolean compression: pack 8 booleans per byte.
 fn compress_boolean(data: &[u8], num_values: usize) -> CompressedChunk {
-    let packed_len = (num_values + 7) / 8;
+    let packed_len = num_values.div_ceil(8);
     let mut packed = vec![0u8; packed_len];
     for i in 0..num_values.min(data.len()) {
         if data[i] != 0 {

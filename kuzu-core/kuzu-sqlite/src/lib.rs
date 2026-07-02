@@ -13,6 +13,12 @@ use std::sync::Arc;
 /// The SQLite extension enables querying SQLite databases from Kuzu.
 pub struct SqliteExtension;
 
+impl Default for SqliteExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SqliteExtension {
     pub fn new() -> Self {
         Self

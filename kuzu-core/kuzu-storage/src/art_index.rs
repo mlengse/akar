@@ -403,12 +403,11 @@ impl ArtPrimaryKeyIndex {
             ArtNode::Node48 { child_index, children, .. } => {
                 for byte in 0u16..256u16 {
                     let idx = child_index[byte as usize];
-                    if idx != crate::art_node::EMPTY_MARKER {
-                        if let Some(ref child) = children[idx as usize] {
+                    if idx != crate::art_node::EMPTY_MARKER
+                        && let Some(ref child) = children[idx as usize] {
                             buf.push(byte as u8);
                             self.serialize_node(child, buf);
                         }
-                    }
                 }
             }
             ArtNode::Node256 { children, .. } => {
@@ -557,7 +556,7 @@ impl ArtPrimaryKeyIndex {
         let data_pages = if tree_size == 0 {
             1
         } else {
-            1 + (tree_size + page_size - 1) / page_size
+            1 + tree_size.div_ceil(page_size)
         };
 
         // Ensure enough pages are allocated
@@ -638,7 +637,7 @@ impl ArtPrimaryKeyIndex {
 
         if tree_size > 0 {
             let page_data_size = bm.page_size();
-            let data_pages = (tree_size as usize + page_data_size - 1) / page_data_size;
+            let data_pages = (tree_size as usize).div_ceil(page_data_size);
             let mut tree_bytes = vec![0u8; tree_size as usize];
 
             for page_idx in 0..data_pages {
@@ -848,11 +847,10 @@ fn collect_all_children(node: &mut ArtNode) -> Vec<(u8, Box<ArtNode>)> {
         ArtNode::Node48 { child_index, children, .. } => {
             for byte in 0..256u16 {
                 let idx = child_index[byte as usize];
-                if idx != crate::art_node::EMPTY_MARKER {
-                    if let Some(child) = children[idx as usize].take() {
+                if idx != crate::art_node::EMPTY_MARKER
+                    && let Some(child) = children[idx as usize].take() {
                         pairs.push((byte as u8, child));
                     }
-                }
             }
         }
         ArtNode::Node256 { children, .. } => {

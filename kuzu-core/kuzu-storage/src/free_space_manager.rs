@@ -69,6 +69,12 @@ pub struct FreeSpaceManager {
     num_entries: u64,
 }
 
+impl Default for FreeSpaceManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FreeSpaceManager {
     pub fn new() -> Self {
         Self {

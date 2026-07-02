@@ -97,7 +97,7 @@ impl GDSUtils {
         bfs_graph: &mut dyn crate::gds::bfs_graph::BaseBFSGraph,
         max_iteration: u16,
     ) -> u64 {
-        let n = graph.num_nodes() as u64;
+        let _n = graph.num_nodes() as u64;
 
         let mut cur_frontier: Vec<u64> = vec![source];
         let mut next_frontier: Vec<u64> = Vec::new();
@@ -344,23 +344,21 @@ impl GDSUtils {
                 let new_cost = cost + weight;
                 let old_cost = dist[nbr as usize];
 
-                if new_cost < old_cost + f64::EPSILON {
-                    if bfs_graph.try_add_parent_with_weight(
+                if new_cost < old_cost + f64::EPSILON
+                    && bfs_graph.try_add_parent_with_weight(
                         bound_node_id,
                         edge_id,
                         *dst,
                         true,
                         weight,
-                    ) {
-                        if new_cost < old_cost {
+                    )
+                        && new_cost < old_cost {
                             dist[nbr as usize] = new_cost;
                             heap.push(std::cmp::Reverse(HeapNode {
                                 cost: new_cost,
                                 node: nbr,
                             }));
                         }
-                    }
-                }
             }
         }
 

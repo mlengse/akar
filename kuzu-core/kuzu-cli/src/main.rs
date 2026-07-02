@@ -185,15 +185,14 @@ impl Completer for CypherCompleter {
                 candidates.push(Pair { display: kw.to_string(), replacement: kw.to_string() });
             }
         }
-        if let Ok(state) = GLOBAL_STATE.lock() {
-            if let Some(ref s) = *state {
+        if let Ok(state) = GLOBAL_STATE.lock()
+            && let Some(ref s) = *state {
                 for name in s.table_names() {
                     if name.to_lowercase().starts_with(&word.to_lowercase()) {
                         candidates.push(Pair { display: name.clone(), replacement: name });
                     }
                 }
             }
-        }
         Ok((pos - word.len(), candidates))
     }
 }
@@ -253,7 +252,7 @@ fn main() {
 
 fn atty_check() -> bool {
     // Simple heuristic: if TERM is set and not "dumb", assume interactive
-    std::env::var("TERM").map_or(false, |t| t != "dumb")
+    std::env::var("TERM").is_ok_and(|t| t != "dumb")
         || std::env::var("CI").is_err()
 }
 

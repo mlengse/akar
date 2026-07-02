@@ -10,6 +10,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The LLM embedding extension.
 pub struct LlmExtension;
 
+impl Default for LlmExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LlmExtension {
     pub fn new() -> Self {
         Self

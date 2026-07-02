@@ -50,7 +50,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         Rule::query_statement => {
             let inner_clone = inner.clone();
             let child_rules: Vec<_> = inner_clone.into_inner().map(|c| c.as_rule()).collect();
-            if child_rules.iter().any(|r| *r == Rule::merge_clause) {
+            if child_rules.contains(&Rule::merge_clause) {
                 let merge = parse_merge(inner)?;
                 Ok(merge)
             } else {
@@ -1036,12 +1036,9 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             let mut children = pair.clone().into_inner();
             let mut result = parse_expression(children.next().ok_or("Empty postfix")?)?;
             for child in children {
-                match child.as_rule() {
-                    Rule::property_access => {
-                        let prop = child.into_inner().next().unwrap().as_str().to_string();
-                        result = Expression::PropertyAccess(Box::new(result), prop);
-                    }
-                    _ => {}
+                if child.as_rule() == Rule::property_access {
+                    let prop = child.into_inner().next().unwrap().as_str().to_string();
+                    result = Expression::PropertyAccess(Box::new(result), prop);
                 }
             }
             Ok(result)

@@ -47,7 +47,7 @@ impl OptimizationPass for FilterPushDown {
             match op {
                 LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) => {
                     // Flush any pending filters before this scan
-                    result.extend(pending_filters.drain(..));
+                    result.append(&mut pending_filters);
                     result.push(op.clone());
                 }
                 LogicalOperator::Filter(_) => {
@@ -56,12 +56,12 @@ impl OptimizationPass for FilterPushDown {
                 }
                 _ => {
                     // Flush pending filters before non-scan operators
-                    result.extend(pending_filters.drain(..));
+                    result.append(&mut pending_filters);
                     result.push(op.clone());
                 }
             }
         }
-        result.extend(pending_filters.drain(..));
+        result.append(&mut pending_filters);
         result
     }
 }
@@ -264,11 +264,10 @@ impl OptimizationPass for JoinOptimization {
         let mut filters_to_remove: Vec<usize> = Vec::new();
 
         for (i, op) in operators.iter().enumerate() {
-            if let LogicalOperator::Filter(f) = op {
-                if is_join_condition(&f.expression) {
+            if let LogicalOperator::Filter(f) = op
+                && is_join_condition(&f.expression) {
                     filters_to_remove.push(i);
                 }
-            }
         }
 
         for (i, op) in operators.iter().enumerate() {
@@ -288,7 +287,7 @@ pub fn is_join_condition(expr: &kuzu_parser::ast::Expression) -> bool {
         kuzu_parser::ast::Expression::BinaryOp(kuzu_parser::ast::BinaryOp::Equal, left, right) => {
             let left_var = extract_root_variable(left);
             let right_var = extract_root_variable(right);
-            matches!(left_var, Some(_)) && matches!(right_var, Some(_)) && left_var != right_var
+            left_var.is_some() && right_var.is_some() && left_var != right_var
         }
         _ => false,
     }
@@ -356,51 +355,48 @@ impl OptimizationPass for VectorSimilarityDetection {
                     let order_by = &operators[order_by_idx];
                     let limit_op = &operators[limit_idx];
 
-                    match (scan, filter, order_by, limit_op) {
-                        (
+                    if let (
                             LogicalOperator::ScanNode(sn),
                             LogicalOperator::Filter(f),
                             LogicalOperator::OrderBy(ob),
                             LogicalOperator::Limit(lim),
-                        ) => {
-                            // Check if the Filter contains a distance function call
-                            if let Some((dist_fn_name, _dist_args)) =
-                                extract_distance_function(&f.expression)
-                            {
-                                // Check that the OrderBy sorts by the same distance function
-                                let order_matches = ob.sort_keys.iter().any(|(expr, _asc)| {
-                                    extract_distance_function(expr)
-                                        .map(|(name, _)| name == dist_fn_name)
-                                        .unwrap_or(false)
-                                });
+                        ) = (scan, filter, order_by, limit_op) {
+                        // Check if the Filter contains a distance function call
+                        if let Some((dist_fn_name, _dist_args)) =
+                            extract_distance_function(&f.expression)
+                        {
+                            // Check that the OrderBy sorts by the same distance function
+                            let order_matches = ob.sort_keys.iter().any(|(expr, _asc)| {
+                                extract_distance_function(expr)
+                                    .map(|(name, _)| name == dist_fn_name)
+                                    .unwrap_or(false)
+                            });
 
-                                if order_matches {
-                                    // Extract the query vector from the filter expression
-                                    let query_vector = extract_query_vector(&f.expression);
-                                    let top_k = lim.limit;
+                            if order_matches {
+                                // Extract the query vector from the filter expression
+                                let query_vector = extract_query_vector(&f.expression);
+                                let top_k = lim.limit;
 
-                                    result.push(LogicalOperator::VectorSimilarityScan(
-                                        LogicalVectorSimilarityScan {
-                                            index_name: String::new(), // resolved at execution
-                                            index_id: 0,
-                                            query_vector,
-                                            top_k,
-                                            table_name: sn.table_name.clone(),
-                                            cardinality: top_k,
-                                        },
-                                    ));
+                                result.push(LogicalOperator::VectorSimilarityScan(
+                                    LogicalVectorSimilarityScan {
+                                        index_name: String::new(), // resolved at execution
+                                        index_id: 0,
+                                        query_vector,
+                                        top_k,
+                                        table_name: sn.table_name.clone(),
+                                        cardinality: top_k,
+                                    },
+                                ));
 
-                                    // Skip past the consumed operators
-                                    if has_proj {
-                                        i += 5;
-                                    } else {
-                                        i += 4;
-                                    }
-                                    continue;
+                                // Skip past the consumed operators
+                                if has_proj {
+                                    i += 5;
+                                } else {
+                                    i += 4;
                                 }
+                                continue;
                             }
                         }
-                        _ => {}
                     }
                 }
             }
@@ -460,30 +456,25 @@ impl OptimizationPass for ArtRangeScanDetection {
 
         while i < operators.len() {
             // Look for: ScanNode + Filter(comparison on PK column)
-            if i + 1 < operators.len() {
-                match (&operators[i], &operators[i + 1]) {
-                    (LogicalOperator::ScanNode(sn), LogicalOperator::Filter(f)) => {
-                        if let Some((lower, lower_inc, upper, upper_inc)) =
-                            extract_range_bounds(&f.expression)
-                        {
-                            result.push(LogicalOperator::ArtIndexRangeScan(
-                                LogicalArtIndexRangeScan {
-                                    table_name: sn.table_name.clone(),
-                                    table_id: sn.table_id,
-                                    lower_bound: lower,
-                                    upper_bound: upper,
-                                    lower_inclusive: lower_inc,
-                                    upper_inclusive: upper_inc,
-                                    cardinality: sn.cardinality.max(1),
-                                },
-                            ));
-                            i += 2;
-                            continue;
-                        }
+            if i + 1 < operators.len()
+                && let (LogicalOperator::ScanNode(sn), LogicalOperator::Filter(f)) = (&operators[i], &operators[i + 1])
+                    && let Some((lower, lower_inc, upper, upper_inc)) =
+                        extract_range_bounds(&f.expression)
+                    {
+                        result.push(LogicalOperator::ArtIndexRangeScan(
+                            LogicalArtIndexRangeScan {
+                                table_name: sn.table_name.clone(),
+                                table_id: sn.table_id,
+                                lower_bound: lower,
+                                upper_bound: upper,
+                                lower_inclusive: lower_inc,
+                                upper_inclusive: upper_inc,
+                                cardinality: sn.cardinality.max(1),
+                            },
+                        ));
+                        i += 2;
+                        continue;
                     }
-                    _ => {}
-                }
-            }
 
             result.push(operators[i].clone());
             i += 1;
@@ -593,10 +584,10 @@ fn extract_single_bound(
 fn constant_to_value(c: &Expression) -> Option<kuzu_common::types::Value> {
     match c {
         Expression::Constant(kuzu_parser::ast::Constant::Integer(i)) => {
-            Some(kuzu_common::types::Value::Int64(*i as i64))
+            Some(kuzu_common::types::Value::Int64(*i))
         }
         Expression::Constant(kuzu_parser::ast::Constant::Float(f)) => {
-            Some(kuzu_common::types::Value::Double(*f as f64))
+            Some(kuzu_common::types::Value::Double(*f))
         }
         Expression::Constant(kuzu_parser::ast::Constant::String(s)) => {
             Some(kuzu_common::types::Value::String(s.clone()))
@@ -682,9 +673,9 @@ impl OptimizationPass for TopKOptimization {
                         continue;
                     }
                     // Check for ORDER BY with non-adjacent LIMIT (through projection)
-                    (LogicalOperator::OrderBy(order), LogicalOperator::Projection(_)) => {
-                        if i + 2 < operators.len() {
-                            if matches!(&operators[i + 2], LogicalOperator::Limit(_)) {
+                    (LogicalOperator::OrderBy(order), LogicalOperator::Projection(_))
+                        if i + 2 < operators.len()
+                            && matches!(&operators[i + 2], LogicalOperator::Limit(_)) => {
                                 let limit = match &operators[i + 2] {
                                     LogicalOperator::Limit(l) => l.clone(),
                                     _ => unreachable!(),
@@ -704,8 +695,6 @@ impl OptimizationPass for TopKOptimization {
                                 i += 3;
                                 continue;
                             }
-                        }
-                    }
                     _ => {}
                 }
             }
@@ -937,7 +926,7 @@ impl TreeOptimizationPass for AccHashJoinOptimization {
                     cardinality: probe_card,
                 });
 
-                hj.probe_side = Box::new(accumulate);
+                *hj.probe_side = accumulate;
             }
         });
     }
@@ -991,7 +980,7 @@ impl TreeOptimizationPass for SIPOptimization {
                     });
                     println!("SIPOptimization triggered: inserted SemiMasker for table_id {}", table_id);
 
-                    hj.build_side = Box::new(semi_masker);
+                    *hj.build_side = semi_masker;
                 }
             }
         });
@@ -1126,14 +1115,13 @@ impl TreeOptimizationPass for CorrelatedSubqueryUnnesting {
         let mut acc_counter = 0usize;
 
         LogicalOperator::visit_bottom_up(root, &mut |op| {
-            if let LogicalOperator::HashJoin(hj) = op {
-                if is_accumulate(&hj.probe_side) {
+            if let LogicalOperator::HashJoin(hj) = op
+                && is_accumulate(&hj.probe_side) {
                     infos.push(AccHashJoinInfo {
                         build_side_idx: acc_counter,
                     });
                     acc_counter += 1;
                 }
-            }
         });
 
         // Second pass: wire ExpressionsScans in build sides
@@ -1150,14 +1138,13 @@ impl CorrelatedSubqueryUnnesting {
     fn wire_build_side(root: &mut LogicalOperator, target_idx: usize) {
         let mut found = 0usize;
         LogicalOperator::visit_bottom_up(root, &mut |op| {
-            if let LogicalOperator::HashJoin(hj) = op {
-                if is_accumulate(&hj.probe_side) {
+            if let LogicalOperator::HashJoin(hj) = op
+                && is_accumulate(&hj.probe_side) {
                     if found == target_idx {
                         Self::wire_expressions_scans(&mut hj.build_side, target_idx);
                     }
                     found += 1;
                 }
-            }
         });
     }
 }
@@ -1179,29 +1166,23 @@ impl CardinalityEstimation {
                     return 0;
                 }
                 // Try to get real stats from the stats store
-                if let Some(ref stats_store) = self.stats {
-                    if let Ok(store) = stats_store.lock() {
-                        if let Some(table_stats) = store.get_table_stats(s.table_id) {
-                            if table_stats.num_rows > 0 {
+                if let Some(ref stats_store) = self.stats
+                    && let Ok(store) = stats_store.lock()
+                        && let Some(table_stats) = store.get_table_stats(s.table_id)
+                            && table_stats.num_rows > 0 {
                                 return table_stats.num_rows;
                             }
-                        }
-                    }
-                }
                 // Fallback heuristic: 1000 nodes per table
                 1000
             }
             LogicalOperator::ScanRel(s) => {
                 // Try to get real stats from the stats store
-                if let Some(ref stats_store) = self.stats {
-                    if let Ok(store) = stats_store.lock() {
-                        if let Some(table_stats) = store.get_table_stats(s.table_id) {
-                            if table_stats.num_rows > 0 {
+                if let Some(ref stats_store) = self.stats
+                    && let Ok(store) = stats_store.lock()
+                        && let Some(table_stats) = store.get_table_stats(s.table_id)
+                            && table_stats.num_rows > 0 {
                                 return table_stats.num_rows;
                             }
-                        }
-                    }
-                }
                 // Fallback heuristic: 5000 edges per rel table
                 5000
             }
@@ -1485,11 +1466,10 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                         return Expression::Constant(c);
                     }
                 }
-                (Expression::Constant(Constant::String(a)), Expression::Constant(Constant::String(b))) => {
-                    if *op == BinaryOp::Concat || *op == BinaryOp::Add {
+                (Expression::Constant(Constant::String(a)), Expression::Constant(Constant::String(b)))
+                    if (*op == BinaryOp::Concat || *op == BinaryOp::Add) => {
                         return Expression::Constant(Constant::String(format!("{}{}", a, b)));
                     }
-                }
                 _ => {}
             }
             Expression::BinaryOp(*op, Box::new(left), Box::new(right))
@@ -1615,25 +1595,21 @@ impl TreeOptimizationPass for AggKeyDependency {
 
                 // First pass: find ID properties (these take priority as keys)
                 for key in &agg.group_by {
-                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key {
-                        if let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref() {
-                            if Self::is_id_property(prop) {
+                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key
+                        && let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref()
+                            && Self::is_id_property(prop) {
                                 var_key_props.entry(var.clone()).or_insert_with(|| prop.clone());
                             }
-                        }
-                    }
                 }
 
                 // Second pass: for variables without an ID property, use the first
                 // PropertyAccess as the key.
                 for key in &agg.group_by {
-                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key {
-                        if let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref() {
-                            if !var_key_props.contains_key(var) {
+                    if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key
+                        && let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref()
+                            && !var_key_props.contains_key(var) {
                                 var_key_props.insert(var.clone(), prop.clone());
                             }
-                        }
-                    }
                 }
 
                 // Phase 2: Filter keys — keep key expressions and non-property

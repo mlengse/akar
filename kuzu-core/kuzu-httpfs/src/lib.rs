@@ -10,6 +10,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The HTTPFS extension adds HTTP file system support to Kuzu.
 pub struct HttpfsExtension;
 
+impl Default for HttpfsExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpfsExtension {
     pub fn new() -> Self {
         Self

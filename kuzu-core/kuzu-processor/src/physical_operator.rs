@@ -913,7 +913,7 @@ impl PhysicalAggregate {
             .map(|name| parse_aggregate_function(name))
             .collect();
 
-        let mut states: Vec<AggValueState> = funcs.iter().map(|f| AggValueState::new(f)).collect();
+        let mut states: Vec<AggValueState> = funcs.iter().map(AggValueState::new).collect();
 
         for chunk in input {
             for row in 0..chunk.size {
@@ -998,7 +998,7 @@ impl PhysicalAggregate {
                 let states = if let Some(idx) = entry_idx {
                     &mut bucket[idx].1
                 } else {
-                    bucket.push((key, funcs.iter().map(|f| AggValueState::new(f)).collect()));
+                    bucket.push((key, funcs.iter().map(AggValueState::new).collect()));
                     &mut bucket.last_mut().unwrap().1
                 };
 
@@ -1030,7 +1030,7 @@ impl PhysicalAggregate {
         let mut group_keys: Vec<Value> = Vec::new();
         let mut agg_results: Vec<Vec<Value>> = (0..self.aggregate_functions.len()).map(|_| Vec::new()).collect();
 
-        for (_hash, bucket) in &groups {
+        for bucket in groups.values() {
             for (key, states) in bucket {
                 group_keys.push(key.clone());
                 for (i, state) in states.iter().enumerate() {
@@ -1544,9 +1544,9 @@ impl PhysicalIntersect {
                 }
 
                 // For each build side, emit the first matching row's payload values
-                for (_side_idx, matches) in matched_build_rows.iter().enumerate() {
-                    if let Some(&(b_ci, b_row)) = matches.first() {
-                        if let Some(chunk) = build_chunks.get(b_ci) {
+                for matches in matched_build_rows.iter() {
+                    if let Some(&(b_ci, b_row)) = matches.first()
+                        && let Some(chunk) = build_chunks.get(b_ci) {
                             for col in 0..chunk.fields.len() {
                                 let val = chunk.fields.get(col)
                                     .and_then(|f| f.get_value(b_row))
@@ -1554,7 +1554,6 @@ impl PhysicalIntersect {
                                 row_values.push(val);
                             }
                         }
-                    }
                 }
                 output_rows.push(row_values);
             }
@@ -1648,15 +1647,14 @@ impl PhysicalHashJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
                     // If semi_mask is active, extract node offset from INTERNAL_ID
-                    if let Some(m) = mask {
-                        if let Some(val) = field.get_value(row) {
+                    if let Some(m) = mask
+                        && let Some(val) = field.get_value(row) {
                             if let Value::InternalID(id) = val {
                                 m.mask(id.offset);
                             } else if let Value::Int64(offset) = val {
                                 m.mask(offset as u64);
                             }
                         }
-                    }
                     let key = field.get_value(row).unwrap_or(Value::Null);
                     // SQL semantics: NULL keys never match in a join
                     if matches!(key, Value::Null) {
@@ -1840,7 +1838,7 @@ impl PhysicalOperatorExec for PhysicalUnwind {
 fn evaluate_unwind_expr(expr: &kuzu_parser::ast::Expression) -> Value {
     match expr {
         kuzu_parser::ast::Expression::List(items) => {
-            let values: Vec<Value> = items.iter().map(|e| expr_to_value(e)).collect();
+            let values: Vec<Value> = items.iter().map(expr_to_value).collect();
             Value::List(values)
         }
         _ => Value::List(Vec::new()),
@@ -1884,13 +1882,12 @@ impl PhysicalOperatorExec for PhysicalSet {
 
         for chunk in &input {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.first() {
-                    if let Some(val) = field.get_i64(row) {
+                if let Some(field) = chunk.fields.first()
+                    && let Some(val) = field.get_i64(row) {
                         // Evaluate the SET value expression against the current row
                         let set_val = evaluate_expression_for_row(&self.value, chunk, row);
                         rows_to_update.push((val as u64, set_val));
                     }
-                }
             }
         }
 
@@ -1974,11 +1971,10 @@ impl PhysicalOperatorExec for PhysicalDelete {
         // If input has data, extract row indices from it
         for chunk in &input {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.first() {
-                    if let Some(val) = field.get_i64(row) {
+                if let Some(field) = chunk.fields.first()
+                    && let Some(val) = field.get_i64(row) {
                         rows_to_delete.push(val as u64);
                     }
-                }
             }
         }
 
@@ -2483,7 +2479,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
 
         let mut col_types = Vec::with_capacity(num_cols);
         for col in &node_table.columns {
-            col_types.push(col.logical_type.clone());
+            col_types.push(col.logical_type);
         }
 
         drop(node_table);
@@ -2681,8 +2677,8 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                         neighbors.iter().map(|(dst, edge_idx)| (*dst, *edge_idx as u64))
                     );
                     // Pre-compute edge weights
-                    if is_weighted {
-                        if let Some(col_idx) = weight_col_idx.get(&rel_table_id).and_then(|&c| c) {
+                    if is_weighted
+                        && let Some(col_idx) = weight_col_idx.get(&rel_table_id).and_then(|&c| c) {
                             for &(_dst, edge_idx) in neighbors {
                                 if let Some(weight_val) = rel_table.properties.get(col_idx).and_then(|col| col.get(edge_idx)) {
                                     let w = match weight_val {
@@ -2696,7 +2692,6 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                                 }
                             }
                         }
-                    }
                 }
                 for (&dst, neighbors) in rel_table.rev_adj.iter() {
                     rev_adj.entry(dst).or_default().extend(
@@ -2767,11 +2762,10 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                     let cur_depth = parents.get(&node).map(|&(_, _, d, _)| d).unwrap_or(0);
 
                     // If we already found a better path to this node, skip
-                    if let Some(&(_, _, _, best_cost)) = parents.get(&node) {
-                        if cur_cost > best_cost + 1e-9 {
+                    if let Some(&(_, _, _, best_cost)) = parents.get(&node)
+                        && cur_cost > best_cost + 1e-9 {
                             continue;
                         }
-                    }
 
                     if cur_depth >= self.upper_bound {
                         continue;

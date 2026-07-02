@@ -18,6 +18,12 @@ use kuzu_extension::{Extension, ExtensionContext};
 /// The JSON extension adds JSON data type and functions to Kuzu.
 pub struct JsonExtension;
 
+impl Default for JsonExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JsonExtension {
     pub fn new() -> Self {
         Self
@@ -256,7 +262,7 @@ fn contains_inner(haystack: &serde_json::Value, needle: &serde_json::Value) -> b
             // Check if needle is a subset of haystack
             n_map
                 .iter()
-                .all(|(k, v)| h_map.get(k).map_or(false, |hv| contains_inner(hv, v)))
+                .all(|(k, v)| h_map.get(k).is_some_and(|hv| contains_inner(hv, v)))
         }
         (serde_json::Value::Array(arr), _) => arr.iter().any(|v| contains_inner(v, needle)),
         (serde_json::Value::Object(map), _) => map.values().any(|v| contains_inner(v, needle)),

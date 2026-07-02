@@ -137,9 +137,9 @@ impl LocalStorage {
             }
             // Try node table first, then rel table
             if let Some(mut node_table) = catalog.get_node_table_mut(table_id) {
-                table_data.flush_to_node_table(&mut *node_table)?;
+                table_data.flush_to_node_table(&mut node_table)?;
             } else if let Some(mut rel_table) = catalog.get_rel_table_mut(table_id) {
-                table_data.flush_to_rel_table(&mut *rel_table)?;
+                table_data.flush_to_rel_table(&mut rel_table)?;
             }
         }
         Ok(())

@@ -769,8 +769,7 @@ impl Binder {
 
         // Register with catalog (separate lock for mutable access)
         let mut catalog = self.catalog.lock().unwrap();
-        catalog.create_index(&v.table_name, v.index_name.clone(), index_type, &v.property)
-            .map_err(|e| e)?;
+        catalog.create_index(&v.table_name, v.index_name.clone(), index_type, &v.property)?;
 
         Ok(BoundStatement::BoundCreateIndex(BoundCreateIndex {
             index_type,
@@ -1032,7 +1031,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_dml(&self, mut c: kuzu_parser::ast::CreateClause, variables: &[BoundVariable]) -> Result<BoundStatement, String> {
+    fn bind_create_dml(&self, c: kuzu_parser::ast::CreateClause, _variables: &[BoundVariable]) -> Result<BoundStatement, String> {
         let node = c.patterns.first().and_then(|p| p.node.as_ref()).ok_or("CREATE DML requires a node pattern")?;
         let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
 
@@ -1081,13 +1080,13 @@ impl Binder {
         if increment == 0 {
             return Err("INCREMENT must not be zero".into());
         }
-        let start_with = s.start_with.unwrap_or_else(|| {
+        let start_with = s.start_with.unwrap_or({
             if increment > 0 { 1 } else { -1 }
         });
-        let min_value = s.min_value.unwrap_or_else(|| {
+        let min_value = s.min_value.unwrap_or({
             if increment > 0 { 1 } else { i64::MIN }
         });
-        let max_value = s.max_value.unwrap_or_else(|| {
+        let max_value = s.max_value.unwrap_or({
             if increment > 0 { i64::MAX } else { -1 }
         });
         let cycle = s.cycle.unwrap_or(false);

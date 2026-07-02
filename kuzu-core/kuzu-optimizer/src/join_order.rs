@@ -164,11 +164,10 @@ fn extract_equality_join(expr: &kuzu_parser::ast::Expression) -> Option<(String,
         kuzu_parser::ast::Expression::BinaryOp(kuzu_parser::ast::BinaryOp::Equal, left, right) => {
             let left_var = extract_root_var(left);
             let right_var = extract_root_var(right);
-            if let (Some(lv), Some(rv)) = (&left_var, &right_var) {
-                if lv != rv {
+            if let (Some(lv), Some(rv)) = (&left_var, &right_var)
+                && lv != rv {
                     return Some((lv.clone(), rv.clone()));
                 }
-            }
             None
         }
         _ => None,

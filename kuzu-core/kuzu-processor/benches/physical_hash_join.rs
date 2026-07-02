@@ -40,7 +40,7 @@ fn bench_join_small(c: &mut Criterion) {
     let probe = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     c.bench_function("join/100_build_100_probe", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });
@@ -56,7 +56,7 @@ fn bench_join_medium(c: &mut Criterion) {
     let probe = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_build_1k_probe", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });
@@ -72,7 +72,7 @@ fn bench_join_large_build(c: &mut Criterion) {
     let probe = make_i64_chunk(&(0..100).collect::<Vec<i64>>());
     c.bench_function("join/10k_build_100_probe", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });
@@ -88,7 +88,7 @@ fn bench_join_large_probe(c: &mut Criterion) {
     let probe = make_i64_chunk(&(0..10_000).collect::<Vec<i64>>());
     c.bench_function("join/100_build_10k_probe", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });
@@ -104,7 +104,7 @@ fn bench_join_multi_column(c: &mut Criterion) {
     let probe = make_i64_chunk(&(0..1_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_multi_col_build_1k_probe", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });
@@ -120,7 +120,7 @@ fn bench_join_no_match(c: &mut Criterion) {
     let probe = make_i64_chunk(&(100_000..101_000).collect::<Vec<i64>>());
     c.bench_function("join/1k_no_match", |b| {
         b.iter(|| {
-            let result = join.execute(black_box(vec![build.clone(), probe.clone()]));
+            let result = join.execute_binary(black_box(&[build.clone()]), black_box(&[probe.clone()]));
             black_box(result.unwrap());
         })
     });

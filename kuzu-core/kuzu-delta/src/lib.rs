@@ -15,6 +15,12 @@ use std::sync::Arc;
 /// The Delta Lake extension enables querying Delta tables from Kuzu.
 pub struct DeltaExtension;
 
+impl Default for DeltaExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeltaExtension {
     pub fn new() -> Self {
         Self

@@ -462,7 +462,7 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
 
         // Determine number of pages needed: ceil(entries / slots_per_page)
         let num_entries = self.cache.len() as u32;
-        let pages_needed = (num_entries + self.slots_per_page - 1) / self.slots_per_page;
+        let pages_needed = num_entries.div_ceil(self.slots_per_page);
         let pages_needed = pages_needed.max(1);
 
         // Allocate pages if needed

@@ -24,6 +24,12 @@ use kuzu_graph::CSRAdjacency;
 /// The graph algorithms extension.
 pub struct AlgoExtension;
 
+impl Default for AlgoExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AlgoExtension {
     pub fn new() -> Self {
         Self
@@ -142,7 +148,7 @@ impl Extension for AlgoExtension {
                     if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
                         let cost = if offset == source as usize {
                             0.0
-                        } else if let Some(parent) = bfs.get_parent_list_head_offset(offset as u64) {
+                        } else if let Some(_parent) = bfs.get_parent_list_head_offset(offset as u64) {
                             // Walk back accumulating costs
                             let mut total = 0.0;
                             let mut cur = offset as u64;

@@ -155,7 +155,7 @@ impl StorageManager {
         // Register the index file with the BufferManager for persistence
         let mut bm = self.buffer_manager.lock().unwrap();
         let full_path = self.db_path.join(format!("{index_name}.art"));
-        let file_name = format!("{index_name}");
+        let file_name = index_name.to_string();
         if !bm.is_file_registered(&file_name) {
             bm.register_file(&file_name, full_path);
         }
@@ -363,22 +363,19 @@ impl StorageManager {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, table.columns.len());
                         if let Err(e) = table.insert_row(values) {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
+                            return Err(std::io::Error::other(
                                 format!("WAL recovery insert failed: {e}"),
                             ));
                         }
                     }
                 }
                 WALRecord::Delete { table_id, row_id } => {
-                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
-                        if let Err(e) = table.delete_row(*row_id) {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
+                    if let Some(mut table) = cat.get_node_table_mut(*table_id)
+                        && let Err(e) = table.delete_row(*row_id) {
+                            return Err(std::io::Error::other(
                                 format!("WAL recovery delete failed: {e}"),
                             ));
                         }
-                    }
                 }
                 WALRecord::Update {
                     table_id,
@@ -388,14 +385,12 @@ impl StorageManager {
                 } => {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, 1);
-                        if let Some(val) = values.into_iter().next() {
-                            if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
-                                return Err(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
+                        if let Some(val) = values.into_iter().next()
+                            && let Err(e) = table.update_cell(*row_id, *column as usize, val) {
+                                return Err(std::io::Error::other(
                                     format!("WAL recovery update failed: {e}"),
                                 ));
                             }
-                        }
                     }
                 }
                 WALRecord::ColumnWrite { .. } => {
@@ -499,11 +494,10 @@ pub(crate) fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) 
                 if cursor.read_exact(&mut len_buf).is_ok() {
                     let len = u32::from_le_bytes(len_buf) as usize;
                     let mut str_buf = vec![0u8; len];
-                    if cursor.read_exact(&mut str_buf).is_ok() {
-                        if let Ok(s) = String::from_utf8(str_buf) {
+                    if cursor.read_exact(&mut str_buf).is_ok()
+                        && let Ok(s) = String::from_utf8(str_buf) {
                             values.push(Value::String(s));
                         }
-                    }
                 }
             }
             TAG_DATE => {
