@@ -82,7 +82,7 @@ impl Binder {
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
             Statement::Call(c) => self.bind_call(c),
-            Statement::CreateDml(c) => self.bind_create_dml(c),
+            Statement::CreateDml(c) => self.bind_create_dml(c, &[]),
             Statement::Explain(e) => self.bind_explain(e),
             Statement::CreateSequence(s) => self.bind_create_sequence(s),
             Statement::DropSequence(s) => self.bind_drop_sequence(s),
@@ -166,7 +166,7 @@ impl Binder {
                     (BoundClause::BoundUnwind(bound), vec![new_var])
                 }
                 Clause::Foreach(f) => {
-                    let bound = self.bind_foreach(&f)?;
+                    let bound = self.bind_foreach(&f, &variables)?;
                     let new_var = BoundVariable {
                         name: bound.variable.clone(),
                         table_id: 0,
@@ -866,7 +866,7 @@ impl Binder {
         })
     }
 
-    fn bind_foreach(&self, f: &kuzu_parser::ast::ForeachClause) -> Result<BoundForeachClause, String> {
+    fn bind_foreach(&self, f: &kuzu_parser::ast::ForeachClause, variables: &[BoundVariable]) -> Result<BoundForeachClause, String> {
         // Validate the expression is a list
         match &f.expression {
             kuzu_parser::ast::Expression::List(_) | kuzu_parser::ast::Expression::Variable(_) => {}
@@ -880,28 +880,39 @@ impl Binder {
         if f.variable.is_empty() {
             return Err("FOREACH requires a variable name".into());
         }
+        // Create a new variable scope for the foreach body
+        let mut local_vars = variables.to_vec();
+        local_vars.push(BoundVariable {
+            name: f.variable.clone(),
+            table_id: 0,
+            label: None,
+            is_node: false,
+        });
+
         // Bind sub-statements
         let mut sub_statements = Vec::new();
         for clause in &f.clauses {
             match clause {
                 kuzu_parser::ast::Clause::Create(cc) => {
                     // Bind as DML CREATE (BoundCreateDml), not as a MATCH clause
-                    let bound = self.bind_create_dml(cc.clone())?;
+                    let bound = self.bind_create_dml(cc.clone(), &local_vars)?;
                     sub_statements.push(bound);
                 }
-                kuzu_parser::ast::Clause::Set(_sc) => {
-                    // Wrap SET as a BoundQuery
-                    let q = kuzu_parser::ast::Query {
-                        clauses: vec![clause.clone()],
-                    };
-                    sub_statements.push(self.bind_query(q)?);
+                kuzu_parser::ast::Clause::Set(sc) => {
+                    // Manually wrap SET in BoundQuery to preserve variable scope
+                    let bound_set = self.bind_set(sc, &local_vars)?;
+                    sub_statements.push(BoundStatement::BoundQuery(BoundQuery {
+                        clauses: vec![BoundClause::BoundSet(bound_set)],
+                        variables: local_vars.clone(),
+                    }));
                 }
-                kuzu_parser::ast::Clause::Delete(_dc) => {
-                    // Wrap DELETE as a BoundQuery
-                    let q = kuzu_parser::ast::Query {
-                        clauses: vec![clause.clone()],
-                    };
-                    sub_statements.push(self.bind_query(q)?);
+                kuzu_parser::ast::Clause::Delete(dc) => {
+                    // Manually wrap DELETE in BoundQuery to preserve variable scope
+                    let bound_delete = self.bind_delete(dc, &local_vars)?;
+                    sub_statements.push(BoundStatement::BoundQuery(BoundQuery {
+                        clauses: vec![BoundClause::BoundDelete(bound_delete)],
+                        variables: local_vars.clone(),
+                    }));
                 }
                 _ => {
                     return Err(format!("Unsupported FOREACH sub-clause: {:?}", clause));
@@ -1021,7 +1032,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_dml(&self, c: kuzu_parser::ast::CreateClause) -> Result<BoundStatement, String> {
+    fn bind_create_dml(&self, mut c: kuzu_parser::ast::CreateClause, variables: &[BoundVariable]) -> Result<BoundStatement, String> {
         let node = c.patterns.first().and_then(|p| p.node.as_ref()).ok_or("CREATE DML requires a node pattern")?;
         let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
 

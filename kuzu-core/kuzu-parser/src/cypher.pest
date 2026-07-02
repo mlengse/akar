@@ -103,7 +103,7 @@ escape_option = { "ESCAPE" ~ string }
 quote_option = { "QUOTE" ~ string }
 
 set_clause = { "SET" ~ set_item ~ ("," ~ set_item)* }
-set_item = { expression ~ "=" ~ expression }
+set_item = { postfix_expr ~ "=" ~ expression }
 
 merge_clause = { "MERGE" ~ pattern ~ on_create_set? ~ on_match_set? }
 
@@ -124,30 +124,31 @@ foreach_body = { create_clause_inline | set_clause | delete_clause }
 create_clause_inline = { "CREATE" ~ pattern }
 
 query_statement = {
-    match_clause ~ with_clause ~ return_clause
+    match_clause ~ optional_match_clause ~ where_clause ~ return_clause
+    | match_clause ~ optional_match_clause ~ return_clause
+    | match_clause ~ optional_match_clause
     | match_clause ~ where_clause ~ with_clause ~ return_clause
-    | match_clause ~ return_clause
-    | match_clause ~ where_clause ~ return_clause
-    | match_clause ~ where_clause ~ delete_clause
-    | match_clause ~ delete_clause
+    | match_clause ~ with_clause ~ return_clause
+    | match_clause ~ with_clause
+    | match_clause ~ where_clause ~ foreach_clause ~ return_clause?
+    | match_clause ~ foreach_clause ~ return_clause?
+    | match_clause ~ foreach_clause ~ set_clause
+    | match_clause ~ foreach_clause ~ delete_clause
     | match_clause ~ where_clause ~ set_clause
     | match_clause ~ set_clause
-    | match_clause ~ optional_match_clause ~ return_clause
-    | match_clause ~ optional_match_clause ~ where_clause ~ return_clause
-    | match_clause ~ optional_match_clause
-    | match_clause ~ with_clause
-    | merge_clause ~ on_create_set? ~ on_match_set? ~ return_clause?
+    | match_clause ~ where_clause ~ delete_clause
+    | match_clause ~ delete_clause
+    | match_clause ~ where_clause ~ create_clause_inline
+    | match_clause ~ create_clause_inline
+    | match_clause ~ where_clause ~ return_clause
+    | match_clause ~ return_clause
+    | match_clause ~ where_clause
     | match_clause
-    | return_clause
+    | merge_clause ~ on_create_set? ~ on_match_set? ~ return_clause?
     | unwind_clause ~ return_clause
     | unwind_clause
     | foreach_clause
-    | match_clause ~ foreach_clause ~ return_clause?
-    | match_clause ~ where_clause ~ foreach_clause ~ return_clause?
-    | match_clause ~ foreach_clause ~ set_clause
-    | match_clause ~ foreach_clause ~ delete_clause
-    | match_clause ~ create_clause_inline
-    | match_clause ~ where_clause ~ create_clause_inline
+    | return_clause
 }
 
 // ==================== DDL ====================

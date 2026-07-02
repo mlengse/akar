@@ -2481,6 +2481,11 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
             }
         }
 
+        let mut col_types = Vec::with_capacity(num_cols);
+        for col in &node_table.columns {
+            col_types.push(col.logical_type.clone());
+        }
+
         drop(node_table);
 
         // Convert column-major Vec<Vec<Value>> to DataChunks
@@ -2501,7 +2506,32 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
 
             for col_idx in 0..num_cols {
                 let col_data = &output_columns[col_idx];
-                let mut vv = ValueVector::new(PhysicalTypeID::Any, count);
+                let phys_type = match col_types[col_idx] {
+                    kuzu_common::types::LogicalTypeID::Bool => PhysicalTypeID::Bool,
+                    kuzu_common::types::LogicalTypeID::Int64 | kuzu_common::types::LogicalTypeID::Serial => PhysicalTypeID::Int64,
+                    kuzu_common::types::LogicalTypeID::Int32 => PhysicalTypeID::Int32,
+                    kuzu_common::types::LogicalTypeID::Int16 => PhysicalTypeID::Int16,
+                    kuzu_common::types::LogicalTypeID::Int8 => PhysicalTypeID::Int8,
+                    kuzu_common::types::LogicalTypeID::UInt64 => PhysicalTypeID::UInt64,
+                    kuzu_common::types::LogicalTypeID::UInt32 => PhysicalTypeID::UInt32,
+                    kuzu_common::types::LogicalTypeID::UInt16 => PhysicalTypeID::UInt16,
+                    kuzu_common::types::LogicalTypeID::UInt8 => PhysicalTypeID::UInt8,
+                    kuzu_common::types::LogicalTypeID::Double => PhysicalTypeID::Double,
+                    kuzu_common::types::LogicalTypeID::Float => PhysicalTypeID::Float,
+                    kuzu_common::types::LogicalTypeID::String => PhysicalTypeID::String,
+                    kuzu_common::types::LogicalTypeID::Blob => PhysicalTypeID::Blob,
+                    kuzu_common::types::LogicalTypeID::Date => PhysicalTypeID::Int32,
+                    kuzu_common::types::LogicalTypeID::Timestamp => PhysicalTypeID::Int64,
+                    kuzu_common::types::LogicalTypeID::Interval => PhysicalTypeID::Interval,
+                    kuzu_common::types::LogicalTypeID::List => PhysicalTypeID::List,
+                    kuzu_common::types::LogicalTypeID::Array => PhysicalTypeID::Array,
+                    kuzu_common::types::LogicalTypeID::Struct => PhysicalTypeID::Struct,
+                    kuzu_common::types::LogicalTypeID::Node => PhysicalTypeID::Struct,
+                    kuzu_common::types::LogicalTypeID::Rel => PhysicalTypeID::Struct,
+                    kuzu_common::types::LogicalTypeID::InternalID => PhysicalTypeID::Struct, // Internal IDs are Structs
+                    _ => PhysicalTypeID::Any,
+                };
+                let mut vv = ValueVector::new(phys_type, count);
                 vv.resize(count);
                 for row_offset in 0..count {
                     let val = &col_data[start + row_offset];

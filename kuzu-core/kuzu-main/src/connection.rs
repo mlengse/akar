@@ -471,11 +471,53 @@ impl Connection {
                 }
             },
         );
+
+        let db = self.database.clone();
+        let subquery_fn: Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<kuzu_common::vector::DataChunk>, String> + Send + Sync> = Arc::new(
+            move |query: &kuzu_parser::ast::Query| -> Result<Vec<kuzu_common::vector::DataChunk>, String> {
+                let stmt = kuzu_parser::ast::Statement::Query(query.clone());
+                let binder = Binder::new(db.catalog.clone());
+                let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
+                let planner = QueryPlanner::new();
+                let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
+                let optimizer = Optimizer::with_stats(db.stats_store.clone());
+                let optimized_plan = optimizer.optimize(logical_plan);
+                
+                let catalog_inner = db.catalog.clone();
+                let seq_fn_inner: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
+                    move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
+                        let mut cat = catalog_inner.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                        if is_nextval {
+                            match cat.get_sequence_mut(seq_name) {
+                                Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
+                                None => Err(format!("Sequence '{}' not found", seq_name)),
+                            }
+                        } else {
+                            match cat.get_sequence(seq_name) {
+                                Some(entry) => Ok(Value::Int64(entry.curr_val())),
+                                None => Err(format!("Sequence '{}' not found", seq_name)),
+                            }
+                        }
+                    }
+                );
+                
+                let processor = QueryProcessor::with_catalog(
+                    db.function_registry.clone(),
+                    db.storage_manager.table_catalog(),
+                )
+                .with_sequence_fn(seq_fn_inner);
+                // Note: Not attaching subquery_fn recursively to avoid complex ARC dependencies for now.
+                
+                processor.execute(&optimized_plan).map_err(|e| format!("Execute error: {e}"))
+            }
+        );
+
         QueryProcessor::with_catalog(
             self.database.function_registry.clone(),
             self.database.storage_manager.table_catalog(),
         )
         .with_sequence_fn(seq_fn)
+        .with_subquery_fn(subquery_fn)
     }
 
     /// The checkpoint_threshold config controls this:
@@ -552,6 +594,13 @@ impl Connection {
                                 }
                             }
                         }
+                    }
+                }
+                // Auto-create ART index for primary key
+                if t.columns.iter().any(|c| c.is_primary_key) {
+                    let index_name = format!("{}_pk_idx", t.name);
+                    if let Err(e) = self.database.storage_manager.create_art_index(&t.name, &index_name) {
+                        tracing::warn!("Failed to create ART index for table {}: {}", t.name, e);
                     }
                 }
 

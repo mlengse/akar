@@ -23,6 +23,8 @@ pub struct QueryProcessor {
     /// Callback for sequence operations (nextval/currval).
     /// Takes (sequence_name, is_nextval) and returns the resulting value.
     sequence_fn: Option<Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>>,
+    /// Callback for executing subqueries.
+    subquery_fn: Option<Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>,
 }
 
 impl QueryProcessor {
@@ -31,6 +33,7 @@ impl QueryProcessor {
             function_registry: None,
             table_catalog: None,
             sequence_fn: None,
+            subquery_fn: None,
         }
     }
 
@@ -40,6 +43,7 @@ impl QueryProcessor {
             function_registry: Some(registry),
             table_catalog: None,
             sequence_fn: None,
+            subquery_fn: None,
         }
     }
 
@@ -49,12 +53,19 @@ impl QueryProcessor {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
             sequence_fn: None,
+            subquery_fn: None,
         }
     }
 
     /// Set the sequence operation callback (for nextval/currval).
     pub fn with_sequence_fn(mut self, f: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>) -> Self {
         self.sequence_fn = Some(f);
+        self
+    }
+
+    /// Set the subquery operation callback.
+    pub fn with_subquery_fn(mut self, f: Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>) -> Self {
+        self.subquery_fn = Some(f);
         self
     }
 
@@ -279,6 +290,9 @@ impl QueryProcessor {
                             if let Some(ref seq_fn) = self.sequence_fn {
                                 eval = eval.with_sequence_fn(seq_fn.clone());
                             }
+                            if let Some(ref subquery_fn) = self.subquery_fn {
+                                eval = eval.with_subquery_fn(subquery_fn.clone());
+                            }
                             Arc::new(Mutex::new(eval))
                         });
                     let filter = if let Some(eval) = evaluator {
@@ -319,6 +333,9 @@ impl QueryProcessor {
                         let mut eval = ExpressionEvaluator::new(registry);
                         if let Some(ref seq_fn) = self.sequence_fn {
                             eval = eval.with_sequence_fn(seq_fn.clone());
+                        }
+                        if let Some(ref subquery_fn) = self.subquery_fn {
+                            eval = eval.with_subquery_fn(subquery_fn.clone());
                         }
 
                         let mut output = Vec::with_capacity(input.len());

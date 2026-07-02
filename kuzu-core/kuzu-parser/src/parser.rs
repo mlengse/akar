@@ -887,6 +887,10 @@ fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnIte
             }
         }
     }
+    if items.is_empty() {
+        // If there are no return_item children, it must be the `*` branch in the grammar.
+        items.push(ReturnItem { expression: Expression::Star, alias: None });
+    }
     Ok(items)
 }
 
@@ -940,7 +944,6 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             | Rule::additive_expr
             | Rule::multiplicative_expr
             | Rule::unary_expr
-            | Rule::postfix_expr
     ) {
         if children.len() == 1 {
             return parse_expression(children[0].clone());
@@ -1029,6 +1032,20 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             }
             Ok(Expression::Map(entries))
         }
+        Rule::postfix_expr => {
+            let mut children = pair.clone().into_inner();
+            let mut result = parse_expression(children.next().ok_or("Empty postfix")?)?;
+            for child in children {
+                match child.as_rule() {
+                    Rule::property_access => {
+                        let prop = child.into_inner().next().unwrap().as_str().to_string();
+                        result = Expression::PropertyAccess(Box::new(result), prop);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(result)
+        }
         Rule::exists_subquery => {
             // EXISTS { MATCH ... }
             for c in children {
@@ -1084,12 +1101,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
             Ok(Expression::FunctionCall(name, args))
         }
         Rule::property_access => {
-            let name = children
-                .into_iter()
-                .next()
-                .map(|p| p.as_str().to_string())
-                .ok_or("Empty property")?;
-            Ok(Expression::Variable(name))
+            Err("property_access should be handled within postfix_expr".into())
         }
         _ => {
             // Try unwrapping single child
