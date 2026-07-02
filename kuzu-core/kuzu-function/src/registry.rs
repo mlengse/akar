@@ -73,6 +73,10 @@ pub enum ScalarFunction {
     Hash {
         op: HashOp,
     },
+    /// Interval constructor functions.
+    Interval {
+        op: IntervalOp,
+    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -95,6 +99,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
             Self::SequenceOp { is_nextval } => f.debug_struct("SequenceOp").field("is_nextval", is_nextval).finish(),
             Self::Hash { op } => f.debug_struct("Hash").field("op", op).finish(),
+            Self::Interval { op } => f.debug_struct("Interval").field("op", op).finish(),
         }
     }
 }
@@ -336,6 +341,29 @@ pub enum HashOp {
     Md5,
     Sha256,
     Hash,
+}
+
+/// Interval constructor functions — ported from C++ `function/interval/`.
+///
+/// Each takes INT64 and returns INTERVAL:
+/// - `TO_YEARS(n)` → months = n * 12
+/// - `TO_MONTHS(n)` → months = n
+/// - `TO_DAYS(n)` → days = n
+/// - `TO_HOURS(n)` → micros = n * 3_600_000_000
+/// - `TO_MINUTES(n)` → micros = n * 60_000_000
+/// - `TO_SECONDS(n)` → micros = n * 1_000_000
+/// - `TO_MILLISECONDS(n)` → micros = n * 1000
+/// - `TO_MICROSECONDS(n)` → micros = n
+#[derive(Debug, Clone, Copy)]
+pub enum IntervalOp {
+    ToYears,
+    ToMonths,
+    ToDays,
+    ToHours,
+    ToMinutes,
+    ToSeconds,
+    ToMilliseconds,
+    ToMicroseconds,
 }
 
 // ==================== Aggregate Function Types ====================

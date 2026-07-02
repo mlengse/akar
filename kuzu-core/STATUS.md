@@ -352,7 +352,7 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 | # | Grup | Fungsi | Alasan |
 |---|------|--------|--------|
 | **7** | **Timestamp** (4) ✅ sudah | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | `DateOp` sudah ada ✅ — tinggal tambah variant ke enum + `evaluate_date()` |
-| **8** | **Interval** (8) | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | `Interval` type ✅ sudah di types.rs — perlu enum `IntervalOp` baru + evaluator |
+| **8** | **Interval** (8) ✅ sudah | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | `Interval` type ✅ sudah di types.rs — perlu enum `IntervalOp` baru + evaluator |
 | **9** | **Blob** (3) | `ENCODE`, `DECODE`, `OCTET_LENGTH` | `Blob` type ✅ sudah ada — encoding/decoding via `_base64` crate |
 
 ##### 🏆 Level 3 — Paling Kompleks

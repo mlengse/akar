@@ -96,6 +96,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Array { op } => evaluate_array(*op, args),
         ScalarFunction::Path { op } => evaluate_path(*op, args),
         ScalarFunction::Hash { op } => evaluate_hash(*op, args),
+        ScalarFunction::Interval { op } => evaluate_interval(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => {
@@ -1511,6 +1512,28 @@ fn evaluate_hash(op: HashOp, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Int64(h as i64))
         }
     }
+}
+
+// ==================== Interval constructor functions ====================
+
+/// Evaluate an interval constructor function.
+/// Each takes a single INT64 argument and returns an INTERVAL value.
+fn evaluate_interval(op: IntervalOp, args: &[Value]) -> Result<Value, String> {
+    let n = match &args[0] {
+        Value::Int64(x) => *x,
+        _ => return Err("Interval functions require integer argument".into()),
+    };
+    let interval = match op {
+        IntervalOp::ToYears => Interval::new((n * 12) as i32, 0, 0),
+        IntervalOp::ToMonths => Interval::new(n as i32, 0, 0),
+        IntervalOp::ToDays => Interval::new(0, n as i32, 0),
+        IntervalOp::ToHours => Interval::new(0, 0, n * 3_600_000_000),
+        IntervalOp::ToMinutes => Interval::new(0, 0, n * 60_000_000),
+        IntervalOp::ToSeconds => Interval::new(0, 0, n * 1_000_000),
+        IntervalOp::ToMilliseconds => Interval::new(0, 0, n * 1000),
+        IntervalOp::ToMicroseconds => Interval::new(0, 0, n),
+    };
+    Ok(Value::Interval(interval))
 }
 
 fn evaluate_boolean(op: BooleanOp, args: &[Value]) -> Result<Value, String> {
@@ -3038,6 +3061,64 @@ mod tests {
         // 1 ms = 1000 micros → 1 ms
         let result = evaluate_scalar(&func, &[Value::Timestamp(Timestamp(1000))]).unwrap();
         assert_eq!(result, Value::Int64(1));
+    }
+
+    // --- Interval constructor function tests ---
+
+    #[test]
+    fn test_to_years() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToYears };
+        let result = evaluate_scalar(&func, &[Value::Int64(3)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(36, 0, 0)));
+    }
+
+    #[test]
+    fn test_to_months() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToMonths };
+        let result = evaluate_scalar(&func, &[Value::Int64(5)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(5, 0, 0)));
+    }
+
+    #[test]
+    fn test_to_days() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToDays };
+        let result = evaluate_scalar(&func, &[Value::Int64(10)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 10, 0)));
+    }
+
+    #[test]
+    fn test_to_hours() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToHours };
+        let result = evaluate_scalar(&func, &[Value::Int64(2)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 0, 7_200_000_000)));
+    }
+
+    #[test]
+    fn test_to_minutes() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToMinutes };
+        let result = evaluate_scalar(&func, &[Value::Int64(30)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 0, 1_800_000_000)));
+    }
+
+    #[test]
+    fn test_to_seconds() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToSeconds };
+        let result = evaluate_scalar(&func, &[Value::Int64(45)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 0, 45_000_000)));
+    }
+
+    #[test]
+    fn test_to_milliseconds() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToMilliseconds };
+        let result = evaluate_scalar(&func, &[Value::Int64(500)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 0, 500_000)));
+    }
+
+    #[test]
+    fn test_to_microseconds() {
+        let func = ScalarFunction::Interval { op: IntervalOp::ToMicroseconds };
+        let result = evaluate_scalar(&func, &[Value::Int64(999)]).unwrap();
+        assert_eq!(result, Value::Interval(Interval::new(0, 0, 999)));
     }
 
     // --- List function tests ---
