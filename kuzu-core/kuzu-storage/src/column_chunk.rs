@@ -43,6 +43,8 @@ pub struct ColumnChunk {
     /// Optional MVCC update version chain for this chunk.
     /// Tracks versioned updates to support snapshot isolation.
     pub update_info: Option<UpdateInfo>,
+    /// Min/max stats for zone map predicate pushdown.
+    pub stats: crate::predicate::ColumnChunkStats,
 }
 
 impl ColumnChunk {
@@ -52,6 +54,7 @@ impl ColumnChunk {
             values: Vec::with_capacity(NODE_GROUP_SIZE),
             capacity: NODE_GROUP_SIZE,
             update_info: None,
+            stats: crate::predicate::ColumnChunkStats::new(None, None),
         }
     }
 
@@ -61,6 +64,7 @@ impl ColumnChunk {
             values: Vec::with_capacity(capacity),
             capacity,
             update_info: None,
+            stats: crate::predicate::ColumnChunkStats::new(None, None),
         }
     }
 
@@ -80,6 +84,7 @@ impl ColumnChunk {
     /// Does **not** automatically flush when full — the caller should check
     /// `is_full()` and call `flush_to_column()` at the appropriate time.
     pub fn append(&mut self, value: Value) {
+        self.stats.update(&value);
         self.values.push(value);
     }
 
@@ -102,6 +107,7 @@ impl ColumnChunk {
             // get_value_with_snapshot using the real commit timestamps.
             ui.append_update(idx as u32, u64::MAX, old_data);
         }
+        self.stats.update(&value);
         self.values[idx] = value;
         Ok(())
     }
@@ -232,10 +238,15 @@ impl Default for ColumnChunk {
 impl From<Vec<Value>> for ColumnChunk {
     fn from(values: Vec<Value>) -> Self {
         let capacity = values.len().max(NODE_GROUP_SIZE);
+        let mut stats = crate::predicate::ColumnChunkStats::new(None, None);
+        for v in &values {
+            stats.update(v);
+        }
         Self {
             values,
             capacity,
             update_info: None,
+            stats,
         }
     }
 }

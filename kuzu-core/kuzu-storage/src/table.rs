@@ -289,10 +289,28 @@ impl NodeTable {
     ///
     /// Used by the processor (`resolve_scan_data`) for backward compatibility.
     pub fn to_column_major_data(&self) -> Vec<Vec<Value>> {
+        self.to_column_major_data_with_predicate(None)
+    }
+
+    /// Like `to_column_major_data`, but applies an optional zone map predicate
+    /// `(col_idx, op_string, val)` to skip entire node groups.
+    pub fn to_column_major_data_with_predicate(
+        &self,
+        predicate: Option<(usize, &str, &Value)>,
+    ) -> Vec<Vec<Value>> {
         let num_cols = self.columns.len();
-        let mut result = vec![Vec::with_capacity(self.num_rows as usize); num_cols];
+        let mut result = vec![Vec::new(); num_cols]; // Avoid allocating self.num_rows if we skip chunks
 
         for group in &self.node_groups {
+            if let Some((col_idx, op, val)) = predicate {
+                if let Some(col_chunk) = group.columns.get(col_idx) {
+                    use crate::predicate::{check_zone_map, ZoneMapCheckResult};
+                    if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
+                        continue; // Skip this entire node group
+                    }
+                }
+            }
+
             for row in 0..group.num_nodes as usize {
                 for col in 0..num_cols {
                     match group.get_value(row, col) {

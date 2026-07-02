@@ -1,0 +1,9 @@
+- `[x]` **Prioritas 0**: Fix binary operators (HashJoin, CrossProduct, SemiJoin, AntiJoin)
+  - `[x]` Planner: Revert flattening for binary joins.
+  - `[x]` Processor: `PhysicalOperatorExec` → `execute_binary`.
+  - `[x]` Refactor `derive_join_column_indices`
+  - `[x]` Processor: recursively execute sub-plans via `execute`.
+  - `[x]` Tests passing.
+- `[ ]` SIP/SemiMask Optimization Verification
+- `[ ]` Weighted RecursiveExtend cost & Intersect enhancements
+- `[ ]` Maintenance: Cleanup clippy warnings

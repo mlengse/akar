@@ -59,6 +59,7 @@ pub const INVALID_PAGE_IDX: u64 = u64::MAX;
 ///
 /// Uses multiple `BTreeSet<PageRange>` organized by power-of-2 levels.
 /// Level `i` stores ranges whose size is in `[2^i, 2^{i+1})`.
+#[derive(Debug)]
 pub struct FreeSpaceManager {
     /// One sorted free list per power-of-2 level.
     free_lists: Vec<BTreeSet<PageRange>>,

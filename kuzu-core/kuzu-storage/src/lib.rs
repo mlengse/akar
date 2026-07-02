@@ -1369,4 +1369,53 @@ mod integration_tests {
             assert_eq!(t.num_rows, 2, "Should have 2 rows after commit");
         }
     }
+    #[test]
+    fn test_zone_map_pushdown() {
+        use crate::table::{NodeTable, ColumnDefinition};
+        use kuzu_common::types::{LogicalTypeID, Value};
+        use crate::column_chunk::NODE_GROUP_SIZE;
+
+        let db_path = "test_zone_map_pushdown.db";
+        let _ = std::fs::remove_file(db_path);
+
+        let mut table = NodeTable::new(
+            0,
+            db_path.to_string(),
+            vec![
+                ColumnDefinition {
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    name: "value".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        );
+
+        // Insert exactly one node group of elements with values 0 to 4095
+        for i in 0..NODE_GROUP_SIZE as i64 {
+            table.insert_row(vec![Value::Int64(i), Value::Int64(i)]).unwrap();
+        }
+
+        // Insert a second node group of elements with values 4096 to 8191
+        for i in 0..NODE_GROUP_SIZE as i64 {
+            let val = i + NODE_GROUP_SIZE as i64;
+            table.insert_row(vec![Value::Int64(val), Value::Int64(val)]).unwrap();
+        }
+
+        // Query with a predicate: id > 5000.
+        // The first node group (max id = 4095) should be completely skipped.
+        let predicate = Some((0, ">", &Value::Int64(5000)));
+        let data = table.to_column_major_data_with_predicate(predicate);
+
+        // data is Vec<Vec<Value>> where data[col][row].
+        // Total rows should be 4096 instead of 8192 because the first node group is skipped.
+        assert_eq!(data[0].len(), NODE_GROUP_SIZE, "Only the second chunk should be returned");
+        assert_eq!(data[0][0], Value::Int64(NODE_GROUP_SIZE as i64), "First element should be from the second chunk");
+
+        let _ = std::fs::remove_file(db_path);
+    }
 }

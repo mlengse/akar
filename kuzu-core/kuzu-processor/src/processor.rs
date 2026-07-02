@@ -59,14 +59,18 @@ impl QueryProcessor {
     }
 
     /// Resolve table data and column definitions for a scan node.
-    fn resolve_scan_data(&self, table_name: &str) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
+    fn resolve_scan_data<'a>(
+        &self,
+        table_name: &str,
+        predicate: Option<(usize, &'a str, &'a Value)>,
+    ) -> (Option<Vec<Vec<Value>>>, Vec<ColumnDefinition>, u64) {
         if let Some(ref tc) = self.table_catalog {
             // Try node table first
             if let Some(node_table) = tc.get_node_table_by_name(table_name) {
                 let num_rows = node_table.num_rows;
                 if num_rows > 0 {
                     return (
-                        Some(node_table.to_column_major_data()),
+                        Some(node_table.to_column_major_data_with_predicate(predicate)),
                         node_table.columns.clone(),
                         num_rows,
                     );
@@ -77,7 +81,7 @@ impl QueryProcessor {
                 let num_rows = rel_table.num_rows;
                 if num_rows > 0 {
                     return (
-                        Some(rel_table.to_column_major_data()),
+                        Some(rel_table.to_column_major_data()), // Rel tables don't have zone map yet
                         rel_table.columns.clone(),
                         num_rows,
                     );
@@ -101,8 +105,46 @@ impl QueryProcessor {
         )
     }
 
+    fn extract_zone_map_predicate(
+        expr: &Expression,
+        columns: &[String],
+    ) -> Option<(usize, String, Value)> {
+        if let Expression::BinaryOp(op, left, right) = expr {
+            let op_str = match op {
+                kuzu_parser::ast::BinaryOp::Equal => "=",
+                kuzu_parser::ast::BinaryOp::GreaterThan => ">",
+                kuzu_parser::ast::BinaryOp::LessThan => "<",
+                kuzu_parser::ast::BinaryOp::GreaterThanOrEqual => ">=",
+                kuzu_parser::ast::BinaryOp::LessThanOrEqual => "<=",
+                kuzu_parser::ast::BinaryOp::NotEqual => "!=",
+                _ => return None,
+            };
+            if let Expression::Variable(var_name) = &**left {
+                if let Expression::Constant(c) = &**right {
+                    let col_name = var_name.split('.').last().unwrap_or(var_name);
+                    if let Some(col_idx) = columns.iter().position(|c| c == col_name) {
+                        let val = match c {
+                            kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
+                            kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
+                            kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
+                            kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
+                            kuzu_parser::ast::Constant::Null => Value::Null,
+                        };
+                        return Some((col_idx, op_str.to_string(), val));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Execute a sequence of logical operators by mapping them to physical operators.
     pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, String> {
+        let mut sip_masks = std::collections::HashMap::new();
+        self.execute_internal(operators, &mut sip_masks)
+    }
+
+    fn execute_internal(&self, operators: &[LogicalOperator], sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>) -> Result<Vec<DataChunk>, String> {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
@@ -117,24 +159,51 @@ impl QueryProcessor {
         // Execute each logical operator
         let mut intermediate_result: Option<Vec<DataChunk>> = None;
 
-        for op in operators {
+        for (i, op) in operators.iter().enumerate() {
             match op {
                 LogicalOperator::ScanNode(s) => {
-                    let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name);
+                    let mut pred_owned = None;
+                    if let Some(LogicalOperator::Filter(f)) = operators.get(i + 1) {
+                        pred_owned = Self::extract_zone_map_predicate(&f.expression, &s.columns);
+                    }
+                    
+                    let pred_ref = pred_owned.as_ref().map(|(idx, op_str, val)| (*idx, op_str.as_str(), val));
+                    let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name, pred_ref);
                     let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
+                    if let Some(mask) = sip_masks.get(&s.table_id) {
+                        scan = scan.with_semi_mask(mask.clone(), 0);
+                    }
                     if let Some(d) = data {
                         scan = scan.with_data(d, columns);
                     }
-                    let result = scan.execute(current.clone())?;
-                    // Accumulate: extend rather than replace so multiple scans feeding a
-                    // HashJoin/CrossProduct all appear in the same input batch.
+                    let mut result = scan.execute(current.clone())?;
+                    let prefix = s.alias.as_ref().unwrap_or(&s.table_name);
+                    for chunk in &mut result {
+                        chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
+                    }
                     match &mut intermediate_result {
                         Some(existing) => existing.extend(result),
                         None => intermediate_result = Some(result),
                     }
                 }
+                LogicalOperator::SemiMasker(s) => {
+                    let mut mask = NodeSemiMask::new(s.table_id);
+                    let masker = PhysicalSemiMasker {
+                        key_column: s.key_column,
+                        mask: mask.clone(),
+                    };
+                    
+                    let result = if let Some(existing) = intermediate_result.take() {
+                        masker.execute(existing)?
+                    } else {
+                        masker.execute(current.clone())?
+                    };
+                    
+                    sip_masks.insert(s.table_id, mask);
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::ScanRel(s) => {
-                    let (data, columns, _num_rows) = self.resolve_scan_data(&s.table_name);
+                    let (data, columns, _num_rows) = self.resolve_scan_data(&s.table_name, None);
                     let scan = PhysicalScanRel {
                         table_name: s.table_name.clone(),
                         table_id: s.table_id,
@@ -142,7 +211,11 @@ impl QueryProcessor {
                         table_data: data,
                         table_columns: columns,
                     };
-                    let result = scan.execute(current.clone())?;
+                    let mut result = scan.execute(current.clone())?;
+                    let prefix = &s.table_name;
+                    for chunk in &mut result {
+                        chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
+                    }
                     // Accumulate: extend rather than replace.
                     match &mut intermediate_result {
                         Some(existing) => existing.extend(result),
@@ -307,35 +380,48 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::HashJoin(h) => {
-                    let input = intermediate_result.take().unwrap_or_default();
-                    // Derive actual join column indices from the join key expressions
-                    // and the field names embedded in the accumulated input chunks.
+                    let left_ops = flatten_union_child(&h.build_side);
+                    let right_ops = flatten_union_child(&h.probe_side);
+
+                    let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
+                    let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
+
                     let (build_cols, probe_cols) =
-                        derive_join_column_indices(&h.join_keys, &input);
+                        derive_join_column_indices(&h.join_keys, &build_chunks, &probe_chunks);
                     let join = PhysicalHashJoin {
                         build_columns: build_cols,
                         probe_columns: probe_cols,
                         semi_mask: None,
                     };
-                    let result = join.execute(input)?;
+                    let result = join.execute_binary(&build_chunks, &probe_chunks)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::SemiJoin(_) => {
+                LogicalOperator::SemiJoin(s) => {
+                    let left_ops = flatten_union_child(&s.left);
+                    let right_ops = flatten_union_child(&s.right);
+
+                    let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
+                    let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
+
                     let semi = PhysicalSemiJoin {
                         build_columns: vec![0],
                         probe_columns: vec![0],
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = semi.execute(input)?;
+                    let result = semi.execute_binary(&build_chunks, &probe_chunks)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::AntiJoin(_) => {
+                LogicalOperator::AntiJoin(a) => {
+                    let left_ops = flatten_union_child(&a.left);
+                    let right_ops = flatten_union_child(&a.right);
+
+                    let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
+                    let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
+
                     let anti = PhysicalAntiJoin {
                         build_columns: vec![0],
                         probe_columns: vec![0],
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = anti.execute(input)?;
+                    let result = anti.execute_binary(&build_chunks, &probe_chunks)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Intersect(ic) => {
@@ -414,10 +500,15 @@ impl QueryProcessor {
                     let result = delete_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::CrossProduct(_) => {
+                LogicalOperator::CrossProduct(cp) => {
+                    let left_ops = flatten_union_child(&cp.left);
+                    let right_ops = flatten_union_child(&cp.right);
+
+                    let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
+                    let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
+
                     let cross = PhysicalCrossProduct;
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = cross.execute(input)?;
+                    let result = cross.execute_binary(&build_chunks, &probe_chunks)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Union(u) => {
@@ -583,20 +674,6 @@ impl QueryProcessor {
                             field_names: vec![],
                         }]);
                     }
-                }
-                LogicalOperator::SemiMasker(sm) => {
-                    // Create a semi-masker that collects node IDs from the build side
-                    let mask = NodeSemiMask::new(sm.table_id);
-                    let semi_masker = PhysicalSemiMasker {
-                        key_column: sm.key_column,
-                        mask: mask.clone(),
-                    };
-                    let input = intermediate_result.take().unwrap_or_default();
-                    let result = semi_masker.execute(input)?;
-
-                    // Store the mask for downstream use via processor state
-                    // For now, pass result through — the mask is collected during hash join
-                    intermediate_result = Some(result);
                 }
                 LogicalOperator::ExpressionsScan(_es) => {
                     // ExpressionsScan reads correlated variables from outer context.
@@ -809,11 +886,9 @@ impl Default for QueryProcessor {
 /// the respective chunks.  Falls back to column 0 when a name is not found.
 fn derive_join_column_indices(
     join_keys: &[Expression],
-    input: &[DataChunk],
+    build_chunks: &[DataChunk],
+    probe_chunks: &[DataChunk],
 ) -> (Vec<u32>, Vec<u32>) {
-    let mid = if input.len() >= 2 { input.len() / 2 } else { 0 };
-    let build_chunks = &input[..mid];
-    let probe_chunks = &input[mid..];
 
     let build_names: Vec<&str> = build_chunks
         .first()
@@ -859,11 +934,17 @@ fn derive_join_column_indices(
 }
 
 /// Extract the property/column name from a join key sub-expression.
-/// Handles `PropertyAccess(_, prop)` → `prop` and `Variable(name)` → `name`.
-fn extract_join_prop(expr: &Expression) -> Option<&str> {
+/// Handles `PropertyAccess(_, prop)` → `var.prop` and `Variable(name)` → `name`.
+fn extract_join_prop(expr: &Expression) -> Option<String> {
     match expr {
-        Expression::PropertyAccess(_, prop) => Some(prop.as_str()),
-        Expression::Variable(name) => Some(name.as_str()),
+        Expression::PropertyAccess(obj, prop) => {
+            if let Expression::Variable(var) = &**obj {
+                Some(format!("{}.{}", var, prop))
+            } else {
+                Some(prop.clone())
+            }
+        },
+        Expression::Variable(name) => Some(name.clone()),
         _ => None,
     }
 }
@@ -946,10 +1027,11 @@ fn merge_union_chunks(
     }
 
     let final_size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+    let field_names = left.first().map(|c| c.field_names.clone()).unwrap_or_default();
     Ok(vec![DataChunk {
         fields: merged_fields,
         size: final_size,
-        field_names: vec![],
+        field_names,
     }])
 }
 
@@ -1576,8 +1658,9 @@ mod tests {
         probe.set_i64(1, 3);
         probe.set_i64(2, 4);
         probe.resize(3);
-        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build]);
+        let probe_chunk = DataChunk::new(vec![probe]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Should match 2 and 3 (2 rows)
         assert!(!result.is_empty());
     }
@@ -1599,8 +1682,9 @@ mod tests {
         probe.set_i64(0, 3);
         probe.set_i64(1, 4);
         probe.resize(2);
-        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build]);
+        let probe_chunk = DataChunk::new(vec![probe]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         assert!(result.is_empty()); // No matches
     }
 
@@ -1617,8 +1701,9 @@ mod tests {
         probe.set_i64(1, 2);
         probe.set_i64(2, 3);
         probe.resize(3);
-        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build]);
+        let probe_chunk = DataChunk::new(vec![probe]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         assert!(result.is_empty()); // Empty build → no matches
     }
 
@@ -1644,8 +1729,9 @@ mod tests {
         probe.set_i64(1, 3);
         // Row 2 stays NULL
         probe.resize(3);
-        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build]);
+        let probe_chunk = DataChunk::new(vec![probe]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Should match 1→1 (1 row) and 3→3 (1 row)
         // NULLs should NOT match each other
         assert!(!result.is_empty(), "Expected at least one matching row");
@@ -1671,8 +1757,9 @@ mod tests {
         probe.set_null(1, true);
         probe.set_null(2, true);
 
-        let input = vec![DataChunk::new(vec![build]), DataChunk::new(vec![probe])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build]);
+        let probe_chunk = DataChunk::new(vec![probe]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // NULL = NULL is unknown in SQL, so no matches
         assert!(result.is_empty());
     }
@@ -1780,8 +1867,9 @@ mod tests {
         probe_v.set_i64(2, 35);
         probe_v.resize(3);
 
-        let input = vec![DataChunk::new(vec![build_v]), DataChunk::new(vec![probe_v])];
-        let result = join.execute(input).unwrap();
+        let build_chunk = DataChunk::new(vec![build_v]);
+        let probe_chunk = DataChunk::new(vec![probe_v]);
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
 
         // Should match 5→5 and 15→15 (2 rows). 35 has no build match.
         assert!(!result.is_empty(), "Expected 2 matching rows");
@@ -2138,10 +2226,9 @@ mod tests {
     fn test_cross_product_basic() {
         let cross = PhysicalCrossProduct;
         // Left: [1, 2, 3], Right: [4, 5]
-        let left_v = make_i64_chunk(&[1, 2, 3]);
-        let right_v = make_i64_chunk(&[4, 5]);
-        let input = vec![left_v, right_v];
-        let result = cross.execute(input).unwrap();
+        let left = vec![make_i64_chunk(&[1, 2, 3])];
+        let right = vec![make_i64_chunk(&[4, 5])];
+        let result = cross.execute_binary(&left, &right).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 6); // 3 × 2 = 6
         assert_eq!(result[0].field(0).get_i64(0), Some(1));
@@ -2166,8 +2253,7 @@ mod tests {
         r1.set_i64(0, 10); r1.set_i64(1, 20); r1.resize(2);
         let right = DataChunk::new(vec![r1]);
 
-        let input = vec![left, right];
-        let result = cross.execute(input).unwrap();
+        let result = cross.execute_binary(&[left], &[right]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 4); // 2 × 2 = 4
         // Row 0: left(1,"a") × right(10) → [1, "a", 10]
@@ -2190,7 +2276,7 @@ mod tests {
         let cross = PhysicalCrossProduct;
         let left = make_i64_chunk(&[]);
         let right = make_i64_chunk(&[1, 2]);
-        let result = cross.execute(vec![left, right]).unwrap();
+        let result = cross.execute_binary(&[left], &[right]).unwrap();
         assert_eq!(result.len(), 0);
     }
 
@@ -2199,7 +2285,7 @@ mod tests {
         let cross = PhysicalCrossProduct;
         let left = make_i64_chunk(&[1, 2, 3]);
         let right = make_i64_chunk(&[]);
-        let result = cross.execute(vec![left, right]).unwrap();
+        let result = cross.execute_binary(&[left], &[right]).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -2207,12 +2293,10 @@ mod tests {
     fn test_cross_product_multi_chunk() {
         let cross = PhysicalCrossProduct;
         // Left: two chunks [1,2] and [3]
-        let left1 = make_i64_chunk(&[1, 2]);
-        let left2 = make_i64_chunk(&[3]);
+        let left = vec![make_i64_chunk(&[1, 2]), make_i64_chunk(&[3])];
         // Right: one chunk [4,5]
-        let right = make_i64_chunk(&[4, 5]);
-        let input = vec![left1, left2, right];
-        let result = cross.execute(input).unwrap();
+        let right = vec![make_i64_chunk(&[4, 5])];
+        let result = cross.execute_binary(&left, &right).unwrap();
         assert_eq!(result[0].size, 6); // 3 × 2 = 6
     }
 
@@ -2225,8 +2309,7 @@ mod tests {
         let build = make_i64_chunk(&[2, 3]);
         // Probe (left): [1, 2, 3]
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let input = vec![build, probe];
-        let result = semi.execute(input).unwrap();
+        let result = semi.execute_binary(&[build], &[probe]).unwrap();
         assert_eq!(result[0].size, 2); // [2, 3] match
     }
 
@@ -2235,7 +2318,7 @@ mod tests {
         let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
         let build = make_i64_chunk(&[4, 5]);
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let result = semi.execute(vec![build, probe]).unwrap();
+        let result = semi.execute_binary(&[build], &[probe]).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -2246,8 +2329,7 @@ mod tests {
         let build = make_i64_chunk(&[2, 3]);
         // Probe (left): [1, 2, 3]
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let input = vec![build, probe];
-        let result = anti.execute(input).unwrap();
+        let result = anti.execute_binary(&[build], &[probe]).unwrap();
         assert_eq!(result[0].size, 1); // Only [1] has no match
     }
 
@@ -2256,7 +2338,7 @@ mod tests {
         let anti = PhysicalAntiJoin { build_columns: vec![0], probe_columns: vec![0] };
         let build = make_i64_chunk(&[1, 2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let result = anti.execute(vec![build, probe]).unwrap();
+        let result = anti.execute_binary(&[build], &[probe]).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -2265,7 +2347,7 @@ mod tests {
         let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
         let build = make_i64_chunk(&[]);
         let probe = make_i64_chunk(&[1, 2, 3]);
-        let result = semi.execute(vec![build, probe]).unwrap();
+        let result = semi.execute_binary(&[build], &[probe]).unwrap();
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -2441,7 +2523,7 @@ mod tests {
             probe_columns: vec![0],
             semi_mask: None,
         };
-        let result = join.execute(vec![build_chunk, probe_chunk]).unwrap();
+        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Must be empty — no rows share the same id.
         assert!(result.is_empty() || result.iter().all(|c| c.size == 0),
             "HashJoin on non-overlapping IDs must produce 0 rows, got {:?}",
@@ -2497,35 +2579,21 @@ mod tests {
             )),
         );
         let plan = vec![
-            LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "A".into(),
-                table_id: 1,
-                alias: Some("a".into()),
-                columns: vec![],
-                cardinality: 2,
-            }),
-            LogicalOperator::ScanNode(LogicalScanNode {
-                table_name: "B".into(),
-                table_id: 2,
-                alias: Some("b".into()),
-                columns: vec![],
-                cardinality: 2,
-            }),
             LogicalOperator::HashJoin(LogicalHashJoin {
                 join_keys: vec![join_key],
                 build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "join_build".into(),
-                    table_id: 0,
-                    alias: None,
+                    table_name: "A".into(),
+                    table_id: 1,
+                    alias: Some("a".into()),
                     columns: vec![],
-                    cardinality: 0,
+                    cardinality: 2,
                 })),
                 probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "join_probe".into(),
-                    table_id: 0,
-                    alias: None,
+                    table_name: "B".into(),
+                    table_id: 2,
+                    alias: Some("b".into()),
                     columns: vec![],
-                    cardinality: 0,
+                    cardinality: 2,
                 })),
                 cardinality: 0,
                 push_down_eligible: false,

@@ -66,6 +66,8 @@ pub struct FileHandle {
     pub num_pages: u64,
     /// Page size in bytes.
     pub page_size: usize,
+    /// Free space manager for reusing pages.
+    pub free_space_manager: Option<std::sync::Arc<std::sync::Mutex<crate::free_space_manager::FreeSpaceManager>>>,
 }
 
 impl FileHandle {
@@ -80,7 +82,13 @@ impl FileHandle {
             path,
             num_pages,
             page_size,
+            free_space_manager: None,
         }
+    }
+    
+    pub fn with_free_space_manager(mut self, fsm: std::sync::Arc<std::sync::Mutex<crate::free_space_manager::FreeSpaceManager>>) -> Self {
+        self.free_space_manager = Some(fsm);
+        self
     }
 
     /// Get the file offset for a given page number.
@@ -102,18 +110,32 @@ impl FileHandle {
     /// Write a page to disk.
     pub fn write_page(&self, page_num: PageNum, data: &[u8]) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
-        let mut file = std::fs::File::create(&self.path)?;
+        // Use OpenOptions to open without truncating
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).open(&self.path)?;
         let offset = self.page_offset(page_num);
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;
         Ok(())
     }
 
-    /// Allocate a new page (extend the file).
+    /// Allocate a new page (extend the file or reuse from FSM).
     pub fn allocate_page(&mut self) -> PageNum {
+        if let Some(fsm) = &self.free_space_manager {
+            let mut fsm = fsm.lock().unwrap();
+            if let Some(range) = fsm.pop_free_pages(1) {
+                return range.start_page_idx;
+            }
+        }
         let page_num = self.num_pages;
         self.num_pages += 1;
         page_num
+    }
+    
+    /// Free a page for reuse.
+    pub fn free_page(&self, page_num: PageNum) {
+        if let Some(fsm) = &self.free_space_manager {
+            fsm.lock().unwrap().add_free_pages(crate::free_space_manager::PageRange::new(page_num, 1));
+        }
     }
 }
 
@@ -149,5 +171,38 @@ mod tests {
         assert_eq!(fh.page_offset(0), 0);
         assert_eq!(fh.page_offset(1), 8192);
         assert_eq!(fh.page_offset(5), 40960);
+    }
+
+    #[test]
+    fn test_file_handle_fsm() {
+        let path = PathBuf::from("test_fsm.db");
+        let _ = std::fs::remove_file(&path); // Cleanup before
+
+        let fsm = std::sync::Arc::new(std::sync::Mutex::new(crate::free_space_manager::FreeSpaceManager::new()));
+        let mut fh = FileHandle::new(path.clone(), DEFAULT_PAGE_SIZE).with_free_space_manager(fsm);
+
+        // Allocate pages
+        let p1 = fh.allocate_page(); // 0
+        let p2 = fh.allocate_page(); // 1
+        let p3 = fh.allocate_page(); // 2
+        assert_eq!(p1, 0);
+        assert_eq!(p2, 1);
+        assert_eq!(p3, 2);
+        assert_eq!(fh.num_pages, 3);
+
+        // Free page 1
+        fh.free_page(p2);
+
+        // Next allocation should reuse page 1
+        let p4 = fh.allocate_page();
+        assert_eq!(p4, 1);
+        assert_eq!(fh.num_pages, 3); // num_pages should not increase
+
+        // Next allocation should give a new page 3
+        let p5 = fh.allocate_page();
+        assert_eq!(p5, 3);
+        assert_eq!(fh.num_pages, 4);
+
+        let _ = std::fs::remove_file(&path); // Cleanup after
     }
 }

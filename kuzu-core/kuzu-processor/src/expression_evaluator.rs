@@ -164,9 +164,16 @@ impl ExpressionEvaluator {
         prop: &str,
         chunk: &DataChunk,
     ) -> Result<ValueVector, String> {
+        // Build the qualified property name (e.g., "t.name")
+        let qualified_prop = if let Expression::Variable(var_name) = obj {
+            format!("{}.{}", var_name, prop)
+        } else {
+            prop.to_string()
+        };
+
         // Fast path: look up the property by name in the chunk's field names.
         if !chunk.field_names.is_empty() {
-            if let Some(idx) = chunk.field_names.iter().position(|n| n == prop) {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop) {
                 return chunk.fields.get(idx).cloned().ok_or_else(|| {
                     format!("Column '{}' (index {}) not found in chunk", prop, idx)
                 });

@@ -31,7 +31,7 @@ pub struct NodeSemiMask {
     /// Table ID that this mask applies to.
     pub table_id: u64,
     /// Whether the mask has been populated.
-    pub initialized: bool,
+    pub initialized: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl NodeSemiMask {
@@ -39,7 +39,7 @@ impl NodeSemiMask {
         Self {
             masked_offsets: Arc::new(Mutex::new(HashSet::new())),
             table_id,
-            initialized: false,
+            initialized: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -52,7 +52,7 @@ impl NodeSemiMask {
 
     /// Check if a node offset is in the mask.
     pub fn is_masked(&self, offset: u64) -> bool {
-        if !self.initialized {
+        if !self.initialized.load(std::sync::atomic::Ordering::SeqCst) {
             return true; // No mask = pass all
         }
         self.masked_offsets
@@ -62,8 +62,8 @@ impl NodeSemiMask {
     }
 
     /// Finalize the mask (called after all data is collected).
-    pub fn finalize(&mut self) {
-        self.initialized = true;
+    pub fn finalize(&self) {
+        self.initialized.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -117,6 +117,8 @@ impl PhysicalOperatorExec for PhysicalSemiMasker {
                 self.mask.mask(offset);
             }
         }
+
+        self.mask.finalize();
 
         // Pass through the input unchanged
         Ok(input)
@@ -605,7 +607,7 @@ impl PhysicalOperatorExec for PhysicalFilter {
                 }
                 new_fields.push(new_v);
             }
-            output.push(DataChunk::new(new_fields));
+            output.push(DataChunk::new(new_fields).with_names(chunk.field_names.clone()));
         }
         Ok(output)
     }
@@ -648,7 +650,12 @@ impl PhysicalOperatorExec for PhysicalProjection {
                     .filter_map(|&i| chunk.fields.get(i).cloned())
                     .collect();
                 let size = fields.first().map(|f| f.size()).unwrap_or(0);
-                DataChunk { fields, size, field_names: vec![] }
+                let names = self
+                    .column_indices
+                    .iter()
+                    .filter_map(|&i| chunk.field_names.get(i).cloned())
+                    .collect();
+                DataChunk { fields, size, field_names: names }
             })
             .collect();
 
@@ -732,7 +739,7 @@ impl PhysicalOperatorExec for PhysicalLimit {
                     }
                     new_fields.push(new_v);
                 }
-                output.push(DataChunk::new(new_fields));
+                output.push(DataChunk::new(new_fields).with_names(chunk.field_names.clone()));
             }
         }
         Ok(output)
@@ -1158,19 +1165,11 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
 /// second half.
 pub struct PhysicalCrossProduct;
 
-impl PhysicalOperatorExec for PhysicalCrossProduct {
-    fn operator_type(&self) -> &str {
-        "cross_product"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        if input.len() < 2 {
-            return Ok(input);
+impl PhysicalCrossProduct {
+    pub fn execute_binary(&self, left_chunks: &[DataChunk], right_chunks: &[DataChunk]) -> OperatorResult {
+        if left_chunks.is_empty() || right_chunks.is_empty() {
+            return Ok(vec![]);
         }
-
-        let mid = input.len() / 2;
-        let left_chunks = &input[..mid];
-        let right_chunks = &input[mid..];
 
         // Count total rows on each side
         let left_rows: usize = left_chunks.iter().map(|c| c.size).sum();
@@ -1270,18 +1269,11 @@ pub struct PhysicalSemiJoin {
     pub probe_columns: Vec<u32>,
 }
 
-impl PhysicalOperatorExec for PhysicalSemiJoin {
-    fn operator_type(&self) -> &str {
-        "semi_join"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        if input.len() < 2 {
-            return Ok(input);
+impl PhysicalSemiJoin {
+    pub fn execute_binary(&self, build_chunks: &[DataChunk], probe_chunks: &[DataChunk]) -> OperatorResult {
+        if build_chunks.is_empty() || probe_chunks.is_empty() {
+            return Ok(vec![]);
         }
-        let mid = input.len() / 2;
-        let build_chunks = &input[..mid];
-        let probe_chunks = &input[mid..];
 
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
@@ -1357,18 +1349,15 @@ pub struct PhysicalAntiJoin {
     pub probe_columns: Vec<u32>,
 }
 
-impl PhysicalOperatorExec for PhysicalAntiJoin {
-    fn operator_type(&self) -> &str {
-        "anti_join"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        if input.len() < 2 {
-            return Ok(input);
+impl PhysicalAntiJoin {
+    pub fn execute_binary(&self, build_chunks: &[DataChunk], probe_chunks: &[DataChunk]) -> OperatorResult {
+        if probe_chunks.is_empty() {
+            return Ok(vec![]);
         }
-        let mid = input.len() / 2;
-        let build_chunks = &input[..mid];
-        let probe_chunks = &input[mid..];
+        if build_chunks.is_empty() {
+            // If build is empty, AntiJoin returns all of probe
+            return Ok(probe_chunks.to_vec());
+        }
 
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
@@ -1648,21 +1637,14 @@ impl PhysicalHashJoin {
     }
 }
 
-impl PhysicalOperatorExec for PhysicalHashJoin {
-    fn operator_type(&self) -> &str {
-        "hash_join"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Expect input chunks from both build and probe sides
-        // Simplified: treat first N chunks as build side, rest as probe
-        if input.len() < 2 {
-            return Ok(input); // Not enough data — pass through
+impl PhysicalHashJoin {
+    pub fn execute_binary(&self, build_chunks: &[DataChunk], probe_chunks: &[DataChunk]) -> OperatorResult {
+        // Simplified Hash Join: build hash table from build chunks, probe with probe chunks
+        if build_chunks.is_empty() || probe_chunks.is_empty() {
+            // Inner join semantics: if either side is empty, result is empty.
+            // Note: If we support outer joins later, this logic will need adjusting.
+            return Ok(vec![]);
         }
-
-        let mid = input.len() / 2;
-        let build_chunks = &input[..mid];
-        let probe_chunks = &input[mid..];
 
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;

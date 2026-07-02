@@ -153,48 +153,52 @@ fn flatten_plan(plan: &JoinPlan, ops: &mut Vec<LogicalOperator>) {
             ops.push(op.clone());
         }
         JoinPlan::HashJoin { keys, left, right } => {
-            // Flatten children first (scans before join)
-            flatten_plan(left, ops);
-            flatten_plan(right, ops);
-            // Then add the join operator
+            let mut left_ops = Vec::new();
+            flatten_plan(left, &mut left_ops);
+            let mut right_ops = Vec::new();
+            flatten_plan(right, &mut right_ops);
+
             ops.push(LogicalOperator::HashJoin(LogicalHashJoin {
                 join_keys: keys.clone(),
-                build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "join_build".into(),
-                    table_id: 0,
-                    alias: None,
-                    columns: Vec::new(),
-                    cardinality: 0,
-                })),
-                probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "join_probe".into(),
-                    table_id: 0,
-                    alias: None,
-                    columns: Vec::new(),
-                    cardinality: 0,
-                })),
+                build_side: Box::new(LogicalOperator::Projection(
+                    crate::logical_operator::LogicalProjection {
+                        expressions: Vec::new(),
+                        children: left_ops,
+                        cardinality: 0,
+                    },
+                )),
+                probe_side: Box::new(LogicalOperator::Projection(
+                    crate::logical_operator::LogicalProjection {
+                        expressions: Vec::new(),
+                        children: right_ops,
+                        cardinality: 0,
+                    },
+                )),
                 cardinality: 0,
                 push_down_eligible: false,
             }));
         }
         JoinPlan::CrossProduct { left, right } => {
-            flatten_plan(left, ops);
-            flatten_plan(right, ops);
+            let mut left_ops = Vec::new();
+            flatten_plan(left, &mut left_ops);
+            let mut right_ops = Vec::new();
+            flatten_plan(right, &mut right_ops);
+
             ops.push(LogicalOperator::CrossProduct(LogicalCrossProduct {
-                left: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "cp_left".into(),
-                    table_id: 0,
-                    alias: None,
-                    columns: Vec::new(),
-                    cardinality: 0,
-                })),
-                right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "cp_right".into(),
-                    table_id: 0,
-                    alias: None,
-                    columns: Vec::new(),
-                    cardinality: 0,
-                })),
+                left: Box::new(LogicalOperator::Projection(
+                    crate::logical_operator::LogicalProjection {
+                        expressions: Vec::new(),
+                        children: left_ops,
+                        cardinality: 0,
+                    },
+                )),
+                right: Box::new(LogicalOperator::Projection(
+                    crate::logical_operator::LogicalProjection {
+                        expressions: Vec::new(),
+                        children: right_ops,
+                        cardinality: 0,
+                    },
+                )),
                 cardinality: 0,
             }));
         }
@@ -355,7 +359,7 @@ mod tests {
             right: Box::new(JoinPlan::Leaf(scan2)),
         };
         let flat = flatten_join_plan(&plan);
-        assert_eq!(flat.len(), 3); // 2 scans + 1 cross product
-        assert!(matches!(flat[2], LogicalOperator::CrossProduct(_)));
+        assert_eq!(flat.len(), 1); // 1 cross product root
+        assert!(matches!(flat[0], LogicalOperator::CrossProduct(_)));
     }
 }

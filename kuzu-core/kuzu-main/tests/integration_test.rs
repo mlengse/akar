@@ -98,6 +98,8 @@ fn test_match_empty_table() {
     );
 }
 
+
+
 #[test]
 fn test_match_nonexistent_table_fails() {
     let (_db, conn) = setup_db();
@@ -154,6 +156,28 @@ fn test_multiple_ddl_statements() {
 
     let r3 = conn.query("MATCH (o:Order) RETURN o.total").unwrap();
     assert!(r3.is_success());
+}
+
+#[test]
+fn test_cross_product_different_sizes() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))",
+    );
+    
+    // Cross product (MATCH (p:Person), (c:City))
+    // Empty tables: left size 0, right size 0
+    let result = conn.query("MATCH (p:Person), (c:City) RETURN p.name, c.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 0);
+    
+    // In our toy system, MATCH scans might still yield 1 dummy row to allow execution
+    // or 0 rows based on implementation. As long as it doesn't panic on split, it succeeds.
 }
 
 #[test]
@@ -781,4 +805,34 @@ fn test_serial_with_explicit_value() {
     let cat = cat.lock().unwrap();
     let seq = cat.get_sequence("Person_id_serial").unwrap();
     assert_eq!(seq.curr_val(), 0, "Sequence should not advance when explicit value provided");
+}
+#[test]
+fn test_sip_optimization() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE NODE TABLE Post(id INT64, content STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE REL TABLE Likes(FROM User TO Post, since INT64)");
+
+    // Insert data
+    exec(&conn, "CREATE (u:User {id: 1, name: 'Alice'})");
+    exec(&conn, "CREATE (u:User {id: 2, name: 'Bob'})");
+    exec(&conn, "CREATE (p:Post {id: 10, content: 'Hello'})");
+    exec(&conn, "CREATE (p:Post {id: 20, content: 'World'})");
+    
+    exec(&conn, "MATCH (u:User {id: 1}), (p:Post {id: 10}) CREATE (u)-[:Likes]->(p)");
+    exec(&conn, "MATCH (u:User {id: 2}), (p:Post {id: 20}) CREATE (u)-[:Likes]->(p)");
+
+    // Query that triggers SIP
+    let query_str = "MATCH (u:User)-[:Likes]->(p:Post) WHERE u.id = 1 RETURN p.content";
+    
+    // Print the plan for debugging
+    let statements = kuzu_parser::parse(query_str).unwrap();
+    let binder = kuzu_binder::Binder::new(_db.catalog());
+    let bound = binder.bind(statements.clone()).unwrap();
+    let planner = kuzu_planner::QueryPlanner::new();
+    let plan = planner.plan(bound).unwrap();
+    println!("LOGICAL PLAN:\n{:#?}", plan);
+
+    let r = conn.query(query_str).unwrap();
+    assert_eq!(r.num_rows(), 1, "Expected exactly 1 row (Hello), got {}", r.num_rows());
 }

@@ -24,9 +24,10 @@ pub fn parse(input: &str) -> Result<Statement, String> {
         return Ok(Statement::Explain(ExplainStatement::new(inner_stmt, explain_type)));
     }
 
-    let mut pairs = CypherParser::parse(Rule::statement, trimmed).map_err(|e| format!("Parse error: {e}"))?;
-    let pair = pairs.next().ok_or("Empty input")?;
-    parse_statement(pair)
+    let mut pairs = CypherParser::parse(Rule::kuzu_query, trimmed).map_err(|e| format!("Parse error: {e}"))?;
+    let kuzu_query_pair = pairs.next().ok_or("Empty input")?;
+    let statement_pair = kuzu_query_pair.into_inner().next().ok_or("No statement in query")?;
+    parse_statement(statement_pair)
 }
 
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
@@ -725,27 +726,47 @@ fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<ForeachClau
 }
 
 fn parse_patterns(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Pattern>, String> {
-    pair.into_inner()
-        .filter(|p| p.as_rule() == Rule::pattern)
-        .map(parse_pattern)
-        .collect()
+    let mut patterns = Vec::new();
+    for p in pair.into_inner() {
+        if p.as_rule() == Rule::pattern {
+            patterns.extend(parse_pattern_path(p)?);
+        }
+    }
+    Ok(patterns)
 }
 
-fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern, String> {
-    let mut node = None;
-    let mut edge = None;
+fn parse_pattern_path(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Pattern>, String> {
+    let mut path = Vec::new();
+    let mut current_node = None;
+    let mut current_edge = None;
+
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::node_pattern => {
-                node = Some(parse_node_pattern(inner)?);
+                let node = parse_node_pattern(inner)?;
+                if current_node.is_some() {
+                    path.push(Pattern {
+                        node: current_node.take(),
+                        edge: current_edge.take(),
+                    });
+                }
+                current_node = Some(node);
             }
             Rule::edge_pattern => {
-                edge = Some(parse_edge_pattern(inner)?);
+                current_edge = Some(parse_edge_pattern(inner)?);
             }
             _ => {}
         }
     }
-    Ok(Pattern { node, edge })
+
+    if current_node.is_some() || current_edge.is_some() {
+        path.push(Pattern {
+            node: current_node.take(),
+            edge: current_edge.take(),
+        });
+    }
+
+    Ok(path)
 }
 
 fn parse_node_pattern(pair: pest::iterators::Pair<Rule>) -> Result<NodePattern, String> {
@@ -784,10 +805,13 @@ fn parse_edge_pattern(pair: pest::iterators::Pair<Rule>) -> Result<EdgePattern, 
     let mut properties = Vec::new();
     let mut lower_bound = None;
     let mut upper_bound = None;
-    let direction = if pair.as_str().contains("<-") {
+    let text = pair.as_str();
+    let direction = if text.starts_with("<-") {
         EdgeDirection::RightToLeft
-    } else {
+    } else if text.ends_with("->") {
         EdgeDirection::LeftToRight
+    } else {
+        EdgeDirection::Both
     };
     for inner in pair.into_inner() {
         match inner.as_rule() {
@@ -1160,12 +1184,18 @@ fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Stri
 fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
     match pair.as_rule() {
         Rule::string => Ok(Expression::Constant(Constant::String(unescape_string(pair.as_str())))),
-        Rule::integer => Ok(Expression::Constant(Constant::Integer(
-            pair.as_str().parse().map_err(|e| format!("Int: {e}"))?,
-        ))),
-        Rule::float => Ok(Expression::Constant(Constant::Float(
-            pair.as_str().parse().map_err(|e| format!("Float: {e}"))?,
-        ))),
+        Rule::integer => {
+            let s = pair.as_str();
+            Ok(Expression::Constant(Constant::Integer(
+            s.trim().parse().map_err(|e| format!("Int: {e} (for string '{s}')"))?,
+        )))
+        },
+        Rule::float => {
+            let s = pair.as_str();
+            Ok(Expression::Constant(Constant::Float(
+            s.trim().parse().map_err(|e| format!("Float: {e} (for string '{s}')"))?,
+        )))
+        },
         Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(
             pair.as_str().to_uppercase() == "TRUE",
         ))),
@@ -1355,7 +1385,7 @@ fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<CallStatement, String
 
 /// Parse a MERGE statement.
 fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
-    let mut pattern = None;
+    let mut patterns = Vec::new();
     let mut on_create = Vec::new();
     let mut on_match = Vec::new();
 
@@ -1365,7 +1395,7 @@ fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                 for part in inner.into_inner() {
                     match part.as_rule() {
                         Rule::pattern => {
-                            pattern = Some(parse_pattern(part)?);
+                            patterns = parse_pattern_path(part)?;
                         }
                         Rule::on_create_set => {
                             for item in part.into_inner() {
@@ -1398,9 +1428,8 @@ fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         }
     }
 
-    let pattern = pattern.ok_or("MERGE requires a pattern")?;
     Ok(Statement::Merge(MergeStatement {
-        pattern,
+        patterns,
         on_create,
         on_match,
     }))

@@ -50,6 +50,8 @@ impl Optimizer {
             Box::new(ForeignJoinPushDown),
             // Tree pass 3: Acc Hash Join — accumulate selective probe sides for SIP
             Box::new(AccHashJoinOptimization),
+            // Tree pass 3.5: SIP — inject SemiMasker for Sideways Information Passing
+            Box::new(SIPOptimization),
             // Tree pass 4: Correlated Subquery Unnesting
             Box::new(CorrelatedSubqueryUnnesting),
             // Tree pass 5: Remove redundant GROUP BY keys (functional dependency analysis)
@@ -78,7 +80,10 @@ impl Optimizer {
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
             Box::new(ForeignJoinPushDown),
+            // Tree pass 3: Acc Hash Join
             Box::new(AccHashJoinOptimization),
+            // Tree pass 3.5: SIP
+            Box::new(SIPOptimization),
             Box::new(CorrelatedSubqueryUnnesting),
             // Remove redundant GROUP BY keys (functional dependency analysis)
             Box::new(AggKeyDependency),
@@ -148,7 +153,8 @@ mod tests {
         assert!(names.contains(&"acc_hash_join"));
         assert!(names.contains(&"correlated_subquery_unnesting"));
         assert!(names.contains(&"foreign_join_push_down"));
-        assert_eq!(names.len(), 17);
+        assert!(names.contains(&"sip_optimization"));
+        assert_eq!(names.len(), 18);
     }
 
     #[test]

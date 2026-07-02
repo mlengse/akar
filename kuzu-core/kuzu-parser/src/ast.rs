@@ -346,7 +346,7 @@ pub struct CopyFrom {
 /// MERGE statement — match or create a pattern with optional ON CREATE / ON MATCH actions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergeStatement {
-    pub pattern: Pattern,
+    pub patterns: Vec<Pattern>,
     pub on_create: Vec<SetItem>,
     pub on_match: Vec<SetItem>,
 }
