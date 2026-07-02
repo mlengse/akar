@@ -388,6 +388,20 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 
 ANY/ALL/NONE/SINGLE dengan predicate mungkin membutuhkan evaluasi ekspresi di runtime, bukan sekadar transformasi value → value.
 
+---
+
+Baik, setelah riset C++, lambda infrastructure untuk predicate belum ada di Rust. Saya implementasi **versi praktis tanpa lambda** (semantic matching C++ spirit):
+
+| Fungsi | Signature | Implementasi | C++ Note |
+|--------|-----------|---------------|----------|
+| `ANY(list)` ✅ sudah | `List → Bool` | `any(is_truthy)` | C++ pakai lambda, kita pakai truthy check |
+| `ALL(list)` ✅ sudah | `List → Bool` | `!empty && all(is_truthy)` | Empty = false (PostgreSQL semantics) |
+| `NONE(list)` ✅ sudah | `List → Bool` | `all(!is_truthy)` | Sama dengan `NOT ANY` |
+| `SINGLE(list)` ✅ sudah | `List → Bool` | `count(is_truthy) == 1` | Tepat satu truthy |
+
+### Catatan Penting
+
+C++ original menggunakan **lambda/predicate expression** (`isListLambda = true`) via `ListLambdaEvaluator` di binder/planner/processor layer. Implementasi Rust saat ini **belum memiliki lambda evaluator infrastructure**. Sebagai gantinya, fungsi-fungsi ini menggunakan **truthy check** (`Bool(true)` / non-zero `Int64/Double`).
 
 ---
 

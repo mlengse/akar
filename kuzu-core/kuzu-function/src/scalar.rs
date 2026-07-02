@@ -1381,7 +1381,6 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 Value::List(items) => items,
                 _ => return Err("Expected list".into()),
             };
-            // Sort descending
             list.sort_by(|a, b| {
                 match compare_values_for_sort(a, b) {
                     Ok(ord) => ord.reverse(),
@@ -1390,6 +1389,46 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
             });
             Ok(Value::List(list))
         }
+        // --- List predicate functions (non-lambda) ---
+        ListOp::Any => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            Ok(Value::Bool(list.iter().any(is_truthy)))
+        }
+        ListOp::All => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            Ok(Value::Bool(!list.is_empty() && list.iter().all(is_truthy)))
+        }
+        ListOp::None => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            Ok(Value::Bool(list.iter().all(|v| !is_truthy(v))))
+        }
+        ListOp::Single => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let count = list.iter().filter(|v| is_truthy(v)).count();
+            Ok(Value::Bool(count == 1))
+        }
+    }
+}
+
+/// Check if a Value is "truthy": Bool(true) or non-zero Int64/Double.
+fn is_truthy(v: &Value) -> bool {
+    match v {
+        Value::Bool(b) => *b,
+        Value::Int64(x) => *x != 0,
+        Value::Double(x) => *x != 0.0,
+        _ => false,
     }
 }
 
@@ -4256,5 +4295,85 @@ mod tests {
         assert_eq!(result, Value::List(vec![
             Value::Int64(3), Value::Int64(2), Value::Int64(1),
         ]));
+    }
+
+    // --- List predicate function tests ---
+
+    #[test]
+    fn test_list_any() {
+        let func = ScalarFunction::List { op: ListOp::Any };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Bool(true),
+            ])]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Bool(false),
+            ])]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_list_all() {
+        let func = ScalarFunction::List { op: ListOp::All };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(true), Value::Int64(1),
+            ])]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(true), Value::Int64(0),
+            ])]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![])]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_list_none() {
+        let func = ScalarFunction::List { op: ListOp::None };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Int64(0),
+            ])]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Int64(1),
+            ])]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_list_single() {
+        let func = ScalarFunction::List { op: ListOp::Single };
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Bool(true), Value::Int64(0),
+            ])]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(false), Value::Int64(0),
+            ])]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::List(vec![
+                Value::Bool(true), Value::Int64(1),
+            ])]).unwrap(),
+            Value::Bool(false)
+        );
     }
 }

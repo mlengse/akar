@@ -273,6 +273,11 @@ pub enum ListOp {
     Position,
     HasAll,
     ReverseSort,
+    /// List predicate functions (non-lambda versions)
+    Any,
+    All,
+    None,
+    Single,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -912,6 +917,12 @@ impl FunctionRegistry {
         self.register_scalar("list_indexof", ScalarFunction::List { op: ListOp::Position });
         self.register_scalar("list_has_all", ScalarFunction::List { op: ListOp::HasAll });
         self.register_scalar("list_reverse_sort", ScalarFunction::List { op: ListOp::ReverseSort });
+
+        // --- List predicate functions ---
+        self.register_scalar("any", ScalarFunction::List { op: ListOp::Any });
+        self.register_scalar("all", ScalarFunction::List { op: ListOp::All });
+        self.register_scalar("none", ScalarFunction::List { op: ListOp::None });
+        self.register_scalar("single", ScalarFunction::List { op: ListOp::Single });
 
         // --- Map ---
         self.register_scalar("map_creation", ScalarFunction::Map { op: MapOp::Creation });
