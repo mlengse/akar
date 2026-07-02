@@ -344,7 +344,7 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 | # | Grup | Fungsi | Alasan |
 |---|------|--------|--------|
 | **4** | **Math berat** (4) ✅ sudah | `FACTORIAL`, `GAMMA`, `LGAMMA`, `SET_SEED` | `GAMMA`/`LGAMMA` perlu `std::f64::ln_gamma()` atau crate `gamma`; `SET_SEED` perlu `rand` crate |
-| **5** | **Hash** (3) | `MD5`, `SHA256`, `HASH` | Butuh `md-5` dan `sha2` crate — **belum** di workspace ❌ |
+| **5** | **Hash** (3) ✅ sudah | `MD5`, `SHA256`, `HASH` | Butuh `md-5` dan `sha2` crate — **belum** di workspace ❌ |
 | **6** | **String regex** (4) | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN` | `regex` ✅ sudah ada; Levenshtein bisa pure Rust tanpa crate |
 
 ##### 🥉 Level 2 — Bergantung pada Tipe Data yang Ada

@@ -188,6 +188,13 @@ pub enum StringOp {
     ConcatWs,
     SplitPart,
     ArrayExtract,
+    /// Regex string functions (C++ port)
+    RegexpFullMatch,
+    RegexpExtract,
+    RegexpExtractAll,
+    RegexpSplitToArray,
+    /// String edit distance
+    Levenshtein,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -687,6 +694,38 @@ impl FunctionRegistry {
             "array_extract",
             ScalarFunction::String {
                 op: StringOp::ArrayExtract,
+            },
+        );
+
+        // --- Regex string functions ---
+        self.register_scalar(
+            "regexp_full_match",
+            ScalarFunction::String {
+                op: StringOp::RegexpFullMatch,
+            },
+        );
+        self.register_scalar(
+            "regexp_extract",
+            ScalarFunction::String {
+                op: StringOp::RegexpExtract,
+            },
+        );
+        self.register_scalar(
+            "regexp_extract_all",
+            ScalarFunction::String {
+                op: StringOp::RegexpExtractAll,
+            },
+        );
+        self.register_scalar(
+            "regexp_split_to_array",
+            ScalarFunction::String {
+                op: StringOp::RegexpSplitToArray,
+            },
+        );
+        self.register_scalar(
+            "levenshtein",
+            ScalarFunction::String {
+                op: StringOp::Levenshtein,
             },
         );
 

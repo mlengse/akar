@@ -697,6 +697,76 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
                 }
             }
         }
+        // --- Regex string functions (C++ port) ---
+        StringOp::RegexpFullMatch => {
+            let s = get_string(&args[0])?;
+            let pat = get_string(&args[1])?;
+            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            Ok(Value::Bool(re.find(&s).is_some_and(|m| m.start() == 0 && m.end() == s.len())))
+        }
+        StringOp::RegexpExtract => {
+            let s = get_string(&args[0])?;
+            let pat = get_string(&args[1])?;
+            let group = if args.len() > 2 {
+                match &args[2] {
+                    Value::Int64(x) => *x as usize,
+                    _ => return Err("RegexpExtract group must be integer".into()),
+                }
+            } else {
+                0
+            };
+            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let result = re.captures(&s)
+                .and_then(|caps| caps.get(group))
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            Ok(Value::String(result))
+        }
+        StringOp::RegexpExtractAll => {
+            let s = get_string(&args[0])?;
+            let pat = get_string(&args[1])?;
+            let group = if args.len() > 2 {
+                match &args[2] {
+                    Value::Int64(x) => *x as usize,
+                    _ => return Err("RegexpExtractAll group must be integer".into()),
+                }
+            } else {
+                0
+            };
+            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let matches: Vec<Value> = re.captures_iter(&s)
+                .filter_map(|caps| caps.get(group))
+                .map(|m| Value::String(m.as_str().to_string()))
+                .collect();
+            Ok(Value::List(matches))
+        }
+        StringOp::RegexpSplitToArray => {
+            let s = get_string(&args[0])?;
+            let pat = get_string(&args[1])?;
+            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let parts: Vec<Value> = re.split(&s).map(|p| Value::String(p.to_string())).collect();
+            Ok(Value::List(parts))
+        }
+        StringOp::Levenshtein => {
+            let a = get_string(&args[0])?;
+            let b = get_string(&args[1])?;
+            let a_chars: Vec<char> = a.chars().collect();
+            let b_chars: Vec<char> = b.chars().collect();
+            let n = b_chars.len();
+            let mut prev_row: Vec<usize> = (0..=n).collect();
+            let mut curr_row = vec![0usize; n + 1];
+            for (i, ca) in a_chars.iter().enumerate() {
+                curr_row[0] = i + 1;
+                for (j, cb) in b_chars.iter().enumerate() {
+                    let cost = if ca == cb { 0 } else { 1 };
+                    curr_row[j + 1] = (curr_row[j] + 1)
+                        .min(prev_row[j + 1] + 1)
+                        .min(prev_row[j] + cost);
+                }
+                std::mem::swap(&mut prev_row, &mut curr_row);
+            }
+            Ok(Value::Int64(prev_row[n] as i64))
+        }
     }
 }
 
@@ -2156,6 +2226,130 @@ mod tests {
         assert_ne!(h1, h3);
         let hs = evaluate_scalar(&func, &[Value::String("test".into())]).unwrap();
         assert!(matches!(hs, Value::Int64(_)));
+    }
+
+    // --- Regex string function tests ---
+
+    #[test]
+    fn test_regexp_full_match() {
+        let func = ScalarFunction::String { op: StringOp::RegexpFullMatch };
+        // Full match
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::String("hello".into())]).unwrap(),
+            Value::Bool(true)
+        );
+        // Partial match should be false
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello123".into()), Value::String(r"\d+".into())]).unwrap(),
+            Value::Bool(false)
+        );
+        // Full match with pattern
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("123".into()), Value::String(r"\d+".into())]).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_regexp_extract() {
+        let func = ScalarFunction::String { op: StringOp::RegexpExtract };
+        // Extract first digit sequence
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("abc123def".into()), Value::String(r"\d+".into())]).unwrap(),
+            Value::String("123".into())
+        );
+        // No match
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("abcdef".into()), Value::String(r"\d+".into())]).unwrap(),
+            Value::String("".into())
+        );
+        // With capture group (0-based: group 0 = full match)
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello@example.com".into()),
+                Value::String(r"(\w+)@(\w+\.\w+)".into()),
+                Value::Int64(1),
+            ]).unwrap(),
+            Value::String("hello".into())
+        );
+        assert_eq!(
+            evaluate_scalar(&func, &[
+                Value::String("hello@example.com".into()),
+                Value::String(r"(\w+)@(\w+\.\w+)".into()),
+                Value::Int64(2),
+            ]).unwrap(),
+            Value::String("example.com".into())
+        );
+    }
+
+    #[test]
+    fn test_regexp_extract_all() {
+        let func = ScalarFunction::String { op: StringOp::RegexpExtractAll };
+        // Extract all digits
+        let result = evaluate_scalar(&func, &[Value::String("a1b2c3".into()), Value::String(r"\d+".into())]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::String("1".into()),
+            Value::String("2".into()),
+            Value::String("3".into()),
+        ]));
+        // With group
+        let result = evaluate_scalar(&func, &[
+            Value::String("a1b2c3".into()),
+            Value::String(r"(\d)".into()),
+            Value::Int64(1),
+        ]).unwrap();
+        assert_eq!(result, Value::List(vec![
+            Value::String("1".into()),
+            Value::String("2".into()),
+            Value::String("3".into()),
+        ]));
+        // No matches
+        let result = evaluate_scalar(&func, &[Value::String("abc".into()), Value::String(r"\d+".into())]).unwrap();
+        assert_eq!(result, Value::List(vec![]));
+    }
+
+    #[test]
+    fn test_regexp_split_to_array() {
+        let func = ScalarFunction::String { op: StringOp::RegexpSplitToArray };
+        // Split on digits
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("a1b2c".into()), Value::String(r"\d".into())]).unwrap(),
+            Value::List(vec![
+                Value::String("a".into()),
+                Value::String("b".into()),
+                Value::String("c".into()),
+            ])
+        );
+        // No match: single element
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("abc".into()), Value::String(r"\d+".into())]).unwrap(),
+            Value::List(vec![Value::String("abc".into())])
+        );
+    }
+
+    #[test]
+    fn test_levenshtein() {
+        let func = ScalarFunction::String { op: StringOp::Levenshtein };
+        // Same strings
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::String("hello".into())]).unwrap(),
+            Value::Int64(0)
+        );
+        // One substitution
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("kitten".into()), Value::String("sitten".into())]).unwrap(),
+            Value::Int64(1)
+        );
+        // Known distance
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("kitten".into()), Value::String("sitting".into())]).unwrap(),
+            Value::Int64(3)
+        );
+        // Empty string
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::String("".into()), Value::String("abc".into())]).unwrap(),
+            Value::Int64(3)
+        );
     }
 
     // --- Bitwise tests ---
