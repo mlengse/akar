@@ -77,6 +77,10 @@ pub enum ScalarFunction {
     Interval {
         op: IntervalOp,
     },
+    /// Blob functions — ENCODE, DECODE, OCTET_LENGTH.
+    Blob {
+        op: BlobOp,
+    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -100,6 +104,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::SequenceOp { is_nextval } => f.debug_struct("SequenceOp").field("is_nextval", is_nextval).finish(),
             Self::Hash { op } => f.debug_struct("Hash").field("op", op).finish(),
             Self::Interval { op } => f.debug_struct("Interval").field("op", op).finish(),
+            Self::Blob { op } => f.debug_struct("Blob").field("op", op).finish(),
         }
     }
 }
@@ -364,6 +369,18 @@ pub enum IntervalOp {
     ToSeconds,
     ToMilliseconds,
     ToMicroseconds,
+}
+
+/// Blob functions — ported from C++ `function/blob/`.
+///
+/// - `ENCODE(str)` → Blob: copy string bytes into a blob
+/// - `DECODE(blob)` → String: convert blob to string (UTF-8 validated)
+/// - `OCTET_LENGTH(blob)` → Int64: byte length of blob
+#[derive(Debug, Clone, Copy)]
+pub enum BlobOp {
+    Encode,
+    Decode,
+    OctetLength,
 }
 
 // ==================== Aggregate Function Types ====================

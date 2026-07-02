@@ -97,6 +97,7 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Path { op } => evaluate_path(*op, args),
         ScalarFunction::Hash { op } => evaluate_hash(*op, args),
         ScalarFunction::Interval { op } => evaluate_interval(*op, args),
+        ScalarFunction::Blob { op } => evaluate_blob(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => {
@@ -1534,6 +1535,35 @@ fn evaluate_interval(op: IntervalOp, args: &[Value]) -> Result<Value, String> {
         IntervalOp::ToMicroseconds => Interval::new(0, 0, n),
     };
     Ok(Value::Interval(interval))
+}
+
+// ==================== Blob functions ====================
+
+/// Evaluate a blob function.
+fn evaluate_blob(op: BlobOp, args: &[Value]) -> Result<Value, String> {
+    match op {
+        BlobOp::Encode => {
+            let s = get_string(&args[0])?;
+            Ok(Value::Blob(s.into_bytes()))
+        }
+        BlobOp::Decode => {
+            let bytes = match &args[0] {
+                Value::Blob(b) => b.clone(),
+                _ => return Err("DECODE requires a blob argument".into()),
+            };
+            let s = String::from_utf8(bytes).map_err(|_| {
+                "Failure in decode: could not convert blob to UTF8 string, the blob contained invalid UTF8 characters".to_string()
+            })?;
+            Ok(Value::String(s))
+        }
+        BlobOp::OctetLength => {
+            let len = match &args[0] {
+                Value::Blob(b) => b.len() as i64,
+                _ => return Err("OCTET_LENGTH requires a blob argument".into()),
+            };
+            Ok(Value::Int64(len))
+        }
+    }
 }
 
 fn evaluate_boolean(op: BooleanOp, args: &[Value]) -> Result<Value, String> {
@@ -3119,6 +3149,39 @@ mod tests {
         let func = ScalarFunction::Interval { op: IntervalOp::ToMicroseconds };
         let result = evaluate_scalar(&func, &[Value::Int64(999)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 999)));
+    }
+
+    // --- Blob function tests ---
+
+    #[test]
+    fn test_encode() {
+        let func = ScalarFunction::Blob { op: BlobOp::Encode };
+        let result = evaluate_scalar(&func, &[Value::String("hello".into())]).unwrap();
+        assert_eq!(result, Value::Blob(b"hello".to_vec()));
+        // Empty string
+        let result = evaluate_scalar(&func, &[Value::String("".into())]).unwrap();
+        assert_eq!(result, Value::Blob(vec![]));
+    }
+
+    #[test]
+    fn test_decode() {
+        let func = ScalarFunction::Blob { op: BlobOp::Decode };
+        let result = evaluate_scalar(&func, &[Value::Blob(b"hello".to_vec())]).unwrap();
+        assert_eq!(result, Value::String("hello".into()));
+        // Invalid UTF-8 should error
+        let result = evaluate_scalar(&func, &[Value::Blob(vec![0xFF, 0xFE])]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("UTF8"));
+    }
+
+    #[test]
+    fn test_octet_length() {
+        let func = ScalarFunction::Blob { op: BlobOp::OctetLength };
+        let result = evaluate_scalar(&func, &[Value::Blob(b"hello".to_vec())]).unwrap();
+        assert_eq!(result, Value::Int64(5));
+        // Empty blob
+        let result = evaluate_scalar(&func, &[Value::Blob(vec![])]).unwrap();
+        assert_eq!(result, Value::Int64(0));
     }
 
     // --- List function tests ---
