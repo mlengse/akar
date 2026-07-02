@@ -228,6 +228,11 @@ pub enum DateOp {
     MonthName,
     LastDay,
     MakeDate,
+    /// Timestamp functions (C++ port)
+    Century,
+    EpochMs,
+    ToTimestamp,
+    ToEpochMs,
 }
 
 #[derive(Debug, Clone, Copy)]

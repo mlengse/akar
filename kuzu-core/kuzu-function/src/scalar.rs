@@ -880,6 +880,40 @@ fn evaluate_date(op: DateOp, args: &[Value]) -> Result<Value, String> {
             let days = (d - epoch).whole_days() as i32;
             Ok(Value::Date(Date(days)))
         }
+        // --- Timestamp functions (C++ port) ---
+        DateOp::Century => {
+            let (date, _) = extract_date_or_timestamp(&args[0])?;
+            let year = date.year();
+            // PostgreSQL semantics: year 1→century 1, year 2000→20, year 2001→21
+            let century = if year > 0 { (year - 1) / 100 + 1 } else { year / 100 - 1 };
+            Ok(Value::Int64(century as i64))
+        }
+        DateOp::EpochMs => {
+            // EPOCH_MS(ms): convert milliseconds since epoch → Timestamp
+            let ms = match &args[0] {
+                Value::Int64(x) => *x,
+                _ => return Err("epoch_ms requires integer milliseconds".into()),
+            };
+            Ok(Value::Timestamp(Timestamp(ms * 1000)))
+        }
+        DateOp::ToTimestamp => {
+            // TO_TIMESTAMP(sec): convert seconds since epoch (double) → Timestamp
+            let secs = match &args[0] {
+                Value::Double(x) => *x,
+                Value::Int64(x) => *x as f64,
+                _ => return Err("to_timestamp requires numeric seconds".into()),
+            };
+            let micros = (secs * 1_000_000.0) as i64;
+            Ok(Value::Timestamp(Timestamp(micros)))
+        }
+        DateOp::ToEpochMs => {
+            // TO_EPOCH_MS(timestamp): convert Timestamp → milliseconds since epoch
+            let micros = match &args[0] {
+                Value::Timestamp(t) | Value::TimestampMs(t) | Value::TimestampNs(t) | Value::TimestampSec(t) => t.0,
+                _ => return Err("to_epoch_ms requires a timestamp argument".into()),
+            };
+            Ok(Value::Int64(micros / 1000))
+        }
         DateOp::DatePart => {
             if args.len() < 2 {
                 return Err("date_part requires 2 arguments".into());
@@ -2952,6 +2986,58 @@ mod tests {
         let da = ScalarFunction::Date { op: DateOp::DateAdd };
         let result = evaluate_scalar(&da, &[Value::String("day".into()), Value::Int64(7), date_val]).unwrap();
         assert!(matches!(result, Value::Date(_)));
+    }
+
+    // --- Timestamp function tests ---
+
+    #[test]
+    fn test_century() {
+        let func = ScalarFunction::Date { op: DateOp::Century };
+        // Use a date in the 21st century (e.g., 2023-06-15 = ~19523 days from epoch)
+        let date_val = Value::Date(Date(19523));
+        assert_eq!(evaluate_scalar(&func, &[date_val]).unwrap(), Value::Int64(21));
+        // Year 2000 → century 20 (2000-01-01 = ~10957 days from epoch)
+        let y2000 = Value::Date(Date(10957));
+        assert_eq!(evaluate_scalar(&func, &[y2000]).unwrap(), Value::Int64(20));
+        // Also works with timestamp
+        let ts = Value::Timestamp(Timestamp(19523i64 * 86400 * 1_000_000));
+        assert_eq!(evaluate_scalar(&func, &[ts]).unwrap(), Value::Int64(21));
+    }
+
+    #[test]
+    fn test_epoch_ms() {
+        let func = ScalarFunction::Date { op: DateOp::EpochMs };
+        // 0 ms → epoch
+        let result = evaluate_scalar(&func, &[Value::Int64(0)]).unwrap();
+        assert_eq!(result, Value::Timestamp(Timestamp(0)));
+        // 1000 ms = 1 sec → Timestamp(1_000_000 micros)
+        let result = evaluate_scalar(&func, &[Value::Int64(1000)]).unwrap();
+        assert_eq!(result, Value::Timestamp(Timestamp(1_000_000)));
+    }
+
+    #[test]
+    fn test_to_timestamp() {
+        let func = ScalarFunction::Date { op: DateOp::ToTimestamp };
+        // 0 seconds → epoch
+        let result = evaluate_scalar(&func, &[Value::Double(0.0)]).unwrap();
+        assert_eq!(result, Value::Timestamp(Timestamp(0)));
+        // 1 second → 1_000_000 micros
+        let result = evaluate_scalar(&func, &[Value::Double(1.0)]).unwrap();
+        assert_eq!(result, Value::Timestamp(Timestamp(1_000_000)));
+        // Integer input
+        let result = evaluate_scalar(&func, &[Value::Int64(0)]).unwrap();
+        assert_eq!(result, Value::Timestamp(Timestamp(0)));
+    }
+
+    #[test]
+    fn test_to_epoch_ms() {
+        let func = ScalarFunction::Date { op: DateOp::ToEpochMs };
+        // Epoch → 0 ms
+        let result = evaluate_scalar(&func, &[Value::Timestamp(Timestamp(0))]).unwrap();
+        assert_eq!(result, Value::Int64(0));
+        // 1 ms = 1000 micros → 1 ms
+        let result = evaluate_scalar(&func, &[Value::Timestamp(Timestamp(1000))]).unwrap();
+        assert_eq!(result, Value::Int64(1));
     }
 
     // --- List function tests ---

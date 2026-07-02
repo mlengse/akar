@@ -345,13 +345,13 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 |---|------|--------|--------|
 | **4** | **Math berat** (4) ✅ sudah | `FACTORIAL`, `GAMMA`, `LGAMMA`, `SET_SEED` | `GAMMA`/`LGAMMA` perlu `std::f64::ln_gamma()` atau crate `gamma`; `SET_SEED` perlu `rand` crate |
 | **5** | **Hash** (3) ✅ sudah | `MD5`, `SHA256`, `HASH` | Butuh `md-5` dan `sha2` crate — **belum** di workspace ❌ |
-| **6** | **String regex** (4) | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN` | `regex` ✅ sudah ada; Levenshtein bisa pure Rust tanpa crate |
+| **6** | **String regex** (4) ✅ sudah | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN` | `regex` ✅ sudah ada; Levenshtein bisa pure Rust tanpa crate |
 
 ##### 🥉 Level 2 — Bergantung pada Tipe Data yang Ada
 
 | # | Grup | Fungsi | Alasan |
 |---|------|--------|--------|
-| **7** | **Timestamp** (4) | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | `DateOp` sudah ada ✅ — tinggal tambah variant ke enum + `evaluate_date()` |
+| **7** | **Timestamp** (4) ✅ sudah | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | `DateOp` sudah ada ✅ — tinggal tambah variant ke enum + `evaluate_date()` |
 | **8** | **Interval** (8) | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | `Interval` type ✅ sudah di types.rs — perlu enum `IntervalOp` baru + evaluator |
 | **9** | **Blob** (3) | `ENCODE`, `DECODE`, `OCTET_LENGTH` | `Blob` type ✅ sudah ada — encoding/decoding via `_base64` crate |
 
