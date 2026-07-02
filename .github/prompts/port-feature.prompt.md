@@ -102,7 +102,6 @@ cargo test --workspace
 
 ## Reference Documents
 
-- **Porting Plan**: [CONSOLIDATED_PLAN.md](../../kuzu-core/CONSOLIDATED_PLAN.md)
 - **Feature Gap List**: Sections C1–F3 in the plan for prioritized gaps
 - **C++ Sources**: `src/` (main Kuzu), `ladybug/` (LadybugDB fork)
 - **Rust Workspace**: `kuzu-core/` (28 crates)

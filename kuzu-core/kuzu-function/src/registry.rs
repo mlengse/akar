@@ -52,6 +52,12 @@ pub enum ScalarFunction {
     Array {
         op: ArrayOp,
     },
+    /// Path functions — operate on recursive rel / path values.
+    Path {
+        op: PathOp,
+    },
+    /// UUID function — generates random UUIDs.
+    Uuid,
     /// Extension-provided scalar function with a callback closure.
     /// The closure receives input values and returns an output value.
     CustomScalar {
@@ -81,6 +87,8 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Utility { op } => f.debug_struct("Utility").field("op", op).finish(),
             Self::Schema { op } => f.debug_struct("Schema").field("op", op).finish(),
             Self::Array { op } => f.debug_struct("Array").field("op", op).finish(),
+            Self::Path { op } => f.debug_struct("Path").field("op", op).finish(),
+            Self::Uuid => f.debug_struct("Uuid").finish(),
             Self::CustomScalar { name, .. } => f.debug_struct("CustomScalar").field("name", name).finish(),
             Self::SequenceOp { is_nextval } => f.debug_struct("SequenceOp").field("is_nextval", is_nextval).finish(),
         }
@@ -150,6 +158,10 @@ pub enum StringOp {
     Split,
     Head,
     Tail,
+    Left,
+    Right,
+    Lpad,
+    Rpad,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -179,6 +191,10 @@ pub enum DateOp {
     Hour,
     Minute,
     Second,
+    DayName,
+    MonthName,
+    LastDay,
+    MakeDate,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,6 +256,19 @@ pub enum SchemaOp {
     StartNode,
     EndNode,
     Label,
+}
+
+/// Path functions — operate on recursive rel / path values (NODES, RELS, LENGTH).
+///
+/// Ported from C++ `function/path/`:
+/// - `NODES(path)` → returns the list of nodes in the path
+/// - `RELS(path)` / `RELATIONSHIPS(path)` → returns the list of rels in the path
+/// - `LENGTH(path)` → returns the number of rels in the path
+#[derive(Debug, Clone, Copy)]
+pub enum PathOp {
+    Nodes,
+    Rels,
+    Length,
 }
 
 /// Array math functions — element-wise operations on numeric lists.
@@ -480,6 +509,30 @@ impl FunctionRegistry {
                 op: StringOp::Tail,
             },
         );
+        self.register_scalar(
+            "left",
+            ScalarFunction::String {
+                op: StringOp::Left,
+            },
+        );
+        self.register_scalar(
+            "right",
+            ScalarFunction::String {
+                op: StringOp::Right,
+            },
+        );
+        self.register_scalar(
+            "lpad",
+            ScalarFunction::String {
+                op: StringOp::Lpad,
+            },
+        );
+        self.register_scalar(
+            "rpad",
+            ScalarFunction::String {
+                op: StringOp::Rpad,
+            },
+        );
 
         // --- Date/Time ---
         self.register_scalar("date_part", ScalarFunction::Date { op: DateOp::DatePart });
@@ -508,6 +561,10 @@ impl FunctionRegistry {
         self.register_scalar("hour", ScalarFunction::Date { op: DateOp::Hour });
         self.register_scalar("minute", ScalarFunction::Date { op: DateOp::Minute });
         self.register_scalar("second", ScalarFunction::Date { op: DateOp::Second });
+        self.register_scalar("dayname", ScalarFunction::Date { op: DateOp::DayName });
+        self.register_scalar("monthname", ScalarFunction::Date { op: DateOp::MonthName });
+        self.register_scalar("last_day", ScalarFunction::Date { op: DateOp::LastDay });
+        self.register_scalar("make_date", ScalarFunction::Date { op: DateOp::MakeDate });
 
         // --- Cast ---
         self.register_scalar(
@@ -603,6 +660,14 @@ impl FunctionRegistry {
         self.register_scalar("array_inner_product", ScalarFunction::Array { op: ArrayOp::InnerProduct });
         self.register_scalar("array_cross_product", ScalarFunction::Array { op: ArrayOp::CrossProduct });
         self.register_scalar("array_squared_distance", ScalarFunction::Array { op: ArrayOp::SquaredDistance });
+
+        // --- Path ---
+        self.register_scalar("nodes", ScalarFunction::Path { op: PathOp::Nodes });
+        self.register_scalar("rels", ScalarFunction::Path { op: PathOp::Rels });
+        self.register_scalar("relationships", ScalarFunction::Path { op: PathOp::Rels });
+
+        // --- UUID ---
+        self.register_scalar("gen_random_uuid", ScalarFunction::Uuid);
 
         // --- Array utility aliases (delegate to list functions) ---
         self.register_scalar("array_concat", ScalarFunction::List { op: ListOp::Concat });

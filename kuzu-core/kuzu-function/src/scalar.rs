@@ -30,6 +30,8 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Utility { op } => evaluate_utility(*op, args),
         ScalarFunction::Schema { op } => evaluate_schema(*op, args),
         ScalarFunction::Array { op } => evaluate_array(*op, args),
+        ScalarFunction::Path { op } => evaluate_path(*op, args),
+        ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => {
             Err("Sequence operations (nextval/currval) require catalog access — handle at connection/processor level".into())
@@ -415,6 +417,36 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             let start = chars.len().saturating_sub(n);
             Ok(Value::String(chars.chars().skip(start).collect()))
         }
+        StringOp::Left => {
+            let s = get_string(&args[0])?;
+            let n = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("left requires integer length".into()) };
+            Ok(Value::String(s.chars().take(n).collect()))
+        }
+        StringOp::Right => {
+            let s = get_string(&args[0])?;
+            let n = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("right requires integer length".into()) };
+            let chars: Vec<char> = s.chars().collect();
+            let start = chars.len().saturating_sub(n);
+            Ok(Value::String(chars[start..].iter().collect()))
+        }
+        StringOp::Lpad => {
+            let s = get_string(&args[0])?;
+            let len = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("lpad requires integer length".into()) };
+            let pad = if args.len() >= 3 { get_string(&args[2])? } else { " ".into() };
+            if s.len() >= len { return Ok(Value::String(s[..len].to_string())); }
+            let pad_needed = len - s.len();
+            let pad_repeat = pad.repeat((pad_needed / pad.len()) + 1);
+            Ok(Value::String(format!("{}{}", &pad_repeat[..pad_needed], s)))
+        }
+        StringOp::Rpad => {
+            let s = get_string(&args[0])?;
+            let len = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("rpad requires integer length".into()) };
+            let pad = if args.len() >= 3 { get_string(&args[2])? } else { " ".into() };
+            if s.len() >= len { return Ok(Value::String(s[..len].to_string())); }
+            let pad_needed = len - s.len();
+            let pad_repeat = pad.repeat((pad_needed / pad.len()) + 1);
+            Ok(Value::String(format!("{}{}", s, &pad_repeat[..pad_needed])))
+        }
     }
 }
 
@@ -492,6 +524,41 @@ fn evaluate_date(op: DateOp, args: &[Value]) -> Result<Value, String> {
         DateOp::Second => {
             let (_, time) = extract_date_or_timestamp(&args[0])?;
             Ok(Value::Int64(time.second() as i64))
+        }
+        DateOp::DayName => {
+            let (date, _) = extract_date_or_timestamp(&args[0])?;
+            let weekday = date.weekday();
+            Ok(Value::String(weekday.to_string()))
+        }
+        DateOp::MonthName => {
+            let (date, _) = extract_date_or_timestamp(&args[0])?;
+            Ok(Value::String(date.month().to_string()))
+        }
+        DateOp::LastDay => {
+            let (date, _) = extract_date_or_timestamp(&args[0])?;
+            // Go to first day of next month, then subtract one day
+            let next_month_first = TimeDate::from_calendar_date(
+                date.year() + if date.month() == time::Month::December { 1 } else { 0 },
+                date.month().next(),
+                1,
+            ).map_err(|e| format!("Date error: {e}"))?;
+            let last_day = next_month_first.previous_day()
+                .ok_or("Could not compute previous day")?;
+            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
+            let days = (last_day - epoch).whole_days() as i32;
+            Ok(Value::Date(Date(days)))
+        }
+        DateOp::MakeDate => {
+            if args.len() < 3 { return Err("make_date requires 3 arguments (year, month, day)".into()); }
+            let year = match &args[0] { Value::Int64(x) => *x as i32, _ => return Err("make_date year must be integer".into()) };
+            let month_val = match &args[1] { Value::Int64(x) => *x as u8, _ => return Err("make_date month must be integer".into()) };
+            let day = match &args[2] { Value::Int64(x) => *x as u8, _ => return Err("make_date day must be integer".into()) };
+            let month_enum = Month::try_from(month_val).map_err(|_| format!("Invalid month: {month_val}"))?;
+            let d = TimeDate::from_calendar_date(year, month_enum, day)
+                .map_err(|e| format!("Invalid date: {e}"))?;
+            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
+            let days = (d - epoch).whole_days() as i32;
+            Ok(Value::Date(Date(days)))
         }
         DateOp::DatePart => {
             if args.len() < 2 {
@@ -923,6 +990,95 @@ fn evaluate_struct(op: StructOp, args: &[Value]) -> Result<Value, String> {
 }
 
 // ==================== Boolean ====================
+
+// ==================== Path ====================
+
+fn evaluate_path(op: PathOp, args: &[Value]) -> Result<Value, String> {
+    match op {
+        PathOp::Nodes => {
+            let path = &args[0];
+            match path {
+                Value::Struct(fields) => {
+                    // Look for "_nodes" field in struct
+                    if let Some((_, nodes_val)) = fields.iter().find(|(k, _)| k == "_nodes") {
+                        Ok(nodes_val.clone())
+                    } else if let Some((_, first)) = fields.first() {
+                        // Fallback: return first field (usually nodes list)
+                        Ok(first.clone())
+                    } else {
+                        Ok(Value::Null)
+                    }
+                }
+                Value::List(_) => Ok(path.clone()),
+                _ => Err(format!("NODES() requires a path/recursive rel, got {:?}", path)),
+            }
+        }
+        PathOp::Rels => {
+            let path = &args[0];
+            match path {
+                Value::Struct(fields) => {
+                    if let Some((_, rels_val)) = fields.iter().find(|(k, _)| k == "_rels") {
+                        Ok(rels_val.clone())
+                    } else if fields.len() >= 2 {
+                        Ok(fields[1].1.clone())
+                    } else {
+                        Ok(Value::Null)
+                    }
+                }
+                _ => Err(format!("RELS() requires a path/recursive rel, got {:?}", path)),
+            }
+        }
+        PathOp::Length => {
+            let path = &args[0];
+            match path {
+                Value::List(items) => Ok(Value::Int64(items.len() as i64)),
+                Value::Struct(fields) => {
+                    // Count entries in _rels or _nodes minus 1
+                    if let Some((_, rels_val)) = fields.iter().find(|(k, _)| k == "_rels") {
+                        if let Value::List(rels) = rels_val {
+                            Ok(Value::Int64(rels.len() as i64))
+                        } else {
+                            Ok(Value::Int64(0))
+                        }
+                    } else {
+                        Ok(Value::Int64(0))
+                    }
+                }
+                _ => Err(format!("LENGTH() requires a path/recursive rel, got {:?}", path)),
+            }
+        }
+    }
+}
+
+/// Generate a random UUID v4 string.
+fn evaluate_uuid(_args: &[Value]) -> Result<Value, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    // Simple UUID v4 generation without external crate dependency
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let mut seed = now.as_nanos() as u64;
+    // Simple PRNG (xorshift64*)
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    let r1 = seed.wrapping_mul(0x2545F4914F6CDD1Du64);
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    let r2 = seed.wrapping_mul(0x2545F4914F6CDD1Du64);
+    
+    // Format as UUID v4: 8-4-4-4-12 hex digits
+    let time_low = (r1 & 0xFFFFFFFF) as u32;
+    let time_mid = ((r1 >> 32) & 0xFFFF) as u16;
+    let time_hi_and_version = (((r1 >> 48) & 0x0FFF) | 0x4000) as u16; // version 4
+    let clock_seq = ((r2 & 0x3FFF) | 0x8000) as u16; // variant 1
+    let node_low = ((r2 >> 14) & 0xFFFFFFFF) as u32;
+    let node_hi = ((r2 >> 46) & 0xFFFF) as u16;
+    
+    Ok(Value::String(format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:04x}{:08x}",
+        time_low, time_mid, time_hi_and_version, clock_seq, node_hi, node_low
+    )))
+}
 
 fn evaluate_boolean(op: BooleanOp, args: &[Value]) -> Result<Value, String> {
     if args.len() < 2 && !matches!(op, BooleanOp::Not) {
