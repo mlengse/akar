@@ -719,7 +719,7 @@ mod integration_tests {
             CompressionType::Float,
         );
 
-        let floats: Vec<f64> = vec![1.0, 3.14159265359, -2.5e10, 0.0, f64::MIN_POSITIVE, f64::MAX];
+        let floats: Vec<f64> = vec![1.0, std::f64::consts::PI, -2.5e10, 0.0, f64::MIN_POSITIVE, f64::MAX];
         for v in &floats {
             col_float.append_value(&Value::Double(*v)).unwrap();
         }

@@ -354,7 +354,7 @@ impl MergeCursor {
 ///
 /// ```ignore
 /// let merger = MultiWayStreamMerge::new(spill_files, None, 0)?;
-/// while let Some(row) = merger.next() {
+/// while let Some(row) = merger.next_tuple() {
 ///     // Write row to Column via BufferManager
 /// }
 /// ```
@@ -401,7 +401,7 @@ impl MultiWayStreamMerge {
     /// Get the next row from the merge.
     ///
     /// Returns `None` when all sources are exhausted.
-    pub fn next(&mut self) -> Option<Vec<Value>> {
+    pub fn next_tuple(&mut self) -> Option<Vec<Value>> {
         loop {
             // Find the cursor with the smallest sort key
             let smallest = self.find_smallest();
@@ -630,7 +630,7 @@ mod tests {
         // Merge with no dedup
         let mut merger = MultiWayStreamMerge::new(&files, None, 0, false).unwrap();
         let mut merged = Vec::new();
-        while let Some(row) = merger.next() {
+        while let Some(row) = merger.next_tuple() {
             merged.push(row[0].clone());
         }
 
@@ -665,7 +665,7 @@ mod tests {
         // Merge WITH dedup
         let mut merger = MultiWayStreamMerge::new(&files, None, 0, true).unwrap();
         let mut merged = Vec::new();
-        while let Some(row) = merger.next() {
+        while let Some(row) = merger.next_tuple() {
             merged.push(row[0].clone());
         }
 
@@ -697,7 +697,7 @@ mod tests {
 
         let mut merger = MultiWayStreamMerge::new(&files, Some(in_memory), 0, false).unwrap();
         let mut merged = Vec::new();
-        while let Some(row) = merger.next() {
+        while let Some(row) = merger.next_tuple() {
             merged.push(row[0].clone());
         }
 

@@ -22,7 +22,7 @@ use crate::compression::{compress_serialized_value, decompress_serialized_value,
 use crate::page::FileHandle;
 use kuzu_common::enums::CompressionType;
 use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
-use std::path::PathBuf;
+
 use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ impl Column {
         logical_type: LogicalTypeID,
         table_id: u64,
         col_idx: u32,
-        db_path: &PathBuf,
+        db_path: &std::path::Path,
         buffer_manager: Arc<Mutex<BufferManager>>,
         page_size: usize,
     ) -> Self {
@@ -138,7 +138,7 @@ impl Column {
         logical_type: LogicalTypeID,
         table_id: u64,
         col_idx: u32,
-        db_path: &PathBuf,
+        db_path: &std::path::Path,
         buffer_manager: Arc<Mutex<BufferManager>>,
         page_size: usize,
         compression_type: CompressionType,
@@ -667,9 +667,9 @@ impl Column {
         let num_values = u32::from_le_bytes(data[..4].try_into().unwrap());
         let num_vals = num_values.min(MAX_VALS_PER_PAGE as u32) as usize;
         let mut offsets = [0u32; MAX_VALS_PER_PAGE];
-        for i in 0..num_vals {
+        for (i, offset) in offsets.iter_mut().enumerate().take(num_vals) {
             let off_pos = 4 + i * 4;
-            offsets[i] = u32::from_le_bytes(data[off_pos..off_pos + 4].try_into().unwrap());
+            *offset = u32::from_le_bytes(data[off_pos..off_pos + 4].try_into().unwrap());
         }
         Ok(PageHeader { num_values, offsets })
     }
@@ -767,8 +767,8 @@ mod tests {
             Value::UInt16(65535),
             Value::UInt8(255),
             Value::Int128(i128::MAX),
-            Value::Double(3.14159),
-            Value::Float(2.71828),
+            Value::Double(3.15),
+            Value::Float(std::f32::consts::E),
         ];
 
         for v in &values {
@@ -890,13 +890,13 @@ mod tests {
         let (mut col, _dir) = setup_column();
 
         col.append_value(&Value::String("hello".to_string())).unwrap();
-        col.append_value(&Value::Double(3.14)).unwrap();
+        col.append_value(&Value::Double(3.15)).unwrap();
         col.append_value(&Value::Bool(true)).unwrap();
         col.append_value(&Value::List(vec![Value::Int64(1), Value::Int64(2)]))
             .unwrap();
 
         assert_eq!(col.get_value(0).unwrap(), Value::String("hello".to_string()));
-        assert_eq!(col.get_value(1).unwrap(), Value::Double(3.14));
+        assert_eq!(col.get_value(1).unwrap(), Value::Double(3.15));
         assert_eq!(col.get_value(2).unwrap(), Value::Bool(true));
         assert_eq!(
             col.get_value(3).unwrap(),
@@ -990,7 +990,7 @@ mod tests {
             CompressionType::Float,
         );
 
-        let vals = vec![1.0, 3.14159, -2.5, 0.0, 1e10];
+        let vals = vec![1.0, 3.15, -2.5, 0.0, 1e10];
         for v in &vals {
             col.append_value(&Value::Double(*v)).unwrap();
         }

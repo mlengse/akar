@@ -111,7 +111,7 @@ impl FileHandle {
     pub fn write_page(&self, page_num: PageNum, data: &[u8]) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
         // Use OpenOptions to open without truncating
-        let mut file = std::fs::OpenOptions::new().write(true).create(true).open(&self.path)?;
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&self.path)?;
         let offset = self.page_offset(page_num);
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;

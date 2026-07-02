@@ -18,15 +18,18 @@ use kuzu_function::scalar::evaluate_scalar;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, Query, UnaryOp};
 use std::sync::{Arc, Mutex};
 
+pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
+pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
+
 /// Evaluates expressions against DataChunks using the function registry.
 pub struct ExpressionEvaluator {
     registry: Arc<Mutex<FunctionRegistry>>,
     /// Optional callback to execute subqueries at evaluation time.
     /// Takes a parsed Query and returns DataChunks.
-    pub subquery_fn: Option<Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>,
+    pub subquery_fn: Option<SubqueryFn>,
     /// Optional callback for sequence operations (nextval/currval).
     /// Takes (sequence_name, is_nextval) and returns the resulting value.
-    pub sequence_fn: Option<Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>>,
+    pub sequence_fn: Option<SequenceFn>,
 }
 
 impl ExpressionEvaluator {
@@ -39,13 +42,13 @@ impl ExpressionEvaluator {
     }
 
     /// Set the subquery execution callback.
-    pub fn with_subquery_fn(mut self, f: Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>) -> Self {
+    pub fn with_subquery_fn(mut self, f: SubqueryFn) -> Self {
         self.subquery_fn = Some(f);
         self
     }
 
     /// Set the sequence operation callback (for nextval/currval).
-    pub fn with_sequence_fn(mut self, f: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>) -> Self {
+    pub fn with_sequence_fn(mut self, f: SequenceFn) -> Self {
         self.sequence_fn = Some(f);
         self
     }
@@ -315,8 +318,8 @@ impl ExpressionEvaluator {
     /// Evaluate a unary operation.
     fn evaluate_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ValueVector, String> {
         match op {
-            UnaryOp::Not => self.evaluate_function_call("NOT", &[inner.clone()], chunk),
-            UnaryOp::Negate => self.evaluate_function_call("-", &[inner.clone()], chunk),
+            UnaryOp::Not => self.evaluate_function_call("NOT", std::slice::from_ref(inner), chunk),
+            UnaryOp::Negate => self.evaluate_function_call("-", std::slice::from_ref(inner), chunk),
             UnaryOp::IsNull => {
                 let vec = self.evaluate(inner, chunk)?;
                 let num_rows = vec.size();

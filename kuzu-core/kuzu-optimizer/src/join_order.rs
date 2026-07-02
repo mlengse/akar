@@ -282,11 +282,10 @@ pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<Logic
     // Extract join conditions to build adjacency matrix
     let mut conditions = Vec::new();
     for op in operators {
-        if let LogicalOperator::Filter(f) = op {
-            if let Some((left, right)) = extract_equality_join(&f.expression) {
+        if let LogicalOperator::Filter(f) = op
+            && let Some((left, right)) = extract_equality_join(&f.expression) {
                 conditions.push((left, right));
             }
-        }
     }
 
     // Map aliases to scan indices
@@ -352,7 +351,7 @@ pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<Logic
                         (c, prev_state.cost + c + 1e9)
                     };
 
-                    if best_state.as_ref().map_or(true, |b| new_cost < b.cost) {
+                    if best_state.as_ref().is_none_or(|b| new_cost < b.cost) {
                         best_state = Some(DpState {
                             cost: new_cost,
                             cardinality: new_card,

@@ -61,14 +61,14 @@ pub enum ArtNode {
     Node48 {
         prefix: Vec<u8>,
         child_index: [u8; 256],
-        children: [Option<Box<ArtNode>>; 48],
+        children: Box<[Option<Box<ArtNode>>; 48]>,
         offsets: Vec<u64>,
         overflow_offsets: Vec<u64>,
         count: u16,
     },
     Node256 {
         prefix: Vec<u8>,
-        children: [Option<Box<ArtNode>>; 256],
+        children: Box<[Option<Box<ArtNode>>; 256]>,
         offsets: Vec<u64>,
         overflow_offsets: Vec<u64>,
         count: u16,
@@ -204,7 +204,7 @@ impl ArtNode {
                     let old_offsets = std::mem::take(offsets);
                     let old_overflow = std::mem::take(overflow_offsets);
                     let old_child_index = std::mem::replace(child_index, [EMPTY_MARKER; 256]);
-                    let old_children = std::mem::replace(children, std::array::from_fn(|_| None));
+                    let old_children = std::mem::replace(children, Box::new(std::array::from_fn(|_| None)));
                     let old_count = *count;
                     *self = ArtNode::grow_node48_to_node256(
                         old_prefix, old_offsets, old_overflow,
@@ -223,12 +223,12 @@ impl ArtNode {
     }
 
     /// Get a child by byte, if it exists.
-    pub fn get_child(&self, byte: u8) -> Option<&Box<ArtNode>> {
+    pub fn get_child(&self, byte: u8) -> Option<&ArtNode> {
         match self {
             ArtNode::Node4 { keys, children, count, .. } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
-                        return children[i].as_ref();
+                        return children[i].as_deref();
                     }
                 }
                 None
@@ -236,7 +236,7 @@ impl ArtNode {
             ArtNode::Node16 { keys, children, count, .. } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
-                        return children[i].as_ref();
+                        return children[i].as_deref();
                     }
                 }
                 None
@@ -246,10 +246,10 @@ impl ArtNode {
                 if idx == EMPTY_MARKER {
                     None
                 } else {
-                    children[idx as usize].as_ref()
+                    children[idx as usize].as_deref()
                 }
             }
-            ArtNode::Node256 { children, .. } => children[byte as usize].as_ref(),
+            ArtNode::Node256 { children, .. } => children[byte as usize].as_deref(),
         }
     }
 
@@ -434,7 +434,7 @@ impl ArtNode {
         old_count: u16,
     ) -> Self {
         let mut child_index = [EMPTY_MARKER; 256];
-        let mut children: [Option<Box<ArtNode>>; 48] = std::array::from_fn(|_| None);
+        let mut children: Box<[Option<Box<ArtNode>>; 48]> = Box::new(std::array::from_fn(|_| None));
         for i in 0..old_count as usize {
             let byte = old_keys[i];
             child_index[byte as usize] = i as u8;
@@ -455,10 +455,10 @@ impl ArtNode {
         old_offsets: Vec<u64>,
         old_overflow: Vec<u64>,
         old_child_index: [u8; 256],
-        mut old_children: [Option<Box<ArtNode>>; 48],
+        mut old_children: Box<[Option<Box<ArtNode>>; 48]>,
         old_count: u16,
     ) -> Self {
-        let mut children: [Option<Box<ArtNode>>; 256] = std::array::from_fn(|_| None);
+        let mut children: Box<[Option<Box<ArtNode>>; 256]> = Box::new(std::array::from_fn(|_| None));
         for byte in 0..256u16 {
             let idx = old_child_index[byte as usize];
             if idx != EMPTY_MARKER {

@@ -310,7 +310,7 @@ mod tests {
     fn test_encode_double_ordering() {
         let neg = ArtKey::from_double(-3.14);
         let zero = ArtKey::from_double(0.0);
-        let pos = ArtKey::from_double(3.14);
+        let pos = ArtKey::from_double(std::f64::consts::PI);
 
         assert!(neg.bytes < zero.bytes, "negative should sort before zero");
         assert!(zero.bytes < pos.bytes, "zero should sort before positive");
@@ -375,7 +375,7 @@ mod tests {
         assert!(ArtKey::from_value(&Value::Null).is_none());
         assert!(ArtKey::from_value(&Value::Int64(42)).is_some());
         assert!(ArtKey::from_value(&Value::String("hello".into())).is_some());
-        assert!(ArtKey::from_value(&Value::Double(3.14)).is_some());
+        assert!(ArtKey::from_value(&Value::Double(std::f64::consts::PI)).is_some());
         assert!(ArtKey::from_value(&Value::Bool(true)).is_some());
         // Compound types
         assert!(ArtKey::from_value(&Value::List(vec![])).is_none());
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_from_value_roundtrip_ordering() {
-        let values = vec![
+        let values = [
             Value::Int64(i64::MIN),
             Value::Int64(-1000),
             Value::Int64(-1),

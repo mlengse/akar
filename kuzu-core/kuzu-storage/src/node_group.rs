@@ -217,11 +217,11 @@ impl NodeGroup {
             sort_col,
             dedup,
         )
-        .map_err(|e| std::io::Error::other(e))?;
+        .map_err(std::io::Error::other)?;
 
         // Stream all merged rows into the target columns
         let mut total: usize = 0;
-        while let Some(row) = merger.next() {
+        while let Some(row) = merger.next_tuple() {
             for (col_idx, value) in row.into_iter().enumerate() {
                 if col_idx < columns.len() {
                     columns[col_idx].append_value(&value)?;

@@ -270,14 +270,14 @@ mod tests {
     use crate::page::DEFAULT_PAGE_SIZE;
     use kuzu_common::memory::MemoryManager;
     use kuzu_common::types::LogicalTypeID;
-    use std::path::PathBuf;
+    
     use std::sync::{Arc, Mutex};
 
-    fn setup_column(db_path: &PathBuf) -> Column {
+    fn setup_column(db_path: &std::path::Path) -> Column {
         let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
         let config = crate::buffer_manager::BufferManagerConfig::default();
         let bm = Arc::new(Mutex::new(crate::buffer_manager::BufferManager::new(
-            db_path.clone(),
+            db_path.to_path_buf(),
             mm,
             config,
         )));

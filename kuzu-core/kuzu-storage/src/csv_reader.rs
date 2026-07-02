@@ -180,9 +180,9 @@ pub fn read_csv(path: &Path, columns: &[CatalogColumn], config: &CsvReaderConfig
     }
 
     let mut results = Vec::new();
-    let mut line_number: usize = if config.has_header { 2 } else { 1 };
+    let start_line = if config.has_header { 2 } else { 1 };
 
-    for result in raw_reader.records() {
+    for (line_number, result) in (start_line..).zip(raw_reader.records()) {
         let record = result.map_err(|e| CsvReaderError::CsvError(format!("Line {line_number}: {e}")))?;
 
         if record.len() != columns.len() {
@@ -201,7 +201,6 @@ pub fn read_csv(path: &Path, columns: &[CatalogColumn], config: &CsvReaderConfig
         }
 
         results.push(row);
-        line_number += 1;
     }
 
     Ok(results)

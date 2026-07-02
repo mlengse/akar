@@ -20,11 +20,11 @@ pub fn compress(compression: CompressionType, data: &[u8], num_values: usize) ->
         CompressionType::Boolean => compress_boolean(data, num_values),
         CompressionType::IntegerBitpacking | CompressionType::ListDelta => {
             // Determine value size from the data length
-            let value_size = if num_values > 0 { data.len() / num_values } else { 8 };
+            let value_size = data.len().checked_div(num_values).unwrap_or(8);
             compress_integer_bitpacking(data, num_values, value_size)
         }
         CompressionType::Float => {
-            let value_size = if num_values > 0 { data.len() / num_values } else { 4 };
+            let value_size = data.len().checked_div(num_values).unwrap_or(4);
             compress_float(data, num_values, value_size)
         }
         CompressionType::OneValue | CompressionType::Uncompressed => CompressedChunk {
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_float_batch_roundtrip() {
-        let values: Vec<f64> = vec![1.0, 3.14159, -2.5, 0.0, 1e10];
+        let values: Vec<f64> = vec![1.0, 3.15, -2.5, 0.0, 1e10];
         let value_size = 8;
         let mut data = Vec::with_capacity(values.len() * value_size);
         for v in &values {

@@ -18,6 +18,9 @@ use crate::expression_evaluator::ExpressionEvaluator;
 /// Result of executing a physical operator.
 pub type OperatorResult = Result<Vec<DataChunk>, String>;
 
+pub type HashJoinBucket = Vec<(Value, Vec<(usize, usize)>)>;
+pub type HashJoinTable = HashMap<u64, HashJoinBucket>;
+
 // ==================== SemiMask (SIP) Types ====================
 
 /// A semi-mask tracks which node offsets match a join condition.
@@ -1230,9 +1233,9 @@ impl PhysicalCrossProduct {
         let mut out_row = 0usize;
         for lr in 0..left_rows {
             for rr in 0..right_rows {
-                for col in 0..num_left_cols {
+                for (col, field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
                     let val = &left_values[col][lr];
-                    let _ = output_fields[col].set_value(out_row, val);
+                    let _ = field.set_value(out_row, val);
                 }
                 for col in 0..num_right_cols {
                     let val = &right_values[col][rr];
@@ -1326,10 +1329,10 @@ impl PhysicalSemiJoin {
 
         for (out_idx, (ci, row)) in match_rows.iter().enumerate() {
             if let Some(chunk) = probe_chunks.get(*ci) {
-                for col in 0..num_left_cols {
+                for (col, out_field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
                     if let Some(field) = chunk.fields.get(col) {
                         let val = field.get_value(*row).unwrap_or(Value::Null);
-                        let _ = output_fields[col].set_value(out_idx, &val);
+                        let _ = out_field.set_value(out_idx, &val);
                     }
                 }
             }
@@ -1408,10 +1411,10 @@ impl PhysicalAntiJoin {
 
         for (out_idx, (ci, row)) in non_match_rows.iter().enumerate() {
             if let Some(chunk) = probe_chunks.get(*ci) {
-                for col in 0..num_left_cols {
+                for (col, out_field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
                     if let Some(field) = chunk.fields.get(col) {
                         let val = field.get_value(*row).unwrap_or(Value::Null);
-                        let _ = output_fields[col].set_value(out_idx, &val);
+                        let _ = out_field.set_value(out_idx, &val);
                     }
                 }
             }
@@ -1458,14 +1461,14 @@ impl PhysicalIntersect {
         let probe_col = self.probe_key_col as usize;
         let chunk_group_size = (build_chunks.len() / num_builds).max(1);
 
-        let mut build_tables: Vec<HashMap<u64, Vec<(Value, Vec<(usize, usize)>)>>> = Vec::new();
+        let mut build_tables: Vec<HashJoinTable> = Vec::new();
 
         for side in 0..num_builds {
             let start = side * chunk_group_size;
             let end = (start + chunk_group_size).min(build_chunks.len());
             let chunks = &build_chunks[start..end];
 
-            let mut ht: HashMap<u64, Vec<(Value, Vec<(usize, usize)>)>> = HashMap::new();
+            let mut ht: HashJoinTable = HashMap::new();
 
             for (ci, chunk) in chunks.iter().enumerate() {
                 for row in 0..chunk.size {
@@ -1715,10 +1718,10 @@ impl PhysicalHashJoin {
 
                         for &(bci, brow) in locations {
                             // Build side columns
-                            for col in 0..build_chunks[bci].num_fields() {
+                            for (col, out_col) in output_rows.iter_mut().enumerate().take(build_chunks[bci].num_fields()) {
                                 if let Some(field) = build_chunks[bci].fields.get(col) {
                                     let val = field.get_value(brow).unwrap_or(Value::Null);
-                                    output_rows[col].push((val, field.is_null(brow)));
+                                    out_col.push((val, field.is_null(brow)));
                                 }
                             }
                             // Probe side columns
@@ -1741,11 +1744,11 @@ impl PhysicalHashJoin {
 
         let num_rows = output_rows[0].len();
         let mut result_fields = Vec::with_capacity(output_rows.len());
-        for col in 0..output_rows.len() {
+        for (col, row_data) in output_rows.iter().enumerate() {
             let phys_type = output_types.get(col).copied().unwrap_or(PhysicalTypeID::Int64);
             let mut v = ValueVector::new(phys_type, num_rows);
             v.resize(num_rows);
-            for (row, (val, _is_null)) in output_rows[col].iter().enumerate() {
+            for (row, (val, _is_null)) in row_data.iter().enumerate() {
                 if matches!(val, Value::Null) {
                     v.set_null(row, true);
                 } else {
@@ -2226,10 +2229,10 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
             output_columns[num_cols].push(Value::Double(*dist));
 
             // Look up each column value from the node table
-            for col_idx in 0..num_cols {
+            for (col_idx, out_col) in output_columns.iter_mut().enumerate().take(num_cols) {
                 match node_table.get_value(*row_id, col_idx) {
-                    Some(val) => output_columns[col_idx].push(val.clone()),
-                    None => output_columns[col_idx].push(Value::Null),
+                    Some(val) => out_col.push(val.clone()),
+                    None => out_col.push(Value::Null),
                 }
             }
         }
@@ -2243,8 +2246,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         let mut fields = Vec::with_capacity(num_cols + 1);
 
         // Add table columns
-        for col_idx in 0..num_cols {
-            let col_data = &output_columns[col_idx];
+        for (_col_idx, col_data) in output_columns.iter().enumerate().take(num_cols) {
             let mut v = ValueVector::new(PhysicalTypeID::Double, num_results);
             v.resize(num_results);
             for (i, val) in col_data.iter().enumerate() {
@@ -2469,10 +2471,10 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols];
 
         for &row_id in &row_ids {
-            for col_idx in 0..num_cols {
+            for (col_idx, out_col) in output_columns.iter_mut().enumerate().take(num_cols) {
                 match node_table.get_value(row_id as usize, col_idx) {
-                    Some(val) => output_columns[col_idx].push(val.clone()),
-                    None => output_columns[col_idx].push(Value::Null),
+                    Some(val) => out_col.push(val.clone()),
+                    None => out_col.push(Value::Null),
                 }
             }
         }
@@ -2969,9 +2971,9 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
         if has_cost {
             let mut cost_v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, num_results);
-            for i in 0..num_results {
+            for (i, cost) in result_cost.iter().enumerate().take(num_results) {
                 let offset = i * 8;
-                cost_v.data_mut()[offset..offset + 8].copy_from_slice(&result_cost[i].to_le_bytes());
+                cost_v.data_mut()[offset..offset + 8].copy_from_slice(&cost.to_le_bytes());
                 cost_v.set_null(i, false);
             }
             cost_v.resize(num_results);

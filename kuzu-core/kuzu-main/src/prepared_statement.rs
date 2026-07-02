@@ -388,7 +388,7 @@ mod tests {
             Constant::String("hi".into())
         );
         assert_eq!(value_to_constant(&Value::Bool(true)), Constant::Bool(true));
-        assert_eq!(value_to_constant(&Value::Double(3.14)), Constant::Float(3.14));
+        assert_eq!(value_to_constant(&Value::Double(3.15)), Constant::Float(3.15));
         assert_eq!(value_to_constant(&Value::Null), Constant::Null);
     }
 

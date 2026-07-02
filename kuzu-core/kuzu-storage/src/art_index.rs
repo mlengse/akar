@@ -504,7 +504,7 @@ impl ArtPrimaryKeyIndex {
                 ArtNode::Node48 {
                     prefix,
                     child_index,
-                    children,
+                    children: Box::new(children),
                     offsets,
                     overflow_offsets,
                     count,
@@ -522,7 +522,7 @@ impl ArtPrimaryKeyIndex {
                 }
                 ArtNode::Node256 {
                     prefix,
-                    children,
+                    children: Box::new(children),
                     offsets,
                     overflow_offsets,
                     count,

@@ -613,8 +613,8 @@ mod tests {
 
     #[test]
     fn test_cast_to_f64() {
-        let f64_arr = Float64Array::from(vec![3.14]);
-        assert!((cast_to_f64(&f64_arr, 0, "col").unwrap() - 3.14).abs() < 1e-10);
+        let f64_arr = Float64Array::from(vec![3.15]);
+        assert!((cast_to_f64(&f64_arr, 0, "col").unwrap() - 3.15).abs() < 1e-10);
 
         let f32_arr = Float32Array::from(vec![2.5f32]);
         assert!((cast_to_f64(&f32_arr, 0, "col").unwrap() - 2.5).abs() < 1e-10);
@@ -747,10 +747,10 @@ mod tests {
         );
 
         // Double
-        let f64_arr = Float64Array::from(vec![Some(3.14), None]);
+        let f64_arr = Float64Array::from(vec![Some(3.15), None]);
         assert_eq!(
             arrow_array_to_value(&f64_arr, 0, "d", LogicalTypeID::Double, 0).unwrap(),
-            Value::Double(3.14)
+            Value::Double(3.15)
         );
     }
 

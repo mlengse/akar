@@ -736,8 +736,8 @@ mod tests {
         let bound = binder.bind(stmt).unwrap();
         let planner = QueryPlanner::new();
         let plan = planner.plan(bound).unwrap();
-        // Should have at least a ScanNode
-        assert!(plan.iter().any(|op| matches!(op, LogicalOperator::ScanNode(_))));
+        // Should have at least a HashJoin or CrossProduct since it joins two nodes
+        assert!(plan.iter().any(|op| matches!(op, LogicalOperator::HashJoin(_) | LogicalOperator::CrossProduct(_))));
     }
 
     #[test]

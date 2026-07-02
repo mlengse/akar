@@ -16,15 +16,18 @@ use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::sync::{Arc, Mutex};
 
+pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
+pub type SubqueryFn = Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
+
 /// The query processor executes a physical plan and produces result chunks.
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     table_catalog: Option<Arc<TableCatalog>>,
     /// Callback for sequence operations (nextval/currval).
     /// Takes (sequence_name, is_nextval) and returns the resulting value.
-    sequence_fn: Option<Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>>,
+    sequence_fn: Option<SequenceFn>,
     /// Callback for executing subqueries.
-    subquery_fn: Option<Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>>,
+    subquery_fn: Option<SubqueryFn>,
 }
 
 impl QueryProcessor {
@@ -58,13 +61,13 @@ impl QueryProcessor {
     }
 
     /// Set the sequence operation callback (for nextval/currval).
-    pub fn with_sequence_fn(mut self, f: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>) -> Self {
+    pub fn with_sequence_fn(mut self, f: SequenceFn) -> Self {
         self.sequence_fn = Some(f);
         self
     }
 
     /// Set the subquery operation callback.
-    pub fn with_subquery_fn(mut self, f: Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>) -> Self {
+    pub fn with_subquery_fn(mut self, f: SubqueryFn) -> Self {
         self.subquery_fn = Some(f);
         self
     }

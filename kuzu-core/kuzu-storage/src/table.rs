@@ -310,10 +310,10 @@ impl NodeTable {
                 }
 
             for row in 0..group.num_nodes as usize {
-                for col in 0..num_cols {
+                for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
                     match group.get_value(row, col) {
-                        Some(v) => result[col].push(v.clone()),
-                        None => result[col].push(Value::Null),
+                        Some(v) => res_col.push(v.clone()),
+                        None => res_col.push(Value::Null),
                     }
                 }
             }
