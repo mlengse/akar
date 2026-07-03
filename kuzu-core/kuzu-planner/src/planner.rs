@@ -277,7 +277,8 @@ impl QueryPlanner {
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;
         let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
-        // Flag to skip destination node pattern consumed by RecursiveExtend
+        let mut extend_ops: Vec<LogicalOperator> = Vec::new();
+        // Flag to skip destination node pattern consumed by RecursiveExtend or Extend
         let mut skip_next_node = false;
 
         for clause in query.clauses {
@@ -285,7 +286,7 @@ impl QueryPlanner {
                 BoundClause::BoundMatch(m) => {
                     let mut patterns_iter = m.patterns.into_iter().peekable();
                     while let Some(pattern) = patterns_iter.next() {
-                        // If the previous pattern's RecursiveExtend consumed this dest node, skip
+                        // If the previous pattern consumed this dest node, skip
                         if skip_next_node {
                             skip_next_node = false;
                             continue;
@@ -343,9 +344,51 @@ impl QueryPlanner {
                                 skip_next_node = true;
                                 continue;
                             }
+
+                            // Regular (non-var-length) edge → create Extend
+                            // Scan the source node (clone what we need before pattern is moved)
+                            let src_node_var = pattern.node_variable.clone();
+                            if let Some(label) = &pattern.node_label {
+                                scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                    table_name: label.clone(),
+                                    table_id: pattern.node_table_id.unwrap_or(0),
+                                    alias: src_node_var.clone(),
+                                    columns: Vec::new(),
+                                    cardinality: 0,
+                                }));
+                            }
+
+                            // Create Extend which replaces ScanRel + destination ScanNode
+                            if let Some(rel_label) = &edge.label {
+                                let dest_pattern = patterns_iter.peek();
+                                let dst_var = dest_pattern
+                                    .and_then(|p| p.node_variable.clone())
+                                    .unwrap_or_default();
+                                let dst_table_name = dest_pattern
+                                    .and_then(|p| p.node_label.clone())
+                                    .unwrap_or_default();
+                                let dst_table_id = dest_pattern
+                                    .and_then(|p| p.node_table_id)
+                                    .unwrap_or(0);
+
+                                extend_ops.push(LogicalOperator::Extend(LogicalExtend {
+                                    rel_table_name: rel_label.clone(),
+                                    rel_table_id: edge.rel_table_id.unwrap_or(0),
+                                    bound_node_var: src_node_var.unwrap_or_default(),
+                                    direction: edge.direction.clone(),
+                                    dst_node_var: dst_var,
+                                    dst_table_name,
+                                    dst_table_id,
+                                    cardinality: 0,
+                                }));
+
+                                // Skip the destination node pattern (consumed by Extend)
+                                skip_next_node = true;
+                                continue;
+                            }
                         }
 
-                        // Regular (non-var-length) pattern: Scan node
+                        // Regular (non-var-length) pattern without edge: Scan node only
                         if let Some(label) = pattern.node_label {
                             scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                 table_name: label,
@@ -355,16 +398,6 @@ impl QueryPlanner {
                                 cardinality: 0,
                             }));
                         }
-                        // Regular edge: ScanRel
-                        if let Some(edge) = pattern.edge
-                            && let Some(rel_label) = edge.label {
-                                scan_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
-                                    table_name: rel_label,
-                                    table_id: edge.rel_table_id.unwrap_or(0),
-                                    direction: edge.direction,
-                                    cardinality: 0,
-                                }));
-                            }
                     }
                 }
                 BoundClause::BoundWhere(w) => {
@@ -590,6 +623,9 @@ impl QueryPlanner {
             }));
         }
 
+        // Append extend operators (replace ScanRel in pipeline)
+        result.extend(std::mem::take(&mut extend_ops));
+
         // Project as topmost
         if let Some(proj) = projection {
             result.push(LogicalOperator::Projection(proj));
@@ -771,8 +807,12 @@ mod tests {
         let bound = binder.bind(stmt).unwrap();
         let planner = QueryPlanner::new();
         let plan = planner.plan(bound).unwrap();
-        // Should have at least a HashJoin or CrossProduct since it joins two nodes
-        assert!(plan.iter().any(|op| matches!(op, LogicalOperator::HashJoin(_) | LogicalOperator::CrossProduct(_))));
+        // Should have an Extend operator replacing the relationship scan + join
+        assert!(plan.iter().any(|op| matches!(op, LogicalOperator::Extend(_))));
+        // Should also have ScanNode for the source node
+        assert!(plan.iter().any(|op| matches!(op, LogicalOperator::ScanNode(_))));
+        // Should NOT have ScanRel (replaced by Extend)
+        assert!(!plan.iter().any(|op| matches!(op, LogicalOperator::ScanRel(_))));
     }
 
     #[test]

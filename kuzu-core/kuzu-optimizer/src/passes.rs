@@ -485,6 +485,7 @@ impl OptimizationPass for ArtRangeScanDetection {
                             LogicalArtIndexRangeScan {
                                 table_name: sn.table_name.clone(),
                                 table_id: sn.table_id,
+                                alias: sn.alias.clone(),
                                 lower_bound: lower,
                                 upper_bound: upper,
                                 lower_inclusive: lower_inc,
@@ -858,6 +859,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::DropSequence(_)
                 | LogicalOperator::CreateNode(_)
                 | LogicalOperator::CreateRel(_)
+                | LogicalOperator::Extend(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_) => {}
@@ -1315,6 +1317,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::DropSequence(_)
                 | LogicalOperator::CreateNode(_)
                 | LogicalOperator::CreateRel(_)
+                | LogicalOperator::Extend(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_) => 1,

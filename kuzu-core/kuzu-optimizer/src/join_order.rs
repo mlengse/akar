@@ -114,6 +114,7 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::DropSequence(_)
         | LogicalOperator::CreateNode(_)
         | LogicalOperator::CreateRel(_)
+        | LogicalOperator::Extend(_)
         | LogicalOperator::CreateDml(_)
         | LogicalOperator::ExportDatabase(_)
         | LogicalOperator::ImportDatabase(_) => {

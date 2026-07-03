@@ -274,7 +274,12 @@ impl QueryProcessor {
                         upper_inclusive: ars.upper_inclusive,
                         table_catalog: self.table_catalog.clone(),
                     };
-                    let result = scan.execute(current.clone())?;
+                    let mut result = scan.execute(current.clone())?;
+                    // Prefix field names with the alias (same as ScanNode)
+                    let prefix = ars.alias.as_ref().unwrap_or(&ars.table_name);
+                    for chunk in &mut result {
+                        chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
+                    }
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Accumulate(_ac) => {
@@ -583,6 +588,26 @@ impl QueryProcessor {
                     };
                     let input = current;
                     let result = create_rel_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::Extend(ex) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for Extend".to_string())?;
+
+                    let extend_op = PhysicalExtend {
+                        rel_table_name: ex.rel_table_name.clone(),
+                        rel_table_id: ex.rel_table_id,
+                        bound_node_var: ex.bound_node_var.clone(),
+                        direction: ex.direction.clone(),
+                        dst_node_var: ex.dst_node_var.clone(),
+                        dst_table_name: ex.dst_table_name.clone(),
+                        dst_table_id: ex.dst_table_id,
+                        table_catalog,
+                    };
+                    let input = current;
+                    let result = extend_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::CrossProduct(cp) => {
@@ -1337,6 +1362,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
         LogicalOperator::CreateNode(cn) => format!("CreateNode({})", cn.table_name),
         LogicalOperator::CreateRel(cr) => format!("CreateRel({})", cr.table_name),
+        LogicalOperator::Extend(ex) => format!("Extend({}->{} via {})", ex.bound_node_var, ex.dst_node_var, ex.rel_table_name),
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
     };

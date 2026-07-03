@@ -103,6 +103,7 @@ pub enum LogicalOperator {
     CreateDml(LogicalCreateDml),
     CreateNode(LogicalCreateNode),
     CreateRel(LogicalCreateRel),
+    Extend(LogicalExtend),
     ExportDatabase(LogicalExportDatabase),
     ImportDatabase(LogicalImportDatabase),
 }
@@ -153,6 +154,7 @@ impl LogicalOperator {
             LogicalOperator::CreateDml(s) => s.cardinality,
             LogicalOperator::CreateNode(s) => s.cardinality,
             LogicalOperator::CreateRel(s) => s.cardinality,
+            LogicalOperator::Extend(s) => s.cardinality,
             LogicalOperator::ExportDatabase(s) => s.cardinality,
             LogicalOperator::ImportDatabase(s) => s.cardinality,
         }
@@ -203,6 +205,7 @@ impl LogicalOperator {
             LogicalOperator::CreateDml(s) => s.cardinality = card,
             LogicalOperator::CreateNode(s) => s.cardinality = card,
             LogicalOperator::CreateRel(s) => s.cardinality = card,
+            LogicalOperator::Extend(s) => s.cardinality = card,
             LogicalOperator::ExportDatabase(s) => s.cardinality = card,
             LogicalOperator::ImportDatabase(s) => s.cardinality = card,
         }
@@ -262,6 +265,7 @@ impl LogicalOperator {
             | LogicalOperator::CreateDml(_)
             | LogicalOperator::CreateNode(_)
             | LogicalOperator::CreateRel(_)
+            | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_) => vec![],
         }
@@ -311,6 +315,7 @@ impl LogicalOperator {
             | LogicalOperator::CreateDml(_)
             | LogicalOperator::CreateNode(_)
             | LogicalOperator::CreateRel(_)
+            | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_) => vec![],
         }
@@ -321,6 +326,7 @@ impl LogicalOperator {
 pub struct LogicalArtIndexRangeScan {
     pub table_name: String,
     pub table_id: u64,
+    pub alias: Option<String>,
     pub lower_bound: Option<kuzu_common::types::Value>,
     pub upper_bound: Option<kuzu_common::types::Value>,
     pub lower_inclusive: bool,
@@ -722,6 +728,34 @@ pub struct LogicalCreateNode {
     pub table_id: u64,
     pub out_var_name: String,
     pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub cardinality: u64,
+}
+
+/// Logical operator for extending from a source node through a relationship.
+///
+/// Replaces the combination of ScanRel + ScanNode(dest) in the pipeline.
+/// For each source node, looks up adjacency list entries in the rel table,
+/// producing output rows that include source fields, rel properties, and
+/// destination node properties.
+///
+/// Ported from C++ `LogicalExtend`.
+#[derive(Debug, Clone)]
+pub struct LogicalExtend {
+    /// Name of the relationship table to extend through.
+    pub rel_table_name: String,
+    /// ID of the relationship table.
+    pub rel_table_id: u64,
+    /// Variable name of the bound (source) node.
+    pub bound_node_var: String,
+    /// Direction of the extend (forward, backward, or both).
+    pub direction: kuzu_parser::ast::EdgeDirection,
+    /// Variable name of the destination node (e.g., "p").
+    pub dst_node_var: String,
+    /// Table name of the destination node (e.g., "Post").
+    pub dst_table_name: String,
+    /// Table ID of the destination node.
+    pub dst_table_id: u64,
+    /// Estimated cardinality.
     pub cardinality: u64,
 }
 

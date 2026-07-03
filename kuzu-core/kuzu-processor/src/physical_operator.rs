@@ -269,7 +269,7 @@ impl PhysicalScan {
     }
 
     /// Determine PhysicalTypeID from a LogicalTypeID.
-    fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
+    pub(crate) fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
         match logical {
             LogicalTypeID::Bool => PhysicalTypeID::Bool,
             LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial => {
@@ -2492,8 +2492,10 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         }
 
         let mut col_types = Vec::with_capacity(num_cols);
+        let mut col_names: Vec<String> = Vec::with_capacity(num_cols);
         for col in &node_table.columns {
             col_types.push(col.logical_type);
+            col_names.push(col.name.clone());
         }
 
         drop(node_table);
@@ -2572,7 +2574,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 fields.push(vv);
             }
 
-            chunks.push(DataChunk { fields, size: count, field_names: vec![] });
+            chunks.push(DataChunk { fields, size: count, field_names: col_names.clone() });
         }
 
         Ok(chunks)
@@ -3116,6 +3118,242 @@ impl PhysicalCreateRel {
             println!("PhysicalCreateRel inserted {} relationships from chunk of size {}", inserted, chunk.size);
             
             output.push(chunk);
+        }
+
+        Ok(output)
+    }
+}
+
+/// Physical operator for extending from a source node through a relationship.
+///
+/// Takes input chunks from the source node scan, and for each source row,
+/// looks up adjacency list entries in the relationship table, producing
+/// output rows that include the source fields, relationship properties,
+/// and destination node properties.
+///
+/// Ported from C++ `ScanRelTable` (the physical extend operator).
+pub struct PhysicalExtend {
+    /// Name of the relationship table.
+    pub rel_table_name: String,
+    /// ID of the relationship table.
+    pub rel_table_id: u64,
+    /// Variable name of the bound (source) node.
+    pub bound_node_var: String,
+    /// Direction of the extend.
+    pub direction: kuzu_parser::ast::EdgeDirection,
+    /// Variable name of the destination node.
+    pub dst_node_var: String,
+    /// Table name of the destination node.
+    pub dst_table_name: String,
+    /// Table ID of the destination node.
+    pub dst_table_id: u64,
+    /// Table catalog for data access.
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+impl PhysicalExtend {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+        if input.is_empty() || input.iter().all(|c| c.size == 0) {
+            return Ok(input);
+        }
+
+        // Collect rel table data upfront (owned)
+        let (fwd_adj, rev_adj, rel_props, rel_cols) = {
+            let rel_table = self.table_catalog.get_rel_table_by_name(&self.rel_table_name)
+                .ok_or_else(|| format!("Rel table {} not found", self.rel_table_name))?;
+            let fwd = rel_table.fwd_adj.clone();
+            let rev = rel_table.rev_adj.clone();
+            let props = rel_table.properties.clone();
+            let cols = rel_table.columns.clone();
+            (fwd, rev, props, cols)
+        };
+
+        // Collect dest node table data upfront (owned)
+        let (dest_data, dest_cols, dest_pk_col) = {
+            let dest_table = self.table_catalog.get_node_table_by_name(&self.dst_table_name)
+                .ok_or_else(|| format!("Node table {} not found", self.dst_table_name))?;
+            let data = dest_table.to_column_major_data();
+            let cols = dest_table.columns.clone();
+            let pk = dest_table.primary_key_column;
+            (data, cols, pk)
+        };
+
+        // Build PK → row offset map for destination lookups
+        let pk_to_row: std::collections::HashMap<u64, usize> = if dest_pk_col < dest_data.len() {
+            dest_data[dest_pk_col].iter().enumerate()
+                .filter_map(|(row, val)| {
+                    if let Value::Int64(id) = val { Some((*id as u64, row)) }
+                    else { None }
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        let mut output = Vec::with_capacity(input.len());
+
+        for chunk in input {
+            // Find the bound node column in the chunk
+            let bound_name_id = format!("{}.{}", self.bound_node_var, "_id");
+            let bound_name_pk = format!("{}.{}", self.bound_node_var, "id");
+            let bound_idx = chunk.field_names.iter().position(|name| name == &bound_name_id)
+                .or_else(|| chunk.field_names.iter().position(|name| name == &self.bound_node_var))
+                .or_else(|| chunk.field_names.iter().position(|name| name == &bound_name_pk))
+                .ok_or_else(|| {
+                    format!("Bound node variable {} not found in Extend input. Available fields: {:?}",
+                        self.bound_node_var, chunk.field_names)
+                })?;
+
+            // Calculate total output rows and build row mapping
+            let mut total_rows = 0;
+            let mut row_mappings: Vec<(usize, u64, usize)> = Vec::new(); // (input_row, dst_offset, edge_idx)
+
+            for i in 0..chunk.size {
+                if chunk.fields[bound_idx].is_null(i) {
+                    continue;
+                }
+                let offset = i * 8;
+                let src_vec_data = chunk.fields[bound_idx].data();
+                if offset + 8 > src_vec_data.len() {
+                    continue;
+                }
+                let mut src_bytes = [0u8; 8];
+                src_bytes.copy_from_slice(&src_vec_data[offset..offset + 8]);
+                let src_id = i64::from_le_bytes(src_bytes) as u64;
+
+                let edges: Vec<(u64, usize)> = match self.direction {
+                    kuzu_parser::ast::EdgeDirection::LeftToRight => {
+                        fwd_adj.get(&src_id).cloned().unwrap_or_default()
+                    }
+                    kuzu_parser::ast::EdgeDirection::RightToLeft => {
+                        rev_adj.get(&src_id).cloned().unwrap_or_default()
+                    }
+                    kuzu_parser::ast::EdgeDirection::Both => {
+                        let mut all = fwd_adj.get(&src_id).cloned().unwrap_or_default();
+                        if let Some(rev) = rev_adj.get(&src_id) {
+                            all.extend(rev.clone());
+                        }
+                        all
+                    }
+                };
+
+                for &(dst_offset, edge_idx) in &edges {
+                    if !pk_to_row.contains_key(&dst_offset) {
+                        if dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0) {
+                            continue;
+                        }
+                    }
+                    total_rows += 1;
+                    row_mappings.push((i, dst_offset, edge_idx));
+                }
+            }
+
+            if total_rows == 0 {
+                output.push(DataChunk::new(vec![]));
+                continue;
+            }
+
+            // Build output:
+            // Column layout: [input_fields | rel_properties | dest_node_fields]
+            let num_input_fields = chunk.fields.len();
+            let num_rel_cols = rel_cols.len();
+            let num_dest_cols = dest_cols.len();
+            let num_out_cols = num_input_fields + num_rel_cols + num_dest_cols;
+
+            // Build column-major data
+            let mut out_data: Vec<Vec<Value>> = vec![Vec::with_capacity(total_rows); num_out_cols];
+
+            for &(input_row, dst_offset, edge_idx) in &row_mappings {
+                // Copy input fields
+                for col in 0..num_input_fields {
+                    let val = chunk.fields[col].get_value(input_row).unwrap_or(Value::Null);
+                    out_data[col].push(val);
+                }
+                // Copy rel properties
+                for col in 0..num_rel_cols {
+                    let val = rel_props.get(col)
+                        .and_then(|c| c.get(edge_idx))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    out_data[num_input_fields + col].push(val);
+                }
+                // Copy dest node properties
+                let dest_row = pk_to_row.get(&dst_offset).copied();
+                for col in 0..num_dest_cols {
+                    let val = dest_row
+                        .and_then(|r| dest_data.get(col).and_then(|c| c.get(r)))
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            dest_data.get(col)
+                                .and_then(|c| c.get(dst_offset as usize))
+                                .cloned()
+                                .unwrap_or(Value::Null)
+                        });
+                    out_data[num_input_fields + num_rel_cols + col].push(val);
+                }
+            }
+
+            // Convert column-major data to ValueVectors
+            let mut fields = Vec::with_capacity(num_out_cols);
+            let mut field_names = Vec::with_capacity(num_out_cols);
+
+            // Input field names (already prefixed)
+            for col in 0..num_input_fields {
+                let phys_type = chunk.fields[col].physical_type();
+                let mut v = ValueVector::new(phys_type, total_rows);
+                v.resize(total_rows);
+                for row in 0..total_rows {
+                    store_value_in_vector(&mut v, row, &out_data[col][row]);
+                }
+                fields.push(v);
+                if col < chunk.field_names.len() {
+                    field_names.push(chunk.field_names[col].clone());
+                } else {
+                    field_names.push(format!("field_{}", col));
+                }
+            }
+
+            // Rel field names (prefixed with rel table name)
+            for col in 0..num_rel_cols {
+                let phys_type = if col < rel_cols.len() {
+                    PhysicalScan::logical_to_physical(&rel_cols[col].logical_type)
+                } else {
+                    PhysicalTypeID::Int64
+                };
+                let mut v = ValueVector::new(phys_type, total_rows);
+                v.resize(total_rows);
+                for row in 0..total_rows {
+                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row]);
+                }
+                fields.push(v);
+                let rel_prefix = &self.rel_table_name;
+                let col_name = rel_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
+                field_names.push(format!("{}.{}", rel_prefix, col_name));
+            }
+
+            // Dest field names (prefixed with dest variable)
+            for col in 0..num_dest_cols {
+                let phys_type = if col < dest_cols.len() {
+                    PhysicalScan::logical_to_physical(&dest_cols[col].logical_type)
+                } else {
+                    PhysicalTypeID::Int64
+                };
+                let mut v = ValueVector::new(phys_type, total_rows);
+                v.resize(total_rows);
+                for row in 0..total_rows {
+                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row]);
+                }
+                fields.push(v);
+                let prefix = &self.dst_node_var;
+                let col_name = dest_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
+                field_names.push(format!("{}.{}", prefix, col_name));
+            }
+
+            output.push(DataChunk {
+                fields,
+                size: total_rows,
+                field_names,
+            });
         }
 
         Ok(output)
