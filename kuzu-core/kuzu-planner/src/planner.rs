@@ -272,7 +272,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_query(&self, query: BoundQuery) -> Result<Vec<LogicalOperator>, String> {
+    pub fn plan_query(&self, query: BoundQuery) -> Result<Vec<LogicalOperator>, String> {
         let mut scan_ops: Vec<LogicalOperator> = Vec::new();
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;
@@ -506,6 +506,39 @@ impl QueryPlanner {
                         }));
                     }
                 }
+                BoundClause::BoundCreate(c) => {
+                    let mut patterns_iter = c.patterns.into_iter().peekable();
+                    while let Some(pattern) = patterns_iter.next() {
+                        let node_var = pattern.node_variable.clone().unwrap_or_default();
+                        
+                        if c.new_variables.iter().any(|v| v.name == node_var) {
+                            delete_exprs.push(LogicalOperator::CreateNode(LogicalCreateNode {
+                                table_name: pattern.node_label.clone().unwrap_or_default(),
+                                table_id: pattern.node_table_id.unwrap_or(0),
+                                out_var_name: node_var.clone(),
+                                properties: pattern.properties.clone(),
+                                cardinality: 0,
+                            }));
+                        }
+
+                        if let Some(edge) = pattern.edge {
+                            let dest_var = patterns_iter.peek().and_then(|p| p.node_variable.clone()).unwrap_or_default();
+                            let (src_node_name, dst_node_name) = match edge.direction {
+                                kuzu_parser::ast::EdgeDirection::RightToLeft => (dest_var, node_var.clone()),
+                                _ => (node_var.clone(), dest_var),
+                            };
+                            
+                            delete_exprs.push(LogicalOperator::CreateRel(LogicalCreateRel {
+                                table_name: edge.label.clone().unwrap_or_default(),
+                                table_id: edge.rel_table_id.unwrap_or(0),
+                                src_node_name,
+                                dst_node_name,
+                                properties: edge.properties.clone(),
+                                cardinality: 0,
+                            }));
+                        }
+                    }
+                }
                 BoundClause::BoundForeach(f) => {
                     // Plan FOREACH sub-statements
                     let mut sub_plans = Vec::new();
@@ -534,6 +567,7 @@ impl QueryPlanner {
             if let Some(proj) = projection {
                 result.push(LogicalOperator::Projection(proj));
             }
+            println!("LOGICAL PLAN IN PLAN_QUERY: {:#?}", result);
             return Ok(result);
         }
 
@@ -564,6 +598,7 @@ impl QueryPlanner {
         // Append DELETE operators at the end
         result.extend(delete_ops);
 
+        println!("LOGICAL PLAN IN PLAN_QUERY: {:#?}", result);
         Ok(result)
     }
 }

@@ -653,7 +653,11 @@ impl PhysicalOperatorExec for PhysicalProjection {
                     .iter()
                     .filter_map(|&i| chunk.fields.get(i).cloned())
                     .collect();
-                let size = fields.first().map(|f| f.size()).unwrap_or(0);
+                let size = if fields.is_empty() {
+                    chunk.size
+                } else {
+                    fields.first().map(|f| f.size()).unwrap_or(0)
+                };
                 let names = self
                     .column_indices
                     .iter()
@@ -1211,8 +1215,9 @@ impl PhysicalCrossProduct {
             }
         }
 
-        // Build physical types for output columns
+        // Build physical types and names for output
         let mut output_types: Vec<PhysicalTypeID> = Vec::with_capacity(total_cols);
+        let mut field_names = Vec::with_capacity(total_cols);
         for col in 0..num_left_cols {
             if let Some(field) = left_chunks[0].fields.get(col) {
                 output_types.push(field.physical_type());
@@ -1222,6 +1227,13 @@ impl PhysicalCrossProduct {
             if let Some(field) = right_chunks[0].fields.get(col) {
                 output_types.push(field.physical_type());
             }
+        }
+        
+        if let Some(c) = left_chunks.first() {
+            field_names.extend(c.field_names.iter().cloned());
+        }
+        if let Some(c) = right_chunks.first() {
+            field_names.extend(c.field_names.iter().cloned());
         }
 
         // Build output vectors
@@ -2990,5 +3002,122 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                 field_names: vec![],
             }])
         }
+    }
+}
+
+pub struct PhysicalCreateNode {
+    pub table_name: String,
+    pub table_id: u64,
+    pub out_var_name: String,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+impl PhysicalCreateNode {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+        if input.is_empty() {
+            return Ok(input);
+        }
+
+        let mut table = self.table_catalog.get_node_table_by_name_mut(&self.table_name)
+            .ok_or_else(|| format!("Node table {} not found", self.table_name))?;
+
+        // For each input chunk, we create nodes and attach the new node IDs
+        let mut output = Vec::with_capacity(input.len());
+        
+        for mut chunk in input {
+            let mut node_ids = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, chunk.size);
+            
+            for i in 0..chunk.size {
+                let mut values = vec![kuzu_common::types::Value::Null; table.columns.len()];
+                for (prop_name, prop_expr) in &self.properties {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                        values[col_idx] = evaluate_expression_for_row(prop_expr, &chunk, i);
+                    }
+                }
+                
+                let row_offset = table.insert_row(values)?;
+                node_ids.data_mut()[i * 8..(i + 1) * 8].copy_from_slice(&(row_offset as i64).to_le_bytes());
+                node_ids.set_null(i, false);
+            }
+            node_ids.resize(chunk.size);
+            
+            chunk.fields.push(node_ids);
+            chunk.field_names.push(self.out_var_name.clone());
+            output.push(chunk);
+        }
+
+        Ok(output)
+    }
+}
+
+pub struct PhysicalCreateRel {
+    pub table_name: String,
+    pub table_id: u64,
+    pub src_node_name: String,
+    pub dst_node_name: String,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+impl PhysicalCreateRel {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+        if input.is_empty() {
+            return Ok(input);
+        }
+
+        let mut table = self.table_catalog.get_rel_table_by_name_mut(&self.table_name)
+            .ok_or_else(|| format!("Rel table {} not found", self.table_name))?;
+
+        let mut output = Vec::with_capacity(input.len());
+        
+        for chunk in input {
+            let src_name_id = format!("{}.{}", self.src_node_name, "_id");
+            let src_name_pk = format!("{}.{}", self.src_node_name, "id");
+            let src_idx = chunk.field_names.iter().position(|name| name == &src_name_id)
+                .or_else(|| chunk.field_names.iter().position(|name| name == &self.src_node_name))
+                .or_else(|| chunk.field_names.iter().position(|name| name == &src_name_pk))
+                .ok_or_else(|| format!("Source node variable {} not found", self.src_node_name))?;
+                
+            let dst_name_id = format!("{}.{}", self.dst_node_name, "_id");
+            let dst_name_pk = format!("{}.{}", self.dst_node_name, "id");
+            let dst_idx = chunk.field_names.iter().position(|name| name == &dst_name_id)
+                .or_else(|| chunk.field_names.iter().position(|name| name == &self.dst_node_name))
+                .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk))
+                .ok_or_else(|| format!("Destination node variable {} not found", self.dst_node_name))?;
+                
+            let src_vec = &chunk.fields[src_idx];
+            let dst_vec = &chunk.fields[dst_idx];
+
+            let mut inserted = 0;
+            for i in 0..chunk.size {
+                if src_vec.is_null(i) || dst_vec.is_null(i) {
+                    continue; // Skip creating relationships involving NULL nodes
+                }
+                
+                let mut src_bytes = [0u8; 8];
+                src_bytes.copy_from_slice(&src_vec.data()[i * 8..(i + 1) * 8]);
+                let src_id = i64::from_le_bytes(src_bytes) as u64;
+
+                let mut dst_bytes = [0u8; 8];
+                dst_bytes.copy_from_slice(&dst_vec.data()[i * 8..(i + 1) * 8]);
+                let dst_id = i64::from_le_bytes(dst_bytes) as u64;
+
+                let mut values = vec![kuzu_common::types::Value::Null; table.columns.len()];
+                for (prop_name, prop_expr) in &self.properties {
+                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                        values[col_idx] = evaluate_expression_for_row(prop_expr, &chunk, i);
+                    }
+                }
+
+                table.insert_rel(src_id, dst_id, values)?;
+                inserted += 1;
+            }
+            println!("PhysicalCreateRel inserted {} relationships from chunk of size {}", inserted, chunk.size);
+            
+            output.push(chunk);
+        }
+
+        Ok(output)
     }
 }

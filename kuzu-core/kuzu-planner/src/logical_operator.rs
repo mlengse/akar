@@ -101,6 +101,8 @@ pub enum LogicalOperator {
     CreateSequence(LogicalCreateSequence),
     DropSequence(LogicalDropSequence),
     CreateDml(LogicalCreateDml),
+    CreateNode(LogicalCreateNode),
+    CreateRel(LogicalCreateRel),
     ExportDatabase(LogicalExportDatabase),
     ImportDatabase(LogicalImportDatabase),
 }
@@ -149,6 +151,8 @@ impl LogicalOperator {
             LogicalOperator::CreateSequence(s) => s.cardinality,
             LogicalOperator::DropSequence(s) => s.cardinality,
             LogicalOperator::CreateDml(s) => s.cardinality,
+            LogicalOperator::CreateNode(s) => s.cardinality,
+            LogicalOperator::CreateRel(s) => s.cardinality,
             LogicalOperator::ExportDatabase(s) => s.cardinality,
             LogicalOperator::ImportDatabase(s) => s.cardinality,
         }
@@ -197,6 +201,8 @@ impl LogicalOperator {
             LogicalOperator::CreateSequence(s) => s.cardinality = card,
             LogicalOperator::DropSequence(s) => s.cardinality = card,
             LogicalOperator::CreateDml(s) => s.cardinality = card,
+            LogicalOperator::CreateNode(s) => s.cardinality = card,
+            LogicalOperator::CreateRel(s) => s.cardinality = card,
             LogicalOperator::ExportDatabase(s) => s.cardinality = card,
             LogicalOperator::ImportDatabase(s) => s.cardinality = card,
         }
@@ -254,6 +260,8 @@ impl LogicalOperator {
             | LogicalOperator::CreateSequence(_)
             | LogicalOperator::DropSequence(_)
             | LogicalOperator::CreateDml(_)
+            | LogicalOperator::CreateNode(_)
+            | LogicalOperator::CreateRel(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_) => vec![],
         }
@@ -301,6 +309,8 @@ impl LogicalOperator {
             | LogicalOperator::CreateSequence(_)
             | LogicalOperator::DropSequence(_)
             | LogicalOperator::CreateDml(_)
+            | LogicalOperator::CreateNode(_)
+            | LogicalOperator::CreateRel(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_) => vec![],
         }
@@ -702,6 +712,25 @@ pub struct LogicalDropSequence {
 pub struct LogicalCreateDml {
     pub table_name: String,
     pub table_id: u64,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub cardinality: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalCreateNode {
+    pub table_name: String,
+    pub table_id: u64,
+    pub out_var_name: String,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
+    pub cardinality: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalCreateRel {
+    pub table_name: String,
+    pub table_id: u64,
+    pub src_node_name: String,
+    pub dst_node_name: String,
     pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
     pub cardinality: u64,
 }

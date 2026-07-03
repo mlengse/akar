@@ -145,7 +145,7 @@ impl Binder {
                 }
                 Clause::Create(c) => {
                     let (bound, vars) = self.bind_match_create(&c, &variables)?;
-                    (BoundClause::BoundMatch(bound), vars)
+                    (BoundClause::BoundCreate(bound), vars)
                 }
                 Clause::Delete(d) => {
                     let bound = self.bind_delete(&d, &variables)?;
@@ -181,7 +181,57 @@ impl Binder {
                 }
             };
             variables.extend(new_vars);
-            clauses.push(bound_clause);
+            clauses.push(bound_clause.clone());
+            
+            // Generate implicit WHERE clauses from inline properties for MATCH and CREATE
+            if let BoundClause::BoundMatch(bound) = &bound_clause {
+                let mut inline_exprs = Vec::new();
+                for pattern in &bound.patterns {
+                    if let Some(node_var) = &pattern.node_variable {
+                        for (key, val_expr) in &pattern.properties {
+                            let prop_access = kuzu_parser::ast::Expression::PropertyAccess(
+                                Box::new(kuzu_parser::ast::Expression::Variable(node_var.clone())),
+                                key.clone(),
+                            );
+                            let equals = kuzu_parser::ast::Expression::BinaryOp(
+                                kuzu_parser::ast::BinaryOp::Equal,
+                                Box::new(prop_access),
+                                Box::new(val_expr.clone()),
+                            );
+                            inline_exprs.push(equals);
+                        }
+                    }
+                    if let Some(edge) = &pattern.edge {
+                        if let Some(edge_var) = &edge.variable {
+                            for (key, val_expr) in &edge.properties {
+                                let prop_access = kuzu_parser::ast::Expression::PropertyAccess(
+                                    Box::new(kuzu_parser::ast::Expression::Variable(edge_var.clone())),
+                                    key.clone(),
+                                );
+                                let equals = kuzu_parser::ast::Expression::BinaryOp(
+                                    kuzu_parser::ast::BinaryOp::Equal,
+                                    Box::new(prop_access),
+                                    Box::new(val_expr.clone()),
+                                );
+                                inline_exprs.push(equals);
+                            }
+                        }
+                    }
+                }
+                
+                if !inline_exprs.is_empty() {
+                    let combined = inline_exprs.into_iter().reduce(|acc, e| {
+                        kuzu_parser::ast::Expression::BinaryOp(
+                            kuzu_parser::ast::BinaryOp::And,
+                            Box::new(acc),
+                            Box::new(e),
+                        )
+                    }).unwrap();
+                    
+                    let bound_expr = self.resolve_expression(&combined, &variables)?;
+                    clauses.push(BoundClause::BoundWhere(BoundWhereClause { expression: bound_expr }));
+                }
+            }
         }
 
         Ok(BoundStatement::BoundQuery(BoundQuery { clauses, variables }))
@@ -301,6 +351,7 @@ impl Binder {
                 label: edge_label,
                 rel_table_id,
                 direction: e.direction.clone(),
+                properties: e.properties.clone(),
                 lower_bound: e.lower_bound,
                 upper_bound: e.upper_bound,
             });
@@ -311,6 +362,7 @@ impl Binder {
                 node_variable: node_var,
                 node_label,
                 node_table_id,
+                properties: pattern.node.as_ref().map(|n| n.properties.clone()).unwrap_or_default(),
                 edge: bound_edge,
             },
             new_vars,

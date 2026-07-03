@@ -807,7 +807,6 @@ fn test_serial_with_explicit_value() {
     assert_eq!(seq.curr_val(), 0, "Sequence should not advance when explicit value provided");
 }
 #[test]
-#[ignore = "MATCH ... CREATE ... not implemented for relationships yet"]
 fn test_sip_optimization() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
@@ -820,8 +819,10 @@ fn test_sip_optimization() {
     exec(&conn, "CREATE (p:Post {id: 10, content: 'Hello'})");
     exec(&conn, "CREATE (p:Post {id: 20, content: 'World'})");
     
-    exec(&conn, "MATCH (u:User {id: 1}), (p:Post {id: 10}) CREATE (u)-[:Likes]->(p)");
-    exec(&conn, "MATCH (u:User {id: 2}), (p:Post {id: 20}) CREATE (u)-[:Likes]->(p)");
+    let msg = exec(&conn, "MATCH (u:User {id: 1}), (p:Post {id: 10}) CREATE (u)-[:Likes]->(p)");
+    println!("CREATE 1: {}", msg);
+    let msg = exec(&conn, "MATCH (u:User {id: 2}), (p:Post {id: 20}) CREATE (u)-[:Likes]->(p)");
+    println!("CREATE 2: {}", msg);
 
     // Query that triggers SIP
     let query_str = "MATCH (u:User)-[:Likes]->(p:Post) WHERE u.id = 1 RETURN p.content";
@@ -835,5 +836,8 @@ fn test_sip_optimization() {
     println!("LOGICAL PLAN:\n{:#?}", plan);
 
     let r = conn.query(query_str).unwrap();
+    if !r.is_success() {
+        panic!("Query failed: {:?}", r.error_message);
+    }
     assert_eq!(r.num_rows(), 1, "Expected exactly 1 row (Hello), got {}", r.num_rows());
 }

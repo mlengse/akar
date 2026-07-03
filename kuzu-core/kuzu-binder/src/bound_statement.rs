@@ -67,6 +67,7 @@ pub enum BoundClause {
     BoundWith(BoundReturnClause),
     BoundUnwind(BoundUnwindClause),
     BoundForeach(BoundForeachClause),
+    BoundCreate(BoundMatchClause),
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +129,7 @@ pub struct BoundPattern {
     pub node_variable: Option<String>,
     pub node_label: Option<String>,
     pub node_table_id: Option<u64>,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
     pub edge: Option<BoundEdgePattern>,
 }
 
@@ -137,6 +139,7 @@ pub struct BoundEdgePattern {
     pub label: Option<String>,
     pub rel_table_id: Option<u64>,
     pub direction: kuzu_parser::ast::EdgeDirection,
+    pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
     pub lower_bound: Option<u64>,
     pub upper_bound: Option<u64>,
 }

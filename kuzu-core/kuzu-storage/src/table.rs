@@ -72,7 +72,7 @@ impl NodeTable {
     ///
     /// Returns an error if the number of values doesn't match the number of columns,
     /// or if a duplicate primary key value is detected.
-    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
+    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, String> {
         if values.len() != self.columns.len() {
             return Err(format!(
                 "Column count mismatch: expected {} values, got {}",
@@ -117,7 +117,7 @@ impl NodeTable {
                 }
         }
 
-        Ok(())
+        Ok(self.num_rows - 1)
     }
 
     /// Look up a row offset by its primary key value.
@@ -448,7 +448,7 @@ impl RelTable {
     /// Insert a row of values (legacy alias that treats all columns as properties).
     /// Only the first two values are treated as (from, to) if the table has
     /// at least 2 columns; otherwise they are stored as pure properties.
-    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<(), String> {
+    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, String> {
         // If there are at least 2 "structural" columns (src_id, dst_id) plus
         // property columns, we assume the first two values are the node offsets.
         // This preserves backward compatibility with the old flat API.
@@ -465,7 +465,8 @@ impl RelTable {
         // as (from, to) placeholders. Real callers should use `insert_rel`.
         let from = self.num_rows;
         let to = self.num_rows;
-        self.insert_rel(from, to, values)
+        self.insert_rel(from, to, values)?;
+        Ok(0) // insert_row on RelTable doesn't have a meaningful row offset right now
     }
 
     /// Scan the forward adjacency list for a given source node.

@@ -116,6 +116,26 @@ fn collect_referenced_columns(operators: &[LogicalOperator]) -> HashSet<String> 
             LogicalOperator::Filter(f) => {
                 extract_variables(&f.expression, &mut refs);
             }
+            LogicalOperator::CreateRel(c) => {
+                refs.insert(format!("{}.id", c.src_node_name));
+                refs.insert(format!("{}.id", c.dst_node_name));
+                refs.insert(format!("{}._id", c.src_node_name));
+                refs.insert(format!("{}._id", c.dst_node_name));
+                for (_, expr) in &c.properties {
+                    extract_variables(expr, &mut refs);
+                }
+            }
+            LogicalOperator::CreateNode(c) => {
+                for (_, expr) in &c.properties {
+                    extract_variables(expr, &mut refs);
+                }
+            }
+            LogicalOperator::Set(s) => {
+                extract_variables(&s.value, &mut refs);
+            }
+            LogicalOperator::Unwind(u) => {
+                extract_variables(&u.expression, &mut refs);
+            }
             _ => {}
         }
     }
@@ -836,6 +856,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::CreateVectorIndex(_)
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
+                | LogicalOperator::CreateNode(_)
+                | LogicalOperator::CreateRel(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_) => {}
@@ -1291,6 +1313,8 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::CreateVectorIndex(_)
                 | LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
+                | LogicalOperator::CreateNode(_)
+                | LogicalOperator::CreateRel(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_) => 1,

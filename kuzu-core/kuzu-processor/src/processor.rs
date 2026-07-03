@@ -158,8 +158,18 @@ impl QueryProcessor {
         self.execute_internal(operators, &mut sip_masks)
     }
 
-    fn execute_internal(&self, operators: &[LogicalOperator], sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>) -> Result<Vec<DataChunk>, String> {
+    pub fn execute_internal(
+        &self,
+        operators: &[LogicalOperator],
+        sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>,
+    ) -> Result<Vec<DataChunk>, String> {
+        println!(">>> execute_internal with {} operators", operators.len());
+        for op in operators {
+            println!("  op: {:?}", op);
+        }
+        
         if operators.is_empty() {
+            println!("<<< execute_internal returning dummy (empty)");
             return Ok(vec![DataChunk {
                 fields: vec![],
                 size: 0,
@@ -168,12 +178,14 @@ impl QueryProcessor {
         }
 
         // Map logical operators to physical and execute in pipeline
-        let current = Vec::new();
-
-        // Execute each logical operator
         let mut intermediate_result: Option<Vec<DataChunk>> = None;
 
         for (i, op) in operators.iter().enumerate() {
+            let current = intermediate_result.take().unwrap_or_else(|| {
+                let mut dummy = DataChunk::new(vec![]);
+                dummy.size = 1;
+                vec![dummy]
+            });
             match op {
                 LogicalOperator::ScanNode(s) => {
                     let mut pred_owned = None;
@@ -191,6 +203,10 @@ impl QueryProcessor {
                         scan = scan.with_data(d, columns);
                     }
                     let mut result = scan.execute(current.clone())?;
+                    println!("ScanNode {} returned {} chunks", s.table_name, result.len());
+                    if let Some(c) = result.first() {
+                        println!("  ScanNode chunk size={}, fields={}", c.size, c.fields.len());
+                    }
                     let prefix = s.alias.as_ref().unwrap_or(&s.table_name);
                     for chunk in &mut result {
                         chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
@@ -265,7 +281,7 @@ impl QueryProcessor {
                     // Accumulate passes through its input (collects all rows in memory)
                     // For now, treat as pass-through since we don't have PhysicalAccumulate yet.
                     // The input is already fully materialized by earlier operators.
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     intermediate_result = Some(input);
                 }
                 LogicalOperator::RecursiveExtend(re) => {
@@ -302,60 +318,61 @@ impl QueryProcessor {
                     } else {
                         PhysicalFilter::new(f.expression.clone())
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = filter.execute(input)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Projection(p) => {
-                    // If projection is the first operator (e.g. RETURN 1 or RETURN nextval(...)),
-                    // synthesize a single-row empty input so scalar expressions are evaluated once.
-                    let input = match intermediate_result.take() {
-                        Some(v) => v,
-                        None => vec![DataChunk {
-                            fields: vec![],
-                            size: 1,
-                            field_names: vec![],
-                        }],
+                    let input = if p.children.is_empty() {
+                        current
+                    } else {
+                        self.execute_internal(&p.children, sip_masks)?
                     };
 
-                    let needs_eval = p
-                        .expressions
-                        .iter()
-                        .any(|be| Self::projection_needs_expression_eval(&be.expression));
-
-                    let result = if needs_eval {
-                        let registry = self
-                            .function_registry
-                            .clone()
-                            .ok_or_else(|| {
-                                "No function registry available for expression projection"
-                                    .to_string()
-                            })?;
-
-                        let mut eval = ExpressionEvaluator::new(registry);
-                        if let Some(ref seq_fn) = self.sequence_fn {
-                            eval = eval.with_sequence_fn(seq_fn.clone());
-                        }
-                        if let Some(ref subquery_fn) = self.subquery_fn {
-                            eval = eval.with_subquery_fn(subquery_fn.clone());
-                        }
-
-                        let mut output = Vec::with_capacity(input.len());
-                        for chunk in input {
-                            let mut fields = Vec::with_capacity(p.expressions.len());
-                            for be in &p.expressions {
-                                let result_vec = eval.evaluate(&be.expression, &chunk)?;
-                                fields.push(result_vec);
-                            }
-                            let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
-                            output.push(DataChunk { fields, size, field_names: vec![] });
-                        }
-                        output
+                    let result = if p.expressions.is_empty() {
+                        // Dummy projection inserted by the planner (e.g. around cross product children).
+                        // It should just pass the chunk through, NOT project column indices!
+                        input
                     } else {
-                        let proj = PhysicalProjection {
-                            column_indices: (0..p.expressions.len()).collect(),
-                        };
-                        proj.execute(input)?
+                        let needs_eval = p
+                            .expressions
+                            .iter()
+                            .any(|be| Self::projection_needs_expression_eval(&be.expression));
+
+                        if needs_eval {
+                            let registry = self
+                                .function_registry
+                                .clone()
+                                .ok_or_else(|| {
+                                    "No function registry available for expression projection"
+                                        .to_string()
+                                })?;
+
+                            let mut eval = ExpressionEvaluator::new(registry);
+                            if let Some(ref seq_fn) = self.sequence_fn {
+                                eval = eval.with_sequence_fn(seq_fn.clone());
+                            }
+                            if let Some(ref subquery_fn) = self.subquery_fn {
+                                eval = eval.with_subquery_fn(subquery_fn.clone());
+                            }
+
+                            let mut output = Vec::with_capacity(input.len());
+                            for chunk in input {
+                                let mut fields = Vec::with_capacity(p.expressions.len());
+                                for be in &p.expressions {
+                                    let result_vec = eval.evaluate(&be.expression, &chunk)?;
+                                    fields.push(result_vec);
+                                }
+                                let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
+                                output.push(DataChunk { fields, size, field_names: vec![] });
+                            }
+                            output
+                        } else {
+                            let proj = PhysicalProjection {
+                                column_indices: (0..p.expressions.len()).collect(),
+                            };
+                            proj.execute(input)?
+                        }
                     };
 
                     intermediate_result = Some(result);
@@ -365,7 +382,7 @@ impl QueryProcessor {
                         limit: l.limit,
                         offset: l.offset,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = limit.execute(input)?;
                     intermediate_result = Some(result);
                 }
@@ -378,15 +395,21 @@ impl QueryProcessor {
                         .map(|(i, _s)| (i as u32, o.sort_keys.get(i).map(|s| s.1).unwrap_or(true)))
                         .collect();
                     let order = PhysicalOrderBy { sort_keys };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = order.execute(input)?;
                     intermediate_result = Some(result);
                 }
-                LogicalOperator::Flatten(_) => {
+                LogicalOperator::Flatten(f) => {
                     // Flatten is a no-op in the flat-list execution model;
                     // it signals that the child's factorization group should
                     // be treated as flat during physical execution.
-                    // Pass through the current result unchanged.
+                    // We must execute its children first.
+                    let result = if f.children.is_empty() {
+                        current
+                    } else {
+                        self.execute_internal(&f.children, sip_masks)?
+                    };
+                    intermediate_result = Some(result);
                 }
                 LogicalOperator::Aggregate(a) => {
                     let agg = PhysicalAggregate {
@@ -397,7 +420,7 @@ impl QueryProcessor {
                         },
                         aggregate_functions: a.aggregates.iter().map(|(n, _)| n.clone()).collect(),
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = agg.execute(input)?;
                     intermediate_result = Some(result);
                 }
@@ -471,7 +494,7 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Unwind(uw) => {
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let unwind = PhysicalUnwind {
                         expression: uw.expression.clone(),
                         variable: uw.variable.clone(),
@@ -506,7 +529,7 @@ impl QueryProcessor {
                         value: sl.value.clone(),
                         table_catalog,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = set_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
@@ -523,19 +546,72 @@ impl QueryProcessor {
                         row_indices: Vec::new(),
                         table_catalog,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = delete_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::CreateNode(cn) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for CREATE".to_string())?;
+
+                    let create_node_op = PhysicalCreateNode {
+                        table_name: cn.table_name.clone(),
+                        table_id: cn.table_id,
+                        out_var_name: cn.out_var_name.clone(),
+                        properties: cn.properties.clone(),
+                        table_catalog,
+                    };
+                    let input = current;
+                    let result = create_node_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::CreateRel(cr) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for CREATE".to_string())?;
+
+                    let create_rel_op = PhysicalCreateRel {
+                        table_name: cr.table_name.clone(),
+                        table_id: cr.table_id,
+                        src_node_name: cr.src_node_name.clone(),
+                        dst_node_name: cr.dst_node_name.clone(),
+                        properties: cr.properties.clone(),
+                        table_catalog,
+                    };
+                    let input = current;
+                    let result = create_rel_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::CrossProduct(cp) => {
                     let left_ops = flatten_union_child(&cp.left);
                     let right_ops = flatten_union_child(&cp.right);
-
+                    println!("CROSS PRODUCT left_ops len: {}", left_ops.len());
+                    for o in &left_ops {
+                        println!("  LEFT OP: {:?}", o);
+                    }
+                    println!("CROSS PRODUCT right_ops len: {}", right_ops.len());
+                    
                     let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
                     let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
 
+                    println!("CROSS PRODUCT: left {} chunks, right {} chunks", build_chunks.len(), probe_chunks.len());
+                    for (i, c) in build_chunks.iter().enumerate() {
+                        println!("  LEFT CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
+                    }
+                    for (i, c) in probe_chunks.iter().enumerate() {
+                        println!("  RIGHT CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
+                    }
+
                     let cross = PhysicalCrossProduct;
                     let result = cross.execute_binary(&build_chunks, &probe_chunks)?;
+                    println!("CROSS PRODUCT RESULT SIZE: {} chunks", result.len());
+                    for (i, c) in result.iter().enumerate() {
+                        println!("  CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
+                        println!("  FIELD_NAMES: {:?}", c.field_names);
+                    }
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Union(u) => {
@@ -574,7 +650,7 @@ impl QueryProcessor {
                         options: cf.options.clone(),
                         table_catalog,
                     };
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let result = copy_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
@@ -583,7 +659,7 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Foreach(fc) => {
-                    let input = intermediate_result.take().unwrap_or_default();
+                    let input = current;
                     let foreach_op = PhysicalForeach {
                         variable: fc.variable.clone(),
                         expression: fc.expression.clone(),
@@ -1259,6 +1335,8 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::CreateSequence(cs) => format!("CreateSequence({})", cs.name),
         LogicalOperator::DropSequence(ds) => format!("DropSequence({})", ds.name),
         LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
+        LogicalOperator::CreateNode(cn) => format!("CreateNode({})", cn.table_name),
+        LogicalOperator::CreateRel(cr) => format!("CreateRel({})", cr.table_name),
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
     };
