@@ -249,7 +249,7 @@ impl Binder {
 
         for pattern in &m.patterns {
             let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned().chain(new_vars.iter().cloned()).collect();
-            let (bound, nv) = self.bind_pattern(pattern, &all_vars)?;
+            let (bound, nv) = self.bind_pattern(pattern, &all_vars, false)?;
             patterns.push(bound);
             new_vars.extend(nv);
         }
@@ -267,6 +267,7 @@ impl Binder {
         &self,
         pattern: &Pattern,
         existing_vars: &[BoundVariable],
+        allow_existing: bool,
     ) -> Result<(BoundPattern, Vec<BoundVariable>), String> {
         let mut new_vars = Vec::new();
         let mut node_table_id = None;
@@ -295,17 +296,33 @@ impl Binder {
 
             // Check for duplicate variable names
             if let Some(ref v) = var {
-                if existing_vars.iter().any(|bv| bv.name == *v) {
-                    return Err(format!("Variable '{}' already defined", v));
+                if let Some(existing) = existing_vars.iter().find(|bv| bv.name == *v) {
+                    if allow_existing {
+                        // Reference to already-bound variable (e.g. in CREATE after MATCH)
+                        // Use the existing variable's table_id if we didn't resolve one
+                        if node_table_id.is_none() {
+                            node_table_id = Some(existing.table_id);
+                        }
+                        // Don't add to new_vars — it's a reference, not a new binding
+                    } else {
+                        return Err(format!("Variable '{}' already defined", v));
+                    }
+                } else {
+                    new_vars.push(BoundVariable {
+                        name: var.clone().unwrap_or_else(|| "_anon_".to_string()),
+                        table_id: node_table_id.unwrap_or(0),
+                        label: label.clone(),
+                        is_node: true,
+                    });
                 }
+            } else {
+                new_vars.push(BoundVariable {
+                    name: "_anon_".to_string(),
+                    table_id: node_table_id.unwrap_or(0),
+                    label: label.clone(),
+                    is_node: true,
+                });
             }
-
-            new_vars.push(BoundVariable {
-                name: var.clone().unwrap_or_else(|| "_anon_".to_string()),
-                table_id: node_table_id.unwrap_or(0),
-                label: label.clone(),
-                is_node: true,
-            });
 
             (var, label)
         } else {
@@ -430,7 +447,8 @@ impl Binder {
         let mut new_vars = Vec::new();
 
         for pattern in &c.patterns {
-            let (bound, nv) = self.bind_pattern(pattern, existing_vars)?;
+            let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned().chain(new_vars.iter().cloned()).collect();
+            let (bound, nv) = self.bind_pattern(pattern, &all_vars, true)?;
             patterns.push(bound);
             new_vars.extend(nv);
         }
@@ -987,7 +1005,7 @@ impl Binder {
 
         for pattern in &m.patterns {
             let all_vars: Vec<BoundVariable> = existing_vars.iter().cloned().chain(new_vars.iter().cloned()).collect();
-            let (bound, nv) = self.bind_pattern(pattern, &all_vars)?;
+            let (bound, nv) = self.bind_pattern(pattern, &all_vars, false)?;
             patterns.push(bound);
             new_vars.extend(nv);
         }
