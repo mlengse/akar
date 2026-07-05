@@ -9,6 +9,7 @@
 //! Most complex extension due to catalog binding + table enumeration + type mapping.
 
 use kuzu_extension::{Extension, ExtensionContext};
+use kuzu_common::types::Value;
 use std::sync::Arc;
 
 /// The PostgreSQL extension enables querying PostgreSQL databases from Kuzu.

@@ -245,7 +245,10 @@ mod tests {
         assert!(!rows.is_empty());
         if let Some(first) = rows.first() {
             if let Some(val) = first.first() {
-                assert_eq!(val.to_string(), "2");
+                match val {
+                    duckdb::types::Value::Int(i) => assert_eq!(*i, 2),
+                    _ => panic!("Expected Int(2), got {:?}", val),
+                }
             }
         }
     }

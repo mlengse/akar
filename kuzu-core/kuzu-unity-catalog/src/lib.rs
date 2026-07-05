@@ -9,6 +9,7 @@
 //! for Unity Catalog; DuckDB's `uc_catalog` extension handles the REST API.
 
 use kuzu_extension::{Extension, ExtensionContext};
+use kuzu_common::types::Value;
 use std::sync::Arc;
 
 /// The Unity Catalog extension enables querying Unity Catalog from Kuzu.
