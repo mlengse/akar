@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub enum WALRecord {
     Insert {
         table_id: u64,
+
         data: Vec<u8>,
     },
     Delete {
@@ -23,6 +24,11 @@ pub enum WALRecord {
         row_id: u64,
         column: u32,
         data: Vec<u8>,
+    },
+    /// Log an FSM page update (allocation or deallocation)
+    UpdateFsm {
+        page_idx: u64,
+        is_free: bool,
     },
     /// Log a write to a column page: (table_id, col_id, page_id, serialized_data).
     ColumnWrite {
@@ -71,6 +77,7 @@ impl WAL {
         let size = match &record {
             WALRecord::Insert { data, .. } => data.len(),
             WALRecord::Update { data, .. } => data.len(),
+            WALRecord::UpdateFsm { .. } => 8 + 1, // u64 + bool
             WALRecord::ColumnWrite { data, .. } => data.len(),
             WALRecord::LocalWALData { data } => data.len(),
             _ => 8,
@@ -171,6 +178,12 @@ impl WAL {
                     (data.len() as u32).serialize(&mut file)?;
                     file.write_all(data)?;
                 }
+                WALRecord::UpdateFsm { page_idx, is_free } => {
+                    file.write_all(b"F")?;
+                    page_idx.serialize(&mut file)?;
+                    let is_free_u8: u8 = if *is_free { 1 } else { 0 };
+                    is_free_u8.serialize(&mut file)?;
+                }
                 WALRecord::ColumnWrite {
                     table_id,
                     col_id,
@@ -206,22 +219,6 @@ impl WAL {
         Ok(())
     }
 
-    /// Load and deserialize WAL records from disk.
-    ///
-    /// Reads the WAL file at `self.path` and populates `self.records` with
-    /// the deserialized records. Returns an error if the file doesn't exist
-    /// or is corrupt.
-    ///
-    /// # Format
-    ///
-    /// Each record on disk starts with a single-byte type tag:
-    /// - `I` → Insert { table_id: u64, data_len: u32, data: [u8; data_len] }
-    /// - `D` → Delete { table_id: u64, row_id: u64 }
-    /// - `U` → Update { table_id: u64, row_id: u64, column: u32, data_len: u32, data }
-    /// - `W` → ColumnWrite { table_id: u64, col_id: u32, page_id: u64, data_len: u32, data }
-    /// - `C` → Commit { transaction_id: u64 }
-    /// - `R` → Rollback { transaction_id: u64 }
-    /// - `K` → Checkpoint
     pub fn load_from_disk(&mut self) -> std::io::Result<()> {
         use kuzu_common::serialization::Deserialize;
         use std::io::{BufReader, Read};
@@ -275,6 +272,14 @@ impl WAL {
                         row_id,
                         column,
                         data,
+                    });
+                }
+                b'F' => {
+                    let page_idx = u64::deserialize(&mut cursor)?;
+                    let is_free_u8 = u8::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::UpdateFsm { 
+                        page_idx, 
+                        is_free: is_free_u8 != 0 
                     });
                 }
                 b'W' => {

@@ -67,7 +67,7 @@ pub struct FileHandle {
     /// Page size in bytes.
     pub page_size: usize,
     /// Free space manager for reusing pages.
-    pub free_space_manager: Option<std::sync::Arc<std::sync::Mutex<crate::free_space_manager::FreeSpaceManager>>>,
+    pub free_space_manager: Option<std::sync::Arc<crate::free_space_manager::FreeSpaceManager>>,
 }
 
 impl FileHandle {
@@ -86,7 +86,7 @@ impl FileHandle {
         }
     }
     
-    pub fn with_free_space_manager(mut self, fsm: std::sync::Arc<std::sync::Mutex<crate::free_space_manager::FreeSpaceManager>>) -> Self {
+    pub fn with_free_space_manager(mut self, fsm: std::sync::Arc<crate::free_space_manager::FreeSpaceManager>) -> Self {
         self.free_space_manager = Some(fsm);
         self
     }
@@ -121,7 +121,6 @@ impl FileHandle {
     /// Allocate a new page (extend the file or reuse from FSM).
     pub fn allocate_page(&mut self) -> PageNum {
         if let Some(fsm) = &self.free_space_manager {
-            let mut fsm = fsm.lock().unwrap();
             if let Some(range) = fsm.pop_free_pages(1) {
                 return range.start_page_idx;
             }
@@ -134,7 +133,7 @@ impl FileHandle {
     /// Free a page for reuse.
     pub fn free_page(&self, page_num: PageNum) {
         if let Some(fsm) = &self.free_space_manager {
-            fsm.lock().unwrap().add_free_pages(crate::free_space_manager::PageRange::new(page_num, 1));
+            fsm.add_uncheckpointed_free_pages(crate::free_space_manager::PageRange::new(page_num, 1));
         }
     }
 }
@@ -178,8 +177,8 @@ mod tests {
         let path = PathBuf::from("test_fsm.db");
         let _ = std::fs::remove_file(&path); // Cleanup before
 
-        let fsm = std::sync::Arc::new(std::sync::Mutex::new(crate::free_space_manager::FreeSpaceManager::new()));
-        let mut fh = FileHandle::new(path.clone(), DEFAULT_PAGE_SIZE).with_free_space_manager(fsm);
+        let fsm = std::sync::Arc::new(crate::free_space_manager::FreeSpaceManager::new());
+        let mut fh = FileHandle::new(path.clone(), DEFAULT_PAGE_SIZE).with_free_space_manager(fsm.clone());
 
         // Allocate pages
         let p1 = fh.allocate_page(); // 0

@@ -393,6 +393,10 @@ impl StorageManager {
                             }
                     }
                 }
+                WALRecord::UpdateFsm { .. } => {
+                    // UpdateFsm records are handled by the FSM recovery directly,
+                    // we can ignore them during the table-level replay.
+                }
                 WALRecord::ColumnWrite { .. } => {
                     // ColumnWrite records are for the BufferManager-level
                     // page writes. At the table level, data is already in

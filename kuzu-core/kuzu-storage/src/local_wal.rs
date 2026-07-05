@@ -62,6 +62,13 @@ impl LocalWAL {
                 self.buffer.write_all(data).unwrap();
                 self.size += 1 + 8 + 8 + 4 + 4 + data.len();
             }
+            WALRecord::UpdateFsm { page_idx, is_free } => {
+                self.buffer.write_all(b"F").unwrap();
+                page_idx.serialize(&mut self.buffer).unwrap();
+                let is_free_u8: u8 = if *is_free { 1 } else { 0 };
+                is_free_u8.serialize(&mut self.buffer).unwrap();
+                self.size += 1 + 8 + 1;
+            }
             WALRecord::ColumnWrite {
                 table_id,
                 col_id,

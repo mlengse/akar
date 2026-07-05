@@ -10,6 +10,7 @@
 //! `src/storage/free_space_manager.cpp`.
 
 use std::collections::BTreeSet;
+use std::sync::{RwLock, atomic::{AtomicU64, Ordering}};
 
 /// A contiguous range of free pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +63,11 @@ pub const INVALID_PAGE_IDX: u64 = u64::MAX;
 #[derive(Debug)]
 pub struct FreeSpaceManager {
     /// One sorted free list per power-of-2 level.
-    free_lists: Vec<BTreeSet<PageRange>>,
+    free_lists: Vec<RwLock<BTreeSet<PageRange>>>,
     /// Uncheckpointed free page ranges (not reusable until next checkpoint finalizes).
-    uncheckpointed_free_page_ranges: Vec<PageRange>,
+    uncheckpointed_free_page_ranges: RwLock<Vec<PageRange>>,
     /// Number of entries across all free lists.
-    num_entries: u64,
+    num_entries: AtomicU64,
 }
 
 impl Default for FreeSpaceManager {
@@ -77,11 +78,53 @@ impl Default for FreeSpaceManager {
 
 impl FreeSpaceManager {
     pub fn new() -> Self {
-        Self {
-            free_lists: Vec::new(),
-            uncheckpointed_free_page_ranges: Vec::new(),
-            num_entries: 0,
+        let mut free_lists = Vec::with_capacity(64);
+        for _ in 0..64 {
+            free_lists.push(RwLock::new(BTreeSet::new()));
         }
+        Self {
+            free_lists,
+            uncheckpointed_free_page_ranges: RwLock::new(Vec::new()),
+            num_entries: AtomicU64::new(0),
+        }
+    }
+
+    /// Serialize the FreeSpaceManager state to a byte vector.
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        // Format: [num_ranges: u32] [range1: start(u64), num(u64)] ...
+        let mut ranges = Vec::new();
+        for list in &self.free_lists {
+            for range in list.read().unwrap().iter() {
+                ranges.push(*range);
+            }
+        }
+        buf.extend_from_slice(&(ranges.len() as u32).to_le_bytes());
+        for range in ranges {
+            buf.extend_from_slice(&range.start_page_idx.to_le_bytes());
+            buf.extend_from_slice(&range.num_pages.to_le_bytes());
+        }
+        buf
+    }
+
+    /// Deserialize FreeSpaceManager state from a byte slice.
+    pub fn deserialize(data: &[u8]) -> std::io::Result<Self> {
+        if data.len() < 4 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Data too short for FSM"));
+        }
+        let num_ranges = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let expected_len = 4 + num_ranges * 16;
+        if data.len() < expected_len {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid FSM data length"));
+        }
+        let fsm = Self::new();
+        for i in 0..num_ranges {
+            let offset = 4 + i * 16;
+            let start_page_idx = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+            let num_pages = u64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap());
+            fsm.add_free_pages(PageRange::new(start_page_idx, num_pages));
+        }
+        Ok(fsm)
     }
 
     /// Compute the power-of-2 level for a given number of pages.
@@ -93,27 +136,26 @@ impl FreeSpaceManager {
         (u64::BITS - 1 - num_pages.leading_zeros()) as usize
     }
 
-    /// Get or create the free list for a given level.
-    fn get_free_list(&mut self, level: usize) -> &mut BTreeSet<PageRange> {
-        if level >= self.free_lists.len() {
-            self.free_lists.resize_with(level + 1, BTreeSet::new);
-        }
-        &mut self.free_lists[level]
+    /// Get the free list for a given level.
+    fn get_free_list(&self, level: usize) -> &RwLock<BTreeSet<PageRange>> {
+        assert!(level < 64);
+        &self.free_lists[level]
     }
 
     /// Add a free page range to the manager.
-    pub fn add_free_pages(&mut self, entry: PageRange) {
+    pub fn add_free_pages(&self, entry: PageRange) {
         assert!(entry.num_pages > 0);
         let level = Self::get_level(entry.num_pages);
-        let list = self.get_free_list(level);
+        let list_lock = self.get_free_list(level);
+        let mut list = list_lock.write().unwrap();
         assert!(!list.contains(&entry), "duplicate free page range");
         list.insert(entry);
-        self.num_entries += 1;
+        self.num_entries.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Evict pages from buffer manager then add as free.
     /// Note: Simplified — just adds to free list; actual eviction requires BufferManager access.
-    pub fn evict_and_add_free_pages(&mut self, entry: PageRange) {
+    pub fn evict_and_add_free_pages(&self, entry: PageRange) {
         // In a full implementation, this would call BufferManager::evict() for each page.
         // For now, just track the free pages.
         self.add_free_pages(entry);
@@ -121,7 +163,7 @@ impl FreeSpaceManager {
 
     /// Pop a free page range of at least `num_pages` from the manager.
     /// Returns `None` if no suitable range is available.
-    pub fn pop_free_pages(&mut self, num_pages: u64) -> Option<PageRange> {
+    pub fn pop_free_pages(&self, num_pages: u64) -> Option<PageRange> {
         if num_pages == 0 {
             return None;
         }
@@ -129,7 +171,7 @@ impl FreeSpaceManager {
         let level_to_search = Self::get_level(num_pages);
         for level in level_to_search..self.free_lists.len() {
             let entry = {
-                let list = &self.free_lists[level];
+                let list = self.free_lists[level].read().unwrap();
                 // Find the first entry with num_pages >= requested
                 let probe = PageRange::new(0, num_pages);
                 if let Some(found) = list.range(probe..).next() {
@@ -140,8 +182,11 @@ impl FreeSpaceManager {
             };
 
             // Remove the entry
-            self.free_lists[level].remove(&entry);
-            self.num_entries -= 1;
+            {
+                let mut list = self.free_lists[level].write().unwrap();
+                list.remove(&entry);
+            }
+            self.num_entries.fetch_sub(1, Ordering::SeqCst);
 
             // Split if the range is larger than needed
             return Some(self.split_page_range(entry, num_pages));
@@ -151,7 +196,7 @@ impl FreeSpaceManager {
     }
 
     /// Split a page range, returning the requested prefix and re-adding the remainder.
-    fn split_page_range(&mut self, chunk: PageRange, num_required_pages: u64) -> PageRange {
+    fn split_page_range(&self, chunk: PageRange, num_required_pages: u64) -> PageRange {
         assert!(chunk.num_pages >= num_required_pages);
         let result = PageRange::new(chunk.start_page_idx, num_required_pages);
         if num_required_pages < chunk.num_pages {
@@ -165,18 +210,18 @@ impl FreeSpaceManager {
     }
 
     /// Add pages that are freed but not yet reusable until checkpoint.
-    pub fn add_uncheckpointed_free_pages(&mut self, entry: PageRange) {
-        self.uncheckpointed_free_page_ranges.push(entry);
+    pub fn add_uncheckpointed_free_pages(&self, entry: PageRange) {
+        self.uncheckpointed_free_page_ranges.write().unwrap().push(entry);
     }
 
     /// Roll back an incomplete checkpoint — discard uncheckpointed entries.
-    pub fn rollback_checkpoint(&mut self) {
-        self.uncheckpointed_free_page_ranges.clear();
+    pub fn rollback_checkpoint(&self) {
+        self.uncheckpointed_free_page_ranges.write().unwrap().clear();
     }
 
     /// Finalize checkpoint — move uncheckpointed entries into the main free lists.
-    pub fn finalize_checkpoint(&mut self) {
-        let entries = std::mem::take(&mut self.uncheckpointed_free_page_ranges);
+    pub fn finalize_checkpoint(&self) {
+        let entries = std::mem::take(&mut *self.uncheckpointed_free_page_ranges.write().unwrap());
         for entry in entries {
             self.add_free_pages(entry);
         }
@@ -184,14 +229,14 @@ impl FreeSpaceManager {
 
     /// Get total number of entries across all free lists.
     pub fn num_entries(&self) -> u64 {
-        self.num_entries
+        self.num_entries.load(Ordering::SeqCst)
     }
 
     /// Get total number of free pages across all lists.
     pub fn total_free_pages(&self) -> u64 {
         self.free_lists
             .iter()
-            .flat_map(|list| list.iter())
+            .flat_map(|list_lock| list_lock.read().unwrap().clone().into_iter())
             .map(|r| r.num_pages)
             .sum()
     }

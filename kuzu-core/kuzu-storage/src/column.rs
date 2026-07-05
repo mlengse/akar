@@ -153,9 +153,9 @@ impl Column {
         }
 
         let fh = FileHandle::new(col_file_path, page_size)
-            .with_free_space_manager(std::sync::Arc::new(std::sync::Mutex::new(
+            .with_free_space_manager(std::sync::Arc::new(
                 crate::free_space_manager::FreeSpaceManager::new(),
-            )));
+            ));
         let physical_type = kuzu_common::types::physical_type_from_logical(logical_type);
         let value_size = serialized_value_size(physical_type);
 
