@@ -11,7 +11,6 @@
 //! still developing, so DuckDB delegation is more stable.
 
 use kuzu_extension::{Extension, ExtensionContext};
-use kuzu_common::types::Value;
 use std::sync::Arc;
 
 /// The Azure Blob Storage extension enables reading from Azure Storage from Kuzu.

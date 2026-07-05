@@ -10,7 +10,6 @@
 //! is more stable.
 
 use kuzu_extension::{Extension, ExtensionContext};
-use kuzu_common::types::Value;
 use std::sync::Arc;
 
 /// The Apache Iceberg extension enables querying Iceberg tables from Kuzu.

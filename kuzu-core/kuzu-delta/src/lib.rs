@@ -10,7 +10,6 @@
 //! `deltalake` crate API is still maturing, so DuckDB delegation is more stable.
 
 use kuzu_extension::{Extension, ExtensionContext};
-use kuzu_common::types::Value;
 use std::sync::Arc;
 
 /// The Delta Lake extension enables querying Delta tables from Kuzu.
