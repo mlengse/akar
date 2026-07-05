@@ -169,6 +169,7 @@ Total: ~469 unit tests — all passing ✅ (14 integration tests pre-existing)
 | Hash Index | ✅ | On-disk + in-memory |
 | WAL + Checkpointer | ✅ | Write-ahead logging, shadow file |
 | Compression | ✅ | Constant, Boolean, dictionary encoding |
+| MVCC / Multiwriter | ✅ | Transaction isolation, dynamic table-level locking, and OCC conflict detection |
 
 ## GDS (Graph Data Science) Framework
 

@@ -27,6 +27,7 @@ pub enum BoundStatement {
     BoundCreateMacro(BoundCreateMacro),
     BoundExportDatabase(BoundExportDatabase),
     BoundImportDatabase(BoundImportDatabase),
+    BoundCreateFtsIndex(BoundCreateFtsIndex),
 }
 
 /// COPY FROM statement — load data from a file into a table.
@@ -302,4 +303,12 @@ pub struct BoundMerge {
     pub on_create: Vec<BoundSetItem>,
     /// ON MATCH SET items: resolved column info.
     pub on_match: Vec<BoundSetItem>,
+}
+
+/// Bound CREATE FTS INDEX statement.
+#[derive(Debug, Clone)]
+pub struct BoundCreateFtsIndex {
+    pub table_name: String,
+    pub index_name: String,
+    pub fields: Vec<String>,
 }

@@ -151,7 +151,6 @@ impl Connection {
         records
     }
 
-    /// Check if a query is a write operation that needs transaction wrapping.
     fn is_write_statement(bound: &BoundStatement) -> bool {
         match bound {
             BoundStatement::BoundCreateNodeTable(_)
@@ -166,11 +165,51 @@ impl Connection {
             | BoundStatement::BoundImportDatabase(_) => true,
             BoundStatement::BoundExplain(_) => false,
             BoundStatement::BoundQuery(q) => {
-                // Check for write clauses like SET
-                q.clauses.iter().any(|c| matches!(c, BoundClause::BoundSet(_)))
+                q.clauses.iter().any(|c| matches!(c, kuzu_binder::bound_statement::BoundClause::BoundSet(_) | kuzu_binder::bound_statement::BoundClause::BoundDelete(_) | kuzu_binder::bound_statement::BoundClause::BoundCreate(_)))
             }
             _ => false,
         }
+    }
+
+    /// Extract all table IDs that will be written to by this statement.
+    fn extract_write_tables(bound: &BoundStatement) -> Vec<u64> {
+        let mut table_ids = Vec::new();
+        match bound {
+            BoundStatement::BoundCopyFrom(c) => table_ids.push(c.table_id),
+            BoundStatement::BoundQuery(q) => {
+                for clause in &q.clauses {
+                    match clause {
+                        kuzu_binder::bound_statement::BoundClause::BoundSet(s) => {
+                            for item in &s.items { table_ids.push(item.table_id); }
+                        }
+                        kuzu_binder::bound_statement::BoundClause::BoundDelete(d) => {
+                            for item in &d.items { table_ids.push(item.table_id); }
+                        }
+                        kuzu_binder::bound_statement::BoundClause::BoundCreate(c) => {
+                            for p in &c.patterns {
+                                if let Some(id) = p.node_table_id { table_ids.push(id); }
+                                if let Some(ref e) = p.edge {
+                                    if let Some(id) = e.rel_table_id { table_ids.push(id); }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            BoundStatement::BoundCreateDml(c) => {
+                table_ids.push(c.table_id);
+            }
+            BoundStatement::BoundMerge(m) => {
+                table_ids.push(m.table_id);
+                for item in &m.on_create { table_ids.push(item.table_id); }
+                for item in &m.on_match { table_ids.push(item.table_id); }
+            }
+            _ => {}
+        }
+        table_ids.sort_unstable();
+        table_ids.dedup();
+        table_ids
     }
 
     /// Execute a Cypher query and return the result.
@@ -316,13 +355,21 @@ impl Connection {
     fn execute_query_inner(
         &self,
         bound: &BoundStatement,
-        _txn: Option<&mut Transaction>,
+        txn_opt: Option<&mut Transaction>,
     ) -> Result<QueryResult, String> {
         // Route: DDL vs DML (handle_ddl returns Some for DDL, None for DML)
         if let Some(result) = self.handle_ddl(bound)? {
             // DDL may have modified the catalog; checkpoint if needed.
             self.maybe_auto_checkpoint()?;
             return Ok(result);
+        }
+
+        // Lock all tables required by this query if in a write transaction
+        if let Some(ref txn) = txn_opt {
+            let write_tables = Self::extract_write_tables(bound);
+            for tid in write_tables {
+                self.database.transaction_manager.lock_table(txn.transaction_id, tid)?;
+            }
         }
 
         // Plan
@@ -1074,6 +1121,7 @@ impl Connection {
                     }
                 Ok(None)
             }
+            BoundStatement::BoundCreateFtsIndex(_) => Ok(None),
         }
     }
 

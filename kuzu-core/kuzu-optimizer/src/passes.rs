@@ -862,7 +862,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::Extend(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
-                | LogicalOperator::ImportDatabase(_) => {}
+                | LogicalOperator::ImportDatabase(_)
+                | LogicalOperator::CreateFtsIndex(_) => {}
             }
         });
     }
@@ -1317,7 +1318,8 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::Extend(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
-                | LogicalOperator::ImportDatabase(_) => 1,
+                | LogicalOperator::ImportDatabase(_)
+                | LogicalOperator::CreateFtsIndex(_) => 1,
             };
             op.set_cardinality(card);
         });

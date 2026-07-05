@@ -74,10 +74,10 @@ pub const fn physical_type_size(t: PhysicalTypeID) -> usize {
         PhysicalTypeID::Int32 | PhysicalTypeID::UInt32 | PhysicalTypeID::Float => 4,
         PhysicalTypeID::Int64 | PhysicalTypeID::UInt64 | PhysicalTypeID::Double | PhysicalTypeID::Interval => 8,
         PhysicalTypeID::Int128 => 16,
-        PhysicalTypeID::String => 16,                       // string view
+        PhysicalTypeID::String => 256,                      // inline string up to 255 chars for prototype
         PhysicalTypeID::Struct => 8,                        // pointer to struct data
         PhysicalTypeID::List | PhysicalTypeID::Array => 16, // list header
-        PhysicalTypeID::Blob => 16,
+        PhysicalTypeID::Blob => 256,
         PhysicalTypeID::Any => 1,
     }
 }
@@ -210,7 +210,7 @@ impl ValueVector {
             }
             PhysicalTypeID::String => {
                 let len = self.data[offset] as usize;
-                let s = String::from_utf8_lossy(&self.data[offset + 1..offset + 1 + len.min(15)]).to_string();
+                let s = String::from_utf8_lossy(&self.data[offset + 1..offset + 1 + len.min(255)]).to_string();
                 Some(Value::String(s))
             }
             // For struct/list types, return a simplified representation
@@ -334,9 +334,9 @@ impl ValueVector {
                 let type_size = physical_type_size(self.physical_type);
                 let offset = idx * type_size;
                 let bytes = s.as_bytes();
-                let len = bytes.len().min(15) as u8;
+                let len = bytes.len().min(255) as u8;
                 self.data[offset] = len;
-                let copy_len = bytes.len().min(15);
+                let copy_len = bytes.len().min(255);
                 self.data[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
                 self.null_mask[idx] = true;
                 if idx >= self.size {
@@ -472,11 +472,11 @@ impl ValueVector {
     pub fn push_string(&mut self, val: &str) {
         let idx = self.size;
         let bytes = val.as_bytes();
-        // Store string length + data (simplified: just store bytes, max ~16 bytes)
-        let len = bytes.len().min(15) as u8;
-        self.data[idx * 16] = len;
-        let copy_len = bytes.len().min(15);
-        self.data[idx * 16 + 1..idx * 16 + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+        // Store string length + data (simplified: just store bytes, max ~255 bytes)
+        let len = bytes.len().min(255) as u8;
+        self.data[idx * 256] = len;
+        let copy_len = bytes.len().min(255);
+        self.data[idx * 256 + 1..idx * 256 + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
         self.null_mask[idx] = true;
         self.size += 1;
     }
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(physical_type_size(PhysicalTypeID::Int64), 8);
         assert_eq!(physical_type_size(PhysicalTypeID::Int32), 4);
         assert_eq!(physical_type_size(PhysicalTypeID::Double), 8);
-        assert_eq!(physical_type_size(PhysicalTypeID::String), 16);
+        assert_eq!(physical_type_size(PhysicalTypeID::String), 256);
     }
 
     #[test]

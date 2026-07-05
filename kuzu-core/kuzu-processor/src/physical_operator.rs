@@ -225,12 +225,12 @@ impl PhysicalScan {
                 }
             }
             Value::String(s) => {
-                let offset = row * 16;
+                let offset = row * 256;
                 let bytes = s.as_bytes();
-                let len = bytes.len().min(15) as u8;
+                let len = bytes.len().min(255) as u8;
                 if offset < v.data().len() {
                     v.data_mut()[offset] = len;
-                    let copy_len = bytes.len().min(15);
+                    let copy_len = bytes.len().min(255);
                     if offset + 1 + copy_len <= v.data().len() {
                         v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
                     }
@@ -1149,13 +1149,17 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
             }
         }
         Value::String(s) => {
-            let offset = row * 16;
+            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(15) as u8;
-            v.data_mut()[offset] = len;
-            let copy_len = bytes.len().min(15);
-            v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-            v.set_null(row, false);
+            let len = bytes.len().min(255) as u8;
+            if offset < v.data().len() {
+                v.data_mut()[offset] = len;
+                let copy_len = bytes.len().min(255);
+                if offset + 1 + copy_len <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                }
+                v.set_null(row, false);
+            }
         }
         _ => {
             // For complex types (List, Struct, etc.), store as Int64 0 placeholder
@@ -2304,10 +2308,10 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
                     }
                     Value::String(s) => {
                         let bytes = s.as_bytes();
-                        let len = bytes.len().min(15) as u8;
-                        v.data_mut()[i * 16] = len;
-                        let copy_len = bytes.len().min(15);
-                        v.data_mut()[i * 16 + 1..i * 16 + 1 + copy_len]
+                        let len = bytes.len().min(255) as u8;
+                        v.data_mut()[i * 256] = len;
+                        let copy_len = bytes.len().min(255);
+                        v.data_mut()[i * 256 + 1..i * 256 + 1 + copy_len]
                             .copy_from_slice(&bytes[..copy_len]);
                         v.set_null(i, false);
                     }
@@ -2596,9 +2600,9 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                         }
                         Value::String(s) => {
                             let bytes = s.as_bytes();
-                            let copy_len = bytes.len().min(15);
-                            vv.data_mut()[row_offset * 16] = copy_len as u8;
-                            vv.data_mut()[row_offset * 16 + 1..row_offset * 16 + 1 + copy_len]
+                            let copy_len = bytes.len().min(255);
+                            vv.data_mut()[row_offset * 256] = copy_len as u8;
+                            vv.data_mut()[row_offset * 256 + 1..row_offset * 256 + 1 + copy_len]
                                 .copy_from_slice(&bytes[..copy_len]);
                         }
                         _ => {}
@@ -2638,7 +2642,7 @@ impl PhysicalOperatorExec for PhysicalExplain {
         let mut vv = ValueVector::new(PhysicalTypeID::String, 1);
         vv.resize(1);
         let bytes = plan_str.as_bytes();
-        let copy_len = bytes.len().min(15);
+        let copy_len = bytes.len().min(255);
         vv.data_mut()[0] = copy_len as u8;
         if copy_len > 0 {
             vv.data_mut()[1..1 + copy_len].copy_from_slice(&bytes[..copy_len]);
@@ -3389,5 +3393,121 @@ impl PhysicalExtend {
         }
 
         Ok(output)
+    }
+}
+
+// ==================== DDL & FTS ====================
+
+pub struct PhysicalCreateFtsIndex {
+    pub table_name: String,
+    pub index_name: String,
+    pub fields: Vec<String>,
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
+    fn operator_type(&self) -> &str {
+        "create_fts_index"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // Find the target table
+        let target_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
+            Some(t) => t,
+            None => return Err(format!("Target table '{}' not found", self.table_name)),
+        };
+
+        // Determine column indices for the target fields
+        let mut field_indices = Vec::new();
+        for field in &self.fields {
+            if let Some(idx) = target_table.columns.iter().position(|c| c.name == *field) {
+                field_indices.push(idx);
+            } else {
+                return Err(format!("Column '{}' not found in table '{}'", field, self.table_name));
+            }
+        }
+
+        // Generate docs and appears_in tables if they exist
+        let docs_table_name = format!("{}_{}_docs", self.table_name, self.index_name);
+        let appears_in_table_name = format!("{}_{}_appears_in", self.table_name, self.index_name);
+
+        // Populate the FTS index by scanning the source table
+        if self.table_catalog.get_node_table_by_name(&docs_table_name).is_none() {
+            let docs_cols = vec![
+                kuzu_storage::table::ColumnDefinition { name: "ID".into(), logical_type: kuzu_common::types::LogicalTypeID::Serial, is_primary_key: true },
+                kuzu_storage::table::ColumnDefinition { name: "term".into(), logical_type: kuzu_common::types::LogicalTypeID::String, is_primary_key: false },
+            ];
+            self.table_catalog.create_node_table(docs_table_name.clone(), docs_cols);
+        }
+
+        let docs_table_id = self.table_catalog.get_node_table_by_name(&docs_table_name).unwrap().table_id;
+
+        if self.table_catalog.get_rel_table_by_name(&appears_in_table_name).is_none() {
+            let appears_in_cols = vec![
+                kuzu_storage::table::ColumnDefinition { name: "count".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: false },
+            ];
+            self.table_catalog.create_rel_table(appears_in_table_name.clone(), docs_table_id, target_table.table_id, appears_in_cols);
+        }
+        
+        let mut docs_table = self.table_catalog.get_node_table_by_name_mut(&docs_table_name).unwrap();
+        let mut appears_in_table = self.table_catalog.get_rel_table_by_name_mut(&appears_in_table_name).unwrap();
+
+        let mut doc_id_counter: i64 = 0;
+        let mut docs_rows = Vec::new();
+        let mut appears_in_rows = Vec::new();
+
+        let source_data = target_table.to_column_major_data();
+        let num_rows = target_table.num_rows as usize;
+
+        for row_idx in 0..num_rows {
+            // Concatenate the specified fields
+            let mut concatenated_text = String::new();
+            for &col_idx in &field_indices {
+                if let Some(col_data) = source_data.get(col_idx) {
+                    if let Some(Value::String(s)) = col_data.get(row_idx) {
+                        concatenated_text.push_str(s);
+                        concatenated_text.push(' ');
+                    }
+                }
+            }
+
+            // Simple tokenize by splitting on whitespace
+            let tokens: Vec<&str> = concatenated_text.split_whitespace().collect();
+
+            // Insert into docs and appears_in
+            for token in tokens {
+                let term = token.to_lowercase(); // Simple stemming/lowercasing
+
+                docs_rows.push(vec![
+                    Value::Int64(doc_id_counter),
+                    Value::String(term.clone()),
+                ]);
+
+                let from_id = doc_id_counter as u64;
+                let to_id = row_idx as u64;
+                
+                appears_in_rows.push((from_id, to_id, vec![
+                    Value::Int64(1), // count
+                ]));
+                
+                doc_id_counter += 1;
+            }
+        }
+
+        for row in docs_rows {
+            docs_table.insert_row(row)?;
+        }
+        for (from, to, row) in appears_in_rows {
+            appears_in_table.insert_rel(from, to, row)?;
+        }
+
+        let mut string_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1);
+        string_vec.resize(1);
+        string_vec.set_value(0, &Value::String("Success".into())).unwrap();
+        
+        let mut result = DataChunk::new(vec![string_vec]);
+        result.size = 1;
+        result.field_names = vec!["result".to_string()];
+        Ok(vec![result])
     }
 }

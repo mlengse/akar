@@ -13,9 +13,14 @@ kuzu-main = { path = "../kuzu-main", default-features = false }
 kuzu-common = { path = "../kuzu-common" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
 
 [features]
 default = []
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

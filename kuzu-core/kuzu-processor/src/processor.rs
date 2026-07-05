@@ -788,8 +788,27 @@ impl QueryProcessor {
                 | LogicalOperator::AlterTable(_)
                 | LogicalOperator::CreateIndex(_)
                 | LogicalOperator::DropIndex(_)
-                | LogicalOperator::CreateVectorIndex(_)
-                | LogicalOperator::CreateSequence(_)
+                | LogicalOperator::CreateVectorIndex(_) => {
+                    intermediate_result = Some(vec![DataChunk {
+                        fields: vec![],
+                        size: 1,
+                        field_names: vec![],
+                    }]);
+                }
+                LogicalOperator::CreateFtsIndex(c) => {
+                    if let Some(ref tc) = self.table_catalog {
+                        let fts_index = PhysicalCreateFtsIndex {
+                            table_name: c.table_name.clone(),
+                            index_name: c.index_name.clone(),
+                            fields: c.fields.clone(),
+                            table_catalog: tc.clone(),
+                        };
+                        intermediate_result = Some(fts_index.execute(current)?);
+                    } else {
+                        return Err("CREATE_FTS_INDEX requires a table catalog".into());
+                    }
+                }
+                LogicalOperator::CreateSequence(_)
                 | LogicalOperator::DropSequence(_)
                 | LogicalOperator::CreateDml(_)
                 | LogicalOperator::ExportDatabase(_)
@@ -1340,6 +1359,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::Extend(ex) => format!("Extend({}->{} via {})", ex.bound_node_var, ex.dst_node_var, ex.rel_table_name),
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
+        LogicalOperator::CreateFtsIndex(c) => format!("CreateFtsIndex({})", c.index_name),
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());

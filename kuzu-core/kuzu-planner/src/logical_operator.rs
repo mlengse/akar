@@ -106,6 +106,7 @@ pub enum LogicalOperator {
     Extend(LogicalExtend),
     ExportDatabase(LogicalExportDatabase),
     ImportDatabase(LogicalImportDatabase),
+    CreateFtsIndex(LogicalCreateFtsIndex),
 }
 
 impl LogicalOperator {
@@ -157,6 +158,7 @@ impl LogicalOperator {
             LogicalOperator::Extend(s) => s.cardinality,
             LogicalOperator::ExportDatabase(s) => s.cardinality,
             LogicalOperator::ImportDatabase(s) => s.cardinality,
+            LogicalOperator::CreateFtsIndex(s) => s.cardinality,
         }
     }
 
@@ -208,6 +210,7 @@ impl LogicalOperator {
             LogicalOperator::Extend(s) => s.cardinality = card,
             LogicalOperator::ExportDatabase(s) => s.cardinality = card,
             LogicalOperator::ImportDatabase(s) => s.cardinality = card,
+            LogicalOperator::CreateFtsIndex(s) => s.cardinality = card,
         }
     }
 
@@ -267,7 +270,8 @@ impl LogicalOperator {
             | LogicalOperator::CreateRel(_)
             | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
-            | LogicalOperator::ImportDatabase(_) => vec![],
+            | LogicalOperator::ImportDatabase(_)
+            | LogicalOperator::CreateFtsIndex(_) => vec![],
         }
     }
 
@@ -317,7 +321,8 @@ impl LogicalOperator {
             | LogicalOperator::CreateRel(_)
             | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
-            | LogicalOperator::ImportDatabase(_) => vec![],
+            | LogicalOperator::ImportDatabase(_)
+            | LogicalOperator::CreateFtsIndex(_) => vec![],
         }
     }
 }
@@ -788,5 +793,14 @@ pub struct LogicalImportDatabase {
     pub file_path: String,
     pub query: String,
     pub index_query: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for creating an FTS index
+#[derive(Debug, Clone)]
+pub struct LogicalCreateFtsIndex {
+    pub table_name: String,
+    pub index_name: String,
+    pub fields: Vec<String>,
     pub cardinality: u64,
 }

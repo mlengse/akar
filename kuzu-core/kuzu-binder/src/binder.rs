@@ -1135,6 +1135,76 @@ impl Binder {
     }
 
     fn bind_call(&self, c: kuzu_parser::ast::CallStatement) -> Result<BoundStatement, String> {
+        if c.function_name.eq_ignore_ascii_case("create_fts_index") {
+            if c.args.len() != 3 {
+                return Err("CREATE_FTS_INDEX expects 3 arguments: table_name, index_name, properties".into());
+            }
+            
+            let table_name = match &c.args[0] {
+                kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s)) => s.clone(),
+                _ => return Err("First argument (table_name) must be a string".into()),
+            };
+            let index_name = match &c.args[1] {
+                kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s)) => s.clone(),
+                _ => return Err("Second argument (index_name) must be a string".into()),
+            };
+            let fields = match &c.args[2] {
+                kuzu_parser::ast::Expression::List(items) => {
+                    let mut cols = Vec::new();
+                    for item in items {
+                        if let kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s)) = item {
+                            cols.push(s.clone());
+                        } else {
+                            return Err("Third argument (properties) must be a list of strings".into());
+                        }
+                    }
+                    cols
+                }
+                _ => return Err("Third argument (properties) must be a list of strings".into()),
+            };
+            
+            let docs_table_name = format!("{}_{}_docs", table_name, index_name);
+            let appears_in_table_name = format!("{}_{}_appears_in", table_name, index_name);
+            
+            // 1. Create docs table in catalog
+            let docs_cols = vec![
+                CatalogColumn { name: "ID".into(), logical_type: LogicalTypeID::Serial, is_primary_key: true, default_value: None },
+                CatalogColumn { name: "term".into(), logical_type: LogicalTypeID::String, is_primary_key: false, default_value: None },
+            ];
+            let (target_table_id, docs_table_id) = {
+                let mut catalog = self.catalog.lock().unwrap();
+                let target_table_id = match catalog.get_entry_by_name(&table_name) {
+                    Some(entry) => entry.table_id(),
+                    None => return Err(format!("Table '{}' not found", table_name)),
+                };
+                let docs_table_id = match catalog.create_node_table(docs_table_name.clone(), docs_cols) {
+                    CatalogResult::Created { table_id } => table_id,
+                    CatalogResult::AlreadyExists => return Err(format!("Table '{}' already exists", docs_table_name)),
+                    _ => return Err("Failed to create FTS docs table".into()),
+                };
+                (target_table_id, docs_table_id)
+            };
+            
+            // 2. Create appears_in table in catalog
+            let appears_in_cols = vec![
+                CatalogColumn { name: "count".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false, default_value: None },
+            ];
+            {
+                let mut catalog = self.catalog.lock().unwrap();
+                match catalog.create_rel_table(appears_in_table_name.clone(), docs_table_id, target_table_id, appears_in_cols) {
+                    CatalogResult::Created { .. } => {}
+                    CatalogResult::AlreadyExists => return Err(format!("Table '{}' already exists", appears_in_table_name)),
+                    _ => return Err("Failed to create FTS appears_in table".into()),
+                }
+            }
+            
+            return Ok(BoundStatement::BoundCreateFtsIndex(BoundCreateFtsIndex {
+                table_name,
+                index_name,
+                fields,
+            }));
+        }
+
         // CALL is a table function invocation — validate the function exists
         // in the function registry. At binding time we just pass through;
         // resolution happens at execution time.

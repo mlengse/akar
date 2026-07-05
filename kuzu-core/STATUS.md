@@ -45,6 +45,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | UUID (gen_random_uuid) | ❌ | ✅ Uuid variant | `ed94a16` |
 | LEFT/RIGHT/LPAD/RPAD | ❌ | ✅ StringOp variants | `ed94a16` |
 | DAYNAME/MONTHNAME/LAST_DAY/MAKE_DATE | ❌ | ✅ DateOp variants | `ed94a16` |
+| HTTPFS Extension | ⚠️ Panic on http_scan | ✅ Fixed chunk size & execution | `[new]` |
+| Multiwriter Execution Locks | ❌ Missing Table locks | ✅ Dynamic `lock_table` in Connection | `[new]` |
 
 ---
 

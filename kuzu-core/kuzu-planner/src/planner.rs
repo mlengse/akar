@@ -37,6 +37,13 @@ impl QueryPlanner {
             BoundStatement::BoundCreateDml(c) => self.plan_create_dml(c),
             BoundStatement::BoundExportDatabase(e) => self.plan_export_database(e),
             BoundStatement::BoundImportDatabase(i) => self.plan_import_database(i),
+            BoundStatement::BoundCreateFtsIndex(c) => Ok(vec![LogicalOperator::CreateFtsIndex(LogicalCreateFtsIndex {
+                table_name: c.table_name,
+                index_name: c.index_name,
+                fields: c.fields,
+                cardinality: 1,
+            })]),
+            BoundStatement::BoundCall(c) => self.plan_call(c),
             _ => Ok(Vec::new()),
         }
     }
@@ -75,6 +82,14 @@ impl QueryPlanner {
             file_path: c.file_path,
             options: c.options,
             cardinality: 0,
+        })])
+    }
+
+    fn plan_call(&self, c: BoundCall) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::TableFunctionCall(LogicalTableFunctionCall {
+            function_name: c.function_name,
+            args: c.args,
+            cardinality: 1,
         })])
     }
 

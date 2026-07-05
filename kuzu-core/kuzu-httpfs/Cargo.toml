@@ -11,6 +11,8 @@ kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
+ureq = "2.9"
+tempfile = "3.10"
 tracing.workspace = true
 
 [lints]

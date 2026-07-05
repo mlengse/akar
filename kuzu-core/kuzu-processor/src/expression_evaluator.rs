@@ -589,13 +589,17 @@ fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) {
             }
         }
         Value::String(s) => {
-            let offset = row * 16;
+            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(15) as u8;
-            v.data_mut()[offset] = len;
-            let copy_len = bytes.len().min(15);
-            v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-            v.set_null(row, false);
+            let len = bytes.len().min(255) as u8;
+            if offset < v.data().len() {
+                v.data_mut()[offset] = len;
+                let copy_len = bytes.len().min(255);
+                if offset + 1 + copy_len <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                }
+                v.set_null(row, false);
+            }
         }
         _ => {
             v.set_null(row, true);
@@ -645,13 +649,17 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
             }
         }
         Value::String(s) => {
-            let offset = row * 16;
+            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(15) as u8;
-            v.data_mut()[offset] = len;
-            let copy_len = bytes.len().min(15);
-            v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-            v.set_null(row, false);
+            let len = bytes.len().min(255) as u8;
+            if offset < v.data().len() {
+                v.data_mut()[offset] = len;
+                let copy_len = bytes.len().min(255);
+                if offset + 1 + copy_len <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                }
+                v.set_null(row, false);
+            }
         }
         _ => {
             // For complex types (List, Struct, etc.), store as null

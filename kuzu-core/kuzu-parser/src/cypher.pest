@@ -334,8 +334,8 @@ literal = {
   | null_literal
 }
 
-string      = { "\"" ~ (escape_char | (!"\"" ~ ANY))* ~ "\"" | "'" ~ (escape_char | (!"'" ~ ANY))* ~ "'" }
-escape_char = { "\\" ~ ANY }
+string      = @{ "\"" ~ (escape_char | (!"\"" ~ ANY))* ~ "\"" | "'" ~ (escape_char | (!"'" ~ ANY))* ~ "'" }
+escape_char = @{ "\\" ~ ANY }
 
 integer         = @{ "-"? ~ ASCII_DIGIT+ }
 float           = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (^"e" ~ "-"? ~ ASCII_DIGIT+)? }
