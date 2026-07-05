@@ -115,6 +115,7 @@ pub enum LogicalOperator {
     ExportDatabase(LogicalExportDatabase),
     ImportDatabase(LogicalImportDatabase),
     CreateFtsIndex(LogicalCreateFtsIndex),
+    FtsScan(LogicalFtsScan),
 }
 
 impl LogicalOperator {
@@ -168,6 +169,7 @@ impl LogicalOperator {
             LogicalOperator::ExportDatabase(s) => s.cardinality,
             LogicalOperator::ImportDatabase(s) => s.cardinality,
             LogicalOperator::CreateFtsIndex(s) => s.cardinality,
+            LogicalOperator::FtsScan(s) => s.cardinality,
         }
     }
 
@@ -221,6 +223,7 @@ impl LogicalOperator {
             LogicalOperator::ExportDatabase(s) => s.cardinality = card,
             LogicalOperator::ImportDatabase(s) => s.cardinality = card,
             LogicalOperator::CreateFtsIndex(s) => s.cardinality = card,
+            LogicalOperator::FtsScan(s) => s.cardinality = card,
         }
     }
 
@@ -282,7 +285,8 @@ impl LogicalOperator {
             | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_)
-            | LogicalOperator::CreateFtsIndex(_) => vec![],
+            | LogicalOperator::CreateFtsIndex(_)
+            | LogicalOperator::FtsScan(_) => vec![],
         }
     }
 
@@ -334,7 +338,8 @@ impl LogicalOperator {
             | LogicalOperator::Extend(_)
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_)
-            | LogicalOperator::CreateFtsIndex(_) => vec![],
+            | LogicalOperator::CreateFtsIndex(_)
+            | LogicalOperator::FtsScan(_) => vec![],
         }
     }
 }
@@ -368,6 +373,7 @@ pub struct LogicalScanNode {
     pub alias: Option<String>,
     pub columns: Vec<String>,
     pub cardinality: u64,
+    pub fts_query: Option<LogicalFtsScan>,
 }
 
 #[derive(Debug, Clone)]
@@ -808,11 +814,27 @@ pub struct LogicalImportDatabase {
     pub cardinality: u64,
 }
 
-/// Logical operator for creating an FTS index
+/// Logical operator for creating an FTS index (P8 architecture)
 #[derive(Debug, Clone)]
 pub struct LogicalCreateFtsIndex {
-    pub table_name: String,
     pub index_name: String,
-    pub fields: Vec<String>,
+    pub table_name: String,
+    pub column_name: String,
+    pub if_not_exists: bool,
+    /// Derived macro table names.
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
+    pub cardinality: u64,
+}
+
+/// Logical operator for querying an FTS index via `USING FTS INDEX` clause.
+#[derive(Debug, Clone)]
+pub struct LogicalFtsScan {
+    pub index_name: String,
+    pub query_string: String,
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
     pub cardinality: u64,
 }

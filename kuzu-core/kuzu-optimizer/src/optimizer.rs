@@ -185,6 +185,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["name".into()],
             cardinality: 0,
+            fts_query: None,
         })];
         let opt = Optimizer::new();
         let result = opt.optimize(plan);

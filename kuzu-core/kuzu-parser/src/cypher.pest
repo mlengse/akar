@@ -42,6 +42,7 @@ ddl_statement = {
   | copy_from
   | alter_table
   | create_vector_index
+  | create_fts_index
   | create_index
   | drop_index
   | create_sequence
@@ -53,6 +54,18 @@ ddl_statement = {
 
 create_macro = {
     "CREATE" ~ "MACRO" ~ identifier ~ "(" ~ macro_params? ~ ")" ~ "AS" ~ expression
+}
+
+// ==================== CREATE FTS INDEX ====================
+
+create_fts_index = {
+    "CREATE" ~ "FTS" ~ "INDEX" ~ if_not_exists? ~ identifier ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+}
+
+// ==================== USING FTS (query modifier) ====================
+
+using_fts_clause = {
+    "USING" ~ "FTS" ~ "INDEX" ~ identifier ~ "(" ~ string ~ ")"
 }
 
 macro_params = { macro_param ~ ("," ~ macro_param)* }
@@ -205,9 +218,8 @@ dimensions_option    = { "dims" ~ "=" ~ integer }
 // ==================== DML Clauses ====================
 
 optional_match_clause = { "OPTIONAL" ~ "MATCH" ~ pattern ~ where_clause? }
-
 match_clause = {
-    "MATCH" ~ pattern ~ ("," ~ pattern)*
+    "MATCH" ~ pattern ~ ("," ~ pattern)* ~ using_fts_clause?
 }
 
 pattern = {

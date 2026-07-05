@@ -204,8 +204,19 @@ impl QueryProcessor {
                     if let Some(d) = data {
                         scan = scan.with_data(d, columns);
                     }
+                    if let Some(ref fq) = s.fts_query {
+                        scan = scan.with_fts_query(PhysicalFtsScan {
+                            index_name: fq.index_name.clone(),
+                            query_string: fq.query_string.clone(),
+                            docs_table: fq.docs_table.clone(),
+                            terms_table: fq.terms_table.clone(),
+                            posting_table: fq.posting_table.clone(),
+                            table_catalog: self.table_catalog.clone().expect("table catalog required for FTS scan"),
+                        });
+                    }
                     let mut result = scan.execute(current.clone())?;
                     let prefix = s.alias.as_ref().unwrap_or(&s.table_name);
+
                     for chunk in &mut result {
                         chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
                     }
@@ -817,14 +828,32 @@ impl QueryProcessor {
                 LogicalOperator::CreateFtsIndex(c) => {
                     if let Some(ref tc) = self.table_catalog {
                         let fts_index = PhysicalCreateFtsIndex {
-                            table_name: c.table_name.clone(),
                             index_name: c.index_name.clone(),
-                            fields: c.fields.clone(),
+                            table_name: c.table_name.clone(),
+                            column_name: c.column_name.clone(),
+                            docs_table: c.docs_table.clone(),
+                            terms_table: c.terms_table.clone(),
+                            posting_table: c.posting_table.clone(),
                             table_catalog: tc.clone(),
                         };
                         intermediate_result = Some(fts_index.execute(current)?);
                     } else {
-                        return Err("CREATE_FTS_INDEX requires a table catalog".into());
+                        return Err("CREATE FTS INDEX requires a table catalog".into());
+                    }
+                }
+                LogicalOperator::FtsScan(s) => {
+                    if let Some(ref tc) = self.table_catalog {
+                        let fts_scan = PhysicalFtsScan {
+                            index_name: s.index_name.clone(),
+                            query_string: s.query_string.clone(),
+                            docs_table: s.docs_table.clone(),
+                            terms_table: s.terms_table.clone(),
+                            posting_table: s.posting_table.clone(),
+                            table_catalog: tc.clone(),
+                        };
+                        intermediate_result = Some(fts_scan.execute(current)?);
+                    } else {
+                        return Err("FTS scan requires a table catalog".into());
                     }
                 }
                 LogicalOperator::CreateSequence(_)
@@ -1380,6 +1409,8 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
         LogicalOperator::CreateFtsIndex(c) => format!("CreateFtsIndex({})", c.index_name),
+        LogicalOperator::FtsScan(s) => format!("FtsScan({})", s.index_name),
+
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());
@@ -1417,6 +1448,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec![],
             cardinality: 0,
+            fts_query: None,
         })
     }
 
@@ -2737,6 +2769,7 @@ mod tests {
                     alias: Some("a".into()),
                     columns: vec![],
                     cardinality: 2,
+                    fts_query: None,
                 })),
                 probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
                     table_name: "B".into(),
@@ -2744,6 +2777,7 @@ mod tests {
                     alias: Some("b".into()),
                     columns: vec![],
                     cardinality: 2,
+                    fts_query: None,
                 })),
                 cardinality: 0,
                 push_down_eligible: false,

@@ -18,6 +18,7 @@ kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-storage = { path = "../kuzu-storage" }
 kuzu-parser = { path = "../kuzu-parser" }
+kuzu-fts = { path = "../kuzu-fts" }
 tracing.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true

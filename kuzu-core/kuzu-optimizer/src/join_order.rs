@@ -121,7 +121,8 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::CreateDml(_)
         | LogicalOperator::ExportDatabase(_)
         | LogicalOperator::ImportDatabase(_)
-        | LogicalOperator::CreateFtsIndex(_) => {
+        | LogicalOperator::CreateFtsIndex(_)
+        | LogicalOperator::FtsScan(_) => {
             // Leaf operator with no children — nothing to recurse into.
         }
     }
@@ -517,6 +518,7 @@ mod tests {
             alias: None,
             columns: vec![],
             cardinality: 100,
+            fts_query: None,
         }));
         assert_eq!(scans.len(), 1);
         assert_eq!(scans[0].0, 100);
@@ -530,6 +532,7 @@ mod tests {
             alias: None,
             columns: vec![],
             cardinality: 10,
+            fts_query: None,
         });
         let large = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "Large".into(),
@@ -537,6 +540,7 @@ mod tests {
             alias: None,
             columns: vec![],
             cardinality: 1000,
+            fts_query: None,
         });
         let join = LogicalOperator::HashJoin(LogicalHashJoin {
             join_keys: vec![],
@@ -561,6 +565,7 @@ mod tests {
             alias: None,
             columns: vec![],
             cardinality: 100,
+            fts_query: None,
         });
         assert!(reorder_joins_greedy(&single).is_none());
     }
@@ -603,6 +608,7 @@ mod tests {
             alias: Some("p".into()),
             columns: vec![],
             cardinality: 100,
+            fts_query: None,
         });
         assert_eq!(get_scan_alias(&scan), Some("p".into()));
     }
@@ -615,6 +621,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec![],
             cardinality: 100,
+            fts_query: None,
         });
         let scan_b = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "B".into(),
@@ -622,6 +629,7 @@ mod tests {
             alias: Some("b".into()),
             columns: vec![],
             cardinality: 200,
+            fts_query: None,
         });
         let scan_c = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "C".into(),
@@ -629,6 +637,7 @@ mod tests {
             alias: Some("c".into()),
             columns: vec![],
             cardinality: 300,
+            fts_query: None,
         });
         
         let filter_ac = LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {

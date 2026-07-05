@@ -147,6 +147,7 @@ pub struct PhysicalScan {
     /// Column index of the internal ID field to test against the mask.
     /// Only used when `semi_mask` is `Some`.
     pub mask_id_column: usize,
+    pub fts_query: Option<PhysicalFtsScan>,
 }
 
 impl PhysicalScan {
@@ -160,8 +161,10 @@ impl PhysicalScan {
             table_columns: Vec::new(),
             semi_mask: None,
             mask_id_column: 0,
+            fts_query: None,
         }
     }
+
 
     /// Set column IDs to scan. These map to column indices in the table data.
     pub fn with_columns(mut self, column_ids: Vec<u32>) -> Self {
@@ -183,6 +186,12 @@ impl PhysicalScan {
         self.mask_id_column = mask_id_column;
         self
     }
+
+    pub fn with_fts_query(mut self, fts_query: PhysicalFtsScan) -> Self {
+        self.fts_query = Some(fts_query);
+        self
+    }
+
 
     /// Convert a Value to bytes in a ValueVector at the given row index.
     fn write_value_to_vector(v: &mut ValueVector, row: usize, val: &Value) {
@@ -318,6 +327,23 @@ impl PhysicalOperatorExec for PhysicalScan {
 
             let num_rows = data[0].len();
 
+            // If FTS query is active, run it to get matching row offsets (doc_ids) in order of relevance
+            let mut fts_doc_ids = None;
+            if let Some(ref fts) = self.fts_query {
+                let fts_chunks = fts.execute(vec![])?;
+                let mut doc_ids = Vec::new();
+                if let Some(chunk) = fts_chunks.first() {
+                    if let Some(id_vec) = chunk.fields.first() {
+                        for row in 0..chunk.size {
+                            if let Some(doc_id) = id_vec.get_i64(row) {
+                                doc_ids.push(doc_id);
+                            }
+                        }
+                    }
+                }
+                fts_doc_ids = Some(doc_ids);
+            }
+
             // Build a row inclusion mask if semi_mask is active
             let row_filter: Option<Vec<bool>> = if let Some(ref mask) = self.semi_mask {
                 if self.mask_id_column < data.len() {
@@ -339,11 +365,34 @@ impl PhysicalOperatorExec for PhysicalScan {
                 None
             };
 
-            // Count valid rows
-            let valid_count = row_filter
-                .as_ref()
-                .map(|f| f.iter().filter(|&&b| b).count())
-                .unwrap_or(num_rows);
+            // Determine final list of row indices to emit
+            let rows_to_emit: Vec<usize> = if let Some(doc_ids) = fts_doc_ids {
+                doc_ids
+                    .into_iter()
+                    .filter_map(|doc_id| {
+                        let row_idx = doc_id as usize;
+                        if row_idx < num_rows {
+                            if let Some(ref filter) = row_filter {
+                                if filter[row_idx] {
+                                    Some(row_idx)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                Some(row_idx)
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else if let Some(ref filter) = row_filter {
+                (0..num_rows).filter(|&r| filter[r]).collect()
+            } else {
+                (0..num_rows).collect()
+            };
+
+            let valid_count = rows_to_emit.len();
 
             // Use column_ids if specified, otherwise scan all columns
             let cols_to_scan: Vec<usize> = if self.column_ids.is_empty() {
@@ -375,28 +424,16 @@ impl PhysicalOperatorExec for PhysicalScan {
                         .unwrap_or(PhysicalTypeID::Int64)
                 };
 
-                if let Some(ref row_filter) = row_filter {
-                    // Write only valid rows
-                    let mut v = ValueVector::new(phys_type, valid_count);
-                    v.resize(valid_count);
-                    let mut write_row = 0;
-                    for (row, val) in col_data.iter().enumerate() {
-                        if row < num_rows && row_filter[row] {
-                            Self::write_value_to_vector(&mut v, write_row, val);
-                            write_row += 1;
-                        }
+                let mut v = ValueVector::new(phys_type, valid_count);
+                v.resize(valid_count);
+                for (write_row, &row_idx) in rows_to_emit.iter().enumerate() {
+                    if let Some(val) = col_data.get(row_idx) {
+                        Self::write_value_to_vector(&mut v, write_row, val);
                     }
-                    fields.push(v);
-                } else {
-                    // No filtering: write all rows
-                    let mut v = ValueVector::new(phys_type, num_rows);
-                    v.resize(num_rows);
-                    for (row, val) in col_data.iter().enumerate() {
-                        Self::write_value_to_vector(&mut v, row, val);
-                    }
-                    fields.push(v);
                 }
+                fields.push(v);
             }
+
 
             let names: Vec<String> = cols_to_scan
                 .iter()
@@ -3727,10 +3764,17 @@ impl PhysicalOperatorExec for PhysicalCountRelTable {
     }
 }
 
+/// Physical operator for `CREATE FTS INDEX` — builds 3 macro tables:
+/// 1. `fts_{idx}_docs`: node table (doc_id INT64, text STRING)
+/// 2. `fts_{idx}_terms`: node table (term_id INT64, term STRING, doc_freq INT64)
+/// 3. `fts_{idx}_appears_in`: rel table (FROM terms TO docs, term_freq INT64)
 pub struct PhysicalCreateFtsIndex {
-    pub table_name: String,
     pub index_name: String,
-    pub fields: Vec<String>,
+    pub table_name: String,
+    pub column_name: String,
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
     pub table_catalog: Arc<TableCatalog>,
 }
 
@@ -3740,103 +3784,250 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        // Find the target table
-        let target_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
+        // Locate source table
+        let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
             Some(t) => t,
-            None => return Err(format!("Target table '{}' not found", self.table_name)),
+            None => return Err(format!("Table '{}' not found", self.table_name)),
         };
+        let col_idx = source_table.columns.iter().position(|c| c.name == self.column_name)
+            .ok_or_else(|| format!("Column '{}' not found in '{}'", self.column_name, self.table_name))?;
 
-        // Determine column indices for the target fields
-        let mut field_indices = Vec::new();
-        for field in &self.fields {
-            if let Some(idx) = target_table.columns.iter().position(|c| c.name == *field) {
-                field_indices.push(idx);
-            } else {
-                return Err(format!("Column '{}' not found in table '{}'", field, self.table_name));
-            }
-        }
-
-        // Generate docs and appears_in tables if they exist
-        let docs_table_name = format!("{}_{}_docs", self.table_name, self.index_name);
-        let appears_in_table_name = format!("{}_{}_appears_in", self.table_name, self.index_name);
-
-        // Populate the FTS index by scanning the source table
-        if self.table_catalog.get_node_table_by_name(&docs_table_name).is_none() {
+        // Ensure macro tables exist; create if needed
+        if self.table_catalog.get_node_table_by_name(&self.docs_table).is_none() {
             let docs_cols = vec![
-                kuzu_storage::table::ColumnDefinition { name: "ID".into(), logical_type: kuzu_common::types::LogicalTypeID::Serial, is_primary_key: true },
-                kuzu_storage::table::ColumnDefinition { name: "term".into(), logical_type: kuzu_common::types::LogicalTypeID::String, is_primary_key: false },
+                kuzu_storage::table::ColumnDefinition {
+                    name: "doc_id".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: true,
+                },
+                kuzu_storage::table::ColumnDefinition {
+                    name: "text".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::String,
+                    is_primary_key: false,
+                },
             ];
-            self.table_catalog.create_node_table(docs_table_name.clone(), docs_cols);
+            self.table_catalog.create_node_table(self.docs_table.clone(), docs_cols);
+        }
+        if self.table_catalog.get_node_table_by_name(&self.terms_table).is_none() {
+            let terms_cols = vec![
+                kuzu_storage::table::ColumnDefinition {
+                    name: "term_id".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: true,
+                },
+                kuzu_storage::table::ColumnDefinition {
+                    name: "term".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::String,
+                    is_primary_key: false,
+                },
+                kuzu_storage::table::ColumnDefinition {
+                    name: "doc_freq".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ];
+            self.table_catalog.create_node_table(self.terms_table.clone(), terms_cols);
         }
 
-        let docs_table_id = self.table_catalog.get_node_table_by_name(&docs_table_name).unwrap().table_id;
+        // Collect docs data
+        let source_data = source_table.to_column_major_data();
+        let num_rows = source_table.num_rows as usize;
 
-        if self.table_catalog.get_rel_table_by_name(&appears_in_table_name).is_none() {
-            let appears_in_cols = vec![
-                kuzu_storage::table::ColumnDefinition { name: "count".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: false },
-            ];
-            self.table_catalog.create_rel_table(appears_in_table_name.clone(), docs_table_id, target_table.table_id, appears_in_cols);
-        }
-        
-        let mut docs_table = self.table_catalog.get_node_table_by_name_mut(&docs_table_name).unwrap();
-        let mut appears_in_table = self.table_catalog.get_rel_table_by_name_mut(&appears_in_table_name).unwrap();
-
-        let mut doc_id_counter: i64 = 0;
-        let mut docs_rows = Vec::new();
-        let mut appears_in_rows = Vec::new();
-
-        let source_data = target_table.to_column_major_data();
-        let num_rows = target_table.num_rows as usize;
+        // term -> (term_id, doc_freq)
+        let mut term_map: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
+        // (doc_id, text) rows
+        let mut doc_rows: Vec<Vec<Value>> = Vec::new();
+        // posting: (term_id, doc_id, term_freq)
+        let mut postings: Vec<(i64, i64, i64)> = Vec::new();
 
         for row_idx in 0..num_rows {
-            // Concatenate the specified fields
-            let mut concatenated_text = String::new();
-            for &col_idx in &field_indices {
-                if let Some(col_data) = source_data.get(col_idx) {
-                    if let Some(Value::String(s)) = col_data.get(row_idx) {
-                        concatenated_text.push_str(s);
-                        concatenated_text.push(' ');
-                    }
+            let text = if let Some(col_data) = source_data.get(col_idx) {
+                if let Some(Value::String(s)) = col_data.get(row_idx) {
+                    s.clone()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
+            let doc_id = row_idx as i64;
+            doc_rows.push(vec![Value::Int64(doc_id), Value::String(text.clone())]);
+
+            // Tokenize using kuzu-fts utilities
+            let tokens = kuzu_fts::tokenize(&text);
+            let mut freq_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            for token in tokens {
+                let stemmed = kuzu_fts::stem_word(&token);
+                if !kuzu_fts::STOP_WORDS.contains(&stemmed.as_str()) {
+                    *freq_map.entry(stemmed).or_insert(0) += 1;
                 }
             }
 
-            // Simple tokenize by splitting on whitespace
-            let tokens: Vec<&str> = concatenated_text.split_whitespace().collect();
 
-            // Insert into docs and appears_in
-            for token in tokens {
-                let term = token.to_lowercase(); // Simple stemming/lowercasing
-
-                docs_rows.push(vec![
-                    Value::Int64(doc_id_counter),
-                    Value::String(term.clone()),
-                ]);
-
-                let from_id = doc_id_counter as u64;
-                let to_id = row_idx as u64;
-                
-                appears_in_rows.push((from_id, to_id, vec![
-                    Value::Int64(1), // count
-                ]));
-                
-                doc_id_counter += 1;
+            for (term, freq) in freq_map {
+                let next_id = term_map.len() as i64;
+                let (term_id, doc_freq) = term_map.entry(term).or_insert((next_id, 0));
+                *doc_freq += 1;
+                postings.push((*term_id, doc_id, freq));
             }
         }
 
-        for row in docs_rows {
-            docs_table.insert_row(row)?;
-        }
-        for (from, to, row) in appears_in_rows {
-            appears_in_table.insert_rel(from, to, row)?;
+        // Insert docs
+        {
+            let mut docs_table = self.table_catalog.get_node_table_by_name_mut(&self.docs_table).unwrap();
+            for row in doc_rows {
+                docs_table.insert_row(row)?;
+            }
         }
 
-        let mut string_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1);
-        string_vec.resize(1);
-        string_vec.set_value(0, &Value::String("Success".into())).unwrap();
-        
-        let mut result = DataChunk::new(vec![string_vec]);
+        // Insert terms
+        if self.table_catalog.get_node_table_by_name(&self.terms_table).is_some() {
+            let mut terms_table = self.table_catalog.get_node_table_by_name_mut(&self.terms_table).unwrap();
+            let mut term_list: Vec<(String, i64, i64)> = term_map.into_iter()
+                .map(|(t, (id, df))| (t, id, df))
+                .collect();
+            term_list.sort_by_key(|(_, id, _)| *id);
+            for (term, term_id, doc_freq) in term_list {
+                terms_table.insert_row(vec![
+                    Value::Int64(term_id),
+                    Value::String(term),
+                    Value::Int64(doc_freq),
+                ])?;
+            }
+        }
+
+        // Create and populate posting (appears_in) table
+        let docs_table_id = self.table_catalog.get_node_table_by_name(&self.docs_table).unwrap().table_id;
+        let terms_table_id = self.table_catalog.get_node_table_by_name(&self.terms_table).unwrap().table_id;
+
+        if self.table_catalog.get_rel_table_by_name(&self.posting_table).is_none() {
+            let posting_cols = vec![
+                kuzu_storage::table::ColumnDefinition {
+                    name: "term_freq".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ];
+            // FROM terms TO docs
+            self.table_catalog.create_rel_table(
+                self.posting_table.clone(),
+                terms_table_id,
+                docs_table_id,
+                posting_cols,
+            );
+        }
+
+        {
+            let mut posting_table = self.table_catalog.get_rel_table_by_name_mut(&self.posting_table).unwrap();
+            for (term_id, doc_id, freq) in postings {
+                posting_table.insert_rel(term_id as u64, doc_id as u64, vec![Value::Int64(freq)])?;
+            }
+        }
+
+        let mut result_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1);
+        result_vec.resize(1);
+        result_vec.set_value(0, &Value::String(format!("FTS index '{}' built successfully.", self.index_name))).unwrap();
+        let mut result = DataChunk::new(vec![result_vec]);
         result.size = 1;
         result.field_names = vec!["result".to_string()];
         Ok(vec![result])
     }
 }
+
+/// Physical operator for `USING FTS INDEX` scan — queries the 3 macro tables
+/// and returns ranked (node_id, score) pairs using BM25 scoring.
+#[derive(Debug, Clone)]
+pub struct PhysicalFtsScan {
+    pub index_name: String,
+    pub query_string: String,
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
+    pub table_catalog: Arc<TableCatalog>,
+}
+
+
+impl PhysicalOperatorExec for PhysicalFtsScan {
+    fn operator_type(&self) -> &str {
+        "fts_scan"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // Tokenize query
+        let query_tokens: Vec<String> = kuzu_fts::tokenize(&self.query_string)
+            .into_iter()
+            .map(|t| kuzu_fts::stem_word(&t))
+            .filter(|t| !kuzu_fts::STOP_WORDS.contains(&t.as_str()))
+            .collect();
+
+
+        // Lookup terms table for matching terms
+        let terms_table = match self.table_catalog.get_node_table_by_name(&self.terms_table) {
+            Some(t) => t,
+            None => return Err(format!("FTS terms table '{}' not found. Has the index been created?", self.terms_table)),
+        };
+
+        // Get total doc count from docs table
+        let num_docs = self.table_catalog.get_node_table_by_name(&self.docs_table)
+            .map(|t| t.num_rows as f64)
+            .unwrap_or(1.0);
+
+        // Build map: term -> (term_id, doc_freq)
+        let terms_data = terms_table.to_column_major_data();
+        let num_terms = terms_table.num_rows as usize;
+        let mut matching_terms: Vec<(i64, i64)> = Vec::new(); // (term_id, doc_freq)
+
+        for row_idx in 0..num_terms {
+            let term_val = terms_data.get(1).and_then(|d| d.get(row_idx));
+            let term_str = if let Some(Value::String(s)) = term_val { s.clone() } else { continue };
+            if query_tokens.contains(&term_str) {
+                let term_id = if let Some(Value::Int64(id)) = terms_data.get(0).and_then(|d| d.get(row_idx)) {
+                    *id
+                } else { continue };
+                let doc_freq = if let Some(Value::Int64(df)) = terms_data.get(2).and_then(|d| d.get(row_idx)) {
+                    *df
+                } else { 0 };
+                matching_terms.push((term_id, doc_freq));
+            }
+        }
+
+        // Accumulate per-doc BM25 scores from posting table
+        let mut doc_scores: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
+
+        if let Some(posting_table) = self.table_catalog.get_rel_table_by_name(&self.posting_table) {
+            for &(term_id, doc_freq) in &matching_terms {
+                let idf = ((num_docs - doc_freq as f64 + 0.5) / (doc_freq as f64 + 0.5) + 1.0).ln();
+                // Scan posting table for this term using get_outgoing_edges(term_id)
+                let posting_rels = posting_table.get_outgoing_edges(term_id as u64);
+                for (doc_id, rel_vals) in posting_rels {
+                    let tf = if let Some(Value::Int64(freq)) = rel_vals.first() { *freq as f64 } else { 1.0 };
+                    // BM25: k1=1.5, b=0.75 (simplified, no avg doc len)
+                    let k1 = 1.5_f64;
+                    let score = idf * (tf * (k1 + 1.0)) / (tf + k1);
+                    *doc_scores.entry(doc_id as i64).or_insert(0.0) += score;
+                }
+            }
+        }
+
+        // Sort by score descending
+        let mut ranked: Vec<(i64, f64)> = doc_scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return (doc_id, score) data chunks
+        let n = ranked.len();
+        let mut id_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+        let mut score_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n);
+        id_vec.resize(n);
+        score_vec.resize(n);
+        for (i, (doc_id, score)) in ranked.into_iter().enumerate() {
+            id_vec.set_i64(i, doc_id);
+            score_vec.set_double(i, score);
+        }
+        let mut chunk = DataChunk::new(vec![id_vec, score_vec]);
+        chunk.size = n;
+        chunk.field_names = vec!["doc_id".to_string(), "score".to_string()];
+        Ok(vec![chunk])
+    }
+}
+

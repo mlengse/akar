@@ -1861,6 +1861,7 @@ dependencies = [
  "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
+ "kuzu-fts",
  "kuzu-function",
  "kuzu-optimizer",
  "kuzu-parser",

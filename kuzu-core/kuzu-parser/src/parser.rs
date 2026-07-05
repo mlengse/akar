@@ -182,6 +182,7 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
         Rule::create_sequence => parse_create_sequence(pair),
         Rule::drop_sequence => parse_drop_sequence(pair),
         Rule::create_macro => parse_create_macro(pair),
+        Rule::create_fts_index => parse_create_fts_index(pair),
         Rule::export_database => parse_export_database(pair),
         Rule::import_database => parse_import_database(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
@@ -606,8 +607,15 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::match_clause => {
+                // Check for a trailing using_fts_clause child inside the match_clause subtree
+                let inner_clone = inner.clone();
+                let fts_query = inner_clone.into_inner()
+                    .find(|p| p.as_rule() == Rule::using_fts_clause)
+                    .map(|fts| parse_using_fts_clause(fts))
+                    .transpose()?;
                 clauses.push(Clause::Match(MatchClause {
                     patterns: parse_patterns(inner)?,
+                    fts_query,
                 }));
             }
             Rule::optional_match_clause => {
@@ -2180,4 +2188,69 @@ mod tests {
             _ => panic!("Expected Analyze, got {:?}", stmt),
         }
     }
+
+    #[test]
+    fn test_create_fts_index_parse() {
+        let sql = "CREATE FTS INDEX idx_name ON (Person.bio)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateFtsIndex(c) => {
+                assert_eq!(c.index_name, "idx_name");
+                assert_eq!(c.table_name, "Person");
+                assert_eq!(c.column_name, "bio");
+                assert!(!c.if_not_exists);
+            }
+            _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
+        }
+    }
 }
+
+// ==================== FTS Parsing Helpers ====================
+
+fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut if_not_exists = false;
+    let mut identifiers: Vec<String> = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::if_not_exists => if_not_exists = true,
+            Rule::identifier => identifiers.push(inner.as_str().to_string()),
+            _ => {}
+        }
+    }
+
+    // identifiers: [index_name, table_name, column_name]
+    if identifiers.len() < 3 {
+        return Err(format!(
+            "CREATE FTS INDEX requires index_name, table_name, and column_name, got {:?}",
+            identifiers
+        ));
+    }
+    Ok(Statement::CreateFtsIndex(CreateFtsIndex {
+        index_name: identifiers[0].clone(),
+        table_name: identifiers[1].clone(),
+        column_name: identifiers[2].clone(),
+        if_not_exists,
+    }))
+}
+
+fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Result<FtsQuery, String> {
+    let mut index_name = String::new();
+    let mut query_string = String::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier => index_name = inner.as_str().to_string(),
+            Rule::string => {
+                query_string = inner.as_str().trim().trim_matches('\'').to_string();
+            }
+            _ => {}
+        }
+    }
+
+    if index_name.is_empty() {
+        return Err("USING FTS INDEX requires an index name".into());
+    }
+    Ok(FtsQuery { index_name, query_string })
+}
+

@@ -747,6 +747,7 @@ impl FactorizationRewriting {
                     alias: None,
                     columns: Vec::new(),
                     cardinality: 0,
+                    fts_query: None,
                 }),
             );
             let flatten = LogicalOperator::Flatten(LogicalFlatten {
@@ -864,6 +865,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_)
                 | LogicalOperator::CreateFtsIndex(_)
+                | LogicalOperator::FtsScan(_)
                 | LogicalOperator::CountRelTable(_) => {}
             }
         });
@@ -941,6 +943,7 @@ impl TreeOptimizationPass for AccHashJoinOptimization {
                         alias: None,
                         columns: Vec::new(),
                         cardinality: 0,
+                        fts_query: None,
                     })),
                 );
 
@@ -995,6 +998,7 @@ impl TreeOptimizationPass for SIPOptimization {
                             alias: None,
                             columns: Vec::new(),
                             cardinality: 0,
+                            fts_query: None,
                         })),
                     );
 
@@ -1321,6 +1325,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::ExportDatabase(_)
                 | LogicalOperator::ImportDatabase(_)
                 | LogicalOperator::CreateFtsIndex(_)
+                | LogicalOperator::FtsScan(_)
                 | LogicalOperator::CountRelTable(_) => 1,
             };
             op.set_cardinality(card);
@@ -1827,6 +1832,7 @@ mod tests {
             alias: None,
             columns: vec!["col1".into(), "col2".into()],
             cardinality: 0,
+            fts_query: None,
         })
     }
 
@@ -2227,6 +2233,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 0,
+                fts_query: None,
             })),
             probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
                 table_name: "B".into(),
@@ -2234,6 +2241,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 0,
+                fts_query: None,
             })),
             cardinality: 0,
             push_down_eligible: false,
@@ -2266,6 +2274,7 @@ mod tests {
             alias: None,
             columns: vec![],
             cardinality: 0,
+            fts_query: None,
         });
 
         let pass = CardinalityEstimation::new(None);
@@ -2287,6 +2296,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 0,
+                fts_query: None,
             })],
             cardinality: 0,
         });
@@ -2313,6 +2323,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 1000,
+                fts_query: None,
             })],
             cardinality: 0,
         });
@@ -2336,6 +2347,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 0, // will be overwritten by estimate_scan_node
+                fts_query: None,
             })),
             right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
                 table_name: "B".into(),
@@ -2343,6 +2355,7 @@ mod tests {
                 alias: None,
                 columns: vec![],
                 cardinality: 0, // will be overwritten by estimate_scan_node
+                fts_query: None,
             })),
             cardinality: 0,
         });
@@ -2376,6 +2389,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["id".into(), "name".into(), "age".into()],
             cardinality: 0,
+            fts_query: None,
         });
         let agg = make_aggregate(
             vec![
@@ -2424,6 +2438,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["name".into(), "age".into()],
             cardinality: 0,
+            fts_query: None,
         });
         let agg = make_aggregate(
             vec![
@@ -2466,6 +2481,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["id".into()],
             cardinality: 0,
+            fts_query: None,
         });
         let agg = make_aggregate(
             vec![
@@ -2497,6 +2513,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["id".into()],
             cardinality: 0,
+            fts_query: None,
         });
         let agg = make_aggregate(
             vec![
@@ -2541,6 +2558,7 @@ mod tests {
                 alias: Some("a".into()),
                 columns: vec!["age".into()],
                 cardinality: 100,
+                fts_query: None,
             })],
             cardinality: 10,
         });
@@ -2551,6 +2569,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["age".into()],
             cardinality: 100,
+            fts_query: None,
         });
 
         let hash_join = LogicalOperator::HashJoin(LogicalHashJoin {
@@ -2594,6 +2613,7 @@ mod tests {
             alias: Some("a".into()),
             columns: vec!["id".into()],
             cardinality: 100,
+            fts_query: None,
         });
 
         let probe_side = LogicalOperator::ScanNode(LogicalScanNode {
@@ -2602,6 +2622,7 @@ mod tests {
             alias: Some("p".into()),
             columns: vec!["id".into()],
             cardinality: 200,
+            fts_query: None,
         });
 
         let hash_join = LogicalOperator::HashJoin(LogicalHashJoin {

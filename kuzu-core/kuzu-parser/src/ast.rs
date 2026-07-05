@@ -66,6 +66,7 @@ pub enum Statement {
     ExportDatabase(ExportDatabase),
     ImportDatabase(ImportDatabase),
     Analyze(AnalyzeStatement),
+    CreateFtsIndex(CreateFtsIndex),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -123,6 +124,24 @@ pub struct DeleteClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchClause {
     pub patterns: Vec<Pattern>,
+    /// Optional FTS query attached to this MATCH via `USING FTS INDEX name('query')`.
+    pub fts_query: Option<FtsQuery>,
+}
+
+/// A `USING FTS INDEX index_name('search string')` clause attached to a MATCH.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FtsQuery {
+    pub index_name: String,
+    pub query_string: String,
+}
+
+/// CREATE FTS INDEX statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateFtsIndex {
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

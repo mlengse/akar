@@ -35,7 +35,9 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
             alias: None,
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         }));
+
     }
 
     if scans.len() == 1 {
@@ -214,6 +216,7 @@ mod tests {
             alias: Some("a".into()),
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let plan = build_join_tree(vec![scan], None);
         match plan {
@@ -230,6 +233,7 @@ mod tests {
             alias: Some("a".into()),
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "City".into(),
@@ -237,6 +241,7 @@ mod tests {
             alias: Some("c".into()),
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let plan = build_join_tree(vec![scan1, scan2], None);
         match plan {
@@ -329,6 +334,7 @@ mod tests {
             alias: None,
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let plan = JoinPlan::Leaf(scan.clone());
         let flat = flatten_join_plan(&plan);
@@ -343,6 +349,7 @@ mod tests {
             alias: None,
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "B".into(),
@@ -350,6 +357,7 @@ mod tests {
             alias: None,
             columns: Vec::new(),
             cardinality: 0,
+            fts_query: None,
         });
         let plan = JoinPlan::CrossProduct {
             left: Box::new(JoinPlan::Leaf(scan1)),

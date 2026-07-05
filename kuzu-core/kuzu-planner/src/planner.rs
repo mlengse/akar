@@ -38,9 +38,13 @@ impl QueryPlanner {
             BoundStatement::BoundExportDatabase(e) => self.plan_export_database(e),
             BoundStatement::BoundImportDatabase(i) => self.plan_import_database(i),
             BoundStatement::BoundCreateFtsIndex(c) => Ok(vec![LogicalOperator::CreateFtsIndex(LogicalCreateFtsIndex {
-                table_name: c.table_name,
                 index_name: c.index_name,
-                fields: c.fields,
+                table_name: c.table_name,
+                column_name: c.column_name,
+                if_not_exists: c.if_not_exists,
+                docs_table: c.docs_table,
+                terms_table: c.terms_table,
+                posting_table: c.posting_table,
                 cardinality: 1,
             })]),
             BoundStatement::BoundCall(c) => self.plan_call(c),
@@ -301,6 +305,14 @@ impl QueryPlanner {
         for clause in query.clauses {
             match clause {
                 BoundClause::BoundMatch(m) => {
+                    let mut fts_to_assign = m.fts_query.as_ref().map(|fq| LogicalFtsScan {
+                        index_name: fq.index_name.clone(),
+                        query_string: fq.query_string.clone(),
+                        docs_table: fq.docs_table.clone(),
+                        terms_table: fq.terms_table.clone(),
+                        posting_table: fq.posting_table.clone(),
+                        cardinality: 0,
+                    });
                     let mut patterns_iter = m.patterns.into_iter().peekable();
                     while let Some(pattern) = patterns_iter.next() {
                         // If the previous pattern consumed this dest node, skip
@@ -333,6 +345,7 @@ impl QueryPlanner {
                                         alias: node_var.clone(),
                                         columns: Vec::new(),
                                         cardinality: 0,
+                                        fts_query: fts_to_assign.take(),
                                     }));
                                 }
 
@@ -372,6 +385,7 @@ impl QueryPlanner {
                                     alias: src_node_var.clone(),
                                     columns: Vec::new(),
                                     cardinality: 0,
+                                    fts_query: fts_to_assign.take(),
                                 }));
                             }
 
@@ -413,10 +427,12 @@ impl QueryPlanner {
                                 alias: pattern.node_variable,
                                 columns: Vec::new(),
                                 cardinality: 0,
+                                fts_query: fts_to_assign.take(),
                             }));
                         }
                     }
                 }
+
                 BoundClause::BoundWhere(w) => {
                     filter_expr = Some(w.expression);
                 }
@@ -466,6 +482,7 @@ impl QueryPlanner {
                             alias: None,
                             columns: Vec::new(),
                             cardinality: 0,
+                            fts_query: None,
                         })
                     } else {
                         LogicalOperator::Projection(LogicalProjection {
@@ -485,6 +502,7 @@ impl QueryPlanner {
                                 alias: pattern.node_variable.clone(),
                                 columns: Vec::new(),
                                 cardinality: 0,
+                                fts_query: None,
                             }));
                         }
                         if let Some(edge) = &pattern.edge
@@ -506,6 +524,7 @@ impl QueryPlanner {
                             alias: None,
                             columns: Vec::new(),
                             cardinality: 0,
+                            fts_query: None,
                         })
                     } else {
                         LogicalOperator::Projection(LogicalProjection {
@@ -514,6 +533,7 @@ impl QueryPlanner {
                             cardinality: 0,
                         })
                     };
+
 
                     // Create the OptionalMatch tree node.
                     // The left side is the entire pipeline built so far (scans + filter + projection).

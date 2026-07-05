@@ -141,6 +141,19 @@ pub struct BoundMatchClause {
     pub patterns: Vec<BoundPattern>,
     /// New variables introduced by this MATCH clause.
     pub new_variables: Vec<BoundVariable>,
+    /// Optional FTS query (from USING FTS INDEX clause).
+    pub fts_query: Option<BoundFtsQuery>,
+}
+
+/// A bound USING FTS INDEX query.
+#[derive(Debug, Clone)]
+pub struct BoundFtsQuery {
+    pub index_name: String,
+    pub query_string: String,
+    /// The macro table names derived from the FTS index.
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
 }
 
 #[derive(Debug, Clone)]
@@ -318,7 +331,12 @@ pub struct BoundMerge {
 /// Bound CREATE FTS INDEX statement.
 #[derive(Debug, Clone)]
 pub struct BoundCreateFtsIndex {
-    pub table_name: String,
     pub index_name: String,
-    pub fields: Vec<String>,
+    pub table_name: String,
+    pub column_name: String,
+    pub if_not_exists: bool,
+    /// The macro table names that will be created.
+    pub docs_table: String,
+    pub terms_table: String,
+    pub posting_table: String,
 }
