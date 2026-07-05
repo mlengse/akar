@@ -681,10 +681,19 @@ impl Binder {
                     is_constant: false,
                 })
             }
-            Expression::ListPredicate { list, predicate, .. } => {
+            Expression::ListPredicate { quantifier: _, list, var_name, predicate } => {
                 // Bind both list and predicate expressions
                 self.resolve_expression(list, variables)?;
-                self.resolve_expression(predicate, variables)?;
+
+                let mut new_vars = variables.to_vec();
+                new_vars.push(crate::bound_statement::BoundVariable {
+                    name: var_name.clone(),
+                    table_id: 0,
+                    label: None,
+                    is_node: false,
+                });
+
+                self.resolve_expression(predicate, &new_vars)?;
                 Ok(BoundExpression {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Bool,
