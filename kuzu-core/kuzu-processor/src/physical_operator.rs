@@ -1883,6 +1883,7 @@ pub struct PhysicalSet {
     pub column_name: String,
     pub column_idx: usize,
     pub value: kuzu_parser::ast::Expression,
+    pub is_node: bool,
     pub table_catalog: Arc<TableCatalog>,
 }
 
@@ -1914,19 +1915,28 @@ impl PhysicalOperatorExec for PhysicalSet {
         }
 
         // Apply updates to the table
-        let updated =
-            if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name)
-            {
-                let mut count = 0u64;
+        let mut updated = 0u64;
+        if self.is_node {
+            if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
                 for (row_idx, val) in &rows_to_update {
                     if table.update_cell(*row_idx, self.column_idx, val.clone()).is_ok() {
-                        count += 1;
+                        updated += 1;
                     }
                 }
-                count
+            } else {
+                return Err(format!("Node table '{}' not found for SET", self.table_name));
+            }
         } else {
-            return Err(format!("Table '{}' not found for SET", self.table_name));
-        };
+            if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
+                for (edge_idx, val) in &rows_to_update {
+                    if table.update_cell(*edge_idx as usize, self.column_idx, val.clone()).is_ok() {
+                        updated += 1;
+                    }
+                }
+            } else {
+                return Err(format!("Rel table '{}' not found for SET", self.table_name));
+            }
+        }
 
         tracing::info!("SET: updated {updated} rows in '{}'", self.table_name);
 
@@ -1964,11 +1974,13 @@ fn evaluate_expression_for_row(
 
 // ==================== Delete ====================
 
-/// Physical operator for DELETE — removes rows from a node table.
+/// Physical operator for DELETE — removes rows from a node or rel table.
 pub struct PhysicalDelete {
     pub table_name: String,
     pub table_id: u64,
     pub primary_key_column: String,
+    pub is_node: bool,
+    pub detach: bool,
     /// Row indices to delete (found by the scan/filter pipeline).
     pub row_indices: Vec<u64>,
     pub table_catalog: Arc<TableCatalog>,
@@ -1994,7 +2006,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
         }
 
         if rows_to_delete.is_empty() {
-            // No rows to delete — still return success
+            // No rows to delete - still return success
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
@@ -2002,17 +2014,38 @@ impl PhysicalOperatorExec for PhysicalDelete {
         }
 
         // Delete rows from the table
-        let deleted = if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
-            let mut count = 0u64;
+        let mut deleted = 0u64;
+        if self.is_node {
             for &row_idx in &rows_to_delete {
-                if table.delete_row(row_idx).is_ok() {
-                    count += 1;
+                if !self.detach && self.table_catalog.has_incident_edges(self.table_id, row_idx) {
+                    return Err(format!("Cannot delete node {} because it has incident edges (use DETACH DELETE)", row_idx));
                 }
             }
-            count
+            if self.detach {
+                for &row_idx in &rows_to_delete {
+                    self.table_catalog.detach_node(self.table_id, row_idx);
+                }
+            }
+            if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                for &row_idx in &rows_to_delete {
+                    if table.delete_row(row_idx).is_ok() {
+                        deleted += 1;
+                    }
+                }
+            } else {
+                return Err(format!("Node table '{}' not found for DELETE", self.table_name));
+            }
         } else {
-            return Err(format!("Table '{}' not found for DELETE", self.table_name));
-        };
+            if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
+                for &edge_idx in &rows_to_delete {
+                    if table.delete_edge(edge_idx as usize).is_ok() {
+                        deleted += 1;
+                    }
+                }
+            } else {
+                return Err(format!("Rel table '{}' not found for DELETE", self.table_name));
+            }
+        }
 
         tracing::info!("DELETE: removed {deleted} rows from '{}'", self.table_name);
 

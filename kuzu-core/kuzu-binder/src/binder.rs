@@ -27,10 +27,13 @@ fn resolve_set_items(
                 // We need to find which table this variable belongs to.
                 // Since MERGE is a single-pattern operation, we just use the label.
                 let found = catalog.all_entries().find_map(|entry| {
-                    entry.columns().iter().find(|c| c.name == *prop_name).map(|_| (entry.name().to_string(), entry.table_id()))
+                    entry.columns().iter().find(|c| c.name == *prop_name).map(|_| {
+                        let is_node = entry.is_node_table();
+                        (entry.name().to_string(), entry.table_id(), is_node)
+                    })
                 });
                 match found {
-                    Some((table_name, table_id)) => {
+                    Some((table_name, table_id, is_node)) => {
                         let col_idx = catalog
                             .get_entry_by_name(&table_name)
                             .and_then(|e| {
@@ -44,6 +47,7 @@ fn resolve_set_items(
                             column_idx: col_idx,
                             table_name: table_name.to_string(),
                             table_id,
+                            is_node,
                         });
                     }
                     None => {
@@ -1038,6 +1042,7 @@ impl Binder {
                                 column_idx: 0, // resolved by catalog lookup
                                 table_name: bound_var.label.clone().unwrap_or_default(),
                                 table_id: bound_var.table_id,
+                                is_node: bound_var.is_node,
                             });
                         }
                         _ => return Err("SET property must be on a variable".into()),
@@ -1320,6 +1325,7 @@ impl Binder {
             return Err("DELETE requires at least one expression".into());
         }
 
+        let mut items = Vec::new();
         for expr in &d.expressions {
             match expr {
                 kuzu_parser::ast::Expression::Variable(var_name) => {
@@ -1327,17 +1333,22 @@ impl Binder {
                         .iter()
                         .find(|v| v.name == *var_name)
                         .ok_or_else(|| format!("Variable '{}' not found in scope for DELETE", var_name))?;
-                    return Ok(BoundDeleteClause {
-                        expressions: d.expressions.clone(),
+                    items.push(BoundDeleteItem {
+                        expression: expr.clone(),
                         table_name: var.label.clone().unwrap_or_default(),
                         table_id: var.table_id,
                         primary_key_column: String::new(),
+                        is_node: var.is_node,
                     });
                 }
                 _ => return Err(format!("DELETE only supports variable references, got: {:?}", expr)),
             }
         }
-        Err("DELETE: no valid expressions".into())
+        
+        Ok(BoundDeleteClause {
+            detach: d.detach,
+            items,
+        })
     }
 
     fn bind_copy_from(&self, c: kuzu_parser::ast::CopyFrom) -> Result<BoundStatement, String> {

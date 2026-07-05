@@ -78,6 +78,7 @@ pub struct BoundSetItem {
     pub column_idx: usize,
     pub table_name: String,
     pub table_id: u64,
+    pub is_node: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -86,11 +87,18 @@ pub struct BoundSetClause {
 }
 
 #[derive(Debug, Clone)]
-pub struct BoundDeleteClause {
-    pub expressions: Vec<Expression>,
+pub struct BoundDeleteItem {
+    pub expression: Expression,
     pub table_name: String,
     pub table_id: u64,
     pub primary_key_column: String,
+    pub is_node: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundDeleteClause {
+    pub detach: bool,
+    pub items: Vec<BoundDeleteItem>,
 }
 
 #[derive(Debug, Clone)]

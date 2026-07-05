@@ -522,6 +522,7 @@ impl QueryProcessor {
                         column_name: sl.column_name.clone(),
                         column_idx: sl.column_idx,
                         value: sl.value.clone(),
+                        is_node: sl.is_node,
                         table_catalog,
                     };
                     let input = current;
@@ -538,6 +539,8 @@ impl QueryProcessor {
                         table_name: dl.table_name.clone(),
                         table_id: dl.table_id,
                         primary_key_column: dl.primary_key_column.clone(),
+                        is_node: dl.is_node,
+                        detach: dl.detach,
                         row_indices: Vec::new(),
                         table_catalog,
                     };
@@ -736,6 +739,7 @@ impl QueryProcessor {
                                 column_name: set_item.column_name.clone(),
                                 column_idx: set_item.column_idx,
                                 value: set_item.value.clone(),
+                                is_node: set_item.is_node,
                                 table_catalog: table_catalog.clone(),
                             };
                             let _ = set_op.execute(vec![])?;
@@ -760,6 +764,7 @@ impl QueryProcessor {
                                 column_name: set_item.column_name.clone(),
                                 column_idx: set_item.column_idx,
                                 value: set_item.value.clone(),
+                                is_node: set_item.is_node,
                                 table_catalog: table_catalog.clone(),
                             };
                             let _ = set_op.execute(vec![])?;

@@ -435,13 +435,60 @@ impl RelTable {
 
         // Update reverse adjacency.
         self.rev_adj.entry(to).or_default().push((from, edge_idx));
-
         // Store property values.
         for (col_idx, val) in values.into_iter().enumerate() {
             self.properties[col_idx].push(val);
         }
-
         self.num_rows += 1;
+        Ok(())
+    }
+
+    /// Delete an edge by its index. Marks the edge as deleted by removing it from adjacency lists
+    /// and setting its properties to Null.
+    pub fn delete_edge(&mut self, edge_idx: usize) -> Result<(), String> {
+        if edge_idx >= self.edges.len() {
+            return Err(format!("Edge index {edge_idx} out of range"));
+        }
+        
+        let (src, dst) = self.edges[edge_idx];
+        if src == u64::MAX {
+            // Already deleted
+            return Ok(());
+        }
+
+        // Remove from fwd_adj
+        if let Some(adj) = self.fwd_adj.get_mut(&src) {
+            adj.retain(|&(_, idx)| idx != edge_idx);
+        }
+
+        // Remove from rev_adj
+        if let Some(adj) = self.rev_adj.get_mut(&dst) {
+            adj.retain(|&(_, idx)| idx != edge_idx);
+        }
+
+        // Tombstone the edge
+        self.edges[edge_idx] = (u64::MAX, u64::MAX);
+
+        // Nullify properties
+        for col in &mut self.properties {
+            if edge_idx < col.len() {
+                col[edge_idx] = Value::Null;
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Update a single cell (edge property) with a new value.
+    pub fn update_cell(&mut self, edge_idx: usize, col_idx: usize, value: Value) -> Result<(), String> {
+        if col_idx >= self.columns.len() {
+            return Err(format!("Column index {col_idx} out of range"));
+        }
+        if edge_idx >= self.properties[col_idx].len() {
+            return Err(format!("Edge index {edge_idx} out of range"));
+        }
+        
+        self.properties[col_idx][edge_idx] = value;
         Ok(())
     }
 
@@ -611,6 +658,54 @@ impl TableCatalog {
     pub fn get_rel_table_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, RelTable>> {
         let id = self.rel_name_to_id.get(name)?;
         self.rel_tables.get_mut(&*id)
+    }
+
+    /// Check if a node has any incident edges.
+    pub fn has_incident_edges(&self, table_id: u64, node_idx: u64) -> bool {
+        for rel_table in self.rel_tables.iter() {
+            if rel_table.src_table_id == table_id {
+                if let Some(edges) = rel_table.fwd_adj.get(&node_idx) {
+                    if !edges.is_empty() {
+                        return true;
+                    }
+                }
+            }
+            if rel_table.dst_table_id == table_id {
+                if let Some(edges) = rel_table.rev_adj.get(&node_idx) {
+                    if !edges.is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Delete all incident edges for a given node.
+    pub fn detach_node(&self, table_id: u64, node_idx: u64) {
+        for mut rel_table in self.rel_tables.iter_mut() {
+            let mut edges_to_delete = Vec::new();
+            
+            if rel_table.src_table_id == table_id {
+                if let Some(edges) = rel_table.fwd_adj.get(&node_idx) {
+                    for &(_, edge_idx) in edges {
+                        edges_to_delete.push(edge_idx);
+                    }
+                }
+            }
+            
+            if rel_table.dst_table_id == table_id {
+                if let Some(edges) = rel_table.rev_adj.get(&node_idx) {
+                    for &(_, edge_idx) in edges {
+                        edges_to_delete.push(edge_idx);
+                    }
+                }
+            }
+            
+            for edge_idx in edges_to_delete {
+                let _ = rel_table.delete_edge(edge_idx);
+            }
+        }
     }
 
     pub fn all_node_tables(

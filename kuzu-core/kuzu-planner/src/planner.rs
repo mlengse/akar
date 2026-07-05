@@ -207,6 +207,7 @@ impl QueryPlanner {
                 column_name: item.column_name.clone(),
                 column_idx: item.column_idx,
                 value: item.value.clone(),
+                is_node: item.is_node,
                 cardinality: 0,
             })
             .collect();
@@ -220,6 +221,7 @@ impl QueryPlanner {
                 column_name: item.column_name.clone(),
                 column_idx: item.column_idx,
                 value: item.value.clone(),
+                is_node: item.is_node,
                 cardinality: 0,
             })
             .collect();
@@ -513,12 +515,16 @@ impl QueryPlanner {
                     projection = None;
                 }
                 BoundClause::BoundDelete(d) => {
-                    delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
-                        table_name: d.table_name.clone(),
-                        table_id: d.table_id,
-                        primary_key_column: d.primary_key_column.clone(),
-                        cardinality: 0,
-                    }));
+                    for item in &d.items {
+                        delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
+                            table_name: item.table_name.clone(),
+                            table_id: item.table_id,
+                            primary_key_column: item.primary_key_column.clone(),
+                            is_node: item.is_node,
+                            detach: d.detach,
+                            cardinality: 0,
+                        }));
+                    }
                 }
                 BoundClause::BoundUnwind(u) => {
                     delete_exprs.push(LogicalOperator::Unwind(LogicalUnwind {
@@ -535,6 +541,7 @@ impl QueryPlanner {
                             column_name: item.column_name.clone(),
                             column_idx: item.column_idx,
                             value: item.value.clone(),
+                            is_node: item.is_node,
                             cardinality: 0,
                         }));
                     }

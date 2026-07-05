@@ -1323,6 +1323,7 @@ fn substitute_foreach_var(
                                 column_idx: item.column_idx,
                                 table_name: item.table_name.clone(),
                                 table_id: item.table_id,
+                                is_node: item.is_node,
                             }
                         }).collect();
                         new_clauses.push(kuzu_binder::bound_statement::BoundClause::BoundSet(

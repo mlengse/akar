@@ -108,6 +108,7 @@ pub struct SetItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteClause {
+    pub detach: bool,
     pub expressions: Vec<Expression>,
 }
 

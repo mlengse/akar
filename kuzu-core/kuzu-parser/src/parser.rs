@@ -615,8 +615,10 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
                 clauses.push(Clause::Where(WhereClause { expression: expr }));
             }
             Rule::delete_clause => {
+                let detach = inner.as_str().to_uppercase().starts_with("DETACH");
                 let expressions: Result<Vec<_>, _> = inner.into_inner().map(parse_expression).collect();
                 clauses.push(Clause::Delete(DeleteClause {
+                    detach,
                     expressions: expressions?,
                 }));
             }
@@ -705,9 +707,11 @@ fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<ForeachClau
                             sub_clauses.push(Clause::Set(SetClause { items: items? }));
                         }
                         Rule::delete_clause => {
+                            let detach = body_inner.as_str().to_uppercase().starts_with("DETACH");
                             let expressions: Result<Vec<_>, _> =
                                 body_inner.into_inner().map(parse_expression).collect();
                             sub_clauses.push(Clause::Delete(DeleteClause {
+                                detach,
                                 expressions: expressions?,
                             }));
                         }

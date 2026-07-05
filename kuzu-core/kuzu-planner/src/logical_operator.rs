@@ -562,6 +562,7 @@ pub struct LogicalSet {
     pub column_name: String,
     pub column_idx: usize,
     pub value: kuzu_parser::ast::Expression,
+    pub is_node: bool,
     pub cardinality: u64,
 }
 
@@ -571,6 +572,8 @@ pub struct LogicalDelete {
     pub table_name: String,
     pub table_id: u64,
     pub primary_key_column: String,
+    pub is_node: bool,
+    pub detach: bool,
     pub cardinality: u64,
 }
 
