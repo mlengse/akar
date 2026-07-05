@@ -33,6 +33,9 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         LogicalOperator::TableFunctionCall(tf) => {
             scans.push((tf.cardinality, op.clone()));
         }
+        LogicalOperator::CountRelTable(crt) => {
+            scans.push((1, op.clone())); // CSR COUNT = O(1), single row
+        }
         // Non-leaf operators: recurse into children
         LogicalOperator::Filter(f) => {
             for child in &f.children {

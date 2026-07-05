@@ -1120,6 +1120,79 @@ impl Connection {
                             Value::String("local".to_string()),
                         ]])
                     }
+                    // ── Storage introspection ──
+                    "bm_info" => {
+                        let bm = &self.database.storage_manager;
+                        let info = bm.buffer_info();
+                        Ok(vec![vec![
+                            Value::String("buffer_pool".to_string()),
+                            Value::Int64(info.total_memory as i64),
+                            Value::Int64(info.used_memory as i64),
+                            Value::Int64(info.num_pinned as i64),
+                        ]])
+                    }
+                    "file_info" => {
+                        let sm = &self.database.storage_manager;
+                        let info = sm.file_info();
+                        Ok(vec![vec![
+                            Value::Int64(info.total_file_size as i64),
+                            Value::Int64(info.num_data_pages as i64),
+                            Value::Int64(info.wal_size as i64),
+                        ]])
+                    }
+                    "free_space_info" => {
+                        let sm = &self.database.storage_manager;
+                        let info = sm.fsm_info();
+                        Ok(vec![vec![
+                            Value::Int64(info.total_free_pages as i64),
+                            Value::Int64(info.num_entries as i64),
+                        ]])
+                    }
+                    "disk_size_info" => {
+                        let sm = &self.database.storage_manager;
+                        let info = sm.file_info();
+                        Ok(vec![vec![
+                            Value::Int64(info.total_file_size as i64),
+                            Value::Int64(info.num_data_pages as i64),
+                            Value::Int64(info.wal_size as i64),
+                        ]])
+                    }
+                    "storage_version" => {
+                        Ok(vec![vec![Value::String(kuzu_storage::version_info::STORAGE_VERSION.to_string())]])
+                    }
+                    // ── Extension info ──
+                    "show_loaded_extensions" => {
+                        let reg = self.database.extension_registry.lock().unwrap();
+                        let names: Vec<Vec<Value>> = reg.names().iter().map(|n| vec![Value::String(n.clone())]).collect();
+                        Ok(names)
+                    }
+                    "show_official_extensions" => {
+                        Ok(vec![
+                            vec![Value::String("json".into()), Value::String("JSON functions".into())],
+                            vec![Value::String("fts".into()), Value::String("Full-Text Search".into())],
+                            vec![Value::String("vector".into()), Value::String("Vector similarity search".into())],
+                            vec![Value::String("httpfs".into()), Value::String("HTTP/S3 file access".into())],
+                            vec![Value::String("duckdb".into()), Value::String("DuckDB integration".into())],
+                            vec![Value::String("sqlite".into()), Value::String("SQLite integration".into())],
+                            vec![Value::String("postgres".into()), Value::String("PostgreSQL integration".into())],
+                            vec![Value::String("delta".into()), Value::String("Delta Lake integration".into())],
+                            vec![Value::String("iceberg".into()), Value::String("Apache Iceberg integration".into())],
+                            vec![Value::String("azure".into()), Value::String("Azure Blob Storage".into())],
+                            vec![Value::String("unity_catalog".into()), Value::String("Unity Catalog integration".into())],
+                            vec![Value::String("neo4j".into()), Value::String("Neo4j integration".into())],
+                            vec![Value::String("llm".into()), Value::String("LLM integration".into())],
+                            vec![Value::String("algo".into()), Value::String("Graph algorithms".into())],
+                        ])
+                    }
+                    // ── Warning context ──
+                    "clear_warnings" => {
+                        // Clear warnings — no-op for now
+                        Ok(vec![vec![Value::String("Warnings cleared".into())]])
+                    }
+                    "show_warnings" => {
+                        // No warning infrastructure yet — return empty
+                        Ok(vec![])
+                    }
                     _ => {
                         // Evaluate AST arguments to Values
                         let args: Vec<Value> = c.args.iter().map(eval_ast_expr_to_value).collect();

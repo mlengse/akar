@@ -234,3 +234,6 @@ mod tests {
     // Need NODE_GROUP_SIZE for the VersionInfo::new() test
     use crate::column_chunk::NODE_GROUP_SIZE;
 }
+
+/// Storage format version, returned by CALL storage_version().
+pub const STORAGE_VERSION: u32 = 1;

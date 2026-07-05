@@ -59,6 +59,13 @@ pub struct LogicalSemiMasker {
     pub cardinality: u64,
 }
 
+/// Logical COUNT on a rel table — optimized via CSR metadata (Ladybug).
+#[derive(Debug, Clone)]
+pub struct LogicalCountRelTable {
+    pub table_name: String,
+    pub table_id: u64,
+}
+
 #[derive(Debug, Clone)]
 pub enum LogicalOperator {
     ScanNode(LogicalScanNode),
@@ -90,6 +97,7 @@ pub enum LogicalOperator {
     SemiMasker(LogicalSemiMasker),
     Accumulate(LogicalAccumulate),
     ExpressionsScan(LogicalExpressionsScan),
+    CountRelTable(LogicalCountRelTable),
     // DDL operators
     CreateNodeTable(LogicalCreateNodeTable),
     CreateRelTable(LogicalCreateRelTable),
@@ -142,6 +150,7 @@ impl LogicalOperator {
             LogicalOperator::SemiMasker(s) => s.cardinality,
             LogicalOperator::Accumulate(s) => s.cardinality,
             LogicalOperator::ExpressionsScan(s) => s.cardinality,
+            LogicalOperator::CountRelTable(_) => 1,
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality,
             LogicalOperator::CreateRelTable(s) => s.cardinality,
@@ -194,6 +203,7 @@ impl LogicalOperator {
             LogicalOperator::SemiMasker(s) => s.cardinality = card,
             LogicalOperator::Accumulate(s) => s.cardinality = card,
             LogicalOperator::ExpressionsScan(s) => s.cardinality = card,
+            LogicalOperator::CountRelTable(_) => {}
             // DDL operators
             LogicalOperator::CreateNodeTable(s) => s.cardinality = card,
             LogicalOperator::CreateRelTable(s) => s.cardinality = card,
@@ -243,6 +253,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter_mut().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter_mut().collect(),
+            LogicalOperator::CountRelTable(_) => vec![],
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
@@ -295,6 +306,7 @@ impl LogicalOperator {
             LogicalOperator::RecursiveExtend(_) => vec![],
             LogicalOperator::SemiMasker(s) => s.children.iter().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter().collect(),
+            LogicalOperator::CountRelTable(_) => vec![],
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)

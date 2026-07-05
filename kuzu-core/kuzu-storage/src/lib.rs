@@ -79,6 +79,29 @@ pub struct StorageInfo {
     pub free_pages: u64,
 }
 
+/// Buffer manager info returned by CALL bm_info().
+#[derive(Debug, Clone)]
+pub struct BufferInfo {
+    pub total_memory: usize,
+    pub used_memory: usize,
+    pub num_pinned: usize,
+}
+
+/// File info returned by CALL file_info() / CALL disk_size_info().
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    pub total_file_size: u64,
+    pub num_data_pages: u64,
+    pub wal_size: u64,
+}
+
+/// FSM info returned by CALL free_space_info().
+#[derive(Debug, Clone)]
+pub struct FsmInfo {
+    pub total_free_pages: u64,
+    pub num_entries: usize,
+}
+
 impl StorageManager {
     pub fn new(db_path: PathBuf, memory_manager: Arc<MemoryManager>) -> Self {
         // Ensure the database directory exists (ignore error for :memory: mode)
@@ -300,6 +323,53 @@ impl StorageManager {
                 .unwrap_or(page::DEFAULT_PAGE_SIZE),
             total_pages,
             free_pages,
+        }
+    }
+
+    /// Buffer manager statistics for CALL bm_info().
+    pub fn buffer_info(&self) -> BufferInfo {
+        let bm = self.buffer_manager.lock().unwrap();
+        let stats = bm.stats();
+        let page_size = bm.page_size();
+        BufferInfo {
+            total_memory: stats.num_frames * page_size,
+            used_memory: (stats.num_frames - (stats.num_frames - stats.pinned_frames - stats.dirty_frames)) * page_size,
+            num_pinned: stats.pinned_frames,
+        }
+    }
+
+    /// File-level statistics for CALL file_info() / CALL disk_size_info().
+    pub fn file_info(&self) -> FileInfo {
+        let db_path = &self.db_path;
+        let wal_path = db_path.join("wal.log");
+        let wal_size = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+        let data_size = std::fs::read_dir(db_path)
+            .map(|entries| {
+                entries.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().map(|x| x == "data").unwrap_or(false))
+                    .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+                    .sum::<u64>()
+            })
+            .unwrap_or(0);
+        let page_size = self.page_manager.as_ref()
+            .map(|pm| pm.page_size())
+            .unwrap_or(page::DEFAULT_PAGE_SIZE) as u64;
+        FileInfo {
+            total_file_size: data_size + wal_size,
+            num_data_pages: data_size / page_size.max(1),
+            wal_size,
+        }
+    }
+
+    /// FSM statistics for CALL free_space_info().
+    pub fn fsm_info(&self) -> FsmInfo {
+        let total_pages = self.page_manager.as_ref()
+            .map(|pm| pm.total_pages())
+            .unwrap_or(0);
+        let free_pages = 0u64; // FSM query later
+        FsmInfo {
+            total_free_pages: free_pages.max(0),
+            num_entries: total_pages as usize,
         }
     }
 

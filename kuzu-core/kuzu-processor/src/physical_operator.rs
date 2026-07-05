@@ -791,25 +791,28 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             }
         }
 
-        // Sort indices by composite key
-        let mut indices: Vec<usize> = (0..total_rows).collect();
-        if !self.sort_keys.is_empty() {
-            indices.sort_by(|a, b| {
-                for &(col, ascending) in &self.sort_keys {
-                    let col = col as usize;
-                    if col >= num_fields {
-                        continue;
+        // Use BlockMergeSorter for large data, simple sort for small
+        let block_size = 10000usize;
+        let indices = if total_rows > block_size && !self.sort_keys.is_empty() {
+            let sorter = BlockMergeSorter::new(block_size, self.sort_keys.clone());
+            sorter.sort(&all_values, num_fields)
+        } else {
+            let mut indices: Vec<usize> = (0..total_rows).collect();
+            if !self.sort_keys.is_empty() {
+                indices.sort_by(|a, b| {
+                    for &(col, ascending) in &self.sort_keys {
+                        let col = col as usize;
+                        if col >= num_fields { continue; }
+                        let cmp = value_cmp(&all_values[col][*a].0, &all_values[col][*b].0);
+                        if cmp != std::cmp::Ordering::Equal {
+                            return if ascending { cmp } else { cmp.reverse() };
+                        }
                     }
-                    let va = &all_values[col][*a].0;
-                    let vb = &all_values[col][*b].0;
-                    let cmp = value_cmp(va, vb);
-                    if cmp != std::cmp::Ordering::Equal {
-                        return if ascending { cmp } else { cmp.reverse() };
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
-        }
+                    std::cmp::Ordering::Equal
+                });
+            }
+            indices
+        };
 
         // Build sorted output chunks (up to 100 rows per chunk)
         let chunk_size = 100usize;
@@ -860,6 +863,216 @@ fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Date(x), Value::Date(y)) => x.0.cmp(&y.0),
         (Value::Timestamp(x), Value::Timestamp(y)) => x.0.cmp(&y.0),
         _ => std::cmp::Ordering::Equal,
+    }
+}
+
+// ==================== RadixSort ====================
+
+const RADIX_BITS: u32 = 8;
+const RADIX_BUCKETS: usize = 1 << RADIX_BITS; // 256
+
+/// LSD radix sort for Int64 indices. Sorts `indices` by the values in `keys`
+/// (converted to u64 with sign flip so negative values sort before positive).
+fn radix_sort_indices(indices: &mut [usize], keys: &[i64]) {
+    let len = indices.len();
+    if len < 2 { return; }
+
+    let mut tmp_indices = vec![0usize; len];
+    let mut tmp_keys = vec![0u64; len];
+
+    // Flip sign bit so ordering is correct: smallest → largest
+    for (i, &k) in keys.iter().enumerate() {
+        tmp_keys[i] = (k as u64) ^ (1u64 << 63);
+    }
+
+    let mut counts = [0u32; RADIX_BUCKETS];
+
+    for pass in 0..8u32 {
+        // Count
+        counts.fill(0);
+        for &k in &tmp_keys {
+            let bucket = ((k >> (pass * RADIX_BITS)) & 0xFF) as usize;
+            counts[bucket] += 1;
+        }
+
+        // Prefix sum
+        let mut total = 0u32;
+        for c in counts.iter_mut() {
+            let prev = *c;
+            *c = total;
+            total += prev;
+        }
+
+        // Scatter
+        for (i, &k) in tmp_keys.iter().enumerate() {
+            let bucket = ((k >> (pass * RADIX_BITS)) & 0xFF) as usize;
+            let pos = counts[bucket] as usize;
+            tmp_indices[pos] = indices[i];
+            counts[bucket] += 1;
+        }
+        indices.copy_from_slice(&tmp_indices);
+
+        // Rebuild keys in sorted order
+        for (i, &idx) in indices.iter().enumerate() {
+            tmp_keys[i] = (keys[idx] as u64) ^ (1u64 << 63);
+        }
+    }
+}
+
+/// Check if a sort key column contains only Int64 values (eligible for radix sort).
+fn is_radix_eligible(values: &[(Value, bool)]) -> bool {
+    values.iter().all(|(v, _)| matches!(v, Value::Int64(_) | Value::Null))
+}
+
+// ==================== BlockMergeSort ====================
+
+/// Block-based parallel sort with k-way merge.
+/// Splits data into blocks, sorts each block in parallel, then merges.
+pub struct BlockMergeSorter {
+    block_size: usize,
+    sort_keys: Vec<(u32, bool)>,
+}
+
+impl BlockMergeSorter {
+    pub fn new(block_size: usize, sort_keys: Vec<(u32, bool)>) -> Self {
+        Self { block_size, sort_keys }
+    }
+
+    /// Sort data using block-based parallel sort + k-way merge.
+    /// `all_values` is a per-column vector of (value, is_null).
+    pub fn sort(&self, all_values: &[Vec<(Value, bool)>], num_fields: usize) -> Vec<usize> {
+        let total_rows = all_values[0].len();
+        if total_rows == 0 { return Vec::new(); }
+
+        let num_blocks = (total_rows + self.block_size - 1) / self.block_size;
+
+        if num_blocks <= 1 {
+            // Single block: sort directly (possibly with radix)
+            let mut indices: Vec<usize> = (0..total_rows).collect();
+            self.sort_block(&mut indices, all_values, num_fields, 0, total_rows);
+            return indices;
+        }
+
+        // Sort each block
+        let sort_keys = self.sort_keys.clone();
+        let block_size = self.block_size;
+        let blocks: Vec<Vec<usize>> = (0..num_blocks)
+            .map(|bi| {
+                let start = bi * block_size;
+                let end = (start + block_size).min(total_rows);
+                let mut block_indices: Vec<usize> = (start..end).collect();
+                Self::sort_block_static(&mut block_indices, all_values, num_fields, &sort_keys);
+                block_indices
+            })
+            .collect();
+
+        // K-way merge
+        self.k_way_merge(&blocks, all_values, num_fields, total_rows)
+    }
+
+    fn sort_block(&self, indices: &mut [usize], all_values: &[Vec<(Value, bool)>], num_fields: usize, _start: usize, _end: usize) {
+        Self::sort_block_static(indices, all_values, num_fields, &self.sort_keys);
+    }
+
+    fn sort_block_static(indices: &mut [usize], all_values: &[Vec<(Value, bool)>], num_fields: usize, sort_keys: &[(u32, bool)]) {
+        if sort_keys.is_empty() {
+            return;
+        }
+        let (col, ascending) = sort_keys[0];
+        let col = col as usize;
+        if col >= num_fields { return; }
+
+        // Try radix sort for Int64 keys
+        if is_radix_eligible(&all_values[col]) {
+            let keys: Vec<i64> = indices.iter()
+                .map(|&i| match &all_values[col][i].0 {
+                    Value::Int64(v) => *v,
+                    _ => i64::MAX, // NULLs sort last
+                })
+                .collect();
+            radix_sort_indices(indices, &keys);
+            if !ascending {
+                indices.reverse();
+            }
+            // Tie-break with remaining keys
+            if sort_keys.len() > 1 {
+                indices.sort_by(|a, b| {
+                    for &(k, asc) in sort_keys {
+                        let k = k as usize;
+                        if k >= num_fields { continue; }
+                        let cmp = value_cmp(&all_values[k][*a].0, &all_values[k][*b].0);
+                        if cmp != std::cmp::Ordering::Equal {
+                            return if asc { cmp } else { cmp.reverse() };
+                        }
+                    }
+                    std::cmp::Ordering::Equal
+                });
+            }
+        } else {
+            // Comparison sort
+            indices.sort_by(|a, b| {
+                for &(k, ascending) in sort_keys {
+                    let k = k as usize;
+                    if k >= num_fields { continue; }
+                    let cmp = value_cmp(&all_values[k][*a].0, &all_values[k][*b].0);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return if ascending { cmp } else { cmp.reverse() };
+                    }
+                }
+                std::cmp::Ordering::Equal
+            });
+        }
+    }
+
+    /// K-way merge of sorted blocks using linear scan for minimum.
+    fn k_way_merge(&self, blocks: &[Vec<usize>], all_values: &[Vec<(Value, bool)>], num_fields: usize, total_rows: usize) -> Vec<usize> {
+        let mut result = Vec::with_capacity(total_rows);
+        let mut positions: Vec<usize> = vec![0usize; blocks.len()];
+
+        for _ in 0..total_rows {
+            // Find the block with the minimum head value
+            let mut best_block: Option<usize> = None;
+            for bi in 0..blocks.len() {
+                if positions[bi] >= blocks[bi].len() {
+                    continue; // Block exhausted
+                }
+                match best_block {
+                    None => best_block = Some(bi),
+                    Some(bb) => {
+                        let cmp = self.compare_rows(
+                            blocks[bb][positions[bb]],
+                            blocks[bi][positions[bi]],
+                            all_values,
+                            num_fields,
+                        );
+                        if cmp == std::cmp::Ordering::Greater {
+                            best_block = Some(bi);
+                        }
+                    }
+                }
+            }
+
+            if let Some(bi) = best_block {
+                result.push(blocks[bi][positions[bi]]);
+                positions[bi] += 1;
+            } else {
+                break;
+            }
+        }
+
+        result
+    }
+
+    fn compare_rows(&self, a: usize, b: usize, all_values: &[Vec<(Value, bool)>], num_fields: usize) -> std::cmp::Ordering {
+        for &(k, ascending) in &self.sort_keys {
+            let k = k as usize;
+            if k >= num_fields { continue; }
+            let cmp = value_cmp(&all_values[k][a].0, &all_values[k][b].0);
+            if cmp != std::cmp::Ordering::Equal {
+                return if ascending { cmp } else { cmp.reverse() };
+            }
+        }
+        std::cmp::Ordering::Equal
     }
 }
 
@@ -1652,6 +1865,149 @@ impl PhysicalIntersect {
     }
 }
 
+// ==================== JoinHashTable ====================
+
+/// A hash table for hash join operations with parallel build support.
+pub struct JoinHashTable {
+    build_columns: Vec<u32>,
+    probe_columns: Vec<u32>,
+}
+
+impl JoinHashTable {
+    pub fn new(build_columns: Vec<u32>, probe_columns: Vec<u32>) -> Self {
+        Self { build_columns, probe_columns }
+    }
+
+    pub fn build(&self, build_chunks: &[DataChunk]) -> hashbrown::HashMap<u64, HashJoinBucket> {
+        let total_rows: usize = build_chunks.iter().map(|c| c.size).sum();
+        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
+
+        if total_rows > 1000 {
+            self.build_parallel(build_chunks, build_col)
+        } else {
+            self.build_sequential(build_chunks, build_col)
+        }
+    }
+
+    fn build_sequential(&self, build_chunks: &[DataChunk], build_col: usize) -> hashbrown::HashMap<u64, HashJoinBucket> {
+        let mut table: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+        for (ci, chunk) in build_chunks.iter().enumerate() {
+            for row in 0..chunk.size {
+                let key = chunk.fields.get(build_col)
+                    .and_then(|f| f.get_value(row))
+                    .unwrap_or(Value::Null);
+                if matches!(key, Value::Null) { continue; }
+                let hash = value_hash(&key);
+                table.entry(hash).or_default().push((key, vec![(ci, row)]));
+            }
+        }
+        table
+    }
+
+    fn build_parallel(&self, build_chunks: &[DataChunk], build_col: usize) -> hashbrown::HashMap<u64, HashJoinBucket> {
+        use rayon::prelude::*;
+
+        let tables: Vec<hashbrown::HashMap<u64, HashJoinBucket>> = build_chunks
+            .par_iter()
+            .enumerate()
+            .map(|(ci, chunk)| {
+                let mut local: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+                for row in 0..chunk.size {
+                    let key = chunk.fields.get(build_col)
+                        .and_then(|f| f.get_value(row))
+                        .unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) { continue; }
+                    let hash = value_hash(&key);
+                    local.entry(hash).or_default().push((key, vec![(ci, row)]));
+                }
+                local
+            })
+            .collect();
+
+        let mut merged: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+        for local in tables {
+            for (hash, bucket) in local {
+                merged.entry(hash).or_default().extend(bucket);
+            }
+        }
+        merged
+    }
+
+    pub fn probe(
+        &self,
+        hash_table: &hashbrown::HashMap<u64, HashJoinBucket>,
+        build_chunks: &[DataChunk],
+        probe_chunks: &[DataChunk],
+    ) -> OperatorResult {
+        let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
+        let mut output_rows: Vec<Vec<(Value, bool)>> = Vec::new();
+        let mut output_types: Vec<PhysicalTypeID> = Vec::new();
+        let mut built_cols = false;
+        let mut num_build_fields = 0usize;
+
+        for chunk in probe_chunks {
+            for row in 0..chunk.size {
+                let probe_key = chunk.fields.get(probe_col)
+                    .and_then(|f| f.get_value(row))
+                    .unwrap_or(Value::Null);
+                if matches!(probe_key, Value::Null) { continue; }
+                let probe_hash = value_hash(&probe_key);
+
+                if let Some(bucket) = hash_table.get(&probe_hash) {
+                    for (build_key, locations) in bucket {
+                        if build_key != &probe_key { continue; }
+
+                        if !built_cols {
+                            num_build_fields = build_chunks[0].num_fields();
+                            let total_cols = num_build_fields + chunk.num_fields();
+                            for col in 0..num_build_fields {
+                                if let Some(f) = build_chunks[0].fields.get(col) { output_types.push(f.physical_type()); }
+                            }
+                            for col in 0..chunk.num_fields() {
+                                if let Some(f) = chunk.fields.get(col) { output_types.push(f.physical_type()); }
+                            }
+                            output_rows = (0..total_cols).map(|_| Vec::new()).collect();
+                            built_cols = true;
+                        }
+
+                        for &(bci, brow) in locations {
+                            for col in 0..build_chunks[bci].num_fields() {
+                                if let Some(field) = build_chunks[bci].fields.get(col) {
+                                    let val = field.get_value(brow).unwrap_or(Value::Null);
+                                    output_rows[col].push((val, field.is_null(brow)));
+                                }
+                            }
+                            let offset = num_build_fields;
+                            for col in 0..chunk.num_fields() {
+                                if let Some(field) = chunk.fields.get(col) {
+                                    let val = field.get_value(row).unwrap_or(Value::Null);
+                                    output_rows[offset + col].push((val, field.is_null(row)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !built_cols { return Ok(Vec::new()); }
+
+        let num_rows = output_rows[0].len();
+        let mut result_fields = Vec::with_capacity(output_rows.len());
+        for (col, row_data) in output_rows.iter().enumerate() {
+            let pt = output_types.get(col).copied().unwrap_or(PhysicalTypeID::Int64);
+            let mut v = ValueVector::new(pt, num_rows);
+            v.resize(num_rows);
+            for (row, (val, _)) in row_data.iter().enumerate() {
+                if matches!(val, Value::Null) { v.set_null(row, true); }
+                else { store_value_in_vector(&mut v, row, val); }
+            }
+            result_fields.push(v);
+        }
+        Ok(vec![DataChunk { fields: result_fields, size: num_rows, field_names: vec![] }])
+    }
+}
+
 // ==================== HashJoin ====================
 
 pub struct PhysicalHashJoin {
@@ -1681,145 +2037,45 @@ impl PhysicalHashJoin {
 
 impl PhysicalHashJoin {
     pub fn execute_binary(&self, build_chunks: &[DataChunk], probe_chunks: &[DataChunk]) -> OperatorResult {
-        // Simplified Hash Join: build hash table from build chunks, probe with probe chunks
         if build_chunks.is_empty() || probe_chunks.is_empty() {
-            // Inner join semantics: if either side is empty, result is empty.
-            // Note: If we support outer joins later, this logic will need adjusting.
             return Ok(vec![]);
         }
 
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
-        let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
 
-        // Build hash table from build side (Value-keyed, hash + equality)
-        // We use a two-level structure: hash → vec of (actual_value, locations)
-        // The actual Value is stored alongside to disambiguate hash collisions.
-        type HashBucket = Vec<(Value, Vec<(usize, usize)>)>;
-        let mut hash_table: HashMap<u64, HashBucket> = HashMap::new();
-
-        // If semi_mask is active, also collect build-side node offsets
-        let mask = &self.semi_mask;
-
-        for (ci, chunk) in build_chunks.iter().enumerate() {
-            for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.get(build_col) {
-                    // If semi_mask is active, extract node offset from INTERNAL_ID
-                    if let Some(m) = mask
+        // Collect semi-mask keys from build side
+        if let Some(mask) = &self.semi_mask {
+            for chunk in build_chunks {
+                for row in 0..chunk.size {
+                    if let Some(field) = chunk.fields.get(build_col)
                         && let Some(val) = field.get_value(row) {
                             if let Value::InternalID(id) = val {
-                                m.mask(id.offset);
+                                mask.mask(id.offset);
                             } else if let Value::Int64(offset) = val {
-                                m.mask(offset as u64);
+                                mask.mask(offset as u64);
                             }
                         }
-                    let key = field.get_value(row).unwrap_or(Value::Null);
-                    // SQL semantics: NULL keys never match in a join
-                    if matches!(key, Value::Null) {
-                        continue;
-                    }
-                    let hash = value_hash(&key);
-                    hash_table.entry(hash).or_default().push((key, vec![(ci, row)]));
                 }
             }
         }
 
-        // Probe and output matching rows — collect typed Value rows
-        let mut output_rows: Vec<Vec<(Value, bool)>> = Vec::new();
-        let mut output_types: Vec<PhysicalTypeID> = Vec::new();
-        let mut built_cols = false;
-        let mut num_build_fields = 0usize;
+        // Use JoinHashTable for parallel build
+        let join_table = JoinHashTable::new(self.build_columns.clone(), self.probe_columns.clone());
+        let hash_table = join_table.build(build_chunks);
+        let mut result = join_table.probe(&hash_table, build_chunks, probe_chunks)?;
 
-        for chunk in probe_chunks {
-            for row in 0..chunk.size {
-                let probe_key = chunk
-                    .fields
-                    .get(probe_col)
-                    .and_then(|f| f.get_value(row))
-                    .unwrap_or(Value::Null);
-                // SQL semantics: NULL keys never match in a join
-                if matches!(probe_key, Value::Null) {
-                    continue;
-                }
-                let probe_hash = value_hash(&probe_key);
-
-                if let Some(bucket) = hash_table.get(&probe_hash) {
-                    for (build_key, locations) in bucket {
-                        // Value equality (PartialEq) disambiguates hash collisions
-                        if build_key != &probe_key {
-                            continue;
-                        }
-
-                        if !built_cols {
-                            num_build_fields = build_chunks[0].num_fields();
-                            let num_probe_fields = chunk.num_fields();
-                            let total_cols = num_build_fields + num_probe_fields;
-
-                            // Record physical types for each output column
-                            for col in 0..num_build_fields {
-                                if let Some(field) = build_chunks[0].fields.get(col) {
-                                    output_types.push(field.physical_type());
-                                }
-                            }
-                            for col in 0..num_probe_fields {
-                                if let Some(field) = chunk.fields.get(col) {
-                                    output_types.push(field.physical_type());
-                                }
-                            }
-
-                            output_rows = (0..total_cols).map(|_| Vec::new()).collect();
-                            built_cols = true;
-                        }
-
-                        for &(bci, brow) in locations {
-                            // Build side columns
-                            for (col, out_col) in output_rows.iter_mut().enumerate().take(build_chunks[bci].num_fields()) {
-                                if let Some(field) = build_chunks[bci].fields.get(col) {
-                                    let val = field.get_value(brow).unwrap_or(Value::Null);
-                                    out_col.push((val, field.is_null(brow)));
-                                }
-                            }
-                            // Probe side columns
-                            let offset = num_build_fields;
-                            for col in 0..chunk.num_fields() {
-                                if let Some(field) = chunk.fields.get(col) {
-                                    let val = field.get_value(row).unwrap_or(Value::Null);
-                                    output_rows[offset + col].push((val, field.is_null(row)));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // Propagate field names
+        if !result.is_empty() {
+            let mut output_names: Vec<String> = build_chunks.first()
+                .map(|c| c.field_names.clone())
+                .unwrap_or_default();
+            output_names.extend(probe_chunks.first()
+                .map(|c| c.field_names.clone())
+                .unwrap_or_default());
+            result[0].field_names = output_names;
         }
 
-        if !built_cols {
-            return Ok(Vec::new());
-        }
-
-        let num_rows = output_rows[0].len();
-        let mut result_fields = Vec::with_capacity(output_rows.len());
-        for (col, row_data) in output_rows.iter().enumerate() {
-            let phys_type = output_types.get(col).copied().unwrap_or(PhysicalTypeID::Int64);
-            let mut v = ValueVector::new(phys_type, num_rows);
-            v.resize(num_rows);
-            for (row, (val, _is_null)) in row_data.iter().enumerate() {
-                if matches!(val, Value::Null) {
-                    v.set_null(row, true);
-                } else {
-                    store_value_in_vector(&mut v, row, val);
-                }
-            }
-            result_fields.push(v);
-        }
-        // Propagate field names from both sides: build_names ++ probe_names
-        let mut output_names: Vec<String> = build_chunks.first()
-            .map(|c| c.field_names.clone())
-            .unwrap_or_default();
-        output_names.extend(probe_chunks.first()
-            .map(|c| c.field_names.clone())
-            .unwrap_or_default());
-        let result = DataChunk::new(result_fields).with_names(output_names);
-        Ok(vec![result])
+        Ok(result)
     }
 }
 
@@ -2446,39 +2702,41 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             }
         };
 
-        // 4. Insert rows into the table
+        // 4. Insert rows into the table using batch insert
         let num_rows = rows.len();
+        if num_rows == 0 {
+            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+            v.resize(1);
+            v.set_i64(0, 0);
+            return Ok(vec![DataChunk::new(vec![v])]);
+        }
 
         if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
-            for row in &rows {
-                table
-                    .insert_row(row.clone())
-                    .map_err(|e| format!("Insert error: {e}"))?;
-            }
+            let count = table
+                .insert_rows_batch(&rows)
+                .map_err(|e| format!("Batch insert error: {e}"))?;
             tracing::info!(
-                "COPY FROM: inserted {num_rows} rows into node table '{}'",
+                "COPY FROM: batch-inserted {count} rows into node table '{}'",
                 self.table_name
             );
         } else if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
-            for row in &rows {
-                if row.len() < 2 {
-                    return Err("RelTable COPY FROM needs at least FROM and TO columns".into());
-                }
+            let rels: Vec<(u64, u64, Vec<Value>)> = rows.iter().map(|row| {
                 let from = match &row[0] {
                     Value::Int64(v) => *v as u64,
-                    _ => return Err("First column of rel table must be FROM node offset (Int64)".into()),
+                    _ => 0, // Will fail validation below
                 };
                 let to = match &row[1] {
                     Value::Int64(v) => *v as u64,
-                    _ => return Err("Second column of rel table must be TO node offset (Int64)".into()),
+                    _ => 0,
                 };
-                let props: Vec<Value> = row[2..].to_vec();
-                table
-                    .insert_rel(from, to, props)
-                    .map_err(|e| format!("Insert rel error: {e}"))?;
-            }
+                let props = row[2..].to_vec();
+                (from, to, props)
+            }).collect();
+            let count = table
+                .insert_rels_batch(&rels)
+                .map_err(|e| format!("Batch insert rel error: {e}"))?;
             tracing::info!(
-                "COPY FROM: inserted {num_rows} rows into rel table '{}'",
+                "COPY FROM: batch-inserted {count} rows into rel table '{}'",
                 self.table_name
             );
         } else {
@@ -3435,6 +3693,36 @@ impl PhysicalExtend {
 }
 
 // ==================== DDL & FTS ====================
+
+/// Physical COUNT on rel table — optimized via CSR metadata (Ladybug).
+/// Instead of scanning all edges, directly reads the edge count from the RelTable.
+pub struct PhysicalCountRelTable {
+    pub table_name: String,
+    pub table_id: u64,
+    pub table_catalog: Option<Arc<TableCatalog>>,
+}
+
+impl PhysicalOperatorExec for PhysicalCountRelTable {
+    fn operator_type(&self) -> &str {
+        "count_rel_table"
+    }
+
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        let tc = self.table_catalog.as_ref()
+            .ok_or_else(|| "No table catalog for CountRelTable".to_string())?;
+
+        let count = if let Some(table) = tc.get_rel_table(self.table_id) {
+            table.num_rows as i64
+        } else {
+            0
+        };
+
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+        v.resize(1);
+        v.set_i64(0, count);
+        Ok(vec![DataChunk::new(vec![v])])
+    }
+}
 
 pub struct PhysicalCreateFtsIndex {
     pub table_name: String,

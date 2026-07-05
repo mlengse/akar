@@ -42,6 +42,12 @@ impl Optimizer {
             Box::new(LimitPushDown),
             // Pass 11: Eliminate duplicate expressions in projections
             Box::new(CommonSubexpressionElimination),
+            // Pass 12: Push ORDER BY below UNION ALL (Ladybug)
+            Box::new(OrderByPushDown),
+            // Pass 13: Deduplicate consecutive UNWIND (Ladybug)
+            Box::new(UnwindDedup),
+            // Pass 14: Replace ScanRel+COUNT with CSR metadata (Ladybug)
+            Box::new(CountRelTable),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
@@ -76,6 +82,9 @@ impl Optimizer {
             Box::new(ArtRangeScanDetection),
             Box::new(LimitPushDown),
             Box::new(CommonSubexpressionElimination),
+            Box::new(OrderByPushDown),
+            Box::new(UnwindDedup),
+            Box::new(CountRelTable),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
@@ -154,7 +163,10 @@ mod tests {
         assert!(names.contains(&"correlated_subquery_unnesting"));
         assert!(names.contains(&"foreign_join_push_down"));
         assert!(names.contains(&"sip_optimization"));
-        assert_eq!(names.len(), 18);
+        assert!(names.contains(&"order_by_push_down"));
+        assert!(names.contains(&"unwind_dedup"));
+        assert!(names.contains(&"count_rel_table"));
+        assert_eq!(names.len(), 21);
     }
 
     #[test]

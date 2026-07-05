@@ -781,6 +781,15 @@ impl QueryProcessor {
                     // Returns empty data (variables resolved at runtime via ExpressionEvaluator).
                     intermediate_result = Some(vec![DataChunk::new(vec![])]);
                 }
+                LogicalOperator::CountRelTable(crt) => {
+                    let physical = PhysicalCountRelTable {
+                        table_name: crt.table_name.clone(),
+                        table_id: crt.table_id,
+                        table_catalog: self.table_catalog.clone(),
+                    };
+                    let result = physical.execute(vec![])?;
+                    intermediate_result = Some(result);
+                }
                 // DDL operators — produce a single-row success result
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)
@@ -1343,6 +1352,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::SemiMasker(sm) => {
             format!("SemiMasker(table={}, col={})", sm.table_id, sm.key_column)
         }
+        LogicalOperator::CountRelTable(crt) => format!("CountRelTable({})", crt.table_name),
         // DDL operators
         LogicalOperator::CreateNodeTable(ct) => format!("CreateNodeTable({})", ct.name),
         LogicalOperator::CreateRelTable(ct) => format!("CreateRelTable({})", ct.name),

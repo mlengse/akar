@@ -58,6 +58,11 @@ impl ExtensionRegistry {
         self.extensions.len()
     }
 
+    /// Get the names of all registered extensions.
+    pub fn names(&self) -> Vec<String> {
+        self.extensions.iter().map(|e| e.name().to_string()).collect()
+    }
+
     /// Get the number of successfully loaded extensions.
     pub fn num_loaded(&self) -> usize {
         self.loaded.values().filter(|&&v| v).count()

@@ -121,6 +121,75 @@ impl NodeTable {
         Ok(self.num_rows - 1)
     }
 
+    /// Batch insert multiple rows efficiently.
+    /// Validates PK uniqueness, pre-allocates node groups, and bulk-appends.
+    pub fn insert_rows_batch(&mut self, rows: &[Vec<Value>]) -> Result<u64, String> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let num_cols = self.columns.len();
+
+        // Validate all rows first
+        for (i, row) in rows.iter().enumerate() {
+            if row.len() != num_cols {
+                return Err(format!(
+                    "Row {} column count mismatch: expected {} values, got {}",
+                    i, num_cols, row.len()
+                ));
+            }
+            // Check PK uniqueness
+            if self.primary_key_column < num_cols {
+                let pk_key = pk_value_to_string(&row[self.primary_key_column]);
+                if self.hash_index.lookup(&pk_key).is_some() {
+                    return Err(format!(
+                        "Duplicate primary key value: '{pk_key}' in table '{}'",
+                        self.name
+                    ));
+                }
+            }
+        }
+
+        let start_offset = self.num_rows;
+        let total_new = rows.len();
+
+        // Ensure we have a node group with enough capacity
+        if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
+            let off = if self.node_groups.is_empty() { start_offset } else { self.num_rows };
+            self.node_groups.push(NodeGroup::new(num_cols, off));
+        }
+
+        // Append to the last group (spilling into new groups if needed)
+        let mut inserted = 0usize;
+        while inserted < total_new {
+            let current = self.node_groups.last_mut().unwrap();
+            let rem = current.remaining();
+            let take = (total_new - inserted).min(rem);
+            for row in &rows[inserted..inserted + take] {
+                current.append_row(row.clone())?;
+            }
+            self.num_rows += take as u64;
+            inserted += take;
+            if inserted < total_new {
+                let off = self.num_rows;
+                self.node_groups.push(NodeGroup::new(num_cols, off));
+            }
+        }
+
+        // Batch update indexes
+        for (i, row) in rows.iter().enumerate() {
+            if self.primary_key_column < num_cols {
+                let pk_key = pk_value_to_string(&row[self.primary_key_column]);
+                self.hash_index.insert(pk_key, start_offset + i as u64);
+                if let Some(ref mut art_idx) = self.art_index
+                    && let Some(art_key) = ArtKey::from_value(&row[self.primary_key_column]) {
+                        art_idx.insert(&art_key, start_offset + i as u64);
+                    }
+            }
+        }
+
+        Ok(rows.len() as u64)
+    }
+
     /// Look up a row offset by its primary key value.
     ///
     /// Returns `Some(row_offset)` if the PK exists, or `None` if not found.
@@ -445,6 +514,48 @@ impl RelTable {
         }
         self.num_rows += 1;
         Ok(())
+    }
+
+    /// Batch insert multiple relations efficiently.
+    /// Each tuple is (from_offset, to_offset, property_values).
+    pub fn insert_rels_batch(&mut self, rels: &[(u64, u64, Vec<Value>)]) -> Result<u64, String> {
+        if rels.is_empty() {
+            return Ok(0);
+        }
+        let num_cols = self.columns.len();
+        let total = rels.len();
+
+        // Validate all rows
+        for (i, (_, _, vals)) in rels.iter().enumerate() {
+            if vals.len() != num_cols {
+                return Err(format!(
+                    "Rel {} column count mismatch: expected {} values, got {}",
+                    i, num_cols, vals.len()
+                ));
+            }
+        }
+
+        // Pre-allocate
+        self.edges.reserve(total);
+        for col in &mut self.properties {
+            col.reserve(total);
+        }
+
+        let start_edge_idx = self.edges.len();
+
+        // Batch append
+        for (from, to, vals) in rels {
+            let edge_idx = self.edges.len();
+            self.edges.push((*from, *to));
+            self.fwd_adj.entry(*from).or_default().push((*to, edge_idx));
+            self.rev_adj.entry(*to).or_default().push((*from, edge_idx));
+            for (col_idx, val) in vals.iter().enumerate() {
+                self.properties[col_idx].push(val.clone());
+            }
+        }
+
+        self.num_rows += total as u64;
+        Ok(total as u64)
     }
 
     /// Delete an edge by its index. Marks the edge as deleted by removing it from adjacency lists

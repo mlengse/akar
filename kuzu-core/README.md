@@ -13,8 +13,8 @@ kuzu-core/
 ├── kuzu-parser/        # PEG grammar (pest.rs) for full Cypher clause set
 ├── kuzu-binder/        # Semantic analysis, symbol resolution, type inference
 ├── kuzu-planner/       # Logical query plan construction (34 LogicalOperator variants)
-├── kuzu-optimizer/     # 11 flat passes + 7 tree passes (18 total)
-├── kuzu-processor/     # Physical operator execution (20+ operator types)
+├── kuzu-optimizer/     # 14 flat passes + 7 tree passes (21 total) — melebihi C++ Ladybug
+├── kuzu-processor/     # Physical operator execution (22+ operator types: AggregateHashTable, JoinHashTable, BlockMergeSorter, etc.)
 ├── kuzu-function/      # Built-in function registry (110+ functions)
 ├── kuzu-graph/         # CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain)
 ├── kuzu-extension/     # Extension framework trait + registry
@@ -73,12 +73,13 @@ Cypher text
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
 │ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (11 flat + 7 │    │ (physical)   │
-│ COPY, MATCH │    │(types)   │    │34 ops    │    │  tree passes)│    │20+ operators │
+│ COPY, MATCH │    │(types)   │    │34 ops    │    │  tree passes)│    │22+ operators │
 │ DELETE, SET │    │(symbols) │    │          │    │ FilterPush   │    │ Scan, Filter │
 │ WITH, UNION │    │          │    │          │    │ JoinReorder  │    │ HashJoin, etc│
 │ UNWIND, etc │    │          │    │          │    │ SIP, CSU,    │    │ SemiMasker,  │
 │ FOREACH,    │    │          │    │          │    │ AccHashJoin, │    │ RecursiveExt,│
-│ MERGE       │    │          │    │          │    │ AggKeyDep... │    │ Intersect... │
+│ MERGE       │    │          │    │          │    │ AggKeyDep,   │    │ Intersect,   │
+│ ANALYZE     │    │          │    │          │    │ OrderByPush, │    │ CountRelTbl  │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
                                                                              │
                                                                              ▼
@@ -127,7 +128,7 @@ Cypher text
 | Expressions | ✅ | Arithmetic, boolean, string functions, property access, function calls |
 | Prepared Statements | ✅ | `conn.prepare("...")` + `conn.execute(&stmt, params)` |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | ✅ | `BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK` with AUTO/MANUAL mode |
-| `CALL` (table functions) | ✅ | `CALL show_tables()`, `CALL table_info('T')`, `CALL show_functions()`, `CALL show_indexes()`, `CALL show_sequences()`, `CALL show_macros()`, `CALL show_connection('T')`, `CALL db_version()`, `CALL catalog_version()`, `CALL current_setting('k')`, `CALL stats_info('T')`, `CALL storage_info()`, `CALL show_attached_databases()` |
+| `CALL` (table functions) | ✅ | `CALL show_tables()`, `table_info()`, `show_functions()`, `show_indexes()`, `show_sequences()`, `show_macros()`, `show_connection()`, `db_version()`, `catalog_version()`, `current_setting()`, `stats_info()`, `storage_info()`, `bm_info()`, `file_info()`, `free_space_info()`, `disk_size_info()`, `storage_version()`, `show_loaded_extensions()`, `show_official_extensions()`, `clear_warnings()`, `show_warnings()` |
 
 ## Test Suite Status
 
@@ -141,11 +142,11 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | `kuzu-parser` | 40 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
 | `kuzu-binder` | 21 | ✅ | Semantic analysis, type inference, symbol resolution |
 | `kuzu-planner` | 48 | ✅ | Logical plan construction (34 LogicalOperator variants) |
-| `kuzu-optimizer` | 93 | ✅ | 11 flat passes + 7 tree passes (18 total) |
-| `kuzu-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy, Aggregate (parallel AggregateHashTable), HashJoin, Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom, Delete, Set |
-| `kuzu-function` | 155 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
+| `kuzu-optimizer` | 49 | ✅ | 14 flat passes + 7 tree passes (21 total, exceeds C++ Ladybug) |
+| `kuzu-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
+| `kuzu-function` | 159 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
 | `kuzu-storage` | 54 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
-| `kuzu-main` (unit) | 47 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM |
+| `kuzu-main` (unit) | 64 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
 | `kuzu-main` (integration) | 44 | ✅ | RETURN *, FOREACH, MERGE, subqueries |
 | `kuzu-catalog` | 21 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
@@ -212,7 +213,7 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Kuzu type mapping, projection pushdown |
 | HTTP(S)/S3 | `kuzu-httpfs` extension | ✅ |
 
-## Optimizer Passes — 18 Total (11 Flat + 7 Tree)
+## Optimizer Passes — 21 Total (14 Flat + 7 Tree)
 
 ### Flat Passes
 | # | Pass | Description |
@@ -228,6 +229,9 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | 9 | ArtRangeScanDetection | Detects ART index range scan patterns |
 | 10 | LimitPushDown | Pushes limits closer to scans |
 | 11 | CommonSubexpressionElimination | Eliminates duplicate expressions |
+| 12 | **OrderByPushDown** | Pushes ORDER BY below UNION ALL (Ladybug) |
+| 13 | **UnwindDedup** | Deduplicates consecutive UNWIND (Ladybug) |
+| 14 | **CountRelTable** | Replaces ScanRel+COUNT with CSR metadata (Ladybug) |
 
 ### Tree Passes
 | # | Pass | Description |
