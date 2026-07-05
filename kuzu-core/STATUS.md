@@ -454,19 +454,19 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| kuzu-common | 19 | ✅ Pass |
+| kuzu-common | 21 | ✅ Pass |
 | kuzu-parser | 40 | ✅ Pass |
 | kuzu-binder | 21 | ✅ Pass |
-| kuzu-planner | 49 | ✅ Pass |
-| kuzu-optimizer | 59 | ✅ Pass |
+| kuzu-planner | 62 | ✅ Pass |
+| kuzu-optimizer | 49 | ✅ Pass |
 | kuzu-processor | 77 | ✅ Pass |
 | kuzu-storage | 242 | ✅ Pass |
 | kuzu-function | 159 | ✅ Pass |
 | kuzu-catalog | 14 | ✅ Pass |
-| kuzu-graph | 9 | ✅ Pass |
+| kuzu-graph | 31 | ✅ Pass |
 | kuzu-vector | 7 | ✅ Pass |
 | kuzu-transaction | 20 | ✅ Pass |
-| kuzu-main (unit) | 80 | ✅ Pass |
+| kuzu-main (unit) | 64 | ✅ Pass |
 | kuzu-main (integration) | 44 | ✅ Pass |
 | kuzu-main (fase_b_verification) | 12 | ✅ Pass |
 | Other crates | 86 | ✅ Pass |

@@ -138,10 +138,10 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
-| `kuzu-common` | 14 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
+| `kuzu-common` | 21 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
 | `kuzu-parser` | 40 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
 | `kuzu-binder` | 21 | ✅ | Semantic analysis, type inference, symbol resolution |
-| `kuzu-planner` | 48 | ✅ | Logical plan construction (34 LogicalOperator variants) |
+| `kuzu-planner` | 62 | ✅ | Logical plan construction (34 LogicalOperator variants) |
 | `kuzu-optimizer` | 49 | ✅ | 14 flat passes + 7 tree passes (21 total, exceeds C++ Ladybug) |
 | `kuzu-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
 | `kuzu-function` | 159 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
@@ -150,7 +150,7 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | `kuzu-main` (integration) | 44 | ✅ | RETURN *, FOREACH, MERGE, subqueries |
 | `kuzu-catalog` | 21 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
-| `kuzu-graph` | 9 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
+| `kuzu-graph` | 31 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
 | `kuzu-vector` | 7 | ✅ | Vector similarity search |
 | `kuzu-json` | 12 | ✅ | extract, valid, type, structure, contains, keys, array_length |
 | `kuzu-fts` | 14 | ✅ | Stemmer, Tokenizer, TF-IDF, BM25, stop words |
