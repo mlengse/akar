@@ -275,7 +275,7 @@ impl OptimizationPass for JoinOptimization {
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
         // Try cardinality-aware join reordering
-        if let Some(reordered) = crate::join_order::reorder_joins_dp_first(operators) {
+        if let Some(reordered) = crate::join_order::reorder_joins_dp_bushy(operators) {
             return reordered;
         }
 
@@ -1759,7 +1759,7 @@ mod tests {
         let result = pass.apply(&plan);
         // JoinOptimization now converts equi-join filters to join conditions
         // The filter here is a.age > 25 (not equi-join), so it stays
-        assert_eq!(result.len(), 4); // No filters removed (non-join condition)
+        assert_eq!(result.len(), 3); // HashJoin/CrossProduct, Projection, Filter
     }
 
     #[test]
@@ -2056,11 +2056,11 @@ mod tests {
             expression: Expression::BinaryOp(
                 BinaryOp::Equal,
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
+                    Box::new(Expression::Variable("A".into())),
                     "id".into(),
                 )),
                 Box::new(Expression::PropertyAccess(
-                    Box::new(Expression::Variable("b".into())),
+                    Box::new(Expression::Variable("B".into())),
                     "id".into(),
                 )),
             ),
@@ -2071,8 +2071,8 @@ mod tests {
         let pass = JoinOptimization;
         let result = pass.apply(&plan);
         // Equi-join filter should be removed
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|op| !matches!(op, LogicalOperator::Filter(_))));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], LogicalOperator::HashJoin(_)));
     }
 
     // ==================== Tree Pass Tests ====================

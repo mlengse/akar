@@ -243,55 +243,40 @@ const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.1;
 struct DpState {
     cost: f64,
     cardinality: f64,
-    prev_mask: usize,
-    last_idx: usize,
+    left_mask: usize,
+    right_mask: usize,
 }
 
-pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
-    let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = operators
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| {
-            matches!(
-                op,
-                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) | LogicalOperator::TableFunctionCall(_)
-            )
-        })
-        .map(|(i, op)| {
-            let card = op.cardinality();
-            (i, card, op.clone())
-        })
-        .collect();
+pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
+    let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = Vec::new();
+    let mut conditions: Vec<(String, String)> = Vec::new();
+    let mut original_join_keys: Vec<kuzu_parser::ast::Expression> = Vec::new();
+
+    for op in operators {
+        let mut scans = Vec::new();
+        collect_scans_recursive(op, &mut scans);
+        for (_, (card, scan_op)) in scans.into_iter().enumerate() {
+            scans_with_pos.push((scans_with_pos.len(), card, scan_op));
+        }
+
+        let mut conds = Vec::new();
+        extract_conditions_recursive(op, &mut conds);
+        conditions.extend(conds);
+        
+        let mut keys = Vec::new();
+        extract_join_keys_recursive(op, &mut keys);
+        original_join_keys.extend(keys);
+    }
 
     let n = scans_with_pos.len();
     if n < 2 {
         return None;
     }
-
-    // Fallback to greedy if N > 32 to prevent bitmask overflow / exponential explosion
-    if n > 32 {
-        scans_with_pos.sort_by_key(|(_, card, _)| *card);
-        let mut result: Vec<LogicalOperator> = operators.to_vec();
-        let original_positions: Vec<usize> = scans_with_pos.iter().map(|(pos, _, _)| *pos).collect();
-        for (new_idx, &old_pos) in original_positions.iter().enumerate() {
-            result[old_pos] = scans_with_pos[new_idx].2.clone();
-        }
-        result.retain(|op| {
-            !matches!(op, LogicalOperator::Filter(f) if crate::passes::is_join_condition(&f.expression))
-        });
-        return Some(result);
+    
+    if n > 15 {
+        return None;
     }
 
-    // Extract join conditions to build adjacency matrix
-    let mut conditions = Vec::new();
-    for op in operators {
-        if let LogicalOperator::Filter(f) = op
-            && let Some((left, right)) = extract_equality_join(&f.expression) {
-                conditions.push((left, right));
-            }
-    }
-
-    // Map aliases to scan indices
     let mut alias_to_idx = HashMap::new();
     for (i, (_, _, op)) in scans_with_pos.iter().enumerate() {
         if let Some(alias) = get_scan_alias(op) {
@@ -299,7 +284,6 @@ pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<Logic
         }
     }
 
-    // Adjacency matrix for joins
     let mut adj_mask = vec![0usize; n];
     for (left, right) in &conditions {
         if let (Some(&i), Some(&j)) = (alias_to_idx.get(left), alias_to_idx.get(right)) {
@@ -308,21 +292,18 @@ pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<Logic
         }
     }
 
-    // DP over subsets
     let max_mask = 1 << n;
-    let mut dp = vec![None; max_mask];
+    let mut dp: Vec<Option<DpState>> = vec![None; max_mask];
 
-    // Base cases (size 1)
     for i in 0..n {
         dp[1 << i] = Some(DpState {
             cost: 0.0,
             cardinality: scans_with_pos[i].1 as f64,
-            prev_mask: 0,
-            last_idx: i,
+            left_mask: 0,
+            right_mask: 0,
         });
     }
 
-    // DP transitions
     for mask in 1..max_mask {
         let k = mask.count_ones();
         if k < 2 {
@@ -330,76 +311,194 @@ pub fn reorder_joins_dp_first(operators: &[LogicalOperator]) -> Option<Vec<Logic
         }
         
         let mut best_state: Option<DpState> = None;
+        let mut submask = (mask - 1) & mask;
 
-        for i in 0..n {
-            if (mask & (1 << i)) != 0 {
-                let prev_mask = mask ^ (1 << i);
-                if let Some(prev_state) = &dp[prev_mask] {
-                    // Check if there is a join condition between prev_mask and i
+        while submask > 0 {
+            let left_mask = submask;
+            let right_mask = mask ^ submask;
+
+            if left_mask < right_mask {
+                if let (Some(left_state), Some(right_state)) = (&dp[left_mask], &dp[right_mask]) {
                     let mut has_edge = false;
-                    for j in 0..n {
-                        if (prev_mask & (1 << j)) != 0 && (adj_mask[j] & (1 << i)) != 0 {
-                            has_edge = true;
-                            break;
+                    for i in 0..n {
+                        if (left_mask & (1 << i)) != 0 {
+                            for j in 0..n {
+                                if (right_mask & (1 << j)) != 0 && (adj_mask[i] & (1 << j)) != 0 {
+                                    has_edge = true;
+                                    break;
+                                }
+                            }
                         }
                     }
 
-                    let card_i = scans_with_pos[i].1 as f64;
                     let (new_card, new_cost) = if has_edge {
-                        let c = prev_state.cardinality * card_i * EQUALITY_PREDICATE_SELECTIVITY;
-                        (c, prev_state.cost + c)
+                        let c = left_state.cardinality * right_state.cardinality * EQUALITY_PREDICATE_SELECTIVITY;
+                        (c, left_state.cost + right_state.cost + c + left_state.cardinality.min(right_state.cardinality))
                     } else {
-                        // Cross product (heavily penalized)
-                        let c = prev_state.cardinality * card_i;
-                        (c, prev_state.cost + c + 1e9)
+                        let c = left_state.cardinality * right_state.cardinality;
+                        (c, left_state.cost + right_state.cost + c + 1e9)
                     };
 
                     if best_state.as_ref().is_none_or(|b| new_cost < b.cost) {
                         best_state = Some(DpState {
                             cost: new_cost,
                             cardinality: new_card,
-                            prev_mask,
-                            last_idx: i,
+                            left_mask,
+                            right_mask,
                         });
                     }
                 }
             }
+            submask = (submask - 1) & mask;
         }
         dp[mask] = best_state;
     }
 
-    // Reconstruct optimal order
-    let mut order = Vec::with_capacity(n);
-    let mut curr_mask = max_mask - 1;
-    while curr_mask != 0 {
-        let state = dp[curr_mask].as_ref().unwrap();
-        order.push(state.last_idx);
-        curr_mask = state.prev_mask;
-    }
-    order.reverse(); // Left-deep tree, so start from the smallest base mask
-
-    // Check if the order is the same as the original (ascending)
-    let already_ordered = order.windows(2).all(|w| w[0] <= w[1]);
-    
-    let original_positions: Vec<usize> = scans_with_pos.iter().map(|(pos, _, _)| *pos).collect();
-
-    let mut result: Vec<LogicalOperator> = operators.to_vec();
-    for (new_idx, &old_pos) in original_positions.iter().enumerate() {
-        let ordered_idx = order[new_idx];
-        result[old_pos] = scans_with_pos[ordered_idx].2.clone();
-    }
-
-    result.retain(|op| {
-        !matches!(op, LogicalOperator::Filter(f)
-            if crate::passes::is_join_condition(&f.expression)
-        )
-    });
-
-    if already_ordered && result.len() == operators.len() {
+    let optimal_mask = max_mask - 1;
+    if dp[optimal_mask].is_none() {
         return None;
     }
 
+    let optimal_tree = build_optimal_tree(
+        optimal_mask, 
+        &dp, 
+        &scans_with_pos, 
+        &conditions, 
+        &original_join_keys, 
+        &alias_to_idx
+    );
+
+    let mut result = vec![];
+    result.push(optimal_tree);
+    
+    for op in operators {
+        match op {
+            LogicalOperator::HashJoin(_) 
+            | LogicalOperator::CrossProduct(_)
+            | LogicalOperator::ScanNode(_)
+            | LogicalOperator::ScanRel(_) => {
+                // skip
+            }
+            LogicalOperator::Filter(f) if crate::passes::is_join_condition(&f.expression) => {
+                // skip
+            }
+            _ => {
+                result.push(op.clone());
+            }
+        }
+    }
+
     Some(result)
+}
+
+fn extract_join_keys_recursive(op: &LogicalOperator, keys: &mut Vec<kuzu_parser::ast::Expression>) {
+    match op {
+        LogicalOperator::HashJoin(hj) => {
+            keys.extend(hj.join_keys.clone());
+            extract_join_keys_recursive(&hj.probe_side, keys);
+            extract_join_keys_recursive(&hj.build_side, keys);
+        }
+        LogicalOperator::CrossProduct(cp) => {
+            extract_join_keys_recursive(&cp.left, keys);
+            extract_join_keys_recursive(&cp.right, keys);
+        }
+        LogicalOperator::Filter(f) => {
+            for child in &f.children {
+                extract_join_keys_recursive(child, keys);
+            }
+        }
+        LogicalOperator::Projection(p) => {
+            for child in &p.children {
+                extract_join_keys_recursive(child, keys);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn build_optimal_tree(
+    mask: usize,
+    dp: &[Option<DpState>],
+    scans: &[(usize, u64, LogicalOperator)],
+    conditions: &[(String, String)],
+    original_join_keys: &[kuzu_parser::ast::Expression],
+    alias_to_idx: &HashMap<String, usize>,
+) -> LogicalOperator {
+    if mask.count_ones() == 1 {
+        let idx = mask.trailing_zeros() as usize;
+        return scans[idx].2.clone();
+    }
+
+    let state = dp[mask].as_ref().unwrap();
+    let left_op = build_optimal_tree(state.left_mask, dp, scans, conditions, original_join_keys, alias_to_idx);
+    let right_op = build_optimal_tree(state.right_mask, dp, scans, conditions, original_join_keys, alias_to_idx);
+
+    let mut join_keys = Vec::new();
+    for key_expr in original_join_keys {
+        if let Some((left_var, right_var)) = extract_equality_join(key_expr) {
+            if let (Some(&i), Some(&j)) = (alias_to_idx.get(&left_var), alias_to_idx.get(&right_var)) {
+                let left_in_left = (state.left_mask & (1 << i)) != 0;
+                let right_in_right = (state.right_mask & (1 << j)) != 0;
+                let left_in_right = (state.right_mask & (1 << i)) != 0;
+                let right_in_left = (state.left_mask & (1 << j)) != 0;
+
+                if (left_in_left && right_in_right) || (left_in_right && right_in_left) {
+                    if !join_keys.contains(key_expr) {
+                        join_keys.push(key_expr.clone());
+                    }
+                }
+            }
+        }
+    }
+    
+    for (left_var, right_var) in conditions {
+        if let (Some(&i), Some(&j)) = (alias_to_idx.get(left_var), alias_to_idx.get(right_var)) {
+            let left_in_left = (state.left_mask & (1 << i)) != 0;
+            let right_in_right = (state.right_mask & (1 << j)) != 0;
+            let left_in_right = (state.right_mask & (1 << i)) != 0;
+            let right_in_left = (state.left_mask & (1 << j)) != 0;
+
+            if (left_in_left && right_in_right) || (left_in_right && right_in_left) {
+                let key_expr = kuzu_parser::ast::Expression::BinaryOp(
+                    kuzu_parser::ast::BinaryOp::Equal,
+                    Box::new(kuzu_parser::ast::Expression::Variable(left_var.clone())),
+                    Box::new(kuzu_parser::ast::Expression::Variable(right_var.clone())),
+                );
+                if !join_keys.contains(&key_expr) {
+                    join_keys.push(key_expr);
+                }
+            }
+        }
+    }
+
+    if join_keys.is_empty() {
+        LogicalOperator::CrossProduct(LogicalCrossProduct {
+            left: Box::new(left_op),
+            right: Box::new(right_op),
+            cardinality: state.cardinality as u64,
+        })
+    } else {
+        let left_card = dp[state.left_mask].as_ref().unwrap().cardinality;
+        let right_card = dp[state.right_mask].as_ref().unwrap().cardinality;
+        
+        if left_card >= right_card {
+            LogicalOperator::HashJoin(LogicalHashJoin {
+                join_keys,
+                probe_side: Box::new(left_op),
+                build_side: Box::new(right_op),
+                cardinality: state.cardinality as u64,
+                push_down_eligible: false,
+            })
+        } else {
+            LogicalOperator::HashJoin(LogicalHashJoin {
+                join_keys,
+                probe_side: Box::new(right_op),
+                build_side: Box::new(left_op),
+                cardinality: state.cardinality as u64,
+                push_down_eligible: false,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -549,17 +648,11 @@ mod tests {
         });
         
         let operators = vec![scan_a, scan_b, scan_c, filter_ac, filter_bc];
-        let result = reorder_joins_dp_first(&operators);
+        let result = reorder_joins_dp_bushy(&operators);
         assert!(result.is_some());
         
         let reordered = result.unwrap();
-        // The scans could be C, A, B or A, C, B since both have same cost
-        assert_eq!(reordered.len(), 3); // filters removed
-        let first = get_scan_alias(&reordered[0]).unwrap();
-        let second = get_scan_alias(&reordered[1]).unwrap();
-        let third = get_scan_alias(&reordered[2]).unwrap();
-        
-        assert!((first == "a" && second == "c") || (first == "c" && second == "a"));
-        assert_eq!(third, "b");
+        assert_eq!(reordered.len(), 1); // all scans and join filters replaced by a single HashJoin tree
+        assert!(matches!(reordered[0], LogicalOperator::HashJoin(_)));
     }
 }
