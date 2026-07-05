@@ -9,7 +9,6 @@
 use kuzu_catalog::CatalogColumn;
 use kuzu_common::types::{Date, Interval, LogicalTypeID, Timestamp, Value};
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Configuration for reading a CSV file.
 #[derive(Debug, Clone)]
@@ -146,8 +145,8 @@ pub type CsvResult<T> = Result<T, CsvReaderError>;
 ///
 /// Returns `CsvReaderError` on I/O errors, CSV parse errors, column count
 /// mismatches, or type coercion failures.
-pub fn read_csv(path: &Path, columns: &[CatalogColumn], config: &CsvReaderConfig) -> CsvResult<Vec<Vec<Value>>> {
-    let file = std::fs::File::open(path).map_err(CsvReaderError::IoError)?;
+pub fn read_csv(path: &str, vfs: &kuzu_common::file_system::VirtualFileSystemRegistry, columns: &[CatalogColumn], config: &CsvReaderConfig) -> CsvResult<Vec<Vec<Value>>> {
+    let file = vfs.open_read(path).map_err(CsvReaderError::IoError)?;
     let mut reader = std::io::BufReader::new(file);
 
     let mut raw_reader = csv::ReaderBuilder::new()
@@ -848,7 +847,7 @@ mod tests {
         .unwrap();
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0][0], Value::String("Alice".into()));
         assert_eq!(rows[0][1], Value::Int64(30));
@@ -866,7 +865,7 @@ mod tests {
             has_header: false,
             ..Default::default()
         };
-        let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1][0], Value::String("Diana".into()));
         assert_eq!(rows[1][1], Value::Int64(22));
@@ -882,7 +881,7 @@ mod tests {
             delimiter: b'|',
             ..Default::default()
         };
-        let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::String("Eve".into()));
         assert_eq!(rows[0][1], Value::Int64(35));
@@ -895,7 +894,7 @@ mod tests {
         std::fs::write(&csv_path, "name,age,score,active\n\"Frank, Jr.\",28,99.9,true\n").unwrap();
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::String("Frank, Jr.".into()));
     }
@@ -907,7 +906,7 @@ mod tests {
         std::fs::write(&csv_path, "name,age,score,active\nGrace,,,\n").unwrap();
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &test_schema(), &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::String("Grace".into()));
         assert_eq!(rows[0][1], Value::Null);
@@ -922,7 +921,7 @@ mod tests {
         std::fs::write(&csv_path, "name,age,score,active\nAlice,30\n").unwrap();
 
         let config = CsvReaderConfig::default();
-        let result = read_csv(&csv_path, &test_schema(), &config);
+        let result = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config);
         assert!(result.is_err());
         match result.unwrap_err() {
             CsvReaderError::ColumnCountMismatch { line, expected, actual } => {
@@ -941,7 +940,7 @@ mod tests {
         std::fs::write(&csv_path, "name,age,score,active\nAlice,not_a_number,95.5,true\n").unwrap();
 
         let config = CsvReaderConfig::default();
-        let result = read_csv(&csv_path, &test_schema(), &config);
+        let result = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config);
         assert!(result.is_err());
         match result.unwrap_err() {
             CsvReaderError::TypeCoercion { line, column, .. } => {
@@ -955,7 +954,7 @@ mod tests {
     #[test]
     fn test_read_csv_file_not_found() {
         let config = CsvReaderConfig::default();
-        let result = read_csv(Path::new("nonexistent.csv"), &test_schema(), &config);
+        let result = read_csv("nonexistent.csv", &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema(), &config);
         assert!(result.is_err());
         match result.unwrap_err() {
             CsvReaderError::IoError(_) => {} // expected
@@ -995,7 +994,7 @@ mod tests {
         ];
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &schema, &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &schema, &config).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::String("Alice".into()));
         // Date: 1990-05-15 → compute days since epoch
@@ -1038,7 +1037,7 @@ mod tests {
         ];
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &schema, &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &schema, &config).unwrap();
         assert_eq!(rows.len(), 1);
         if let Value::Interval(iv) = &rows[0][1] {
             // 1 year = 12 months, + 2 months = 14 months
@@ -1083,7 +1082,7 @@ mod tests {
         ];
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &schema, &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &schema, &config).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], Value::String("Item1".into()));
         if let Value::List(items) = &rows[0][1] {
@@ -1121,7 +1120,7 @@ mod tests {
         ];
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &schema, &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &schema, &config).unwrap();
         assert_eq!(rows.len(), 1);
         if let Value::Blob(bytes) = &rows[0][1] {
             assert_eq!(bytes, &[0xAA, 0xBB, 0xCC, 0xDD]);
@@ -1158,7 +1157,7 @@ mod tests {
         ];
 
         let config = CsvReaderConfig::default();
-        let rows = read_csv(&csv_path, &schema, &config).unwrap();
+        let rows = read_csv(csv_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &schema, &config).unwrap();
         assert_eq!(rows[0][0], Value::UInt8(100));
         assert_eq!(rows[0][1], Value::UInt32(1000));
         assert_eq!(rows[0][2], Value::UInt64(100000));

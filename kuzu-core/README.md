@@ -159,6 +159,7 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | `kuzu-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `kuzu-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
 | `kuzu-neo4j` | 12 | ✅ | Bolt protocol integration |
+| `kuzu-wasm` | - | ✅ | KuzuDatabase, KuzuConnection, PreparedStatement wrappers untuk NodeJS |
 | Extension crates | 6 | ✅ | Azure(1), Delta(1), Iceberg(1), Postgres(1), SQLite(1), Unity(1) |
 
 ## Storage Engine Features
@@ -177,6 +178,7 @@ Total: 922 tests — all passing ✅ (44 integration tests)
 | WAL + Checkpointer | ✅ | Write-ahead logging, shadow file |
 | Compression | ✅ | Constant, Boolean, dictionary encoding |
 | MVCC / Multiwriter | ✅ | Transaction isolation, AUTO/MANUAL modes, dynamic table-level locking, OCC conflict detection |
+| Virtual File System (VFS) | ✅ | Extensible registry for resolving files via HTTP/HTTPS/S3/Local |
 
 ## GDS (Graph Data Science) Framework
 

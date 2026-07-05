@@ -231,7 +231,7 @@ impl TransactionContext {
         F: FnOnce(&Transaction) -> Result<T, String>,
     {
         let _txn = self.begin_implicit()?;
-        let txn_id = self.active_txn_id().unwrap();
+        let _txn_id = self.active_txn_id().unwrap();
         let result = exec_fn(self.active_txn.as_ref().unwrap())?;
         self.commit()?;
         Ok(result)

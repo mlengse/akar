@@ -2,6 +2,7 @@
 //!
 //! Provides access to register functions, types, and other database components.
 
+use kuzu_common::file_system::{FileSystem, VirtualFileSystemRegistry};
 use kuzu_catalog::Catalog;
 use kuzu_function::registry::{AggregateFunction, FunctionRegistry, ScalarFunction, TableFunction};
 use std::sync::{Arc, Mutex};
@@ -10,14 +11,16 @@ use std::sync::{Arc, Mutex};
 pub struct ExtensionContext {
     pub(crate) function_registry: Arc<Mutex<FunctionRegistry>>,
     pub(crate) catalog: Arc<Mutex<Catalog>>,
+    pub(crate) vfs: Arc<VirtualFileSystemRegistry>,
 }
 
 impl ExtensionContext {
     /// Create a new extension context.
-    pub fn new(function_registry: Arc<Mutex<FunctionRegistry>>, catalog: Arc<Mutex<Catalog>>) -> Self {
+    pub fn new(function_registry: Arc<Mutex<FunctionRegistry>>, catalog: Arc<Mutex<Catalog>>, vfs: Arc<VirtualFileSystemRegistry>) -> Self {
         Self {
             function_registry,
             catalog,
+            vfs,
         }
     }
 
@@ -53,5 +56,11 @@ impl ExtensionContext {
     /// Get a reference to the function registry.
     pub fn function_registry(&self) -> &Arc<Mutex<FunctionRegistry>> {
         &self.function_registry
+    }
+
+    /// Register a virtual file system.
+    pub fn register_file_system(&self, fs: Box<dyn FileSystem>) {
+        self.vfs.register_file_system(fs);
+        tracing::debug!("Extension registered file system");
     }
 }

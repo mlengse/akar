@@ -46,7 +46,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | UUID (gen_random_uuid) | ❌ | ✅ Uuid variant | `ed94a16` |
 | LEFT/RIGHT/LPAD/RPAD | ❌ | ✅ StringOp variants | `ed94a16` |
 | DAYNAME/MONTHNAME/LAST_DAY/MAKE_DATE | ❌ | ✅ DateOp variants | `ed94a16` |
-| HTTPFS Extension | ⚠️ Panic on http_scan | ✅ Fixed chunk size & execution | `[new]` |
+| HTTPFS Extension & VFS | ⚠️ Panic on http_scan | ✅ VFS Registry + HttpRandomAccessReader (HTTP Range) | `[new]` |
 | Multiwriter Execution Locks | ❌ Missing Table locks | ✅ Dynamic `lock_table` in Connection | `[new]` |
 | Undo Buffer | ❌ TIDAK ADA | ✅ `undo_buffer.rs` + wiring ke Transaction | `[P0]` |
 | WAL Replayer + DDL variants | ❌ TIDAK ADA | ✅ `wal_replayer.rs` + 6 WALRecord DDL variants | `[P0]` |
@@ -288,6 +288,7 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 | Zone Map Predicate (ColumnChunkStats) | ✅ + wiring ke NodeTable::to_column_major_data_with_predicate |
 | ColumnChunk stats update on append/update | ✅ |
 | Hybrid CSR Storage (CsrIndex) | ✅ + wiring ke RelTable |
+| Virtual File System (VFS) | ✅ `VirtualFileSystemRegistry` plumbing to physical operators |
 
 ### ✅ Crash Recovery & Storage Foundation (Fase P0)
 | Item | Status |
@@ -434,8 +435,9 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 4. Kesenjangan Tersisa (Aktual)
 
 ### 4.1 Wasm Build
-- `kuzu-wasm` telah dibuat dan berhasil di-compile (target `wasm32-unknown-unknown`).
-- Implementasi awal `KuzuDatabase` dan `KuzuConnection` wrapper sudah ada, memisahkan dependency yang tidak kompatibel (`zstd`).
+- `kuzu-wasm` telah **stabil** (Fase P6) dan berhasil di-build menggunakan `wasm-pack` (target `nodejs`).
+- Mendukung `KuzuDatabase`, `KuzuConnection`, dan `KuzuPreparedStatement` yang memungkinkan binding parameter via `js_sys::Object` dan penarikan metadata (`get_column_names`).
+- Artifak NPM sudah siap dan tersedia di `kuzu-wasm/pkg`.
 
 ### 4.2 Extension Crates
 - `kuzu-json` & `kuzu-llm`: **Selesai**. Sudah di-wire ke native Rust API via `CustomScalar`.

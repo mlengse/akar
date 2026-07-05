@@ -6,9 +6,116 @@
 //! - File download to memory
 
 use kuzu_common::types::Value;
+use kuzu_common::file_system::{FileRead, FileSystem, FileWrite};
 use kuzu_extension::{Extension, ExtensionContext};
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
 use tempfile::NamedTempFile;
+
+/// A FileSystem implementation for HTTP/HTTPS URLs.
+pub struct HttpFileSystem;
+
+impl FileSystem for HttpFileSystem {
+    fn can_handle(&self, path: &str) -> bool {
+        is_valid_http_url(path)
+    }
+
+    fn open_read(&self, path: &str) -> std::io::Result<Box<dyn FileRead>> {
+        Ok(Box::new(HttpRandomAccessReader::new(path)?))
+    }
+
+    fn open_write(&self, _path: &str) -> std::io::Result<Box<dyn FileWrite>> {
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        match ureq::head(path).call() {
+            Ok(resp) => resp.status() == 200,
+            Err(_) => false,
+        }
+    }
+
+    fn remove(&self, _path: &str) -> std::io::Result<()> {
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+    }
+
+    fn create_dir_all(&self, _path: &str) -> std::io::Result<()> {
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+    }
+}
+
+/// A reader that uses HTTP Range requests for random access.
+pub struct HttpRandomAccessReader {
+    url: String,
+    position: u64,
+    content_length: Option<u64>,
+}
+
+impl HttpRandomAccessReader {
+    pub fn new(url: &str) -> std::io::Result<Self> {
+        let resp = ureq::head(url)
+            .call()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let content_length = resp
+            .header("Content-Length")
+            .and_then(|s| s.parse::<u64>().ok());
+        Ok(Self {
+            url: url.to_string(),
+            position: 0,
+            content_length,
+        })
+    }
+}
+
+impl Read for HttpRandomAccessReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let end = self.position + buf.len() as u64 - 1;
+        let range_header = format!("bytes={}-{}", self.position, end);
+        let resp = ureq::get(&self.url)
+            .set("Range", &range_header)
+            .call()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        
+        let mut reader = resp.into_reader();
+        let bytes_read = reader.read(buf)?;
+        self.position += bytes_read as u64;
+        Ok(bytes_read)
+    }
+}
+
+impl Seek for HttpRandomAccessReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            SeekFrom::Start(offset) => {
+                self.position = offset;
+            }
+            SeekFrom::Current(offset) => {
+                let new_pos = self.position as i64 + offset;
+                if new_pos < 0 {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek to a negative position"));
+                }
+                self.position = new_pos as u64;
+            }
+            SeekFrom::End(offset) => {
+                if let Some(len) = self.content_length {
+                    let new_pos = len as i64 + offset;
+                    if new_pos < 0 {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek to a negative position"));
+                    }
+                    self.position = new_pos as u64;
+                } else {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "SeekFrom::End requires Content-Length"));
+                }
+            }
+        }
+        Ok(self.position)
+    }
+}
+
+impl FileRead for HttpRandomAccessReader {}
 
 /// The HTTPFS extension adds HTTP file system support to Kuzu.
 pub struct HttpfsExtension;
@@ -108,7 +215,10 @@ impl Extension for HttpfsExtension {
             },
         );
 
-        tracing::info!("HTTPFS extension loaded: 3 functions registered");
+        // Register the virtual file system
+        context.register_file_system(Box::new(HttpFileSystem));
+
+        tracing::info!("HTTPFS extension loaded: 3 functions registered, 1 VFS registered");
         Ok(())
     }
 }

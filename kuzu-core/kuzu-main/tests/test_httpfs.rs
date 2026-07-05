@@ -1,6 +1,4 @@
-use kuzu_main::{Connection, Database, SystemConfig};
-use tempfile::tempdir;
-use std::sync::Arc;
+// kuzu_main::test_httpfs.rs
 
 #[test]
 #[cfg(feature = "httpfs-extension")]

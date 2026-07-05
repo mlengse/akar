@@ -198,4 +198,26 @@ Berikut adalah rincian isi dokumen, rencana kerja, dan catatan sesi yang diurutk
 ---
 
 > [!NOTE]
-> Semua 12 dokumen pengembangan kini terintegrasi secara kronologis dalam satu file konsolidasi ini untuk memberikan riwayat perkembangan terpadu dari Kuzu Rust (`kuzu-core`).
+> Semua 13 dokumen pengembangan kini terintegrasi secara kronologis dalam satu file konsolidasi ini untuk memberikan riwayat perkembangan terpadu dari Kuzu Rust (`kuzu-core`).
+
+---
+
+### Milestone 13: Fase P6 - Stabilisasi WASM Wrapper
+*   **Tanggal:** 5 Juli 2026
+*   **Tujuan Utama:** Menstabilkan integrasi `kuzu-wasm` agar dapat digunakan secara fungsional di lingkungan Node.js.
+*   **Pencapaian Utama:**
+    *   Mengimplementasikan `KuzuPreparedStatement` di `kuzu-wasm/src/lib.rs`.
+    *   Memperluas `KuzuConnection` dengan metode `prepare` dan eksekusi `execute` yang mengonversi parameter JavaScript `Object` ke tipe `kuzu_common::types::Value`.
+    *   Menambahkan metode `get_column_names()` pada `QueryResult` di level WASM.
+    *   Menyelesaikan kompilasi mandiri via `wasm-pack build --target nodejs` dan menghasilkan artifak NPM lokal yang siap di-link. GitHub Actions CI dilewati sesuai batasan limit *balance* pengguna.
+
+---
+
+### Milestone 14: Fase P7 - Integrasi VFS (Virtual File System) & HTTPFS
+*   **Tanggal:** 5 Juli 2026
+*   **Tujuan Utama:** Mendukung sistem file virtual untuk abstraksi `read`/`write` secara transparan dari berbagai protokol, termasuk HTTP/HTTPS.
+*   **Pencapaian Utama:**
+    *   **Abstraksi FileSystem:** Modifikasi trait `FileSystem` pada `kuzu-common` menjadi berbasis *dynamic dispatch* (`Box<dyn FileRead>`).
+    *   **VFS Registry:** Pembuatan `VirtualFileSystemRegistry` tersentralisasi yang disuntikkan mulai dari `Database` hingga `PhysicalOperator` (seperti `PhysicalCopyFrom`, `PhysicalForeach`).
+    *   **Refactor Reader:** Mengubah `csv_reader` dan `parquet_reader` untuk menggunakan VFS menggantikan panggilan statis `std::fs`. Untuk Parquet, diimplementasikan stub in-memory yang menggunakan `bytes::Bytes`.
+    *   **Extensi HTTPFS:** Pembuatan `HttpFileSystem` dan `HttpRandomAccessReader` di `kuzu-httpfs` yang memanfaatkan HTTP `Range` requests untuk baca acak secara remote.

@@ -541,7 +541,7 @@ impl RelTable {
             col.reserve(total);
         }
 
-        let start_edge_idx = self.edges.len();
+        let _start_edge_idx = self.edges.len();
 
         // Batch append
         for (from, to, vals) in rels {

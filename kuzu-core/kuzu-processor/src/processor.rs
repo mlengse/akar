@@ -23,6 +23,7 @@ pub type SubqueryFn = Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChu
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     table_catalog: Option<Arc<TableCatalog>>,
+    vfs: Option<Arc<kuzu_common::file_system::VirtualFileSystemRegistry>>,
     /// Callback for sequence operations (nextval/currval).
     /// Takes (sequence_name, is_nextval) and returns the resulting value.
     sequence_fn: Option<SequenceFn>,
@@ -35,6 +36,7 @@ impl QueryProcessor {
         Self {
             function_registry: None,
             table_catalog: None,
+            vfs: None,
             sequence_fn: None,
             subquery_fn: None,
         }
@@ -45,16 +47,22 @@ impl QueryProcessor {
         Self {
             function_registry: Some(registry),
             table_catalog: None,
+            vfs: None,
             sequence_fn: None,
             subquery_fn: None,
         }
     }
 
-    /// Create a processor with function registry and table catalog access.
-    pub fn with_catalog(registry: Arc<Mutex<FunctionRegistry>>, table_catalog: Arc<TableCatalog>) -> Self {
+    /// Create a processor with function registry, table catalog access, and VFS.
+    pub fn with_catalog(
+        registry: Arc<Mutex<FunctionRegistry>>, 
+        table_catalog: Arc<TableCatalog>, 
+        vfs: Arc<kuzu_common::file_system::VirtualFileSystemRegistry>
+    ) -> Self {
         Self {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
+            vfs: Some(vfs),
             sequence_fn: None,
             subquery_fn: None,
         }
@@ -647,6 +655,7 @@ impl QueryProcessor {
                         columns,
                         options: cf.options.clone(),
                         table_catalog,
+                        vfs: self.vfs.clone().expect("VFS not initialized in processor"),
                     };
                     let input = current;
                     let result = copy_op.execute(input)?;
@@ -664,6 +673,7 @@ impl QueryProcessor {
                         sub_plans: fc.sub_plans.clone(),
                         function_registry: self.function_registry.clone(),
                         table_catalog: self.table_catalog.clone(),
+                        vfs: self.vfs.clone(),
                     };
                     let result = foreach_op.execute(input)?;
                     intermediate_result = Some(result);
@@ -1468,7 +1478,7 @@ mod tests {
                 .unwrap();
         }
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
-        QueryProcessor::with_catalog(registry, catalog)
+        QueryProcessor::with_catalog(registry, catalog, std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()))
     }
 
     #[test]
@@ -2704,7 +2714,7 @@ mod tests {
         use kuzu_function::registry::FunctionRegistry;
         use std::sync::{Arc, Mutex};
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
-        let proc = QueryProcessor::with_catalog(registry, Arc::new(catalog));
+        let proc = QueryProcessor::with_catalog(registry, std::sync::Arc::new(catalog), std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()));
 
         // Plan: ScanNode(A), ScanNode(B), HashJoin{join_keys: [a.id = b.id]}
         let join_key = Expression::BinaryOp(

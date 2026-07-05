@@ -1,5 +1,6 @@
 //! Database — the main entry point for Kuzu.
 
+use kuzu_common::file_system::VirtualFileSystemRegistry;
 use kuzu_catalog::Catalog;
 use kuzu_common::memory::MemoryManager;
 use kuzu_common::task_system::TaskSystem;
@@ -65,6 +66,7 @@ pub struct Database {
     pub(crate) memory_manager: Arc<MemoryManager>,
     pub(crate) extension_registry: Mutex<ExtensionRegistry>,
     pub(crate) stats_store: Arc<Mutex<StatsStore>>,
+    pub(crate) vfs: Arc<VirtualFileSystemRegistry>,
     /// Configuration used at database creation time.
     pub(crate) config: SystemConfig,
     /// Runtime-overridable spill threshold via `SET spill_threshold`.
@@ -133,6 +135,7 @@ impl Database {
         let function_registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         let storage_manager = Arc::new(StorageManager::new(db_path.clone(), memory_manager.clone()));
         let stats_store = Arc::new(Mutex::new(StatsStore::new()));
+        let vfs = Arc::new(VirtualFileSystemRegistry::new());
 
         let mut db = Self {
             storage_manager,
@@ -143,6 +146,7 @@ impl Database {
             memory_manager,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
+            vfs,
             spill_threshold_override: AtomicU64::new(0),
             config,
         };
@@ -153,7 +157,7 @@ impl Database {
         // Load all registered extensions
         {
             let mut ext_registry = db.extension_registry.lock().unwrap();
-            let context = ExtensionContext::new(db.function_registry.clone(), db.catalog.clone());
+            let context = ExtensionContext::new(db.function_registry.clone(), db.catalog.clone(), db.vfs.clone());
             for result in ext_registry.load_all(&context) {
                 match result {
                     (name, Ok(())) => tracing::info!("Extension '{name}' loaded successfully"),

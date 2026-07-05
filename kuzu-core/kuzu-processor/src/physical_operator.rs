@@ -2432,6 +2432,7 @@ pub struct PhysicalForeach {
     pub sub_plans: Vec<Vec<kuzu_planner::logical_operator::LogicalOperator>>,
     pub function_registry: Option<Arc<Mutex<kuzu_function::registry::FunctionRegistry>>>,
     pub table_catalog: Option<Arc<TableCatalog>>,
+    pub vfs: Option<Arc<kuzu_common::file_system::VirtualFileSystemRegistry>>,
 }
 
 impl PhysicalOperatorExec for PhysicalForeach {
@@ -2487,6 +2488,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 let processor = crate::processor::QueryProcessor::with_catalog(
                     self.function_registry.clone().unwrap(),
                     self.table_catalog.clone().unwrap(),
+                    self.vfs.clone().unwrap(),
                 );
                 let _result = processor.execute(sub_plan)?;
             }
@@ -2650,6 +2652,7 @@ pub struct PhysicalCopyFrom {
     pub columns: Vec<ColumnDefinition>,
     pub options: std::collections::HashMap<String, String>,
     pub table_catalog: Arc<TableCatalog>,
+    pub vfs: Arc<kuzu_common::file_system::VirtualFileSystemRegistry>,
 }
 
 impl PhysicalOperatorExec for PhysicalCopyFrom {
@@ -2687,11 +2690,11 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                     config.delimiter = b'\t';
                 }
 
-                kuzu_storage::csv_reader::read_csv(path, &catalog_cols, &config)
+                kuzu_storage::csv_reader::read_csv(&self.file_path, &self.vfs, &catalog_cols, &config)
                     .map_err(|e| format!("CSV read error: {e}"))?
             }
             #[cfg(feature = "parquet")]
-            "parquet" => kuzu_storage::parquet_reader::read_parquet(path, &catalog_cols)
+            "parquet" => kuzu_storage::parquet_reader::read_parquet(&self.file_path, &self.vfs, &catalog_cols)
                 .map_err(|e| format!("Parquet read error: {e}"))?,
             #[cfg(not(feature = "parquet"))]
             "parquet" => return Err("Parquet support not enabled (feature 'parquet' in kuzu-storage)".into()),

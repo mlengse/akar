@@ -552,6 +552,7 @@ impl Connection {
                 let processor = QueryProcessor::with_catalog(
                     db.function_registry.clone(),
                     db.storage_manager.table_catalog(),
+                    db.vfs.clone(),
                 )
                 .with_sequence_fn(seq_fn_inner);
                 // Note: Not attaching subquery_fn recursively to avoid complex ARC dependencies for now.
@@ -563,6 +564,7 @@ impl Connection {
         QueryProcessor::with_catalog(
             self.database.function_registry.clone(),
             self.database.storage_manager.table_catalog(),
+            self.database.vfs.clone(),
         )
         .with_sequence_fn(seq_fn)
         .with_subquery_fn(subquery_fn)
@@ -1765,6 +1767,7 @@ fn extract_arg_string(args: &[kuzu_parser::ast::Expression], index: usize) -> Re
 }
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
+#[allow(dead_code)]
 fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> kuzu_common::vector::DataChunk {
     use kuzu_common::vector::ValueVector;
     use kuzu_common::types::PhysicalTypeID;
@@ -3144,9 +3147,9 @@ mod fase_a_verification {
     #[test]
     fn test_analyze_all_tables() {
         let (_dir, _db, conn) = setup_test_db(-1);
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))");
-        exec_ok(&conn, "CREATE (:Person {name: 'Alice', age: 30})");
-        exec_ok(&conn, "CREATE (:Person {name: 'Bob', age: 25})");
+        let _ = exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))");
+        let _ = exec_ok(&conn, "CREATE (:Person {name: 'Alice', age: 30})");
+        let _ = exec_ok(&conn, "CREATE (:Person {name: 'Bob', age: 25})");
 
         let result = conn.query("ANALYZE *");
         assert!(result.is_ok(), "ANALYZE * should succeed: {:?}", result);
@@ -3161,9 +3164,9 @@ mod fase_a_verification {
     #[test]
     fn test_analyze_specific_table() {
         let (_dir, _db, conn) = setup_test_db(-1);
-        exec_ok(&conn, "CREATE NODE TABLE User(id INT64, score DOUBLE, PRIMARY KEY(id))");
-        exec_ok(&conn, "CREATE (:User {id: 1, score: 95.5})");
-        exec_ok(&conn, "CREATE (:User {id: 2, score: 87.0})");
+        let _ = exec_ok(&conn, "CREATE NODE TABLE User(id INT64, score DOUBLE, PRIMARY KEY(id))");
+        let _ = exec_ok(&conn, "CREATE (:User {id: 1, score: 95.5})");
+        let _ = exec_ok(&conn, "CREATE (:User {id: 2, score: 87.0})");
 
         let result = conn.query("ANALYZE User");
         assert!(result.is_ok(), "ANALYZE User should succeed: {:?}", result);
