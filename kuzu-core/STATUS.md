@@ -365,18 +365,20 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 ## 4. Kesenjangan Tersisa (Aktual)
 
-### 🟡 4.1 Wasm Build
-- Ada `cfg(target_arch = "wasm32")` guards di `page.rs` dan `build.rs`
-- Belum ada `wasm-bindgen`, `wasm-pack`, atau JS bindings
-- LadybugDB punya full Wasm (`@ladybugdb/wasm-core`) — Kuzu Rust belum setara
+### 4.1 Wasm Build
+- `kuzu-wasm` telah dibuat dan berhasil di-compile (target `wasm32-unknown-unknown`).
+- Implementasi awal `KuzuDatabase` dan `KuzuConnection` wrapper sudah ada, memisahkan dependency yang tidak kompatibel (`zstd`).
 
-### ⚪ 4.2 Extension Crates (Sebagian Masih Stub)
-- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`, `kuzu-sqlite`, `kuzu-neo4j`, `kuzu-httpfs`, `kuzu-json`, `kuzu-fts`, `kuzu-llm` — sebagian besar masih kerangka dasar
-- `kuzu-postgres`, `kuzu-duckdb` — sudah fungsional
+### 4.2 Extension Crates
+- `kuzu-json` & `kuzu-llm`: **Selesai**. Sudah di-wire ke native Rust API via `CustomScalar`.
+- `kuzu-postgres`, `kuzu-duckdb`: **Selesai**. Sudah fungsional mendelegasikan query atau scanning.
+- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`: **Selesai (Delegation)**. Menggunakan `kuzu-duckdb` attach_helper untuk query.
+- `kuzu-sqlite`, `kuzu-neo4j`: **Selesai (Native)**.
+- `kuzu-httpfs`, `kuzu-fts`: Sebagian masih stub/placeholder yang menunggu integrasi engine indexing secara native.
 
-### ⚪ 4.3 Code Quality
-- Clippy warnings di extension crates
-- CI/CD setup
+### 4.3 Code Quality
+- Clippy warnings di extension crates **sudah diperbaiki** (`unused_imports` di kuzu-postgres, kuzu-iceberg, dll).
+- CI/CD setup belum ada.
 
 ---
 

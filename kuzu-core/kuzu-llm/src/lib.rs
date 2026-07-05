@@ -29,16 +29,34 @@ impl Extension for LlmExtension {
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use kuzu_function::registry::ScalarFunction;
-        use kuzu_function::registry::UtilityOp;
+        use kuzu_common::types::Value;
+        use std::sync::Arc;
 
         context.register_scalar_function(
             "create_embedding",
-            ScalarFunction::Utility {
-                op: UtilityOp::Coalesce,
+            ScalarFunction::CustomScalar {
+                name: "create_embedding".into(),
+                execute: Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("create_embedding requires at least a text argument".into());
+                    }
+                    let text = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("create_embedding: first argument must be string".into()),
+                    };
+                    
+                    // Default config for now
+                    let config = crate::EmbeddingConfig::default();
+                    let embedding = crate::create_embedding(text, Some(&config))?;
+                    
+                    // Return the vector as a List of floats
+                    let vals: Vec<Value> = embedding.vector.into_iter().map(Value::Double).collect();
+                    Ok(Value::List(vals))
+                }),
             },
         );
 
-        tracing::info!("LLM extension loaded: create_embedding function registered");
+        tracing::info!("LLM extension loaded: create_embedding function registered (CustomScalar)");
         Ok(())
     }
 }

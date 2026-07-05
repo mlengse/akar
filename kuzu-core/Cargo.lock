@@ -109,7 +109,6 @@ dependencies = [
  "arrow-csv",
  "arrow-data 53.4.1",
  "arrow-ipc",
- "arrow-json",
  "arrow-ord 53.4.1",
  "arrow-row 53.4.1",
  "arrow-schema 53.4.1",
@@ -232,6 +231,7 @@ dependencies = [
  "atoi",
  "base64",
  "chrono",
+ "comfy-table",
  "half",
  "lexical-core",
  "num",
@@ -314,26 +314,6 @@ dependencies = [
  "arrow-data 53.4.1",
  "arrow-schema 53.4.1",
  "flatbuffers",
-]
-
-[[package]]
-name = "arrow-json"
-version = "53.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acdec0024749fc0d95e025c0b0266d78613727b3b3a5d4cf8ea47eb6d38afdd1"
-dependencies = [
- "arrow-array 53.4.1",
- "arrow-buffer 53.4.1",
- "arrow-cast 53.4.1",
- "arrow-data 53.4.1",
- "arrow-schema 53.4.1",
- "chrono",
- "half",
- "indexmap",
- "lexical-core",
- "num",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -757,6 +737,16 @@ checksum = "4a65ebfec4fb190b6f90e944a817d60499ee0744e582530e2c9900a22e591d9a"
 dependencies = [
  "unicode-segmentation",
  "unicode-width 0.2.2",
+]
+
+[[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1820,6 +1810,17 @@ dependencies = [
  "kuzu-extension",
  "kuzu-function",
  "tracing",
+]
+
+[[package]]
+name = "kuzu-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "kuzu-common",
+ "kuzu-main",
+ "wasm-bindgen",
 ]
 
 [[package]]

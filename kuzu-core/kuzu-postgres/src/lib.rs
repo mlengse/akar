@@ -10,7 +10,6 @@
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
-use kuzu_common::types::Value;
 
 /// The PostgreSQL extension enables querying PostgreSQL databases from Kuzu.
 pub struct PostgresExtension;
