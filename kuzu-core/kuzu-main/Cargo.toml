@@ -57,6 +57,7 @@ arrow = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = "3"
 parquet = "53"
+arrow = { workspace = true }
 criterion.workspace = true
 
 [[bench]]

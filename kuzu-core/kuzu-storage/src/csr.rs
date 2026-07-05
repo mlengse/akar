@@ -15,16 +15,16 @@ use std::sync::RwLock;
 /// 2. `adjacency_array`: Stores the destination node IDs contiguously.
 #[derive(Debug, Clone)]
 pub struct CsrIndex {
-    file_handle: Arc<RwLock<FileHandle>>,
-    num_nodes: usize,
+    _file_handle: Arc<RwLock<FileHandle>>,
+    _num_nodes: usize,
     num_edges: usize,
 }
 
 impl CsrIndex {
     pub fn new(file_handle: Arc<RwLock<FileHandle>>) -> Self {
         Self {
-            file_handle,
-            num_nodes: 0,
+            _file_handle: file_handle,
+            _num_nodes: 0,
             num_edges: 0,
         }
     }

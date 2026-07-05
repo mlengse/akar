@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_add_and_pop_exact() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         fsm.add_free_pages(PageRange::new(10, 5));
         assert_eq!(fsm.num_entries(), 1);
 
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_pop_splits_larger_range() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         // Add a range of 10 pages starting at index 0
         fsm.add_free_pages(PageRange::new(0, 10));
 
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_pop_no_suitable_range() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         fsm.add_free_pages(PageRange::new(0, 3));
 
         // Request more pages than available
@@ -296,13 +296,13 @@ mod tests {
 
     #[test]
     fn test_pop_from_empty() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         assert!(fsm.pop_free_pages(1).is_none());
     }
 
     #[test]
     fn test_multiple_free_lists() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         fsm.add_free_pages(PageRange::new(0, 2));  // level 1
         fsm.add_free_pages(PageRange::new(10, 4)); // level 2
         fsm.add_free_pages(PageRange::new(20, 8)); // level 3
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_uncheckpointed_pages() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         fsm.add_uncheckpointed_free_pages(PageRange::new(100, 5));
 
         // Not yet available for allocation
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_multiple_pop_from_same_range() {
-        let mut fsm = FreeSpaceManager::new();
+        let fsm = FreeSpaceManager::new();
         fsm.add_free_pages(PageRange::new(0, 100));
 
         // Pop multiple times from the same range
