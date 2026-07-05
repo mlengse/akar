@@ -5,6 +5,7 @@ use crate::art_key::ArtKey;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use crate::vector_index::VectorIndexTable;
+use crate::csr::CsrIndex;
 use dashmap::DashMap;
 use kuzu_common::types::{LogicalTypeID, Value};
 use kuzu_vector::hnsw::DistanceMetric;
@@ -384,6 +385,8 @@ pub struct RelTable {
     pub fwd_adj: HashMap<u64, Vec<(u64, usize)>>,
     /// Reverse CSR adjacency: dst_offset → [(src_offset, edge_idx), ...].
     pub rev_adj: HashMap<u64, Vec<(u64, usize)>>,
+    /// Specialized CSR Index for fast graph traversals.
+    pub csr_index: Option<CsrIndex>,
     /// Column-major property storage: properties[col_idx][edge_idx].
     pub properties: Vec<Vec<Value>>,
 }
@@ -407,6 +410,7 @@ impl RelTable {
             edges: Vec::new(),
             fwd_adj: HashMap::new(),
             rev_adj: HashMap::new(),
+            csr_index: None,
             properties: vec![Vec::new(); num_cols],
         }
     }

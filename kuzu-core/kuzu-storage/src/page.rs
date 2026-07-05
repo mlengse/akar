@@ -97,6 +97,7 @@ impl FileHandle {
     }
 
     /// Read a page from disk.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn read_page(&self, page_num: PageNum) -> std::io::Result<Vec<u8>> {
         use std::io::{Read, Seek, SeekFrom};
         let mut file = std::fs::File::open(&self.path)?;
@@ -107,14 +108,26 @@ impl FileHandle {
         Ok(buf)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn read_page(&self, page_num: PageNum) -> std::io::Result<Vec<u8>> {
+        // Mock implementation for Wasm
+        Ok(vec![0u8; self.page_size])
+    }
+
     /// Write a page to disk.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write_page(&self, page_num: PageNum, data: &[u8]) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
-        // Use OpenOptions to open without truncating
         let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&self.path)?;
         let offset = self.page_offset(page_num);
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn write_page(&self, _page_num: PageNum, _data: &[u8]) -> std::io::Result<()> {
+        // Mock implementation for Wasm
         Ok(())
     }
 

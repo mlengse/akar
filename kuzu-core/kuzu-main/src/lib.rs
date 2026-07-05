@@ -5,6 +5,9 @@ pub mod database;
 pub mod prepared_statement;
 pub mod query_result;
 
+#[cfg(feature = "adbc")]
+pub mod adbc;
+
 pub use connection::Connection;
 pub use database::{Database, SystemConfig};
 pub use prepared_statement::PreparedStatement;

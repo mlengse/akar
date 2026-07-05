@@ -10,6 +10,7 @@ pub mod checkpoint;
 pub mod column;
 pub mod column_chunk;
 pub mod compression;
+pub mod csr;
 pub mod csv_reader;
 pub mod free_space_manager;
 pub mod index;

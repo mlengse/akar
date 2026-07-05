@@ -1539,6 +1539,7 @@ dependencies = [
 name = "kuzu-extension"
 version = "0.1.0"
 dependencies = [
+ "arrow 53.4.1",
  "kuzu-catalog",
  "kuzu-common",
  "kuzu-function",
@@ -1773,6 +1774,7 @@ version = "0.1.0"
 dependencies = [
  "arrow 53.4.1",
  "bytes",
+ "criterion",
  "csv",
  "dashmap",
  "hashbrown 0.15.5",
