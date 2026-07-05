@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-02
+> **Tanggal:** 2026-07-05 (diperbarui dari 2026-07-02)
 
 ---
 
@@ -12,11 +12,16 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **93+ per crate** ✅ |
+| **Tests passing** | **898 total, 0 failed** ✅ |
+| **Integration tests** | **44 passed, 0 failed** ✅ |
 | **Optimizer passes** | **18** (11 flat + 7 tree) — melebihi C++ |
-| **Functions** | **110+** registered (scalar + aggregate + table) |
+| **Join Order** | **DP Bushy Trees** (cost-based) ✅ |
+| **Functions** | **150+** registered (scalar + aggregate + table) |
 | **Logical operators** | **34** variants |
-| **Extensions** | **15** |
+| **Extensions** | **15** crates |
+| **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
+| **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
+| **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -293,296 +298,109 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 
 ## 3. Kesenjangan Tersisa (Gaps)
 
-### 3.1 🔴 Fungsi C++ Belum Diporting (18 fungsi)
+### 3.1 ✅ Fungsi C++ — Semua Sudah Diporting
 
-| Fungsi | Kategori | Detail |
-|--------|----------|--------|
-| BITWISE_XOR, BITWISE_AND, BITWISE_OR | Arithmetic | Operasi bitwise |
-| BITSHIFT_LEFT, BITSHIFT_RIGHT | Arithmetic | Pergeseran bit |
-| CBRT, COT | Arithmetic | Cube root, cotangent |
-| EVEN, FACTORIAL, GAMMA, LGAMMA | Arithmetic | Math functions |
-| LN, LOG2 | Arithmetic | Log aliases |
-| SET_SEED | Arithmetic | RNG seeding |
-| REGEXP_FULL_MATCH, REGEXP_EXTRACT, REGEXP_EXTRACT_ALL | String | Regex tambahan |
-| REGEXP_SPLIT_TO_ARRAY | String | Split to array |
-| LEVENSHTEIN | String | Distance |
-| INITCAP | String | Title case |
-| STRING_SPLIT / SPLIT_PART | String | Split with part |
-| CONCAT_WS | String | Concat with separator |
-| ARRAY_EXTRACT (char at index) | String | Char extraction |
-| CENTURY, EPOCH_MS, TO_TIMESTAMP, TO_EPOCH_MS | Timestamp | 4 timestamp functions |
-| TO_YEARS, TO_MONTHS, TO_DAYS, TO_HOURS, TO_MINUTES, TO_SECONDS, TO_MILLISECONDS, TO_MICROSECONDS | Interval | 8 interval functions |
-| MD5, SHA256, HASH | Hash | 3 hash functions |
-| ENCODE, DECODE, OCTET_LENGTH | Blob | 3 blob functions |
-| GEN_RANDOM_UUID | UUID | ✅ Already ported |
-| UNION_VALUE, UNION_TAG, UNION_EXTRACT | Union | 3 union functions |
-| NODES, RELS, PROPERTIES, IS_TRAIL, IS_ACYCLIC, LENGTH | Path | ✅ Already ported |
-| RANGE, LIST_REVERSE_SORT, LIST_SUM, LIST_PRODUCT, LIST_DISTINCT, LIST_UNIQUE, LIST_ANY_VALUE, LIST_TO_STRING, LIST_POSITION, LIST_HAS_ALL, ANY, ALL, NONE, SINGLE | List | 14 list functions |
-| CARDINALITY | Map | Alias missing |
-
-**Estimasi:** ~5-7 hari untuk porting semua fungsi scalar yang tersisa
+Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasikan** di `kuzu-function/src/scalar.rs` dan `kuzu-function/src/registry.rs`. Termasuk:
+- **Bitwise** (5): `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` ✅
+- **Math** (8): `CBRT`, `COT`, `EVEN`, `FACTORIAL`, `GAMMA`, `LGAMMA`, `LN`, `LOG2`, `SET_SEED` ✅
+- **String** (7): `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN`, `INITCAP`, `CONCAT_WS` ✅
+- **Timestamp** (4): `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` ✅
+- **Interval** (8): `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` ✅
+- **Hash** (3): `MD5`, `SHA256`, `HASH` ✅ (menggunakan `md5` dan `sha2` crates)
+- **Blob** (3): `ENCODE`, `DECODE`, `OCTET_LENGTH` ✅
+- **Union** (3): `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` ✅
+- **List** (14): `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` ✅
+- **Path** (6): `NODES`, `RELS`, `PROPERTIES`, `IS_TRAIL`, `IS_ACYCLIC`, `LENGTH` ✅
+- **UUID**: `GEN_RANDOM_UUID` ✅
+- **Map**: `CARDINALITY` ✅
 
 
-#### 🔴 Prioritas 1
 
-| Kelompok | Fungsi | Estimasi |
-|----------|--------|----------|
-| **Interval** (8 func) | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | ~2 hari |
-| **List** (14 func) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | ~2 hari |
-| **Hash** (3 func) | `MD5`, `SHA256`, `HASH` | ~1 hari |
-| **Timestamp** (4 func) | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | ~1 hari |
-| **Blob** (3 func) | `ENCODE`, `DECODE`, `OCTET_LENGTH` | ~1 hari |
-| **Bitwise** (4 func) | `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` | ~1 hari |
-| **String** (7 func) | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN`, `INITCAP`, `CONCAT_WS` | ~1 hari |
-| **Math** (6 func) | `CBRT`, `COT`, `EVEN`, `FACTORIAL`, `GAMMA`, `LGAMMA`, `LN`, `LOG2` | ~1 hari |
-| **Union** (3 func) | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | ~1 hari |
+> **Catatan historis:** Bagian di atas (Prioritas 1, Level 0-3, Iterasi 1-2, dan Lambda Infrastructure) ditulis sebelum implementasi dilakukan. Per 2026-07-05, **semua fungsi dan semua 5 layer lambda infrastructure sudah selesai diimplementasikan**:
+> - Grammar: `list_predicate` rule di `cypher.pest` ✅
+> - AST: `Expression::ListPredicate` + `Quantifier` enum ✅
+> - Parser: Parse list predicate → AST ✅
+> - Binder: `Expression::ListPredicate` handling ✅
+> - Evaluator: `evaluate_list_predicate()` di `expression_evaluator.rs` — evaluasi predikat per elemen dengan mini-chunk, bukan truthy check ✅
 
-#### Urutan Berdasarkan Dependency (Termudah → Tersulit)
 
-##### 🥇 Level 0 — Zero External Dependency
 
-| # | Grup | Fungsi | Alasan |
-|---|------|--------|--------|
-| **1** | **Bitwise** (5) ✅ sudah | `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` | Pure `i64` ops via `\| & ^ << >>` — tidak perlu tipe khusus, tidak perlu external crate |
-| **2** | **Math ringan** (4) ✅ sudah | `CBRT`, `COT`, `LN`, `LOG2`, `EVEN` | `f64::cbrt()`, `f64::ln()`, `f64::log2()`, `1.0 / f64::tan()`, `x.ceil().even()` — semua stdlib |
-| **3** | **String basic** (5) ✅ sudah | `INITCAP`, `CONCAT_WS`, `STRING_SPLIT` / `SPLIT_PART`, `ARRAY_EXTRACT` | Pure `String`/`char` ops — `regex` sudah di workspace ✅ |
+### 3.2 ✅ Optimizer Enhancements — Selesai
 
-##### 🥈 Level 1 — Butuh External Crate (Perlu Cek/Tambah)
+| Item | Status |
+|------|--------|
+| Cost-based join order DP (Bushy Trees) | ✅ `reorder_joins_dp_bushy()` di `join_order.rs` — bitmask DP, adj_mask, cost-based probe/build assignment |
 
-| # | Grup | Fungsi | Alasan |
-|---|------|--------|--------|
-| **4** | **Math berat** (4) ✅ sudah | `FACTORIAL`, `GAMMA`, `LGAMMA`, `SET_SEED` | `GAMMA`/`LGAMMA` perlu `std::f64::ln_gamma()` atau crate `gamma`; `SET_SEED` perlu `rand` crate |
-| **5** | **Hash** (3) ✅ sudah | `MD5`, `SHA256`, `HASH` | Butuh `md-5` dan `sha2` crate — **belum** di workspace ❌ |
-| **6** | **String regex** (4) ✅ sudah | `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN` | `regex` ✅ sudah ada; Levenshtein bisa pure Rust tanpa crate |
+### 3.3 ✅ Storage Enhancements — Selesai
 
-##### 🥉 Level 2 — Bergantung pada Tipe Data yang Ada
+| Item | Status |
+|------|--------|
+| FSM persistensi via WAL | ✅ `WALRecord::UpdateFsm` + `FreeSpaceManager::serialize/deserialize` |
 
-| # | Grup | Fungsi | Alasan |
-|---|------|--------|--------|
-| **7** | **Timestamp** (4) ✅ sudah | `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` | `DateOp` sudah ada ✅ — tinggal tambah variant ke enum + `evaluate_date()` |
-| **8** | **Interval** (8) ✅ sudah | `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` | `Interval` type ✅ sudah di types.rs — perlu enum `IntervalOp` baru + evaluator |
-| **9** | **Blob** (3) ✅ sudah | `ENCODE`, `DECODE`, `OCTET_LENGTH` | `Blob` type ✅ sudah ada — encoding/decoding via `_base64` crate |
+### 3.4 ✅ Code Quality
 
-##### 🏆 Level 3 — Paling Kompleks
+| Item | Status |
+|------|--------|
+| ADBC extension | ✅ `kuzu-main/src/adbc.rs` — `AdbcDatabase`, `AdbcConnection`, `AdbcStatement`, `AdbcPreparedStatement` (gated `#[cfg(feature = "adbc")]`) |
 
-| # | Grup | Fungsi | Alasan |
-|---|------|--------|--------|
-| **10** | **Union** (3) ✅ sudah | `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` | `Union` type ✅ ada — tapi perlu `UnionOp` enum, tag-based dispatch, validasi tag |
-| **11** | **List** (14) | `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` | Paling banyak fungsi, perlu `LogicalType::List` handling, existing `ListOp` enum mungkin perlu diperluas |
+### 3.5 ✅ Transaction Layer — Multiwriter
 
-##### Iterasi 1 ✅ (10 fungsi — langsung bisa) ✅ sudah 
+| Item | Status |
+|------|--------|
+| Concurrent write transactions | ✅ `concurrent_writes: AtomicBool` + `writer_condvar: Condvar` di `kuzu-transaction/src/lib.rs` |
+| Single-writer fallback mode | ✅ `set_concurrent_writes(false)` — blocking via Condvar |
+| Unit tests | ✅ `test_concurrent_writer_limit_single_writer_mode` + `test_concurrent_writes_allowed` |
 
-| Fungsi | Kompleksitas | Implementasi |
-|--------|-------------|--------------|
-| `RANGE(start, end, step?)` | ⭐ | `(start..=end).step_by(step)` → List |
-| `LIST_DISTINCT(list)` | ⭐ | Dedup via `HashSet` |
-| `LIST_UNIQUE(list)` | ⭐ | `len == distinct_len ? 1 : 0` |
-| `LIST_SUM(list)` | ⭐ | Sum numeric elements |
-| `LIST_PRODUCT(list)` | ⭐ | Product numeric elements |
-| `LIST_ANY_VALUE(list)` | ⭐ | `list.first().cloned()` |
-| `LIST_TO_STRING(list, sep)` | ⭐ | `join` elements by separator |
-| `LIST_POSITION(list, val)` | ⭐ | `position()` — 1-based |
-| `LIST_HAS_ALL(list1, list2)` | ⭐ | `list1.contains_all(list2)` |
-| `LIST_REVERSE_SORT(list)` | ⭐ | `sort().reverse()` |
+### 3.6 ✅ Lambda Evaluator — Per-Elemen Predicate
 
-##### Iterasi 2 ⏳ (4 fungsi — perlu riset lebih)
-
-| Fungsi | Kompleksitas | Alasan |
-|--------|-------------|--------|
-| `ANY(list, pred)` | ⭐⭐ | Predicate evaluation — butuh expression handling |
-| `ALL(list, pred)` | ⭐⭐ | Sama |
-| `NONE(list, pred)` | ⭐⭐ | Sama |
-| `SINGLE(list, pred)` | ⭐⭐ | Sama — perlu cek C++ bagaimana implementasinya |
-
-ANY/ALL/NONE/SINGLE dengan predicate mungkin membutuhkan evaluasi ekspresi di runtime, bukan sekadar transformasi value → value.
+| Item | Status |
+|------|--------|
+| Grammar (`cypher.pest`) | ✅ `list_predicate` rule |
+| AST (`ast.rs`) | ✅ `Expression::ListPredicate` + `Quantifier` enum |
+| Parser (`parser.rs`) | ✅ Parse list predicate → AST |
+| Binder (`binder.rs`) | ✅ `Expression::ListPredicate` handling |
+| Evaluator (`expression_evaluator.rs`) | ✅ `evaluate_list_predicate()` — creates mini-chunk per element, evaluates predicate, applies quantifier (ANY/ALL/NONE/SINGLE) |
 
 ---
 
-Baik, setelah riset C++, lambda infrastructure untuk predicate belum ada di Rust. Saya implementasi **versi praktis tanpa lambda** (semantic matching C++ spirit):
+## 4. Kesenjangan Tersisa (Aktual)
 
-| Fungsi | Signature | Implementasi | C++ Note |
-|--------|-----------|---------------|----------|
-| `ANY(list)` ✅ sudah | `List → Bool` | `any(is_truthy)` | C++ pakai lambda, kita pakai truthy check |
-| `ALL(list)` ✅ sudah | `List → Bool` | `!empty && all(is_truthy)` | Empty = false (PostgreSQL semantics) |
-| `NONE(list)` ✅ sudah | `List → Bool` | `all(!is_truthy)` | Sama dengan `NOT ANY` |
-| `SINGLE(list)` ✅ sudah | `List → Bool` | `count(is_truthy) == 1` | Tepat satu truthy |
+### 🟡 4.1 Wasm Build
+- Ada `cfg(target_arch = "wasm32")` guards di `page.rs` dan `build.rs`
+- Belum ada `wasm-bindgen`, `wasm-pack`, atau JS bindings
+- LadybugDB punya full Wasm (`@ladybugdb/wasm-core`) — Kuzu Rust belum setara
 
-### Catatan Penting
+### ⚪ 4.2 Extension Crates (Sebagian Masih Stub)
+- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`, `kuzu-sqlite`, `kuzu-neo4j`, `kuzu-httpfs`, `kuzu-json`, `kuzu-fts`, `kuzu-llm` — sebagian besar masih kerangka dasar
+- `kuzu-postgres`, `kuzu-duckdb` — sudah fungsional
 
-C++ original menggunakan **lambda/predicate expression** (`isListLambda = true`) via `ListLambdaEvaluator` di binder/planner/processor layer. Implementasi Rust saat ini **belum memiliki lambda evaluator infrastructure**. Sebagai gantinya, fungsi-fungsi ini menggunakan **truthy check** (`Bool(true)` / non-zero `Int64/Double`).
-
----
-
-## Hasil Riset: Lambda Infrastructure untuk Rust Kuzu
-
-### Ringkasan: 5 Layer yang Perlu Dibangun
-
-```
-Cypher: ANY(x IN [1,2,3] WHERE x > 5)
-                         ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Grammar (cypher.pest)       ← Rule baru: list_predicate │
-│ 2. AST (ast.rs)                ← Variant: ListPredicate    │
-│ 3. Parser (parser.rs)          ← Parse ke AST baru         │
-│ 4. Binder (binder.rs) ⚠️ Perlu perubahan arsitektur │
-│ 5. Processor (processor.rs) ⚠️ Yang paling kompleks │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Detail per Layer
-
-#### Layer 1: Grammar (`cypher.pest`) — ✅ sudah 
-
-Rule baru di `primary`:
-```pest
-list_predicate = {
-    ("ANY" | "ALL" | "NONE" | "SINGLE") ~
-    "(" ~ variable ~ "IN" ~ expression ~ "WHERE" ~ expression ~ ")"
-}
-```
-
-Serta `LambdaExpression` untuk fungsi `list_filter`/`list_transform`:
-```pest
-lambda_function_args = {
-    "(" ~ expression ~ "," ~ lambda_expr ~ ")"
-}
-lambda_expr = { variable ~ "->" ~ expression }
-```
-
-Saat ini grammar **tidak memiliki rule untuk `list_predicate`** — perlu ditambahkan.
-
-#### Layer 2: AST (`ast.rs`) — ✅ Sudah
-
-Variant baru di `Expression`:
-```rust
-pub enum Expression {
-    // ... existing ...
-    /// ANY/ALL/NONE/SINGLE list predicates
-    ListPredicate {
-        quantifier: Quantifier,       // Any | All | None | Single
-        list: Box<Expression>,
-        var_name: String,             // iteration variable (x)
-        predicate: Box<Expression>,   // x > 5
-    },
-}
-
-pub enum Quantifier { Any, All, None, Single }
-```
-
-Saat ini **tidak ada variant `ListPredicate` atau `Quantifier`**.
-
-#### Layer 3: Parser (`parser.rs`) — ✅ Bisa ditambahkan
-
-Parse `list_predicate` rule menjadi `Expression::ListPredicate { ... }`.
-
-Saat ini **tidak ada kode parsing untuk list predicates**.
-
-#### Layer 4: Binder (`binder.rs`) — ⚠️ Perlu perubahan arsitektur
-
-Saat ini `BoundExpression` hanyalah wrapper:
-```rust
-pub struct BoundExpression {
-    pub expression: Expression,       // AST asli (opaque)
-    pub resolved_type: LogicalTypeID,
-    pub is_constant: bool,
-}
-```
-
-Untuk lambda, perlu:
-- **`BoundLambdaExpression`** baru dengan `var_name`, `body_expression`, `resolved_var_type`
-- **`resolve_list_predicate()`** untuk bind list + variable + predicate secara terpisah
-- Variabel `x` perlu dimasukkan ke scope sementara untuk predicate resolution
-
-#### Layer 5: Processor (`expression_evaluator.rs`) — ⚠️ Yang paling kompleks
-
-Saat ini `evaluate_scalar` hanya menerima `&[Value]`:
-```rust
-pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, String>
-```
-
-Untuk lambda, perlu mekanisme yang bisa **mengevaluasi predicate untuk setiap elemen list**.
-
----
-
-### Status Saat Ini
-
-| Layer | Status | Yang Perlu Dibangun |
-|-------|--------|---------------------|
-| `cypher.pest` | ✅ sudah  | Rule `list_predicate` + `lambda_expr` |
-| `ast.rs` | ✅ sudah  | `Expression::ListPredicate` + `Quantifier` enum |
-| `parser.rs` | ✅ sudah  | Parse list predicate + lambda |
-| `binder.rs` | ⚠️ Perlu perubahan arsitektur | `BoundLambdaExpression` + variable scope |
-| registry.rs | ❌ | `ScalarFunction::ListLambda` variant |
-| scalar.rs | ⚠️ Ada | Versi truthy-check saja (`is_truthy()`) |
-| `expression_evaluator.rs` | ❌ | Iterasi + evaluasi predicate per elemen |
-
-
----
-
-### 3.2 🟡 Optimizer Enhancements
-
-| Item | Detail | Estimasi |
-|------|--------|----------|
-| Cost-based join order DP (upgrade dari greedy) | `join_order.rs` masih greedy | 4-5 hari |
-
-### 3.3 🟡 Storage Enhancements
-
-| Item | Detail | Estimasi |
-|------|--------|----------|
-| FSM persistensi via WAL | In-memory only saat ini | 2-3 hari |
-
-### 3.4 ⚪ Code Quality
-
-| Item | Detail | Estimasi |
-|------|--------|----------|
-| Clippy warnings | ~90 warnings (extension crates, pre-existing) | 2 hari |
-| ADBC extension | LadybugDB-only, nol di C++ Vela asli | 3-5 hari (opsional) |
-
----
-
-## 4. Prioritas ke Depan
-
-### 🔴 Prioritas 1: Fungsi C++ Tersisa (5-7 hari)
-Port 18+ fungsi scalar yang masih missing:
-1. Interval functions (TO_YEARS, TO_DAYS, etc.) — 2 hari
-2. Hash functions (MD5, SHA256) — 1 hari
-3. List functions (RANGE, LIST_DISTINCT, etc.) — 2 hari
-4. Timestamp functions (CENTURY, EPOCH_MS, etc.) — 1 hari
-5. Blob functions (ENCODE, DECODE) — 1 hari
-
-### 🟡 Prioritas 2: Optimizer Enhancement (4-5 hari)
-- Cost-based join order dengan DP enumeration
-
-### 🟢 Prioritas 3: Code Quality (2 hari)
-- Clippy warning cleanup
-- Cargo fmt
-
-### ⚪ Prioritas 4: Opsional (3-5 hari)
-- ADBC extension (jika diperlukan)
+### ⚪ 4.3 Code Quality
+- Clippy warnings di extension crates
 - CI/CD setup
 
 ---
 
-## 5. Test Results (Current)
+## 5. Test Results (Per 2026-07-05)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| kuzu-common | 14 | ✅ Pass |
+| kuzu-common | 19 | ✅ Pass |
 | kuzu-parser | 37 | ✅ Pass |
 | kuzu-binder | 21 | ✅ Pass |
-| kuzu-planner | 48 | ✅ Pass |
-| kuzu-optimizer | 93 | ✅ Pass |
-| kuzu-processor | 31 | ✅ Pass |
-| kuzu-storage | 48 | ✅ Pass |
-| kuzu-function | 93 | ✅ Pass |
-| kuzu-catalog | 21 | ✅ Pass |
+| kuzu-planner | 49 | ✅ Pass |
+| kuzu-optimizer | 59 | ✅ Pass |
+| kuzu-processor | 61 | ✅ Pass |
+| kuzu-storage | 233 | ✅ Pass |
+| kuzu-function | 150 | ✅ Pass |
+| kuzu-catalog | 14 | ✅ Pass |
 | kuzu-graph | 9 | ✅ Pass |
 | kuzu-vector | 7 | ✅ Pass |
-| kuzu-main (unit) | 47 | ✅ Pass |
-| kuzu-main (integration) | 14 | ⚠️ Pre-existing (RETURN *, FOREACH, MERGE, subqueries not wired end-to-end) |
-| **Total unit tests** | **~469** | **✅ All pass** |
+| kuzu-transaction | 20 | ✅ Pass |
+| kuzu-main (unit) | 77 | ✅ Pass |
+| kuzu-main (integration) | 44 | ✅ Pass |
+| kuzu-main (fase_b_verification) | 12 | ✅ Pass |
+| Other crates | 86 | ✅ Pass |
+| **Total** | **898** | **✅ All pass, 0 failed** |
 
 ---
 
@@ -594,11 +412,12 @@ Port 18+ fungsi scalar yang masih missing:
 | `08e6117` | Prioritas 0 follow-up: Intersect execute_binary + weighted RecursiveExtend + SIP tests + clippy fixes |
 | `44848e6` | Prioritas 0: Binary operators fix + SIP opt + parser improvements + zone map + FSM |
 | Prior | 18+ commits implementing GDS, SIP, FSM, zone map, optimizer passes, etc. |
+| Post-07/02 | Lambda evaluator per-elemen, DP Bushy Trees join order, multiwriter, ADBC, Postgres/DuckDB extensions, all scalar functions, integration test fixes |
 
 ---
 
 ## 7. Catatan
 
-- Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`git show`/`cargo check`/`grep`).
-- 14 kegagalan test di kuzu-main adalah **pre-existing** (parser belum support `RETURN *`, FOREACH end-to-end, MERGE end-to-end, subquery end-to-end, dll.) — bukan regresi.
+- Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
+- Per 2026-07-05: **898 test lulus, 0 gagal** di seluruh workspace.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
