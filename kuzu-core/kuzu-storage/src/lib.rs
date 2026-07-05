@@ -18,6 +18,7 @@ pub mod local_storage;
 pub mod local_wal;
 pub mod node_group;
 pub mod page;
+pub mod page_manager;
 pub mod predicate;
 #[cfg(feature = "parquet")]
 pub mod parquet_reader;
@@ -25,10 +26,12 @@ pub mod shadow_file;
 pub mod spiller;
 pub mod stats;
 pub mod table;
+pub mod undo_buffer;
 pub mod update_info;
 pub mod vector_index;
 pub mod version_info;
 pub mod wal;
+pub mod wal_replayer;
 
 use buffer_manager::{BufferManager, BufferManagerConfig};
 use checkpoint::checkpoint;
@@ -47,9 +50,12 @@ pub use vector_index::{extract_f64_list_from_value, VectorIndexTable};
 pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
+pub use page_manager::PageManager;
 pub use shadow_file::ShadowFile;
 pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
+pub use undo_buffer::UndoBuffer;
+pub use wal_replayer::{ReplayResult, WALReplayer};
 
 /// The storage manager — root of the storage engine.
 #[allow(dead_code)]
@@ -58,6 +64,8 @@ pub struct StorageManager {
     buffer_manager: Arc<Mutex<BufferManager>>,
     wal: Arc<Mutex<WAL>>,
     memory_manager: Arc<MemoryManager>,
+    /// Page manager for allocation/deallocation.
+    page_manager: Option<Arc<PageManager>>,
     /// Lock-free table catalog using DashMap internally.
     pub(crate) table_catalog: Arc<TableCatalog>,
 }
@@ -81,13 +89,31 @@ impl StorageManager {
         // a previous session. Recovery is triggered later by `Database::new()`
         // via the `recover()` method.
         let wal = WAL::new(wal_path);
+        let fsm = Arc::new(free_space_manager::FreeSpaceManager::new());
+        let existing_pages = 0u64; // Will be determined by file metadata
+        let pm = PageManager::new(db_path.clone(), page::DEFAULT_PAGE_SIZE, existing_pages, fsm);
         Self {
             db_path,
             buffer_manager: Arc::new(Mutex::new(bm)),
             wal: Arc::new(Mutex::new(wal)),
             memory_manager,
+            page_manager: Some(Arc::new(pm)),
             table_catalog: Arc::new(TableCatalog::new()),
         }
+    }
+
+    /// Open (or create) a database at `db_path`, initializing all storage
+    /// subsystems and replaying the WAL if necessary.
+    ///
+    /// This is the primary entry point for storage initialization.
+    /// After opening, call `recover()` to replay any uncommitted WAL records.
+    pub fn open(db_path: PathBuf, memory_manager: Arc<MemoryManager>) -> Self {
+        Self::new(db_path, memory_manager)
+    }
+
+    /// Get a reference to the page manager, if available.
+    pub fn page_manager(&self) -> Option<&Arc<PageManager>> {
+        self.page_manager.as_ref()
     }
 
     pub fn buffer_manager(&self) -> &Arc<Mutex<BufferManager>> {
@@ -304,9 +330,13 @@ impl StorageManager {
 
     /// Roll back a write transaction, discarding all pending changes.
     ///
-    /// Clears the local storage buffer and discards shadow pages.
+    /// Clears the local storage buffer, discards shadow pages, and
+    /// applies undo records to restore pre-write state.
     /// The caller should also call `TransactionManager::rollback()` to
     /// update the transaction's status and release locks.
+    ///
+    /// `undo_records` — accumulated undo records from the transaction.
+    ///   Applied in reverse order to restore overwritten data.
     ///
     /// Returns `Ok(())` on success.
     pub fn rollback_transaction(
@@ -314,12 +344,25 @@ impl StorageManager {
         local_storage: &mut crate::local_storage::LocalStorage,
         shadow_file: &mut crate::shadow_file::ShadowFile,
         txn_id: u64,
+        undo_records: &[kuzu_transaction::UndoRecord],
     ) -> Result<(), String> {
         // Log the rollback to WAL
         {
             let mut wal = self.wal.lock().unwrap();
             wal.append(crate::wal::WALRecord::Rollback { transaction_id: txn_id });
             let _ = wal.flush_to_disk();
+        }
+
+        // Apply undo records in reverse order to restore pre-write state
+        for record in undo_records.iter().rev() {
+            if let Some(mut table) = self.table_catalog.get_node_table_mut(record.table_id) {
+                let values = deserialize_values_from_bytes(&record.old_data, 1);
+                if let Some(val) = values.into_iter().next() {
+                    table
+                        .update_cell(record.row_id, record.column as usize, val)
+                        .map_err(|e| format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id))?;
+                }
+            }
         }
 
         // Discard buffered writes
@@ -423,6 +466,18 @@ impl StorageManager {
                     // At recovery time, the raw data is opaque — we skip it
                     // since the table-level records (Insert/Delete/Update)
                     // are replayed independently from the same transaction.
+                }
+                // DDL records — metadata-only, no data to replay for now.
+                // DDL operations (CREATE/DROP TABLE, etc.) are captured via
+                // Catalog serialization separately.
+                WALRecord::CreateTable { .. }
+                | WALRecord::DropTable { .. }
+                | WALRecord::AlterTable { .. }
+                | WALRecord::CreateIndex { .. }
+                | WALRecord::DropIndex { .. }
+                | WALRecord::CreateSequence { .. } => {
+                    // DDL records are replayed via catalog snapshot, not
+                    // individual WAL entries. Skip during table-level replay.
                 }
             }
             Ok(())
@@ -1310,7 +1365,7 @@ mod integration_tests {
         assert!(!local_storage.is_empty(), "LocalStorage should have buffered data");
 
         // Rollback
-        sm.rollback_transaction(&mut local_storage, &mut shadow, 1 /* txn_id */)
+        sm.rollback_transaction(&mut local_storage, &mut shadow, 1 /* txn_id */, &[])
             .unwrap();
 
         // Verify buffers are cleared

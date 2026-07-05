@@ -106,6 +106,26 @@ impl LocalWAL {
                 self.buffer.write_all(data).unwrap();
                 self.size += 1 + 4 + data.len();
             }
+            // DDL variants — each writes a tag + u64 table_id
+            WALRecord::CreateTable { table_id }
+            | WALRecord::DropTable { table_id }
+            | WALRecord::AlterTable { table_id }
+            | WALRecord::CreateIndex { table_id }
+            | WALRecord::DropIndex { table_id }
+            | WALRecord::CreateSequence { table_id } => {
+                let tag: u8 = match record {
+                    WALRecord::CreateTable { .. } => b'T',
+                    WALRecord::DropTable { .. } => b'A',
+                    WALRecord::AlterTable { .. } => b'M',
+                    WALRecord::CreateIndex { .. } => b'N',
+                    WALRecord::DropIndex { .. } => b'X',
+                    WALRecord::CreateSequence { .. } => b'Q',
+                    _ => unreachable!(),
+                };
+                self.buffer.write_all(&[tag]).unwrap();
+                table_id.serialize(&mut self.buffer).unwrap();
+                self.size += 1 + 8;
+            }
         }
         self.count += 1;
     }

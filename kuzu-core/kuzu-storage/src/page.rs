@@ -149,6 +149,36 @@ impl FileHandle {
             fsm.add_uncheckpointed_free_pages(crate::free_space_manager::PageRange::new(page_num, 1));
         }
     }
+
+    /// Extend the file by `num_pages` pages, writing zero-filled data.
+    ///
+    /// Returns the starting page number of the newly extended region.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn extend_file(&mut self, num_pages: u64) -> std::io::Result<PageNum> {
+        use std::io::Write;
+
+        let start_page = self.num_pages;
+        let extend_bytes = (num_pages as usize) * self.page_size;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+
+        let zeros = vec![0u8; extend_bytes];
+        file.write_all(&zeros)?;
+        file.flush()?;
+
+        self.num_pages += num_pages;
+        Ok(start_page)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn extend_file(&mut self, num_pages: u64) -> std::io::Result<PageNum> {
+        let start_page = self.num_pages;
+        self.num_pages += num_pages;
+        Ok(start_page)
+    }
 }
 
 #[cfg(test)]

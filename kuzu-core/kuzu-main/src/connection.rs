@@ -145,6 +145,7 @@ impl Connection {
                 &mut res.local_storage,
                 &mut res.shadow_file,
                 txn_id,
+                &records.iter().cloned().collect::<Vec<_>>(),
             );
         }
 
@@ -2782,7 +2783,7 @@ mod fase_a_verification {
 
         // Rollback
         db.storage_manager
-            .rollback_transaction(&mut local_storage, &mut ShadowFile::new(), txn.transaction_id)
+            .rollback_transaction(&mut local_storage, &mut ShadowFile::new(), txn.transaction_id, &[])
             .unwrap();
         let _ = db.transaction_manager.rollback(&mut txn.clone());
 

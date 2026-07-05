@@ -49,6 +49,31 @@ pub enum WALRecord {
         transaction_id: u64,
     },
     Checkpoint,
+    // ── DDL record types (extended for Ladybug-style WAL) ──
+    /// Create a node or rel table.
+    CreateTable {
+        table_id: u64,
+    },
+    /// Drop a table.
+    DropTable {
+        table_id: u64,
+    },
+    /// Alter a table (add/drop/rename column).
+    AlterTable {
+        table_id: u64,
+    },
+    /// Create an index on a table.
+    CreateIndex {
+        table_id: u64,
+    },
+    /// Drop an index on a table.
+    DropIndex {
+        table_id: u64,
+    },
+    /// Create a sequence.
+    CreateSequence {
+        table_id: u64,
+    },
 }
 
 /// Write-Ahead Log for durability.
@@ -80,6 +105,13 @@ impl WAL {
             WALRecord::UpdateFsm { .. } => 8 + 1, // u64 + bool
             WALRecord::ColumnWrite { data, .. } => data.len(),
             WALRecord::LocalWALData { data } => data.len(),
+            // DDL variants: each has a u64 table_id
+            WALRecord::CreateTable { .. }
+            | WALRecord::DropTable { .. }
+            | WALRecord::AlterTable { .. }
+            | WALRecord::CreateIndex { .. }
+            | WALRecord::DropIndex { .. }
+            | WALRecord::CreateSequence { .. } => 8,
             _ => 8,
         };
         self.total_size += size;
@@ -213,6 +245,31 @@ impl WAL {
                 WALRecord::Checkpoint => {
                     file.write_all(b"K")?;
                 }
+                // ── DDL record types ──
+                WALRecord::CreateTable { table_id } => {
+                    file.write_all(b"T")?;
+                    table_id.serialize(&mut file)?;
+                }
+                WALRecord::DropTable { table_id } => {
+                    file.write_all(b"A")?; // 'A' for drop (avoid conflict)
+                    table_id.serialize(&mut file)?;
+                }
+                WALRecord::AlterTable { table_id } => {
+                    file.write_all(b"M")?; // 'M' for alter/modify
+                    table_id.serialize(&mut file)?;
+                }
+                WALRecord::CreateIndex { table_id } => {
+                    file.write_all(b"N")?; // 'N' for iNdex
+                    table_id.serialize(&mut file)?;
+                }
+                WALRecord::DropIndex { table_id } => {
+                    file.write_all(b"X")?; // 'X' for drop indeX
+                    table_id.serialize(&mut file)?;
+                }
+                WALRecord::CreateSequence { table_id } => {
+                    file.write_all(b"Q")?; // 'Q' for seQuence
+                    table_id.serialize(&mut file)?;
+                }
             }
         }
         file.flush()?;
@@ -312,6 +369,31 @@ impl WAL {
                 }
                 b'K' => {
                     self.records.push(WALRecord::Checkpoint);
+                }
+                // ── DDL record types ──
+                b'T' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::CreateTable { table_id });
+                }
+                b'A' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::DropTable { table_id });
+                }
+                b'M' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::AlterTable { table_id });
+                }
+                b'N' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::CreateIndex { table_id });
+                }
+                b'X' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::DropIndex { table_id });
+                }
+                b'Q' => {
+                    let table_id = u64::deserialize(&mut cursor)?;
+                    self.records.push(WALRecord::CreateSequence { table_id });
                 }
                 _ => {
                     return Err(std::io::Error::new(
