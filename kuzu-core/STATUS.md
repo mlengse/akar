@@ -68,6 +68,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | UnwindDedup (Ladybug) | ❌ TIDAK ADA | ✅ Dedup consecutive UNWIND operators | `[P4.2]` |
 | CountRelTable (Ladybug) | ❌ TIDAK ADA | ✅ Logical+Physical+Optimizer pass | `[P4.3]` |
 | Remaining Table Functions | ❌ 8 missing | ✅ bm_info, file_info, free_space_info, show_loaded_extensions, show_official_extensions, clear_warnings, show_warnings, disk_size_info, storage_version | `[P5]` |
+| Native FTS Index | ❌ TIDAK ADA | ✅ DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX`, BM25, 3 macro tables, Porter stemmer, tokenizer, stop words | `[P8]` |
 
 ---
 
@@ -444,7 +445,8 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - `kuzu-postgres`, `kuzu-duckdb`: **Selesai**. Sudah fungsional mendelegasikan query atau scanning.
 - `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`: **Selesai (Delegation)**. Menggunakan `kuzu-duckdb` attach_helper untuk query.
 - `kuzu-sqlite`, `kuzu-neo4j`: **Selesai (Native)**.
-- `kuzu-httpfs`, `kuzu-fts`: Sebagian masih stub/placeholder yang menunggu integrasi engine indexing secara native.
+- `kuzu-httpfs`: **Selesai (Native)**. HTTP/HTTPS/S3 via VFS Registry + `HttpRandomAccessReader` (HTTP Range requests).
+- `kuzu-fts`: **Selesai (Native)**. Full pipeline: DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX doc_idx('query')`, BM25 scoring, 3 macro tables (`{name}_docs`, `{name}_terms`, `{name}_appears_in`), Porter stemmer, stop word filtering, tokenizer. Diuji via `kuzu-main/tests/test_fts.rs`.
 
 ### 4.3 Code Quality
 - Clippy warnings di extension crates **sudah diperbaiki** (`unused_imports` di kuzu-postgres, kuzu-iceberg, dll).

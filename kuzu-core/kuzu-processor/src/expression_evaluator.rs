@@ -124,10 +124,12 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a variable expression — reads a field from the DataChunk by variable name.
-    /// The variable name is matched against field names by index position (0-based).
-    /// Falls back to treating any non-null first field as true (legacy compatibility).
+    /// The variable name is matched against:
+    /// 1. Numeric index (binder resolves names to positions, e.g., "0", "1")
+    /// 2. Chunk field names (e.g., "title", "d.title")
+    /// 3. Falls back to the first field (legacy compatibility) if no match found.
     fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
-        // Try to find the field by position (the binder resolves names to positions)
+        // Try to find the field by numeric position (the binder resolves names to positions)
         if let Ok(idx) = name.parse::<usize>() {
             return chunk.fields.get(idx).cloned().ok_or_else(|| {
                 format!(
@@ -137,6 +139,18 @@ impl ExpressionEvaluator {
                     chunk.fields.len()
                 )
             });
+        }
+
+        // Try to find the field by name in the chunk's field names.
+        if !chunk.field_names.is_empty() {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
+                return chunk.fields.get(idx).cloned().ok_or_else(|| {
+                    format!(
+                        "Variable '{}' (field name match at index {}) not found in chunk",
+                        name, idx
+                    )
+                });
+            }
         }
 
         // For unresolved variable names (e.g., from MATCH patterns), fall back to

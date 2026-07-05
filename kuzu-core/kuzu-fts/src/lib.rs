@@ -1,15 +1,17 @@
 //! Full-Text Search (FTS) extension for Kuzu.
 //!
 //! Enables full-text indexing and querying:
-//! - `STEM` — stem words using a language stemmer
+//! - `STEM` — stem words using a Porter-style English stemmer
 //! - `TOKENIZE` — tokenize text into words
-//! - `CREATE_FTS_INDEX` — create a full-text search index
-//! - `QUERY_FTS_INDEX` — query the FTS index
 //!
-//! The FTS index is backed by internal tables storing terms, documents,
-//! and posting lists.
+//! FTS index creation and querying are handled **natively** via the DDL and
+//! MATCH clause (`CREATE FTS INDEX`, `MATCH ... USING FTS INDEX`), which
+//! bypass the extension function registry. The library functions below
+//! (stem_word, tokenize, bm25, etc.) are called directly by the physical
+//! operators in `kuzu-processor`.
 
 use kuzu_extension::{Extension, ExtensionContext};
+use std::sync::Arc;
 
 /// The FTS extension adds full-text search capabilities to Kuzu.
 pub struct FtsExtension;
@@ -32,33 +34,50 @@ impl Extension for FtsExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
+        use kuzu_common::types::Value;
         use kuzu_function::registry::ScalarFunction;
-        use kuzu_function::registry::{StringOp, TableFunction};
 
-        // Register scalar functions
+        // Register `stem(word)` — applies Porter-style stemming
         context.register_scalar_function(
             "stem",
-            ScalarFunction::String {
-                op: StringOp::Substring,
-            },
-        );
-        context.register_scalar_function("tokenize", ScalarFunction::String { op: StringOp::Contains });
-
-        // Register table functions
-        context.register_table_function(
-            "create_fts_index",
-            TableFunction::ScanJson {
-                path: "fts_index".into(),
-            },
-        );
-        context.register_table_function(
-            "query_fts_index",
-            TableFunction::ScanJson {
-                path: "fts_query".into(),
+            ScalarFunction::CustomScalar {
+                name: "stem".into(),
+                execute: Arc::new(|args: &[Value]| -> Result<Value, String> {
+                    let word = match args.first() {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err("stem: expected 1 string argument".into()),
+                    };
+                    Ok(Value::String(stem_word(&word)))
+                }),
             },
         );
 
-        tracing::info!("FTS extension loaded: 4 functions registered");
+        // Register `tokenize(text)` — splits text into lowercase word tokens
+        context.register_scalar_function(
+            "tokenize",
+            ScalarFunction::CustomScalar {
+                name: "tokenize".into(),
+                execute: Arc::new(|args: &[Value]| -> Result<Value, String> {
+                    let text = match args.first() {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err("tokenize: expected 1 string argument".into()),
+                    };
+                    let tokens: Vec<Value> = tokenize(&text)
+                        .into_iter()
+                        .map(Value::String)
+                        .collect();
+                    Ok(Value::List(tokens))
+                }),
+            },
+        );
+
+        // FTS index creation and querying are handled natively via:
+        //   CREATE FTS INDEX ...  (DDL → PhysicalCreateFtsIndex)
+        //   MATCH ... USING FTS INDEX ... (PhysicalFtsScan + BM25)
+        // These extension table functions are informational stubs for
+        // CALL-based discovery (e.g., `CALL show_functions()`).
+
+        tracing::info!("FTS extension loaded: stem, tokenize (scalar) + native DDL/MATCH FTS pipeline");
 
         Ok(())
     }

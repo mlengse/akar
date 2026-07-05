@@ -382,9 +382,23 @@ impl QueryProcessor {
                             }
                             output
                         } else {
-                            let proj = PhysicalProjection {
-                                column_indices: (0..p.expressions.len()).collect(),
+                            // Simple column references — resolve column indices from
+                            // expression variable names against the input chunk's field names.
+                            let column_indices: Vec<usize> = if let Some(first_chunk) = input.first() {
+                                p.expressions
+                                    .iter()
+                                    .filter_map(|be| resolve_projection_column_index(&be.expression, first_chunk))
+                                    .collect()
+                            } else {
+                                Vec::new()
                             };
+                            // Fallback: if resolution failed for any expression, use 0..n
+                            let column_indices = if column_indices.len() == p.expressions.len() {
+                                column_indices
+                            } else {
+                                (0..p.expressions.len()).collect()
+                            };
+                            let proj = PhysicalProjection { column_indices };
                             proj.execute(input)?
                         }
                     };
@@ -1115,6 +1129,49 @@ fn extract_join_prop(expr: &Expression) -> Option<String> {
         Expression::Variable(name) => Some(name.clone()),
         _ => None,
     }
+}
+
+/// Resolve a projection expression to a column index in the input DataChunk.
+///
+/// For simple column references (Variable, PropertyAccess), this matches
+/// against the chunk's `field_names` to find the correct column position.
+/// Returns `None` if the expression can't be resolved to a known column.
+fn resolve_projection_column_index(expr: &Expression, chunk: &DataChunk) -> Option<usize> {
+    // For PropertyAccess like `r.count`: qualify as "r.count" and match
+    // against prefixed field names like "fts_appears_in.count".
+    if let Expression::PropertyAccess(obj, prop) = expr {
+        let col_name = if let Expression::Variable(var) = &**obj {
+            format!("{}.{}", var, prop)
+        } else {
+            prop.clone()
+        };
+        // Try qualified name first, then just the property name
+        if !chunk.field_names.is_empty() {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n.ends_with(&format!(".{}", prop)) || n == &col_name || n == prop) {
+                return Some(idx);
+            }
+        }
+        // Fallback: try numeric index from variable name
+        if let Expression::Variable(var) = &**obj {
+            if let Ok(idx) = var.parse::<usize>() {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+    // For Variable like `name`: match by name or numeric index
+    if let Expression::Variable(name) = expr {
+        if let Ok(idx) = name.parse::<usize>() {
+            return Some(idx);
+        }
+        if !chunk.field_names.is_empty() {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+    None
 }
 
 /// Flatten a `LogicalUnion` child subtree into a sequence of operators
