@@ -42,4 +42,16 @@ impl StatsStore {
     pub fn update_table_stats(&mut self, table_id: u64, stats: TableStats) {
         self.tables.insert(table_id, stats);
     }
+
+    /// Get row count and estimated storage size for a table by ID.
+    /// Returns (row_count: u64, storage_size_bytes: u64).
+    pub fn table_stats_by_id(&self, table_id: u64) -> (u64, u64) {
+        if let Some(stats) = self.tables.get(&table_id) {
+            // Rough estimate: num_rows * 256 bytes per row average
+            let estimated_size = stats.num_rows * 256;
+            (stats.num_rows, estimated_size)
+        } else {
+            (0, 0)
+        }
+    }
 }

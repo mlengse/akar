@@ -129,7 +129,7 @@ impl CliState {
                 } else {
                     let sql = format!("COPY {} FROM '{}' (HEADER true)", parts[2], parts[1].replace('\\', "/"));
                     match self.conn.query(&sql) {
-                        Ok(r) => { let _ = writeln!(output, "{}", r.summary()); }
+                        Ok(r) => { let _ = writeln!(output, "{}", r.result_summary()); }
                         Err(e) => { let _ = writeln!(output, "Error: {e}"); }
                     }
                 }

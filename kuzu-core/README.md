@@ -7,8 +7,8 @@ A from-scratch Rust port of [Kuzu](https://github.com/kuzudb/kuzu), an embedded 
 ```
 kuzu-core/
 ├── kuzu-common/        # Type system (37 LogicalTypes, Value, DataChunk), memory, serialization
-├── kuzu-storage/       # Columnar storage: BufferManager, WAL, compression, CSV/Parquet readers
-├── kuzu-transaction/   # MVCC transaction manager with timestamp ordering
+├── kuzu-storage/       # Columnar storage: BufferManager, WAL+Replayer, UndoBuffer, PageManager, compression, CSV/Parquet readers
+├── kuzu-transaction/   # MVCC + TransactionContext (AUTO/MANUAL), checkpoint worker, conflict detection
 ├── kuzu-catalog/       # System catalog (schemas, tables, types, columns)
 ├── kuzu-parser/        # PEG grammar (pest.rs) for full Cypher clause set
 ├── kuzu-binder/        # Semantic analysis, symbol resolution, type inference
@@ -112,7 +112,8 @@ Cypher text
 | `UNION ALL` | ✅ | `RETURN 1 AS x UNION ALL RETURN 2 AS x` |
 | `UNWIND` | ✅ | `UNWIND [1,2,3] AS x RETURN x` |
 | `CREATE` (node) | ✅ | `CREATE (:Person {name: 'Alice', age: 25})` |
-| Aggregation | ✅ | `RETURN COUNT(*), SUM(n.age), AVG(n.score), MIN(n.age), MAX(n.age)` |
+| Aggregation | ✅ | `RETURN COUNT(*), SUM(n.age), AVG(n.score), MIN(n.age), MAX(n.age), PERCENTILE_DISC(n.age, 0.5)` |
+| `ANALYZE` | ✅ | `ANALYZE Person`, `ANALYZE *` — collect table statistics |
 | `GROUP BY` | ✅ (multi-key) | `RETURN n.gender, COUNT(*) GROUP BY n.gender` |
 | `HAVING` | ✅ | `RETURN n.gender, COUNT(*) AS c GROUP BY n.gender HAVING c > 1` |
 | `CREATE SEQUENCE` | ✅ | `CREATE SEQUENCE seq1;` |
@@ -121,31 +122,33 @@ Cypher text
 | `EXPORT DATABASE` | ✅ | `EXPORT DATABASE '/path/export';` |
 | `IMPORT DATABASE` | ✅ | `IMPORT DATABASE '/path/export';` |
 | `FOREACH` | ✅ | `FOREACH (x IN [1,2,3] | CREATE (:N {p: x}))` |
-| `MERGE` | ⚠️ Partial | `MERGE (n:Person {name: 'Alice'})` (parser/binder OK, end-to-end pending) |
+| `MERGE` | ✅ | `MERGE (n:Person {name: 'Alice'})` ON CREATE SET n.age=30 ON MATCH SET n.age=31 |
 | Variable-length paths | ✅ | `MATCH (a)-[*1..5]->(b) RETURN a, b` |
 | Expressions | ✅ | Arithmetic, boolean, string functions, property access, function calls |
 | Prepared Statements | ✅ | `conn.prepare("...")` + `conn.execute(&stmt, params)` |
+| `BEGIN` / `COMMIT` / `ROLLBACK` | ✅ | `BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK` with AUTO/MANUAL mode |
+| `CALL` (table functions) | ✅ | `CALL show_tables()`, `CALL table_info('T')`, `CALL show_functions()`, `CALL show_indexes()`, `CALL show_sequences()`, `CALL show_macros()`, `CALL show_connection('T')`, `CALL db_version()`, `CALL catalog_version()`, `CALL current_setting('k')`, `CALL stats_info('T')`, `CALL storage_info()`, `CALL show_attached_databases()` |
 
 ## Test Suite Status
 
 ```
-Total: ~469 unit tests — all passing ✅ (14 integration tests pre-existing)
+Total: 922 tests — all passing ✅ (44 integration tests)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
 | `kuzu-common` | 14 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
-| `kuzu-parser` | 37 | ✅ | Cypher PEG grammar, 34+ Statement variants, operator precedence |
+| `kuzu-parser` | 40 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
 | `kuzu-binder` | 21 | ✅ | Semantic analysis, type inference, symbol resolution |
 | `kuzu-planner` | 48 | ✅ | Logical plan construction (34 LogicalOperator variants) |
 | `kuzu-optimizer` | 93 | ✅ | 11 flat passes + 7 tree passes (18 total) |
-| `kuzu-processor` | 31 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy, Aggregate, HashJoin, Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom, Delete, Set |
-| `kuzu-function` | 93 | ✅ | 110+ registered functions, scalar/aggregate/table dispatch |
-| `kuzu-storage` | 48 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map |
+| `kuzu-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy, Aggregate (parallel AggregateHashTable), HashJoin, Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom, Delete, Set |
+| `kuzu-function` | 155 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
+| `kuzu-storage` | 54 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `kuzu-main` (unit) | 47 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `kuzu-main` (integration) | 14 | ⚠️ Pre-existing (RETURN *, FOREACH, MERGE, subqueries not wired end-to-end) |
+| `kuzu-main` (integration) | 44 | ✅ | RETURN *, FOREACH, MERGE, subqueries |
 | `kuzu-catalog` | 21 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
-| `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, conflict detection |
+| `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
 | `kuzu-graph` | 9 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
 | `kuzu-vector` | 7 | ✅ | Vector similarity search |
 | `kuzu-json` | 12 | ✅ | extract, valid, type, structure, contains, keys, array_length |
@@ -162,6 +165,9 @@ Total: ~469 unit tests — all passing ✅ (14 integration tests pre-existing)
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Buffer Manager | ✅ | Clock eviction, page pin/unpin |
+| Page Manager | ✅ | Page allocation/deallocation via FSM (`PageManager`) |
+| Undo Buffer | ✅ | Rollback safety via undo record replay (`UndoBuffer`) |
+| WAL + Replayer + DDL | ✅ | Write-ahead logging, crash recovery, 6 DDL record types (`WALReplayer`) |
 | Free Space Manager | ✅ | Buddy-system allocation integrated in `FileHandle::allocate_page()` |
 | Zone Map Predicate | ✅ | `ColumnChunkStats`-based predicate pushdown in `NodeTable::to_column_major_data_with_predicate()` |
 | ART Index | ✅ | Node4/16/48/256 adaptive radix tree |
@@ -169,7 +175,7 @@ Total: ~469 unit tests — all passing ✅ (14 integration tests pre-existing)
 | Hash Index | ✅ | On-disk + in-memory |
 | WAL + Checkpointer | ✅ | Write-ahead logging, shadow file |
 | Compression | ✅ | Constant, Boolean, dictionary encoding |
-| MVCC / Multiwriter | ✅ | Transaction isolation, dynamic table-level locking, and OCC conflict detection |
+| MVCC / Multiwriter | ✅ | Transaction isolation, AUTO/MANUAL modes, dynamic table-level locking, OCC conflict detection |
 
 ## GDS (Graph Data Science) Framework
 

@@ -93,6 +93,7 @@ impl Binder {
             Statement::CreateMacro(m) => self.bind_create_macro(m),
             Statement::ExportDatabase(e) => self.bind_export_database(e),
             Statement::ImportDatabase(i) => self.bind_import_database(i),
+            Statement::Analyze(a) => self.bind_analyze(a),
         }
     }
 
@@ -1346,6 +1347,26 @@ impl Binder {
             file_path: i.file_path,
             query,
             index_query,
+        }))
+    }
+
+    /// Bind ANALYZE statement — resolve table names to table IDs.
+    fn bind_analyze(&self, a: AnalyzeStatement) -> Result<BoundStatement, String> {
+        let cat = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let table_ids = if let Some(ref table_name) = a.table_name {
+            let id = cat.get_table_id(table_name)
+                .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+            vec![id]
+        } else {
+            // ANALYZE * — collect stats for all node/rel tables
+            cat.all_entries()
+                .filter(|e| e.is_node_table() || e.is_rel_table())
+                .map(|e| e.table_id())
+                .collect()
+        };
+        Ok(BoundStatement::BoundAnalyze(BoundAnalyze {
+            table_name: a.table_name,
+            table_ids,
         }))
     }
 

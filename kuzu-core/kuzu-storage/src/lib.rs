@@ -70,6 +70,15 @@ pub struct StorageManager {
     pub(crate) table_catalog: Arc<TableCatalog>,
 }
 
+/// Storage info returned by CALL storage_info().
+#[derive(Debug, Clone)]
+pub struct StorageInfo {
+    pub db_path: String,
+    pub page_size: usize,
+    pub total_pages: u64,
+    pub free_pages: u64,
+}
+
 impl StorageManager {
     pub fn new(db_path: PathBuf, memory_manager: Arc<MemoryManager>) -> Self {
         // Ensure the database directory exists (ignore error for :memory: mode)
@@ -276,6 +285,22 @@ impl StorageManager {
         // Phase 2: Do the actual checkpoint
         let mut wal = self.wal.lock().unwrap();
         crate::checkpoint::checkpoint(&mut wal, &self.buffer_manager)
+    }
+
+    /// Get storage-level information for diagnostics.
+    pub fn storage_info(&self) -> StorageInfo {
+        let total_pages = self.page_manager.as_ref()
+            .map(|pm| pm.total_pages())
+            .unwrap_or(0);
+        let free_pages = 0u64; // FSM query could be added later
+        StorageInfo {
+            db_path: self.db_path.to_string_lossy().to_string(),
+            page_size: self.page_manager.as_ref()
+                .map(|pm| pm.page_size())
+                .unwrap_or(page::DEFAULT_PAGE_SIZE),
+            total_pages,
+            free_pages,
+        }
     }
 
     /// Commit a write transaction's data to storage.

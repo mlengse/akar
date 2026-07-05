@@ -123,6 +123,148 @@ impl Default for TransactionManagerConfig {
     }
 }
 
+/// Transaction mode for a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionMode {
+    /// Auto-commit: each query implicitly begins and commits.
+    Auto,
+    /// Manual: explicit BEGIN/COMMIT/ROLLBACK required.
+    Manual,
+}
+
+/// Per-connection transaction context that manages the active transaction
+/// and enforces AUTO/MANUAL mode semantics.
+///
+/// In AUTO mode, each write query is wrapped in an implicit transaction:
+/// begin → execute → commit. Read queries proceed without a transaction.
+///
+/// In MANUAL mode, the user must call BEGIN TRANSACTION before any write
+/// and COMMIT/ROLLBACK to finalize. Writes without an active transaction
+/// return an error.
+pub struct TransactionContext {
+    /// Reference to the global transaction manager.
+    manager: Arc<TransactionManager>,
+    /// Current transaction mode.
+    mode: TransactionMode,
+    /// The active write transaction, if any.
+    active_txn: Option<Transaction>,
+}
+
+impl TransactionContext {
+    pub fn new(manager: Arc<TransactionManager>) -> Self {
+        Self {
+            manager,
+            mode: TransactionMode::Auto,
+            active_txn: None,
+        }
+    }
+
+    /// Set the transaction mode.
+    pub fn set_mode(&mut self, mode: TransactionMode) {
+        self.mode = mode;
+    }
+
+    /// Get the current mode.
+    pub fn mode(&self) -> TransactionMode {
+        self.mode
+    }
+
+    /// Whether there is an active write transaction.
+    pub fn has_active_txn(&self) -> bool {
+        self.active_txn.is_some()
+    }
+
+    /// Get the active transaction ID, if any.
+    pub fn active_txn_id(&self) -> Option<u64> {
+        self.active_txn.as_ref().map(|t| t.transaction_id)
+    }
+
+    /// Begin a write transaction (explicit, for MANUAL mode).
+    /// Returns error if a transaction is already active.
+    pub fn begin_manual(&mut self) -> Result<&Transaction, String> {
+        if self.active_txn.is_some() {
+            return Err("A transaction is already active. COMMIT or ROLLBACK first.".into());
+        }
+        let txn = self.manager.begin_write()?;
+        self.active_txn = Some(txn);
+        Ok(self.active_txn.as_ref().unwrap())
+    }
+
+    /// Begin a write transaction (implicit, for AUTO mode DDL/DML).
+    /// If already active, returns the existing transaction.
+    pub fn begin_implicit(&mut self) -> Result<&Transaction, String> {
+        if self.active_txn.is_some() {
+            return Ok(self.active_txn.as_ref().unwrap());
+        }
+        let txn = self.manager.begin_write()?;
+        self.active_txn = Some(txn);
+        Ok(self.active_txn.as_ref().unwrap())
+    }
+
+    /// Commit the active transaction.
+    /// Returns the undo records and commit timestamp.
+    pub fn commit(&mut self) -> Result<(Vec<UndoRecord>, u64), String> {
+        let mut txn = self
+            .active_txn
+            .take()
+            .ok_or("No active transaction to commit")?;
+        let result = self.manager.commit(&mut txn);
+        match result {
+            CommitResult::Committed { commit_ts } => Ok((txn.undo_records, commit_ts)),
+        }
+    }
+
+    /// Rollback the active transaction.
+    /// Returns undo records for rollback application.
+    pub fn rollback(&mut self) -> Result<Vec<UndoRecord>, String> {
+        let mut txn = self
+            .active_txn
+            .take()
+            .ok_or("No active transaction to rollback")?;
+        Ok(self.manager.rollback(&mut txn))
+    }
+
+    /// Auto-commit: begin (if not active), execute, commit.
+    /// Used in AUTO mode for DDL/DML statements.
+    pub fn auto_commit<F, T>(&mut self, exec_fn: F) -> Result<T, String>
+    where
+        F: FnOnce(&Transaction) -> Result<T, String>,
+    {
+        let _txn = self.begin_implicit()?;
+        let txn_id = self.active_txn_id().unwrap();
+        let result = exec_fn(self.active_txn.as_ref().unwrap())?;
+        self.commit()?;
+        Ok(result)
+    }
+
+    /// Record an undo operation on the active transaction.
+    pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Result<(), String> {
+        if let Some(ref mut txn) = self.active_txn {
+            txn.record_undo(table_id, row_id, column, old_data);
+            Ok(())
+        } else {
+            Err("No active transaction to record undo".into())
+        }
+    }
+
+    /// Lock a table on the active transaction.
+    pub fn lock_table(&self, table_id: u64) -> Result<(), String> {
+        let txn_id = self
+            .active_txn_id()
+            .ok_or("No active transaction to lock table")?;
+        self.manager.lock_table(txn_id, table_id)
+    }
+}
+
+impl Drop for TransactionContext {
+    fn drop(&mut self) {
+        // Auto-rollback any uncommitted transaction.
+        if let Some(mut txn) = self.active_txn.take() {
+            let _ = self.manager.rollback(&mut txn);
+        }
+    }
+}
+
 /// Manages concurrent transaction lifecycle with MVCC timestamp ordering.
 ///
 /// - Write transactions are serialized (one at a time by default).

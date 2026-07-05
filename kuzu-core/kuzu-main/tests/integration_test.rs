@@ -20,7 +20,7 @@ fn exec(conn: &Connection, query: &str) -> String {
         "Query failed: {query} → {:?}",
         result.error_message
     );
-    result.summary()
+    result.result_summary()
 }
 
 /// Helper: execute a query and assert it returns an error.
@@ -30,7 +30,7 @@ fn exec_err(conn: &Connection, query: &str) -> String {
         Err(e) => e,
         Ok(r) => {
             if r.success {
-                panic!("Expected error for query: {query}, got success: {}", r.summary());
+                panic!("Expected error for query: {query}, got success: {}", r.result_summary());
             }
             r.error_message.unwrap_or_else(|| "Unknown error".into())
         }
@@ -200,7 +200,7 @@ fn test_empty_query() {
     let (_db, conn) = setup_db();
     let result = conn.query("").unwrap();
     assert!(result.is_success());
-    assert!(result.summary().contains("empty") || result.num_rows() == 0);
+    assert!(result.result_summary().contains("empty") || result.num_rows() == 0);
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn test_query_result_display() {
 
     // Empty query display
     let r3 = conn.query("MATCH (t:Test) RETURN t.id").unwrap();
-    let summary = r3.summary();
+    let summary = r3.result_summary();
     assert!(!summary.is_empty());
 }
 
@@ -388,7 +388,7 @@ fn test_prepare_ddl() {
     // Execute should work
     let result = conn.execute(&stmt, vec![]).unwrap();
     assert!(result.is_success());
-    assert!(result.summary().contains("City"));
+    assert!(result.result_summary().contains("City"));
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn test_physical_scan_reads_real_data() {
     );
 
     // Verify the summary reflects correct row count
-    let summary = result.summary();
+    let summary = result.result_summary();
     assert!(summary.contains("3"), "Expected 3 in summary: {summary}");
 }
 

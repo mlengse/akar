@@ -68,6 +68,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         }
         Rule::export_database => parse_export_database(inner),
         Rule::import_database => parse_import_database(inner),
+        Rule::analyze_statement => parse_analyze(inner),
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
 }
@@ -227,6 +228,20 @@ fn parse_import_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement,
         }
     }
     Ok(Statement::ImportDatabase(ImportDatabase { file_path }))
+}
+
+/// Parse ANALYZE (TABLE) <name> | ANALYZE *
+fn parse_analyze(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let inner = pair.as_str().trim();
+    // Format: "ANALYZE TABLE Foo" or "ANALYZE Foo" or "ANALYZE *"
+    let rest = inner.strip_prefix("ANALYZE").unwrap_or(inner).trim();
+    let rest = rest.strip_prefix("TABLE").unwrap_or(rest).trim();
+    let table_name = if rest == "*" {
+        None
+    } else {
+        Some(rest.to_string())
+    };
+    Ok(Statement::Analyze(AnalyzeStatement { table_name }))
 }
 
 fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
@@ -2132,5 +2147,37 @@ mod tests {
     fn test_list_predicate_nested() {
         let sql = "RETURN ANY(x IN [1,2,3] WHERE x > 0 AND x < 5)";
         assert!(parse(sql).is_ok());
+    }
+
+    // --- ANALYZE tests ---
+
+    #[test]
+    fn test_analyze_star() {
+        let sql = "ANALYZE *";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Analyze(a) => assert_eq!(a.table_name, None),
+            _ => panic!("Expected Analyze, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_analyze_table() {
+        let sql = "ANALYZE Person";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Analyze(a) => assert_eq!(a.table_name, Some("Person".to_string())),
+            _ => panic!("Expected Analyze, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_analyze_table_with_keyword() {
+        let sql = "ANALYZE TABLE Person";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Analyze(a) => assert_eq!(a.table_name, Some("Person".to_string())),
+            _ => panic!("Expected Analyze, got {:?}", stmt),
+        }
     }
 }

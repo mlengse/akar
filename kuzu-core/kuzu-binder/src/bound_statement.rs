@@ -28,6 +28,16 @@ pub enum BoundStatement {
     BoundExportDatabase(BoundExportDatabase),
     BoundImportDatabase(BoundImportDatabase),
     BoundCreateFtsIndex(BoundCreateFtsIndex),
+    BoundAnalyze(BoundAnalyze),
+}
+
+/// Bound ANALYZE statement.
+#[derive(Debug, Clone)]
+pub struct BoundAnalyze {
+    /// Table name to analyze, or None for all tables.
+    pub table_name: Option<String>,
+    /// Resolved table IDs for the tables to analyze.
+    pub table_ids: Vec<u64>,
 }
 
 /// COPY FROM statement — load data from a file into a table.

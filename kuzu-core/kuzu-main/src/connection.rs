@@ -981,14 +981,144 @@ impl Connection {
             BoundStatement::BoundCall(c) => {
                 tracing::info!("CALL '{}'", c.function_name);
 
-                // Handle catalog-aware functions first
                 let fn_lower = c.function_name.to_lowercase();
-                let result = match fn_lower.as_str() {
+                let result: Result<Vec<Vec<Value>>, String> = match fn_lower.as_str() {
+                    // ── Catalog inspection functions ──
                     "show_tables" | "show tables" | "list_tables" | "list tables" | "tables" => {
-                        // Return list of tables from the catalog
                         let catalog = self.database.catalog.lock().unwrap();
-                        let names: Vec<String> = catalog.all_entries().map(|e| e.name().to_string()).collect();
-                        Ok(names.into_iter().map(|n| vec![Value::String(n)]).collect())
+                        let entries: Vec<Vec<Value>> = catalog
+                            .all_entries()
+                            .map(|e| {
+                                let kind = match e {
+                                    kuzu_catalog::CatalogEntry::NodeTable(_) => "NODE",
+                                    kuzu_catalog::CatalogEntry::RelTable(_) => "REL",
+                                    kuzu_catalog::CatalogEntry::Sequence(_) => "SEQUENCE",
+                                    kuzu_catalog::CatalogEntry::Macro(_) => "MACRO",
+                                    kuzu_catalog::CatalogEntry::VectorIndex(_) => "VECTOR_INDEX",
+                                    kuzu_catalog::CatalogEntry::Foreign(_) => "FOREIGN",
+                                };
+                                vec![Value::String(e.name().to_string()), Value::String(kind.to_string())]
+                            })
+                            .collect();
+                        Ok(entries)
+                    }
+                    "table_info" => {
+                        let table_name = extract_arg_string(&c.args, 0)?;
+                        let cat = self.database.catalog.lock().unwrap();
+                        let entry = cat.get_entry_by_name(&table_name)
+                            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+                        let columns = entry.columns();
+                        let rows: Vec<Vec<Value>> = columns
+                            .iter()
+                            .map(|col| vec![
+                                Value::String(table_name.clone()),
+                                Value::String(col.name.clone()),
+                                Value::String(format!("{:?}", col.logical_type)),
+                                Value::String(if col.is_primary_key { "NO" } else { "YES" }.into()),
+                            ])
+                            .collect();
+                        Ok(rows)
+                    }
+                    "show_functions" => {
+                        let registry = self.database.function_registry.lock().unwrap();
+                        let funcs = registry.list_all();
+                        Ok(funcs.into_iter().map(|(name, kind)| vec![
+                            Value::String(name),
+                            Value::String(kind),
+                        ]).collect())
+                    }
+                    "show_indexes" => {
+                        let cat = self.database.catalog.lock().unwrap();
+                        let indexes = cat.indexes();
+                        Ok(indexes.into_iter().map(|(name, table, kind, col)| vec![
+                            Value::String(name),
+                            Value::String(table),
+                            Value::String(kind),
+                            Value::String(col),
+                        ]).collect())
+                    }
+                    "show_sequences" => {
+                        let cat = self.database.catalog.lock().unwrap();
+                        let seqs = cat.sequences();
+                        Ok(seqs.into_iter().map(|s| vec![
+                            Value::String(s.name.clone()),
+                            Value::Int64(s.curr_val()),
+                        ]).collect())
+                    }
+                    "show_macros" => {
+                        let cat = self.database.catalog.lock().unwrap();
+                        let macros = cat.macros();
+                        Ok(macros.into_iter().map(|m| vec![
+                            Value::String(m.name.clone()),
+                            Value::String(
+                                m.default_args.iter()
+                                    .map(|(k, v)| format!("{k}={v}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        ]).collect())
+                    }
+                    "show_connection" => {
+                        let table_name = extract_arg_string(&c.args, 0)?;
+                        let cat = self.database.catalog.lock().unwrap();
+                        let info = cat.connection_info(&table_name)
+                            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+                        Ok(vec![info])
+                    }
+                    "db_version" => {
+                        let version = env!("CARGO_PKG_VERSION");
+                        Ok(vec![vec![Value::String(version.to_string())]])
+                    }
+                    "catalog_version" => {
+                        let cat = self.database.catalog.lock().unwrap();
+                        let ver = cat.version();
+                        Ok(vec![vec![Value::Int64(ver as i64)]])
+                    }
+                    // ── Configuration & stats functions ──
+                    "current_setting" => {
+                        let key = extract_arg_string(&c.args, 0)
+                            .unwrap_or_else(|_| String::new());
+                        let (k, v) = match key.to_lowercase().as_str() {
+                            "spill_threshold" => ("spill_threshold", self.database.effective_spill_threshold().to_string()),
+                            "checkpoint_threshold" => ("checkpoint_threshold", self.database.config.checkpoint_threshold.to_string()),
+                            "buffer_pool_size" => ("buffer_pool_size", self.database.config.buffer_pool_size.to_string()),
+                            "max_num_threads" => ("max_num_threads", self.database.config.max_num_threads.to_string()),
+                            "concurrent_writes" => ("concurrent_writes", self.database.config.concurrent_writes.to_string()),
+                            "read_only" => ("read_only", self.database.config.read_only.to_string()),
+                            _ => (key.as_str(), "UNKNOWN".to_string()),
+                        };
+                        Ok(vec![vec![Value::String(k.to_string()), Value::String(v)]])
+                    }
+                    "stats_info" => {
+                        let table_name = extract_arg_string(&c.args, 0)?;
+                        let (row_count, storage_size) = {
+                            let cat = self.database.catalog.lock().unwrap();
+                            let table_id = cat.get_table_id(&table_name)
+                                .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+                            let stats = self.database.stats_store.lock().unwrap();
+                            stats.table_stats_by_id(table_id)
+                        };
+                        Ok(vec![vec![
+                            Value::String(table_name),
+                            Value::Int64(row_count as i64),
+                            Value::String(format_storage_size(storage_size)),
+                        ]])
+                    }
+                    "storage_info" => {
+                        let sm = &self.database.storage_manager;
+                        let info = sm.storage_info();
+                        Ok(vec![vec![
+                            Value::String(info.db_path),
+                            Value::Int64(info.page_size as i64),
+                            Value::Int64(info.total_pages as i64),
+                            Value::Int64(info.free_pages as i64),
+                        ]])
+                    }
+                    "show_attached_databases" => {
+                        Ok(vec![vec![
+                            Value::String("main".to_string()),
+                            Value::String("local".to_string()),
+                        ]])
                     }
                     _ => {
                         // Evaluate AST arguments to Values
@@ -1123,6 +1253,85 @@ impl Connection {
                 Ok(None)
             }
             BoundStatement::BoundCreateFtsIndex(_) => Ok(None),
+            BoundStatement::BoundAnalyze(a) => {
+                tracing::info!("ANALYZE {} tables", a.table_ids.len());
+                let mut stats = self.database.stats_store.lock().unwrap();
+                let catalog = self.database.storage_manager.table_catalog();
+
+                for &table_id in &a.table_ids {
+                    // Try node table first, then rel table
+                    let node_table = catalog.get_node_table(table_id);
+                    if let Some(table) = node_table {
+                        let row_count = table.num_rows;
+                        let mut columns = std::collections::HashMap::new();
+                        for col_idx in 0..table.columns.len() {
+                            let mut null_count: u64 = 0;
+                            let mut distinct_set = std::collections::HashSet::new();
+                            for row_idx in 0..row_count as usize {
+                                if let Some(val) = table.get_value(row_idx, col_idx) {
+                                    if matches!(val, Value::Null) {
+                                        null_count += 1;
+                                    } else {
+                                        distinct_set.insert(format!("{:?}", val));
+                                    }
+                                } else {
+                                    null_count += 1;
+                                }
+                            }
+                            columns.insert(col_idx as u32, kuzu_storage::stats::ColumnStats {
+                                table_id,
+                                column_id: col_idx as u32,
+                                num_distinct_values: distinct_set.len() as u64,
+                                num_null_values: null_count,
+                                min_value: None,
+                                max_value: None,
+                            });
+                        }
+                        stats.update_table_stats(table_id, kuzu_storage::stats::TableStats {
+                            num_rows: row_count,
+                            columns,
+                        });
+                    } else {
+                        // Try rel table
+                        let rel_table = catalog.get_rel_table(table_id);
+                        if let Some(table) = rel_table {
+                            let row_count = table.num_rows;
+                            let mut columns = std::collections::HashMap::new();
+                            for col_idx in 0..table.columns.len() {
+                                let mut null_count: u64 = 0;
+                                let mut distinct_set = std::collections::HashSet::new();
+                                if let Some(col_data) = table.get_column(col_idx) {
+                                    for val in col_data {
+                                        if matches!(val, Value::Null) {
+                                            null_count += 1;
+                                        } else {
+                                            distinct_set.insert(format!("{:?}", val));
+                                        }
+                                    }
+                                }
+                                columns.insert(col_idx as u32, kuzu_storage::stats::ColumnStats {
+                                    table_id,
+                                    column_id: col_idx as u32,
+                                    num_distinct_values: distinct_set.len() as u64,
+                                    num_null_values: null_count,
+                                    min_value: None,
+                                    max_value: None,
+                                });
+                            }
+                            stats.update_table_stats(table_id, kuzu_storage::stats::TableStats {
+                                num_rows: row_count,
+                                columns,
+                            });
+                        }
+                    }
+                }
+
+                let table_desc = a.table_name.as_deref().unwrap_or("all tables");
+                Ok(Some(QueryResult::success_message(format!(
+                    "Statistics collected for {}",
+                    table_desc
+                ))))
+            }
         }
     }
 
@@ -1469,6 +1678,67 @@ fn pk_value_to_string(v: &Value) -> String {
         Value::Date(d) => format!("Date({})", d.0),
         Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
         other => format!("{other:?}"),
+    }
+}
+
+/// Extract a string argument at `index` from a list of AST expressions.
+fn extract_arg_string(args: &[kuzu_parser::ast::Expression], index: usize) -> Result<String, String> {
+    args.get(index)
+        .ok_or_else(|| format!("Missing argument at index {index}"))
+        .and_then(|arg| match arg {
+            kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s)) => Ok(s.clone()),
+            _ => Err(format!("Argument {index} must be a string literal")),
+        })
+}
+
+/// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
+fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> kuzu_common::vector::DataChunk {
+    use kuzu_common::vector::ValueVector;
+    use kuzu_common::types::PhysicalTypeID;
+
+    if rows.is_empty() {
+        let fields = column_names.iter().map(|_| ValueVector::new(PhysicalTypeID::String, 0)).collect();
+        let mut chunk = kuzu_common::vector::DataChunk::new(fields);
+        chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
+        return chunk;
+    }
+    let num_columns = rows[0].len();
+    let num_rows = rows.len();
+    let mut cols: Vec<ValueVector> = (0..num_columns)
+        .map(|_| ValueVector::new(PhysicalTypeID::String, num_rows))
+        .collect();
+
+    for row in &rows {
+        for (col_idx, v) in row.iter().enumerate() {
+            let display = match v {
+                Value::Null => "NULL".to_string(),
+                Value::String(s) => s.clone(),
+                Value::Int64(i) => i.to_string(),
+                Value::Int32(i) => i.to_string(),
+                Value::Double(f) => f.to_string(),
+                Value::Bool(b) => b.to_string(),
+                other => format!("{other:?}"),
+            };
+            cols[col_idx].push_string(&display);
+        }
+    }
+
+    let mut chunk = kuzu_common::vector::DataChunk::new(cols);
+    chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
+    chunk.size = num_rows;
+    chunk
+}
+
+/// Format a byte count into a human-readable string (e.g., "1.2 MB").
+fn format_storage_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 
@@ -2794,5 +3064,46 @@ mod fase_a_verification {
             let table = catalog.get_node_table(table_id).unwrap();
             assert_eq!(table.num_rows, 0, "Table should have 0 rows after rollback");
         }
+    }
+
+    // ── ANALYZE tests ──
+
+    #[test]
+    fn test_analyze_all_tables() {
+        let (_dir, _db, conn) = setup_test_db(-1);
+        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))");
+        exec_ok(&conn, "CREATE (:Person {name: 'Alice', age: 30})");
+        exec_ok(&conn, "CREATE (:Person {name: 'Bob', age: 25})");
+
+        let result = conn.query("ANALYZE *");
+        assert!(result.is_ok(), "ANALYZE * should succeed: {:?}", result);
+
+        // Verify stats are populated
+        let result = conn.query("CALL stats_info('Person')");
+        assert!(result.is_ok());
+        let r = result.unwrap();
+        assert!(r.success, "stats_info should succeed");
+    }
+
+    #[test]
+    fn test_analyze_specific_table() {
+        let (_dir, _db, conn) = setup_test_db(-1);
+        exec_ok(&conn, "CREATE NODE TABLE User(id INT64, score DOUBLE, PRIMARY KEY(id))");
+        exec_ok(&conn, "CREATE (:User {id: 1, score: 95.5})");
+        exec_ok(&conn, "CREATE (:User {id: 2, score: 87.0})");
+
+        let result = conn.query("ANALYZE User");
+        assert!(result.is_ok(), "ANALYZE User should succeed: {:?}", result);
+
+        let r = result.unwrap();
+        assert!(r.success);
+        assert!(r.message.as_deref().unwrap_or("").contains("User"));
+    }
+
+    #[test]
+    fn test_analyze_nonexistent_table() {
+        let (_dir, _db, conn) = setup_test_db(-1);
+        let result = conn.query("ANALYZE NoSuchTable");
+        assert!(result.is_err(), "ANALYZE on nonexistent table should fail");
     }
 }

@@ -2186,6 +2186,8 @@ pub enum AggValueState {
     Collect(Vec<Value>),
     StdDev { sum: f64, sum_sq: f64, count: u64 },
     Variance { sum: f64, sum_sq: f64, count: u64 },
+    /// Percentile state — collects all non-null values for percentile computation.
+    Percentile { values: Vec<f64>, percentile: f64 },
 }
 
 impl AggValueState {
@@ -2210,6 +2212,14 @@ impl AggValueState {
                 sum: 0.0,
                 sum_sq: 0.0,
                 count: 0,
+            },
+            AggregateFunction::PercentileDisc { percentile } => AggValueState::Percentile {
+                values: Vec::new(),
+                percentile: *percentile,
+            },
+            AggregateFunction::PercentileCont { percentile } => AggValueState::Percentile {
+                values: Vec::new(),
+                percentile: *percentile,
             },
         }
     }
@@ -2266,6 +2276,11 @@ impl AggValueState {
                 *sum_sq += v * v;
                 *count += 1;
             }
+            AggValueState::Percentile { values, .. } => {
+                if let Ok(v) = numeric_to_f64(val) {
+                    values.push(v);
+                }
+            }
         }
     }
 
@@ -2303,6 +2318,83 @@ impl AggValueState {
                 let variance = (sum_sq - (sum * sum) / n) / n;
                 Value::Double(variance)
             }
+            AggValueState::Percentile { values, percentile } => {
+                if values.is_empty() {
+                    return Value::Null;
+                }
+                let mut sorted = values.clone();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let n = sorted.len();
+                let p = *percentile;
+                // Discrete percentile: pick the value at ceil(p * n) - 1 index
+                let idx = ((p * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
+                Value::Double(sorted[idx])
+            }
+        }
+    }
+
+    /// Merge another AggValueState into this one (for parallel aggregation).
+    pub fn merge(&mut self, other: &Self) {
+        match (self, other) {
+            (AggValueState::Count(a), AggValueState::Count(b)) => *a += b,
+            (AggValueState::Sum(a), AggValueState::Sum(b)) => {
+                if matches!(a, Value::Null) {
+                    *a = b.clone();
+                } else if !matches!(b, Value::Null) {
+                    *a = add_values_for_agg(a.clone(), b.clone());
+                }
+            }
+            (AggValueState::Min(a), AggValueState::Min(b)) => {
+                if !matches!(b, Value::Null) {
+                    if matches!(a, Value::Null) {
+                        *a = b.clone();
+                    } else if let Ok(Value::Bool(true)) = evaluate_scalar(
+                        &ScalarFunction::Comparison { op: ComparisonOp::Lt },
+                        &[b.clone(), a.clone()],
+                    ) {
+                        *a = b.clone();
+                    }
+                }
+            }
+            (AggValueState::Max(a), AggValueState::Max(b)) => {
+                if !matches!(b, Value::Null) {
+                    if matches!(a, Value::Null) {
+                        *a = b.clone();
+                    } else if let Ok(Value::Bool(true)) = evaluate_scalar(
+                        &ScalarFunction::Comparison { op: ComparisonOp::Gt },
+                        &[b.clone(), a.clone()],
+                    ) {
+                        *a = b.clone();
+                    }
+                }
+            }
+            (AggValueState::Avg { sum: s1, count: c1 }, AggValueState::Avg { sum: s2, count: c2 }) => {
+                if *c2 > 0 {
+                    if *c1 == 0 {
+                        *s1 = s2.clone();
+                    } else {
+                        *s1 = add_values_for_agg(s1.clone(), s2.clone());
+                    }
+                    *c1 += c2;
+                }
+            }
+            (AggValueState::Collect(a), AggValueState::Collect(b)) => a.extend(b.iter().cloned()),
+            (AggValueState::StdDev { sum: s1, sum_sq: sq1, count: c1 },
+             AggValueState::StdDev { sum: s2, sum_sq: sq2, count: c2 }) => {
+                *s1 += s2;
+                *sq1 += sq2;
+                *c1 += c2;
+            }
+            (AggValueState::Variance { sum: s1, sum_sq: sq1, count: c1 },
+             AggValueState::Variance { sum: s2, sum_sq: sq2, count: c2 }) => {
+                *s1 += s2;
+                *sq1 += sq2;
+                *c1 += c2;
+            }
+            (AggValueState::Percentile { values: a, .. }, AggValueState::Percentile { values: b, .. }) => {
+                a.extend(b.iter().cloned());
+            }
+            _ => { /* type mismatch — should not happen in practice */ }
         }
     }
 }
@@ -3894,6 +3986,120 @@ mod tests {
         let result = state.finalize();
         match result {
             Value::Double(x) => assert!((x - 2.66666).abs() < 0.001),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    #[test]
+    fn test_agg_state_percentile_disc() {
+        let mut state = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.5 });
+        state.update(&Value::Double(1.0));
+        state.update(&Value::Double(3.0));
+        state.update(&Value::Double(7.0));
+        state.update(&Value::Double(9.0));
+        // 4 values, 0.5 * 4 = 2 → ceil(2) = 2 → index 1 → 3.0
+        let result = state.finalize();
+        match result {
+            Value::Double(x) => assert!((x - 3.0).abs() < 0.001, "Expected median 3.0, got {}", x),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    #[test]
+    fn test_agg_state_percentile_disc_90th() {
+        let mut state = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.9 });
+        for v in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0] {
+            state.update(&Value::Double(v));
+        }
+        // 10 values, 0.9 * 10 = 9 → ceil(9) = 9 → index 8 → 9.0
+        let result = state.finalize();
+        match result {
+            Value::Double(x) => assert!((x - 9.0).abs() < 0.001),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    #[test]
+    fn test_agg_state_percentile_skip_null() {
+        let mut state = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.5 });
+        state.update(&Value::Null);
+        state.update(&Value::Double(10.0));
+        state.update(&Value::Double(20.0));
+        // 2 values: 10, 20. 0.5 * 2 = 1 → ceil(1) = 1 → index 0 → 10.0
+        let result = state.finalize();
+        match result {
+            Value::Double(x) => assert!((x - 10.0).abs() < 0.001),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    #[test]
+    fn test_agg_state_percentile_empty() {
+        let state = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.5 });
+        let result = state.finalize();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_agg_state_percentile_cont() {
+        let mut state = AggValueState::new(&AggregateFunction::PercentileCont { percentile: 0.5 });
+        state.update(&Value::Double(1.0));
+        state.update(&Value::Double(5.0));
+        // 2 values, 0.5 * 2 = 1 → ceil(1) = 1 → index 0 → 1.0 (same as disc for small N)
+        let result = state.finalize();
+        match result {
+            Value::Double(x) => assert!((x - 1.0).abs() < 0.001),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    // --- AggValueState merge tests ---
+    #[test]
+    fn test_agg_state_merge_count() {
+        let mut a = AggValueState::new(&AggregateFunction::Count);
+        let b = AggValueState::Count(5);
+        a.update(&Value::Int64(1));
+        a.update(&Value::Int64(2));
+        a.merge(&b);
+        assert_eq!(a.finalize(), Value::Int64(7)); // 2 + 5
+    }
+
+    #[test]
+    fn test_agg_state_merge_sum() {
+        let mut a = AggValueState::new(&AggregateFunction::Sum);
+        let mut b = AggValueState::new(&AggregateFunction::Sum);
+        a.update(&Value::Int64(10));
+        b.update(&Value::Int64(20));
+        b.update(&Value::Int64(30));
+        a.merge(&b);
+        assert_eq!(a.finalize(), Value::Int64(60));
+    }
+
+    #[test]
+    fn test_agg_state_merge_avg() {
+        let mut a = AggValueState::new(&AggregateFunction::Avg);
+        let mut b = AggValueState::new(&AggregateFunction::Avg);
+        a.update(&Value::Double(10.0));
+        b.update(&Value::Double(20.0));
+        b.update(&Value::Double(30.0));
+        a.merge(&b);
+        match a.finalize() {
+            Value::Double(x) => assert!((x - 20.0).abs() < 0.001),
+            _ => panic!("Expected double"),
+        }
+    }
+
+    #[test]
+    fn test_agg_state_merge_percentile() {
+        let mut a = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.5 });
+        let mut b = AggValueState::new(&AggregateFunction::PercentileDisc { percentile: 0.5 });
+        a.update(&Value::Double(1.0));
+        a.update(&Value::Double(3.0));
+        b.update(&Value::Double(7.0));
+        b.update(&Value::Double(9.0));
+        a.merge(&b);
+        match a.finalize() {
+            Value::Double(x) => assert!((x - 3.0).abs() < 0.001),
             _ => panic!("Expected double"),
         }
     }

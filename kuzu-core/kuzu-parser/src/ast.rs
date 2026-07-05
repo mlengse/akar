@@ -27,6 +27,13 @@ pub struct ImportDatabase {
     pub file_path: String,
 }
 
+/// ANALYZE statement — collect table statistics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalyzeStatement {
+    /// Table name to analyze, or None for all tables (ANALYZE *).
+    pub table_name: Option<String>,
+}
+
 /// EXPLAIN statement wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainStatement {
@@ -58,6 +65,7 @@ pub enum Statement {
     CreateMacro(CreateMacro),
     ExportDatabase(ExportDatabase),
     ImportDatabase(ImportDatabase),
+    Analyze(AnalyzeStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).

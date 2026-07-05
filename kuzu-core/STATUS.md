@@ -7,12 +7,12 @@
 ## 0. Ringkasan Eksekutif
 
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
-**28 crate**, **~94 file .rs**, **~25.000 LOC**.
+**28 crate**, **~98 file .rs**, **~26.000 LOC**.
 
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **898 total, 0 failed** ✅ |
+| **Tests passing** | **922 total, 0 failed** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **Optimizer passes** | **18** (11 flat + 7 tree) — melebihi C++ |
 | **Join Order** | **DP Bushy Trees** (cost-based) ✅ |
@@ -22,6 +22,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
+| **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -47,6 +48,19 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | DAYNAME/MONTHNAME/LAST_DAY/MAKE_DATE | ❌ | ✅ DateOp variants | `ed94a16` |
 | HTTPFS Extension | ⚠️ Panic on http_scan | ✅ Fixed chunk size & execution | `[new]` |
 | Multiwriter Execution Locks | ❌ Missing Table locks | ✅ Dynamic `lock_table` in Connection | `[new]` |
+| Undo Buffer | ❌ TIDAK ADA | ✅ `undo_buffer.rs` + wiring ke Transaction | `[P0]` |
+| WAL Replayer + DDL variants | ❌ TIDAK ADA | ✅ `wal_replayer.rs` + 6 WALRecord DDL variants | `[P0]` |
+| Page Manager | ❌ TIDAK ADA | ✅ `page_manager.rs` + wiring ke StorageManager | `[P0]` |
+| FileHandle extend_file | ❌ No extend | ✅ `extend_file()` method | `[P0]` |
+| StorageManager rollback undo | ❌ Clear-only | ✅ Apply undo_records in reverse | `[P0]` |
+| Table Functions (CALL) | ❌ 1 fungsi (`show_tables`) | ✅ 12 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases) | `[P1]` |
+| Catalog version counter | ❌ TIDAK ADA | ✅ `version: u64` + `bump_version()` di 5 DDL methods | `[P1]` |
+| FunctionRegistry::list_all() | ❌ TIDAK ADA | ✅ List all 150+ functions with type | `[P1]` |
+| TransactionContext (AUTO/MANUAL) | ❌ TIDAK ADA | ✅ `TransactionMode` + `TransactionContext` with auto-commit, implicit/manual begin, Drop guard | `[P2]` |
+| QuerySummary (timing stats) | ❌ TIDAK ADA | ✅ `QuerySummary` with compile_time, execution_time, elapsed | `[P2]` |
+| ANALYZE statement | ❌ TIDAK ADA | ✅ grammar+AST+parser+binder+execution, collects stats to StatsStore | `[P3.1]` |
+| PERCENTILE_DISC/CONT aggregates | ❌ TIDAK ADA | ✅ `AggValueState::Percentile` + registry + physical mapping | `[P3.6]` |
+| AggregateHashTable (parallel agg) | ❌ HashMap single-thread | ✅ `AggregateHashTable` with rayon + `AggValueState::merge()` | `[P3.2]` |
 
 ---
 
@@ -56,7 +70,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 - **Engine:** `pest.rs` PEG (bukan ANTLR4 C++)
 - **Grammar:** `cypher.pest` — modular rules, composable
 - **AST:** 34+ Statement variants, semua ekspresi Cypher
-- **DDL:** Full: CREATE/DROP TABLE, INDEX, SEQUENCE, VECTOR INDEX, COPY, ALTER, EXPORT/IMPORT DB
+- **DDL:** Full: CREATE/DROP TABLE, INDEX, SEQUENCE, VECTOR INDEX, COPY, ALTER, EXPORT/IMPORT DB, ANALYZE
 - **DML:** Full: MATCH, RETURN, WHERE, CREATE, DELETE, SET, MERGE, UNWIND, FOREACH, OPTIONAL MATCH, WITH
 - **Expressions:** Full: semua operator, function calls, CASE, list/map/struct literals, subqueries, parameters, STAR
 - **Variable-length paths:** ✅ `[*1..5]` dengan lower_bound/upper_bound
@@ -141,7 +155,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | PhysicalCrossProduct (execute_binary) | ✅ |
 | PhysicalOrderBy | ✅ |
 | PhysicalLimit | ✅ |
-| PhysicalAggregate (Value-based) | ✅ |
+| PhysicalAggregate (Value-based) | ✅ (with AggregateHashTable parallel aggregation) |
 | PhysicalUnion | ✅ |
 | PhysicalFlatten | ✅ |
 | PhysicalIntersect (execute_binary) | ✅ |
@@ -175,6 +189,10 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Overflow pages | ✅ (via column_chunk) |
 | LocalStorage (LocalNodeTable, LocalRelTable) | ✅ |
 | CSV/Parquet readers | ✅ |
+| Page Manager (allocation/deallocation) | ✅ **terintegrasi** di `StorageManager` |
+| Undo Buffer (rollback safety) | ✅ **terintegrasi** di `StorageManager::rollback_transaction()` |
+| WAL Replayer (crash recovery) | ✅ **terintegrasi** di `StorageManager::recover()` |
+| WAL DDL Record Types | ✅ CreateTable, DropTable, AlterTable, CreateIndex, DropIndex, CreateSequence |
 
 **Paritas:** ~90%
 
@@ -203,10 +221,10 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Array aliases** | array_concat/cat, array_append/push_back, array_prepend/push_front, array_contains/has, array_slice, array_value | ✅ 10 aliases |
 
 #### Aggregate Functions
-COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE — ✅ 9 ops
+COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC, PERCENTILE_CONT — ✅ 11 ops
 
 #### Table Functions
-list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom, CustomTable — ✅ 8 ops
+12 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases) + 8 registry ops (list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom, CustomTable) — ✅ 20 ops
 
 **Paritas fungsional:** ~95% dari C++ (18 fungsi C++ masih missing — lihat Bagian 3)
 
@@ -263,6 +281,40 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 | Zone Map Predicate (ColumnChunkStats) | ✅ + wiring ke NodeTable::to_column_major_data_with_predicate |
 | ColumnChunk stats update on append/update | ✅ |
 | Hybrid CSR Storage (CsrIndex) | ✅ + wiring ke RelTable |
+
+### ✅ Crash Recovery & Storage Foundation (Fase P0)
+| Item | Status |
+|------|--------|
+| Undo Buffer (rollback safety) | ✅ `kuzu-storage/src/undo_buffer.rs` |
+| WAL Replayer (crash recovery) | ✅ `kuzu-storage/src/wal_replayer.rs` |
+| WALRecord DDL variants (6 new) | ✅ `wal.rs` + `local_wal.rs` |
+| Page Manager (FSM integration) | ✅ `kuzu-storage/src/page_manager.rs` |
+| FileHandle extend_file() | ✅ `page.rs` |
+| StorageManager rollback with undo | ✅ `lib.rs` |
+| Connection wiring | ✅ `connection.rs` |
+
+### ✅ Table Functions / CALL (Fase P1)
+| Item | Status |
+|------|--------|
+| `table_info(table)` — column metadata | ✅ `connection.rs` |
+| `show_functions()` — 150+ functions | ✅ `connection.rs` + `FunctionRegistry::list_all()` |
+| `show_indexes()` — ART + HNSW | ✅ `connection.rs` + `Catalog::indexes()` |
+| `show_sequences()` — sequence list | ✅ `connection.rs` |
+| `show_macros()` — macro list | ✅ `connection.rs` |
+| `show_connection(table)` — node/rel topology | ✅ `connection.rs` + `Catalog::connection_info()` |
+| `db_version()` — version string | ✅ `connection.rs` |
+| `catalog_version()` — DDL counter | ✅ `Catalog::version` + `bump_version()` in 5 DDL methods |
+| `current_setting(key)` — config value | ✅ `connection.rs` |
+| `stats_info(table)` — row count + size | ✅ `connection.rs` + `StatsStore::table_stats_by_id()` |
+| `storage_info()` — page stats | ✅ `connection.rs` + `StorageManager::storage_info()` |
+| `show_attached_databases()` | ✅ `connection.rs` |
+
+### ✅ Physical Operator & Aggregate (Fase P3 — sebagian)
+| Item | Status |
+|------|--------|
+| ANALYZE statement (P3.1) | ✅ grammar→AST→parser→binder→execution, stats ke StatsStore |
+| PERCENTILE_DISC/CONT (P3.6) | ✅ `AggValueState::Percentile`, registry + physical mapping |
+| AggregateHashTable (P3.2) | ✅ rayon parallel aggregation + `AggValueState::merge()` |
 
 ### ✅ ADBC Interface Support
 | Item | Status |
@@ -351,6 +403,10 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 |------|--------|
 | Concurrent write transactions | ✅ `concurrent_writes: AtomicBool` + `writer_condvar: Condvar` di `kuzu-transaction/src/lib.rs` |
 | Single-writer fallback mode | ✅ `set_concurrent_writes(false)` — blocking via Condvar |
+| TransactionContext AUTO/MANUAL | ✅ `TransactionMode::Auto` / `Manual` + `begin_implicit()` / `begin_manual()` / `auto_commit()` |
+| Drop guard for uncommitted txns | ✅ Auto-rollback on `TransactionContext::drop()` |
+| Checkpoint worker thread | ✅ `start_auto_checkpoint_worker()` — background polling with shutdown |
+| QuerySummary timing | ✅ `compile_time` / `execution_time` / `elapsed` in `QueryResult` |
 | Unit tests | ✅ `test_concurrent_writer_limit_single_writer_mode` + `test_concurrent_writes_allowed` |
 
 ### 3.6 ✅ Lambda Evaluator — Per-Elemen Predicate
@@ -389,22 +445,22 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | Crate | Tests | Status |
 |-------|-------|--------|
 | kuzu-common | 19 | ✅ Pass |
-| kuzu-parser | 37 | ✅ Pass |
+| kuzu-parser | 40 | ✅ Pass |
 | kuzu-binder | 21 | ✅ Pass |
 | kuzu-planner | 49 | ✅ Pass |
 | kuzu-optimizer | 59 | ✅ Pass |
-| kuzu-processor | 61 | ✅ Pass |
-| kuzu-storage | 233 | ✅ Pass |
-| kuzu-function | 150 | ✅ Pass |
+| kuzu-processor | 77 | ✅ Pass |
+| kuzu-storage | 242 | ✅ Pass |
+| kuzu-function | 159 | ✅ Pass |
 | kuzu-catalog | 14 | ✅ Pass |
 | kuzu-graph | 9 | ✅ Pass |
 | kuzu-vector | 7 | ✅ Pass |
 | kuzu-transaction | 20 | ✅ Pass |
-| kuzu-main (unit) | 77 | ✅ Pass |
+| kuzu-main (unit) | 80 | ✅ Pass |
 | kuzu-main (integration) | 44 | ✅ Pass |
 | kuzu-main (fase_b_verification) | 12 | ✅ Pass |
 | Other crates | 86 | ✅ Pass |
-| **Total** | **898** | **✅ All pass, 0 failed** |
+| **Total** | **922** | **✅ All pass, 0 failed** |
 
 ---
 
@@ -423,5 +479,5 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-05: **898 test lulus, 0 gagal** di seluruh workspace.
+- Per 2026-07-05: **922 test lulus, 0 gagal** di seluruh workspace. P0 (Crash Recovery) + P1 (Table Functions) + P2 (Transaction Enhancement) + P3.1 (ANALYZE) + P3.2 (AggregateHashTable) + P3.6 (PERCENTILE) selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

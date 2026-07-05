@@ -359,6 +359,8 @@ pub struct Catalog {
     entries: HashMap<u64, CatalogEntry>,
     name_to_id: HashMap<String, u64>,
     next_id: u64,
+    /// Monotonically increasing version counter, incremented on every DDL.
+    version: u64,
 }
 
 impl Catalog {
@@ -416,6 +418,7 @@ impl Catalog {
         };
         self.entries.insert(table_id, CatalogEntry::NodeTable(entry));
         self.name_to_id.insert(name, table_id);
+        self.bump_version();
         CatalogResult::Created { table_id }
     }
 
@@ -441,6 +444,7 @@ impl Catalog {
         };
         self.entries.insert(table_id, CatalogEntry::RelTable(entry));
         self.name_to_id.insert(name, table_id);
+        self.bump_version();
         CatalogResult::Created { table_id }
     }
 
@@ -449,6 +453,7 @@ impl Catalog {
         if let Some(&table_id) = self.name_to_id.get(name) {
             self.entries.remove(&table_id);
             self.name_to_id.remove(name);
+            self.bump_version();
             CatalogResult::Dropped { table_id }
         } else {
             CatalogResult::NotFound
@@ -596,6 +601,7 @@ impl Catalog {
         self.entries
             .insert(sequence_id, CatalogEntry::Sequence(entry));
         self.name_to_id.insert(name, sequence_id);
+        self.bump_version();
         CatalogResult::Created { table_id: sequence_id }
     }
 
@@ -681,6 +687,7 @@ impl Catalog {
         self.entries
             .insert(macro_id, CatalogEntry::Macro(entry));
         self.name_to_id.insert(macro_name_upper, macro_id);
+        self.bump_version();
         CatalogResult::Created { table_id: macro_id }
     }
 
@@ -919,6 +926,71 @@ impl Catalog {
     /// Iterate over all catalog entries.
     pub fn all_entries(&self) -> impl Iterator<Item = &CatalogEntry> {
         self.entries.values()
+    }
+
+    /// Get the current catalog version.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Bump the catalog version counter.
+    fn bump_version(&mut self) {
+        self.version += 1;
+    }
+
+    /// Get all indexes as (name, table_name, type, column).
+    pub fn indexes(&self) -> Vec<(String, String, String, String)> {
+        let mut result = Vec::new();
+        for entry in self.entries.values() {
+            match entry {
+                CatalogEntry::NodeTable(nt) => {
+                    if nt.index_type.is_some() {
+                        result.push((
+                            nt.index_name.clone().unwrap_or_default(),
+                            nt.name.clone(),
+                            "ART".to_string(),
+                            nt.columns.get(nt.primary_key_column)
+                                .map(|c| c.name.clone())
+                                .unwrap_or_default(),
+                        ));
+                    }
+                }
+                CatalogEntry::VectorIndex(vi) => {
+                    result.push((
+                        vi.name.clone(),
+                        vi.table_name.clone(),
+                        "HNSW".to_string(),
+                        vi.column_name.clone(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        result
+    }
+
+    /// Get connection info for a table as a vec of Values.
+    pub fn connection_info(&self, table_name: &str) -> Option<Vec<kuzu_common::types::Value>> {
+        let entry = self.get_entry_by_name(table_name)?;
+        match entry {
+            CatalogEntry::NodeTable(nt) => Some(vec![
+                kuzu_common::types::Value::String(nt.name.clone()),
+                kuzu_common::types::Value::String("NODE".to_string()),
+                kuzu_common::types::Value::Null,
+            ]),
+            CatalogEntry::RelTable(rt) => {
+                let src = self.entries.get(&rt.src_table_id).map(|e| e.name().to_string())
+                    .unwrap_or_else(|| rt.src_table_id.to_string());
+                let dst = self.entries.get(&rt.dst_table_id).map(|e| e.name().to_string())
+                    .unwrap_or_else(|| rt.dst_table_id.to_string());
+                Some(vec![
+                    kuzu_common::types::Value::String(rt.name.clone()),
+                    kuzu_common::types::Value::String(src),
+                    kuzu_common::types::Value::String(dst),
+                ])
+            }
+            _ => None,
+        }
     }
 
     /// Get all node table entries.

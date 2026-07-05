@@ -3,6 +3,7 @@ use tempfile::tempdir;
 use std::sync::Arc;
 
 #[test]
+#[cfg(feature = "httpfs-extension")]
 fn test_httpfs_extension() -> Result<(), String> {
     let dir = tempdir().map_err(|e| e.to_string())?;
     let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);

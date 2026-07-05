@@ -24,7 +24,7 @@ fn exec(conn: &Connection, query: &str) -> String {
         "Query failed: {query} → {:?}",
         result.error_message
     );
-    result.summary()
+    result.result_summary()
 }
 
 /// Helper: execute a query and return the raw QueryResult.
@@ -115,7 +115,7 @@ fn test_verification_call_show_tables() {
 
     let result = query(&conn, "CALL show_tables()");
     assert!(result.is_success(), "CALL show_tables() after CREATE should succeed");
-    let summary = result.summary().to_lowercase();
+    let summary = result.result_summary().to_lowercase();
     assert!(
         summary.contains("person") || summary.contains("city"),
         "Should list tables: {summary}"

@@ -431,6 +431,10 @@ pub enum AggregateFunction {
     CountStar,
     StdDev,
     Variance,
+    /// PERCENTILE_DISC(expr, percentile) — discrete percentile.
+    PercentileDisc { percentile: f64 },
+    /// PERCENTILE_CONT(expr, percentile) — continuous percentile.
+    PercentileCont { percentile: f64 },
 }
 
 // ==================== Table Function Types ====================
@@ -1018,6 +1022,8 @@ impl FunctionRegistry {
         self.register_aggregate("COLLECT", AggregateFunction::Collect);
         self.register_aggregate("STDDEV", AggregateFunction::StdDev);
         self.register_aggregate("VARIANCE", AggregateFunction::Variance);
+        self.register_aggregate("PERCENTILE_DISC", AggregateFunction::PercentileDisc { percentile: 0.5 });
+        self.register_aggregate("PERCENTILE_CONT", AggregateFunction::PercentileCont { percentile: 0.5 });
 
         // --- Table ---
         self.register_table("list_tables", TableFunction::ListTables);
@@ -1063,6 +1069,23 @@ impl FunctionRegistry {
 
     pub fn get_table(&self, name: &str) -> Option<&TableFunction> {
         self.table_functions.get(&name.to_lowercase())
+    }
+
+    /// List all registered functions as (name, kind) pairs.
+    /// Kind is one of: "SCALAR", "AGGREGATE", "TABLE".
+    pub fn list_all(&self) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        for name in self.scalar_functions.keys() {
+            result.push((name.clone(), "SCALAR".to_string()));
+        }
+        for name in self.aggregate_functions.keys() {
+            result.push((name.clone(), "AGGREGATE".to_string()));
+        }
+        for name in self.table_functions.keys() {
+            result.push((name.clone(), "TABLE".to_string()));
+        }
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        result
     }
 
     pub fn contains(&self, name: &str) -> bool {
