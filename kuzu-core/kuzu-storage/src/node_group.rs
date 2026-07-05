@@ -427,7 +427,7 @@ mod tests {
                     LogicalTypeID::Int64,
                     0,
                     i as u32,
-                    &db_path.to_path_buf(),
+                    db_path,
                     bm.clone(),
                     DEFAULT_PAGE_SIZE,
                 )

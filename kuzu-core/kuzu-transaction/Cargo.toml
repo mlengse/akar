@@ -10,3 +10,6 @@ publish = false
 kuzu-common = { path = "../kuzu-common" }
 tracing.workspace = true
 thiserror.workspace = true
+
+[lints]
+workspace = true

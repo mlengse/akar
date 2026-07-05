@@ -357,12 +357,9 @@ mod tests {
         let mut count = 0;
         wal.replay(|record| {
             count += 1;
-            match record {
-                WALRecord::Insert { table_id, data } => {
-                    assert_eq!(*table_id, 1);
-                    assert_eq!(data, &[10, 20]);
-                }
-                _ => {}
+            if let WALRecord::Insert { table_id, data } = record {
+                assert_eq!(*table_id, 1);
+                assert_eq!(data, &[10, 20]);
             }
             Ok(())
         })

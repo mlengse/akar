@@ -219,13 +219,12 @@ impl BaseBFSGraph for DenseBFSGraph {
         fwd_edge: bool,
     ) {
         let offset = nbr_node_id.offset;
-        if let Some(slot) = self.get_mut(offset) {
-            if slot.is_none() {
+        if let Some(slot) = self.get_mut(offset)
+            && slot.is_none() {
                 *slot = Some(Box::new(ParentList::new(
                     bound_node_id, edge_id, fwd_edge, iter,
                 )));
             }
-        }
     }
 
     fn try_add_parent_with_weight(
@@ -323,6 +322,12 @@ impl BaseBFSGraph for DenseBFSGraph {
 pub struct SparseBFSGraph {
     data: HashMap<u64, Box<ParentList>>,
     pinned_table_id: u64,
+}
+
+impl Default for SparseBFSGraph {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SparseBFSGraph {

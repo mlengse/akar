@@ -79,7 +79,7 @@ pub fn stem_word(word: &str) -> String {
 
     // Rule 1a: -sses → -ss, -ies → -i, -es → -e, -s → (remove s if not -ss)
     let w = if w.ends_with("sses") {
-        (&w[..w.len() - 2]).to_string()
+        w[..w.len() - 2].to_string()
     } else if w.ends_with("ies") && w.len() > 4 {
         format!("{}i", &w[..w.len() - 3])
     } else if w.ends_with("es") && w.len() > 4 && !w.ends_with("aes") && !w.ends_with("ees") && !w.ends_with("oes") {

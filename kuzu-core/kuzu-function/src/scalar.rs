@@ -1607,12 +1607,8 @@ fn evaluate_path(op: PathOp, args: &[Value]) -> Result<Value, String> {
                 Value::List(items) => Ok(Value::Int64(items.len() as i64)),
                 Value::Struct(fields) => {
                     // Count entries in _rels or _nodes minus 1
-                    if let Some((_, rels_val)) = fields.iter().find(|(k, _)| k == "_rels") {
-                        if let Value::List(rels) = rels_val {
-                            Ok(Value::Int64(rels.len() as i64))
-                        } else {
-                            Ok(Value::Int64(0))
-                        }
+                    if let Some((_, Value::List(rels))) = fields.iter().find(|(k, _)| k == "_rels") {
+                        Ok(Value::Int64(rels.len() as i64))
                     } else {
                         Ok(Value::Int64(0))
                     }

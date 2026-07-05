@@ -3238,11 +3238,10 @@ impl PhysicalExtend {
                 };
 
                 for &(dst_offset, edge_idx) in &edges {
-                    if !pk_to_row.contains_key(&dst_offset) {
-                        if dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0) {
+                    if !pk_to_row.contains_key(&dst_offset)
+                        && dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0) {
                             continue;
                         }
-                    }
                     total_rows += 1;
                     row_mappings.push((i, dst_offset, edge_idx));
                 }

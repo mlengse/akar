@@ -22,6 +22,7 @@ pub enum IndexType {
 }
 
 impl IndexType {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "HASH" => Some(IndexType::Hash),
@@ -1236,7 +1237,7 @@ mod tests {
         assert_eq!(seq.sequence_id, 99);
         assert_eq!(seq.curr_val(), 42);
         assert_eq!(seq.increment, 2);
-        assert_eq!(seq.cycle, true);
+        assert!(seq.cycle);
     }
 
     // --- Foreign table tests ---

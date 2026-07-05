@@ -13,3 +13,6 @@ kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
 regex.workspace = true
 tracing.workspace = true
+
+[lints]
+workspace = true

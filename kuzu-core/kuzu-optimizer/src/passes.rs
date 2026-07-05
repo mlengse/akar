@@ -1075,10 +1075,7 @@ fn is_foreign_table_function_call(op: &LogicalOperator) -> bool {
 
 /// Check if a logical operator is an Accumulate.
 fn is_accumulate(op: &LogicalOperator) -> bool {
-    match op {
-        LogicalOperator::Accumulate(_) => true,
-        _ => false,
-    }
+    matches!(op, LogicalOperator::Accumulate(_))
 }
 
 /// Check if a subtree contains any Filter operator.

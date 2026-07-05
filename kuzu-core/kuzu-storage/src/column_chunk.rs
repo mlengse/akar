@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn test_flush_to_column() {
         let dir = tempfile::tempdir().unwrap();
-        let mut column = setup_column(&dir.path().to_path_buf());
+        let mut column = setup_column(dir.path());
         let mut chunk = ColumnChunk::new();
 
         for i in 0i64..50 {
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_flush_copy_to_column_preserves_buffer() {
         let dir = tempfile::tempdir().unwrap();
-        let mut column = setup_column(&dir.path().to_path_buf());
+        let mut column = setup_column(dir.path());
         let mut chunk = ColumnChunk::new();
 
         chunk.append(Value::Int64(10));
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn test_flush_empty_chunk() {
         let dir = tempfile::tempdir().unwrap();
-        let mut column = setup_column(&dir.path().to_path_buf());
+        let mut column = setup_column(dir.path());
         let mut chunk = ColumnChunk::new();
 
         let flushed = chunk.flush_to_column(&mut column).unwrap();
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn test_multiple_flushes_to_same_column() {
         let dir = tempfile::tempdir().unwrap();
-        let mut column = setup_column(&dir.path().to_path_buf());
+        let mut column = setup_column(dir.path());
         let mut chunk = ColumnChunk::with_capacity(20);
 
         // First batch
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn test_large_flush() {
         let dir = tempfile::tempdir().unwrap();
-        let mut column = setup_column(&dir.path().to_path_buf());
+        let mut column = setup_column(dir.path());
         let mut chunk = ColumnChunk::new();
 
         // Fill the chunk to capacity

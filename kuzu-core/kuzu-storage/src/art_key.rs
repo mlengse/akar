@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_encode_double_ordering() {
-        let neg = ArtKey::from_double(-3.14);
+        let neg = ArtKey::from_double(-std::f64::consts::PI);
         let zero = ArtKey::from_double(0.0);
         let pos = ArtKey::from_double(std::f64::consts::PI);
 
@@ -393,7 +393,7 @@ mod tests {
             Value::Int64(i64::MAX),
         ];
 
-        let keys: Vec<ArtKey> = values.iter().filter_map(|v| ArtKey::from_value(v)).collect();
+        let keys: Vec<ArtKey> = values.iter().filter_map(ArtKey::from_value).collect();
         for i in 1..keys.len() {
             assert!(
                 keys[i - 1].bytes <= keys[i].bytes,

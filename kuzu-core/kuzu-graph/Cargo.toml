@@ -12,3 +12,6 @@ kuzu-storage = { path = "../kuzu-storage" }
 hashbrown.workspace = true
 rayon.workspace = true
 tracing.workspace = true
+
+[lints]
+workspace = true

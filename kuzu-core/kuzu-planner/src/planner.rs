@@ -600,7 +600,6 @@ impl QueryPlanner {
             if let Some(proj) = projection {
                 result.push(LogicalOperator::Projection(proj));
             }
-            println!("LOGICAL PLAN IN PLAN_QUERY: {:#?}", result);
             return Ok(result);
         }
 
@@ -634,7 +633,6 @@ impl QueryPlanner {
         // Append DELETE operators at the end
         result.extend(delete_ops);
 
-        println!("LOGICAL PLAN IN PLAN_QUERY: {:#?}", result);
         Ok(result)
     }
 }

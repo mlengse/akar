@@ -167,7 +167,7 @@ mod tests {
             LogicalTypeID::Int64,
             0,
             0,
-            &dir.path().to_path_buf(),
+            dir.path(),
             bm.clone(),
             DEFAULT_PAGE_SIZE,
         );

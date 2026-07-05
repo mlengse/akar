@@ -163,13 +163,7 @@ impl QueryProcessor {
         operators: &[LogicalOperator],
         sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>,
     ) -> Result<Vec<DataChunk>, String> {
-        println!(">>> execute_internal with {} operators", operators.len());
-        for op in operators {
-            println!("  op: {:?}", op);
-        }
-        
         if operators.is_empty() {
-            println!("<<< execute_internal returning dummy (empty)");
             return Ok(vec![DataChunk {
                 fields: vec![],
                 size: 0,
@@ -203,10 +197,6 @@ impl QueryProcessor {
                         scan = scan.with_data(d, columns);
                     }
                     let mut result = scan.execute(current.clone())?;
-                    println!("ScanNode {} returned {} chunks", s.table_name, result.len());
-                    if let Some(c) = result.first() {
-                        println!("  ScanNode chunk size={}, fields={}", c.size, c.fields.len());
-                    }
                     let prefix = s.alias.as_ref().unwrap_or(&s.table_name);
                     for chunk in &mut result {
                         chunk.field_names = chunk.field_names.iter().map(|n| format!("{}.{}", prefix, n)).collect();
@@ -613,30 +603,10 @@ impl QueryProcessor {
                 LogicalOperator::CrossProduct(cp) => {
                     let left_ops = flatten_union_child(&cp.left);
                     let right_ops = flatten_union_child(&cp.right);
-                    println!("CROSS PRODUCT left_ops len: {}", left_ops.len());
-                    for o in &left_ops {
-                        println!("  LEFT OP: {:?}", o);
-                    }
-                    println!("CROSS PRODUCT right_ops len: {}", right_ops.len());
-                    
                     let build_chunks = self.execute_internal(&left_ops, sip_masks)?;
                     let probe_chunks = self.execute_internal(&right_ops, sip_masks)?;
-
-                    println!("CROSS PRODUCT: left {} chunks, right {} chunks", build_chunks.len(), probe_chunks.len());
-                    for (i, c) in build_chunks.iter().enumerate() {
-                        println!("  LEFT CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
-                    }
-                    for (i, c) in probe_chunks.iter().enumerate() {
-                        println!("  RIGHT CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
-                    }
-
                     let cross = PhysicalCrossProduct;
                     let result = cross.execute_binary(&build_chunks, &probe_chunks)?;
-                    println!("CROSS PRODUCT RESULT SIZE: {} chunks", result.len());
-                    for (i, c) in result.iter().enumerate() {
-                        println!("  CHUNK {}: size={}, fields={}", i, c.size, c.fields.len());
-                        println!("  FIELD_NAMES: {:?}", c.field_names);
-                    }
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Union(u) => {

@@ -12,3 +12,6 @@ kuzu-function = { path = "../kuzu-function" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
 tracing.workspace = true
+
+[lints]
+workspace = true

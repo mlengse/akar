@@ -127,11 +127,10 @@ impl PathsOutputWriter {
             if self.check_semantic(path) {
                 self.write_path(path, results);
             }
-        } else if let Some(ref next_parent) = first_parent.next {
-            if self.is_next_viable(next_parent, path) {
+        } else if let Some(ref next_parent) = first_parent.next
+            && self.is_next_viable(next_parent, path) {
                 self.dfs_slow(next_parent, path, results);
             }
-        }
 
         path.pop();
     }

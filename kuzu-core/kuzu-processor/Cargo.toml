@@ -45,3 +45,6 @@ harness = false
 [[bench]]
 name = "physical_aggregate"
 harness = false
+
+[lints]
+workspace = true

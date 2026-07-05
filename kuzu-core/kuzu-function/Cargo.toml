@@ -15,3 +15,6 @@ regex.workspace = true
 time.workspace = true
 md-5.workspace = true
 sha2.workspace = true
+
+[lints]
+workspace = true

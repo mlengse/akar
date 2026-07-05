@@ -68,6 +68,12 @@ pub struct SparseFrontier {
     data: HashMap<u64, Iteration>,
 }
 
+impl Default for SparseFrontier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SparseFrontier {
     pub fn new() -> Self {
         Self {

@@ -2682,7 +2682,7 @@ mod fase_a_verification {
             });
             if !has_checkpoint {
                 // WAL has Commit records (one per DDL/DML operation)
-                assert!(wal.len() >= 1, "WAL should have at least commit records");
+                assert!(!wal.is_empty(), "WAL should have at least commit records");
             }
         }
 

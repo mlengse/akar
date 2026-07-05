@@ -17,3 +17,6 @@ thiserror.workspace = true
 [features]
 default = []
 duckdb-delegation = ["kuzu-duckdb/bundled"]
+
+[lints]
+workspace = true
