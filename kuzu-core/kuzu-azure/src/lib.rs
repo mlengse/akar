@@ -12,6 +12,7 @@
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
+use kuzu_common::types::Value;
 
 /// The Azure Blob Storage extension enables reading from Azure Storage from Kuzu.
 pub struct AzureExtension;

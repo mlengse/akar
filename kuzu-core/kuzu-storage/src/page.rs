@@ -205,6 +205,9 @@ mod tests {
         // Free page 1
         fh.free_page(p2);
 
+        // Finalize checkpoint so uncheckpointed pages become reusable
+        fsm.finalize_checkpoint();
+
         // Next allocation should reuse page 1
         let p4 = fh.allocate_page();
         assert_eq!(p4, 1);

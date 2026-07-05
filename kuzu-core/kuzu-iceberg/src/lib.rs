@@ -11,6 +11,7 @@
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
+use kuzu_common::types::Value;
 
 /// The Apache Iceberg extension enables querying Iceberg tables from Kuzu.
 pub struct IcebergExtension;

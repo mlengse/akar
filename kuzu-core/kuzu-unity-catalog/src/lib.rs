@@ -10,6 +10,7 @@
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
+use kuzu_common::types::Value;
 
 /// The Unity Catalog extension enables querying Unity Catalog from Kuzu.
 pub struct UnityCatalogExtension;

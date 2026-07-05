@@ -255,6 +255,14 @@ list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom
 | Free Space Manager (buddy-system) | ✅ + wiring ke FileHandle |
 | Zone Map Predicate (ColumnChunkStats) | ✅ + wiring ke NodeTable::to_column_major_data_with_predicate |
 | ColumnChunk stats update on append/update | ✅ |
+| Hybrid CSR Storage (CsrIndex) | ✅ + wiring ke RelTable |
+
+### ✅ ADBC Interface Support
+| Item | Status |
+|------|--------|
+| AdbcDatabase & AdbcConnection | ✅ |
+| AdbcStatement & AdbcPreparedStatement | ✅ |
+| Query Execution & Arrow Conversion | ✅ (execute_arrow logic) |
 
 ### ✅ Functions Ported (15 new functions)
 | Function | Status | Commit |

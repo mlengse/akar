@@ -11,6 +11,7 @@
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
+use kuzu_common::types::Value;
 
 /// The Delta Lake extension enables querying Delta tables from Kuzu.
 pub struct DeltaExtension;
