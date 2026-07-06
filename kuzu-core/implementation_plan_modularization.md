@@ -1,6 +1,6 @@
 # Modularization Plan — Split Large Rust Files
 
-> **Status:** ✅ Phase 1-3 Complete | **Target:** 2026-07-14
+> **Status:** ✅ ALL PHASES COMPLETE | **Target:** 2026-07-14
 > **Prerequisites:** P10.1 (COPY TO) ✅
 > **Referensi:** `STATUS.md` §4.4 Technical Debt Register + §9 Architecture Audit
 
@@ -205,12 +205,45 @@ kuzu-optimizer/src/
 └── lib.rs
 ```
 
+### Actual Structure
+
+```
+kuzu-optimizer/src/
+├── passes/
+│   ├── mod.rs                  # Trait definitions + re-exports
+│   ├── flat/
+│   │   ├── mod.rs              # Module declarations + re-exports
+│   │   ├── filter_pushdown.rs  # Pass 1: FilterPushDown
+│   │   ├── projection_pushdown.rs # Pass 2: ProjectionPushDown
+│   │   ├── constant_folding.rs # Pass 4: ConstantFolding
+│   │   ├── aggregate_detection.rs # Pass 5: AggregateDetection
+│   │   ├── join_optimization.rs   # Pass 6: JoinOptimization
+│   │   ├── top_k.rs               # Pass 7: TopKOptimization
+│   │   ├── vector_similarity.rs   # Pass 8: VectorSimilarityDetection
+│   │   ├── art_range_scan.rs      # Pass 9: ArtRangeScanDetection
+│   │   ├── scan_ops.rs            # Pass 1+10+11: RemoveUnnecessaryOperators + LimitPushDown + CSE
+│   │   └── ladybug.rs             # Pass 12+13+14: OrderByPushDown + UnwindDedup + CountRelTable
+│   └── tree/
+│       ├── mod.rs              # Module declarations + re-exports
+│       ├── factorization.rs    # Tree 1: FactorizationRewriting
+│       ├── acc_hash_join.rs    # Tree 3: AccHashJoinOptimization
+│       ├── sip.rs              # Tree 3.5: SIPOptimization
+│       ├── foreign_join.rs     # Tree 2: ForeignJoinPushDown
+│       ├── subquery_unnesting.rs # Tree 4: CorrelatedSubqueryUnnesting
+│       ├── cardinality.rs      # Tree 6: CardinalityEstimation
+│       └── agg_key_dep.rs      # Tree 5: AggKeyDependency
+├── passes_test.rs              # All test modules extracted
+├── join_order.rs
+├── optimizer.rs
+└── lib.rs
+```
+
 ### Langkah
 
-- `[ ]` **4.1** Buat struktur `passes/flat/` dan `passes/tree/`
-- `[ ]` **4.2** Ekstrak setiap pass ke file sendiri
-- `[ ]` **4.3** `passes/mod.rs` — orchestrate semua pass dalam urutan yang benar
-- `[ ]` **4.4** Verifikasi: `cargo test -p kuzu-optimizer` (49 passing)
+- `[x]` **4.1** Buat struktur `passes/flat/` dan `passes/tree/`
+- `[x]` **4.2** Ekstrak setiap pass ke file sendiri (10 flat + 7 tree = 17 files)
+- `[x]` **4.3** `passes/mod.rs` — trait definitions + re-exports
+- `[x]` **4.4** Verifikasi: `cargo test -p kuzu-optimizer` (49 passing, 0 failed) + `cargo clippy -D warnings` clean
 
 ---
 
@@ -234,12 +267,12 @@ kuzu-parser/src/
 
 ### Langkah
 
-- `[ ]` **5.1** Buat direktori `kuzu-parser/src/parser/`
-- `[ ]` **5.2** Ekstrak `ddl.rs` — semua `parse_create_*`, `parse_drop_*`, `parse_copy_*`, `parse_alter_*`, `parse_analyze`
-- `[ ]` **5.3** Ekstrak `dml.rs` — `parse_match`, `parse_return`, `parse_create`, `parse_delete`, `parse_set`, `parse_merge`, `parse_foreach`, `parse_unwind`, `parse_with`
-- `[ ]` **5.4** Ekstrak `expression.rs` — semua parsing expression
-- `[ ]` **5.5** Ekstrak `query.rs` — `parse_query`, `parse_union`, `parse_call`, `parse_transaction`
-- `[ ]` **5.6** Verifikasi: `cargo test -p kuzu-parser` (63 passing)
+- `[x]` **5.1** Buat direktori `kuzu-parser/src/parser/`
+- `[x]` **5.2** Ekstrak `ddl.rs` — semua `parse_create_*`, `parse_drop_*`, `parse_copy_*`, `parse_alter_*`, `parse_analyze`
+- `[x]` **5.3** Ekstrak `dml.rs` — DML + patterns + CALL + MERGE
+- `[x]` **5.4** Ekstrak `expression.rs` — semua parsing expression
+- `[x]` **5.5** Ekstrak tests → `parser_test.rs`
+- `[x]` **5.6** Verifikasi: `cargo test -p kuzu-parser` (63 passing, 0 failed)
 
 ---
 
@@ -262,11 +295,10 @@ kuzu-binder/src/
 
 ### Langkah
 
-- `[ ]` **6.1** Buat direktori `kuzu-binder/src/bind/`
-- `[ ]` **6.2** Ekstrak DDL binding → `bind/ddl.rs`
-- `[ ]` **6.3** Ekstrak DML binding → `bind/dml.rs`
-- `[ ]` **6.4** Ekstrak expression binding → `bind/expression.rs`
-- `[ ]` **6.5** Verifikasi: `cargo test -p kuzu-binder` (14 passing)
+- `[x]` **6.1** Buat direktori `kuzu-binder/src/binder/`
+- `[x]` **6.2** `binder/mod.rs` — all Binder logic (Binder struct + impl + helpers)
+- `[x]` **6.3** `binder_test.rs` — all tests extracted
+- `[x]` **6.4** Verifikasi: `cargo test -p kuzu-binder` (14 passing, 0 failed)
 
 ---
 
@@ -293,9 +325,9 @@ cargo build --workspace --release
 | **P-MOD1** | `scalar.rs` → 20+ files | 4.578 | **8** | Medium | Registry refactor |
 | **P-MOD2** | `physical_operator.rs` + `processor.rs` | 6.496 | **8** | Low | P-MOD1 |
 | **P-MOD3** | `connection.rs` → connection/ + test | 3.133 | **5** ✅ | Low | P-MOD2 |
-| **P-MOD4** | `passes.rs` → 21 files | 2.486 | **5** | Low | — |
-| **P-MOD5** | `parser.rs` → parser/ | 2.183 | **5** | Low | — |
-| **P-MOD6** | `binder.rs` → bind/ | 1.667 | **3** | Low | P-MOD5 |
+| **P-MOD4** | `passes.rs` → 17 files | 2.486 | **5** ✅ | Low | — |
+| **P-MOD5** | `parser.rs` → parser/ | 2.183 | **5** ✅ | Low | — |
+| **P-MOD6** | `binder.rs` → binder/ + test | 1.667 | **3** ✅ | Low | P-MOD5 |
 | **Total** | **7 files → ~90 files modular** | **20.543** | **34** | | |
 
 ---

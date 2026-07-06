@@ -7,6 +7,7 @@
 //! This pass runs after `CardinalityEstimation` has annotated operators
 //! with row counts.
 
+use crate::passes::flat::join_optimization::is_join_condition;
 use kuzu_planner::logical_operator::*;
 use std::collections::HashMap;
 
@@ -389,7 +390,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
             | LogicalOperator::ScanRel(_) => {
                 // skip
             }
-            LogicalOperator::Filter(f) if crate::passes::is_join_condition(&f.expression) => {
+            LogicalOperator::Filter(f) if is_join_condition(&f.expression) => {
                 // skip
             }
             _ => {

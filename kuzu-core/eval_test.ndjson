@@ -1,0 +1,1101 @@
+{"argv":["test","--message-format=json","--workspace"],"cwd":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core","reason":"x-cargo-mcp-invocation"}
+{"reason":"compiler-message","package_id":"path+file:///C:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-parser#0.1.0","manifest_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-parser\\Cargo.toml","target":{"kind":["lib"],"crate_types":["lib"],"name":"kuzu_parser","src_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-parser\\src\\lib.rs","edition":"2024","doc":true,"doctest":true,"test":true},"message":{"rendered":"warning: function `parse_create_fts_index` is never used\n   --> kuzu-parser\\src\\parser_test.rs:714:4\n    |\n714 | fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {\n    |    ^^^^^^^^^^^^^^^^^^^^^^\n    |\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\n","$message_type":"diagnostic","children":[{"children":[],"code":null,"level":"note","message":"`#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default","rendered":null,"spans":[]}],"level":"warning","message":"function `parse_create_fts_index` is never used","spans":[{"byte_end":22526,"byte_start":22504,"column_end":26,"column_start":4,"expansion":null,"file_name":"kuzu-parser\\src\\parser_test.rs","is_primary":true,"label":null,"line_end":714,"line_start":714,"suggested_replacement":null,"suggestion_applicability":null,"text":[{"highlight_end":26,"highlight_start":4,"text":"fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {"}]}],"code":{"code":"dead_code","explanation":null}}}
+{"reason":"compiler-message","package_id":"path+file:///C:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-parser#0.1.0","manifest_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-parser\\Cargo.toml","target":{"kind":["lib"],"crate_types":["lib"],"name":"kuzu_parser","src_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-parser\\src\\lib.rs","edition":"2024","doc":true,"doctest":true,"test":true},"message":{"rendered":"warning: function `parse_using_fts_clause` is never used\n   --> kuzu-parser\\src\\parser_test.rs:741:4\n    |\n741 | fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Result<FtsQuery, String> {\n    |    ^^^^^^^^^^^^^^^^^^^^^^\n\n","$message_type":"diagnostic","children":[],"level":"warning","message":"function `parse_using_fts_clause` is never used","spans":[{"byte_end":23413,"byte_start":23391,"column_end":26,"column_start":4,"expansion":null,"file_name":"kuzu-parser\\src\\parser_test.rs","is_primary":true,"label":null,"line_end":741,"line_start":741,"suggested_replacement":null,"suggestion_applicability":null,"text":[{"highlight_end":26,"highlight_start":4,"text":"fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Result<FtsQuery, String> {"}]}],"code":{"code":"dead_code","explanation":null}}}
+{"reason":"compiler-message","package_id":"path+file:///C:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-binder#0.1.0","manifest_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-binder\\Cargo.toml","target":{"kind":["lib"],"crate_types":["lib"],"name":"kuzu_binder","src_path":"c:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-binder\\src\\lib.rs","edition":"2024","doc":true,"doctest":true,"test":true},"message":{"rendered":"warning: unused import: `kuzu_parser::ast::*`\n --> kuzu-binder\\src\\binder_test.rs:7:5\n  |\n7 | use kuzu_parser::ast::*;\n  |     ^^^^^^^^^^^^^^^^^^^\n  |\n  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\n","$message_type":"diagnostic","children":[{"children":[],"code":null,"level":"note","message":"`#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default","rendered":null,"spans":[]},{"children":[],"code":null,"level":"help","message":"remove the whole `use` item","rendered":null,"spans":[{"byte_end":184,"byte_start":159,"column_end":1,"column_start":1,"expansion":null,"file_name":"kuzu-binder\\src\\binder_test.rs","is_primary":true,"label":null,"line_end":8,"line_start":7,"suggested_replacement":"","suggestion_applicability":"MachineApplicable","text":[{"highlight_end":25,"highlight_start":1,"text":"use kuzu_parser::ast::*;"},{"highlight_end":1,"highlight_start":1,"text":"use kuzu_parser::parse;"}]}]}],"level":"warning","message":"unused import: `kuzu_parser::ast::*`","spans":[{"byte_end":182,"byte_start":163,"column_end":24,"column_start":5,"expansion":null,"file_name":"kuzu-binder\\src\\binder_test.rs","is_primary":true,"label":null,"line_end":7,"line_start":7,"suggested_replacement":null,"suggestion_applicability":null,"text":[{"highlight_end":24,"highlight_start":5,"text":"use kuzu_parser::ast::*;"}]}],"code":{"code":"unused_imports","explanation":null}}}
+{"reason":"build-finished","success":true}
+{"reason":"x-cargo-mcp-test-output","text":"running 19 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_algo_extension_registration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_compute_shortest_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_all_sp_destinations ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_all_sp_destinations_disconnected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_compute_weighted_shortest_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_k_core ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_page_rank ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_scc_kosaraju ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_scc_tarjan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_louvain ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_shortest_path_bfs_direct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_shortest_path_bfs_out_of_range_source ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_shortest_path_bfs_unreachable ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_spanning_forest_connected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_spanning_forest_disconnected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_wcc_connected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_wcc_disconnected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_weighted_shortest_path_custom_weights ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_weighted_shortest_path_unit_weights ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_azure_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 14 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_drop_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_invalid_type ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_create_node_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_empty_table_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_create_rel_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_function_return_type ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_match_nonexistent_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_match_existing_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_duplicate_variable ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_rel_pattern ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_sequence_function_return_type ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_property_type_resolution ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_complex_where ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test binder_test::tests::test_bind_where_boolean ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 37 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_catalog_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_all_entries ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_rel_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_foreign_table_duplicate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_sequence_duplicate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_foreign_table_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_sequence_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_create_node_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_drop_foreign_table_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_drop_foreign_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_drop_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_drop_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_duplicate_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_entry_helpers ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_table_cannot_drop_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_table_cannot_add_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_table_columns_access ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_table_helpers ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_table_rename ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_foreign_tables_filter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_get_foreign_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_get_foreign_table_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_get_sequence ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_get_sequence_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_get_table_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_lookup_by_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_lookup_by_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_node_tables_filter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_rename ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_rename_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_drop ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_drop_nonexistent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_entry_new ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_next_k_val ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_next_k_val_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_rollback ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sequence_serial_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 21 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_date ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_multi_value_serialization ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_f64_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_internal_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_interval ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_primitive_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_timestamp ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_serialize_u32_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test serialization::tests::test_varint_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_date_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_internal_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_physical_type_from_logical ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_timestamp_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_value_from_list ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_value_from_primitives ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_value_logical_type ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test types::tests::test_value_physical_type ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test vector::tests::test_data_chunk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test vector::tests::test_physical_type_size ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test vector::tests::test_value_vector_bool ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test vector::tests::test_vector_append ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_delta_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 9 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test attach_helper::tests::test_helper_new_without_bundled ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_config_defaults ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_validate_invalid_query ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test type_converter::tests::test_duckdb_type_to_kuzu ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_duckdb_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_validate_valid_query ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection::tests::test_config_default ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection::tests::test_config_custom ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test type_converter::tests::test_duckdb_type_to_kuzu_unknown ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 14 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_bm25_score ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_fts_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_stem_short_words ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_stem_ly ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_stem_ment_ness ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_remove_stop_words ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_stem_complex ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_stem_simple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_tf_idf_all_docs ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_term_frequencies ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_tf_idf_score ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_tokenize_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_tokenize_with_punctuation ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_tokenize_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 159 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_merge_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_merge_avg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_abs ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_merge_sum ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_percentile_cont ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_percentile_disc ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_add ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_merge_percentile ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_percentile_disc_90th ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_percentile_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_percentile_skip_null ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_stddev ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_state_variance ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_agg_value_state_new ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_avg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_collect ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_count_star ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_double_sum ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_min_max ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_skip_null ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_aggregate_sum ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_cosine_similarity ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_cosine_identical ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_cross_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_cross_product_wrong_dim ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_diff_length ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_distance ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_inner_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_squared_distance ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bit_shift_left ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bit_shift_right ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bitwise_and ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bitwise_or ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bitwise_xor ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_boolean_and ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_boolean_not ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_boolean_or ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_array_registry_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_bool ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_date_timestamp ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_float ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_int32 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_int64 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cast_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cbrt ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_century ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_coalesce ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_comparison_eq ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_comparison_gt ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_concat_ws ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cot ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_add ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_current ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_diff ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_part ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_trunc ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_date_year_month_day ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_div ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_decode ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_div_by_zero ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_encode ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_epoch_ms ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_even ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_factorial ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_gamma ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_hash_generic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_initcap ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_function_registry_lookup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_is_null ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_lgamma ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_levenshtein ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_any ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_any_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_append ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_concat ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_creation ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_distinct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_has_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_len ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_none ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_position ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_prepend ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_reverse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_reverse_sort ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_single ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_slice ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_slice_single_arg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_sort ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_sum ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_to_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_list_unique ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_log2 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_map_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_map_creation ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_map_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_map_keys_values ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_mod ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_mul ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_md5 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_negate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_octet_length ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_empty_args ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_id_from_struct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_id_internal_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_label_internal_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_label_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_label_struct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_offset_error ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_offset_internal_id ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_offset_struct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_start_end_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_schema_registry_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_set_seed ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_sha256 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_split_part ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_concat ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_length ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regex_replace ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_repeat ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_reverse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_replace ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_starts_ends_with ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_substring ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_to_lower ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_to_upper ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_trim ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_string_trim_variants ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_struct_creation ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_struct_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_sub ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_days ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regexp_full_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_epoch_ms ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_hours ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_microseconds ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_milliseconds ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_minutes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_months ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_seconds ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_timestamp ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_to_years ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_typeof ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_union_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_union_tag ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_union_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regex_matches ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regexp_split_to_array ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regexp_extract_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_regexp_extract ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 159 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 31 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_shortest_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_reachable_within ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_page_rank_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_empty_graph_algorithms ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_degree_centrality ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_bfs ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_wcc ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_shortest_path_same_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test algorithms::tests::test_wcc_disconnected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::bfs_graph::tests::test_bfs_graph_manager ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::bfs_graph::tests::test_dense_bfs_graph_add_parent_multiple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::bfs_graph::tests::test_dense_bfs_graph_add_single_parent ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::bfs_graph::tests::test_dense_bfs_graph_weighted ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::bfs_graph::tests::test_parent_list_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::compute::tests::test_edge_compute_default ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::frontier::tests::test_dense_frontier_pair ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::frontier::tests::test_dense_sparse_dynamic_pair ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::frontier::tests::test_sp_frontier_pair_active_nodes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::frontier::tests::test_dense_frontier ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::frontier::tests::test_sparse_frontier ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::output_writer::tests::test_paths_output_writer_info_default ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::utils::tests::test_all_shortest_paths ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::utils::tests::test_single_shortest_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test gds::utils::tests::test_weighted_shortest_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_create_graph_entry ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_csr_build ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_csr_neighbors ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_csr_single_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_empty_graph ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_get_neighbors ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test graph::tests::test_graph_build_adjacency ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 7 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_invalid_url ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_httpfs_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_is_valid_http_url ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_http_url ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_https_url ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_url_with_port ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_url_no_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_iceberg_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 12 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_extension_registration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_array_length ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_is_valid_json ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_extract_not_found ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_contains ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_extract_array_index ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_extract_simple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_extract_nested ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_keys ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_merge_patch_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_structure_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_json_type_of ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 9 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_embedding_config_default_openai ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_llm_extension_registration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_embedding_result_fields ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_llm_provider_from_str ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_openai_embed_fails_without_key ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_ollama_request_body_format ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_openai_request_body_format ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_provider_from_str_case_insensitive ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_ollama_embed_fails_if_not_running ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 55 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::call_tests::test_call_syntax_no_args ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::call_tests::test_call_nonexistent_function ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::call_tests::test_call_show_tables_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::call_tests::test_call_show_tables_with_tables ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_duplicate_pk_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_empty_properties ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_multiple_nodes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_nonexistent_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::foreach_tests::test_foreach_in_match_context ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_verify_via_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::create_dml_tests::test_create_dml_without_variable ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::foreach_tests::test_foreach_parse_only ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_alter_add_column_with_data ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_auto_checkpoint_default_triggers_after_write ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_ceiling_function_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_alter_drop_column_with_data ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_alter_rename_column_with_data ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_auto_checkpoint_threshold_respected ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_auto_checkpoint_disabled_no_checkpoint ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_file_not_found ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_no_header ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_custom_delimiter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_column_count_mismatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_type_mismatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_tab_delimiter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_csv_with_header ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_empty_csv ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_lower_function_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_empty_table_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_empty_match_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_copy_parquet_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_delete_with_empty_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_optional_match_no_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_large_dataset_stability ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_return_star_no_variables ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_return_star_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_sequence_missing_error_query_e2e ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_sequence_nextval_currval_query_e2e ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_unwind_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_upper_function_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::merge_tests::test_merge_creates_new_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::merge_tests::test_merge_on_create_sets_properties ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::merge_tests::test_merge_parse_error_on_bad_syntax ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::merge_tests::test_merge_into_nonexistent_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_extract_parameters_simple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_no_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_substitute_missing_param ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_extract_multiple_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_value_to_constant ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test prepared_statement::tests::test_substitute_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::integration_tests::test_set_valid_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::var_length_path_tests::test_var_length_path_with_bounds_parse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::merge_tests::test_merge_matches_existing_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test connection_test::var_length_path_tests::test_var_length_path_parse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 15 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_call_tables_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_call_show_tables ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_foreach_empty_list ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_foreach_create_nodes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_call_and_create ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_create_dml_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_create_dml_duplicate_pk_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_create_dml_multiple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_foreach_with_merge_and_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_merge_and_create_and_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_merge_on_create_set ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_merge_create_new_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_merge_matches_existing ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_multi_step_pipeline ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_verification_var_length_path_parse_and_bind ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 44 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_macro_no_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_macro_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_macro_with_default ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_macro_duplicate_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_duplicate_table_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_clear_cache ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_bind_error_handling ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_concurrent_catalog_access ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_rel_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_node_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_table_with_serial_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_rel_table_schema ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_drop_nonexistent_table_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_empty_query ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_drop_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cross_product_different_sizes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_match_nonexistent_table_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_match_empty_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_execute_with_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_full_ddl_and_query_flow ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_merge_create_new_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_cross_product_no_crash ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_merge_with_on_create_set ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_parse_error_handling ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_multiple_connections_same_db ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_physical_scan_reads_real_data ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_merge_existing_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_multiple_ddl_statements ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_optional_match_no_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_parameter_parse_and_bind ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_prepare_ddl ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_prepare_cache ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_physical_scan_with_where_on_real_data ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_prepare_and_execute ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_prepare_missing_param_fails ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_prepare_multiple_params ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_scan_multiple_columns ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_query_with_where_clause ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_query_result_display ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_serial_auto_increment_on_insert ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_serial_with_explicit_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_union_all_integration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_serial_multiple_columns ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_sip_optimization ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 4 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_copy_to_empty_result ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_copy_to_parquet_fallback ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_copy_to_csv_no_header ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_copy_to_csv_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_delete_and_set ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test test_create_and_query_fts_index ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 12 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_empty_dump ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_neo4j_extension_registration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_index ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_constraint ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_properties_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_multi_label_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_comment_lines ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_full_dump ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_properties_multiple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_relationship ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_parse_single_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_run_migration ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 49 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_extract_join_conditions ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_get_scan_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_extract_join_same_var_not_join ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_collect_scans_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_reorder_no_join_needed ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_collect_scans_sorted_by_cardinality ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_reorder_joins_dp_prefers_join_over_cross_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test optimizer::tests::test_optimizer_empty_plan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test optimizer::tests::test_optimizer_registers_all_passes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test optimizer::tests::test_optimizer_preserves_valid_plan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_agg_key_dependency_no_pk_in_keys ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_agg_key_dependency_non_property_keys_unchanged ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_agg_key_dependency_pk_only ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_agg_key_dependency_single_key_unchanged ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_cardinality_estimation_aggregate_no_keys ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_cardinality_estimation_cross_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_cardinality_estimation_limit ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_cardinality_estimation_scan_node ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_combined_passes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_extract_root_variable_constant ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_extract_root_variable_property ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_extract_root_variable_simple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_factorization_rewriting_inserts_flatten ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_filter_push_down ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_boolean_and ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_boolean_or ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_comparison_lt ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_integer_add ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_integer_mul ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_mixed_types_no_fold ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_negate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_nested ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_not ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_fold_string_concat ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_join_condition ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_not_join_condition ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_join_condition_same_var ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_tautology_equal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_tautology_false ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_is_tautology_true ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_join_optimization ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_join_optimization_removes_equi_join_filter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_projection_push_down ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_remove_empty_projection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_remove_tautology_filter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_sip_optimization_no_filter_no_semi_masker ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_sip_optimization_triggers_on_filtered_build_side ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_top_k_detection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test passes_test::tests::test_top_k_with_projection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 63 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_analyze_star ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_analyze_table_with_keyword ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_analyze_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_copy_from_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_copy_from_full_options ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_copy_from_parse_error ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_copy_from_single_quoted_path ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_copy_from_with_options ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_fts_index_parse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_cast_aliases_parse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_macro_no_args ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_macro_expression_body ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_macro_positional_args ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_macro_multiple_positional_args ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_node_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_rel_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_boolean_expr ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_macro_with_default_arg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_full_options ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_if_not_exists ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_no_cycle ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_count_star ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_no_minvalue ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_or_replace ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_negative_increment ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_start_with_with ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_create_sequence_start_with ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_drop_sequence_if_exists ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_drop_sequence ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_drop_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_explain_create_table ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_export_database_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_complex_and_or ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_explain_query ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_explain_logical ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_explain_profile ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_foreach_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_import_database_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_function_call_ast_nextval_currval ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_foreach_in_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_function_call ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_exists_subquery_in_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_integer_expr ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_in_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_nested ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_any ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_lower_upper_parse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_literal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_match_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_none ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_match_where_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_list_predicate_single ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_match_with_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_multiple_parameters ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_parameter_syntax ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_parameter_with_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_rel_pattern ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_var_length_path_simple ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_var_length_path_with_bounds ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_exists_subquery_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parser_test::tests::test_var_length_path_with_rel_variable ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 16 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_extract_variable_alias ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_no_join_condition ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_join_condition_extraction ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_single_scan_leaf ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_flatten_join_plan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_two_scans_cross_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_flatten_cross_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test join_order::tests::test_and_condition_extraction ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_ddl_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_return_only_projection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_scan_node_fields ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_match_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_unwind_then_projection_without_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_order ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_match_where_return ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test planner::tests::test_plan_rel_pattern ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_postgres_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 77 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_constant_bool ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_variable ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_constant_int ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_function_call_string_length ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_not ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_binary_and ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_binary_greater_than ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_evaluate_binary_equal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_avg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_sequence_requires_string_arg ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_sequence_requires_callback ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_empty_input ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_group_by_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_count_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test expression_evaluator::tests::test_sequence_nextval_currval_with_callback ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_min_max ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_sum ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_aggregate_sum_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_cross_product_empty_left ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_anti_join_all_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_anti_join_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_cross_product_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_cross_product_empty_right ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_cross_product_multi_chunk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_cross_product_multi_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_empty_input_through_pipeline ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_empty_table_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_empty_plan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_filter_false_removes_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_filter_true_passthrough ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_all_null_keys ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_filter_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_empty_build ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_no_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_non_overlapping_ids_returns_zero_rows ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_null_keys_no_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_hash_join_with_semi_mask_collects_build_keys ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_empty_build ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_no_common ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_no_probe ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_probe_key_missing ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_three_build_sides ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_intersect_single_build_side ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_limit ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_limit_offset_exceeds_total ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_limit_with_offset ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_limit_zero ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_order_by_empty_input ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_order_by_ascending ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_order_by_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_order_by_descending ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_projection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_projection_evaluates_function_call_no_input_source ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_projection_sequence_missing_callback_errors ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_property_access_resolves_named_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_scan_with_semi_mask ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_semi_join_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_semi_join_no_match ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_semi_mask_uninitialized_passes_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_scan_filter_limit ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_semi_join_empty_build ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_semi_masker_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_all_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_scan_filter_projection ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_scan_only ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_scan_accumulation_both_scans_reach_join ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_all_empty_chunks ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_all_multi_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_all_multiple_chunks ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_column_mismatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_distinct_all_duplicates ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_distinct_dedup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_empty_left ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test processor::tests::test_union_empty_right ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_sqlite_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 242 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_lookup_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_delete ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_insert_and_lookup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_clear ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_insert_multiple_consecutive ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_range_scan_exclusive_lower ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_max_results ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_range_scan_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_range_scan_open_bounds ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_range_scan_with_strings ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_varint_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_range_scan_inclusive_upper ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_bool ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_index::tests::test_serialize_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_double_neg_zero ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_date_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_int128 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_int64_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_double_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_interval ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_string_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_string_with_null_byte ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_timestamp_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_encode_uint64_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_from_value_roundtrip_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_key::tests::test_from_value_dispatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_add_and_remove_offset ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_get_or_insert_child ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_node16_grows_to_node48 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_node48_grows_to_node256 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_node4_grows_to_node16 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_node4_insert_and_get ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_node_block_allocate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test art_node::tests::test_remove_child ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test checkpoint::tests::test_checkpoint_clears_wal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_cached_page_no_fault ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_flush_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_multiple_pages ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_clock_eviction ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test checkpoint::tests::test_checkpoint_flush_dirty_pages ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_pin_unpin ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test checkpoint::tests::test_wal_column_write_replay ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_empty_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test checkpoint::tests::test_checkpoint_with_column_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_column_compression_mixed_types ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_append_and_read ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_column_with_float_compression ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_column_compression_large_values ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test buffer_manager::tests::test_dirty_and_flush ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_blob ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_column_with_integer_bitpacking ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_date_time ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_list ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_primitives ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_chunk_default_capacity ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_mixed_types ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_clear ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_serialize_deserialize_struct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_append_and_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_scan_values ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_out_of_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_drain ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_empty_chunk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_from_vec ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_is_full ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_flush_empty_chunk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column::tests::test_roundtrip_via_buffer_manager ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_flush_copy_to_column_preserves_buffer ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_remaining ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_boolean_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_compression_metadata ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_compress_integer_small ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_compress_integer_large ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_flush_to_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_compress_integer_negative ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_constant_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_float_batch_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_integer_roundtrip_batch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_pass_through_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_naive_date_to_epoch_days_known ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_single_value_compress_decompress ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_config_from_options ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test compression::tests::test_uncompressed_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_multiple_flushes_to_same_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_parse_blob_mixed ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_file_not_found ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_column_count_mismatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_blob ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_custom_delimiter ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_interval ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_dates_and_timestamps ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_quoted_fields ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_null_values ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_split_top_level_nested ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_list_and_struct ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_no_header ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_add_and_pop_exact ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_get_level ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_multiple_free_lists ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_multiple_pop_from_same_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_page_range_ordering ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_pop_no_suitable_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_uncheckpointed_pages ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_pop_splits_larger_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test free_space_manager::tests::test_pop_from_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_hash_index_delete ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_hash_index_in_memory ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_type_coercion_error ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_empty_index ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test csv_reader::tests::test_read_csv_uint_types ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_collision_handling ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_delete ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_basic_insert_and_lookup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_commit_multiple_rows ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_large_entries ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_commit_pipeline_local_storage_flush ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_rollback_pipeline_no_data_written ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_compression_full_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_multiple_pages ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_multi_node_group_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_table_full_persistence_cycle ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test index::tests::test_on_disk_rebuild_from_disk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_wal_recovery_empty_wal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_wal_recovery_cycle ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_wal_load_from_disk_roundtrip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_buffer_content ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_wal_recovery_no_wal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_clear ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_multiple_records ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_append_row ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_wal_recovery_insert_then_recover ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_insert_record ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test local_wal::tests::test_local_wal_into_buffer ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_append_when_full ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_append_wrong_column_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_clear ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_empty_group ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_compressed_multi_group_with_checkpoint ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_get_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_multi_column_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_scan_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_remaining ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_start_offset ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_zone_map_pushdown ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page::tests::test_file_handle_fsm ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page::tests::test_frame_dirty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page::tests::test_page_offset ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_multiple_flush_cycles ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page::tests::test_frame_pin_unpin ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page_manager::tests::test_allocate_extends_file ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_array_to_string ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_arrow_array_to_value_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page_manager::tests::test_free_and_reuse ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test page_manager::tests::test_allocate_multiple_no_fsm ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_flush_copy_preserves_buffer ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_cast_date_to_days ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_arrow_array_widening ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_blob_conversion ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test node_group::tests::test_flush_to_columns ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_cast_int_to_i64 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_cast_timestamp_to_micros ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_cast_to_f64 ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_date_conversion ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_timestamp_conversion ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_file_not_found ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_unsigned_int_types ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_validate_type_compatibility ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_column_chunk_stats_update ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_double_zone_map ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_eq_below_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_column_not_found ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_eq_in_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_round_trip_with_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_round_trip_unsigned_and_floats ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_gt_all_below ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_round_trip_parquet ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_eq_out_of_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test parquet_reader::tests::test_type_mismatch ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_gte_eq_max_not_skip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_gt_some_above ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_gte_gt_max ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_internal_id_zone_map ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_lte_eq_min_not_skip ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_lte_lt_min ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_lt_all_above ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_lt_some_below ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_not_eq_single_value ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_no_stats_always_scan ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_not_eq_range ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_null_predicate_is_null_has_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_null_predicate_is_null_no_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_null_predicate_is_not_null_all_nulls ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test predicate::tests::test_string_zone_map ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_cleanup_on_drop ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_cleanup_all ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_should_spill ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_merge_with_in_memory ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_multi_way_merge_with_dedup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_catalog_create_and_lookup ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_node_table_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_spill_empty_chunk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_multi_way_merge ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_node_table_insert_and_get ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_node_table_scan_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_node_table_to_column_major ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_spill_and_restore_columns ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_get_incoming_edges ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_get_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_get_edge_properties ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_get_outgoing_edges ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_reverse_adjacency ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_insert_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_no_edges ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_insert_row_legacy ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_table_empty ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_wrong_column_count ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_rel_to_column_major ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test undo_buffer::tests::test_empty_buffer ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test undo_buffer::tests::test_record_and_drain ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test undo_buffer::tests::test_rollback_applies_reverse_order ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test undo_buffer::tests::test_rollback_clears_buffer ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test update_info::tests::test_update_info_append_and_get ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test update_info::tests::test_update_info_latest ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test update_info::tests::test_update_info_no_update ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test update_info::tests::test_update_info_version_chain ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test version_info::tests::test_vector_version_info_delete ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test version_info::tests::test_vector_version_info_insert ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test version_info::tests::test_version_info_basic ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test wal::tests::test_wal_append_clear ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test spiller::tests::test_spill_and_restore_single_column ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test wal::tests::test_wal_flush_to_disk ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test wal_replayer::tests::test_replay_empty_wal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test wal::tests::test_wal_replay ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test table::tests::test_node_table_auto_node_group ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test wal_replayer::tests::test_replay_with_records ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test column_chunk::tests::test_large_flush ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test integration_tests::test_10k_row_stress ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 242 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 12 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_begin_read ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_commit_read ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_begin_write ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_concurrent_writes_allowed ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_commit_write ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_description ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_mvcc_visibility ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_no_conflict_different_tables ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_num_active_changes ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_rollback ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_write_write_conflict ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_concurrent_writer_limit_single_writer_mode ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_uc_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 20 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_distance_metrics ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_empty_index ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_l1_metric ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_insert_and_search_exact ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_cosine_metric_search ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_single_insert ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_cosine_similarity_identical ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_cosine_different_lengths ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_dot_product ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_cosine_similarity_orthogonal ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_dot_product_negative ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_empty_vectors ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_euclidean_distance ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_l2_distance ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_vector_extension_name ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test tests::test_normalize ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_search_returns_k_results ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_stats_report ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_recall_rate ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test hnsw::tests::test_1000_vectors_recall ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.52s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 4 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-main\\src\\prepared_statement.rs - prepared_statement (line 6) ... ignored"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-main\\src\\connection\\mod.rs - connection::Connection (line 44) - compile ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-main\\src\\database.rs - database::Database (line 65) - compile ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-main\\src\\query_result.rs - query_result::QueryResult (line 47) - compile ... ok"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"all doctests ran in 1.66s; merged doctests compilation took 1.60s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 1 test"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-processor\\src\\processor.rs - processor::serialize_plan_tree (line 1405) ... ignored"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"all doctests ran in 0.45s; merged doctests compilation took 0.40s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 3 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-storage\\src\\column_chunk.rs - column_chunk::ColumnChunk (line 25) ... ignored"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-storage\\src\\spiller.rs - spiller (line 18) ... ignored"}
+{"reason":"x-cargo-mcp-test-output","text":"test kuzu-storage\\src\\spiller.rs - spiller::MultiWayStreamMerge (line 341) ... ignored"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"all doctests ran in 0.40s; merged doctests compilation took 0.35s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"reason":"x-cargo-mcp-test-output","text":"running 0 tests"}
+{"reason":"x-cargo-mcp-test-output","text":"test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"}
+{"status":"success"}
+{"reason":"x-cargo-mcp-stderr","text":"Compiling kuzu-function v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-function)\n   Compiling kuzu-parser v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-parser)\n   Compiling kuzu-extension v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-extension)\n   Compiling kuzu-vector v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-vector)\n   Compiling kuzu-fts v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-fts)\n   Compiling kuzu-postgres v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-postgres)\n   Compiling kuzu-unity-catalog v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-unity-catalog)\n   Compiling kuzu-iceberg v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-iceberg)\n   Compiling kuzu-duckdb v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-duckdb)\n   Compiling kuzu-storage v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-storage)\n   Compiling kuzu-binder v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-binder)\n   Compiling kuzu-sqlite v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-sqlite)\n   Compiling kuzu-llm v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-llm)\n   Compiling kuzu-json v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-json)\n   Compiling kuzu-planner v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-planner)\n   Compiling kuzu-neo4j v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-neo4j)\n   Compiling kuzu-azure v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-azure)\n   Compiling kuzu-delta v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-delta)\n   Compiling kuzu-httpfs v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-httpfs)\n   Compiling kuzu-graph v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-graph)\n   Compiling kuzu-optimizer v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-optimizer)\n   Compiling kuzu-processor v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-processor)\n   Compiling kuzu-algo v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-algo)\n   Compiling kuzu-main v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-main)\n   Compiling kuzu-wasm v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-wasm)\n   Compiling kuzu-cli v0.1.0 (C:\\Users\\anjan\\dev\\memory\\kuzu\\kuzu-core\\kuzu-cli)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 04s\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_algo-366dcfab25e74c69.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_azure-7b2db3e9e80bb507.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_binder-1adc20b1d2204c53.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_catalog-40bf7de850a05bc7.exe)\n     Running unittests src\\main.rs (target\\debug\\deps\\kuzu_cli-b9373528ca80c0bd.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_common-c8389abfd2911055.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_delta-e22567d7ed6c2150.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_duckdb-369da099b393a2ae.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_extension-54185ecdfa8119ae.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_fts-ef064393abaed9b8.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_function-f12e028ecbea5eb3.exe)\n     Running tests\\scalar_tests.rs (target\\debug\\deps\\scalar_tests-eb68677755e07f2d.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_graph-dfafa91fd51dd076.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_httpfs-ec508af03671ffa8.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_iceberg-cc4df82b74cae82a.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_json-31511cf28131df91.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_llm-fac41886410a967f.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_main-986405013c43e1ea.exe)\n     Running unittests src\\bin\\print_plan.rs (target\\debug\\deps\\print_plan-aef2a088c38e3d22.exe)\n     Running tests\\fase_b_verification.rs (target\\debug\\deps\\fase_b_verification-1a87912264253dd7.exe)\n     Running tests\\integration_test.rs (target\\debug\\deps\\integration_test-394ca7c8374e29c9.exe)\n     Running tests\\test_copy_to.rs (target\\debug\\deps\\test_copy_to-0aa9aa7ecd2bebee.exe)\n     Running tests\\test_delete_set.rs (target\\debug\\deps\\test_delete_set-43780fc9ae1b3732.exe)\n     Running tests\\test_fts.rs (target\\debug\\deps\\test_fts-7b7222587a735432.exe)\n     Running tests\\test_httpfs.rs (target\\debug\\deps\\test_httpfs-cad51ebf89595ebb.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_neo4j-d936728931943f8d.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_optimizer-1c1dc63e9de4b920.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_parser-a67aa17bccf719d2.exe)\n     Running unittests src\\bin\\test_parse.rs (target\\debug\\deps\\test_parse-55a9006b70179ec7.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_planner-37b074d1422181e2.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_postgres-aed2d407cb96fb4a.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_processor-2ec50a4fa84ca096.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_sqlite-902506ea954d85ec.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_storage-f863482b26f0183c.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_transaction-99a34daccfa6bbb6.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_unity_catalog-3968df7a1ef185b6.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_vector-1ff88aef1d5e12d6.exe)\n     Running unittests src\\lib.rs (target\\debug\\deps\\kuzu_wasm-a17bb691329b0993.exe)\n     Running tests\\wasm_test.rs (target\\debug\\deps\\wasm_test-743cf344a7564bf2.exe)\n   Doc-tests kuzu_algo\n   Doc-tests kuzu_azure\n   Doc-tests kuzu_binder\n   Doc-tests kuzu_catalog\n   Doc-tests kuzu_common\n   Doc-tests kuzu_delta\n   Doc-tests kuzu_duckdb\n   Doc-tests kuzu_extension\n   Doc-tests kuzu_fts\n   Doc-tests kuzu_function\n   Doc-tests kuzu_graph\n   Doc-tests kuzu_httpfs\n   Doc-tests kuzu_iceberg\n   Doc-tests kuzu_json\n   Doc-tests kuzu_llm\n   Doc-tests kuzu_main\n   Doc-tests kuzu_neo4j\n   Doc-tests kuzu_optimizer\n   Doc-tests kuzu_parser\n   Doc-tests kuzu_planner\n   Doc-tests kuzu_postgres\n   Doc-tests kuzu_processor\n   Doc-tests kuzu_sqlite\n   Doc-tests kuzu_storage\n   Doc-tests kuzu_transaction\n   Doc-tests kuzu_unity_catalog\n   Doc-tests kuzu_vector\n   Doc-tests kuzu_wasm"}

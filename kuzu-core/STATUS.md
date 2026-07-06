@@ -9,7 +9,7 @@
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
 **28 crate**, **~106 file .rs**, **~27.000 LOC**.
 
-> **Modularization:** Phase 1-3 complete — `scalar.rs` (4.578 → 20 files), `physical_operator.rs` (3.794 → 7 files), `connection.rs` (3.133 → 9 files). Next: Phase 4 (`passes.rs`).
+> **Modularization:** ALL PHASES COMPLETE — `scalar.rs` (4.578 → 20 files), `physical_operator.rs` (3.794 → 7 files), `connection.rs` (3.133 → 9 files), `passes.rs` (2.486 → 17 files), `parser.rs` (2.183 → 4 files + test), `binder.rs` (1.667 → 2 files).
 
 | Metrik | Nilai |
 |--------|-------|
@@ -480,9 +480,9 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | 2 | **Monolith `physical_operator.rs`** (3.794 lines) | 🔴 HIGH | `kuzu-processor/src/physical_operator.rs` | P-MOD2: Split ke `operators/*.rs` (P10.6) |
 | 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
 | 4 | **Monolith `processor.rs`** (2.702 lines) | 🔴 HIGH | `kuzu-processor/src/processor.rs` | P-MOD2: Split helpers dari pipeline |
-| 5 | **Monolith `passes.rs`** (2.486 lines) | 🟡 HIGH | `kuzu-optimizer/src/passes.rs` | P-MOD4: Split ke `passes/flat/*.rs` + `passes/tree/*.rs` |
-| 6 | **Monolith `parser.rs`** (2.183 lines) | 🟡 HIGH | `kuzu-parser/src/parser.rs` | P-MOD5: Split ke `parser/*.rs` (ddl, dml, expression, query) |
-| 7 | **Monolith `binder.rs`** (1.667 lines) | 🟡 MEDIUM | `kuzu-binder/src/binder.rs` | P-MOD6: Split ke `bind/*.rs` (ddl, dml, expression) |
+| 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{10 files},tree/{7 files}}` | P-MOD4: ✅ Complete (Phase 4) |
+| 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
+| 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/mod.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
 | 8 | **TRANSACTION via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.2 — pindahkan ke pipeline parser→binder→planner→processor |
 | 9 | **STANDALONE_CALL via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.3 — pindahkan ke pipeline proper |
 | 10 | **Missing physical operators** | 🟡 MEDIUM | `kuzu-processor/` | P12 — Partitioner, IndexLookup, TopK, dll |

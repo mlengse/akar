@@ -1,4 +1,4 @@
-//! Binder implementation — resolves symbols and validates semantics.
+//! Binder implementation ΓÇö resolves symbols and validates semantics.
 
 #![allow(clippy::collapsible_if, clippy::never_loop)]
 
@@ -318,7 +318,7 @@ impl Binder {
                         if node_table_id.is_none() {
                             node_table_id = Some(existing.table_id);
                         }
-                        // Don't add to new_vars — it's a reference, not a new binding
+                        // Don't add to new_vars ΓÇö it's a reference, not a new binding
                     } else {
                         return Err(format!("Variable '{}' already defined", v));
                     }
@@ -1155,7 +1155,7 @@ impl Binder {
 
     fn bind_call(&self, c: kuzu_parser::ast::CallStatement) -> Result<BoundStatement, String> {
         // Note: CALL create_fts_index is superseded by the DDL `CREATE FTS INDEX` statement.
-        // CALL is a table function invocation — validate the function exists
+        // CALL is a table function invocation ΓÇö validate the function exists
         // in the function registry. At binding time we just pass through;
         // resolution happens at execution time.
         Ok(BoundStatement::BoundCall(BoundCall {
@@ -1298,7 +1298,7 @@ impl Binder {
         }))
     }
 
-    /// Bind ANALYZE statement — resolve table names to table IDs.
+    /// Bind ANALYZE statement ΓÇö resolve table names to table IDs.
     fn bind_analyze(&self, a: AnalyzeStatement) -> Result<BoundStatement, String> {
         let cat = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
         let table_ids = if let Some(ref table_name) = a.table_name {
@@ -1307,7 +1307,7 @@ impl Binder {
                 .ok_or_else(|| format!("Table '{table_name}' not found"))?;
             vec![id]
         } else {
-            // ANALYZE * — collect stats for all node/rel tables
+            // ANALYZE * ΓÇö collect stats for all node/rel tables
             cat.all_entries()
                 .filter(|e| e.is_node_table() || e.is_rel_table())
                 .map(|e| e.table_id())
@@ -1563,7 +1563,7 @@ impl Binder {
         }))
     }
 
-    /// Bind COPY TO — export query results to a file.
+    /// Bind COPY TO ΓÇö export query results to a file.
     fn bind_copy_to(&self, c: kuzu_parser::ast::CopyTo) -> Result<BoundStatement, String> {
         // Bind the inner query
         let bound_query = match self.bind(Statement::Query(c.query))? {
@@ -1586,225 +1586,3 @@ fn expr_to_debug_string(expr: &kuzu_parser::ast::Expression) -> String {
     format!("{:?}", expr)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kuzu_catalog::Catalog;
-    use kuzu_parser::parse;
-
-    fn setup_binder() -> Binder {
-        let mut catalog = Catalog::new();
-        catalog.create_node_table(
-            "Person".into(),
-            vec![
-                CatalogColumn {
-                    name: "name".into(),
-                    logical_type: LogicalTypeID::String,
-                    is_primary_key: true,
-                    default_value: None,
-                },
-                CatalogColumn {
-                    name: "age".into(),
-                    logical_type: LogicalTypeID::Int64,
-                    is_primary_key: false,
-                    default_value: None,
-                },
-                CatalogColumn {
-                    name: "score".into(),
-                    logical_type: LogicalTypeID::Double,
-                    is_primary_key: false,
-                    default_value: None,
-                },
-            ],
-        );
-        catalog.create_rel_table(
-            "Knows".into(),
-            0,
-            0,
-            vec![CatalogColumn {
-                name: "since".into(),
-                logical_type: LogicalTypeID::Int64,
-                is_primary_key: false,
-                default_value: None,
-            }],
-        );
-        Binder::new(Arc::new(Mutex::new(catalog)))
-    }
-
-    #[test]
-    fn test_bind_create_node_table() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
-        let sql = "CREATE NODE TABLE City(name STRING, population INT64, PRIMARY KEY (name))";
-        let stmt = parse(sql).unwrap();
-        let bound = binder.bind(stmt).unwrap();
-        match bound {
-            BoundStatement::BoundCreateNodeTable(t) => {
-                assert_eq!(t.name, "City");
-                assert_eq!(t.columns.len(), 2);
-                assert_eq!(t.columns[0].logical_type, LogicalTypeID::String);
-                assert_eq!(t.columns[1].logical_type, LogicalTypeID::Int64);
-            }
-            _ => panic!("Expected BoundCreateNodeTable"),
-        }
-    }
-
-    #[test]
-    fn test_bind_drop_table() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
-        let sql = "DROP TABLE Person";
-        // Should fail because table doesn't exist
-        assert!(binder.bind(parse(sql).unwrap()).is_err());
-    }
-
-    #[test]
-    fn test_bind_match_existing_table() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person) RETURN a.name";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(q) => {
-                assert_eq!(q.clauses.len(), 2);
-                assert_eq!(q.variables.len(), 1);
-                assert_eq!(q.variables[0].name, "a");
-                assert!(q.variables[0].is_node);
-            }
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_match_nonexistent_table() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:GhostTable) RETURN a";
-        assert!(binder.bind(parse(sql).unwrap()).is_err());
-    }
-
-    #[test]
-    fn test_bind_rel_pattern() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a, b";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(q) => {
-                // a is the first node, r is the edge
-                // b is the second node - parser currently drops it
-                assert!(!q.variables.is_empty());
-            }
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_where_boolean() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person) WHERE a.age > 25 RETURN a.name";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(q) => {
-                assert_eq!(q.clauses.len(), 3); // match, where, return
-                match &q.clauses[1] {
-                    BoundClause::BoundWhere(w) => {
-                        assert_eq!(w.expression.resolved_type, LogicalTypeID::Bool);
-                    }
-                    _ => panic!("Expected BoundWhere"),
-                }
-            }
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_duplicate_variable() {
-        let binder = setup_binder();
-        // Duplicate variable in same MATCH (comma-separated patterns)
-        // Note: multiple MATCH clauses not yet supported in grammar
-        let sql = "MATCH (a:Person) WHERE a.age = a.age RETURN a";
-        // Should bind fine since a is used consistently
-        assert!(binder.bind(parse(sql).unwrap()).is_ok());
-    }
-
-    #[test]
-    fn test_bind_invalid_type() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
-        // Valid type but wrong for PRIMARY KEY
-        let sql = "CREATE NODE TABLE Bad(age INT64, PRIMARY KEY (name))";
-        assert!(binder.bind(parse(sql).unwrap()).is_err());
-    }
-
-    #[test]
-    fn test_bind_empty_table_name() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
-        let sql = "CREATE NODE TABLE (name STRING, PRIMARY KEY (name))";
-        // This should fail because parser expects a name
-        assert!(parse(sql).is_err() || binder.bind(parse(sql).unwrap()).is_err());
-    }
-
-    #[test]
-    fn test_bind_create_rel_table() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
-        let sql = "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))";
-        binder.bind(parse(sql).unwrap()).unwrap();
-        let sql2 = "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)";
-        let bound = binder.bind(parse(sql2).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundCreateRelTable(t) => {
-                assert_eq!(t.name, "Knows");
-                assert_eq!(t.columns.len(), 1);
-            }
-            _ => panic!("Expected BoundCreateRelTable"),
-        }
-    }
-
-    #[test]
-    fn test_bind_function_return_type() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person) RETURN COUNT(a)";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(q) => match &q.clauses[1] {
-                BoundClause::BoundReturn(r) => {
-                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
-                }
-                _ => panic!("Expected BoundReturn"),
-            },
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_sequence_function_return_type() {
-        let binder = setup_binder();
-        let sql = "RETURN nextval('my_seq'), currval('my_seq')";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(q) => match &q.clauses[0] {
-                BoundClause::BoundReturn(r) => {
-                    assert_eq!(r.expressions.len(), 2);
-                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
-                    assert_eq!(r.expressions[1].resolved_type, LogicalTypeID::Int64);
-                }
-                _ => panic!("Expected BoundReturn"),
-            },
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_property_type_resolution() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person) WHERE a.score > 4.5 RETURN a.name";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        match bound {
-            BoundStatement::BoundQuery(_) => {} // Just check it binds successfully
-            _ => panic!("Expected BoundQuery"),
-        }
-    }
-
-    #[test]
-    fn test_bind_complex_where() {
-        let binder = setup_binder();
-        let sql = "MATCH (a:Person) WHERE a.age > 25 AND a.name = 'Alice' RETURN a";
-        let bound = binder.bind(parse(sql).unwrap()).unwrap();
-        assert!(matches!(bound, BoundStatement::BoundQuery(_)));
-    }
-}
