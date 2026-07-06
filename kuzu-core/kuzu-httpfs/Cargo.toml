@@ -11,7 +11,7 @@ kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
-ureq = "2.9"
+ureq = "3.3"
 tempfile = "3.10"
 tracing.workspace = true
 
