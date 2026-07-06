@@ -40,7 +40,31 @@ struct TxnResources {
     pub shadow_file: ShadowFile,
 }
 
-/// A connection to the database for executing queries.
+/// A connection to the database for executing Cypher queries.
+///
+/// Created via [`Connection::new`] with a reference to a [`Database`].
+/// Supports both ad-hoc queries and prepared statements.
+///
+/// # Examples
+///
+/// ```no_run
+/// use kuzu_main::database::{Database, SystemConfig};
+/// use kuzu_main::connection::Connection;
+///
+/// let db = Database::new("./my_db", SystemConfig::default())?;
+/// let conn = Connection::new(&db);
+///
+/// // DDL
+/// conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")?;
+///
+/// // DML
+/// conn.query("CREATE (:Person {name: 'Alice'})")?;
+///
+/// // Query
+/// let result = conn.query("MATCH (p:Person) RETURN p.name")?;
+/// assert!(result.success);
+/// # Ok::<(), String>(())
+/// ```
 pub struct Connection {
     database: Arc<Database>,
     /// Cache of prepared statements (query → PreparedStatement).

@@ -37,7 +37,31 @@ impl fmt::Display for QuerySummary {
     }
 }
 
-/// The result of executing a query.
+/// The result of executing a Cypher query.
+///
+/// Contains result chunks as column-major [`DataChunk`] vectors, metadata
+/// (row/column counts), and optional timing summary.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use kuzu_main::database::{Database, SystemConfig};
+/// # use kuzu_main::connection::Connection;
+/// # let db = Database::new("./db", SystemConfig::default())?;
+/// # let conn = Connection::new(&db);
+/// let result = conn.query("MATCH (n) RETURN n LIMIT 5")?;
+/// println!("Rows: {}, Columns: {}", result.num_rows, result.num_columns);
+/// for chunk in &result.chunks {
+///     for field in &chunk.fields {
+///         for row in 0..field.size() {
+///             if let Some(val) = field.get_value(row) {
+///                 println!("  {:?}", val);
+///             }
+///         }
+///     }
+/// }
+/// # Ok::<(), String>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct QueryResult {
     pub chunks: Vec<DataChunk>,

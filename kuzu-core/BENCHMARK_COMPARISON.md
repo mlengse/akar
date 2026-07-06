@@ -1,15 +1,35 @@
 # Kuzu Rust vs C++ Performance Comparison
 
-> **Date:** 2026-06-29
-> **Rust Commit:** Current workspace HEAD
-> **C++ Commit:** N/A (C++ binary pre-built from release)
-> **Dataset:** Synthetic benchmarks (various sizes — see individual benchmarks)
+> **Date:** 2026-07-07 (updated from 2026-06-29)
+> **Rust:** criterion v0.5, cargo bench --workspace
+> **C++:** TBD — binary not yet built (see [C++ Setup](#cpp-setup) below)
+> **Dataset:** Synthetic operator benchmarks (various sizes)
+
+---
+
+## Quick Start
+
+```bash
+# Run Rust benchmarks (operator micro-benchmarks)
+cd kuzu-core
+cargo bench -p kuzu-processor   # Scan, Filter, Join, OrderBy, Aggregate
+cargo bench -p kuzu-main         # Full pipeline + Storage
+
+# View HTML reports
+# Open target/criterion/report/index.html
+```
 
 ---
 
 ## TL;DR
 
-The Rust Kuzu port shows **competitive performance** on individual operators. Full pipeline queries are slower (expected for a first port) due to serialization overhead through the full parse→bind→plan→optimize→execute stack. Key areas for optimization are identified below.
+The Rust Kuzu port shows **competitive performance** on individual operators. Direct C++ comparison is pending — the C++ benchmark binary needs to be built from the CMake project. See [C++ Setup](#cpp-setup) for build instructions.
+
+**Current Status:**
+- ✅ Rust micro-benchmarks: 30+ criterion benchmarks across scan, filter, join, sort, aggregate
+- ✅ Full pipeline benchmarks: parse→bind→plan→optimize→execute
+- ❌ C++ baseline: not yet measured
+- ❌ Cross-language gap ratios: TBD
 
 ---
 
@@ -132,36 +152,40 @@ Multi-key and string-key GROUP BY are ~2× slower than integer key.
 
 ## C++ Benchmark Status
 
-### C++ kuzu_benchmark.exe
+### C++ kuzu_benchmark
 
-The C++ benchmark binary exists at:
-```
-build/release/tools/benchmark/kuzu_benchmark.exe
-```
+The C++ benchmark binary needs to be built from the CMake project at the repo root.
 
-However, running it requires a **serialized Kuzu database** created by `kuzu_shell`, which has not been built in the current Rust-first workspace. The serialization process involves:
+**Prerequisites:**
+- CMake 3.15+
+- C++20 compiler (MSVC 2022, GCC 13+, or Clang 17+)
+- Python 3.9+ (for benchmark runner)
 
-1. Building `kuzu_shell` (C++ CLI, not currently compiled)
-2. Running `serialize.cypher` against the LDBC SF-100 or tinysnb CSV datasets
-3. Pointing `kuzu_benchmark --dataset=<path>` at the resulting directory
-
-### To Collect C++ Numbers
+### <a name="cpp-setup"></a>To Build and Run C++ Benchmarks
 
 ```bash
-# Build the C++ shell + benchmark
-cd build/release
-cmake --build . --target kuzu_shell
-cmake --build . --target kuzu_benchmark
+# Step 1: Build the C++ project
+cd /path/to/kuzu
+mkdir -p build/release && cd build/release
+cmake ../.. -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARKS=ON
+cmake --build . --target kuzu_benchmark --parallel $(nproc)
 
-# Serialize tinysnb dataset
-./tools/shell/kuzu_shell /tmp/tinysnb_db < ../../dataset/tinysnb/schema.cypher
-./tools/shell/kuzu_shell /tmp/tinysnb_db < ../../dataset/tinysnb/copy.cypher
+# Step 2: Serialize a test dataset (tinysnb)
+./tools/shell/kuzu_shell /tmp/tinysnb_db <<EOF
+CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name));
+COPY Person FROM '../../dataset/tinysnb/person.csv' (HEADER true);
+EOF
 
-# Run benchmarks
+# Step 3: Run C++ benchmarks
 ./tools/benchmark/kuzu_benchmark \
   --dataset=/tmp/tinysnb_db \
   --benchmark=../../benchmark/queries/ldbc-sf100/scan_after_filter \
-  --warmup=1 --run=5
+  --warmup=1 --run=5 --json > cpp_bench.json
+
+# Step 4: Compare with Rust
+cd kuzu-core
+cargo bench -p kuzu-processor -- --output-format bencher > rust_bench.txt
+python ../benchmark/compare_benches.py rust_bench.txt ../build/release/cpp_bench.json
 ```
 
 > **Note:** The C++ benchmark suite covers 84+ benchmark files across 5 datasets
@@ -169,20 +193,80 @@ cmake --build . --target kuzu_benchmark
 > ranging from simple scans to complex recursive joins and graph algorithms.
 > See `benchmark/queries/` for the full set.
 
+### Comparison Script
+
+```python
+# benchmark/compare_benches.py — Compare Rust criterion vs C++ benchmark output
+import json, sys, re
+
+def parse_rust_bencher(path):
+    """Parse cargo bench --output-format bencher output."""
+    results = {}
+    with open(path) as f:
+        for line in f:
+            m = re.match(r'test (\S+)\s+.*bench:\s+([\d,]+)\s+ns/iter', line)
+            if m:
+                name = m.group(1)
+                ns = int(m.group(2).replace(',', ''))
+                results[name] = ns / 1000.0  # ns → µs
+    return results
+
+def parse_cpp_json(path):
+    """Parse kuzu_benchmark --json output."""
+    with open(path) as f:
+        data = json.load(f)
+    return {b['name']: b['real_time'] / 1000.0 for b in data.get('benchmarks', [])}
+
+def compare(rust_file, cpp_file, mapping):
+    """Compare and print gap ratios."""
+    rust = parse_rust_bencher(rust_file)
+    cpp = parse_cpp_json(cpp_file)
+    
+    print(f"{'Operator':<35} {'Rust (µs)':>12} {'C++ (µs)':>12} {'Ratio':>8}")
+    print("-" * 70)
+    for name, (rust_key, cpp_key) in mapping.items():
+        r = rust.get(rust_key, 0)
+        c = cpp.get(cpp_key, 0)
+        ratio = r / c if c > 0 else float('inf')
+        print(f"{name:<35} {r:>12.2f} {c:>12.2f} {ratio:>8.2f}x")
+
+if __name__ == '__main__':
+    # Mapping: display_name → (rust_bench_name, cpp_bench_name)
+    MAPPING = {
+        'Seq Scan (10K, 4 cols)':      ('scan/10k_rows',               'scan_after_filter'),
+        'Filter (pass-all, 10K)':      ('filter/pass_all_10k',         'filter_pass_all'),
+        'Hash Join (1K×1K)':           ('join/1k_build_1k_probe',     'hash_join_1k'),
+        'Order By (1K, single-key)':   ('order_by/single_key_1k',     'order_by_1k'),
+        'Aggregate COUNT (10K)':       ('aggregate/count_10k',         'aggregate_count'),
+        'Agg GROUP BY (10 groups)':    ('aggregate/group_by_10_groups_10k', 'aggregate_group_by'),
+        'Full Pipeline (MATCH+RETURN)':('query/match_return_all',       'full_pipeline_match'),
+    }
+    compare(sys.argv[1], sys.argv[2], MAPPING)
+```
+
 ---
 
 ## Gap Analysis
 
-| Operator | Rust (µs/row) | C++ (µs/row) | Gap Ratio | Notes |
-|----------|--------------|--------------|-----------|-------|
-| **Seq Scan** (10K rows, 4 cols) | ~0.105 | TBD | — | Pure columnar scan, no overhead |
-| **Filter** (constant true, 10K) | ~0.043 | TBD | — | Row-wise boolean mask |
-| **Hash Join** (1K build, 1K probe) | ~1.44 | TBD | — | Value-keyed hash table |
-| **Order By** (single-key, 1K) | ~0.073 | TBD | — | Collect→sort→rebuild |
-| **Aggregate COUNT** (10K) | ~0.016 | TBD | — | Scalar accumulator |
-| **Aggregate GROUP BY** (10 groups, 10K) | ~0.106 | TBD | — | Hash-based grouping |
+| Operator | Rust (per-row) | C++ (per-row) | Gap Ratio | Status |
+|----------|---------------|--------------|-----------|--------|
+| **Seq Scan** (10K, 4 cols) | ~0.105 µs | TBD | — | 🔴 Pending C++ build |
+| **Filter** (constant true, 10K) | ~0.043 µs | TBD | — | 🔴 Pending C++ build |
+| **Hash Join** (1K×1K) | ~1.44 µs/match | TBD | — | 🔴 Pending C++ build |
+| **Order By** (1K, single-key) | ~0.073 µs | TBD | — | 🔴 Pending C++ build |
+| **Aggregate COUNT** (10K) | ~0.016 µs | TBD | — | 🔴 Pending C++ build |
+| **Agg GROUP BY** (10 groups) | ~0.106 µs | TBD | — | 🔴 Pending C++ build |
+| **Full Pipeline** (MATCH+RETURN) | ~18.5 µs | TBD | — | 🔴 Pending C++ build |
 
 > Gap ratio = Rust time / C++ time. Values < 1.0 mean Rust is faster.
+> **Status legend:** 🔴 Pending C++ build | 🟡 Partial data | 🟢 Complete
+
+### Next Steps for Gap Analysis
+1. Build C++ `kuzu_benchmark` binary (see [C++ Setup](#cpp-setup))
+2. Serialize `tinysnb` dataset for both runtimes
+3. Run benchmarks with matching dataset sizes
+4. Fill gap ratios in the table above
+5. File GitHub issues for any gap > 2×
 
 ---
 

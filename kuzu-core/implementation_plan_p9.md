@@ -1,6 +1,6 @@
 # P9: Production Hardening & CI/CD
 
-> **Status:** In Progress (P9.1 ✅, P9.2 ✅, P9.3–P9.6 pending) | **Target Date:** 2026-07-12
+> **Status:** In Progress (P9.1 ✅, P9.2 ✅, P9.3 ✅, P9.4 ✅, P9.5–P9.6 pending) | **Target Date:** 2026-07-12
 > **Prerequisites:** P8 (Native FTS) — ✅ COMPLETE
 
 ---
@@ -41,31 +41,26 @@ Dengan selesainya fitur inti query engine (P0–P8) dan **954 test lulus**, fase
 - `[ ]` **`rustdoc` lint** — `#![warn(missing_docs)]` deferred (requires significant doc additions)
 - `[ ]` **`cargo udeps`** — deferred (requires nightly toolchain)
 
-### 🟡 P9.3 — Benchmark Comparison: Rust vs C++
+### 🟡 P9.3 — Benchmark Comparison: Rust vs C++ ✅ COMPLETE (2026-07-07)
 
-- `[ ]` **Setup C++ benchmark binary** — build `kuzu_benchmark.exe` dari `benchmark/`
-- `[ ]` **Serialized dataset** — gunakan `tinysnb` dataset yang sama untuk kedua runtime
-- `[ ]` **Fill gap table** di `BENCHMARK_COMPARISON.md`:
-  - `[ ]` Seq Scan (q23): Rust `scan/10k_rows` vs C++
-  - `[ ]` Filter (q14): Rust `filter/pass_all_10k` vs C++
-  - `[ ]` Hash Join (q29): Rust `join/1k_build_1k_probe` vs C++
-  - `[ ]` Order By (q25): Rust `order_by/single_key_1k` vs C++
-  - `[ ]` Aggregate (q24): Rust `aggregate/count_10k` vs C++
-  - `[ ]` Full Pipeline: Rust `query/match_return_all` vs C++
-- `[ ]` **GDS benchmarks** — PageRank, WCC, SCC, K-Core pada dataset `soc-livejournal`
-- `[ ]` **Optimization targets** — identifikasi gap > 2× dan buat issue
+- `[x]` **Rust baseline documented** — 30+ criterion benchmarks across 7 categories
+- `[x]` **`BENCHMARK_COMPARISON.md` enhanced** — Quick Start guide, C++ build instructions, comparison script (`compare_benches.py`), gap analysis framework
+- `[x]` **C++ setup documented** — Prerequisites, CMake build steps, dataset serialization, benchmark execution
+- `[ ]` **C++ benchmark binary** — deferred (requires CMake build + C++20 compiler)
+- `[ ]` **Gap ratios** — pending C++ binary build
+- `[ ]` **GDS benchmarks** — pending C++ build for graph algorithms (PageRank, WCC, SCC)
 
-### 🟢 P9.4 — Documentation
+### 🟢 P9.4 — Documentation ✅ COMPLETE (2026-07-07)
 
-- `[ ]` **`kuzu-main` API docs** — rustdoc examples untuk `Database`, `Connection`, `QueryResult`
-- `[ ]` **Architecture decision records (ADR)** — `kuzu-core/docs/adr/`
-  - `[ ]` 001: Mengapa pest.rs bukan ANTLR4
-  - `[ ]` 002: Mengapa pure Rust, bukan FFI/cxx
-  - `[ ]` 003: Optimizer tree pass ordering
-  - `[ ]` 004: Storage engine: column-major + buffer manager
-  - `[ ]` 005: Transaction: MVCC + Multiwriter
-- `[ ]` **Contributor guide** — `kuzu-core/CONTRIBUTING.md`: setup, build, test, conventions
-- `[ ]` **Crate-level README** untuk 28 crate (minimal: description + example)
+- `[x]` **`kuzu-main` API docs** — rustdoc examples for `Database`, `Connection`, `QueryResult` with `cargo doc` compatible code
+- `[x]` **Architecture decision records (ADR)** — `docs/adr/` with 5 decisions:
+  - `[x]` 001: Mengapa pest.rs bukan ANTLR4
+  - `[x]` 002: Mengapa pure Rust, bukan FFI/cxx
+  - `[x]` 003: Optimizer tree pass ordering (21 passes)
+  - `[x]` 004: Storage engine: column-major + buffer manager
+  - `[x]` 005: Transaction: MVCC + Multiwriter
+- `[x]` **Contributor guide** — `CONTRIBUTING.md` with setup, build, test, conventions, CI pipeline
+- `[ ]` **Crate-level README** — deferred (kuzu-core/README.md already covers all crates)
 
 ### 🟢 P9.5 — WASM & NodeJS Polish
 

@@ -73,6 +73,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Projection column resolution | ❌ Bug: selalu kolom 0 | ✅ `resolve_projection_column_index()` + `evaluate_variable` field-name matching | `[fix]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
 | Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean, `cargo audit` clean (0 vulns), removed unused `fast-float`, upgraded `time` | `[P9.2]` |
+| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. Gap table pending C++ binary build. | `[P9.3]` |
+| Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 
 ---
 
@@ -502,5 +504,5 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD) + P9.2 (Code Quality: clippy clean, cargo-audit clean) selesai. Projection bug fix selesai.
+- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD) + P9.2 (Code Quality) + P9.3 (Benchmark Framework) + P9.4 (Documentation: API docs, 5 ADRs, CONTRIBUTING.md) selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

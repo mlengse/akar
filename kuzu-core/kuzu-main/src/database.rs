@@ -56,6 +56,21 @@ impl Default for SystemConfig {
 }
 
 /// The main database instance.
+///
+/// Manages the storage engine, catalog, transaction manager, and all subsystem
+/// instances. Create via [`Database::new`] with a path and [`SystemConfig`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use kuzu_main::database::{Database, SystemConfig};
+/// use kuzu_main::connection::Connection;
+///
+/// let db = Database::new("./my_db", SystemConfig::default())?;
+/// let conn = Connection::new(&db);
+/// conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")?;
+/// # Ok::<(), String>(())
+/// ```
 #[allow(dead_code)]
 pub struct Database {
     pub(crate) storage_manager: Arc<StorageManager>,
