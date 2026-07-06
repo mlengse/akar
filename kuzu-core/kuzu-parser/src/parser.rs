@@ -175,6 +175,7 @@ fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
             Ok(Statement::Union(UnionStatement { left, right, all }))
         }
         Rule::copy_from => parse_copy_from(pair),
+        Rule::copy_to => parse_copy_to(pair),
         Rule::alter_table => parse_alter_table(pair),
         Rule::create_vector_index => parse_create_vector_index(pair),
         Rule::create_index => parse_create_index(pair),
@@ -1420,6 +1421,62 @@ fn parse_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         table_name,
         file_path,
         options,
+    }))
+}
+
+/// Parse a COPY TO statement.
+fn parse_copy_to(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut query: Option<Query> = None;
+    let mut file_path = String::new();
+    let mut format = CopyToFormat::Csv;
+    let mut header = false;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::query_statement => {
+                query = Some(parse_query_pairs(inner)?);
+            }
+            Rule::string => {
+                file_path = unescape_string(inner.as_str());
+            }
+            Rule::copy_to_options => {
+                for item in inner.into_inner() {
+                    if item.as_rule() != Rule::copy_to_option {
+                        continue;
+                    }
+                    // Each copy_to_option contains one inner rule
+                    let Some(opt_inner) = item.into_inner().next() else { continue };
+                    let rule = opt_inner.as_rule();
+                    if rule == Rule::format_option {
+                        let mut inner_pairs = opt_inner.into_inner();
+                        inner_pairs.next(); // skip "FORMAT" keyword
+                        if let Some(fmt_pair) = inner_pairs.next() {
+                            let fmt_upper = fmt_pair.as_str().to_uppercase();
+                            if fmt_upper == "CSV" {
+                                format = CopyToFormat::Csv;
+                            } else if fmt_upper == "PARQUET" {
+                                format = CopyToFormat::Parquet;
+                            }
+                        }
+                    } else if rule == Rule::header_option {
+                        for val in opt_inner.into_inner() {
+                            if val.as_rule() == Rule::boolean_literal || val.as_rule() == Rule::integer {
+                                header = val.as_str().eq_ignore_ascii_case("true") || val.as_str() == "1";
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let query = query.ok_or("COPY TO requires a query in parentheses")?;
+    Ok(Statement::CopyTo(CopyTo {
+        query,
+        file_path,
+        format,
+        header,
     }))
 }
 

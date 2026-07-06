@@ -657,6 +657,76 @@ impl Connection {
                 // EXPLAIN is handled by the query processor pipeline
                 Ok(None)
             }
+            BoundStatement::BoundCopyTo(c) => {
+                // Execute the inner query
+                let inner_bound = BoundStatement::BoundQuery(c.query.clone());
+                let result = self.execute_query_inner(&inner_bound, None)?;
+
+                // Write results to file
+                let path = std::path::Path::new(&c.file_path);
+                match c.format {
+                    kuzu_parser::ast::CopyToFormat::Csv => {
+                        let mut w = csv::WriterBuilder::new()
+                            .has_headers(c.header)
+                            .from_path(path)
+                            .map_err(|e| format!("Cannot create file '{}': {}", c.file_path, e))?;
+
+                        // Write header
+                        if c.header {
+                            if let Some(first_chunk) = result.chunks.first() {
+                                let header: Vec<String> = if first_chunk.field_names.is_empty() {
+                                    (0..first_chunk.num_fields()).map(|i| format!("column_{}", i)).collect()
+                                } else {
+                                    first_chunk.field_names.clone()
+                                };
+                                if !header.is_empty() {
+                                    w.write_record(&header)
+                                        .map_err(|e| format!("CSV write error: {e}"))?;
+                                }
+                            }
+                        }
+
+                        // Write rows
+                        for chunk in &result.chunks {
+                            for row in 0..chunk.size {
+                                let row_values: Vec<String> = chunk
+                                    .fields
+                                    .iter()
+                                    .map(|f| {
+                                        f.get_value(row)
+                                            .map(|v| value_to_csv_string(&v))
+                                            .unwrap_or_default()
+                                    })
+                                    .collect();
+                                w.write_record(&row_values)
+                                    .map_err(|e| format!("CSV write error: {e}"))?;
+                            }
+                        }
+
+                        w.flush().map_err(|e| format!("CSV flush error: {e}"))?;
+                    }
+                    kuzu_parser::ast::CopyToFormat::Parquet => {
+                        #[cfg(feature = "parquet-export")]
+                        {
+                            self.write_parquet(path, &result, c.header)
+                                .map_err(|e| format!("Parquet export error: {e}"))?;
+                        }
+                        #[cfg(not(feature = "parquet-export"))]
+                        {
+                            return Err(
+                                "Parquet export requires 'parquet-export' feature. \
+                                 Build with: cargo build --features parquet-export"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                Ok(Some(QueryResult::success_message(format!(
+                    "COPY TO '{}' completed, {} rows exported",
+                    c.file_path,
+                    result.num_rows
+                ))))
+            }
             BoundStatement::BoundCreateNodeTable(t) => {
                 // Also create a storage table with in-memory data capacity
                 let columns: Vec<ColumnDefinition> = t
@@ -3372,5 +3442,96 @@ mod fase_a_verification {
         let (_dir, _db, conn) = setup_test_db(-1);
         let result = conn.query("ANALYZE NoSuchTable");
         assert!(result.is_err(), "ANALYZE on nonexistent table should fail");
+    }
+}
+
+/// Convert a Value to a string for CSV/Parquet output.
+fn value_to_csv_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int16(i) => i.to_string(),
+        Value::Int8(i) => i.to_string(),
+        Value::Double(f) => f.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+        other => format!("{:?}", other),
+    }
+}
+
+#[cfg(feature = "parquet-export")]
+impl Connection {
+    /// Write query results to a Parquet file.
+    #[cfg(feature = "parquet-export")]
+    fn write_parquet(
+        &self,
+        path: &std::path::Path,
+        result: &crate::query_result::QueryResult,
+        _header: bool,
+    ) -> Result<(), String> {
+        use arrow::array::{RecordBatch, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use parquet::arrow::ArrowWriter;
+        use std::sync::Arc;
+
+        if result.chunks.is_empty() {
+            return Ok(());
+        }
+
+        let first_chunk = &result.chunks[0];
+        let num_cols = first_chunk.num_fields();
+
+        // Build schema from field names
+        let fields: Vec<Field> = (0..num_cols)
+            .map(|i| {
+                let name = if first_chunk.field_names.len() > i && !first_chunk.field_names[i].is_empty() {
+                    first_chunk.field_names[i].clone()
+                } else {
+                    format!("column_{}", i)
+                };
+                Field::new(&name, DataType::Utf8, true)
+            })
+            .collect();
+
+        if fields.is_empty() {
+            return Ok(());
+        }
+
+        let schema = Arc::new(Schema::new(fields));
+        let file = std::fs::File::create(path)
+            .map_err(|e| format!("Cannot create Parquet file: {e}"))?;
+
+        let mut writer = ArrowWriter::try_new(file, schema.clone(), None)
+            .map_err(|e| format!("Parquet writer error: {e}"))?;
+
+        for chunk in &result.chunks {
+            let mut columns: Vec<Arc<dyn arrow::array::Array>> = Vec::with_capacity(num_cols);
+            for col_idx in 0..num_cols {
+                let field = &chunk.fields[col_idx];
+                let strings: Vec<Option<String>> = (0..chunk.size)
+                    .map(|row| {
+                        if field.is_null(row) {
+                            None
+                        } else {
+                            field.get_value(row).map(|val| value_to_csv_string(val))
+                        }
+                    })
+                    .collect();
+                let arr: StringArray = strings.iter().map(|s| s.as_deref()).collect();
+                columns.push(Arc::new(arr));
+            }
+
+            let batch = RecordBatch::try_new(schema.clone(), columns)
+                .map_err(|e| format!("RecordBatch error: {e}"))?;
+            writer.write(&batch)
+                .map_err(|e| format!("Parquet write error: {e}"))?;
+        }
+
+        writer.close()
+            .map_err(|e| format!("Parquet close error: {e}"))?;
+
+        Ok(())
     }
 }

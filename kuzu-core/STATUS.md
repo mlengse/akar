@@ -125,7 +125,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas:** ~90%
 
-### 1.4 Optimizer — 18 Passes (11 flat + 7 tree)
+### 1.4 Optimizer — 21 Passes (14 flat + 7 tree)
 
 #### Flat Passes
 | # | Pass | Status |
@@ -141,6 +141,9 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | 9 | ArtRangeScanDetection | ✅ |
 | 10 | LimitPushDown | ✅ |
 | 11 | CommonSubexpressionElimination | ✅ |
+| 12 | **OrderByPushDown** | ✅ Push ORDER BY below UNION ALL (Ladybug port) |
+| 13 | **UnwindDedup** | ✅ Dedup consecutive UNWIND operators (Ladybug port) |
+| 14 | **CountRelTable** | ✅ Replace ScanRel+COUNT with CSR metadata (Ladybug port) |
 
 #### Tree Passes
 | # | Pass | Status |
@@ -153,7 +156,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | 6 | AggKeyDependency | ✅ |
 | 7 | CardinalityEstimation (static + StatsStore) | ✅ |
 
-**Total: 18 passes — melebihi C++ (16+)**
+**Total: 21 passes (14 flat + 7 tree) — melebihi C++ (19)**
 
 **Paritas:** ~95%
 
@@ -181,9 +184,12 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | PhysicalRecursiveExtend (BFS + Dijkstra) | ✅ |
 | PhysicalExplain | ✅ |
 | PhysicalForeach | ✅ |
+| PhysicalCopyTo (CSV + Parquet) | ✅ |
 | + DDL operators | ✅ |
 
-**Paritas:** ~90%
+**Paritas esensial:** ~90% (semua operator inti query engine ter-port).
+**Paritas total:** ~43% (28 vs 65+ physical operators C++ — lihat §8 untuk gap analysis).
+> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam 1 file `physical_operator.rs` (~2500+ LOC). Lihat §9 untuk rencana refactor.
 
 ### 1.6 Storage Engine
 
@@ -242,7 +248,7 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 #### Table Functions
 12 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases) + 8 registry ops (list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom, CustomTable) — ✅ 20 ops
 
-**Paritas fungsional:** ~95% dari C++ (18 fungsi C++ masih missing — lihat Bagian 3)
+**Paritas fungsional:** ~93% dari C++ (~15 fungsi C++ masih missing — lihat §8 Ladybug Gap Analysis)
 
 ### 1.8 GDS Framework
 
@@ -463,6 +469,25 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - `cargo fmt --all` applied — 0 formatting diffs.
 - `cargo udeps` + `rustdoc` linting deferred (requires nightly / significant doc additions).
 
+### 4.4 Technical Debt Register (2026-07-07 Audit)
+
+| # | Debt | Severity | File(s) | Rencana |
+|---|------|----------|---------|---------|
+| 1 | **Monolith `scalar.rs`** (4.578 lines) | 🔴 HIGH | `kuzu-function/src/scalar.rs` | P-MOD1: Split ke `scalar/*.rs` (20+ files) + `aggregate/*.rs` |
+| 2 | **Monolith `physical_operator.rs`** (3.794 lines) | 🔴 HIGH | `kuzu-processor/src/physical_operator.rs` | P-MOD2: Split ke `operators/*.rs` (P10.6) |
+| 3 | **Monolith `connection.rs`** (3.133 lines) | 🔴 HIGH | `kuzu-main/src/connection.rs` | P-MOD3: Split ke `connection/*.rs` + extract tests |
+| 4 | **Monolith `processor.rs`** (2.702 lines) | 🔴 HIGH | `kuzu-processor/src/processor.rs` | P-MOD2: Split helpers dari pipeline |
+| 5 | **Monolith `passes.rs`** (2.486 lines) | 🟡 HIGH | `kuzu-optimizer/src/passes.rs` | P-MOD4: Split ke `passes/flat/*.rs` + `passes/tree/*.rs` |
+| 6 | **Monolith `parser.rs`** (2.183 lines) | 🟡 HIGH | `kuzu-parser/src/parser.rs` | P-MOD5: Split ke `parser/*.rs` (ddl, dml, expression, query) |
+| 7 | **Monolith `binder.rs`** (1.667 lines) | 🟡 MEDIUM | `kuzu-binder/src/binder.rs` | P-MOD6: Split ke `bind/*.rs` (ddl, dml, expression) |
+| 8 | **TRANSACTION via string matching** | 🔴 HIGH | `kuzu-main/src/connection.rs` | P10.2 — pindahkan ke pipeline parser→binder→planner→processor |
+| 9 | **STANDALONE_CALL via string matching** | 🔴 HIGH | `kuzu-main/src/connection.rs` | P10.3 — pindahkan ke pipeline proper |
+| 10 | **Missing physical operators** | 🟡 MEDIUM | `kuzu-processor/` | P12 — Partitioner, IndexLookup, TopK, dll |
+| 11 | **Missing ATTACH/DETACH DATABASE** | 🟡 MEDIUM | Multi-crate | P11 — fitur multi-DB fundamental |
+| 12 | **README klaim TRANSACTION ✅ tapi P10.2 bilang belum** | 🟡 MEDIUM | `README.md` | P10.2 akan resolve |
+
+> 📋 **Rencana modularization lengkap:** `implementation_plan_modularization.md` — 6 phase, 7 file → ~90 files modular, 34 SP
+
 ---
 
 ## 5. Test Results (Per 2026-07-07)
@@ -508,3 +533,221 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. **P9 (Production Hardening) COMPLETE** — P9.1 (CI/CD) + P9.2 (Code Quality) + P9.3 (Benchmark Framework) + P9.4 (Documentation) + P9.5 (WASM) + P9.6 (Regex cache) selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
+
+---
+
+## 8. Ladybug C++ Parity Gap Analysis (2026-07-07)
+
+Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
+**Overall parity: ~85%.**
+
+### 8.1 Ringkasan per Layer
+
+| Layer | C++ Features | Rust Ported | Missing | Parity |
+|-------|-------------|-------------|---------|--------|
+| **Parser** | 24 statement types | 21 | 15 DDL/DB statements | 88% |
+| **Binder** | 25+ bound statements | 20 | 10 | 80% |
+| **Planner** | 60+ logical ops | 43 | ~20 | 72% |
+| **Processor** | 65+ physical ops | 28 | ~30 | 43% |
+| **Optimizer** | 19 passes | 21 | 0 (+2 extras) | 100% |
+| **Functions** | 150+ functions | 140+ | ~15 | 93% |
+| **Storage** | 25 features | 19 | 6 | 76% |
+| **GDS** | 15+ algorithms | 8 | 11 | 53% |
+| **Types** | 35+ types | 33 | 3 | 91% |
+
+### 8.2 Critical Gaps — Fundamental Missing Features
+
+| # | Feature | Priority |
+|---|---------|----------|
+| 1 | **COPY TO** (export data) | 🔴 P0 |
+| 2 | **TRANSACTION** statement (BEGIN/COMMIT/ROLLBACK as parsed) | 🔴 P0 |
+| 3 | **STANDALONE_CALL** (top-level CALL procedures) | 🔴 P0 |
+| 4 | **INSTALL/LOAD/UNINSTALL EXTENSION** | 🔴 P0 |
+| 5 | **ATTACH/DETACH/USE DATABASE** (multi-DB) | 🟡 P1 |
+| 6 | **CREATE TYPE** (custom types) | 🟡 P1 |
+| 7 | **COMMENT ON TABLE** | 🟡 P1 |
+| 8 | **LOAD FROM** (external scan) | 🟡 P1 |
+| 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 |
+| 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 |
+
+### 8.3 Missing Physical Operators
+
+| Operator | Purpose | Priority |
+|----------|---------|----------|
+| `TOP_K` / `TOP_K_SCAN` | Fused top-k (ORDER BY + LIMIT) | P1 |
+| `INDEX_LOOKUP` | Point index lookup | P1 |
+| `BATCH_INSERT` | Dedicated batch insert operator | P1 |
+| `PACKED_EXTEND` | Optimized multi-rel extend | P2 |
+| `PARTITIONER` | Morsel-driven parallelism | P2 |
+| `PATH_PROPERTY_PROBE` | Path property resolution | P2 |
+| `PRIMARY_KEY_SCAN` | PK-based scan | P2 |
+| `AGGREGATE_FINALIZE/SCAN` | Split aggregate | P2 |
+| `RESULT_COLLECTOR` | Explicit result collector | P2 |
+| `PROFILE` | Query profiling | P2 |
+| `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 |
+
+### 8.4 Missing Functions
+
+| Function | Type | Priority |
+|----------|------|----------|
+| `nullif` | Utility | P1 |
+| `count_if` | Aggregate | P1 |
+| `export_csv` / `export_parquet` | Export | P1 |
+| `list_transform/reduce/filter` | Lambda list | P2 |
+| `size` (generic) | Utility | P1 |
+| Path `properties`, `semantic` | Path | P2 |
+| Pattern `cost/id/label/rowid` | Pattern | P2 |
+| `error` | Utility | P3 |
+| Graph management: `show_graphs`, `project_*_graph`, etc. | Table | P2 |
+
+### 8.5 Missing Storage Features
+
+| Feature | Priority |
+|---------|----------|
+| Parquet writer | P1 |
+| NPY reader | P2 |
+| HyperLogLog cardinality stats | P2 |
+| Roaring bitmap | P2 |
+| ICE disk format | P3 |
+| Lazy segment scanner | P3 |
+| Float compression (delta/offset) | P3 |
+
+### 8.6 Missing GDS Algorithms
+
+| Algorithm | Priority |
+|-----------|----------|
+| Dijkstra (SSSP weighted) | P2 |
+| Louvain Community Detection | P2 |
+| K-Core Decomposition | P2 |
+| Recursive Joins | P2 |
+| Betweenness Centrality | P3 |
+| Closeness Centrality | P3 |
+| Triangle Counting | P3 |
+| Label Propagation | P3 |
+| Random Walk | P3 |
+| Node2Vec / Embedding | P3 |
+
+### 8.7 Missing Types
+
+| Type | Priority |
+|------|----------|
+| `JSON` (native type) | P2 |
+| `UINT128` | P3 |
+| `DTime` (DateTime with TZ offset) | P3 |
+| `Value::Union` variant | P3 |
+
+### 8.8 Missing Optimizer Passes
+
+| C++ Pass | Priority |
+|-----------|----------|
+| `remove_unnecessary_join` | P2 |
+| `remove_factorization` | P2 |
+
+### 8.9 Areas Where Rust EXCEEDS C++
+
+| Area | Rust Advantage |
+|------|---------------|
+| **Optimizer passes** | 21 vs 19 (extra: `VectorSimilarityDetection`, `ArtRangeScanDetection`, `CSE`) |
+| **Join order** | DP Bushy Trees (cost-based) vs C++ greedy |
+| **Multiwriter** | `AtomicBool` + `Condvar` concurrent writes |
+| **ADBC** | Native Arrow Flight SQL interface |
+| **Lambda evaluator** | Per-element predicate with mini-chunk |
+| **Native FTS** | Full DDL + MATCH pipeline with BM25 |
+| **CI/CD** | 8-job GitHub Actions + Dependabot |
+| **Code quality** | Clippy `-D warnings` clean, `cargo-audit` clean |
+| **Tests** | 954 tests, 0 failures |
+
+### 8.10 Estimasi Fase Selanjutnya
+
+| Fase | Konten | Prioritas | Estimasi Story Points |
+|------|--------|-----------|----------------------|
+| **P10** | COPY TO + TRANSACTION + missing functions (nullif, count_if, export) | 🔴 P0 | 8 |
+| **P11** | ATTACH/DETACH/USE DATABASE + CREATE TYPE + LOAD FROM | 🟡 P1 | 13 |
+| **P12** | Physical operators: TOP_K, INDEX_LOOKUP, BATCH_INSERT, PACKED_EXTEND | 🟡 P1 | 13 |
+| **P13** | GDS expansion: Dijkstra, Louvain, K-Core, Recursive Joins | 🟢 P2 | 13 |
+| **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap | 🟢 P2 | 8 |
+| **P15** | CREATE/USE GRAPH, projected graph functions | 🟢 P2 | 8 |
+| **P16** | Types: JSON, UINT128 | 🟢 P3 | 5 |
+| **Total** | | | **68** |
+
+---
+
+## 9. Architecture Audit & Refactor Plan (2026-07-07)
+
+### 9.1 Ringkasan Audit
+
+Audit dilakukan dengan membandingkan struktur direktori Rust (`kuzu-core/`) vs C++ Ladybug (`ladybug/src/`). Temuan utama:
+
+| Area | Temuan | Dampak |
+|------|--------|--------|
+| **Processor operators** | 28 operator types dalam 1 file (`physical_operator.rs`, ~2500+ LOC) vs C++: 32 file `.cpp` + 50 file mapper | Maintainability risk, menyulitkan kontributor baru |
+| **Planner mapper** | Logic mapping logical→physical operator tersebar di planner/processor | Tidak ada separation of concerns yang jelas |
+| **Plan mapper** | C++ punya 50 file `map_*.cpp` di `processor/map/`, Rust tidak ada | Physical plan construction logic bercampur dengan execution |
+
+### 9.2 Rencana Refactor: Processor Operators
+
+**Target:** `kuzu-processor/src/physical_operator.rs` → `kuzu-processor/src/operators/*.rs`
+
+```
+kuzu-processor/src/
+├── operators/
+│   ├── mod.rs                  # Re-export semua operator
+│   ├── scan.rs                 # PhysicalScan, PhysicalScanRel
+│   ├── filter.rs               # PhysicalFilter
+│   ├── projection.rs           # PhysicalProjection
+│   ├── hash_join.rs            # PhysicalHashJoin + JoinHashTable
+│   ├── cross_product.rs        # PhysicalCrossProduct
+│   ├── intersect.rs            # PhysicalIntersect
+│   ├── semi_join.rs            # PhysicalSemiJoin
+│   ├── anti_join.rs            # PhysicalAntiJoin
+│   ├── aggregate.rs            # PhysicalAggregate + AggregateHashTable
+│   ├── order_by.rs             # PhysicalOrderBy + BlockMergeSorter
+│   ├── limit.rs                # PhysicalLimit
+│   ├── union.rs                # PhysicalUnion
+│   ├── flatten.rs              # PhysicalFlatten
+│   ├── semi_masker.rs          # PhysicalSemiMasker + NodeSemiMask
+│   ├── recursive_extend.rs     # PhysicalRecursiveExtend
+│   ├── explain.rs              # PhysicalExplain
+│   ├── foreach.rs              # PhysicalForeach
+│   ├── ddl/
+│   │   ├── mod.rs
+│   │   ├── copy_from.rs        # PhysicalCopyFrom
+│   │   ├── copy_to.rs          # PhysicalCopyTo (CSV + Parquet writer)
+│   │   ├── create_table.rs     # DDL create operators
+│   │   ├── drop_table.rs
+│   │   ├── alter_table.rs
+│   │   ├── create_index.rs
+│   │   └── drop_index.rs
+│   └── ...
+├── expression_evaluator.rs     # ExpressionEvaluator (tetap)
+├── lib.rs                      # Crate root
+└── processor.rs                # Processor pipeline (tetap)
+```
+
+**Estimasi effort:** 5 story points. Tidak mengubah behavior — murni reorganisasi kode.
+**Risiko:** Rendah. Dipandu oleh compiler (mod imports/exports).
+**Timing:** Sebaiknya dilakukan **sebelum** P11 (ATTACH/DETACH) atau P12 (physical operators baru) untuk menghindari akumulasi technical debt.
+
+### 9.3 Verifikasi Refactor
+
+```bash
+# Setelah refactor
+cargo check -p kuzu-processor
+cargo test -p kuzu-processor    # Harus tetap 77 passing
+cargo build --workspace          # Semua downstream crates harus compile
+cargo test --workspace           # Harus tetap 954 passing
+```
+
+### 9.4 Dampak ke Implementation Plan
+
+Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P10.5):
+
+| Fase | Deskripsi | SP | Dependensi |
+|------|-----------|-----|------------|
+| P10.1 | COPY TO | 5 ✅ | — |
+| P10.2 | TRANSACTION pipeline | 3 | — |
+| P10.3 | STANDALONE_CALL pipeline | 3 | — |
+| P10.4 | EXTENSION Mgmt | 5 | — |
+| P10.5 | Missing functions | 2 | — |
+| **P10.6** | **Refactor physical_operator.rs** | **5** | ⚠️ Sebelum P11/P12 |
+| **Total P10** | | **23** (naik dari 18) | |

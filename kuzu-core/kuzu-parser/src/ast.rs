@@ -51,6 +51,7 @@ pub enum Statement {
     CreateRelTable(CreateRelTable),
     DropTable(DropTable),
     CopyFrom(CopyFrom),
+    CopyTo(CopyTo),
     AlterTable(AlterTable),
     CreateVectorIndex(CreateVectorIndex),
     CreateIndex(CreateIndex),
@@ -386,6 +387,23 @@ pub struct CopyFrom {
     pub table_name: String,
     pub file_path: String,
     pub options: std::collections::HashMap<String, String>,
+}
+
+/// COPY TO statement — export query results to a file.
+///
+/// Syntax: `COPY (query) TO 'path' (FORMAT 'CSV'|'PARQUET', HEADER true|false)`
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyTo {
+    pub query: Query,
+    pub file_path: String,
+    pub format: CopyToFormat,
+    pub header: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CopyToFormat {
+    Csv,
+    Parquet,
 }
 
 /// MERGE statement — match or create a pattern with optional ON CREATE / ON MATCH actions.

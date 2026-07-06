@@ -1744,6 +1744,7 @@ version = "0.1.0"
 dependencies = [
  "arrow 53.4.1",
  "criterion",
+ "csv",
  "kuzu-algo",
  "kuzu-azure",
  "kuzu-binder",

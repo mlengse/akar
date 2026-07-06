@@ -14,6 +14,7 @@ pub enum BoundStatement {
     BoundCreateRelTable(BoundCreateRelTable),
     BoundDropTable(BoundDropTable),
     BoundCopyFrom(BoundCopyFrom),
+    BoundCopyTo(BoundCopyTo),
     BoundAlterTable(BoundAlterTable),
     BoundCreateVectorIndex(BoundCreateVectorIndex),
     BoundCreateIndex(BoundCreateIndex),
@@ -49,6 +50,16 @@ pub struct BoundCopyFrom {
     pub options: HashMap<String, String>,
     /// Resolved column schema from the catalog (column names + types).
     pub columns: Vec<kuzu_catalog::CatalogColumn>,
+}
+
+/// COPY TO statement — export query results to a file.
+#[derive(Debug, Clone)]
+pub struct BoundCopyTo {
+    pub file_path: String,
+    pub format: kuzu_parser::ast::CopyToFormat,
+    pub header: bool,
+    /// The inner query to execute.
+    pub query: BoundQuery,
 }
 
 /// A resolved variable in scope (from MATCH patterns).

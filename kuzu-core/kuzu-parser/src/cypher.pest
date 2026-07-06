@@ -40,6 +40,7 @@ ddl_statement = {
   | create_rel_table
   | drop_table
   | copy_from
+  | copy_to
   | alter_table
   | create_vector_index
   | create_fts_index
@@ -96,6 +97,19 @@ index_type    = { "ART" | "HASH" }
 if_not_exists = { "IF" ~ "NOT" ~ "EXISTS" }
 if_exists     = { "IF" ~ "EXISTS" }
 drop_index    = { "DROP" ~ "INDEX" ~ identifier ~ "ON" ~ identifier }
+
+// ==================== COPY TO ====================
+
+copy_to = { "COPY" ~ "(" ~ query_statement ~ ")" ~ "TO" ~ string ~ copy_to_options? }
+
+copy_to_options = { "(" ~ copy_to_option ~ ("," ~ copy_to_option)* ~ ")" }
+
+copy_to_option = {
+    format_option
+  | header_option
+}
+
+format_option = { "FORMAT" ~ ("CSV" | "PARQUET") }
 
 // ==================== COPY FROM ====================
 

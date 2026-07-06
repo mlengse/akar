@@ -1,6 +1,8 @@
 # P9: Production Hardening & CI/CD
 
-> **Status:** ✅ COMPLETE (P9.1–P9.6 all done) | **Target Date:** 2026-07-12
+> **Status:** ✅ COMPLETE | **Target Date:** 2026-07-12 | **Completed:** 2026-07-07
+
+Next: See [`implementation_plan_p10.md`](../implementation_plan_p10.md) — Critical C++ Parity
 > **Prerequisites:** P8 (Native FTS) — ✅ COMPLETE
 
 ---

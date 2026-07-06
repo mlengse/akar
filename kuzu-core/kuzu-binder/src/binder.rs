@@ -74,6 +74,7 @@ impl Binder {
             Statement::CreateRelTable(t) => self.bind_create_rel_table(t),
             Statement::DropTable(t) => self.bind_drop_table(t),
             Statement::CopyFrom(c) => self.bind_copy_from(c),
+            Statement::CopyTo(c) => self.bind_copy_to(c),
             Statement::AlterTable(a) => self.bind_alter_table(a),
             Statement::CreateVectorIndex(v) => self.bind_create_vector_index(v),
             Statement::CreateIndex(v) => self.bind_create_index(v),
@@ -1559,6 +1560,22 @@ impl Binder {
             file_path: c.file_path,
             options: c.options,
             columns,
+        }))
+    }
+
+    /// Bind COPY TO — export query results to a file.
+    fn bind_copy_to(&self, c: kuzu_parser::ast::CopyTo) -> Result<BoundStatement, String> {
+        // Bind the inner query
+        let bound_query = match self.bind(Statement::Query(c.query))? {
+            BoundStatement::BoundQuery(q) => q,
+            _ => return Err("COPY TO inner statement must be a query".into()),
+        };
+
+        Ok(BoundStatement::BoundCopyTo(BoundCopyTo {
+            file_path: c.file_path,
+            format: c.format,
+            header: c.header,
+            query: bound_query,
         }))
     }
 }
