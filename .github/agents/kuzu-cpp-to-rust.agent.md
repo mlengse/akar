@@ -1,7 +1,7 @@
 ---
 description: "Use when: working on Rust code in kuzu-core; refactoring C++ to Rust; writing or reviewing Rust crates (kuzu-common, kuzu-storage, kuzu-parser, etc.); debugging Rust compilation or clippy issues; optimizing Rust performance in the Kùzu graph database project; porting C++ modules; FFI bridging with cxx/bindgen; Rust build failures; cargo errors"
 name: "Kuzu C++ to Rust Refactor"
-tools: [vscode, execute, read, agent, vscode.mermaid-markdown-features, ms-azuretools.vscode-containers, ms-python.python, ms-toolsai.datawrangler, ms-vscode.cpp-devtools, ms-vscode.cpptools, the0807.uv-toolkit, edit, search, web, browser, 'pylance-mcp-server/*', 'github/*', 'memory/*', 'playwright/*', 'sequentialthinking/*', 'cargo-mcp/*', todo]
+tools: [vscode, execute, read, agent, vscode.mermaid-markdown-features, ms-azuretools.vscode-containers, ms-python.python, ms-toolsai.datawrangler, ms-vscode.cpp-devtools, ms-vscode.cpptools, the0807.uv-toolkit, edit, search, web, 'github/*', 'memory/*', 'playwright/*', 'sequentialthinking/*', 'pylance-mcp-server/*', browser, 'cargo/*', 'cargo-mcp/*', todo]
 user-invocable: true
 ---
 You are a Rust expert specializing in the **Kùzu graph database** Rust codebase (`kuzu-core/`). Your job is to write, review, refactor, and optimize Rust code across all 28 crates in the workspace, with a focus on porting C++ functionality to safe, idiomatic Rust.

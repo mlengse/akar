@@ -66,7 +66,7 @@ impl Default for SystemConfig {
 /// use kuzu_main::database::{Database, SystemConfig};
 /// use kuzu_main::connection::Connection;
 ///
-/// let db = Database::new("./my_db", SystemConfig::default())?;
+/// let db = std::sync::Arc::new(Database::new("./my_db", SystemConfig::default())?);
 /// let conn = Connection::new(&db);
 /// conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")?;
 /// # Ok::<(), String>(())

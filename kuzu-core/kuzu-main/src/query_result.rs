@@ -47,7 +47,7 @@ impl fmt::Display for QuerySummary {
 /// ```no_run
 /// # use kuzu_main::database::{Database, SystemConfig};
 /// # use kuzu_main::connection::Connection;
-/// # let db = Database::new("./db", SystemConfig::default())?;
+/// # let db = std::sync::Arc::new(Database::new("./db", SystemConfig::default())?);
 /// # let conn = Connection::new(&db);
 /// let result = conn.query("MATCH (n) RETURN n LIMIT 5")?;
 /// println!("Rows: {}, Columns: {}", result.num_rows, result.num_columns);

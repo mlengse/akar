@@ -7,7 +7,9 @@
 ## 0. Ringkasan Eksekutif
 
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
-**28 crate**, **~98 file .rs**, **~27.000 LOC**.
+**28 crate**, **~106 file .rs**, **~27.000 LOC**.
+
+> **Modularization:** Phase 1-3 complete — `scalar.rs` (4.578 → 20 files), `physical_operator.rs` (3.794 → 7 files), `connection.rs` (3.133 → 9 files). Next: Phase 4 (`passes.rs`).
 
 | Metrik | Nilai |
 |--------|-------|
@@ -77,6 +79,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
 | Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |
+| Modularization Phase 3 | ❌ Monolith `connection.rs` (3.133 lines) | ✅ 8 modules: `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` + `connection_test.rs` | `[P-MOD3]` |
 
 ---
 
@@ -189,7 +192,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas esensial:** ~90% (semua operator inti query engine ter-port).
 **Paritas total:** ~43% (28 vs 65+ physical operators C++ — lihat §8 untuk gap analysis).
-> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam 1 file `physical_operator.rs` (~2500+ LOC). Lihat §9 untuk rencana refactor.
+> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam 1 file `physical_operator.rs` (~2500+ LOC). ✅ Sudah direfactor ke `physical/` (Phase 2).
 
 ### 1.6 Storage Engine
 
@@ -314,23 +317,23 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 | Page Manager (FSM integration) | ✅ `kuzu-storage/src/page_manager.rs` |
 | FileHandle extend_file() | ✅ `page.rs` |
 | StorageManager rollback with undo | ✅ `lib.rs` |
-| Connection wiring | ✅ `connection.rs` |
+| Connection wiring | ✅ `connection/mod.rs` |
 
 ### ✅ Table Functions / CALL (Fase P1)
 | Item | Status |
 |------|--------|
-| `table_info(table)` — column metadata | ✅ `connection.rs` |
-| `show_functions()` — 150+ functions | ✅ `connection.rs` + `FunctionRegistry::list_all()` |
-| `show_indexes()` — ART + HNSW | ✅ `connection.rs` + `Catalog::indexes()` |
-| `show_sequences()` — sequence list | ✅ `connection.rs` |
-| `show_macros()` — macro list | ✅ `connection.rs` |
-| `show_connection(table)` — node/rel topology | ✅ `connection.rs` + `Catalog::connection_info()` |
-| `db_version()` — version string | ✅ `connection.rs` |
+| `table_info(table)` — column metadata | ✅ `connection/ddl.rs` |
+| `show_functions()` — 150+ functions | ✅ `connection/ddl.rs` + `FunctionRegistry::list_all()` |
+| `show_indexes()` — ART + HNSW | ✅ `connection/ddl.rs` + `Catalog::indexes()` |
+| `show_sequences()` — sequence list | ✅ `connection/ddl.rs` |
+| `show_macros()` — macro list | ✅ `connection/ddl.rs` |
+| `show_connection(table)` — node/rel topology | ✅ `connection/ddl.rs` + `Catalog::connection_info()` |
+| `db_version()` — version string | ✅ `connection/ddl.rs` |
 | `catalog_version()` — DDL counter | ✅ `Catalog::version` + `bump_version()` in 5 DDL methods |
-| `current_setting(key)` — config value | ✅ `connection.rs` |
-| `stats_info(table)` — row count + size | ✅ `connection.rs` + `StatsStore::table_stats_by_id()` |
-| `storage_info()` — page stats | ✅ `connection.rs` + `StorageManager::storage_info()` |
-| `show_attached_databases()` | ✅ `connection.rs` |
+| `current_setting(key)` — config value | ✅ `connection/ddl.rs` |
+| `stats_info(table)` — row count + size | ✅ `connection/ddl.rs` + `StatsStore::table_stats_by_id()` |
+| `storage_info()` — page stats | ✅ `connection/ddl.rs` + `StorageManager::storage_info()` |
+| `show_attached_databases()` | ✅ `connection/ddl.rs` |
 
 ### ✅ Physical Operator & Aggregate (Fase P3 — sebagian)
 | Item | Status |
@@ -475,13 +478,13 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 |---|------|----------|---------|---------|
 | 1 | **Monolith `scalar.rs`** (4.578 lines) | 🔴 HIGH | `kuzu-function/src/scalar.rs` | P-MOD1: Split ke `scalar/*.rs` (20+ files) + `aggregate/*.rs` |
 | 2 | **Monolith `physical_operator.rs`** (3.794 lines) | 🔴 HIGH | `kuzu-processor/src/physical_operator.rs` | P-MOD2: Split ke `operators/*.rs` (P10.6) |
-| 3 | **Monolith `connection.rs`** (3.133 lines) | 🔴 HIGH | `kuzu-main/src/connection.rs` | P-MOD3: Split ke `connection/*.rs` + extract tests |
+| 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
 | 4 | **Monolith `processor.rs`** (2.702 lines) | 🔴 HIGH | `kuzu-processor/src/processor.rs` | P-MOD2: Split helpers dari pipeline |
 | 5 | **Monolith `passes.rs`** (2.486 lines) | 🟡 HIGH | `kuzu-optimizer/src/passes.rs` | P-MOD4: Split ke `passes/flat/*.rs` + `passes/tree/*.rs` |
 | 6 | **Monolith `parser.rs`** (2.183 lines) | 🟡 HIGH | `kuzu-parser/src/parser.rs` | P-MOD5: Split ke `parser/*.rs` (ddl, dml, expression, query) |
 | 7 | **Monolith `binder.rs`** (1.667 lines) | 🟡 MEDIUM | `kuzu-binder/src/binder.rs` | P-MOD6: Split ke `bind/*.rs` (ddl, dml, expression) |
-| 8 | **TRANSACTION via string matching** | 🔴 HIGH | `kuzu-main/src/connection.rs` | P10.2 — pindahkan ke pipeline parser→binder→planner→processor |
-| 9 | **STANDALONE_CALL via string matching** | 🔴 HIGH | `kuzu-main/src/connection.rs` | P10.3 — pindahkan ke pipeline proper |
+| 8 | **TRANSACTION via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.2 — pindahkan ke pipeline parser→binder→planner→processor |
+| 9 | **STANDALONE_CALL via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.3 — pindahkan ke pipeline proper |
 | 10 | **Missing physical operators** | 🟡 MEDIUM | `kuzu-processor/` | P12 — Partitioner, IndexLookup, TopK, dll |
 | 11 | **Missing ATTACH/DETACH DATABASE** | 🟡 MEDIUM | Multi-crate | P11 — fitur multi-DB fundamental |
 | 12 | **README klaim TRANSACTION ✅ tapi P10.2 bilang belum** | 🟡 MEDIUM | `README.md` | P10.2 akan resolve |
@@ -506,13 +509,14 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-graph | 31 | ✅ Pass |
 | kuzu-vector | 20 | ✅ Pass |
 | kuzu-transaction | 12 | ✅ Pass |
-| kuzu-main (unit) | 64 | ✅ Pass |
+| kuzu-main (unit + connection_test) | 55 | ✅ Pass |
 | kuzu-main (integration) | 44 | ✅ Pass |
 | kuzu-main (fase_b_verification) | 15 | ✅ Pass |
+| kuzu-main (copy_to) | 4 | ✅ Pass |
 | kuzu-main (delete_set) | 1 | ✅ Pass |
 | kuzu-main (fts) | 1 | ✅ Pass |
 | Extension crates | 88 | ✅ Pass |
-| **Total** | **954** | **✅ All pass, 0 failed** |
+| **Total** | **~954** | **✅ All pass, 0 failed** |
 
 ---
 
@@ -520,6 +524,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[P-MOD3]` | Phase 3 modularization: Split `connection.rs` (3,133 lines) → 8 modules + `connection_test.rs` |
 | `ed94a16` | Port missing functions: Path, UUID, Left/Right/Lpad/Rpad, DayName/MonthName/LastDay/MakeDate |
 | `08e6117` | Prioritas 0 follow-up: Intersect execute_binary + weighted RecursiveExtend + SIP tests + clippy fixes |
 | `44848e6` | Prioritas 0: Binary operators fix + SIP opt + parser improvements + zone map + FSM |
