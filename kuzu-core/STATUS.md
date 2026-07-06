@@ -75,6 +75,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean, `cargo audit` clean (0 vulns), removed unused `fast-float`, upgraded `time` | `[P9.2]` |
 | Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. Gap table pending C++ binary build. | `[P9.3]` |
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
+| WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
+| Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |
 
 ---
 
@@ -504,5 +506,5 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD) + P9.2 (Code Quality) + P9.3 (Benchmark Framework) + P9.4 (Documentation: API docs, 5 ADRs, CONTRIBUTING.md) selesai.
+- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. **P9 (Production Hardening) COMPLETE** — P9.1 (CI/CD) + P9.2 (Code Quality) + P9.3 (Benchmark Framework) + P9.4 (Documentation) + P9.5 (WASM) + P9.6 (Regex cache) selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

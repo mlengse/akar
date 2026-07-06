@@ -28,6 +28,27 @@ thread_local! {
     );
 }
 
+/// Global regex cache — avoids recompiling regex patterns on every row.
+///
+/// Regex compilation is expensive (~10-50µs per pattern). For queries like
+/// `WHERE regex_matches(text, 'pattern')`, this saves the compilation cost
+/// for every row beyond the first.
+static REGEX_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, regex::Regex>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Get a compiled regex from the cache, or compile and cache it.
+fn get_cached_regex(pattern: &str) -> Result<regex::Regex, String> {
+    let mut cache = REGEX_CACHE
+        .lock()
+        .map_err(|e| format!("Regex cache lock error: {e}"))?;
+    if let Some(re) = cache.get(pattern) {
+        return Ok(re.clone());
+    }
+    let re = regex::Regex::new(pattern).map_err(|e| format!("Regex error: {e}"))?;
+    cache.insert(pattern.to_string(), re.clone());
+    Ok(re)
+}
+
 /// Get next random f64 in [0, 1) from the thread-local LCG.
 fn rng_next() -> f64 {
     RNG_STATE.with(|state| {
@@ -555,14 +576,14 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
         StringOp::RegexMatches => {
             let s = get_string(&args[0])?;
             let pat = get_string(&args[1])?;
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             Ok(Value::Bool(re.is_match(&s)))
         }
         StringOp::RegexReplace => {
             let s = get_string(&args[0])?;
             let pat = get_string(&args[1])?;
             let repl = get_string(&args[2])?;
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             Ok(Value::String(re.replace_all(&s, repl).to_string()))
         }
         StringOp::Split => {
@@ -745,7 +766,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
         StringOp::RegexpFullMatch => {
             let s = get_string(&args[0])?;
             let pat = get_string(&args[1])?;
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             Ok(Value::Bool(
                 re.find(&s).is_some_and(|m| m.start() == 0 && m.end() == s.len()),
             ))
@@ -761,7 +782,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             } else {
                 0
             };
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             let result = re
                 .captures(&s)
                 .and_then(|caps| caps.get(group))
@@ -780,7 +801,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             } else {
                 0
             };
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             let matches: Vec<Value> = re
                 .captures_iter(&s)
                 .filter_map(|caps| caps.get(group))
@@ -791,7 +812,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
         StringOp::RegexpSplitToArray => {
             let s = get_string(&args[0])?;
             let pat = get_string(&args[1])?;
-            let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
+            let re = get_cached_regex(&pat)?;
             let parts: Vec<Value> = re.split(&s).map(|p| Value::String(p.to_string())).collect();
             Ok(Value::List(parts))
         }
