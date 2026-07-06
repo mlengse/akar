@@ -52,7 +52,7 @@ regex = "1"
 hashbrown = "0.15"
 bitflags = "2"
 bytes = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 arrow = { version = "53", default-features = false, features = ["csv", "ipc", "prettyprint"] }
 parquet = { version = "53", default-features = false, features = ["arrow", "flate2", "snap", "brotli", "lz4"] }
 csv = "1.3"
