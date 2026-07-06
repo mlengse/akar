@@ -1,19 +1,20 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-05 (diperbarui dari 2026-07-02)
+> **Tanggal:** 2026-07-07 (diperbarui dari 2026-07-05)
 
 ---
 
 ## 0. Ringkasan Eksekutif
 
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
-**28 crate**, **~98 file .rs**, **~26.000 LOC**.
+**28 crate**, **~98 file .rs**, **~27.000 LOC**.
 
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **922 total, 0 failed** ✅ |
-| **Integration tests** | **44 passed, 0 failed** ✅ |
+| **Tests passing** | **954 total, 0 failed** ✅ |
+| **Integration tests** | **61 passed, 0 failed** ✅ |
+| **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **21** (14 flat + 7 tree) — melebihi C++ |
 | **Join Order** | **DP Bushy Trees** (cost-based) ✅ |
 | **Functions** | **150+** registered (scalar + aggregate + table) |
@@ -69,6 +70,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | CountRelTable (Ladybug) | ❌ TIDAK ADA | ✅ Logical+Physical+Optimizer pass | `[P4.3]` |
 | Remaining Table Functions | ❌ 8 missing | ✅ bm_info, file_info, free_space_info, show_loaded_extensions, show_official_extensions, clear_warnings, show_warnings, disk_size_info, storage_version | `[P5]` |
 | Native FTS Index | ❌ TIDAK ADA | ✅ DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX`, BM25, 3 macro tables, Porter stemmer, tokenizer, stop words | `[P8]` |
+| Projection column resolution | ❌ Bug: selalu kolom 0 | ✅ `resolve_projection_column_index()` + `evaluate_variable` field-name matching | `[fix]` |
+| CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
 
 ---
 
@@ -450,31 +453,35 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 ### 4.3 Code Quality
 - Clippy warnings di extension crates **sudah diperbaiki** (`unused_imports` di kuzu-postgres, kuzu-iceberg, dll).
-- CI/CD setup belum ada.
+- **CI/CD pipeline implemented** — 8 job GitHub Actions (fmt, clippy, test×3 OS, feature-gated build, WASM check, bench compilation, coverage via tarpaulin) + Dependabot untuk weekly dependency updates. File: `.github/workflows/rust-ci.yml`, `.github/dependabot.yml`.
+- `cargo fmt --all` applied — 0 formatting diffs.
+- `cargo audit` + `cargo udeps` belum dijalankan (P9.2).
 
 ---
 
-## 5. Test Results (Per 2026-07-05)
+## 5. Test Results (Per 2026-07-07)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
 | kuzu-common | 21 | ✅ Pass |
-| kuzu-parser | 40 | ✅ Pass |
-| kuzu-binder | 21 | ✅ Pass |
-| kuzu-planner | 62 | ✅ Pass |
+| kuzu-parser | 63 | ✅ Pass |
+| kuzu-binder | 14 | ✅ Pass |
+| kuzu-planner | 16 | ✅ Pass |
 | kuzu-optimizer | 49 | ✅ Pass |
 | kuzu-processor | 77 | ✅ Pass |
 | kuzu-storage | 242 | ✅ Pass |
 | kuzu-function | 159 | ✅ Pass |
-| kuzu-catalog | 14 | ✅ Pass |
+| kuzu-catalog | 37 | ✅ Pass |
 | kuzu-graph | 31 | ✅ Pass |
-| kuzu-vector | 7 | ✅ Pass |
-| kuzu-transaction | 20 | ✅ Pass |
+| kuzu-vector | 20 | ✅ Pass |
+| kuzu-transaction | 12 | ✅ Pass |
 | kuzu-main (unit) | 64 | ✅ Pass |
 | kuzu-main (integration) | 44 | ✅ Pass |
-| kuzu-main (fase_b_verification) | 12 | ✅ Pass |
-| Other crates | 86 | ✅ Pass |
-| **Total** | **922** | **✅ All pass, 0 failed** |
+| kuzu-main (fase_b_verification) | 15 | ✅ Pass |
+| kuzu-main (delete_set) | 1 | ✅ Pass |
+| kuzu-main (fts) | 1 | ✅ Pass |
+| Extension crates | 88 | ✅ Pass |
+| **Total** | **954** | **✅ All pass, 0 failed** |
 
 ---
 
@@ -493,5 +500,5 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-05: **922 test lulus, 0 gagal** di seluruh workspace. P0 (Crash Recovery) + P1 (Table Functions) + P2 (Transaction Enhancement) + P3.1 (ANALYZE) + P3.2 (AggregateHashTable) + P3.3 (JoinHashTable) + P3.6 (PERCENTILE) selesai. HTTPFS test fixed (gated behind feature flag).
+- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD: 8 job GitHub Actions + Dependabot) selesai. Projection bug fix (`resolve_projection_column_index` + `evaluate_variable` field-name matching) selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

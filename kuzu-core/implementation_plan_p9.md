@@ -1,34 +1,31 @@
 # P9: Production Hardening & CI/CD
 
-> **Status:** Planning | **Target Date:** 2026-07-12
+> **Status:** In Progress (P9.1 ✅, P9.2–P9.6 pending) | **Target Date:** 2026-07-12
 > **Prerequisites:** P8 (Native FTS) — ✅ COMPLETE
 
 ---
 
 ## Overview
 
-Dengan selesainya fitur inti query engine (P0–P8) dan **922 test lulus**, fase P9 fokus pada **production hardening**: CI/CD pipeline, code quality enforcement, dokumentasi developer, publikasi crate, dan benchmark comparison terhadap C++.
+Dengan selesainya fitur inti query engine (P0–P8) dan **954 test lulus**, fase P9 fokus pada **production hardening**: CI/CD pipeline, code quality enforcement, dokumentasi developer, publikasi crate, dan benchmark comparison terhadap C++.
 
 ---
 
 ## Prioritas
 
-### 🔴 P9.1 — CI/CD Pipeline
+### 🔴 P9.1 — CI/CD Pipeline ✅ COMPLETE (2026-07-06)
 
-- `[ ]` **GitHub Actions — CI workflow** (`kuzu-core/.github/workflows/ci.yml`)
-  - `[ ]` `cargo check --workspace --all-features` (Windows, Linux, macOS)
-  - `[ ]` `cargo test --workspace` (Windows, Linux, macOS)
-  - `[ ]` `cargo clippy --workspace -- -D warnings`
-  - `[ ]` `cargo fmt --check --workspace`
-  - `[ ]` `cargo bench --workspace --no-run` (pastikan benchmark kompilasi)
-- `[ ]` **GitHub Actions — WASM workflow**
-  - `[ ]` `wasm-pack build kuzu-wasm --target nodejs`
-  - `[ ]` `wasm-pack test --node kuzu-wasm`
-- `[ ]` **GitHub Actions — Coverage workflow**
-  - `[ ]` `cargo tarpaulin --workspace --out Html --out Xml`
-  - `[ ]` Upload ke Codecov / Coveralls
-- `[ ]` **Dependabot / Renovate** — dependency update automation
-- `[ ]` **Release workflow** — `cargo publish` untuk 28 crate (dry-run dulu)
+- `[x]` **GitHub Actions — CI workflow** (`.github/workflows/rust-ci.yml`)
+  - `[x]` `cargo build --workspace` + `cargo test --workspace` (Windows, Linux, macOS)
+  - `[x]` `cargo clippy --workspace --all-targets -- -D warnings`
+  - `[x]` `cargo fmt --all -- --check`
+  - `[x]` Feature-gated build (11 extension features + adbc)
+  - `[x]` WASM check (`cargo check --target wasm32-unknown-unknown`)
+  - `[x]` Benchmark compilation (`cargo bench --workspace --no-run`)
+  - `[x]` Coverage (`cargo tarpaulin` + Codecov upload)
+- `[x]` **Dependabot** — weekly cargo + monthly GHA updates (`.github/dependabot.yml`)
+- `[x]` **cargo fmt --all** — pre-existing formatting diffs fixed
+- `[ ]` **Release workflow** — `cargo publish` untuk 28 crate (deferred: needs crates.io setup)
 
 ### 🟡 P9.2 — Code Quality & Linting
 

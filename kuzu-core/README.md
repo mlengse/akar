@@ -1,5 +1,7 @@
 # Kuzu Core — Pure Rust Port
 
+[![Rust CI](https://github.com/kuzudb/kuzu/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/kuzudb/kuzu/actions/workflows/rust-ci.yml)
+
 A from-scratch Rust port of [Kuzu](https://github.com/kuzudb/kuzu), an embedded property graph database management system (GDBMS) with openCypher query support.
 
 ## Architecture
@@ -133,28 +135,28 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 922 tests — all passing ✅ (44 integration tests)
+Total: 954 tests — all passing ✅ (61 integration tests)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
 | `kuzu-common` | 21 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
-| `kuzu-parser` | 40 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
-| `kuzu-binder` | 21 | ✅ | Semantic analysis, type inference, symbol resolution |
-| `kuzu-planner` | 62 | ✅ | Logical plan construction (34 LogicalOperator variants) |
+| `kuzu-parser` | 63 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
+| `kuzu-binder` | 14 | ✅ | Semantic analysis, type inference, symbol resolution |
+| `kuzu-planner` | 16 | ✅ | Logical plan construction (34 LogicalOperator variants) |
 | `kuzu-optimizer` | 49 | ✅ | 14 flat passes + 7 tree passes (21 total, exceeds C++ Ladybug) |
 | `kuzu-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
 | `kuzu-function` | 159 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
-| `kuzu-storage` | 54 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
+| `kuzu-storage` | 242 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `kuzu-main` (unit) | 64 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
 | `kuzu-main` (integration) | 44 | ✅ | RETURN *, FOREACH, MERGE, subqueries |
-| `kuzu-catalog` | 21 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
-| `kuzu-transaction` | 11 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
+| `kuzu-catalog` | 37 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
+| `kuzu-transaction` | 12 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
 | `kuzu-graph` | 31 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
-| `kuzu-vector` | 7 | ✅ | Vector similarity search |
+| `kuzu-vector` | 20 | ✅ | Vector similarity search |
 | `kuzu-json` | 12 | ✅ | extract, valid, type, structure, contains, keys, array_length |
 | `kuzu-fts` | 14 | ✅ | Stemmer, Tokenizer, TF-IDF, BM25, stop words |
-| `kuzu-algo` | 10 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest, shortest path algorithms |
+| `kuzu-algo` | 19 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest, shortest path algorithms |
 | `kuzu-llm` | 9 | ✅ | LLM function integration |
 | `kuzu-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `kuzu-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
