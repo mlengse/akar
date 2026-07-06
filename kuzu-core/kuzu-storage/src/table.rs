@@ -2,10 +2,10 @@
 
 use crate::art_index::ArtPrimaryKeyIndex;
 use crate::art_key::ArtKey;
+use crate::csr::CsrIndex;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use crate::vector_index::VectorIndexTable;
-use crate::csr::CsrIndex;
 use dashmap::DashMap;
 use kuzu_common::types::{LogicalTypeID, Value};
 use kuzu_vector::hnsw::DistanceMetric;
@@ -113,9 +113,10 @@ impl NodeTable {
 
             // Also update ART index if present
             if let Some(ref mut art_idx) = self.art_index
-                && let Some(art_key) = ArtKey::from_value(pk_value) {
-                    art_idx.insert(&art_key, self.num_rows - 1);
-                }
+                && let Some(art_key) = ArtKey::from_value(pk_value)
+            {
+                art_idx.insert(&art_key, self.num_rows - 1);
+            }
         }
 
         Ok(self.num_rows - 1)
@@ -134,7 +135,9 @@ impl NodeTable {
             if row.len() != num_cols {
                 return Err(format!(
                     "Row {} column count mismatch: expected {} values, got {}",
-                    i, num_cols, row.len()
+                    i,
+                    num_cols,
+                    row.len()
                 ));
             }
             // Check PK uniqueness
@@ -154,7 +157,11 @@ impl NodeTable {
 
         // Ensure we have a node group with enough capacity
         if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
-            let off = if self.node_groups.is_empty() { start_offset } else { self.num_rows };
+            let off = if self.node_groups.is_empty() {
+                start_offset
+            } else {
+                self.num_rows
+            };
             self.node_groups.push(NodeGroup::new(num_cols, off));
         }
 
@@ -181,9 +188,10 @@ impl NodeTable {
                 let pk_key = pk_value_to_string(&row[self.primary_key_column]);
                 self.hash_index.insert(pk_key, start_offset + i as u64);
                 if let Some(ref mut art_idx) = self.art_index
-                    && let Some(art_key) = ArtKey::from_value(&row[self.primary_key_column]) {
-                        art_idx.insert(&art_key, start_offset + i as u64);
-                    }
+                    && let Some(art_key) = ArtKey::from_value(&row[self.primary_key_column])
+                {
+                    art_idx.insert(&art_key, start_offset + i as u64);
+                }
             }
         }
 
@@ -363,21 +371,19 @@ impl NodeTable {
 
     /// Like `to_column_major_data`, but applies an optional zone map predicate
     /// `(col_idx, op_string, val)` to skip entire node groups.
-    pub fn to_column_major_data_with_predicate(
-        &self,
-        predicate: Option<(usize, &str, &Value)>,
-    ) -> Vec<Vec<Value>> {
+    pub fn to_column_major_data_with_predicate(&self, predicate: Option<(usize, &str, &Value)>) -> Vec<Vec<Value>> {
         let num_cols = self.columns.len();
         let mut result = vec![Vec::new(); num_cols]; // Avoid allocating self.num_rows if we skip chunks
 
         for group in &self.node_groups {
             if let Some((col_idx, op, val)) = predicate
-                && let Some(col_chunk) = group.columns.get(col_idx) {
-                    use crate::predicate::{check_zone_map, ZoneMapCheckResult};
-                    if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
-                        continue; // Skip this entire node group
-                    }
+                && let Some(col_chunk) = group.columns.get(col_idx)
+            {
+                use crate::predicate::{ZoneMapCheckResult, check_zone_map};
+                if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
+                    continue; // Skip this entire node group
                 }
+            }
 
             for row in 0..group.num_nodes as usize {
                 for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
@@ -530,7 +536,9 @@ impl RelTable {
             if vals.len() != num_cols {
                 return Err(format!(
                     "Rel {} column count mismatch: expected {} values, got {}",
-                    i, num_cols, vals.len()
+                    i,
+                    num_cols,
+                    vals.len()
                 ));
             }
         }
@@ -564,7 +572,7 @@ impl RelTable {
         if edge_idx >= self.edges.len() {
             return Err(format!("Edge index {edge_idx} out of range"));
         }
-        
+
         let (src, dst) = self.edges[edge_idx];
         if src == u64::MAX {
             // Already deleted
@@ -590,7 +598,7 @@ impl RelTable {
                 col[edge_idx] = Value::Null;
             }
         }
-        
+
         Ok(())
     }
 
@@ -602,7 +610,7 @@ impl RelTable {
         if edge_idx >= self.properties[col_idx].len() {
             return Err(format!("Edge index {edge_idx} out of range"));
         }
-        
+
         self.properties[col_idx][edge_idx] = value;
         Ok(())
     }
@@ -800,7 +808,7 @@ impl TableCatalog {
     pub fn detach_node(&self, table_id: u64, node_idx: u64) {
         for mut rel_table in self.rel_tables.iter_mut() {
             let mut edges_to_delete = Vec::new();
-            
+
             if rel_table.src_table_id == table_id {
                 if let Some(edges) = rel_table.fwd_adj.get(&node_idx) {
                     for &(_, edge_idx) in edges {
@@ -808,7 +816,7 @@ impl TableCatalog {
                     }
                 }
             }
-            
+
             if rel_table.dst_table_id == table_id {
                 if let Some(edges) = rel_table.rev_adj.get(&node_idx) {
                     for &(_, edge_idx) in edges {
@@ -816,30 +824,24 @@ impl TableCatalog {
                     }
                 }
             }
-            
+
             for edge_idx in edges_to_delete {
                 let _ = rel_table.delete_edge(edge_idx);
             }
         }
     }
 
-    pub fn all_node_tables(
-        &self,
-    ) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, NodeTable>> {
+    pub fn all_node_tables(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, NodeTable>> {
         self.node_tables.iter().collect()
     }
 
-    pub fn all_rel_tables(
-        &self,
-    ) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, RelTable>> {
+    pub fn all_rel_tables(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, RelTable>> {
         self.rel_tables.iter().collect()
     }
 
     /// Get the number of rows in a node table by name.
     pub fn node_table_num_rows(&self, name: &str) -> u64 {
-        self.get_node_table_by_name(name)
-            .map(|t| t.num_rows)
-            .unwrap_or(0)
+        self.get_node_table_by_name(name).map(|t| t.num_rows).unwrap_or(0)
     }
 
     /// Remove a node table by name. Returns true if the table existed.
@@ -882,13 +884,19 @@ impl TableCatalog {
     }
 
     /// Get a mutable vector index by name.
-    pub fn get_vector_index_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+    pub fn get_vector_index_by_name_mut(
+        &self,
+        name: &str,
+    ) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
         let id = self.vector_index_name_to_id.get(name)?;
         self.vector_indexes.get_mut(&*id)
     }
 
     /// Get a mutable vector index by ID.
-    pub fn get_vector_index_mut(&self, index_id: u64) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+    pub fn get_vector_index_mut(
+        &self,
+        index_id: u64,
+    ) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
         self.vector_indexes.get_mut(&index_id)
     }
 
@@ -933,9 +941,10 @@ impl TableCatalog {
         if pk_col < col_major.len() {
             for (row_offset, pk_val) in col_major[pk_col].iter().enumerate() {
                 if !matches!(pk_val, Value::Null)
-                    && let Some(art_key) = ArtKey::from_value(pk_val) {
-                        art_idx.insert(&art_key, row_offset as u64);
-                    }
+                    && let Some(art_key) = ArtKey::from_value(pk_val)
+                {
+                    art_idx.insert(&art_key, row_offset as u64);
+                }
             }
         }
 

@@ -106,7 +106,15 @@ pub struct SequenceEntry {
 }
 
 impl SequenceEntry {
-    pub fn new(name: String, start_value: i64, increment: i64, min_value: i64, max_value: i64, cycle: bool, sequence_id: u64) -> Self {
+    pub fn new(
+        name: String,
+        start_value: i64,
+        increment: i64,
+        min_value: i64,
+        max_value: i64,
+        cycle: bool,
+        sequence_id: u64,
+    ) -> Self {
         Self {
             sequence_id,
             name,
@@ -228,7 +236,13 @@ impl ScalarMacroEntry {
         default_args: Vec<(String, String)>,
         expression: String,
     ) -> Self {
-        Self { macro_id, name, positional_args, default_args, expression }
+        Self {
+            macro_id,
+            name,
+            positional_args,
+            default_args,
+            expression,
+        }
     }
 
     pub fn total_args(&self) -> usize {
@@ -394,8 +408,7 @@ impl Catalog {
             metric,
             dimensions,
         };
-        self.entries
-            .insert(index_id, CatalogEntry::VectorIndex(entry));
+        self.entries.insert(index_id, CatalogEntry::VectorIndex(entry));
         self.name_to_id.insert(name, index_id);
         CatalogResult::Created { table_id: index_id }
     }
@@ -496,18 +509,10 @@ impl Catalog {
                 t.columns.push(column);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => {
-                Err("Cannot add column to a vector index".into())
-            }
-            CatalogEntry::Sequence(_) => {
-                Err("Cannot add column to a sequence".into())
-            }
-            CatalogEntry::Foreign(_) => {
-                Err("Cannot add column to a foreign table".into())
-            }
-            CatalogEntry::Macro(_) => {
-                Err("Cannot add column to a macro".into())
-            }
+            CatalogEntry::VectorIndex(_) => Err("Cannot add column to a vector index".into()),
+            CatalogEntry::Sequence(_) => Err("Cannot add column to a sequence".into()),
+            CatalogEntry::Foreign(_) => Err("Cannot add column to a foreign table".into()),
+            CatalogEntry::Macro(_) => Err("Cannot add column to a macro".into()),
         }
     }
 
@@ -535,18 +540,10 @@ impl Catalog {
                 t.columns.remove(pos);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => {
-                Err("Cannot drop column from a vector index".into())
-            }
-            CatalogEntry::Sequence(_) => {
-                Err("Cannot drop column from a sequence".into())
-            }
-            CatalogEntry::Foreign(_) => {
-                Err("Cannot drop column from a foreign table".into())
-            }
-            CatalogEntry::Macro(_) => {
-                Err("Cannot drop column from a macro".into())
-            }
+            CatalogEntry::VectorIndex(_) => Err("Cannot drop column from a vector index".into()),
+            CatalogEntry::Sequence(_) => Err("Cannot drop column from a sequence".into()),
+            CatalogEntry::Foreign(_) => Err("Cannot drop column from a foreign table".into()),
+            CatalogEntry::Macro(_) => Err("Cannot drop column from a macro".into()),
         }
     }
 
@@ -597,9 +594,16 @@ impl Catalog {
         }
         let sequence_id = self.next_id;
         self.next_id += 1;
-        let entry = SequenceEntry::new(name.clone(), start_value, increment, min_value, max_value, cycle, sequence_id);
-        self.entries
-            .insert(sequence_id, CatalogEntry::Sequence(entry));
+        let entry = SequenceEntry::new(
+            name.clone(),
+            start_value,
+            increment,
+            min_value,
+            max_value,
+            cycle,
+            sequence_id,
+        );
+        self.entries.insert(sequence_id, CatalogEntry::Sequence(entry));
         self.name_to_id.insert(name, sequence_id);
         self.bump_version();
         CatalogResult::Created { table_id: sequence_id }
@@ -607,11 +611,9 @@ impl Catalog {
 
     /// Get a sequence entry by name.
     pub fn get_sequence(&self, name: &str) -> Option<&SequenceEntry> {
-        self.name_to_id.get(name).and_then(|id| {
-            match self.entries.get(id) {
-                Some(CatalogEntry::Sequence(s)) => Some(s),
-                _ => None,
-            }
+        self.name_to_id.get(name).and_then(|id| match self.entries.get(id) {
+            Some(CatalogEntry::Sequence(s)) => Some(s),
+            _ => None,
         })
     }
 
@@ -684,8 +686,7 @@ impl Catalog {
         let macro_id = self.next_id;
         self.next_id += 1;
         let entry = ScalarMacroEntry::new(macro_id, name.clone(), positional_args, default_args, expression);
-        self.entries
-            .insert(macro_id, CatalogEntry::Macro(entry));
+        self.entries.insert(macro_id, CatalogEntry::Macro(entry));
         self.name_to_id.insert(macro_name_upper, macro_id);
         self.bump_version();
         CatalogResult::Created { table_id: macro_id }
@@ -694,11 +695,9 @@ impl Catalog {
     /// Get a macro entry by name (case-insensitive lookup).
     pub fn get_macro(&self, name: &str) -> Option<&ScalarMacroEntry> {
         let upper = name.to_uppercase();
-        self.name_to_id.get(&upper).and_then(|id| {
-            match self.entries.get(id) {
-                Some(CatalogEntry::Macro(m)) => Some(m),
-                _ => None,
-            }
+        self.name_to_id.get(&upper).and_then(|id| match self.entries.get(id) {
+            Some(CatalogEntry::Macro(m)) => Some(m),
+            _ => None,
         })
     }
 
@@ -739,7 +738,10 @@ impl Catalog {
     pub fn contains_macro(&self, name: &str) -> bool {
         let upper = name.to_uppercase();
         self.name_to_id.contains_key(&upper)
-            && matches!(self.entries.get(self.name_to_id.get(&upper).unwrap()), Some(CatalogEntry::Macro(_)))
+            && matches!(
+                self.entries.get(self.name_to_id.get(&upper).unwrap()),
+                Some(CatalogEntry::Macro(_))
+            )
     }
 
     /// Create a foreign table entry in the catalog.
@@ -760,19 +762,16 @@ impl Catalog {
             columns,
             source_type,
         };
-        self.entries
-            .insert(table_id, CatalogEntry::Foreign(entry));
+        self.entries.insert(table_id, CatalogEntry::Foreign(entry));
         self.name_to_id.insert(name, table_id);
         CatalogResult::Created { table_id }
     }
 
     /// Get a foreign table entry by name.
     pub fn get_foreign_table(&self, name: &str) -> Option<&ForeignTableEntry> {
-        self.name_to_id.get(name).and_then(|id| {
-            match self.entries.get(id) {
-                Some(CatalogEntry::Foreign(f)) => Some(f),
-                _ => None,
-            }
+        self.name_to_id.get(name).and_then(|id| match self.entries.get(id) {
+            Some(CatalogEntry::Foreign(f)) => Some(f),
+            _ => None,
         })
     }
 
@@ -861,18 +860,10 @@ impl Catalog {
                 col.name = new_name.to_string();
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => {
-                Err("Cannot rename column on a vector index".into())
-            }
-            CatalogEntry::Sequence(_) => {
-                Err("Cannot rename column on a sequence".into())
-            }
-            CatalogEntry::Foreign(_) => {
-                Err("Cannot rename column on a foreign table".into())
-            }
-            CatalogEntry::Macro(_) => {
-                Err("Cannot rename column on a macro".into())
-            }
+            CatalogEntry::VectorIndex(_) => Err("Cannot rename column on a vector index".into()),
+            CatalogEntry::Sequence(_) => Err("Cannot rename column on a sequence".into()),
+            CatalogEntry::Foreign(_) => Err("Cannot rename column on a foreign table".into()),
+            CatalogEntry::Macro(_) => Err("Cannot rename column on a macro".into()),
         }
     }
 
@@ -949,7 +940,8 @@ impl Catalog {
                             nt.index_name.clone().unwrap_or_default(),
                             nt.name.clone(),
                             "ART".to_string(),
-                            nt.columns.get(nt.primary_key_column)
+                            nt.columns
+                                .get(nt.primary_key_column)
                                 .map(|c| c.name.clone())
                                 .unwrap_or_default(),
                         ));
@@ -979,9 +971,15 @@ impl Catalog {
                 kuzu_common::types::Value::Null,
             ]),
             CatalogEntry::RelTable(rt) => {
-                let src = self.entries.get(&rt.src_table_id).map(|e| e.name().to_string())
+                let src = self
+                    .entries
+                    .get(&rt.src_table_id)
+                    .map(|e| e.name().to_string())
                     .unwrap_or_else(|| rt.src_table_id.to_string());
-                let dst = self.entries.get(&rt.dst_table_id).map(|e| e.name().to_string())
+                let dst = self
+                    .entries
+                    .get(&rt.dst_table_id)
+                    .map(|e| e.name().to_string())
                     .unwrap_or_else(|| rt.dst_table_id.to_string());
                 Some(vec![
                     kuzu_common::types::Value::String(rt.name.clone()),

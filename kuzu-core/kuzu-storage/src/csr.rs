@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 /// A Compressed Sparse Row (CSR) index for storing graph edges.
-/// 
+///
 /// `CsrIndex` stores edges compactly using two arrays (represented as pages on disk):
 /// 1. `offset_array`: Maps a node ID to its starting position in the adjacency array.
 /// 2. `adjacency_array`: Stores the destination node IDs contiguously.

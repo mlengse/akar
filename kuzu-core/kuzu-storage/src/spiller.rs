@@ -107,14 +107,11 @@ impl Spiller {
         // For a single-column chunk, each line is just one value.
         // Multi-column chunks are handled by the caller (NodeGroup) which spills
         // all columns together in a coordinated way.
-        let mut file = fs::File::create(&path)
-            .map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
+        let mut file = fs::File::create(&path).map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
 
         for value in &values {
-            let line = serde_json::to_string(value)
-                .map_err(|e| format!("Failed to serialize value: {e}"))?;
-            writeln!(file, "{line}")
-                .map_err(|e| format!("Failed to write spill file: {e}"))?;
+            let line = serde_json::to_string(value).map_err(|e| format!("Failed to serialize value: {e}"))?;
+            writeln!(file, "{line}").map_err(|e| format!("Failed to write spill file: {e}"))?;
         }
 
         // Re-allocate the chunk's buffer
@@ -131,10 +128,7 @@ impl Spiller {
     ///
     /// Each row is serialized as a JSON array `[col0, col1, ..., colN]`.
     /// This is used by `NodeGroup` to spill multi-column data.
-    pub fn spill_columns(
-        &self,
-        chunks: &mut [ColumnChunk],
-    ) -> Result<Option<SpillFile>, String> {
+    pub fn spill_columns(&self, chunks: &mut [ColumnChunk]) -> Result<Option<SpillFile>, String> {
         if chunks.is_empty() || chunks[0].is_empty() {
             return Ok(None);
         }
@@ -146,8 +140,7 @@ impl Spiller {
         // Drain all columns
         let mut drained: Vec<Vec<Value>> = chunks.iter_mut().map(|c| c.drain()).collect();
 
-        let mut file = fs::File::create(&path)
-            .map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
+        let mut file = fs::File::create(&path).map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
 
         for row in 0..num_rows {
             let mut row_values = Vec::with_capacity(num_cols);
@@ -159,10 +152,8 @@ impl Spiller {
                 };
                 row_values.push(val);
             }
-            let line = serde_json::to_string(&row_values)
-                .map_err(|e| format!("Failed to serialize row: {e}"))?;
-            writeln!(file, "{line}")
-                .map_err(|e| format!("Failed to write spill file: {e}"))?;
+            let line = serde_json::to_string(&row_values).map_err(|e| format!("Failed to serialize row: {e}"))?;
+            writeln!(file, "{line}").map_err(|e| format!("Failed to write spill file: {e}"))?;
         }
 
         Ok(Some(SpillFile {
@@ -177,8 +168,8 @@ impl Spiller {
     /// Each line of the JSON-lines file is deserialized as a single `Value`.
     /// Returns a new `ColumnChunk` with the restored values.
     pub fn restore(&self, spill: &SpillFile) -> Result<ColumnChunk, String> {
-        let file = fs::File::open(&spill.path)
-            .map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
+        let file =
+            fs::File::open(&spill.path).map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
         let reader = BufReader::new(file);
         let mut values = Vec::with_capacity(spill.row_count);
 
@@ -188,8 +179,8 @@ impl Spiller {
             if line.is_empty() {
                 continue;
             }
-            let value: Value = serde_json::from_str(&line)
-                .map_err(|e| format!("Failed to deserialize value from spill file: {e}"))?;
+            let value: Value =
+                serde_json::from_str(&line).map_err(|e| format!("Failed to deserialize value from spill file: {e}"))?;
             values.push(value);
         }
 
@@ -201,8 +192,8 @@ impl Spiller {
     ///
     /// Returns one `ColumnChunk` per column.
     pub fn restore_columns(&self, spill: &SpillFile, num_cols: usize) -> Result<Vec<ColumnChunk>, String> {
-        let file = fs::File::open(&spill.path)
-            .map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
+        let file =
+            fs::File::open(&spill.path).map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
         let reader = BufReader::new(file);
 
         let mut columns: Vec<Vec<Value>> = (0..num_cols).map(|_| Vec::new()).collect();
@@ -213,8 +204,8 @@ impl Spiller {
             if line.is_empty() {
                 continue;
             }
-            let row: Vec<Value> = serde_json::from_str(&line)
-                .map_err(|e| format!("Failed to deserialize row from spill file: {e}"))?;
+            let row: Vec<Value> =
+                serde_json::from_str(&line).map_err(|e| format!("Failed to deserialize row from spill file: {e}"))?;
             for (col, value) in row.into_iter().enumerate() {
                 if col < num_cols {
                     columns[col].push(value);
@@ -222,16 +213,12 @@ impl Spiller {
             }
         }
 
-        Ok(columns
-            .into_iter()
-            .map(ColumnChunk::from)
-            .collect())
+        Ok(columns.into_iter().map(ColumnChunk::from).collect())
     }
 
     /// Remove a spill file from disk.
     pub fn cleanup(&self, spill: &SpillFile) -> Result<(), String> {
-        fs::remove_file(&spill.path)
-            .map_err(|e| format!("Failed to remove spill file {:?}: {e}", spill.path))
+        fs::remove_file(&spill.path).map_err(|e| format!("Failed to remove spill file {:?}: {e}", spill.path))
     }
 
     /// Remove all spill files in the temp directory.
@@ -277,8 +264,7 @@ struct MergeCursor {
 
 impl MergeCursor {
     fn new(path: &Path, sort_key_col: usize) -> Result<Self, String> {
-        let file = fs::File::open(path)
-            .map_err(|e| format!("Failed to open merge source {:?}: {e}", path))?;
+        let file = fs::File::open(path).map_err(|e| format!("Failed to open merge source {:?}: {e}", path))?;
         let mut reader = BufReader::new(file);
         let current = Self::read_next_row(&mut reader);
         Ok(Self {
@@ -689,11 +675,7 @@ mod tests {
         let files = vec![spiller.spill(&mut c1).unwrap().unwrap()];
 
         // In-memory: [2, 4, 6]
-        let in_memory: Vec<Vec<Value>> = vec![
-            vec![Value::Int64(2)],
-            vec![Value::Int64(4)],
-            vec![Value::Int64(6)],
-        ];
+        let in_memory: Vec<Vec<Value>> = vec![vec![Value::Int64(2)], vec![Value::Int64(4)], vec![Value::Int64(6)]];
 
         let mut merger = MultiWayStreamMerge::new(&files, Some(in_memory), 0, false).unwrap();
         let mut merged = Vec::new();

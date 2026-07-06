@@ -14,7 +14,10 @@ fn test_httpfs_extension() -> Result<(), String> {
         kuzu_common::types::Value::String(s) => s,
         _ => panic!("Expected string"),
     };
-    assert!(body.contains("Example Domain"), "http_get should fetch the URL successfully");
+    assert!(
+        body.contains("Example Domain"),
+        "http_get should fetch the URL successfully"
+    );
 
     // Test http_scan
     let res2 = conn.query("CALL http_scan('https://example.com/')").unwrap();

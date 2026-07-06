@@ -1,6 +1,6 @@
 use kuzu_main::{Connection, Database, SystemConfig};
-use tempfile::tempdir;
 use std::sync::Arc;
+use tempfile::tempdir;
 
 #[test]
 fn test_delete_and_set() -> Result<(), String> {

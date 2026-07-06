@@ -10,7 +10,10 @@
 //! `src/storage/free_space_manager.cpp`.
 
 use std::collections::BTreeSet;
-use std::sync::{RwLock, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    RwLock,
+    atomic::{AtomicU64, Ordering},
+};
 
 /// A contiguous range of free pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,12 +113,18 @@ impl FreeSpaceManager {
     /// Deserialize FreeSpaceManager state from a byte slice.
     pub fn deserialize(data: &[u8]) -> std::io::Result<Self> {
         if data.len() < 4 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Data too short for FSM"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Data too short for FSM",
+            ));
         }
         let num_ranges = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let expected_len = 4 + num_ranges * 16;
         if data.len() < expected_len {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid FSM data length"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid FSM data length",
+            ));
         }
         let fsm = Self::new();
         for i in 0..num_ranges {
@@ -303,7 +312,7 @@ mod tests {
     #[test]
     fn test_multiple_free_lists() {
         let fsm = FreeSpaceManager::new();
-        fsm.add_free_pages(PageRange::new(0, 2));  // level 1
+        fsm.add_free_pages(PageRange::new(0, 2)); // level 1
         fsm.add_free_pages(PageRange::new(10, 4)); // level 2
         fsm.add_free_pages(PageRange::new(20, 8)); // level 3
 

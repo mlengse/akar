@@ -1,9 +1,9 @@
-use std::sync::{Arc, Mutex};
 use kuzu_binder::Binder;
 use kuzu_catalog::{Catalog, CatalogColumn};
 use kuzu_common::types::LogicalTypeID;
 use kuzu_parser::parse;
 use kuzu_planner::QueryPlanner;
+use std::sync::{Arc, Mutex};
 
 fn main() {
     let mut catalog = Catalog::new();

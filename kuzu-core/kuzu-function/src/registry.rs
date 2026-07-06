@@ -432,9 +432,13 @@ pub enum AggregateFunction {
     StdDev,
     Variance,
     /// PERCENTILE_DISC(expr, percentile) — discrete percentile.
-    PercentileDisc { percentile: f64 },
+    PercentileDisc {
+        percentile: f64,
+    },
     /// PERCENTILE_CONT(expr, percentile) — continuous percentile.
-    PercentileCont { percentile: f64 },
+    PercentileCont {
+        percentile: f64,
+    },
 }
 
 // ==================== Table Function Types ====================
@@ -580,9 +584,24 @@ impl FunctionRegistry {
         self.register_scalar("asin", ScalarFunction::Arithmetic { op: ArithmeticOp::Asin });
         self.register_scalar("acos", ScalarFunction::Arithmetic { op: ArithmeticOp::Acos });
         self.register_scalar("atan", ScalarFunction::Arithmetic { op: ArithmeticOp::Atan });
-        self.register_scalar("atan2", ScalarFunction::Arithmetic { op: ArithmeticOp::Atan2 });
-        self.register_scalar("degrees", ScalarFunction::Arithmetic { op: ArithmeticOp::Degrees });
-        self.register_scalar("radians", ScalarFunction::Arithmetic { op: ArithmeticOp::Radians });
+        self.register_scalar(
+            "atan2",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Atan2,
+            },
+        );
+        self.register_scalar(
+            "degrees",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Degrees,
+            },
+        );
+        self.register_scalar(
+            "radians",
+            ScalarFunction::Arithmetic {
+                op: ArithmeticOp::Radians,
+            },
+        );
         self.register_scalar("sign", ScalarFunction::Arithmetic { op: ArithmeticOp::Sign });
         self.register_scalar("pi", ScalarFunction::Arithmetic { op: ArithmeticOp::Pi });
         self.register_scalar("rand", ScalarFunction::Arithmetic { op: ArithmeticOp::Rand });
@@ -716,62 +735,17 @@ impl FunctionRegistry {
                 op: StringOp::RegexReplace,
             },
         );
-        self.register_scalar(
-            "split",
-            ScalarFunction::String {
-                op: StringOp::Split,
-            },
-        );
-        self.register_scalar(
-            "head",
-            ScalarFunction::String {
-                op: StringOp::Head,
-            },
-        );
-        self.register_scalar(
-            "tail",
-            ScalarFunction::String {
-                op: StringOp::Tail,
-            },
-        );
-        self.register_scalar(
-            "left",
-            ScalarFunction::String {
-                op: StringOp::Left,
-            },
-        );
-        self.register_scalar(
-            "right",
-            ScalarFunction::String {
-                op: StringOp::Right,
-            },
-        );
-        self.register_scalar(
-            "lpad",
-            ScalarFunction::String {
-                op: StringOp::Lpad,
-            },
-        );
-        self.register_scalar(
-            "rpad",
-            ScalarFunction::String {
-                op: StringOp::Rpad,
-            },
-        );
+        self.register_scalar("split", ScalarFunction::String { op: StringOp::Split });
+        self.register_scalar("head", ScalarFunction::String { op: StringOp::Head });
+        self.register_scalar("tail", ScalarFunction::String { op: StringOp::Tail });
+        self.register_scalar("left", ScalarFunction::String { op: StringOp::Left });
+        self.register_scalar("right", ScalarFunction::String { op: StringOp::Right });
+        self.register_scalar("lpad", ScalarFunction::String { op: StringOp::Lpad });
+        self.register_scalar("rpad", ScalarFunction::String { op: StringOp::Rpad });
 
         // --- String basic (C++ port) ---
-        self.register_scalar(
-            "initcap",
-            ScalarFunction::String {
-                op: StringOp::InitCap,
-            },
-        );
-        self.register_scalar(
-            "concat_ws",
-            ScalarFunction::String {
-                op: StringOp::ConcatWs,
-            },
-        );
+        self.register_scalar("initcap", ScalarFunction::String { op: StringOp::InitCap });
+        self.register_scalar("concat_ws", ScalarFunction::String { op: StringOp::ConcatWs });
         self.register_scalar(
             "split_part",
             ScalarFunction::String {
@@ -823,14 +797,49 @@ impl FunctionRegistry {
         self.register_scalar("hash", ScalarFunction::Hash { op: HashOp::Hash });
 
         // --- Interval ---
-        self.register_scalar("to_years", ScalarFunction::Interval { op: IntervalOp::ToYears });
-        self.register_scalar("to_months", ScalarFunction::Interval { op: IntervalOp::ToMonths });
+        self.register_scalar(
+            "to_years",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToYears,
+            },
+        );
+        self.register_scalar(
+            "to_months",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToMonths,
+            },
+        );
         self.register_scalar("to_days", ScalarFunction::Interval { op: IntervalOp::ToDays });
-        self.register_scalar("to_hours", ScalarFunction::Interval { op: IntervalOp::ToHours });
-        self.register_scalar("to_minutes", ScalarFunction::Interval { op: IntervalOp::ToMinutes });
-        self.register_scalar("to_seconds", ScalarFunction::Interval { op: IntervalOp::ToSeconds });
-        self.register_scalar("to_milliseconds", ScalarFunction::Interval { op: IntervalOp::ToMilliseconds });
-        self.register_scalar("to_microseconds", ScalarFunction::Interval { op: IntervalOp::ToMicroseconds });
+        self.register_scalar(
+            "to_hours",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToHours,
+            },
+        );
+        self.register_scalar(
+            "to_minutes",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToMinutes,
+            },
+        );
+        self.register_scalar(
+            "to_seconds",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToSeconds,
+            },
+        );
+        self.register_scalar(
+            "to_milliseconds",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToMilliseconds,
+            },
+        );
+        self.register_scalar(
+            "to_microseconds",
+            ScalarFunction::Interval {
+                op: IntervalOp::ToMicroseconds,
+            },
+        );
 
         // --- Date/Time ---
         self.register_scalar("date_part", ScalarFunction::Date { op: DateOp::DatePart });
@@ -865,7 +874,12 @@ impl FunctionRegistry {
         self.register_scalar("make_date", ScalarFunction::Date { op: DateOp::MakeDate });
         self.register_scalar("century", ScalarFunction::Date { op: DateOp::Century });
         self.register_scalar("epoch_ms", ScalarFunction::Date { op: DateOp::EpochMs });
-        self.register_scalar("to_timestamp", ScalarFunction::Date { op: DateOp::ToTimestamp });
+        self.register_scalar(
+            "to_timestamp",
+            ScalarFunction::Date {
+                op: DateOp::ToTimestamp,
+            },
+        );
         self.register_scalar("to_epoch_ms", ScalarFunction::Date { op: DateOp::ToEpochMs });
 
         // --- Cast ---
@@ -900,21 +914,76 @@ impl FunctionRegistry {
             },
         );
         // Cast function name aliases (Cypher/SQL standard)
-        self.register_scalar("date", ScalarFunction::Cast { target_type: CastTarget::Date });
-        self.register_scalar("timestamp", ScalarFunction::Cast { target_type: CastTarget::Timestamp });
-        self.register_scalar("float", ScalarFunction::Cast { target_type: CastTarget::Double });
-        self.register_scalar("double", ScalarFunction::Cast { target_type: CastTarget::Double });
-        self.register_scalar("int64", ScalarFunction::Cast { target_type: CastTarget::Int64 });
-        self.register_scalar("int", ScalarFunction::Cast { target_type: CastTarget::Int64 });
-        self.register_scalar("bool", ScalarFunction::Cast { target_type: CastTarget::Bool });
-        self.register_scalar("boolean", ScalarFunction::Cast { target_type: CastTarget::Bool });
-        self.register_scalar("string", ScalarFunction::Cast { target_type: CastTarget::String });
-        self.register_scalar("blob", ScalarFunction::Cast { target_type: CastTarget::String });
+        self.register_scalar(
+            "date",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Date,
+            },
+        );
+        self.register_scalar(
+            "timestamp",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Timestamp,
+            },
+        );
+        self.register_scalar(
+            "float",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Double,
+            },
+        );
+        self.register_scalar(
+            "double",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Double,
+            },
+        );
+        self.register_scalar(
+            "int64",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Int64,
+            },
+        );
+        self.register_scalar(
+            "int",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Int64,
+            },
+        );
+        self.register_scalar(
+            "bool",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Bool,
+            },
+        );
+        self.register_scalar(
+            "boolean",
+            ScalarFunction::Cast {
+                target_type: CastTarget::Bool,
+            },
+        );
+        self.register_scalar(
+            "string",
+            ScalarFunction::Cast {
+                target_type: CastTarget::String,
+            },
+        );
+        self.register_scalar(
+            "blob",
+            ScalarFunction::Cast {
+                target_type: CastTarget::String,
+            },
+        );
 
         // --- Blob ---
         self.register_scalar("encode", ScalarFunction::Blob { op: BlobOp::Encode });
         self.register_scalar("decode", ScalarFunction::Blob { op: BlobOp::Decode });
-        self.register_scalar("octet_length", ScalarFunction::Blob { op: BlobOp::OctetLength });
+        self.register_scalar(
+            "octet_length",
+            ScalarFunction::Blob {
+                op: BlobOp::OctetLength,
+            },
+        );
 
         // --- List ---
         self.register_scalar("list_creation", ScalarFunction::List { op: ListOp::Creation });
@@ -939,7 +1008,12 @@ impl FunctionRegistry {
         self.register_scalar("list_position", ScalarFunction::List { op: ListOp::Position });
         self.register_scalar("list_indexof", ScalarFunction::List { op: ListOp::Position });
         self.register_scalar("list_has_all", ScalarFunction::List { op: ListOp::HasAll });
-        self.register_scalar("list_reverse_sort", ScalarFunction::List { op: ListOp::ReverseSort });
+        self.register_scalar(
+            "list_reverse_sort",
+            ScalarFunction::List {
+                op: ListOp::ReverseSort,
+            },
+        );
 
         // --- List predicate functions ---
         self.register_scalar("any", ScalarFunction::List { op: ListOp::Any });
@@ -958,8 +1032,18 @@ impl FunctionRegistry {
         self.register_scalar("struct_extract", ScalarFunction::Struct { op: StructOp::Extract });
 
         // --- Union ---
-        self.register_scalar("union_value", ScalarFunction::Union { op: UnionOp::UnionValue });
-        self.register_scalar("union_extract", ScalarFunction::Union { op: UnionOp::UnionExtract });
+        self.register_scalar(
+            "union_value",
+            ScalarFunction::Union {
+                op: UnionOp::UnionValue,
+            },
+        );
+        self.register_scalar(
+            "union_extract",
+            ScalarFunction::Union {
+                op: UnionOp::UnionExtract,
+            },
+        );
         self.register_scalar("union_tag", ScalarFunction::Union { op: UnionOp::UnionTag });
 
         // --- Boolean ---
@@ -981,16 +1065,41 @@ impl FunctionRegistry {
         // --- Schema ---
         self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
         self.register_scalar("ID", ScalarFunction::Schema { op: SchemaOp::Id });
-        self.register_scalar("START_NODE", ScalarFunction::Schema { op: SchemaOp::StartNode });
+        self.register_scalar(
+            "START_NODE",
+            ScalarFunction::Schema {
+                op: SchemaOp::StartNode,
+            },
+        );
         self.register_scalar("END_NODE", ScalarFunction::Schema { op: SchemaOp::EndNode });
         self.register_scalar("LABEL", ScalarFunction::Schema { op: SchemaOp::Label });
 
         // --- Array ---
-        self.register_scalar("array_cosine_similarity", ScalarFunction::Array { op: ArrayOp::CosineSimilarity });
+        self.register_scalar(
+            "array_cosine_similarity",
+            ScalarFunction::Array {
+                op: ArrayOp::CosineSimilarity,
+            },
+        );
         self.register_scalar("array_distance", ScalarFunction::Array { op: ArrayOp::Distance });
-        self.register_scalar("array_inner_product", ScalarFunction::Array { op: ArrayOp::InnerProduct });
-        self.register_scalar("array_cross_product", ScalarFunction::Array { op: ArrayOp::CrossProduct });
-        self.register_scalar("array_squared_distance", ScalarFunction::Array { op: ArrayOp::SquaredDistance });
+        self.register_scalar(
+            "array_inner_product",
+            ScalarFunction::Array {
+                op: ArrayOp::InnerProduct,
+            },
+        );
+        self.register_scalar(
+            "array_cross_product",
+            ScalarFunction::Array {
+                op: ArrayOp::CrossProduct,
+            },
+        );
+        self.register_scalar(
+            "array_squared_distance",
+            ScalarFunction::Array {
+                op: ArrayOp::SquaredDistance,
+            },
+        );
 
         // --- Path ---
         self.register_scalar("nodes", ScalarFunction::Path { op: PathOp::Nodes });
@@ -1119,11 +1228,7 @@ impl FunctionRegistry {
     ///
     /// Returns a `Vec<Vec<Value>>` representing rows of results.
     /// Each inner vec is one row with one or more column values.
-    pub fn execute_table_function(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Result<Vec<Vec<Value>>, String> {
+    pub fn execute_table_function(&self, name: &str, args: &[Value]) -> Result<Vec<Vec<Value>>, String> {
         use kuzu_common::vector::DataChunk;
 
         let func = self
@@ -1131,15 +1236,14 @@ impl FunctionRegistry {
             .ok_or_else(|| format!("Table function '{}' not found", name))?;
 
         match func {
-            TableFunction::ListTables => {
-                Err("ListTables requires catalog access — handled at connection level".into())
-            }
+            TableFunction::ListTables => Err("ListTables requires catalog access — handled at connection level".into()),
             TableFunction::ShowColumns { .. } => {
                 Err("ShowColumns requires catalog access — handled at connection level".into())
             }
-            TableFunction::Custom { name: custom_name } => {
-                Err(format!("Custom table function '{}' has no callback registered", custom_name))
-            }
+            TableFunction::Custom { name: custom_name } => Err(format!(
+                "Custom table function '{}' has no callback registered",
+                custom_name
+            )),
             TableFunction::CustomTable { name: _, execute } => {
                 let mut chunk = DataChunk {
                     fields: Vec::new(),
@@ -1161,12 +1265,10 @@ impl FunctionRegistry {
             TableFunction::ScanCsv { .. }
             | TableFunction::ScanParquet { .. }
             | TableFunction::ScanJson { .. }
-            | TableFunction::CurrentSetting { .. } => {
-                Err(format!(
-                    "Table function '{}' requires file/catalog context — use COPY FROM instead",
-                    name
-                ))
-            }
+            | TableFunction::CurrentSetting { .. } => Err(format!(
+                "Table function '{}' requires file/catalog context — use COPY FROM instead",
+                name
+            )),
         }
     }
 }

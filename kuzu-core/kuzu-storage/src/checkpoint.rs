@@ -163,14 +163,7 @@ mod tests {
         )));
 
         // Create a column and write values via BufferManager
-        let mut col = Column::new(
-            LogicalTypeID::Int64,
-            0,
-            0,
-            dir.path(),
-            bm.clone(),
-            DEFAULT_PAGE_SIZE,
-        );
+        let mut col = Column::new(LogicalTypeID::Int64, 0, 0, dir.path(), bm.clone(), DEFAULT_PAGE_SIZE);
 
         // Write data through the column (this goes through BufferManager pages)
         for i in 0i64..10 {

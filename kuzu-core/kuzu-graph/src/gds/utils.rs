@@ -126,13 +126,7 @@ impl GDSUtils {
                     // First visit = shortest path in BFS
                     if !visited[nbr_offset] {
                         visited[nbr_offset] = true;
-                        bfs_graph.add_single_parent(
-                            iter + 1,
-                            bound_node_id,
-                            edge_id,
-                            *dst,
-                            true,
-                        );
+                        bfs_graph.add_single_parent(iter + 1, bound_node_id, edge_id, *dst, true);
                         next_frontier.push(dst.offset);
                     }
                 }
@@ -263,26 +257,14 @@ impl GDSUtils {
                 if new_cost < old_cost {
                     dist[nbr as usize] = new_cost;
                     // Replace parent with better path
-                    bfs_graph.try_add_single_parent_with_weight(
-                        bound_node_id,
-                        edge_id,
-                        *dst,
-                        true,
-                        weight,
-                    );
+                    bfs_graph.try_add_single_parent_with_weight(bound_node_id, edge_id, *dst, true, weight);
                     heap.push(std::cmp::Reverse(HeapNode {
                         cost: new_cost,
                         node: nbr,
                     }));
                 } else if (new_cost - old_cost).abs() < f64::EPSILON {
                     // Alternative path with same cost (for all-weighted-shortest-paths)
-                    bfs_graph.try_add_parent_with_weight(
-                        bound_node_id,
-                        edge_id,
-                        *dst,
-                        true,
-                        weight,
-                    );
+                    bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, weight);
                 }
             }
         }
@@ -345,20 +327,15 @@ impl GDSUtils {
                 let old_cost = dist[nbr as usize];
 
                 if new_cost < old_cost + f64::EPSILON
-                    && bfs_graph.try_add_parent_with_weight(
-                        bound_node_id,
-                        edge_id,
-                        *dst,
-                        true,
-                        weight,
-                    )
-                        && new_cost < old_cost {
-                            dist[nbr as usize] = new_cost;
-                            heap.push(std::cmp::Reverse(HeapNode {
-                                cost: new_cost,
-                                node: nbr,
-                            }));
-                        }
+                    && bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, weight)
+                    && new_cost < old_cost
+                {
+                    dist[nbr as usize] = new_cost;
+                    heap.push(std::cmp::Reverse(HeapNode {
+                        cost: new_cost,
+                        node: nbr,
+                    }));
+                }
             }
         }
 
@@ -399,12 +376,42 @@ mod tests {
 
     fn sample_csr() -> CSRAdjacency {
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 3, rel_id: 3, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 4, rel_table_id: 0 },
-            Edge { src_offset: 3, dst_offset: 4, rel_id: 5, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 3,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 4,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 3,
+                dst_offset: 4,
+                rel_id: 5,
+                rel_table_id: 0,
+            },
         ];
         CSRAdjacency::build(&edges, 5)
     }

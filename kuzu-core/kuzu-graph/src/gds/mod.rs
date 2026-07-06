@@ -16,14 +16,12 @@ pub mod frontier;
 pub mod output_writer;
 pub mod utils;
 
-pub use bfs_graph::{
-    BaseBFSGraph, BFSGraphManager, DenseBFSGraph, ParentList, SparseBFSGraph,
-};
+pub use bfs_graph::{BFSGraphManager, BaseBFSGraph, DenseBFSGraph, ParentList, SparseBFSGraph};
 pub use compute::{EdgeCompute, VertexCompute};
 pub use frontier::{
-    DenseFrontier, DenseFrontierPair, DenseFrontierReference, DenseSparseDynamicFrontierPair,
-    Frontier, FrontierPair, GDSDensityState, Iteration, SPFrontierPair, SparseFrontier,
-    SparseFrontierReference, FRONTIER_INITIAL_VISITED, FRONTIER_UNVISITED,
+    DenseFrontier, DenseFrontierPair, DenseFrontierReference, DenseSparseDynamicFrontierPair, FRONTIER_INITIAL_VISITED,
+    FRONTIER_UNVISITED, Frontier, FrontierPair, GDSDensityState, Iteration, SPFrontierPair, SparseFrontier,
+    SparseFrontierReference,
 };
 pub use output_writer::{PathsOutputWriter, PathsOutputWriterInfo, RJOutputWriter, SPPathsOutputWriter};
 pub use utils::GDSUtils;

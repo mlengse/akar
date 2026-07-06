@@ -9,10 +9,7 @@ use kuzu_parser::ast::{Clause, Expression, Statement, *};
 use std::sync::{Arc, Mutex};
 
 /// Resolve SET clause items against the catalog to find column info.
-fn resolve_set_items(
-    catalog: &Catalog,
-    items: &[SetItem],
-) -> Result<Vec<BoundSetItem>, String> {
+fn resolve_set_items(catalog: &Catalog, items: &[SetItem]) -> Result<Vec<BoundSetItem>, String> {
     let mut result = Vec::new();
     for item in items {
         // Expect property expression like `n.property_name = value`
@@ -36,9 +33,7 @@ fn resolve_set_items(
                     Some((table_name, table_id, is_node)) => {
                         let col_idx = catalog
                             .get_entry_by_name(&table_name)
-                            .and_then(|e| {
-                                e.columns().iter().position(|c| c.name == *prop_name)
-                            })
+                            .and_then(|e| e.columns().iter().position(|c| c.name == *prop_name))
                             .unwrap_or(0);
                         result.push(BoundSetItem {
                             property: item.property.clone(),
@@ -188,7 +183,7 @@ impl Binder {
             };
             variables.extend(new_vars);
             clauses.push(bound_clause.clone());
-            
+
             // Generate implicit WHERE clauses from inline properties for MATCH and CREATE
             if let BoundClause::BoundMatch(bound) = &bound_clause {
                 let mut inline_exprs = Vec::new();
@@ -224,16 +219,19 @@ impl Binder {
                         }
                     }
                 }
-                
+
                 if !inline_exprs.is_empty() {
-                    let combined = inline_exprs.into_iter().reduce(|acc, e| {
-                        kuzu_parser::ast::Expression::BinaryOp(
-                            kuzu_parser::ast::BinaryOp::And,
-                            Box::new(acc),
-                            Box::new(e),
-                        )
-                    }).unwrap();
-                    
+                    let combined = inline_exprs
+                        .into_iter()
+                        .reduce(|acc, e| {
+                            kuzu_parser::ast::Expression::BinaryOp(
+                                kuzu_parser::ast::BinaryOp::And,
+                                Box::new(acc),
+                                Box::new(e),
+                            )
+                        })
+                        .unwrap();
+
                     let bound_expr = self.resolve_expression(&combined, &variables)?;
                     clauses.push(BoundClause::BoundWhere(BoundWhereClause { expression: bound_expr }));
                 }
@@ -415,10 +413,7 @@ impl Binder {
                 Expression::Star => {
                     // Expand * to all variables in scope
                     if variables.is_empty() {
-                        return Err(
-                            "RETURN or WITH * is not allowed when there are no variables in scope."
-                                .to_string(),
-                        );
+                        return Err("RETURN or WITH * is not allowed when there are no variables in scope.".to_string());
                     }
                     for var in variables {
                         expressions.push(BoundExpression {
@@ -574,8 +569,11 @@ impl Binder {
                     "COUNT" | "SUM" | "MIN" | "MAX" | "AVG" => LogicalTypeID::Int64,
                     "NEXTVAL" | "CURRVAL" => LogicalTypeID::Int64,
                     "STARTS_WITH" | "ENDS_WITH" | "CONTAINS" => LogicalTypeID::Bool,
-                    "TO_UPPER" | "TO_LOWER" | "UPPER" | "LOWER" | "UCASE" | "LCASE" | "TRIM" | "SUBSTRING" | "REPLACE" => LogicalTypeID::String,
-                    "ABS" | "CEIL" | "CEILING" | "FLOOR" | "ROUND" | "SQRT" | "LOG" | "EXP" | "SIN" | "COS" | "TAN" => LogicalTypeID::Double,
+                    "TO_UPPER" | "TO_LOWER" | "UPPER" | "LOWER" | "UCASE" | "LCASE" | "TRIM" | "SUBSTRING"
+                    | "REPLACE" => LogicalTypeID::String,
+                    "ABS" | "CEIL" | "CEILING" | "FLOOR" | "ROUND" | "SQRT" | "LOG" | "EXP" | "SIN" | "COS" | "TAN" => {
+                        LogicalTypeID::Double
+                    }
                     "DATE" | "TIMESTAMP" => LogicalTypeID::Date,
                     "INT64" | "INT" => LogicalTypeID::Int64,
                     "FLOAT" | "DOUBLE" | "BOOL" | "BOOLEAN" | "STRING" | "BLOB" => LogicalTypeID::String,
@@ -698,7 +696,12 @@ impl Binder {
                     is_constant: false,
                 })
             }
-            Expression::ListPredicate { quantifier: _, list, var_name, predicate } => {
+            Expression::ListPredicate {
+                quantifier: _,
+                list,
+                var_name,
+                predicate,
+            } => {
                 // Bind both list and predicate expressions
                 self.resolve_expression(list, variables)?;
 
@@ -764,10 +767,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_vector_index(
-        &self,
-        v: kuzu_parser::ast::CreateVectorIndex,
-    ) -> Result<BoundStatement, String> {
+    fn bind_create_vector_index(&self, v: kuzu_parser::ast::CreateVectorIndex) -> Result<BoundStatement, String> {
         if v.index_name.is_empty() {
             return Err("Index name cannot be empty".into());
         }
@@ -852,10 +852,7 @@ impl Binder {
             // Validate column exists and is PK
             let col_exists = entry.columns().iter().any(|c| c.name == v.property);
             if !col_exists {
-                return Err(format!(
-                    "Column '{}' not found in table '{}'",
-                    v.property, v.table_name
-                ));
+                return Err(format!("Column '{}' not found in table '{}'", v.property, v.table_name));
             }
 
             let pk_col = entry.columns().iter().find(|c| c.is_primary_key);
@@ -965,16 +962,15 @@ impl Binder {
         })
     }
 
-    fn bind_foreach(&self, f: &kuzu_parser::ast::ForeachClause, variables: &[BoundVariable]) -> Result<BoundForeachClause, String> {
+    fn bind_foreach(
+        &self,
+        f: &kuzu_parser::ast::ForeachClause,
+        variables: &[BoundVariable],
+    ) -> Result<BoundForeachClause, String> {
         // Validate the expression is a list
         match &f.expression {
             kuzu_parser::ast::Expression::List(_) | kuzu_parser::ast::Expression::Variable(_) => {}
-            _ => {
-                return Err(format!(
-                    "FOREACH requires a list expression, got: {:?}",
-                    f.expression
-                ))
-            }
+            _ => return Err(format!("FOREACH requires a list expression, got: {:?}", f.expression)),
         }
         if f.variable.is_empty() {
             return Err("FOREACH requires a variable name".into());
@@ -1133,8 +1129,16 @@ impl Binder {
         }))
     }
 
-    fn bind_create_dml(&self, c: kuzu_parser::ast::CreateClause, _variables: &[BoundVariable]) -> Result<BoundStatement, String> {
-        let node = c.patterns.first().and_then(|p| p.node.as_ref()).ok_or("CREATE DML requires a node pattern")?;
+    fn bind_create_dml(
+        &self,
+        c: kuzu_parser::ast::CreateClause,
+        _variables: &[BoundVariable],
+    ) -> Result<BoundStatement, String> {
+        let node = c
+            .patterns
+            .first()
+            .and_then(|p| p.node.as_ref())
+            .ok_or("CREATE DML requires a node pattern")?;
         let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
 
         let catalog = self.catalog.lock().unwrap();
@@ -1183,15 +1187,9 @@ impl Binder {
         if increment == 0 {
             return Err("INCREMENT must not be zero".into());
         }
-        let start_with = s.start_with.unwrap_or({
-            if increment > 0 { 1 } else { -1 }
-        });
-        let min_value = s.min_value.unwrap_or({
-            if increment > 0 { 1 } else { i64::MIN }
-        });
-        let max_value = s.max_value.unwrap_or({
-            if increment > 0 { i64::MAX } else { -1 }
-        });
+        let start_with = s.start_with.unwrap_or({ if increment > 0 { 1 } else { -1 } });
+        let min_value = s.min_value.unwrap_or({ if increment > 0 { 1 } else { i64::MIN } });
+        let max_value = s.max_value.unwrap_or({ if increment > 0 { i64::MAX } else { -1 } });
         let cycle = s.cycle.unwrap_or(false);
 
         // Validate min/max/start consistency
@@ -1229,7 +1227,9 @@ impl Binder {
 
     fn bind_create_macro(&self, m: kuzu_parser::ast::CreateMacro) -> Result<BoundStatement, String> {
         // Convert default args to strings
-        let default_args: Vec<(String, String)> = m.default_args.iter()
+        let default_args: Vec<(String, String)> = m
+            .default_args
+            .iter()
             .map(|(name, expr)| (name.clone(), expr_to_debug_string(expr)))
             .collect();
         let expression_str = expr_to_debug_string(&m.expression);
@@ -1242,9 +1242,15 @@ impl Binder {
     }
 
     fn bind_export_database(&self, e: kuzu_parser::ast::ExportDatabase) -> Result<BoundStatement, String> {
-        let file_type = e.options.get("FORMAT").map(|s| s.to_lowercase()).unwrap_or_else(|| "csv".to_string());
+        let file_type = e
+            .options
+            .get("FORMAT")
+            .map(|s| s.to_lowercase())
+            .unwrap_or_else(|| "csv".to_string());
         if file_type != "csv" && file_type != "parquet" {
-            return Err(format!("Unsupported export format '{file_type}'. Supported: csv, parquet"));
+            return Err(format!(
+                "Unsupported export format '{file_type}'. Supported: csv, parquet"
+            ));
         }
         let schema_only = e.options.get("SCHEMA_ONLY").map(|s| s == "true").unwrap_or(false);
         Ok(BoundStatement::BoundExportDatabase(BoundExportDatabase {
@@ -1274,19 +1280,16 @@ impl Binder {
         }
 
         let query = if copy_path.exists() {
-            let schema = std::fs::read_to_string(&schema_path)
-                .map_err(|e| format!("Cannot read schema.cypher: {e}"))?;
-            let copy = std::fs::read_to_string(&copy_path)
-                .map_err(|e| format!("Cannot read copy.cypher: {e}"))?;
+            let schema =
+                std::fs::read_to_string(&schema_path).map_err(|e| format!("Cannot read schema.cypher: {e}"))?;
+            let copy = std::fs::read_to_string(&copy_path).map_err(|e| format!("Cannot read copy.cypher: {e}"))?;
             format!("{schema}\n{copy}")
         } else {
-            std::fs::read_to_string(&schema_path)
-                .map_err(|e| format!("Cannot read schema.cypher: {e}"))?
+            std::fs::read_to_string(&schema_path).map_err(|e| format!("Cannot read schema.cypher: {e}"))?
         };
 
         let index_query = if index_path.exists() {
-            std::fs::read_to_string(&index_path)
-                .map_err(|e| format!("Cannot read index.cypher: {e}"))?
+            std::fs::read_to_string(&index_path).map_err(|e| format!("Cannot read index.cypher: {e}"))?
         } else {
             String::new()
         };
@@ -1302,7 +1305,8 @@ impl Binder {
     fn bind_analyze(&self, a: AnalyzeStatement) -> Result<BoundStatement, String> {
         let cat = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
         let table_ids = if let Some(ref table_name) = a.table_name {
-            let id = cat.get_table_id(table_name)
+            let id = cat
+                .get_table_id(table_name)
                 .ok_or_else(|| format!("Table '{table_name}' not found"))?;
             vec![id]
         } else {
@@ -1343,32 +1347,66 @@ impl Binder {
             let mut catalog = self.catalog.lock().unwrap();
 
             let docs_cols = vec![
-                kuzu_catalog::CatalogColumn { name: "doc_id".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: true, default_value: None },
-                kuzu_catalog::CatalogColumn { name: "text".into(), logical_type: kuzu_common::types::LogicalTypeID::String, is_primary_key: false, default_value: None },
+                kuzu_catalog::CatalogColumn {
+                    name: "doc_id".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: true,
+                    default_value: None,
+                },
+                kuzu_catalog::CatalogColumn {
+                    name: "text".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::String,
+                    is_primary_key: false,
+                    default_value: None,
+                },
             ];
             let docs_id = match catalog.create_node_table(docs_table.clone(), docs_cols) {
                 kuzu_catalog::CatalogResult::Created { table_id } => table_id,
-                kuzu_catalog::CatalogResult::AlreadyExists => return Err(format!("Table '{}' already exists", docs_table)),
+                kuzu_catalog::CatalogResult::AlreadyExists => {
+                    return Err(format!("Table '{}' already exists", docs_table));
+                }
                 _ => return Err("Failed to create docs table".into()),
             };
 
             let terms_cols = vec![
-                kuzu_catalog::CatalogColumn { name: "term_id".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: true, default_value: None },
-                kuzu_catalog::CatalogColumn { name: "term".into(), logical_type: kuzu_common::types::LogicalTypeID::String, is_primary_key: false, default_value: None },
-                kuzu_catalog::CatalogColumn { name: "doc_freq".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: false, default_value: None },
+                kuzu_catalog::CatalogColumn {
+                    name: "term_id".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: true,
+                    default_value: None,
+                },
+                kuzu_catalog::CatalogColumn {
+                    name: "term".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::String,
+                    is_primary_key: false,
+                    default_value: None,
+                },
+                kuzu_catalog::CatalogColumn {
+                    name: "doc_freq".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: false,
+                    default_value: None,
+                },
             ];
             let terms_id = match catalog.create_node_table(terms_table.clone(), terms_cols) {
                 kuzu_catalog::CatalogResult::Created { table_id } => table_id,
-                kuzu_catalog::CatalogResult::AlreadyExists => return Err(format!("Table '{}' already exists", terms_table)),
+                kuzu_catalog::CatalogResult::AlreadyExists => {
+                    return Err(format!("Table '{}' already exists", terms_table));
+                }
                 _ => return Err("Failed to create terms table".into()),
             };
 
-            let posting_cols = vec![
-                kuzu_catalog::CatalogColumn { name: "term_freq".into(), logical_type: kuzu_common::types::LogicalTypeID::Int64, is_primary_key: false, default_value: None },
-            ];
+            let posting_cols = vec![kuzu_catalog::CatalogColumn {
+                name: "term_freq".into(),
+                logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+            }];
             match catalog.create_rel_table(posting_table.clone(), terms_id, docs_id, posting_cols) {
                 kuzu_catalog::CatalogResult::Created { .. } => {}
-                kuzu_catalog::CatalogResult::AlreadyExists => return Err(format!("Table '{}' already exists", posting_table)),
+                kuzu_catalog::CatalogResult::AlreadyExists => {
+                    return Err(format!("Table '{}' already exists", posting_table));
+                }
                 _ => return Err("Failed to create posting table".into()),
             }
         }
@@ -1458,7 +1496,7 @@ impl Binder {
                 _ => return Err(format!("DELETE only supports variable references, got: {:?}", expr)),
             }
         }
-        
+
         Ok(BoundDeleteClause {
             detach: d.detach,
             items,
@@ -1757,4 +1795,3 @@ mod tests {
         assert!(matches!(bound, BoundStatement::BoundQuery(_)));
     }
 }
-

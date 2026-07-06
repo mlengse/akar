@@ -101,9 +101,10 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Union { op } => evaluate_union(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
-        ScalarFunction::SequenceOp { .. } => {
-            Err("Sequence operations (nextval/currval) require catalog access — handle at connection/processor level".into())
-        }
+        ScalarFunction::SequenceOp { .. } => Err(
+            "Sequence operations (nextval/currval) require catalog access — handle at connection/processor level"
+                .into(),
+        ),
     }
 }
 
@@ -201,14 +202,16 @@ fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String
         }
         ArithmeticOp::Sign => {
             let v = numeric_to_f64(&args[0])?;
-            Ok(Value::Int64(if v > 0.0 { 1 } else if v < 0.0 { -1 } else { 0 }))
+            Ok(Value::Int64(if v > 0.0 {
+                1
+            } else if v < 0.0 {
+                -1
+            } else {
+                0
+            }))
         }
-        ArithmeticOp::Pi => {
-            Ok(Value::Double(std::f64::consts::PI))
-        }
-        ArithmeticOp::Rand => {
-            Ok(Value::Double(rng_next()))
-        }
+        ArithmeticOp::Pi => Ok(Value::Double(std::f64::consts::PI)),
+        ArithmeticOp::Rand => Ok(Value::Double(rng_next())),
         ArithmeticOp::Power => {
             if args.len() < 2 {
                 return Err("Power requires 2 arguments".into());
@@ -564,52 +567,90 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
         }
         StringOp::Split => {
             let s = get_string(&args[0])?;
-            let delim = if args.len() > 1 { get_string(&args[1])? } else { ",".to_string() };
+            let delim = if args.len() > 1 {
+                get_string(&args[1])?
+            } else {
+                ",".to_string()
+            };
             let parts: Vec<Value> = s.split(&delim).map(|p| Value::String(p.to_string())).collect();
             Ok(Value::List(parts))
         }
         StringOp::Head => {
             let s = get_string(&args[0])?;
             let n = if args.len() > 1 {
-                match &args[1] { Value::Int64(x) => *x as usize, _ => 1 }
-            } else { 1 };
+                match &args[1] {
+                    Value::Int64(x) => *x as usize,
+                    _ => 1,
+                }
+            } else {
+                1
+            };
             Ok(Value::String(s.chars().take(n).collect()))
         }
         StringOp::Tail => {
             let s = get_string(&args[0])?;
             let n = if args.len() > 1 {
-                match &args[1] { Value::Int64(x) => *x as usize, _ => 1 }
-            } else { 1 };
+                match &args[1] {
+                    Value::Int64(x) => *x as usize,
+                    _ => 1,
+                }
+            } else {
+                1
+            };
             let chars: String = s.chars().collect();
             let start = chars.len().saturating_sub(n);
             Ok(Value::String(chars.chars().skip(start).collect()))
         }
         StringOp::Left => {
             let s = get_string(&args[0])?;
-            let n = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("left requires integer length".into()) };
+            let n = match &args[1] {
+                Value::Int64(x) => *x as usize,
+                _ => return Err("left requires integer length".into()),
+            };
             Ok(Value::String(s.chars().take(n).collect()))
         }
         StringOp::Right => {
             let s = get_string(&args[0])?;
-            let n = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("right requires integer length".into()) };
+            let n = match &args[1] {
+                Value::Int64(x) => *x as usize,
+                _ => return Err("right requires integer length".into()),
+            };
             let chars: Vec<char> = s.chars().collect();
             let start = chars.len().saturating_sub(n);
             Ok(Value::String(chars[start..].iter().collect()))
         }
         StringOp::Lpad => {
             let s = get_string(&args[0])?;
-            let len = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("lpad requires integer length".into()) };
-            let pad = if args.len() >= 3 { get_string(&args[2])? } else { " ".into() };
-            if s.len() >= len { return Ok(Value::String(s[..len].to_string())); }
+            let len = match &args[1] {
+                Value::Int64(x) => *x as usize,
+                _ => return Err("lpad requires integer length".into()),
+            };
+            let pad = if args.len() >= 3 {
+                get_string(&args[2])?
+            } else {
+                " ".into()
+            };
+            if s.len() >= len {
+                return Ok(Value::String(s[..len].to_string()));
+            }
             let pad_needed = len - s.len();
             let pad_repeat = pad.repeat((pad_needed / pad.len()) + 1);
             Ok(Value::String(format!("{}{}", &pad_repeat[..pad_needed], s)))
         }
         StringOp::Rpad => {
             let s = get_string(&args[0])?;
-            let len = match &args[1] { Value::Int64(x) => *x as usize, _ => return Err("rpad requires integer length".into()) };
-            let pad = if args.len() >= 3 { get_string(&args[2])? } else { " ".into() };
-            if s.len() >= len { return Ok(Value::String(s[..len].to_string())); }
+            let len = match &args[1] {
+                Value::Int64(x) => *x as usize,
+                _ => return Err("rpad requires integer length".into()),
+            };
+            let pad = if args.len() >= 3 {
+                get_string(&args[2])?
+            } else {
+                " ".into()
+            };
+            if s.len() >= len {
+                return Ok(Value::String(s[..len].to_string()));
+            }
             let pad_needed = len - s.len();
             let pad_repeat = pad.repeat((pad_needed / pad.len()) + 1);
             Ok(Value::String(format!("{}{}", s, &pad_repeat[..pad_needed])))
@@ -705,7 +746,9 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
             let s = get_string(&args[0])?;
             let pat = get_string(&args[1])?;
             let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
-            Ok(Value::Bool(re.find(&s).is_some_and(|m| m.start() == 0 && m.end() == s.len())))
+            Ok(Value::Bool(
+                re.find(&s).is_some_and(|m| m.start() == 0 && m.end() == s.len()),
+            ))
         }
         StringOp::RegexpExtract => {
             let s = get_string(&args[0])?;
@@ -719,7 +762,8 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
                 0
             };
             let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
-            let result = re.captures(&s)
+            let result = re
+                .captures(&s)
                 .and_then(|caps| caps.get(group))
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_default();
@@ -737,7 +781,8 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
                 0
             };
             let re = regex::Regex::new(&pat).map_err(|e| format!("Regex error: {e}"))?;
-            let matches: Vec<Value> = re.captures_iter(&s)
+            let matches: Vec<Value> = re
+                .captures_iter(&s)
                 .filter_map(|caps| caps.get(group))
                 .map(|m| Value::String(m.as_str().to_string()))
                 .collect();
@@ -762,9 +807,7 @@ fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
                 curr_row[0] = i + 1;
                 for (j, cb) in b_chars.iter().enumerate() {
                     let cost = if ca == cb { 0 } else { 1 };
-                    curr_row[j + 1] = (curr_row[j] + 1)
-                        .min(prev_row[j + 1] + 1)
-                        .min(prev_row[j] + cost);
+                    curr_row[j + 1] = (curr_row[j] + 1).min(prev_row[j + 1] + 1).min(prev_row[j] + cost);
                 }
                 std::mem::swap(&mut prev_row, &mut curr_row);
             }
@@ -864,21 +907,33 @@ fn evaluate_date(op: DateOp, args: &[Value]) -> Result<Value, String> {
                 date.year() + if date.month() == time::Month::December { 1 } else { 0 },
                 date.month().next(),
                 1,
-            ).map_err(|e| format!("Date error: {e}"))?;
-            let last_day = next_month_first.previous_day()
+            )
+            .map_err(|e| format!("Date error: {e}"))?;
+            let last_day = next_month_first
+                .previous_day()
                 .ok_or("Could not compute previous day")?;
             let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
             let days = (last_day - epoch).whole_days() as i32;
             Ok(Value::Date(Date(days)))
         }
         DateOp::MakeDate => {
-            if args.len() < 3 { return Err("make_date requires 3 arguments (year, month, day)".into()); }
-            let year = match &args[0] { Value::Int64(x) => *x as i32, _ => return Err("make_date year must be integer".into()) };
-            let month_val = match &args[1] { Value::Int64(x) => *x as u8, _ => return Err("make_date month must be integer".into()) };
-            let day = match &args[2] { Value::Int64(x) => *x as u8, _ => return Err("make_date day must be integer".into()) };
+            if args.len() < 3 {
+                return Err("make_date requires 3 arguments (year, month, day)".into());
+            }
+            let year = match &args[0] {
+                Value::Int64(x) => *x as i32,
+                _ => return Err("make_date year must be integer".into()),
+            };
+            let month_val = match &args[1] {
+                Value::Int64(x) => *x as u8,
+                _ => return Err("make_date month must be integer".into()),
+            };
+            let day = match &args[2] {
+                Value::Int64(x) => *x as u8,
+                _ => return Err("make_date day must be integer".into()),
+            };
             let month_enum = Month::try_from(month_val).map_err(|_| format!("Invalid month: {month_val}"))?;
-            let d = TimeDate::from_calendar_date(year, month_enum, day)
-                .map_err(|e| format!("Invalid date: {e}"))?;
+            let d = TimeDate::from_calendar_date(year, month_enum, day).map_err(|e| format!("Invalid date: {e}"))?;
             let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
             let days = (d - epoch).whole_days() as i32;
             Ok(Value::Date(Date(days)))
@@ -1216,8 +1271,13 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
         // --- List functions (C++ port) ---
         ListOp::Range => {
             let step = if args.len() >= 3 {
-                match &args[2] { Value::Int64(s) => *s, _ => 1i64 }
-            } else { 1i64 };
+                match &args[2] {
+                    Value::Int64(s) => *s,
+                    _ => 1i64,
+                }
+            } else {
+                1i64
+            };
             let (start, end) = if args.len() >= 2 {
                 match (&args[0], &args[1]) {
                     (Value::Int64(s), Value::Int64(e)) => (*s, *e),
@@ -1236,9 +1296,7 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 Ok(Value::List(vec![]))
             } else {
                 let size = ((end - start).unsigned_abs() / step.unsigned_abs()) + 1;
-                let items: Vec<Value> = (0..size)
-                    .map(|i| Value::Int64(start + step * i as i64))
-                    .collect();
+                let items: Vec<Value> = (0..size).map(|i| Value::Int64(start + step * i as i64)).collect();
                 Ok(Value::List(items))
             }
         }
@@ -1280,7 +1338,10 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 match item {
                     Value::Null => continue,
                     Value::Int64(x) => sum += *x as f64,
-                    Value::Double(x) => { sum += x; is_int = false; }
+                    Value::Double(x) => {
+                        sum += x;
+                        is_int = false;
+                    }
                     _ => return Err("LIST_SUM requires numeric list".into()),
                 }
             }
@@ -1301,7 +1362,10 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 match item {
                     Value::Null => continue,
                     Value::Int64(x) => prod *= *x as f64,
-                    Value::Double(x) => { prod *= x; is_int = false; }
+                    Value::Double(x) => {
+                        prod *= x;
+                        is_int = false;
+                    }
                     _ => return Err("LIST_PRODUCT requires numeric list".into()),
                 }
             }
@@ -1335,8 +1399,12 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
             let mut result = String::new();
             let mut first = true;
             for item in list {
-                if matches!(item, Value::Null) { continue; }
-                if !first { result.push_str(&delim); }
+                if matches!(item, Value::Null) {
+                    continue;
+                }
+                if !first {
+                    result.push_str(&delim);
+                }
                 match item {
                     Value::String(s) => result.push_str(s),
                     other => result.push_str(&format!("{:?}", other)),
@@ -1369,7 +1437,9 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 _ => return Err("Expected list".into()),
             };
             for target in right {
-                if matches!(target, Value::Null) { continue; }
+                if matches!(target, Value::Null) {
+                    continue;
+                }
                 if !left.contains(target) {
                     return Ok(Value::Bool(false));
                 }
@@ -1381,11 +1451,9 @@ fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
                 Value::List(items) => items,
                 _ => return Err("Expected list".into()),
             };
-            list.sort_by(|a, b| {
-                match compare_values_for_sort(a, b) {
-                    Ok(ord) => ord.reverse(),
-                    Err(_) => std::cmp::Ordering::Equal,
-                }
+            list.sort_by(|a, b| match compare_values_for_sort(a, b) {
+                Ok(ord) => ord.reverse(),
+                Err(_) => std::cmp::Ordering::Equal,
             });
             Ok(Value::List(list))
         }
@@ -1634,7 +1702,7 @@ fn evaluate_uuid(_args: &[Value]) -> Result<Value, String> {
     seed ^= seed << 25;
     seed ^= seed >> 27;
     let r2 = seed.wrapping_mul(0x2545F4914F6CDD1Du64);
-    
+
     // Format as UUID v4: 8-4-4-4-12 hex digits
     let time_low = (r1 & 0xFFFFFFFF) as u32;
     let time_mid = ((r1 >> 32) & 0xFFFF) as u16;
@@ -1642,7 +1710,7 @@ fn evaluate_uuid(_args: &[Value]) -> Result<Value, String> {
     let clock_seq = ((r2 & 0x3FFF) | 0x8000) as u16; // variant 1
     let node_low = ((r2 >> 14) & 0xFFFFFFFF) as u32;
     let node_hi = ((r2 >> 46) & 0xFFFF) as u16;
-    
+
     Ok(Value::String(format!(
         "{:08x}-{:04x}-{:04x}-{:04x}-{:04x}{:08x}",
         time_low, time_mid, time_hi_and_version, clock_seq, node_hi, node_low
@@ -1659,7 +1727,11 @@ fn hash_value(v: &Value) -> u64 {
         Value::Int64(x) => murmur64(*x as u64),
         Value::Int32(x) => murmur64(*x as u64),
         Value::Double(x) => {
-            if *x == 0.0 { murmur64(0) } else { murmur64(x.to_bits()) }
+            if *x == 0.0 {
+                murmur64(0)
+            } else {
+                murmur64(x.to_bits())
+            }
         }
         Value::String(s) => hash_string(s),
         Value::List(items) => {
@@ -1770,7 +1842,9 @@ fn evaluate_union(op: UnionOp, args: &[Value]) -> Result<Value, String> {
                 _ => return Err("UNION_TAG requires a union argument".into()),
             };
             // Find the tag field (should be first entry)
-            let tag_val = entries.iter().find(|(k, _)| k == "tag")
+            let tag_val = entries
+                .iter()
+                .find(|(k, _)| k == "tag")
                 .ok_or("Union has no tag field".to_string())?;
             let tag_idx = match &tag_val.1 {
                 Value::UInt16(x) => *x as usize,
@@ -1962,7 +2036,11 @@ fn evaluate_cast(target: CastTarget, args: &[Value]) -> Result<Value, String> {
             Value::Interval(x) => Ok(Value::Interval(*x)),
             Value::Int64(x) => {
                 // Treat as microseconds
-                Ok(Value::Interval(Interval { months: 0, days: 0, micros: *x }))
+                Ok(Value::Interval(Interval {
+                    months: 0,
+                    days: 0,
+                    micros: *x,
+                }))
             }
             _ => Err("Cannot cast to Interval".into()),
         },
@@ -2033,10 +2111,7 @@ fn evaluate_schema(op: SchemaOp, args: &[Value]) -> Result<Value, String> {
                     }
                     Err("ID: argument struct has no _id field".into())
                 }
-                other => Err(format!(
-                    "ID requires a node/rel value, got {:?}",
-                    other.logical_type()
-                )),
+                other => Err(format!("ID requires a node/rel value, got {:?}", other.logical_type())),
             }
         }
         SchemaOp::StartNode => {
@@ -2094,9 +2169,7 @@ fn evaluate_schema(op: SchemaOp, args: &[Value]) -> Result<Value, String> {
                     }
                     Err("LABEL: argument struct has no _label field".into())
                 }
-                Value::InternalID(id) => {
-                    Ok(Value::String(format!("Table({})", id.table_id)))
-                }
+                Value::InternalID(id) => Ok(Value::String(format!("Table({})", id.table_id))),
                 other => Err(format!(
                     "LABEL requires a node/rel/string value, got {:?}",
                     other.logical_type()
@@ -2118,14 +2191,18 @@ fn evaluate_array(op: ArrayOp, args: &[Value]) -> Result<Value, String> {
     /// Extract a Vec<f64> from a Value::List or return an error.
     fn extract_f64s(v: &Value) -> Result<Vec<f64>, String> {
         match v {
-            Value::List(items) => {
-                items.iter().map(|item| match item {
+            Value::List(items) => items
+                .iter()
+                .map(|item| match item {
                     Value::Int64(i) => Ok(*i as f64),
                     Value::Double(f) => Ok(*f),
                     Value::Float(f) => Ok(*f as f64),
-                    _ => Err(format!("Expected numeric value in array, got {:?}", item.logical_type())),
-                }).collect()
-            }
+                    _ => Err(format!(
+                        "Expected numeric value in array, got {:?}",
+                        item.logical_type()
+                    )),
+                })
+                .collect(),
             _ => Err("Expected list/array".into()),
         }
     }
@@ -2182,12 +2259,26 @@ pub enum AggValueState {
     Sum(Value),
     Min(Value),
     Max(Value),
-    Avg { sum: Value, count: u64 },
+    Avg {
+        sum: Value,
+        count: u64,
+    },
     Collect(Vec<Value>),
-    StdDev { sum: f64, sum_sq: f64, count: u64 },
-    Variance { sum: f64, sum_sq: f64, count: u64 },
+    StdDev {
+        sum: f64,
+        sum_sq: f64,
+        count: u64,
+    },
+    Variance {
+        sum: f64,
+        sum_sq: f64,
+        count: u64,
+    },
     /// Percentile state — collects all non-null values for percentile computation.
-    Percentile { values: Vec<f64>, percentile: f64 },
+    Percentile {
+        values: Vec<f64>,
+        percentile: f64,
+    },
 }
 
 impl AggValueState {
@@ -2379,14 +2470,34 @@ impl AggValueState {
                 }
             }
             (AggValueState::Collect(a), AggValueState::Collect(b)) => a.extend(b.iter().cloned()),
-            (AggValueState::StdDev { sum: s1, sum_sq: sq1, count: c1 },
-             AggValueState::StdDev { sum: s2, sum_sq: sq2, count: c2 }) => {
+            (
+                AggValueState::StdDev {
+                    sum: s1,
+                    sum_sq: sq1,
+                    count: c1,
+                },
+                AggValueState::StdDev {
+                    sum: s2,
+                    sum_sq: sq2,
+                    count: c2,
+                },
+            ) => {
                 *s1 += s2;
                 *sq1 += sq2;
                 *c1 += c2;
             }
-            (AggValueState::Variance { sum: s1, sum_sq: sq1, count: c1 },
-             AggValueState::Variance { sum: s2, sum_sq: sq2, count: c2 }) => {
+            (
+                AggValueState::Variance {
+                    sum: s1,
+                    sum_sq: sq1,
+                    count: c1,
+                },
+                AggValueState::Variance {
+                    sum: s2,
+                    sum_sq: sq2,
+                    count: c2,
+                },
+            ) => {
                 *s1 += s2;
                 *sq1 += sq2;
                 *c1 += c2;
@@ -2513,7 +2624,11 @@ mod tests {
     fn test_cbrt() {
         let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Cbrt };
         let get_f64 = |v: Value| -> f64 {
-            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+            if let Value::Double(d) = v {
+                d
+            } else {
+                panic!("Expected Double")
+            }
         };
         assert!((get_f64(evaluate_scalar(&func, &[Value::Double(27.0)]).unwrap()) - 3.0).abs() < 1e-10);
         assert!((get_f64(evaluate_scalar(&func, &[Value::Double(8.0)]).unwrap()) - 2.0).abs() < 1e-10);
@@ -2537,7 +2652,11 @@ mod tests {
     fn test_log2() {
         let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Log2 };
         let get_f64 = |v: Value| -> f64 {
-            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+            if let Value::Double(d) = v {
+                d
+            } else {
+                panic!("Expected Double")
+            }
         };
         assert!((get_f64(evaluate_scalar(&func, &[Value::Double(8.0)]).unwrap()) - 3.0).abs() < 1e-10);
         assert!((get_f64(evaluate_scalar(&func, &[Value::Int64(16)]).unwrap()) - 4.0).abs() < 1e-10);
@@ -2560,20 +2679,31 @@ mod tests {
 
     #[test]
     fn test_factorial() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Factorial };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::Factorial,
+        };
         assert_eq!(evaluate_scalar(&func, &[Value::Int64(0)]).unwrap(), Value::Int64(1));
         assert_eq!(evaluate_scalar(&func, &[Value::Int64(1)]).unwrap(), Value::Int64(1));
         assert_eq!(evaluate_scalar(&func, &[Value::Int64(5)]).unwrap(), Value::Int64(120));
-        assert_eq!(evaluate_scalar(&func, &[Value::Int64(10)]).unwrap(), Value::Int64(3628800));
+        assert_eq!(
+            evaluate_scalar(&func, &[Value::Int64(10)]).unwrap(),
+            Value::Int64(3628800)
+        );
         // Negative input
         assert!(evaluate_scalar(&func, &[Value::Int64(-1)]).is_err());
     }
 
     #[test]
     fn test_gamma() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Gamma };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::Gamma,
+        };
         let get_f64 = |v: Value| -> f64 {
-            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+            if let Value::Double(d) = v {
+                d
+            } else {
+                panic!("Expected Double")
+            }
         };
         // Gamma(1) = 1
         assert!((get_f64(evaluate_scalar(&func, &[Value::Double(1.0)]).unwrap()) - 1.0).abs() < 1e-10);
@@ -2594,9 +2724,15 @@ mod tests {
 
     #[test]
     fn test_lgamma() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::Lgamma };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::Lgamma,
+        };
         let get_f64 = |v: Value| -> f64 {
-            if let Value::Double(d) = v { d } else { panic!("Expected Double") }
+            if let Value::Double(d) = v {
+                d
+            } else {
+                panic!("Expected Double")
+            }
         };
         // ln(Gamma(1)) = ln(1) = 0
         assert!((get_f64(evaluate_scalar(&func, &[Value::Double(1.0)]).unwrap()) - 0.0).abs() < 1e-10);
@@ -2611,7 +2747,9 @@ mod tests {
 
     #[test]
     fn test_set_seed() {
-        let set_seed = ScalarFunction::Arithmetic { op: ArithmeticOp::SetSeed };
+        let set_seed = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::SetSeed,
+        };
         let rand_func = ScalarFunction::Arithmetic { op: ArithmeticOp::Rand };
         // Set seed to known value
         assert_eq!(
@@ -2648,15 +2786,11 @@ mod tests {
         let func = ScalarFunction::Hash { op: HashOp::Sha256 };
         assert_eq!(
             evaluate_scalar(&func, &[Value::String("hello".into())]).unwrap(),
-            Value::String(
-                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".into()
-            )
+            Value::String("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".into())
         );
         assert_eq!(
             evaluate_scalar(&func, &[Value::String("".into())]).unwrap(),
-            Value::String(
-                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into()
-            )
+            Value::String("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into())
         );
     }
 
@@ -2676,7 +2810,9 @@ mod tests {
 
     #[test]
     fn test_regexp_full_match() {
-        let func = ScalarFunction::String { op: StringOp::RegexpFullMatch };
+        let func = ScalarFunction::String {
+            op: StringOp::RegexpFullMatch,
+        };
         // Full match
         assert_eq!(
             evaluate_scalar(&func, &[Value::String("hello".into()), Value::String("hello".into())]).unwrap(),
@@ -2696,10 +2832,16 @@ mod tests {
 
     #[test]
     fn test_regexp_extract() {
-        let func = ScalarFunction::String { op: StringOp::RegexpExtract };
+        let func = ScalarFunction::String {
+            op: StringOp::RegexpExtract,
+        };
         // Extract first digit sequence
         assert_eq!(
-            evaluate_scalar(&func, &[Value::String("abc123def".into()), Value::String(r"\d+".into())]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[Value::String("abc123def".into()), Value::String(r"\d+".into())]
+            )
+            .unwrap(),
             Value::String("123".into())
         );
         // No match
@@ -2709,44 +2851,64 @@ mod tests {
         );
         // With capture group (0-based: group 0 = full match)
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello@example.com".into()),
-                Value::String(r"(\w+)@(\w+\.\w+)".into()),
-                Value::Int64(1),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[
+                    Value::String("hello@example.com".into()),
+                    Value::String(r"(\w+)@(\w+\.\w+)".into()),
+                    Value::Int64(1),
+                ]
+            )
+            .unwrap(),
             Value::String("hello".into())
         );
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello@example.com".into()),
-                Value::String(r"(\w+)@(\w+\.\w+)".into()),
-                Value::Int64(2),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[
+                    Value::String("hello@example.com".into()),
+                    Value::String(r"(\w+)@(\w+\.\w+)".into()),
+                    Value::Int64(2),
+                ]
+            )
+            .unwrap(),
             Value::String("example.com".into())
         );
     }
 
     #[test]
     fn test_regexp_extract_all() {
-        let func = ScalarFunction::String { op: StringOp::RegexpExtractAll };
+        let func = ScalarFunction::String {
+            op: StringOp::RegexpExtractAll,
+        };
         // Extract all digits
         let result = evaluate_scalar(&func, &[Value::String("a1b2c3".into()), Value::String(r"\d+".into())]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::String("1".into()),
-            Value::String("2".into()),
-            Value::String("3".into()),
-        ]));
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::String("1".into()),
+                Value::String("2".into()),
+                Value::String("3".into()),
+            ])
+        );
         // With group
-        let result = evaluate_scalar(&func, &[
-            Value::String("a1b2c3".into()),
-            Value::String(r"(\d)".into()),
-            Value::Int64(1),
-        ]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::String("1".into()),
-            Value::String("2".into()),
-            Value::String("3".into()),
-        ]));
+        let result = evaluate_scalar(
+            &func,
+            &[
+                Value::String("a1b2c3".into()),
+                Value::String(r"(\d)".into()),
+                Value::Int64(1),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::String("1".into()),
+                Value::String("2".into()),
+                Value::String("3".into()),
+            ])
+        );
         // No matches
         let result = evaluate_scalar(&func, &[Value::String("abc".into()), Value::String(r"\d+".into())]).unwrap();
         assert_eq!(result, Value::List(vec![]));
@@ -2754,7 +2916,9 @@ mod tests {
 
     #[test]
     fn test_regexp_split_to_array() {
-        let func = ScalarFunction::String { op: StringOp::RegexpSplitToArray };
+        let func = ScalarFunction::String {
+            op: StringOp::RegexpSplitToArray,
+        };
         // Split on digits
         assert_eq!(
             evaluate_scalar(&func, &[Value::String("a1b2c".into()), Value::String(r"\d".into())]).unwrap(),
@@ -2773,7 +2937,9 @@ mod tests {
 
     #[test]
     fn test_levenshtein() {
-        let func = ScalarFunction::String { op: StringOp::Levenshtein };
+        let func = ScalarFunction::String {
+            op: StringOp::Levenshtein,
+        };
         // Same strings
         assert_eq!(
             evaluate_scalar(&func, &[Value::String("hello".into()), Value::String("hello".into())]).unwrap(),
@@ -2786,7 +2952,11 @@ mod tests {
         );
         // Known distance
         assert_eq!(
-            evaluate_scalar(&func, &[Value::String("kitten".into()), Value::String("sitting".into())]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[Value::String("kitten".into()), Value::String("sitting".into())]
+            )
+            .unwrap(),
             Value::Int64(3)
         );
         // Empty string
@@ -2800,7 +2970,9 @@ mod tests {
 
     #[test]
     fn test_bitwise_and() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseAnd };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::BitwiseAnd,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
             Value::Int64(2)
@@ -2817,7 +2989,9 @@ mod tests {
 
     #[test]
     fn test_bitwise_or() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseOr };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::BitwiseOr,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
             Value::Int64(7)
@@ -2831,7 +3005,9 @@ mod tests {
 
     #[test]
     fn test_bitwise_xor() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitwiseXor };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::BitwiseXor,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::Int64(6), Value::Int64(3)]).unwrap(),
             Value::Int64(5)
@@ -2845,7 +3021,9 @@ mod tests {
 
     #[test]
     fn test_bit_shift_left() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitShiftLeft };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::BitShiftLeft,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::Int64(1), Value::Int64(3)]).unwrap(),
             Value::Int64(8)
@@ -2859,7 +3037,9 @@ mod tests {
 
     #[test]
     fn test_bit_shift_right() {
-        let func = ScalarFunction::Arithmetic { op: ArithmeticOp::BitShiftRight };
+        let func = ScalarFunction::Arithmetic {
+            op: ArithmeticOp::BitShiftRight,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::Int64(8), Value::Int64(3)]).unwrap(),
             Value::Int64(1)
@@ -3225,105 +3405,103 @@ mod tests {
         let func = ScalarFunction::String { op: StringOp::ConcatWs };
         // Basic concat
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String(",".into()),
-                Value::String("a".into()),
-                Value::String("b".into()),
-                Value::String("c".into()),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[
+                    Value::String(",".into()),
+                    Value::String("a".into()),
+                    Value::String("b".into()),
+                    Value::String("c".into()),
+                ]
+            )
+            .unwrap(),
             Value::String("a,b,c".into())
         );
         // Skip NULL
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("-".into()),
-                Value::String("a".into()),
-                Value::Null,
-                Value::String("b".into()),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[
+                    Value::String("-".into()),
+                    Value::String("a".into()),
+                    Value::Null,
+                    Value::String("b".into()),
+                ]
+            )
+            .unwrap(),
             Value::String("a-b".into())
         );
         // Single element (no separator)
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String(",".into()),
-                Value::String("only".into()),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String(",".into()), Value::String("only".into()),]).unwrap(),
             Value::String("only".into())
         );
     }
 
     #[test]
     fn test_split_part() {
-        let func = ScalarFunction::String { op: StringOp::SplitPart };
+        let func = ScalarFunction::String {
+            op: StringOp::SplitPart,
+        };
         // Normal case
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("a,b,c".into()),
-                Value::String(",".into()),
-                Value::Int64(2),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[
+                    Value::String("a,b,c".into()),
+                    Value::String(",".into()),
+                    Value::Int64(2),
+                ]
+            )
+            .unwrap(),
             Value::String("b".into())
         );
         // Out of range (too high)
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("a,b".into()),
-                Value::String(",".into()),
-                Value::Int64(5),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[Value::String("a,b".into()), Value::String(",".into()), Value::Int64(5),]
+            )
+            .unwrap(),
             Value::String("".into())
         );
         // Index <= 0
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("a,b".into()),
-                Value::String(",".into()),
-                Value::Int64(0),
-            ]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[Value::String("a,b".into()), Value::String(",".into()), Value::Int64(0),]
+            )
+            .unwrap(),
             Value::String("".into())
         );
     }
 
     #[test]
     fn test_array_extract() {
-        let func = ScalarFunction::String { op: StringOp::ArrayExtract };
+        let func = ScalarFunction::String {
+            op: StringOp::ArrayExtract,
+        };
         // Positive 1-based index
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello".into()),
-                Value::Int64(1),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::Int64(1),]).unwrap(),
             Value::String("h".into())
         );
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello".into()),
-                Value::Int64(5),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::Int64(5),]).unwrap(),
             Value::String("o".into())
         );
         // Index 0 returns empty
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello".into()),
-                Value::Int64(0),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::Int64(0),]).unwrap(),
             Value::String("".into())
         );
         // Negative index (from end)
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello".into()),
-                Value::Int64(-1),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::Int64(-1),]).unwrap(),
             Value::String("o".into())
         );
         assert_eq!(
-            evaluate_scalar(&func, &[
-                Value::String("hello".into()),
-                Value::Int64(-2),
-            ]).unwrap(),
+            evaluate_scalar(&func, &[Value::String("hello".into()), Value::Int64(-2),]).unwrap(),
             Value::String("l".into())
         );
     }
@@ -3427,7 +3605,9 @@ mod tests {
 
     #[test]
     fn test_to_timestamp() {
-        let func = ScalarFunction::Date { op: DateOp::ToTimestamp };
+        let func = ScalarFunction::Date {
+            op: DateOp::ToTimestamp,
+        };
         // 0 seconds → epoch
         let result = evaluate_scalar(&func, &[Value::Double(0.0)]).unwrap();
         assert_eq!(result, Value::Timestamp(Timestamp(0)));
@@ -3454,14 +3634,18 @@ mod tests {
 
     #[test]
     fn test_to_years() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToYears };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToYears,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(3)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(36, 0, 0)));
     }
 
     #[test]
     fn test_to_months() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToMonths };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToMonths,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(5)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(5, 0, 0)));
     }
@@ -3475,35 +3659,45 @@ mod tests {
 
     #[test]
     fn test_to_hours() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToHours };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToHours,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(2)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 7_200_000_000)));
     }
 
     #[test]
     fn test_to_minutes() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToMinutes };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToMinutes,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(30)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 1_800_000_000)));
     }
 
     #[test]
     fn test_to_seconds() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToSeconds };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToSeconds,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(45)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 45_000_000)));
     }
 
     #[test]
     fn test_to_milliseconds() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToMilliseconds };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToMilliseconds,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(500)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 500_000)));
     }
 
     #[test]
     fn test_to_microseconds() {
-        let func = ScalarFunction::Interval { op: IntervalOp::ToMicroseconds };
+        let func = ScalarFunction::Interval {
+            op: IntervalOp::ToMicroseconds,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(999)]).unwrap();
         assert_eq!(result, Value::Interval(Interval::new(0, 0, 999)));
     }
@@ -3533,7 +3727,9 @@ mod tests {
 
     #[test]
     fn test_octet_length() {
-        let func = ScalarFunction::Blob { op: BlobOp::OctetLength };
+        let func = ScalarFunction::Blob {
+            op: BlobOp::OctetLength,
+        };
         let result = evaluate_scalar(&func, &[Value::Blob(b"hello".to_vec())]).unwrap();
         assert_eq!(result, Value::Int64(5));
         // Empty blob
@@ -3545,13 +3741,18 @@ mod tests {
 
     #[test]
     fn test_union_value() {
-        let func = ScalarFunction::Union { op: UnionOp::UnionValue };
+        let func = ScalarFunction::Union {
+            op: UnionOp::UnionValue,
+        };
         let result = evaluate_scalar(&func, &[Value::Int64(42)]).unwrap();
         // Should produce a union wrapping the value
-        assert_eq!(result, Value::Struct(vec![
-            ("tag".to_string(), Value::UInt16(0)),
-            ("_value".to_string(), Value::Int64(42)),
-        ]));
+        assert_eq!(
+            result,
+            Value::Struct(vec![
+                ("tag".to_string(), Value::UInt16(0)),
+                ("_value".to_string(), Value::Int64(42)),
+            ])
+        );
     }
 
     #[test]
@@ -3574,7 +3775,9 @@ mod tests {
             ("a".to_string(), Value::Int64(10)),
             ("b".to_string(), Value::String("hello".into())),
         ]);
-        let func = ScalarFunction::Union { op: UnionOp::UnionExtract };
+        let func = ScalarFunction::Union {
+            op: UnionOp::UnionExtract,
+        };
         // Extract field "a"
         let result = evaluate_scalar(&func, &[union_val.clone(), Value::String("a".into())]).unwrap();
         assert_eq!(result, Value::Int64(10));
@@ -3601,12 +3804,11 @@ mod tests {
     fn test_array_value() {
         // array_value is an alias for ListOp::Creation
         let func = ScalarFunction::List { op: ListOp::Creation };
-        let result = evaluate_scalar(&func, &[
-            Value::Int64(10),
-            Value::Int64(20),
-            Value::Int64(30),
-            Value::Int64(40),
-        ]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::Int64(10), Value::Int64(20), Value::Int64(30), Value::Int64(40)],
+        )
+        .unwrap();
         match result {
             Value::List(items) => {
                 assert_eq!(items.len(), 4);
@@ -4108,7 +4310,10 @@ mod tests {
     #[test]
     fn test_schema_offset_internal_id() {
         let func = ScalarFunction::Schema { op: SchemaOp::Offset };
-        let id = kuzu_common::types::InternalID { table_id: 1, offset: 42 };
+        let id = kuzu_common::types::InternalID {
+            table_id: 1,
+            offset: 42,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::InternalID(id)]).unwrap(),
             Value::Int64(42)
@@ -4118,12 +4323,12 @@ mod tests {
     #[test]
     fn test_schema_offset_struct() {
         let func = ScalarFunction::Schema { op: SchemaOp::Offset };
-        let id = kuzu_common::types::InternalID { table_id: 1, offset: 99 };
+        let id = kuzu_common::types::InternalID {
+            table_id: 1,
+            offset: 99,
+        };
         let node = Value::Struct(vec![("_id".into(), Value::InternalID(id))]);
-        assert_eq!(
-            evaluate_scalar(&func, &[node]).unwrap(),
-            Value::Int64(99)
-        );
+        assert_eq!(evaluate_scalar(&func, &[node]).unwrap(), Value::Int64(99));
     }
 
     #[test]
@@ -4135,7 +4340,10 @@ mod tests {
     #[test]
     fn test_schema_id_internal_id() {
         let func = ScalarFunction::Schema { op: SchemaOp::Id };
-        let id = kuzu_common::types::InternalID { table_id: 5, offset: 100 };
+        let id = kuzu_common::types::InternalID {
+            table_id: 5,
+            offset: 100,
+        };
         assert_eq!(
             evaluate_scalar(&func, &[Value::InternalID(id)]).unwrap(),
             Value::InternalID(id)
@@ -4145,20 +4353,28 @@ mod tests {
     #[test]
     fn test_schema_id_from_struct() {
         let func = ScalarFunction::Schema { op: SchemaOp::Id };
-        let id = kuzu_common::types::InternalID { table_id: 2, offset: 77 };
+        let id = kuzu_common::types::InternalID {
+            table_id: 2,
+            offset: 77,
+        };
         let node = Value::Struct(vec![("_id".into(), Value::InternalID(id))]);
-        assert_eq!(
-            evaluate_scalar(&func, &[node]).unwrap(),
-            Value::InternalID(id)
-        );
+        assert_eq!(evaluate_scalar(&func, &[node]).unwrap(), Value::InternalID(id));
     }
 
     #[test]
     fn test_schema_start_end_node() {
-        let start_func = ScalarFunction::Schema { op: SchemaOp::StartNode };
+        let start_func = ScalarFunction::Schema {
+            op: SchemaOp::StartNode,
+        };
         let end_func = ScalarFunction::Schema { op: SchemaOp::EndNode };
-        let src_id = kuzu_common::types::InternalID { table_id: 1, offset: 10 };
-        let dst_id = kuzu_common::types::InternalID { table_id: 1, offset: 20 };
+        let src_id = kuzu_common::types::InternalID {
+            table_id: 1,
+            offset: 10,
+        };
+        let dst_id = kuzu_common::types::InternalID {
+            table_id: 1,
+            offset: 20,
+        };
         let rel = Value::Struct(vec![
             ("_src".into(), Value::InternalID(src_id)),
             ("_dst".into(), Value::InternalID(dst_id)),
@@ -4167,10 +4383,7 @@ mod tests {
             evaluate_scalar(&start_func, &[rel.clone()]).unwrap(),
             Value::InternalID(src_id)
         );
-        assert_eq!(
-            evaluate_scalar(&end_func, &[rel]).unwrap(),
-            Value::InternalID(dst_id)
-        );
+        assert_eq!(evaluate_scalar(&end_func, &[rel]).unwrap(), Value::InternalID(dst_id));
     }
 
     #[test]
@@ -4186,10 +4399,7 @@ mod tests {
     fn test_schema_label_struct() {
         let func = ScalarFunction::Schema { op: SchemaOp::Label };
         let node = Value::Struct(vec![("_label".into(), Value::String("Person".into()))]);
-        assert_eq!(
-            evaluate_scalar(&func, &[node]).unwrap(),
-            Value::String("Person".into())
-        );
+        assert_eq!(evaluate_scalar(&func, &[node]).unwrap(), Value::String("Person".into()));
     }
 
     #[test]
@@ -4222,7 +4432,9 @@ mod tests {
     // --- Array function tests ---
     #[test]
     fn test_array_cosine_similarity() {
-        let func = ScalarFunction::Array { op: ArrayOp::CosineSimilarity };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::CosineSimilarity,
+        };
         let a = Value::List(vec![Value::Double(1.0), Value::Double(0.0)]);
         let b = Value::List(vec![Value::Double(0.0), Value::Double(1.0)]);
         let result = evaluate_scalar(&func, &[a, b]).unwrap();
@@ -4235,7 +4447,9 @@ mod tests {
 
     #[test]
     fn test_array_cosine_identical() {
-        let func = ScalarFunction::Array { op: ArrayOp::CosineSimilarity };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::CosineSimilarity,
+        };
         let a = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
         let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
         let result = evaluate_scalar(&func, &[a, b]).unwrap();
@@ -4261,7 +4475,9 @@ mod tests {
 
     #[test]
     fn test_array_inner_product() {
-        let func = ScalarFunction::Array { op: ArrayOp::InnerProduct };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::InnerProduct,
+        };
         let a = Value::List(vec![Value::Double(1.0), Value::Double(2.0)]);
         let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
         let result = evaluate_scalar(&func, &[a, b]).unwrap();
@@ -4270,7 +4486,9 @@ mod tests {
 
     #[test]
     fn test_array_cross_product() {
-        let func = ScalarFunction::Array { op: ArrayOp::CrossProduct };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::CrossProduct,
+        };
         let a = Value::List(vec![Value::Double(1.0), Value::Double(0.0), Value::Double(0.0)]);
         let b = Value::List(vec![Value::Double(0.0), Value::Double(1.0), Value::Double(0.0)]);
         let result = evaluate_scalar(&func, &[a, b]).unwrap();
@@ -4289,7 +4507,9 @@ mod tests {
 
     #[test]
     fn test_array_cross_product_wrong_dim() {
-        let func = ScalarFunction::Array { op: ArrayOp::CrossProduct };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::CrossProduct,
+        };
         let a = Value::List(vec![Value::Double(1.0), Value::Double(2.0)]);
         let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
         assert!(evaluate_scalar(&func, &[a, b]).is_err());
@@ -4297,7 +4517,9 @@ mod tests {
 
     #[test]
     fn test_array_squared_distance() {
-        let func = ScalarFunction::Array { op: ArrayOp::SquaredDistance };
+        let func = ScalarFunction::Array {
+            op: ArrayOp::SquaredDistance,
+        };
         let a = Value::List(vec![Value::Double(0.0), Value::Double(0.0)]);
         let b = Value::List(vec![Value::Double(3.0), Value::Double(4.0)]);
         let result = evaluate_scalar(&func, &[a, b]).unwrap();
@@ -4316,7 +4538,11 @@ mod tests {
     fn test_list_slice() {
         let func = ScalarFunction::List { op: ListOp::Slice };
         let list = Value::List(vec![
-            Value::Int64(10), Value::Int64(20), Value::Int64(30), Value::Int64(40), Value::Int64(50),
+            Value::Int64(10),
+            Value::Int64(20),
+            Value::Int64(30),
+            Value::Int64(40),
+            Value::Int64(50),
         ]);
         let result = evaluate_scalar(&func, &[list, Value::Int64(2), Value::Int64(4)]).unwrap();
         match result {
@@ -4360,7 +4586,10 @@ mod tests {
         assert!(reg.contains("array_append"), "array_append should be registered");
         assert!(reg.contains("array_push_back"), "array_push_back should be registered");
         assert!(reg.contains("array_prepend"), "array_prepend should be registered");
-        assert!(reg.contains("array_push_front"), "array_push_front should be registered");
+        assert!(
+            reg.contains("array_push_front"),
+            "array_push_front should be registered"
+        );
         assert!(reg.contains("array_contains"), "array_contains should be registered");
         assert!(reg.contains("array_has"), "array_has should be registered");
         assert!(reg.contains("array_slice"), "array_slice should be registered");
@@ -4373,19 +4602,22 @@ mod tests {
         let func = ScalarFunction::List { op: ListOp::Range };
         // 1-arg: range(end) → [0, 1, ..., end]
         let result = evaluate_scalar(&func, &[Value::Int64(3)]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::Int64(0), Value::Int64(1), Value::Int64(2), Value::Int64(3),
-        ]));
+        assert_eq!(
+            result,
+            Value::List(vec![Value::Int64(0), Value::Int64(1), Value::Int64(2), Value::Int64(3),])
+        );
         // 2-arg: range(start, end)
         let result = evaluate_scalar(&func, &[Value::Int64(2), Value::Int64(5)]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::Int64(2), Value::Int64(3), Value::Int64(4), Value::Int64(5),
-        ]));
+        assert_eq!(
+            result,
+            Value::List(vec![Value::Int64(2), Value::Int64(3), Value::Int64(4), Value::Int64(5),])
+        );
         // 3-arg: range(start, end, step)
         let result = evaluate_scalar(&func, &[Value::Int64(0), Value::Int64(6), Value::Int64(2)]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::Int64(0), Value::Int64(2), Value::Int64(4), Value::Int64(6),
-        ]));
+        assert_eq!(
+            result,
+            Value::List(vec![Value::Int64(0), Value::Int64(2), Value::Int64(4), Value::Int64(6),])
+        );
         // Zero step → error
         assert!(evaluate_scalar(&func, &[Value::Int64(0), Value::Int64(5), Value::Int64(0)]).is_err());
     }
@@ -4393,66 +4625,85 @@ mod tests {
     #[test]
     fn test_list_distinct() {
         let func = ScalarFunction::List { op: ListOp::Distinct };
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(1), Value::Int64(2), Value::Int64(1), Value::Int64(3),
-        ])]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![
+                Value::Int64(1),
+                Value::Int64(2),
+                Value::Int64(1),
+                Value::Int64(3),
+            ])],
+        )
+        .unwrap();
         if let Value::List(items) = result {
             assert_eq!(items.len(), 3);
             assert!(items.contains(&Value::Int64(1)));
             assert!(items.contains(&Value::Int64(2)));
             assert!(items.contains(&Value::Int64(3)));
-        } else { panic!("Expected list"); }
+        } else {
+            panic!("Expected list");
+        }
     }
 
     #[test]
     fn test_list_unique() {
         let func = ScalarFunction::List { op: ListOp::Unique };
         // All unique → count = 3
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(1), Value::Int64(2), Value::Int64(3),
-        ])]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)])],
+        )
+        .unwrap();
         assert_eq!(result, Value::Int64(3));
         // Duplicates → count = 2
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(1), Value::Int64(2), Value::Int64(1),
-        ])]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(1)])],
+        )
+        .unwrap();
         assert_eq!(result, Value::Int64(2));
     }
 
     #[test]
     fn test_list_sum() {
         let func = ScalarFunction::List { op: ListOp::Sum };
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(1), Value::Int64(2), Value::Int64(3),
-        ])]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)])],
+        )
+        .unwrap();
         assert_eq!(result, Value::Int64(6));
     }
 
     #[test]
     fn test_list_product() {
         let func = ScalarFunction::List { op: ListOp::Product };
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(2), Value::Int64(3), Value::Int64(4),
-        ])]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![Value::Int64(2), Value::Int64(3), Value::Int64(4)])],
+        )
+        .unwrap();
         assert_eq!(result, Value::Int64(24));
     }
 
     #[test]
     fn test_list_any_value() {
         let func = ScalarFunction::List { op: ListOp::AnyValue };
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(42), Value::Int64(100),
-        ])]).unwrap();
+        let result = evaluate_scalar(&func, &[Value::List(vec![Value::Int64(42), Value::Int64(100)])]).unwrap();
         assert_eq!(result, Value::Int64(42));
     }
 
     #[test]
     fn test_list_to_string() {
         let func = ScalarFunction::List { op: ListOp::ToString };
-        let result = evaluate_scalar(&func, &[
-            Value::String(",".into()),
-            Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]),
-        ]).unwrap();
+        let result = evaluate_scalar(
+            &func,
+            &[
+                Value::String(",".into()),
+                Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]),
+            ],
+        )
+        .unwrap();
         assert_eq!(result, Value::String("Int64(1),Int64(2),Int64(3)".into()));
     }
 
@@ -4460,7 +4711,9 @@ mod tests {
     fn test_list_position() {
         let func = ScalarFunction::List { op: ListOp::Position };
         let list = Value::List(vec![
-            Value::String("a".into()), Value::String("b".into()), Value::String("c".into()),
+            Value::String("a".into()),
+            Value::String("b".into()),
+            Value::String("c".into()),
         ]);
         // Found → 1-based index
         let result = evaluate_scalar(&func, &[list.clone(), Value::String("b".into())]).unwrap();
@@ -4473,30 +4726,30 @@ mod tests {
     #[test]
     fn test_list_has_all() {
         let func = ScalarFunction::List { op: ListOp::HasAll };
-        let left = Value::List(vec![
-            Value::Int64(1), Value::Int64(2), Value::Int64(3),
-        ]);
+        let left = Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]);
         let right_yes = Value::List(vec![Value::Int64(1), Value::Int64(3)]);
         let right_no = Value::List(vec![Value::Int64(1), Value::Int64(99)]);
         assert_eq!(
             evaluate_scalar(&func, &[left.clone(), right_yes]).unwrap(),
             Value::Bool(true)
         );
-        assert_eq!(
-            evaluate_scalar(&func, &[left, right_no]).unwrap(),
-            Value::Bool(false)
-        );
+        assert_eq!(evaluate_scalar(&func, &[left, right_no]).unwrap(), Value::Bool(false));
     }
 
     #[test]
     fn test_list_reverse_sort() {
-        let func = ScalarFunction::List { op: ListOp::ReverseSort };
-        let result = evaluate_scalar(&func, &[Value::List(vec![
-            Value::Int64(3), Value::Int64(1), Value::Int64(2),
-        ])]).unwrap();
-        assert_eq!(result, Value::List(vec![
-            Value::Int64(3), Value::Int64(2), Value::Int64(1),
-        ]));
+        let func = ScalarFunction::List {
+            op: ListOp::ReverseSort,
+        };
+        let result = evaluate_scalar(
+            &func,
+            &[Value::List(vec![Value::Int64(3), Value::Int64(1), Value::Int64(2)])],
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![Value::Int64(3), Value::Int64(2), Value::Int64(1),])
+        );
     }
 
     // --- List predicate function tests ---
@@ -4505,15 +4758,11 @@ mod tests {
     fn test_list_any() {
         let func = ScalarFunction::List { op: ListOp::Any };
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Bool(true),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(false), Value::Bool(true),])]).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Bool(false),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(false), Value::Bool(false),])]).unwrap(),
             Value::Bool(false)
         );
     }
@@ -4522,15 +4771,11 @@ mod tests {
     fn test_list_all() {
         let func = ScalarFunction::List { op: ListOp::All };
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(true), Value::Int64(1),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(true), Value::Int64(1),])]).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(true), Value::Int64(0),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(true), Value::Int64(0),])]).unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
@@ -4543,15 +4788,11 @@ mod tests {
     fn test_list_none() {
         let func = ScalarFunction::List { op: ListOp::None };
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Int64(0),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(false), Value::Int64(0),])]).unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Int64(1),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(false), Value::Int64(1),])]).unwrap(),
             Value::Bool(false)
         );
     }
@@ -4560,21 +4801,23 @@ mod tests {
     fn test_list_single() {
         let func = ScalarFunction::List { op: ListOp::Single };
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Bool(true), Value::Int64(0),
-            ])]).unwrap(),
+            evaluate_scalar(
+                &func,
+                &[Value::List(vec![
+                    Value::Bool(false),
+                    Value::Bool(true),
+                    Value::Int64(0),
+                ])]
+            )
+            .unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(false), Value::Int64(0),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(false), Value::Int64(0),])]).unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            evaluate_scalar(&func, &[Value::List(vec![
-                Value::Bool(true), Value::Int64(1),
-            ])]).unwrap(),
+            evaluate_scalar(&func, &[Value::List(vec![Value::Bool(true), Value::Int64(1),])]).unwrap(),
             Value::Bool(false)
         );
     }

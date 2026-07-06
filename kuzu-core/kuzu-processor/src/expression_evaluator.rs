@@ -97,10 +97,15 @@ impl ExpressionEvaluator {
                 Ok(v)
             }
             Expression::Case(case_expr) => self.evaluate_case(case_expr, chunk),
-            Expression::Star => Err("STAR expression should be expanded by the binder before reaching the evaluator".into()),
-            Expression::ListPredicate { quantifier, list, var_name, predicate } => {
-                self.evaluate_list_predicate(quantifier, list, var_name, predicate, chunk)
+            Expression::Star => {
+                Err("STAR expression should be expanded by the binder before reaching the evaluator".into())
             }
+            Expression::ListPredicate {
+                quantifier,
+                list,
+                var_name,
+                predicate,
+            } => self.evaluate_list_predicate(quantifier, list, var_name, predicate, chunk),
         }
     }
 
@@ -178,12 +183,7 @@ impl ExpressionEvaluator {
     ///
     /// Falls back to evaluating the object expression (legacy behaviour) if no
     /// `field_names` are available on the chunk.
-    fn evaluate_property_access(
-        &self,
-        obj: &Expression,
-        prop: &str,
-        chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    fn evaluate_property_access(&self, obj: &Expression, prop: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
         // Build the qualified property name (e.g., "t.name")
         let qualified_prop = if let Expression::Variable(var_name) = obj {
             format!("{}.{}", var_name, prop)
@@ -193,11 +193,14 @@ impl ExpressionEvaluator {
 
         // Fast path: look up the property by name in the chunk's field names.
         if !chunk.field_names.is_empty()
-            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop) {
-                return chunk.fields.get(idx).cloned().ok_or_else(|| {
-                    format!("Column '{}' (index {}) not found in chunk", prop, idx)
-                });
-            }
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
+        {
+            return chunk
+                .fields
+                .get(idx)
+                .cloned()
+                .ok_or_else(|| format!("Column '{}' (index {}) not found in chunk", prop, idx));
+        }
         // Fallback: evaluate the object expression (returns first column — legacy behaviour).
         self.evaluate(obj, chunk)
     }
@@ -284,9 +287,10 @@ impl ExpressionEvaluator {
         }
 
         if row_results.iter().all(|v| matches!(v, Value::Null))
-            && let Some(e) = first_error {
-                return Err(e);
-            }
+            && let Some(e) = first_error
+        {
+            return Err(e);
+        }
 
         Ok(result_vec)
     }
@@ -390,11 +394,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a `CASE [subject] WHEN ... THEN ... [ELSE ...] END` expression.
-    fn evaluate_case(
-        &self,
-        case_expr: &kuzu_parser::ast::CaseExpr,
-        chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    fn evaluate_case(&self, case_expr: &kuzu_parser::ast::CaseExpr, chunk: &DataChunk) -> Result<ValueVector, String> {
         let num_rows = chunk.size;
         // Evaluate subject (if any)
         let subject_vec = if let Some(subj) = &case_expr.subject {
@@ -544,10 +544,7 @@ impl ExpressionEvaluator {
             let mut true_count = 0u64;
             for item in &items {
                 // Create a single-row chunk with the variable as first field
-                let mut elem_vec = ValueVector::new(
-                    item.physical_type(),
-                    1,
-                );
+                let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
                 store_value_in_vector(&mut elem_vec, 0, item);
                 let mini_chunk = DataChunk::new(vec![elem_vec]);
@@ -697,9 +694,10 @@ impl ExpressionEvaluator {
             _ => return Err(format!("Internal error: expected SequenceOp for '{}'", name)),
         };
 
-        let seq_fn = self.sequence_fn.as_ref().ok_or_else(|| {
-            format!("No sequence callback configured for '{}'", name)
-        })?;
+        let seq_fn = self
+            .sequence_fn
+            .as_ref()
+            .ok_or_else(|| format!("No sequence callback configured for '{}'", name))?;
 
         let mut result_vec = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_rows);
         result_vec.resize(num_rows);
@@ -877,8 +875,8 @@ mod tests {
         state.lock().unwrap().insert("my_seq".to_string(), 10_i64);
 
         let state_for_fn = state.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
-            move |seq_name: &str, is_nextval: bool| {
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+            Arc::new(move |seq_name: &str, is_nextval: bool| {
                 let mut map = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
                 let current = map
                     .get_mut(seq_name)
@@ -890,8 +888,7 @@ mod tests {
                 } else {
                     Ok(Value::Int64(*current))
                 }
-            },
-        );
+            });
 
         let eval = ExpressionEvaluator::new(make_registry()).with_sequence_fn(seq_fn);
         let chunk = make_chunk(&[1, 2, 3]);
@@ -921,7 +918,10 @@ mod tests {
             vec![Expression::Constant(Constant::String("my_seq".into()))],
         );
         let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
-        assert!(err.contains("No sequence callback configured"), "Unexpected error: {err}");
+        assert!(
+            err.contains("No sequence callback configured"),
+            "Unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -930,14 +930,8 @@ mod tests {
             Arc::new(|_seq_name: &str, _is_nextval: bool| Ok(Value::Int64(1)));
         let eval = ExpressionEvaluator::new(make_registry()).with_sequence_fn(seq_fn);
 
-        let expr = Expression::FunctionCall(
-            "nextval".into(),
-            vec![Expression::Constant(Constant::Integer(42))],
-        );
+        let expr = Expression::FunctionCall("nextval".into(), vec![Expression::Constant(Constant::Integer(42))]);
         let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
-        assert!(
-            err.contains("requires a string argument"),
-            "Unexpected error: {err}"
-        );
+        assert!(err.contains("requires a string argument"), "Unexpected error: {err}");
     }
 }

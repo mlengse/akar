@@ -37,7 +37,6 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
             cardinality: 0,
             fts_query: None,
         }));
-
     }
 
     if scans.len() == 1 {
@@ -112,10 +111,11 @@ fn collect_equality_conditions(expr: &Expression, conditions: &mut Vec<(Option<S
             let left_var = extract_variable_alias(left);
             let right_var = extract_variable_alias(right);
             if let (Some(lv), Some(rv)) = (&left_var, &right_var)
-                && lv != rv {
-                    // This is a potential join condition between two different variables
-                    conditions.push((left_var, right_var, expr.clone()));
-                }
+                && lv != rv
+            {
+                // This is a potential join condition between two different variables
+                conditions.push((left_var, right_var, expr.clone()));
+            }
             // Fall through to check children
         }
         Expression::BinaryOp(BinaryOp::And, left, right) => {

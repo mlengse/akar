@@ -6,10 +6,10 @@
 //!
 //! Ported from C++ `src/storage/page_manager.cpp`.
 
-use crate::free_space_manager::{FreeSpaceManager, PageRange, INVALID_PAGE_IDX};
+use crate::free_space_manager::{FreeSpaceManager, INVALID_PAGE_IDX, PageRange};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Manages page allocation and deallocation for a database file.
 pub struct PageManager {
@@ -31,12 +31,7 @@ impl PageManager {
     ///
     /// `existing_pages` is the number of pages already present in the file
     /// (determined from file metadata on open).
-    pub fn new(
-        db_path: PathBuf,
-        page_size: usize,
-        existing_pages: u64,
-        fsm: Arc<FreeSpaceManager>,
-    ) -> Self {
+    pub fn new(db_path: PathBuf, page_size: usize, existing_pages: u64, fsm: Arc<FreeSpaceManager>) -> Self {
         Self {
             db_path,
             page_size,
@@ -87,8 +82,7 @@ impl PageManager {
         if num_pages == 0 || start_page_idx == INVALID_PAGE_IDX {
             return;
         }
-        self.fsm
-            .add_free_pages(PageRange::new(start_page_idx, num_pages));
+        self.fsm.add_free_pages(PageRange::new(start_page_idx, num_pages));
     }
 
     /// Access the underlying free space manager.
@@ -122,8 +116,7 @@ impl PageManager {
         file.write_all(&zeros)?;
         file.flush()?;
 
-        self.total_pages
-            .fetch_add(num_pages, Ordering::SeqCst);
+        self.total_pages.fetch_add(num_pages, Ordering::SeqCst);
 
         Ok(start_page)
     }
@@ -131,8 +124,7 @@ impl PageManager {
     #[cfg(target_arch = "wasm32")]
     pub fn extend_file(&self, num_pages: u64) -> std::io::Result<u64> {
         let start_page = self.total_pages.load(Ordering::Acquire);
-        self.total_pages
-            .fetch_add(num_pages, Ordering::SeqCst);
+        self.total_pages.fetch_add(num_pages, Ordering::SeqCst);
         Ok(start_page)
     }
 }

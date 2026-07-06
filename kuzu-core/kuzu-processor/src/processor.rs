@@ -10,8 +10,8 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_parser::ast::{BinaryOp, Expression};
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
+use kuzu_parser::ast::{BinaryOp, Expression};
 use kuzu_planner::logical_operator::LogicalOperator;
 use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 use std::sync::{Arc, Mutex};
@@ -55,9 +55,9 @@ impl QueryProcessor {
 
     /// Create a processor with function registry, table catalog access, and VFS.
     pub fn with_catalog(
-        registry: Arc<Mutex<FunctionRegistry>>, 
-        table_catalog: Arc<TableCatalog>, 
-        vfs: Arc<kuzu_common::file_system::VirtualFileSystemRegistry>
+        registry: Arc<Mutex<FunctionRegistry>>,
+        table_catalog: Arc<TableCatalog>,
+        vfs: Arc<kuzu_common::file_system::VirtualFileSystemRegistry>,
     ) -> Self {
         Self {
             function_registry: Some(registry),
@@ -128,10 +128,7 @@ impl QueryProcessor {
         )
     }
 
-    fn extract_zone_map_predicate(
-        expr: &Expression,
-        columns: &[String],
-    ) -> Option<(usize, String, Value)> {
+    fn extract_zone_map_predicate(expr: &Expression, columns: &[String]) -> Option<(usize, String, Value)> {
         if let Expression::BinaryOp(op, left, right) = expr {
             let op_str = match op {
                 kuzu_parser::ast::BinaryOp::Equal => "=",
@@ -143,19 +140,20 @@ impl QueryProcessor {
                 _ => return None,
             };
             if let Expression::Variable(var_name) = &**left
-                && let Expression::Constant(c) = &**right {
-                    let col_name = var_name.split('.').next_back().unwrap_or(var_name);
-                    if let Some(col_idx) = columns.iter().position(|c| c == col_name) {
-                        let val = match c {
-                            kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
-                            kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
-                            kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
-                            kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
-                            kuzu_parser::ast::Constant::Null => Value::Null,
-                        };
-                        return Some((col_idx, op_str.to_string(), val));
-                    }
+                && let Expression::Constant(c) = &**right
+            {
+                let col_name = var_name.split('.').next_back().unwrap_or(var_name);
+                if let Some(col_idx) = columns.iter().position(|c| c == col_name) {
+                    let val = match c {
+                        kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
+                        kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
+                        kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
+                        kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
+                        kuzu_parser::ast::Constant::Null => Value::Null,
+                    };
+                    return Some((col_idx, op_str.to_string(), val));
                 }
+            }
         }
         None
     }
@@ -194,8 +192,10 @@ impl QueryProcessor {
                     if let Some(LogicalOperator::Filter(f)) = operators.get(i + 1) {
                         pred_owned = Self::extract_zone_map_predicate(&f.expression, &s.columns);
                     }
-                    
-                    let pred_ref = pred_owned.as_ref().map(|(idx, op_str, val)| (*idx, op_str.as_str(), val));
+
+                    let pred_ref = pred_owned
+                        .as_ref()
+                        .map(|(idx, op_str, val)| (*idx, op_str.as_str(), val));
                     let (data, columns, num_rows) = self.resolve_scan_data(&s.table_name, pred_ref);
                     let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
                     if let Some(mask) = sip_masks.get(&s.table_id) {
@@ -231,13 +231,13 @@ impl QueryProcessor {
                         key_column: s.key_column,
                         mask: mask.clone(),
                     };
-                    
+
                     let result = if let Some(existing) = intermediate_result.take() {
                         masker.execute(existing)?
                     } else {
                         masker.execute(current.clone())?
                     };
-                    
+
                     sip_masks.insert(s.table_id, mask);
                     intermediate_result = Some(result);
                 }
@@ -314,19 +314,16 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Filter(f) => {
-                    let evaluator = self
-                        .function_registry
-                        .clone()
-                        .map(|reg| {
-                            let mut eval = ExpressionEvaluator::new(reg);
-                            if let Some(ref seq_fn) = self.sequence_fn {
-                                eval = eval.with_sequence_fn(seq_fn.clone());
-                            }
-                            if let Some(ref subquery_fn) = self.subquery_fn {
-                                eval = eval.with_subquery_fn(subquery_fn.clone());
-                            }
-                            Arc::new(Mutex::new(eval))
-                        });
+                    let evaluator = self.function_registry.clone().map(|reg| {
+                        let mut eval = ExpressionEvaluator::new(reg);
+                        if let Some(ref seq_fn) = self.sequence_fn {
+                            eval = eval.with_sequence_fn(seq_fn.clone());
+                        }
+                        if let Some(ref subquery_fn) = self.subquery_fn {
+                            eval = eval.with_subquery_fn(subquery_fn.clone());
+                        }
+                        Arc::new(Mutex::new(eval))
+                    });
                     let filter = if let Some(eval) = evaluator {
                         PhysicalFilter::with_evaluator(f.expression.clone(), eval)
                     } else {
@@ -354,13 +351,9 @@ impl QueryProcessor {
                             .any(|be| Self::projection_needs_expression_eval(&be.expression));
 
                         if needs_eval {
-                            let registry = self
-                                .function_registry
-                                .clone()
-                                .ok_or_else(|| {
-                                    "No function registry available for expression projection"
-                                        .to_string()
-                                })?;
+                            let registry = self.function_registry.clone().ok_or_else(|| {
+                                "No function registry available for expression projection".to_string()
+                            })?;
 
                             let mut eval = ExpressionEvaluator::new(registry);
                             if let Some(ref seq_fn) = self.sequence_fn {
@@ -378,7 +371,11 @@ impl QueryProcessor {
                                     fields.push(result_vec);
                                 }
                                 let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
-                                output.push(DataChunk { fields, size, field_names: vec![] });
+                                output.push(DataChunk {
+                                    fields,
+                                    size,
+                                    field_names: vec![],
+                                });
                             }
                             output
                         } else {
@@ -515,9 +512,7 @@ impl QueryProcessor {
                 LogicalOperator::Explain(ex) => {
                     // Serialize the inner plan tree to a string
                     let plan_str = serialize_plan_tree(&ex.inner, 0);
-                    let explain = PhysicalExplain {
-                        inner_plan: plan_str,
-                    };
+                    let explain = PhysicalExplain { inner_plan: plan_str };
                     let result = explain.execute(vec![])?;
                     intermediate_result = Some(result);
                 }
@@ -725,14 +720,16 @@ impl QueryProcessor {
 
                     // Get table info to build the row
                     let num_cols = {
-                        let tbl = table_catalog.get_node_table_by_name(&m.table_name)
+                        let tbl = table_catalog
+                            .get_node_table_by_name(&m.table_name)
                             .ok_or_else(|| format!("Table '{}' not found for MERGE", m.table_name))?;
                         tbl.columns.len()
                     };
 
                     // Build values from properties
                     let mut new_values: Vec<Value> = Vec::new();
-                    let table_info = table_catalog.get_node_table_by_name(&m.table_name)
+                    let table_info = table_catalog
+                        .get_node_table_by_name(&m.table_name)
                         .ok_or_else(|| format!("Table '{}' not found", m.table_name))?;
                     for col_idx in 0..num_cols {
                         let col_name = &table_info.columns[col_idx].name;
@@ -749,21 +746,23 @@ impl QueryProcessor {
                     // Simple match detection: scan the PK column for a match
                     let mut matched = false;
                     if let Some(tbl) = table_catalog.get_node_table_by_name(&m.table_name)
-                        && let Some((prop_name, first_expr)) = m.properties.first() {
-                            let first_val = eval_const(first_expr);
-                            // Find which column index this property maps to
-                            if let Some(prop_col) = tbl.columns.iter().position(|c| &c.name == prop_name) {
-                                let _ = prop_col; // Column index for matching
-                                // Scan the column for matching values
-                                for row_idx in 0..tbl.num_rows as usize {
-                                    if let Some(val) = tbl.get_value(row_idx, prop_col)
-                                        && val == &first_val {
-                                            matched = true;
-                                            break;
-                                        }
+                        && let Some((prop_name, first_expr)) = m.properties.first()
+                    {
+                        let first_val = eval_const(first_expr);
+                        // Find which column index this property maps to
+                        if let Some(prop_col) = tbl.columns.iter().position(|c| &c.name == prop_name) {
+                            let _ = prop_col; // Column index for matching
+                            // Scan the column for matching values
+                            for row_idx in 0..tbl.num_rows as usize {
+                                if let Some(val) = tbl.get_value(row_idx, prop_col)
+                                    && val == &first_val
+                                {
+                                    matched = true;
+                                    break;
                                 }
                             }
                         }
+                    }
 
                     if matched {
                         // Apply ON MATCH SET
@@ -922,10 +921,9 @@ impl QueryProcessor {
                         drop(reg);
                         self.execute_vector_similarity_scan(tf)
                     }
-                    TableFunction::Custom { name } => Err(format!(
-                        "Custom table function '{}' has no registered handler",
-                        name
-                    )),
+                    TableFunction::Custom { name } => {
+                        Err(format!("Custom table function '{}' has no registered handler", name))
+                    }
                 }
             } else {
                 Err(format!("Table function '{}' not found", func_name))
@@ -948,7 +946,9 @@ impl QueryProcessor {
     ) -> Result<Vec<DataChunk>, String> {
         // Evaluate arguments from expressions (they should be constants or simple vars)
         if tf.args.len() < 4 {
-            return Err("vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into());
+            return Err(
+                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into(),
+            );
         }
 
         // For CALL statements, args arrive as Expression AST nodes.
@@ -1071,7 +1071,6 @@ fn derive_join_column_indices(
     build_chunks: &[DataChunk],
     probe_chunks: &[DataChunk],
 ) -> (Vec<u32>, Vec<u32>) {
-
     let build_names: Vec<&str> = build_chunks
         .first()
         .map(|c| c.field_names.iter().map(|s| s.as_str()).collect())
@@ -1125,7 +1124,7 @@ fn extract_join_prop(expr: &Expression) -> Option<String> {
             } else {
                 Some(prop.clone())
             }
-        },
+        }
         Expression::Variable(name) => Some(name.clone()),
         _ => None,
     }
@@ -1147,7 +1146,11 @@ fn resolve_projection_column_index(expr: &Expression, chunk: &DataChunk) -> Opti
         };
         // Try qualified name first, then just the property name
         if !chunk.field_names.is_empty() {
-            if let Some(idx) = chunk.field_names.iter().position(|n| n.ends_with(&format!(".{}", prop)) || n == &col_name || n == prop) {
+            if let Some(idx) = chunk
+                .field_names
+                .iter()
+                .position(|n| n.ends_with(&format!(".{}", prop)) || n == &col_name || n == prop)
+            {
                 return Some(idx);
             }
         }
@@ -1193,11 +1196,7 @@ fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
 /// Column-by-column concatenation using `ValueVector::append`.
 /// For `UNION ALL` (`all = true`), rows are simply concatenated.
 /// For `UNION` distinct (`all = false`), duplicate rows are removed.
-fn merge_union_chunks(
-    left: Vec<DataChunk>,
-    right: Vec<DataChunk>,
-    all: bool,
-) -> Result<Vec<DataChunk>, String> {
+fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool) -> Result<Vec<DataChunk>, String> {
     if left.is_empty() {
         return Ok(right);
     }
@@ -1267,10 +1266,7 @@ fn merge_union_chunks(
 /// is emitted. If the right side has no row for a given position (or fewer
 /// rows than the left side), the left row is emitted with NULL values for
 /// the right-side columns.
-fn merge_optional_chunks(
-    left: Vec<DataChunk>,
-    right: Vec<DataChunk>,
-) -> Result<Vec<DataChunk>, String> {
+fn merge_optional_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
     if left.is_empty() {
         return Ok(left);
     }
@@ -1311,7 +1307,11 @@ fn merge_optional_chunks(
 
     let fields = rows_to_columns(&combined);
     let size = fields.first().map(|f| f.size()).unwrap_or(0);
-    Ok(vec![DataChunk { fields, size, field_names: vec![] }])
+    Ok(vec![DataChunk {
+        fields,
+        size,
+        field_names: vec![],
+    }])
 }
 
 /// Extract all rows from a Vec<DataChunk> as row-major Vec<Vec<Value>>.
@@ -1384,10 +1384,13 @@ fn value_to_physical_type(val: &Value) -> PhysicalTypeID {
         Value::Double(_) => PhysicalTypeID::Double,
         Value::Float(_) => PhysicalTypeID::Float,
         Value::String(_) | Value::Blob(_) => PhysicalTypeID::String,
-        Value::Date(_) | Value::Timestamp(_) | Value::TimestampTz(_) | Value::TimestampNs(_)
-        | Value::TimestampMs(_) | Value::TimestampSec(_) | Value::Interval(_) => {
-            PhysicalTypeID::Int64
-        }
+        Value::Date(_)
+        | Value::Timestamp(_)
+        | Value::TimestampTz(_)
+        | Value::TimestampNs(_)
+        | Value::TimestampMs(_)
+        | Value::TimestampSec(_)
+        | Value::Interval(_) => PhysicalTypeID::Int64,
         Value::InternalID(_) => PhysicalTypeID::Int64,
         Value::List(_) => PhysicalTypeID::List,
         Value::Map(_) => PhysicalTypeID::Struct,
@@ -1462,12 +1465,14 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
         LogicalOperator::CreateNode(cn) => format!("CreateNode({})", cn.table_name),
         LogicalOperator::CreateRel(cr) => format!("CreateRel({})", cr.table_name),
-        LogicalOperator::Extend(ex) => format!("Extend({}->{} via {})", ex.bound_node_var, ex.dst_node_var, ex.rel_table_name),
+        LogicalOperator::Extend(ex) => format!(
+            "Extend({}->{} via {})",
+            ex.bound_node_var, ex.dst_node_var, ex.rel_table_name
+        ),
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
         LogicalOperator::CreateFtsIndex(c) => format!("CreateFtsIndex({})", c.index_name),
         LogicalOperator::FtsScan(s) => format!("FtsScan({})", s.index_name),
-
     };
 
     let card_str = format!("[cardinality={}]", op.cardinality());
@@ -1567,7 +1572,11 @@ mod tests {
                 .unwrap();
         }
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
-        QueryProcessor::with_catalog(registry, catalog, std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()))
+        QueryProcessor::with_catalog(
+            registry,
+            catalog,
+            std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()),
+        )
     }
 
     #[test]
@@ -1678,8 +1687,8 @@ mod tests {
         let state = Arc::new(Mutex::new(HashMap::new()));
         state.lock().unwrap().insert("s".to_string(), 1_i64);
         let state_for_fn = state.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
-            move |seq_name: &str, is_nextval: bool| {
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+            Arc::new(move |seq_name: &str, is_nextval: bool| {
                 let mut m = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
                 let v = m
                     .get_mut(seq_name)
@@ -1691,11 +1700,10 @@ mod tests {
                 } else {
                     Ok(Value::Int64(*v))
                 }
-            },
-        );
+            });
 
-        let proc = QueryProcessor::with_registry(Arc::new(Mutex::new(FunctionRegistry::new())))
-            .with_sequence_fn(seq_fn);
+        let proc =
+            QueryProcessor::with_registry(Arc::new(Mutex::new(FunctionRegistry::new()))).with_sequence_fn(seq_fn);
 
         let plan = vec![LogicalOperator::Projection(
             kuzu_planner::logical_operator::LogicalProjection {
@@ -2051,8 +2059,16 @@ mod tests {
             ],
         ];
         let columns = vec![
-            ColumnDefinition { name: "id".into(), logical_type: LogicalTypeID::InternalID, is_primary_key: false },
-            ColumnDefinition { name: "val".into(), logical_type: LogicalTypeID::Int64, is_primary_key: false },
+            ColumnDefinition {
+                name: "id".into(),
+                logical_type: LogicalTypeID::InternalID,
+                is_primary_key: false,
+            },
+            ColumnDefinition {
+                name: "val".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+            },
         ];
         scan = scan.with_data(data, columns);
         scan = scan.with_semi_mask(mask, 0); // mask on column 0 (InternalID)
@@ -2359,9 +2375,7 @@ mod tests {
             ValueVector::new(PhysicalTypeID::Int64, 1),
             ValueVector::new(PhysicalTypeID::Int64, 1),
         ])];
-        let right = vec![DataChunk::new(vec![
-            ValueVector::new(PhysicalTypeID::Int64, 1),
-        ])];
+        let right = vec![DataChunk::new(vec![ValueVector::new(PhysicalTypeID::Int64, 1)])];
         let result = merge_union_chunks(left, right, true);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("column count mismatch"));
@@ -2477,13 +2491,18 @@ mod tests {
         let cross = PhysicalCrossProduct;
         // Left: [{1, "a"}, {2, "b"}], Right: [{10}, {20}]
         let mut l1 = ValueVector::new(PhysicalTypeID::Int64, 2);
-        l1.set_i64(0, 1); l1.set_i64(1, 2); l1.resize(2);
+        l1.set_i64(0, 1);
+        l1.set_i64(1, 2);
+        l1.resize(2);
         let mut l2 = ValueVector::new(PhysicalTypeID::String, 2);
-        l2.push_string("a"); l2.push_string("b");
+        l2.push_string("a");
+        l2.push_string("b");
         let left = DataChunk::new(vec![l1, l2]);
 
         let mut r1 = ValueVector::new(PhysicalTypeID::Int64, 2);
-        r1.set_i64(0, 10); r1.set_i64(1, 20); r1.resize(2);
+        r1.set_i64(0, 10);
+        r1.set_i64(1, 20);
+        r1.resize(2);
         let right = DataChunk::new(vec![r1]);
 
         let result = cross.execute_binary(&[left], &[right]).unwrap();
@@ -2537,7 +2556,10 @@ mod tests {
 
     #[test]
     fn test_semi_join_basic() {
-        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let semi = PhysicalSemiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
         // Build (right): [2, 3]
         let build = make_i64_chunk(&[2, 3]);
         // Probe (left): [1, 2, 3]
@@ -2548,7 +2570,10 @@ mod tests {
 
     #[test]
     fn test_semi_join_no_match() {
-        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let semi = PhysicalSemiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
         let build = make_i64_chunk(&[4, 5]);
         let probe = make_i64_chunk(&[1, 2, 3]);
         let result = semi.execute_binary(&[build], &[probe]).unwrap();
@@ -2557,7 +2582,10 @@ mod tests {
 
     #[test]
     fn test_anti_join_basic() {
-        let anti = PhysicalAntiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let anti = PhysicalAntiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
         // Build (right): [2, 3]
         let build = make_i64_chunk(&[2, 3]);
         // Probe (left): [1, 2, 3]
@@ -2568,7 +2596,10 @@ mod tests {
 
     #[test]
     fn test_anti_join_all_match() {
-        let anti = PhysicalAntiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let anti = PhysicalAntiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
         let build = make_i64_chunk(&[1, 2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3]);
         let result = anti.execute_binary(&[build], &[probe]).unwrap();
@@ -2577,7 +2608,10 @@ mod tests {
 
     #[test]
     fn test_semi_join_empty_build() {
-        let semi = PhysicalSemiJoin { build_columns: vec![0], probe_columns: vec![0] };
+        let semi = PhysicalSemiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
         let build = make_i64_chunk(&[]);
         let probe = make_i64_chunk(&[1, 2, 3]);
         let result = semi.execute_binary(&[build], &[probe]).unwrap();
@@ -2588,7 +2622,11 @@ mod tests {
 
     #[test]
     fn test_intersect_basic() {
-        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         // Two build sides with overlapping keys
         let build1 = make_i64_chunk(&[1, 2, 3]);
         let build2 = make_i64_chunk(&[2, 3, 4]);
@@ -2604,7 +2642,11 @@ mod tests {
 
     #[test]
     fn test_intersect_no_common() {
-        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         // Build sides have no overlapping keys
         let build1 = make_i64_chunk(&[1, 2, 3]);
         let build2 = make_i64_chunk(&[4, 5, 6]);
@@ -2618,7 +2660,11 @@ mod tests {
 
     #[test]
     fn test_intersect_probe_key_missing() {
-        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         // Build sides share key 3, but probe doesn't probe for 3
         let build1 = make_i64_chunk(&[1, 3]);
         let build2 = make_i64_chunk(&[3, 5]);
@@ -2632,7 +2678,11 @@ mod tests {
 
     #[test]
     fn test_intersect_single_build_side() {
-        let intersect = PhysicalIntersect { num_build_sides: 1, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 1,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         // Single build side — acts like semi-join
         let build = make_i64_chunk(&[2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3, 4]);
@@ -2645,7 +2695,11 @@ mod tests {
 
     #[test]
     fn test_intersect_empty_build() {
-        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         let build1 = make_i64_chunk(&[]);
         let build2 = make_i64_chunk(&[1, 2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3]);
@@ -2658,7 +2712,11 @@ mod tests {
 
     #[test]
     fn test_intersect_no_probe() {
-        let intersect = PhysicalIntersect { num_build_sides: 2, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         let build1 = make_i64_chunk(&[1, 2, 3]);
         let build2 = make_i64_chunk(&[2, 3, 4]);
         let build_chunks = vec![build1, build2];
@@ -2669,7 +2727,11 @@ mod tests {
 
     #[test]
     fn test_intersect_three_build_sides() {
-        let intersect = PhysicalIntersect { num_build_sides: 3, probe_key_col: 0, build_key_col: 0 };
+        let intersect = PhysicalIntersect {
+            num_build_sides: 3,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
         // Three build sides: key 3 appears in all
         let build1 = make_i64_chunk(&[1, 3, 5]);
         let build2 = make_i64_chunk(&[2, 3, 6]);
@@ -2688,11 +2750,11 @@ mod tests {
     /// not always return the first column.
     #[test]
     fn test_property_access_resolves_named_column() {
+        use crate::expression_evaluator::ExpressionEvaluator;
         use kuzu_common::types::PhysicalTypeID;
         use kuzu_common::vector::{DataChunk, ValueVector};
         use kuzu_function::registry::FunctionRegistry;
         use kuzu_parser::ast::Expression;
-        use crate::expression_evaluator::ExpressionEvaluator;
         use std::sync::{Arc, Mutex};
 
         // Build a chunk with two columns: col 0 = id (Int64), col 1 = name (String)
@@ -2706,29 +2768,28 @@ mod tests {
         name_col.push_string("alice");
         name_col.push_string("bob");
 
-        let chunk = DataChunk::new(vec![id_col, name_col])
-            .with_names(vec!["id".into(), "name".into()]);
+        let chunk = DataChunk::new(vec![id_col, name_col]).with_names(vec!["id".into(), "name".into()]);
 
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         let eval = ExpressionEvaluator::new(registry);
 
         // Requesting "name" should return the String column (col 1), not "id" (col 0).
-        let expr = Expression::PropertyAccess(
-            Box::new(Expression::Variable("t".into())),
-            "name".into(),
-        );
+        let expr = Expression::PropertyAccess(Box::new(Expression::Variable("t".into())), "name".into());
         let result = eval.evaluate(&expr, &chunk).unwrap();
-        assert_eq!(result.physical_type(), PhysicalTypeID::String,
-            "PropertyAccess('name') must return the String column, not Int64");
+        assert_eq!(
+            result.physical_type(),
+            PhysicalTypeID::String,
+            "PropertyAccess('name') must return the String column, not Int64"
+        );
 
         // Requesting "id" should return the Int64 column (col 0).
-        let expr_id = Expression::PropertyAccess(
-            Box::new(Expression::Variable("t".into())),
-            "id".into(),
-        );
+        let expr_id = Expression::PropertyAccess(Box::new(Expression::Variable("t".into())), "id".into());
         let result_id = eval.evaluate(&expr_id, &chunk).unwrap();
-        assert_eq!(result_id.physical_type(), PhysicalTypeID::Int64,
-            "PropertyAccess('id') must return the Int64 column");
+        assert_eq!(
+            result_id.physical_type(),
+            PhysicalTypeID::Int64,
+            "PropertyAccess('id') must return the Int64 column"
+        );
         assert_eq!(result_id.get_i64(0), Some(10));
         assert_eq!(result_id.get_i64(1), Some(20));
     }
@@ -2746,16 +2807,14 @@ mod tests {
         build_id.set_i64(0, 1);
         build_id.set_i64(1, 2);
         build_id.resize(2);
-        let build_chunk = DataChunk::new(vec![build_id])
-            .with_names(vec!["id".into()]);
+        let build_chunk = DataChunk::new(vec![build_id]).with_names(vec!["id".into()]);
 
         // Probe side: id = [3, 4] — no overlap
         let mut probe_id = ValueVector::new(PhysicalTypeID::Int64, 2);
         probe_id.set_i64(0, 3);
         probe_id.set_i64(1, 4);
         probe_id.resize(2);
-        let probe_chunk = DataChunk::new(vec![probe_id])
-            .with_names(vec!["id".into()]);
+        let probe_chunk = DataChunk::new(vec![probe_id]).with_names(vec!["id".into()]);
 
         let join = PhysicalHashJoin {
             build_columns: vec![0],
@@ -2764,9 +2823,11 @@ mod tests {
         };
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Must be empty — no rows share the same id.
-        assert!(result.is_empty() || result.iter().all(|c| c.size == 0),
+        assert!(
+            result.is_empty() || result.iter().all(|c| c.size == 0),
             "HashJoin on non-overlapping IDs must produce 0 rows, got {:?}",
-            result.iter().map(|c| c.size).collect::<Vec<_>>());
+            result.iter().map(|c| c.size).collect::<Vec<_>>()
+        );
     }
 
     /// Bug 0.2 regression: scan accumulation — two scans feeding a HashJoin must both
@@ -2774,8 +2835,8 @@ mod tests {
     #[test]
     fn test_scan_accumulation_both_scans_reach_join() {
         use kuzu_common::types::{LogicalTypeID, Value};
-        use kuzu_planner::logical_operator::{LogicalHashJoin, LogicalOperator, LogicalScanNode};
         use kuzu_parser::ast::{BinaryOp, Expression};
+        use kuzu_planner::logical_operator::{LogicalHashJoin, LogicalOperator, LogicalScanNode};
         use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 
         let col_id = ColumnDefinition {
@@ -2803,7 +2864,11 @@ mod tests {
         use kuzu_function::registry::FunctionRegistry;
         use std::sync::{Arc, Mutex};
         let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
-        let proc = QueryProcessor::with_catalog(registry, std::sync::Arc::new(catalog), std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()));
+        let proc = QueryProcessor::with_catalog(
+            registry,
+            std::sync::Arc::new(catalog),
+            std::sync::Arc::new(kuzu_common::file_system::VirtualFileSystemRegistry::new()),
+        );
 
         // Plan: ScanNode(A), ScanNode(B), HashJoin{join_keys: [a.id = b.id]}
         let join_key = Expression::BinaryOp(
@@ -2817,29 +2882,27 @@ mod tests {
                 "id".into(),
             )),
         );
-        let plan = vec![
-            LogicalOperator::HashJoin(LogicalHashJoin {
-                join_keys: vec![join_key],
-                build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "A".into(),
-                    table_id: 1,
-                    alias: Some("a".into()),
-                    columns: vec![],
-                    cardinality: 2,
-                    fts_query: None,
-                })),
-                probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "B".into(),
-                    table_id: 2,
-                    alias: Some("b".into()),
-                    columns: vec![],
-                    cardinality: 2,
-                    fts_query: None,
-                })),
-                cardinality: 0,
-                push_down_eligible: false,
-            }),
-        ];
+        let plan = vec![LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![join_key],
+            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "A".into(),
+                table_id: 1,
+                alias: Some("a".into()),
+                columns: vec![],
+                cardinality: 2,
+                fts_query: None,
+            })),
+            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: "B".into(),
+                table_id: 2,
+                alias: Some("b".into()),
+                columns: vec![],
+                cardinality: 2,
+                fts_query: None,
+            })),
+            cardinality: 0,
+            push_down_eligible: false,
+        })];
 
         let result = proc.execute(&plan).unwrap();
         // A has ids [1,2], B has ids [2,3]. Join on id → exactly 1 matching row (id=2).

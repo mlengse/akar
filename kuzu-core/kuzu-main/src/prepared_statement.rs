@@ -215,9 +215,10 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
         }
         // Non-parameter expressions pass through
         Expression::Variable(_) | Expression::Constant(_) => Ok(expr.clone()),
-        Expression::ExistsSubquery(q) => {
-            Ok(Expression::ExistsSubquery(Box::new(substitute_params_in_query(q, param_values)?)))
-        }
+        Expression::ExistsSubquery(q) => Ok(Expression::ExistsSubquery(Box::new(substitute_params_in_query(
+            q,
+            param_values,
+        )?))),
         Expression::Case(case_expr) => {
             use kuzu_parser::ast::{CaseAlternative, CaseExpr};
             let subject = if let Some(subj) = &case_expr.subject {
@@ -225,21 +226,34 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
             } else {
                 None
             };
-            let alternatives: Result<Vec<CaseAlternative>, String> = case_expr.alternatives.iter()
-                .map(|alt| Ok(CaseAlternative {
-                    when: substitute_params(&alt.when, param_values)?,
-                    then: substitute_params(&alt.then, param_values)?,
-                }))
+            let alternatives: Result<Vec<CaseAlternative>, String> = case_expr
+                .alternatives
+                .iter()
+                .map(|alt| {
+                    Ok(CaseAlternative {
+                        when: substitute_params(&alt.when, param_values)?,
+                        then: substitute_params(&alt.then, param_values)?,
+                    })
+                })
                 .collect();
             let else_expr = if let Some(e) = &case_expr.else_expr {
                 Some(Box::new(substitute_params(e, param_values)?))
             } else {
                 None
             };
-            Ok(Expression::Case(CaseExpr { subject, alternatives: alternatives?, else_expr }))
+            Ok(Expression::Case(CaseExpr {
+                subject,
+                alternatives: alternatives?,
+                else_expr,
+            }))
         }
         Expression::Star => Ok(expr.clone()),
-        Expression::ListPredicate { quantifier, list, var_name, predicate } => {
+        Expression::ListPredicate {
+            quantifier,
+            list,
+            var_name,
+            predicate,
+        } => {
             let new_list = substitute_params(list, param_values)?;
             let new_predicate = substitute_params(predicate, param_values)?;
             Ok(Expression::ListPredicate {
@@ -262,13 +276,20 @@ fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Valu
                 Clause::Where(WhereClause { expression: new_expr })
             }
             Clause::Return(r) => {
-                let new_items: Result<Vec<ReturnItem>, String> = r.expressions.iter()
+                let new_items: Result<Vec<ReturnItem>, String> = r
+                    .expressions
+                    .iter()
                     .map(|item| {
                         let new_expr = substitute_params(&item.expression, param_values)?;
-                        Ok(ReturnItem { expression: new_expr, alias: item.alias.clone() })
+                        Ok(ReturnItem {
+                            expression: new_expr,
+                            alias: item.alias.clone(),
+                        })
                     })
                     .collect();
-                Clause::Return(ReturnClause { expressions: new_items? })
+                Clause::Return(ReturnClause {
+                    expressions: new_items?,
+                })
             }
             other => other.clone(),
         };

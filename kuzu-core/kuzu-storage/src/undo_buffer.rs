@@ -16,9 +16,7 @@ pub struct UndoBuffer {
 
 impl UndoBuffer {
     pub fn new() -> Self {
-        Self {
-            records: Vec::new(),
-        }
+        Self { records: Vec::new() }
     }
 
     /// Record the old value of a cell before it is overwritten.

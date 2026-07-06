@@ -150,9 +150,7 @@ impl ArtPrimaryKeyIndex {
 
         loop {
             let prefix = current.prefix();
-            if depth + prefix.len() > key_bytes.len()
-                || key_bytes[depth..depth + prefix.len()] != *prefix
-            {
+            if depth + prefix.len() > key_bytes.len() || key_bytes[depth..depth + prefix.len()] != *prefix {
                 return None;
             }
             depth += prefix.len();
@@ -262,7 +260,9 @@ impl ArtPrimaryKeyIndex {
 
         // Visit children in byte order
         match node {
-            ArtNode::Node4 { keys, children, count, .. } => {
+            ArtNode::Node4 {
+                keys, children, count, ..
+            } => {
                 // Sort children by key byte
                 let mut indices: Vec<usize> = (0..*count as usize).collect();
                 indices.sort_by_key(|&i| keys[i]);
@@ -271,8 +271,14 @@ impl ArtPrimaryKeyIndex {
                         key.push(keys[i]);
                         if satisfies_upper_bound(key, upper, true) {
                             self.collect_range(
-                                child, key, lower, lower_inclusive,
-                                upper, upper_inclusive, max_results, results,
+                                child,
+                                key,
+                                lower,
+                                lower_inclusive,
+                                upper,
+                                upper_inclusive,
+                                max_results,
+                                results,
                             );
                         }
                         key.pop();
@@ -283,7 +289,9 @@ impl ArtPrimaryKeyIndex {
                     }
                 }
             }
-            ArtNode::Node16 { keys, children, count, .. } => {
+            ArtNode::Node16 {
+                keys, children, count, ..
+            } => {
                 // Sort children by key byte
                 let mut indices: Vec<usize> = (0..*count as usize).collect();
                 indices.sort_by_key(|&i| keys[i]);
@@ -292,8 +300,14 @@ impl ArtPrimaryKeyIndex {
                         key.push(keys[i]);
                         if satisfies_upper_bound(key, upper, true) {
                             self.collect_range(
-                                child, key, lower, lower_inclusive,
-                                upper, upper_inclusive, max_results, results,
+                                child,
+                                key,
+                                lower,
+                                lower_inclusive,
+                                upper,
+                                upper_inclusive,
+                                max_results,
+                                results,
                             );
                         }
                         key.pop();
@@ -304,7 +318,9 @@ impl ArtPrimaryKeyIndex {
                     }
                 }
             }
-            ArtNode::Node48 { child_index, children, .. } => {
+            ArtNode::Node48 {
+                child_index, children, ..
+            } => {
                 for byte in 0u16..256u16 {
                     let idx = child_index[byte as usize];
                     if idx == crate::art_node::EMPTY_MARKER {
@@ -314,8 +330,14 @@ impl ArtPrimaryKeyIndex {
                         key.push(byte as u8);
                         if satisfies_upper_bound(key, upper, true) {
                             self.collect_range(
-                                child, key, lower, lower_inclusive,
-                                upper, upper_inclusive, max_results, results,
+                                child,
+                                key,
+                                lower,
+                                lower_inclusive,
+                                upper,
+                                upper_inclusive,
+                                max_results,
+                                results,
                             );
                         }
                         key.pop();
@@ -332,8 +354,14 @@ impl ArtPrimaryKeyIndex {
                         key.push(byte as u8);
                         if satisfies_upper_bound(key, upper, true) {
                             self.collect_range(
-                                child, key, lower, lower_inclusive,
-                                upper, upper_inclusive, max_results, results,
+                                child,
+                                key,
+                                lower,
+                                lower_inclusive,
+                                upper,
+                                upper_inclusive,
+                                max_results,
+                                results,
                             );
                         }
                         key.pop();
@@ -384,7 +412,9 @@ impl ArtPrimaryKeyIndex {
         // Write children
         write_art_varint(buf, node.count() as u64);
         match node {
-            ArtNode::Node4 { keys, children, count, .. } => {
+            ArtNode::Node4 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if let Some(ref child) = children[i] {
                         buf.push(keys[i]);
@@ -392,7 +422,9 @@ impl ArtPrimaryKeyIndex {
                     }
                 }
             }
-            ArtNode::Node16 { keys, children, count, .. } => {
+            ArtNode::Node16 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if let Some(ref child) = children[i] {
                         buf.push(keys[i]);
@@ -400,14 +432,17 @@ impl ArtPrimaryKeyIndex {
                     }
                 }
             }
-            ArtNode::Node48 { child_index, children, .. } => {
+            ArtNode::Node48 {
+                child_index, children, ..
+            } => {
                 for byte in 0u16..256u16 {
                     let idx = child_index[byte as usize];
                     if idx != crate::art_node::EMPTY_MARKER
-                        && let Some(ref child) = children[idx as usize] {
-                            buf.push(byte as u8);
-                            self.serialize_node(child, buf);
-                        }
+                        && let Some(ref child) = children[idx as usize]
+                    {
+                        buf.push(byte as u8);
+                        self.serialize_node(child, buf);
+                    }
                 }
             }
             ArtNode::Node256 { children, .. } => {
@@ -703,11 +738,7 @@ fn common_prefix_len(node_prefix: &[u8], key_bytes: &[u8], key_offset: usize) ->
 }
 
 /// Check if the current key path satisfies the lower bound.
-fn satisfies_lower_bound(
-    key: &[u8],
-    lower: Option<&ArtKey>,
-    inclusive: bool,
-) -> bool {
+fn satisfies_lower_bound(key: &[u8], lower: Option<&ArtKey>, inclusive: bool) -> bool {
     match lower {
         None => true,
         Some(lower_key) => {
@@ -736,11 +767,7 @@ fn satisfies_lower_bound(
 }
 
 /// Check if the current key path satisfies the upper bound.
-fn satisfies_upper_bound(
-    key: &[u8],
-    upper: Option<&ArtKey>,
-    inclusive: bool,
-) -> bool {
+fn satisfies_upper_bound(key: &[u8], upper: Option<&ArtKey>, inclusive: bool) -> bool {
     match upper {
         None => true,
         Some(upper_key) => {
@@ -830,27 +857,34 @@ fn transfer_children_into(src: &mut ArtNode, mut dst: ArtNode) -> ArtNode {
 fn collect_all_children(node: &mut ArtNode) -> Vec<(u8, Box<ArtNode>)> {
     let mut pairs = Vec::new();
     match node {
-        ArtNode::Node4 { keys, children, count, .. } => {
+        ArtNode::Node4 {
+            keys, children, count, ..
+        } => {
             for i in 0..*count as usize {
                 if let Some(child) = children[i].take() {
                     pairs.push((keys[i], child));
                 }
             }
         }
-        ArtNode::Node16 { keys, children, count, .. } => {
+        ArtNode::Node16 {
+            keys, children, count, ..
+        } => {
             for i in 0..*count as usize {
                 if let Some(child) = children[i].take() {
                     pairs.push((keys[i], child));
                 }
             }
         }
-        ArtNode::Node48 { child_index, children, .. } => {
+        ArtNode::Node48 {
+            child_index, children, ..
+        } => {
             for byte in 0..256u16 {
                 let idx = child_index[byte as usize];
                 if idx != crate::art_node::EMPTY_MARKER
-                    && let Some(child) = children[idx as usize].take() {
-                        pairs.push((byte as u8, child));
-                    }
+                    && let Some(child) = children[idx as usize].take()
+                {
+                    pairs.push((byte as u8, child));
+                }
             }
         }
         ArtNode::Node256 { children, .. } => {
@@ -879,7 +913,12 @@ fn clear_all_children(node: &mut ArtNode) {
             }
             *count = 0;
         }
-        ArtNode::Node48 { child_index, children, count, .. } => {
+        ArtNode::Node48 {
+            child_index,
+            children,
+            count,
+            ..
+        } => {
             *child_index = [crate::art_node::EMPTY_MARKER; 256];
             for c in children.iter_mut() {
                 *c = None;
@@ -898,10 +937,26 @@ fn clear_all_children(node: &mut ArtNode) {
 /// Clear offsets from a node (but not children).
 fn clear_children_offsets(node: &mut ArtNode) {
     match node {
-        ArtNode::Node4 { offsets, overflow_offsets, .. }
-        | ArtNode::Node16 { offsets, overflow_offsets, .. }
-        | ArtNode::Node48 { offsets, overflow_offsets, .. }
-        | ArtNode::Node256 { offsets, overflow_offsets, .. } => {
+        ArtNode::Node4 {
+            offsets,
+            overflow_offsets,
+            ..
+        }
+        | ArtNode::Node16 {
+            offsets,
+            overflow_offsets,
+            ..
+        }
+        | ArtNode::Node48 {
+            offsets,
+            overflow_offsets,
+            ..
+        }
+        | ArtNode::Node256 {
+            offsets,
+            overflow_offsets,
+            ..
+        } => {
             offsets.clear();
             overflow_offsets.clear();
         }
@@ -910,13 +965,7 @@ fn clear_children_offsets(node: &mut ArtNode) {
 
 /// Recursive insert: traverse the tree and insert a key-value pair.
 /// Port of C++ `ArtPrimaryKeyIndex::insertInternal()`.
-fn insert_internal(
-    node: &mut ArtNode,
-    key: &[u8],
-    depth: usize,
-    row_offset: u64,
-    num_entries: &mut u64,
-) {
+fn insert_internal(node: &mut ArtNode, key: &[u8], depth: usize, row_offset: u64, num_entries: &mut u64) {
     let prefix = node.prefix().to_vec();
     let common = common_prefix_len(&prefix, key, depth);
 
@@ -988,11 +1037,23 @@ mod tests {
     fn test_insert_and_lookup() {
         let mut idx = ArtPrimaryKeyIndex::new("test");
         idx.insert(&make_key(42), 0);
-        assert_eq!(idx.lookup(&make_key(42)), Some(0), "key 42 should be found after first insert");
+        assert_eq!(
+            idx.lookup(&make_key(42)),
+            Some(0),
+            "key 42 should be found after first insert"
+        );
 
         idx.insert(&make_key(43), 1);
-        assert_eq!(idx.lookup(&make_key(42)), Some(0), "key 42 should still be found after second insert");
-        assert_eq!(idx.lookup(&make_key(43)), Some(1), "key 43 should be found after second insert");
+        assert_eq!(
+            idx.lookup(&make_key(42)),
+            Some(0),
+            "key 42 should still be found after second insert"
+        );
+        assert_eq!(
+            idx.lookup(&make_key(43)),
+            Some(1),
+            "key 43 should be found after second insert"
+        );
         assert_eq!(idx.lookup(&make_key(44)), None);
         assert_eq!(idx.len(), 2);
     }
@@ -1006,11 +1067,7 @@ mod tests {
         }
         assert_eq!(idx.len(), 20);
         for i in 0..20u64 {
-            assert_eq!(
-                idx.lookup(&make_key(i as i64)),
-                Some(i),
-                "key {i} should be found"
-            );
+            assert_eq!(idx.lookup(&make_key(i as i64)), Some(i), "key {i} should be found");
         }
     }
 
@@ -1058,8 +1115,10 @@ mod tests {
         idx.insert(&make_str_key("date"), 4);
 
         let results = idx.range_scan(
-            Some(&make_str_key("banana")), true,
-            Some(&make_str_key("date")), false,
+            Some(&make_str_key("banana")),
+            true,
+            Some(&make_str_key("date")),
+            false,
             100,
         );
         assert_eq!(results.len(), 2);

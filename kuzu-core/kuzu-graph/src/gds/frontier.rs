@@ -76,9 +76,7 @@ impl Default for SparseFrontier {
 
 impl SparseFrontier {
     pub fn new() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
+        Self { data: HashMap::new() }
     }
 
     pub fn get_current_data(&self) -> &HashMap<u64, Iteration> {
@@ -162,10 +160,7 @@ impl DenseFrontier {
     /// Create a new dense frontier with `size` entries, initialized to `val`.
     pub fn new(size: usize, val: Iteration) -> Self {
         let data = (0..size).map(|_| AtomicU16::new(val)).collect();
-        Self {
-            data,
-            pinned: false,
-        }
+        Self { data, pinned: false }
     }
 
     /// Create from an existing graph's max node count.
@@ -187,12 +182,7 @@ impl DenseFrontier {
     }
 
     /// CAS: if current == expected, set to new. Returns true on success.
-    pub fn compare_exchange(
-        &self,
-        offset: u64,
-        expected: Iteration,
-        new: Iteration,
-    ) -> bool {
+    pub fn compare_exchange(&self, offset: u64, expected: Iteration, new: Iteration) -> bool {
         self.data
             .get(offset as usize)
             .map(|a| {
@@ -241,10 +231,12 @@ impl DenseFrontierReference {
     pub fn new(source: &DenseFrontier) -> Self {
         // We can't easily share Vec<AtomicU16> by reference in a thread-safe way
         // without Arc. For the simplified Rust port, we clone the current state.
-        let values: Vec<AtomicU16> = source.data.iter().map(|a| AtomicU16::new(a.load(Ordering::SeqCst))).collect();
-        Self {
-            data: Arc::new(values),
-        }
+        let values: Vec<AtomicU16> = source
+            .data
+            .iter()
+            .map(|a| AtomicU16::new(a.load(Ordering::SeqCst)))
+            .collect();
+        Self { data: Arc::new(values) }
     }
 }
 
@@ -816,10 +808,7 @@ mod tests {
         let mut pair = SPFrontierPair::new_dense(10);
         assert_eq!(pair.current_iter(), 0);
         // Add a node to next frontier
-        pair.add_node_to_next_frontier(InternalID {
-            table_id: 0,
-            offset: 3,
-        });
+        pair.add_node_to_next_frontier(InternalID { table_id: 0, offset: 3 });
         // Mark active and check
         pair.set_active_nodes_for_next_iter();
         assert!(pair.continue_next_iter(10));

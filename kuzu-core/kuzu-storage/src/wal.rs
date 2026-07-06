@@ -334,9 +334,9 @@ impl WAL {
                 b'F' => {
                     let page_idx = u64::deserialize(&mut cursor)?;
                     let is_free_u8 = u8::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::UpdateFsm { 
-                        page_idx, 
-                        is_free: is_free_u8 != 0 
+                    self.records.push(WALRecord::UpdateFsm {
+                        page_idx,
+                        is_free: is_free_u8 != 0,
                     });
                 }
                 b'W' => {

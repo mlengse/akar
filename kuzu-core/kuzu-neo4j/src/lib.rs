@@ -384,9 +384,10 @@ fn parse_properties(s: &str) -> Result<Vec<(String, String)>, String> {
         current.push(c);
     }
     if !current.is_empty()
-        && let Some((k, v)) = parse_property_pair(&current) {
-            props.push((k, v));
-        }
+        && let Some((k, v)) = parse_property_pair(&current)
+    {
+        props.push((k, v));
+    }
 
     Ok(props)
 }

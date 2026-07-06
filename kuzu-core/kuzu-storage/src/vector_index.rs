@@ -191,10 +191,7 @@ impl VectorIndexTable {
 
                 // Write vector data
                 if let Some(vec_data) = vectors.get(offset as usize) {
-                    let vec_bytes: Vec<u8> = vec_data
-                        .iter()
-                        .flat_map(|f| f.to_le_bytes())
-                        .collect();
+                    let vec_bytes: Vec<u8> = vec_data.iter().flat_map(|f| f.to_le_bytes()).collect();
                     let vec_len = vec_bytes.len() as u32;
                     if pos + 4 + vec_len as usize > capacity {
                         break; // Not enough room for this vector — continue on next page
@@ -267,17 +264,13 @@ impl VectorIndexTable {
             let capacity = page_data.len();
 
             while pos + 8 <= capacity {
-                let id = u64::from_le_bytes(
-                    page_data[pos..pos + 8].try_into().unwrap(),
-                ) as usize;
+                let id = u64::from_le_bytes(page_data[pos..pos + 8].try_into().unwrap()) as usize;
                 pos += 8;
 
                 if pos + 4 > capacity {
                     break;
                 }
-                let vec_len = u32::from_le_bytes(
-                    page_data[pos..pos + 4].try_into().unwrap(),
-                ) as usize;
+                let vec_len = u32::from_le_bytes(page_data[pos..pos + 4].try_into().unwrap()) as usize;
                 pos += 4;
 
                 if pos + vec_len > capacity {
@@ -287,11 +280,7 @@ impl VectorIndexTable {
                 let dims = vec_len / 8;
                 let mut vec_data = Vec::with_capacity(dims);
                 for i in 0..dims {
-                    let f = f64::from_le_bytes(
-                        page_data[pos + i * 8..pos + (i + 1) * 8]
-                            .try_into()
-                            .unwrap(),
-                    );
+                    let f = f64::from_le_bytes(page_data[pos + i * 8..pos + (i + 1) * 8].try_into().unwrap());
                     vec_data.push(f);
                 }
                 pos += vec_len;
@@ -319,8 +308,7 @@ impl VectorIndexTable {
         if self.dirty {
             self.save(bm)?;
         }
-        bm.flush_all()
-            .map_err(|e| format!("Failed to flush vector index: {e}"))
+        bm.flush_all().map_err(|e| format!("Failed to flush vector index: {e}"))
     }
 
     /// Register the vector index file with the BufferManager.
@@ -347,10 +335,7 @@ pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, String> {
                     Value::Int32(i) => result.push(*i as f64),
                     Value::Float(f) => result.push(*f as f64),
                     other => {
-                        return Err(format!(
-                            "Expected numeric value in vector list, got {:?}",
-                            other
-                        ));
+                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
                     }
                 }
             }

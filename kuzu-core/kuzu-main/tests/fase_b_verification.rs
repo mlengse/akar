@@ -50,7 +50,10 @@ fn query_column(conn: &Connection, sql: &str) -> Vec<kuzu_common::types::Value> 
 fn test_verification_merge_create_new_node() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // MERGE a non-existing node — should create it
     let msg = exec(&conn, "MERGE (n:Person {name: 'Bob', age: 30})");
@@ -66,10 +69,16 @@ fn test_verification_merge_create_new_node() {
 fn test_verification_merge_on_create_set() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // MERGE with ON CREATE SET — should override the pattern age
-    let msg = exec(&conn, "MERGE (n:Person {name: 'Alice', age: 25}) ON CREATE SET n.age = 30");
+    let msg = exec(
+        &conn,
+        "MERGE (n:Person {name: 'Alice', age: 25}) ON CREATE SET n.age = 30",
+    );
     assert!(msg.contains("Created"), "MERGE ON CREATE should create: {msg}");
 
     // Verify age was set (ON CREATE SET overrides pattern value)
@@ -81,7 +90,10 @@ fn test_verification_merge_on_create_set() {
 fn test_verification_merge_matches_existing() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // First MERGE creates
     exec(&conn, "MERGE (n:Person {name: 'Bob', age: 30})");
@@ -110,7 +122,10 @@ fn test_verification_call_show_tables() {
     assert!(result.num_rows() == 0, "Empty DB should have 0 tables");
 
     // Create some tables and CALL again
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
 
     let result = query(&conn, "CALL show_tables()");
@@ -141,7 +156,10 @@ fn test_verification_call_tables_alias() {
 fn test_verification_create_dml_basic() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // CREATE a node with properties
     let msg = exec(&conn, "CREATE (n:Person {name: 'Alice', age: 25})");
@@ -157,7 +175,10 @@ fn test_verification_create_dml_basic() {
 fn test_verification_create_dml_multiple() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Create multiple nodes
     exec(&conn, "CREATE (n:Person {name: 'Alice', age: 30})");
@@ -172,7 +193,10 @@ fn test_verification_create_dml_multiple() {
 fn test_verification_create_dml_duplicate_pk_fails() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     exec(&conn, "CREATE (n:Person {name: 'Alice', age: 30})");
 
@@ -231,15 +255,27 @@ fn test_verification_var_length_path_parse_and_bind() {
 
     // Simplest var-length path: [*]
     let result = conn.query("MATCH (a:Person)-[*]->(b:Person) RETURN a.name, b.name");
-    assert!(result.is_ok(), "Var-length path [*] should parse & bind: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Var-length path [*] should parse & bind: {:?}",
+        result.err()
+    );
 
     // Var-length path with bounds: [*1..3]
     let result = conn.query("MATCH (a:Person)-[*1..3]->(b:Person) RETURN a.name");
-    assert!(result.is_ok(), "Var-length path [*1..3] should parse & bind: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Var-length path [*1..3] should parse & bind: {:?}",
+        result.err()
+    );
 
     // Var-length path with rel variable
     let result = conn.query("MATCH (a:Person)-[r*]->(b:Person) RETURN a.name, b.name");
-    assert!(result.is_ok(), "Var-length path [r*] should parse & bind: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Var-length path [r*] should parse & bind: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -250,7 +286,10 @@ fn test_verification_var_length_path_parse_and_bind() {
 fn test_verification_merge_and_create_and_match() {
     let (_db, conn) = setup_db();
 
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     // Step 1: CREATE a node
     exec(&conn, "CREATE (n:Person {name: 'Alice', age: 25})");
@@ -277,7 +316,10 @@ fn test_verification_call_and_create() {
     assert!(result.is_success());
 
     // CREATE a table
-    exec(&conn, "CREATE NODE TABLE Product(name STRING, price INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Product(name STRING, price INT64, PRIMARY KEY (name))",
+    );
 
     // CALL show_tables after creation
     let result = query(&conn, "CALL show_tables()");
@@ -311,8 +353,14 @@ fn test_verification_multi_step_pipeline() {
     let (_db, conn) = setup_db();
 
     // Step 1: Create node table + rel table
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, city STRING, PRIMARY KEY (name))");
-    exec(&conn, "CREATE NODE TABLE City(name STRING, pop INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, city STRING, PRIMARY KEY (name))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE City(name STRING, pop INT64, PRIMARY KEY (name))",
+    );
 
     // Step 2: CALL tables
     let result = query(&conn, "CALL tables()");

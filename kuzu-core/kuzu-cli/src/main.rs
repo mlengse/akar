@@ -72,7 +72,12 @@ impl CliState {
     }
 
     fn table_names(&self) -> Vec<String> {
-        self.catalog.lock().unwrap().all_entries().map(|e| e.name().to_string()).collect()
+        self.catalog
+            .lock()
+            .unwrap()
+            .all_entries()
+            .map(|e| e.name().to_string())
+            .collect()
     }
 
     fn execute_dot_command(&mut self, cmd: &str, output: &mut dyn Write) -> Result<(), String> {
@@ -94,14 +99,20 @@ impl CliState {
             }
             "tables" => {
                 let names = self.table_names();
-                if names.is_empty() { writeln!(output, "No tables.").ok(); }
-                else { for n in names { writeln!(output, "  {n}").ok(); } }
+                if names.is_empty() {
+                    writeln!(output, "No tables.").ok();
+                } else {
+                    for n in names {
+                        writeln!(output, "  {n}").ok();
+                    }
+                }
             }
             "schema" => {
                 let cat = self.catalog.lock().unwrap();
                 let entries: Vec<_> = cat.all_entries().collect();
-                if entries.is_empty() { writeln!(output, "No tables.").ok(); }
-                else {
+                if entries.is_empty() {
+                    writeln!(output, "No tables.").ok();
+                } else {
                     for e in entries {
                         let tt = if e.is_node_table() { "NODE" } else { "REL" };
                         writeln!(output, "TABLE {} ({})", e.name(), tt).ok();
@@ -129,8 +140,12 @@ impl CliState {
                 } else {
                     let sql = format!("COPY {} FROM '{}' (HEADER true)", parts[2], parts[1].replace('\\', "/"));
                     match self.conn.query(&sql) {
-                        Ok(r) => { let _ = writeln!(output, "{}", r.result_summary()); }
-                        Err(e) => { let _ = writeln!(output, "Error: {e}"); }
+                        Ok(r) => {
+                            let _ = writeln!(output, "{}", r.result_summary());
+                        }
+                        Err(e) => {
+                            let _ = writeln!(output, "Error: {e}");
+                        }
                     }
                 }
             }
@@ -147,11 +162,15 @@ impl CliState {
                                 let _ = writeln!(output, "Exported to {}", parts[1]);
                             }
                         }
-                        Err(e) => { let _ = writeln!(output, "Query error: {e}"); }
+                        Err(e) => {
+                            let _ = writeln!(output, "Query error: {e}");
+                        }
                     }
                 }
             }
-            other => { let _ = writeln!(output, "Unknown: '{other}'. Type .help"); }
+            other => {
+                let _ = writeln!(output, "Unknown: '{other}'. Type .help");
+            }
         }
         Ok(())
     }
@@ -160,8 +179,7 @@ impl CliState {
 // ==================== Global State Bridge ====================
 
 use std::sync::Mutex as StdMutex;
-static GLOBAL_STATE: std::sync::LazyLock<StdMutex<Option<CliState>>> =
-    std::sync::LazyLock::new(|| StdMutex::new(None));
+static GLOBAL_STATE: std::sync::LazyLock<StdMutex<Option<CliState>>> = std::sync::LazyLock::new(|| StdMutex::new(None));
 
 // ==================== Rustyline Completer ====================
 
@@ -172,39 +190,53 @@ impl Completer for CypherCompleter {
     fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Result<(usize, Vec<Pair>), ReadlineError> {
         let before = &line[..pos];
         let word = before.split_whitespace().last().unwrap_or("");
-        if word.is_empty() { return Ok((pos, vec![])); }
+        if word.is_empty() {
+            return Ok((pos, vec![]));
+        }
         let mut candidates = Vec::new();
         let keywords = [
-            "MATCH", "RETURN", "WHERE", "CREATE", "DELETE", "SET", "MERGE",
-            "CALL", "FOREACH", "IN", "AS", "ORDER", "BY", "LIMIT",
-            "WITH", "UNWIND", "OPTIONAL", "EXISTS", "UNION", "ALL",
-            "AND", "OR", "NOT", "TRUE", "FALSE", "NULL", "ON",
+            "MATCH", "RETURN", "WHERE", "CREATE", "DELETE", "SET", "MERGE", "CALL", "FOREACH", "IN", "AS", "ORDER",
+            "BY", "LIMIT", "WITH", "UNWIND", "OPTIONAL", "EXISTS", "UNION", "ALL", "AND", "OR", "NOT", "TRUE", "FALSE",
+            "NULL", "ON",
         ];
         for kw in &keywords {
             if kw.starts_with(&word.to_uppercase()) {
-                candidates.push(Pair { display: kw.to_string(), replacement: kw.to_string() });
+                candidates.push(Pair {
+                    display: kw.to_string(),
+                    replacement: kw.to_string(),
+                });
             }
         }
         if let Ok(state) = GLOBAL_STATE.lock()
-            && let Some(ref s) = *state {
-                for name in s.table_names() {
-                    if name.to_lowercase().starts_with(&word.to_lowercase()) {
-                        candidates.push(Pair { display: name.clone(), replacement: name });
-                    }
+            && let Some(ref s) = *state
+        {
+            for name in s.table_names() {
+                if name.to_lowercase().starts_with(&word.to_lowercase()) {
+                    candidates.push(Pair {
+                        display: name.clone(),
+                        replacement: name,
+                    });
                 }
             }
+        }
         Ok((pos - word.len(), candidates))
     }
 }
 
 impl Hinter for CypherCompleter {
     type Hint = String;
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> { None }
+    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        None
+    }
 }
 
 impl Highlighter for CypherCompleter {
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> { Cow::Borrowed(line) }
-    fn highlight_char(&self, _line: &str, _pos: usize) -> bool { false }
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        Cow::Borrowed(line)
+    }
+    fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
+        false
+    }
 }
 
 impl Validator for CypherCompleter {
@@ -226,11 +258,18 @@ fn main() {
     tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 
     let args: Vec<String> = std::env::args().collect();
-    let db_path = if args.len() > 1 { args[1].clone() } else { ":memory:".to_string() };
+    let db_path = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        ":memory:".to_string()
+    };
 
     let state = match CliState::new(&db_path) {
         Ok(s) => s,
-        Err(e) => { eprintln!("Error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
     };
 
     // Store global state reference
@@ -252,8 +291,7 @@ fn main() {
 
 fn atty_check() -> bool {
     // Simple heuristic: if TERM is set and not "dumb", assume interactive
-    std::env::var("TERM").is_ok_and(|t| t != "dumb")
-        || std::env::var("CI").is_err()
+    std::env::var("TERM").is_ok_and(|t| t != "dumb") || std::env::var("CI").is_err()
 }
 
 // ==================== Rustyline REPL ====================
@@ -267,7 +305,10 @@ fn run_repl_rustyline(output: &mut dyn Write) {
 
     let mut rl = match Editor::with_config(config) {
         Ok(e) => e,
-        Err(e) => { let _ = writeln!(output, "Editor error: {e}"); return; }
+        Err(e) => {
+            let _ = writeln!(output, "Editor error: {e}");
+            return;
+        }
     };
     rl.set_helper(Some(CypherCompleter));
 
@@ -283,7 +324,9 @@ fn run_repl_rustyline(output: &mut dyn Write) {
         match readline {
             Ok(line) => {
                 let trimmed = line.trim().to_string();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
 
                 if trimmed.starts_with('.') {
                     rl.add_history_entry(trimmed.as_str());
@@ -291,8 +334,13 @@ fn run_repl_rustyline(output: &mut dyn Write) {
                     if let Some(ref mut s) = *state {
                         match s.execute_dot_command(&trimmed, output) {
                             Ok(_) => {}
-                            Err(e) if e == "__EXIT__" => { let _ = writeln!(output, "Bye!"); break; }
-                            Err(e) => { let _ = writeln!(output, "Error: {e}"); }
+                            Err(e) if e == "__EXIT__" => {
+                                let _ = writeln!(output, "Bye!");
+                                break;
+                            }
+                            Err(e) => {
+                                let _ = writeln!(output, "Error: {e}");
+                            }
                         }
                     }
                     continue;
@@ -303,22 +351,46 @@ fn run_repl_rustyline(output: &mut dyn Write) {
                     loop {
                         let line2 = rl.readline("  ..> ");
                         match line2 {
-                            Ok(l) => { full_query.push(' '); full_query.push_str(l.trim()); if full_query.ends_with(';') { break; } }
-                            Err(ReadlineError::Interrupted) => { let _ = writeln!(output, "^C"); full_query.clear(); break; }
+                            Ok(l) => {
+                                full_query.push(' ');
+                                full_query.push_str(l.trim());
+                                if full_query.ends_with(';') {
+                                    break;
+                                }
+                            }
+                            Err(ReadlineError::Interrupted) => {
+                                let _ = writeln!(output, "^C");
+                                full_query.clear();
+                                break;
+                            }
                             Err(ReadlineError::Eof) => break,
-                            Err(e) => { let _ = writeln!(output, "Error: {e:?}"); break; }
+                            Err(e) => {
+                                let _ = writeln!(output, "Error: {e:?}");
+                                break;
+                            }
                         }
                     }
-                    if full_query.is_empty() { continue; }
+                    if full_query.is_empty() {
+                        continue;
+                    }
                 }
 
                 rl.add_history_entry(full_query.as_str());
                 let clean = full_query.trim_end_matches(';').trim();
                 execute_query(clean, output);
             }
-            Err(ReadlineError::Interrupted) => { let _ = writeln!(output, "^C"); continue; }
-            Err(ReadlineError::Eof) => { let _ = writeln!(output, "Bye!"); break; }
-            Err(e) => { let _ = writeln!(output, "Error: {e:?}"); break; }
+            Err(ReadlineError::Interrupted) => {
+                let _ = writeln!(output, "^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                let _ = writeln!(output, "Bye!");
+                break;
+            }
+            Err(e) => {
+                let _ = writeln!(output, "Error: {e:?}");
+                break;
+            }
         }
     }
     let _ = rl.save_history(&history_file);
@@ -338,11 +410,24 @@ fn get_history_path() -> String {
 
 fn execute_query(query: &str, output: &mut dyn Write) {
     let state_ref = GLOBAL_STATE.lock().unwrap();
-    let state = match state_ref.as_ref() { Some(s) => s, None => return };
+    let state = match state_ref.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
 
     match query.to_lowercase().trim() {
-        "exit" | "quit" => { let _ = writeln!(output, "Bye!"); std::process::exit(0); }
-        "help" => { drop(state_ref); let mut s = GLOBAL_STATE.lock().unwrap(); if let Some(ref mut ss) = *s { let _ = ss.execute_dot_command(".help", output); } return; }
+        "exit" | "quit" => {
+            let _ = writeln!(output, "Bye!");
+            std::process::exit(0);
+        }
+        "help" => {
+            drop(state_ref);
+            let mut s = GLOBAL_STATE.lock().unwrap();
+            if let Some(ref mut ss) = *s {
+                let _ = ss.execute_dot_command(".help", output);
+            }
+            return;
+        }
         _ => {}
     }
 
@@ -355,10 +440,16 @@ fn execute_query(query: &str, output: &mut dyn Write) {
                     let _ = writeln!(output, "{msg}");
                 }
             } else {
-                let _ = writeln!(output, "Error: {}", result.error_message.as_deref().unwrap_or("Unknown"));
+                let _ = writeln!(
+                    output,
+                    "Error: {}",
+                    result.error_message.as_deref().unwrap_or("Unknown")
+                );
             }
         }
-        Err(e) => { let _ = writeln!(output, "Error: {e}"); }
+        Err(e) => {
+            let _ = writeln!(output, "Error: {e}");
+        }
     }
 }
 
@@ -384,18 +475,36 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
             let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
             for row in &rows {
                 for (i, v) in row.iter().enumerate() {
-                    if i < widths.len() { widths[i] = widths[i].max(v.len()); }
+                    if i < widths.len() {
+                        widths[i] = widths[i].max(v.len());
+                    }
                 }
             }
-            let hdr = format!("| {} |", headers.iter().enumerate()
-                .map(|(i, h)| format!("{:w$}", h, w = widths[i])).collect::<Vec<_>>().join(" | "));
-            let sep = format!("+{}+", widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>().join("-+-"));
+            let hdr = format!(
+                "| {} |",
+                headers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| format!("{:w$}", h, w = widths[i]))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
+            let sep = format!(
+                "+{}+",
+                widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>().join("-+-")
+            );
             let _ = writeln!(output, "{sep}");
             let _ = writeln!(output, "{hdr}");
             let _ = writeln!(output, "{sep}");
             for row in &rows {
-                let line = format!("| {} |", row.iter().enumerate()
-                    .map(|(i, v)| format!("{:w$}", v, w = widths[i])).collect::<Vec<_>>().join(" | "));
+                let line = format!(
+                    "| {} |",
+                    row.iter()
+                        .enumerate()
+                        .map(|(i, v)| format!("{:w$}", v, w = widths[i]))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                );
                 writeln!(output, "{line}").ok();
             }
             writeln!(output, "{sep}").ok();
@@ -403,8 +512,15 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
         }
         OutputMode::Csv => {
             for row in &rows {
-                let csv: Vec<String> = row.iter()
-                    .map(|v| if v.contains(',') || v.contains('"') { format!("\"{}\"", v.replace('"', "\"\"")) } else { v.clone() })
+                let csv: Vec<String> = row
+                    .iter()
+                    .map(|v| {
+                        if v.contains(',') || v.contains('"') {
+                            format!("\"{}\"", v.replace('"', "\"\""))
+                        } else {
+                            v.clone()
+                        }
+                    })
                     .collect();
                 writeln!(output, "{}", csv.join(",")).ok();
             }
@@ -412,7 +528,9 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
         OutputMode::Json => {
             writeln!(output, "[").ok();
             for (ri, row) in rows.iter().enumerate() {
-                let objs: Vec<String> = row.iter().enumerate()
+                let objs: Vec<String> = row
+                    .iter()
+                    .enumerate()
                     .map(|(i, v)| format!("\"col_{}\": \"{}\"", i, v.replace('"', "\\\"")))
                     .collect();
                 let comma = if ri < rows.len() - 1 { "," } else { "" };
@@ -425,7 +543,9 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
                 for (i, v) in row.iter().enumerate() {
                     writeln!(output, "  {}: {}", headers[i], v).ok();
                 }
-                if ri < rows.len() - 1 { writeln!(output).ok(); }
+                if ri < rows.len() - 1 {
+                    writeln!(output).ok();
+                }
             }
             writeln!(output, "({} rows)", rows.len()).ok();
         }
@@ -433,9 +553,13 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
             for i in 0..ncols {
                 writeln!(output, "{}:", headers[i]).ok();
                 for row in &rows {
-                    if let Some(v) = row.get(i) { writeln!(output, "  {v}").ok(); }
+                    if let Some(v) = row.get(i) {
+                        writeln!(output, "  {v}").ok();
+                    }
                 }
-                if i < ncols - 1 { writeln!(output).ok(); }
+                if i < ncols - 1 {
+                    writeln!(output).ok();
+                }
             }
             writeln!(output, "({} rows)", rows.len()).ok();
         }
@@ -451,8 +575,15 @@ fn export_to_csv(result: &kuzu_main::QueryResult, file_path: &str) -> Result<(),
     for chunk in &result.chunks {
         for r in 0..chunk.size {
             let row: Vec<String> = chunk.fields.iter().map(|v| fmt_val(v, r)).collect();
-            let csv: Vec<String> = row.iter()
-                .map(|v| if v.contains(',') || v.contains('"') { format!("\"{}\"", v.replace('"', "\"\"")) } else { v.clone() })
+            let csv: Vec<String> = row
+                .iter()
+                .map(|v| {
+                    if v.contains(',') || v.contains('"') {
+                        format!("\"{}\"", v.replace('"', "\"\""))
+                    } else {
+                        v.clone()
+                    }
+                })
                 .collect();
             writeln!(f, "{}", csv.join(",")).map_err(|e| format!("Write: {e}"))?;
         }
@@ -464,12 +595,23 @@ fn export_to_csv(result: &kuzu_main::QueryResult, file_path: &str) -> Result<(),
 
 fn run_script(conn: &Connection, reader: impl BufRead, output: &mut dyn Write) {
     for line in reader.lines() {
-        let line = match line { Ok(l) => l, Err(_) => break };
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
         let t = line.trim();
-        if t.is_empty() || t.starts_with("--") || t.starts_with("//") { continue; }
+        if t.is_empty() || t.starts_with("--") || t.starts_with("//") {
+            continue;
+        }
         match conn.query(t) {
-            Ok(r) => { if !r.is_success() { let _ = writeln!(output, "Error: {}", r.error_message.as_deref().unwrap_or("Unknown")); } }
-            Err(e) => { let _ = writeln!(output, "Error: {e}"); }
+            Ok(r) => {
+                if !r.is_success() {
+                    let _ = writeln!(output, "Error: {}", r.error_message.as_deref().unwrap_or("Unknown"));
+                }
+            }
+            Err(e) => {
+                let _ = writeln!(output, "Error: {e}");
+            }
         }
     }
 }
@@ -477,9 +619,12 @@ fn run_script(conn: &Connection, reader: impl BufRead, output: &mut dyn Write) {
 // ==================== Value Formatting ====================
 
 fn fmt_val(v: &kuzu_common::vector::ValueVector, row: usize) -> String {
-    if v.is_null(row) { return "NULL".into(); }
+    if v.is_null(row) {
+        return "NULL".into();
+    }
     match v.physical_type() {
-        kuzu_common::types::PhysicalTypeID::Int64 | kuzu_common::types::PhysicalTypeID::Int32
+        kuzu_common::types::PhysicalTypeID::Int64
+        | kuzu_common::types::PhysicalTypeID::Int32
         | kuzu_common::types::PhysicalTypeID::Int16 => v.get_i64(row).map_or("NULL".into(), |n| n.to_string()),
         kuzu_common::types::PhysicalTypeID::Double | kuzu_common::types::PhysicalTypeID::Float => {
             v.get_double(row).map_or("NULL".into(), |n| format!("{:.4}", n))

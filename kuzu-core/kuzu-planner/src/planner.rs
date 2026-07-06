@@ -37,16 +37,18 @@ impl QueryPlanner {
             BoundStatement::BoundCreateDml(c) => self.plan_create_dml(c),
             BoundStatement::BoundExportDatabase(e) => self.plan_export_database(e),
             BoundStatement::BoundImportDatabase(i) => self.plan_import_database(i),
-            BoundStatement::BoundCreateFtsIndex(c) => Ok(vec![LogicalOperator::CreateFtsIndex(LogicalCreateFtsIndex {
-                index_name: c.index_name,
-                table_name: c.table_name,
-                column_name: c.column_name,
-                if_not_exists: c.if_not_exists,
-                docs_table: c.docs_table,
-                terms_table: c.terms_table,
-                posting_table: c.posting_table,
-                cardinality: 1,
-            })]),
+            BoundStatement::BoundCreateFtsIndex(c) => {
+                Ok(vec![LogicalOperator::CreateFtsIndex(LogicalCreateFtsIndex {
+                    index_name: c.index_name,
+                    table_name: c.table_name,
+                    column_name: c.column_name,
+                    if_not_exists: c.if_not_exists,
+                    docs_table: c.docs_table,
+                    terms_table: c.terms_table,
+                    posting_table: c.posting_table,
+                    cardinality: 1,
+                })])
+            }
             BoundStatement::BoundCall(c) => self.plan_call(c),
             _ => Ok(Vec::new()),
         }
@@ -328,12 +330,13 @@ impl QueryPlanner {
                                 let lb = edge.lower_bound.unwrap_or(0);
                                 let ub = edge.upper_bound.unwrap_or(1);
                                 let direction = match edge.direction {
-                                    kuzu_parser::ast::EdgeDirection::LeftToRight =>
-                                        kuzu_common::enums::ExtendDirection::Fwd,
-                                    kuzu_parser::ast::EdgeDirection::RightToLeft =>
-                                        kuzu_common::enums::ExtendDirection::Bwd,
-                                    kuzu_parser::ast::EdgeDirection::Both =>
-                                        kuzu_common::enums::ExtendDirection::Both,
+                                    kuzu_parser::ast::EdgeDirection::LeftToRight => {
+                                        kuzu_common::enums::ExtendDirection::Fwd
+                                    }
+                                    kuzu_parser::ast::EdgeDirection::RightToLeft => {
+                                        kuzu_common::enums::ExtendDirection::Bwd
+                                    }
+                                    kuzu_parser::ast::EdgeDirection::Both => kuzu_common::enums::ExtendDirection::Both,
                                 };
 
                                 // Scan source node
@@ -352,7 +355,8 @@ impl QueryPlanner {
                                 // Create RecursiveExtend (consumes destination node pattern)
                                 let rel_table_ids = edge.rel_table_id.map_or(vec![], |id| vec![id]);
                                 let rel_labels = edge.label.as_ref().map_or(vec![], |l| vec![l.clone()]);
-                                let target_var = patterns_iter.peek()
+                                let target_var = patterns_iter
+                                    .peek()
                                     .and_then(|p| p.node_variable.clone())
                                     .unwrap_or_default();
                                 scan_ops.push(LogicalOperator::RecursiveExtend(LogicalRecursiveExtend {
@@ -392,15 +396,10 @@ impl QueryPlanner {
                             // Create Extend which replaces ScanRel + destination ScanNode
                             if let Some(rel_label) = &edge.label {
                                 let dest_pattern = patterns_iter.peek();
-                                let dst_var = dest_pattern
-                                    .and_then(|p| p.node_variable.clone())
-                                    .unwrap_or_default();
-                                let dst_table_name = dest_pattern
-                                    .and_then(|p| p.node_label.clone())
-                                    .unwrap_or_default();
-                                let dst_table_id = dest_pattern
-                                    .and_then(|p| p.node_table_id)
-                                    .unwrap_or(0);
+                                let dst_var = dest_pattern.and_then(|p| p.node_variable.clone()).unwrap_or_default();
+                                let dst_table_name =
+                                    dest_pattern.and_then(|p| p.node_label.clone()).unwrap_or_default();
+                                let dst_table_id = dest_pattern.and_then(|p| p.node_table_id).unwrap_or(0);
 
                                 extend_ops.push(LogicalOperator::Extend(LogicalExtend {
                                     rel_table_name: rel_label.clone(),
@@ -506,14 +505,15 @@ impl QueryPlanner {
                             }));
                         }
                         if let Some(edge) = &pattern.edge
-                            && let Some(rel_label) = &edge.label {
-                                right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
-                                    table_name: rel_label.clone(),
-                                    table_id: edge.rel_table_id.unwrap_or(0),
-                                    direction: edge.direction.clone(),
-                                    cardinality: 0,
-                                }));
-                            }
+                            && let Some(rel_label) = &edge.label
+                        {
+                            right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
+                                table_name: rel_label.clone(),
+                                table_id: edge.rel_table_id.unwrap_or(0),
+                                direction: edge.direction.clone(),
+                                cardinality: 0,
+                            }));
+                        }
                     }
                     let right_op = if right_ops.len() == 1 {
                         right_ops.into_iter().next().unwrap()
@@ -533,7 +533,6 @@ impl QueryPlanner {
                             cardinality: 0,
                         })
                     };
-
 
                     // Create the OptionalMatch tree node.
                     // The left side is the entire pipeline built so far (scans + filter + projection).
@@ -585,7 +584,7 @@ impl QueryPlanner {
                     let mut patterns_iter = c.patterns.into_iter().peekable();
                     while let Some(pattern) = patterns_iter.next() {
                         let node_var = pattern.node_variable.clone().unwrap_or_default();
-                        
+
                         if c.new_variables.iter().any(|v| v.name == node_var) {
                             delete_exprs.push(LogicalOperator::CreateNode(LogicalCreateNode {
                                 table_name: pattern.node_label.clone().unwrap_or_default(),
@@ -597,12 +596,15 @@ impl QueryPlanner {
                         }
 
                         if let Some(edge) = pattern.edge {
-                            let dest_var = patterns_iter.peek().and_then(|p| p.node_variable.clone()).unwrap_or_default();
+                            let dest_var = patterns_iter
+                                .peek()
+                                .and_then(|p| p.node_variable.clone())
+                                .unwrap_or_default();
                             let (src_node_name, dst_node_name) = match edge.direction {
                                 kuzu_parser::ast::EdgeDirection::RightToLeft => (dest_var, node_var.clone()),
                                 _ => (node_var.clone(), dest_var),
                             };
-                            
+
                             delete_exprs.push(LogicalOperator::CreateRel(LogicalCreateRel {
                                 table_name: edge.label.clone().unwrap_or_default(),
                                 table_id: edge.rel_table_id.unwrap_or(0),

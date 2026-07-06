@@ -55,13 +55,7 @@ impl ParentList {
         }
     }
 
-    pub fn new_with_cost(
-        node_id: InternalID,
-        edge_id: u64,
-        is_fwd: bool,
-        iter: u16,
-        cost: f64,
-    ) -> Self {
+    pub fn new_with_cost(node_id: InternalID, edge_id: u64, is_fwd: bool, iter: u16, cost: f64) -> Self {
         Self {
             node_id,
             edge_id,
@@ -220,11 +214,10 @@ impl BaseBFSGraph for DenseBFSGraph {
     ) {
         let offset = nbr_node_id.offset;
         if let Some(slot) = self.get_mut(offset)
-            && slot.is_none() {
-                *slot = Some(Box::new(ParentList::new(
-                    bound_node_id, edge_id, fwd_edge, iter,
-                )));
-            }
+            && slot.is_none()
+        {
+            *slot = Some(Box::new(ParentList::new(bound_node_id, edge_id, fwd_edge, iter)));
+        }
     }
 
     fn try_add_parent_with_weight(
@@ -239,7 +232,11 @@ impl BaseBFSGraph for DenseBFSGraph {
         if let Some(slot) = self.get_mut(offset) {
             if slot.is_none() {
                 *slot = Some(Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
+                    bound_node_id,
+                    edge_id,
+                    fwd_edge,
+                    0,
+                    weight,
                 )));
                 return true;
             }
@@ -247,15 +244,17 @@ impl BaseBFSGraph for DenseBFSGraph {
             let existing_cost = slot.as_ref().unwrap().cost;
             if weight < existing_cost {
                 *slot = Some(Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
+                    bound_node_id,
+                    edge_id,
+                    fwd_edge,
+                    0,
+                    weight,
                 )));
                 true
             } else if (weight - existing_cost).abs() < f64::EPSILON {
                 // Same cost — prepend
                 let old_head = slot.take();
-                let mut new_parent = Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
-                ));
+                let mut new_parent = Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight));
                 new_parent.next = old_head;
                 *slot = Some(new_parent);
                 true
@@ -279,14 +278,22 @@ impl BaseBFSGraph for DenseBFSGraph {
         if let Some(slot) = self.get_mut(offset) {
             if slot.is_none() {
                 *slot = Some(Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
+                    bound_node_id,
+                    edge_id,
+                    fwd_edge,
+                    0,
+                    weight,
                 )));
                 return true;
             }
             let existing_cost = slot.as_ref().unwrap().cost;
             if weight < existing_cost {
                 *slot = Some(Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
+                    bound_node_id,
+                    edge_id,
+                    fwd_edge,
+                    0,
+                    weight,
                 )));
                 true
             } else {
@@ -391,16 +398,12 @@ impl BaseBFSGraph for SparseBFSGraph {
             if weight < existing.cost {
                 self.data.insert(
                     offset,
-                    Box::new(ParentList::new_with_cost(
-                        bound_node_id, edge_id, fwd_edge, 0, weight,
-                    )),
+                    Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight)),
                 );
                 true
             } else if (weight - existing.cost).abs() < f64::EPSILON {
                 // Same cost — prepend
-                let mut new_parent = Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
-                ));
+                let mut new_parent = Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight));
                 new_parent.next = Some(existing);
                 self.data.insert(offset, new_parent);
                 true
@@ -411,9 +414,7 @@ impl BaseBFSGraph for SparseBFSGraph {
         } else {
             self.data.insert(
                 offset,
-                Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
-                )),
+                Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight)),
             );
             true
         }
@@ -432,9 +433,7 @@ impl BaseBFSGraph for SparseBFSGraph {
             if weight < existing.cost {
                 self.data.insert(
                     offset,
-                    Box::new(ParentList::new_with_cost(
-                        bound_node_id, edge_id, fwd_edge, 0, weight,
-                    )),
+                    Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight)),
                 );
                 true
             } else {
@@ -444,9 +443,7 @@ impl BaseBFSGraph for SparseBFSGraph {
         } else {
             self.data.insert(
                 offset,
-                Box::new(ParentList::new_with_cost(
-                    bound_node_id, edge_id, fwd_edge, 0, weight,
-                )),
+                Box::new(ParentList::new_with_cost(bound_node_id, edge_id, fwd_edge, 0, weight)),
             );
             true
         }
@@ -544,15 +541,7 @@ mod tests {
 
     #[test]
     fn test_parent_list_basic() {
-        let pl = ParentList::new(
-            InternalID {
-                table_id: 0,
-                offset: 1,
-            },
-            42,
-            true,
-            1,
-        );
+        let pl = ParentList::new(InternalID { table_id: 0, offset: 1 }, 42, true, 1);
         assert_eq!(pl.node_id.offset, 1);
         assert_eq!(pl.edge_id, 42);
         assert!(pl.is_fwd);
@@ -563,14 +552,8 @@ mod tests {
     #[test]
     fn test_dense_bfs_graph_add_single_parent() {
         let mut g = DenseBFSGraph::new(10);
-        let src = InternalID {
-            table_id: 0,
-            offset: 0,
-        };
-        let dst = InternalID {
-            table_id: 0,
-            offset: 5,
-        };
+        let src = InternalID { table_id: 0, offset: 0 };
+        let dst = InternalID { table_id: 0, offset: 5 };
         g.add_single_parent(1, src, 100, dst, true);
         assert!(g.get_parent_list_head_offset(5).is_some());
         // Second add should be no-op (single parent)
@@ -582,18 +565,9 @@ mod tests {
     #[test]
     fn test_dense_bfs_graph_add_parent_multiple() {
         let mut g = DenseBFSGraph::new(10);
-        let src1 = InternalID {
-            table_id: 0,
-            offset: 1,
-        };
-        let src2 = InternalID {
-            table_id: 0,
-            offset: 2,
-        };
-        let dst = InternalID {
-            table_id: 0,
-            offset: 5,
-        };
+        let src1 = InternalID { table_id: 0, offset: 1 };
+        let src2 = InternalID { table_id: 0, offset: 2 };
+        let dst = InternalID { table_id: 0, offset: 5 };
         g.add_parent(1, src1, 100, dst, true);
         g.add_parent(1, src2, 200, dst, true);
         let p = g.get_parent_list_head_offset(5).unwrap();
@@ -606,14 +580,8 @@ mod tests {
     #[test]
     fn test_dense_bfs_graph_weighted() {
         let mut g = DenseBFSGraph::new(10);
-        let src = InternalID {
-            table_id: 0,
-            offset: 0,
-        };
-        let dst = InternalID {
-            table_id: 0,
-            offset: 5,
-        };
+        let src = InternalID { table_id: 0, offset: 0 };
+        let dst = InternalID { table_id: 0, offset: 5 };
         // First path with weight 10
         assert!(g.try_add_single_parent_with_weight(src, 100, dst, true, 10.0));
         let p = g.get_parent_list_head_offset(5).unwrap();

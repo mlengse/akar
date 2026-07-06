@@ -62,10 +62,7 @@ impl Extension for FtsExtension {
                         Some(Value::String(s)) => s.clone(),
                         _ => return Err("tokenize: expected 1 string argument".into()),
                     };
-                    let tokens: Vec<Value> = tokenize(&text)
-                        .into_iter()
-                        .map(Value::String)
-                        .collect();
+                    let tokens: Vec<Value> = tokenize(&text).into_iter().map(Value::String).collect();
                     Ok(Value::List(tokens))
                 }),
             },
@@ -131,7 +128,6 @@ pub fn stem_word(word: &str) -> String {
     };
 
     // Rule 2: -ational → -ate, -ization → -ize, -iveness → -ive, etc.
-    
 
     if w.ends_with("ational") && w.len() > 7 {
         format!("{}ate", &w[..w.len() - 7])

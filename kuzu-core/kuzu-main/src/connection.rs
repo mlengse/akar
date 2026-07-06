@@ -19,8 +19,8 @@ use crate::prepared_statement::{PreparedStatement, substitute_params};
 use crate::query_result::QueryResult;
 use kuzu_binder::Binder;
 use kuzu_binder::bound_statement::{
-    BoundClause, BoundExpression, BoundQuery, BoundReturnClause, BoundStatement, BoundWhereClause,
-    BoundExportDatabase, BoundImportDatabase,
+    BoundClause, BoundExportDatabase, BoundExpression, BoundImportDatabase, BoundQuery, BoundReturnClause,
+    BoundStatement, BoundWhereClause,
 };
 use kuzu_common::types::Value;
 use kuzu_optimizer::Optimizer;
@@ -128,11 +128,7 @@ impl Connection {
     fn rollback_write_txn(&self, txn: &mut Transaction) -> Vec<kuzu_transaction::UndoRecord> {
         let txn_id = txn.transaction_id;
         // Remove resources (discard them) — try to get them for cleanup
-        let resources = self
-            .txn_resources
-            .lock()
-            .ok()
-            .and_then(|mut map| map.remove(&txn_id));
+        let resources = self.txn_resources.lock().ok().and_then(|mut map| map.remove(&txn_id));
 
         // Rollback via TransactionManager
         let tm = &self.database.transaction_manager;
@@ -165,9 +161,14 @@ impl Connection {
             | BoundStatement::BoundExportDatabase(_)
             | BoundStatement::BoundImportDatabase(_) => true,
             BoundStatement::BoundExplain(_) => false,
-            BoundStatement::BoundQuery(q) => {
-                q.clauses.iter().any(|c| matches!(c, kuzu_binder::bound_statement::BoundClause::BoundSet(_) | kuzu_binder::bound_statement::BoundClause::BoundDelete(_) | kuzu_binder::bound_statement::BoundClause::BoundCreate(_)))
-            }
+            BoundStatement::BoundQuery(q) => q.clauses.iter().any(|c| {
+                matches!(
+                    c,
+                    kuzu_binder::bound_statement::BoundClause::BoundSet(_)
+                        | kuzu_binder::bound_statement::BoundClause::BoundDelete(_)
+                        | kuzu_binder::bound_statement::BoundClause::BoundCreate(_)
+                )
+            }),
             _ => false,
         }
     }
@@ -181,16 +182,24 @@ impl Connection {
                 for clause in &q.clauses {
                     match clause {
                         kuzu_binder::bound_statement::BoundClause::BoundSet(s) => {
-                            for item in &s.items { table_ids.push(item.table_id); }
+                            for item in &s.items {
+                                table_ids.push(item.table_id);
+                            }
                         }
                         kuzu_binder::bound_statement::BoundClause::BoundDelete(d) => {
-                            for item in &d.items { table_ids.push(item.table_id); }
+                            for item in &d.items {
+                                table_ids.push(item.table_id);
+                            }
                         }
                         kuzu_binder::bound_statement::BoundClause::BoundCreate(c) => {
                             for p in &c.patterns {
-                                if let Some(id) = p.node_table_id { table_ids.push(id); }
+                                if let Some(id) = p.node_table_id {
+                                    table_ids.push(id);
+                                }
                                 if let Some(ref e) = p.edge {
-                                    if let Some(id) = e.rel_table_id { table_ids.push(id); }
+                                    if let Some(id) = e.rel_table_id {
+                                        table_ids.push(id);
+                                    }
                                 }
                             }
                         }
@@ -203,8 +212,12 @@ impl Connection {
             }
             BoundStatement::BoundMerge(m) => {
                 table_ids.push(m.table_id);
-                for item in &m.on_create { table_ids.push(item.table_id); }
-                for item in &m.on_match { table_ids.push(item.table_id); }
+                for item in &m.on_create {
+                    table_ids.push(item.table_id);
+                }
+                for item in &m.on_match {
+                    table_ids.push(item.table_id);
+                }
             }
             _ => {}
         }
@@ -227,7 +240,8 @@ impl Connection {
         if upper == "BEGIN" || upper == "BEGIN TRANSACTION" || upper == "BEGIN WORK" {
             let txn = self.begin_write_txn()?;
             return Ok(QueryResult::success_message(format!(
-                "Transaction started (txn#{})", txn.transaction_id
+                "Transaction started (txn#{})",
+                txn.transaction_id
             )));
         }
         if upper == "COMMIT" || upper == "COMMIT TRANSACTION" || upper == "COMMIT WORK" {
@@ -235,7 +249,13 @@ impl Connection {
             // the most recently started write transaction.
             let tm = &self.database.transaction_manager;
             // We need to know which txn to commit. For now, find it from resources.
-            let txn_ids: Vec<u64> = self.txn_resources.lock().map_err(|e| format!("Lock: {e}"))?.keys().copied().collect();
+            let txn_ids: Vec<u64> = self
+                .txn_resources
+                .lock()
+                .map_err(|e| format!("Lock: {e}"))?
+                .keys()
+                .copied()
+                .collect();
             if txn_ids.is_empty() {
                 return Err("No active transaction to commit".into());
             }
@@ -252,7 +272,13 @@ impl Connection {
             return Err("No active transaction to commit".into());
         }
         if upper == "ROLLBACK" || upper == "ROLLBACK TRANSACTION" || upper == "ROLLBACK WORK" {
-            let txn_ids: Vec<u64> = self.txn_resources.lock().map_err(|e| format!("Lock: {e}"))?.keys().copied().collect();
+            let txn_ids: Vec<u64> = self
+                .txn_resources
+                .lock()
+                .map_err(|e| format!("Lock: {e}"))?
+                .keys()
+                .copied()
+                .collect();
             if txn_ids.is_empty() {
                 return Err("No active transaction to rollback".into());
             }
@@ -281,9 +307,9 @@ impl Connection {
             .and_then(|s| s.trim().strip_prefix("="))
             .map(|s| s.trim())
         {
-            let bytes: u64 = value
-                .parse()
-                .map_err(|_| format!("Invalid spill_threshold value '{value}'. Expected a positive integer (bytes)."))?;
+            let bytes: u64 = value.parse().map_err(|_| {
+                format!("Invalid spill_threshold value '{value}'. Expected a positive integer (bytes).")
+            })?;
             self.database.set_spill_threshold(bytes);
             return Ok(QueryResult::success_message(format!(
                 "spill_threshold set to {bytes} bytes"
@@ -299,13 +325,9 @@ impl Connection {
             let enabled = match value.to_lowercase().as_str() {
                 "true" | "1" | "yes" => true,
                 "false" | "0" | "no" => false,
-                _ => return Err(
-                    "Invalid value for concurrent_writes. Use true or false.".into()
-                ),
+                _ => return Err("Invalid value for concurrent_writes. Use true or false.".into()),
             };
-            self.database
-                .transaction_manager
-                .set_concurrent_writes(enabled);
+            self.database.transaction_manager.set_concurrent_writes(enabled);
             return Ok(QueryResult::success_message(format!(
                 "concurrent_writes set to {enabled}"
             )));
@@ -324,11 +346,7 @@ impl Connection {
         //    backward compatibility (no WAL commit records for pure DDL).
         let concurrent_mode = self.database.transaction_manager.allow_concurrent_writes();
         let is_write = concurrent_mode && Self::is_write_statement(&bound);
-        let mut txn_opt: Option<Transaction> = if is_write {
-            Some(self.begin_write_txn()?)
-        } else {
-            None
-        };
+        let mut txn_opt: Option<Transaction> = if is_write { Some(self.begin_write_txn()?) } else { None };
 
         // 4. Execute the query within a transaction scope
         let query_result = self.execute_query_inner(&bound, txn_opt.as_mut());
@@ -500,8 +518,8 @@ impl Connection {
     /// Create a QueryProcessor configured with the sequence callback.
     fn create_processor(&self) -> QueryProcessor {
         let catalog = self.database.catalog.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
-            move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+            Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
                 let mut catalog = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
                 if is_nextval {
                     match catalog.get_sequence_mut(seq_name) {
@@ -517,11 +535,12 @@ impl Connection {
                         None => Err(format!("Sequence '{}' not found", seq_name)),
                     }
                 }
-            },
-        );
+            });
 
         let db = self.database.clone();
-        let subquery_fn: Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<kuzu_common::vector::DataChunk>, String> + Send + Sync> = Arc::new(
+        let subquery_fn: Arc<
+            dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<kuzu_common::vector::DataChunk>, String> + Send + Sync,
+        > = Arc::new(
             move |query: &kuzu_parser::ast::Query| -> Result<Vec<kuzu_common::vector::DataChunk>, String> {
                 let stmt = kuzu_parser::ast::Statement::Query(query.clone());
                 let binder = Binder::new(db.catalog.clone());
@@ -530,10 +549,10 @@ impl Connection {
                 let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
                 let optimizer = Optimizer::with_stats(db.stats_store.clone());
                 let optimized_plan = optimizer.optimize(logical_plan);
-                
+
                 let catalog_inner = db.catalog.clone();
-                let seq_fn_inner: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> = Arc::new(
-                    move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
+                let seq_fn_inner: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+                    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
                         let mut cat = catalog_inner.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
                         if is_nextval {
                             match cat.get_sequence_mut(seq_name) {
@@ -546,9 +565,8 @@ impl Connection {
                                 None => Err(format!("Sequence '{}' not found", seq_name)),
                             }
                         }
-                    }
-                );
-                
+                    });
+
                 let processor = QueryProcessor::with_catalog(
                     db.function_registry.clone(),
                     db.storage_manager.table_catalog(),
@@ -556,9 +574,11 @@ impl Connection {
                 )
                 .with_sequence_fn(seq_fn_inner);
                 // Note: Not attaching subquery_fn recursively to avoid complex ARC dependencies for now.
-                
-                processor.execute(&optimized_plan).map_err(|e| format!("Execute error: {e}"))
-            }
+
+                processor
+                    .execute(&optimized_plan)
+                    .map_err(|e| format!("Execute error: {e}"))
+            },
         );
 
         QueryProcessor::with_catalog(
@@ -597,7 +617,9 @@ impl Connection {
 
     /// Wait for checkpoint to finish (for CHECKPOINT command).
     fn do_sync_checkpoint(&self) -> Result<(), String> {
-        self.database.storage_manager.checkpoint_with_drain()
+        self.database
+            .storage_manager
+            .checkpoint_with_drain()
             .map_err(|e| format!("Checkpoint failed: {e}"))?;
         tracing::debug!("Sync checkpoint completed");
         Ok(())
@@ -631,15 +653,14 @@ impl Connection {
                         if col.logical_type == kuzu_common::types::LogicalTypeID::Serial {
                             match catalog.create_serial_sequence(&t.name, &col.name) {
                                 kuzu_catalog::CatalogResult::Created { .. } => {
-                                    tracing::info!(
-                                        "Created serial sequence for {}.{}",
-                                        t.name, col.name
-                                    );
+                                    tracing::info!("Created serial sequence for {}.{}", t.name, col.name);
                                 }
                                 other => {
                                     tracing::warn!(
                                         "Failed to create serial sequence for {}.{}: {:?}",
-                                        t.name, col.name, other
+                                        t.name,
+                                        col.name,
+                                        other
                                     );
                                 }
                             }
@@ -732,19 +753,14 @@ impl Connection {
                 // Auto-populate from existing table data
                 let table_catalog = self.database.storage_manager.table_catalog();
                 if let Some(table) = table_catalog.get_node_table_by_name(&idx.table_name) {
-                    let col_idx = table
-                        .columns
-                        .iter()
-                        .position(|c| c.name == idx.column_name);
+                    let col_idx = table.columns.iter().position(|c| c.name == idx.column_name);
                     if let Some(col_idx) = col_idx {
                         // Scan all rows and extract vectors
                         for row_id in 0..table.num_rows as usize {
                             if let Some(val) = table.get_value(row_id, col_idx) {
                                 if let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val) {
                                     // Get mutable access and insert into HNSW
-                                    if let Some(mut vi) = table_catalog
-                                        .get_vector_index_by_name_mut(&idx.index_name)
-                                    {
+                                    if let Some(mut vi) = table_catalog.get_vector_index_by_name_mut(&idx.index_name) {
                                         vi.hnsw_mut().insert(vec, row_id);
                                     }
                                 }
@@ -760,12 +776,10 @@ impl Connection {
                 ))))
             }
             #[cfg(not(feature = "vector-extension"))]
-            BoundStatement::BoundCreateVectorIndex(idx) => {
-                Err(format!(
-                    "Vector extension not enabled. Enable the 'vector-extension' feature to use CREATE VECTOR INDEX. Index '{}' not created.",
-                    idx.index_name
-                ))
-            }
+            BoundStatement::BoundCreateVectorIndex(idx) => Err(format!(
+                "Vector extension not enabled. Enable the 'vector-extension' feature to use CREATE VECTOR INDEX. Index '{}' not created.",
+                idx.index_name
+            )),
             BoundStatement::BoundUnion(u) => {
                 tracing::info!("UNION ALL query");
                 let planner = QueryPlanner::new();
@@ -865,9 +879,10 @@ impl Connection {
                 let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                 for (prop_name, expr) in &c.properties {
                     if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
-                        && let kuzu_parser::ast::Expression::Constant(con) = expr {
-                            values[col_idx] = ast_constant_to_value(con);
-                        }
+                        && let kuzu_parser::ast::Expression::Constant(con) = expr
+                    {
+                        values[col_idx] = ast_constant_to_value(con);
+                    }
                 }
 
                 // Auto-generate SERIAL column values for null entries
@@ -875,15 +890,14 @@ impl Connection {
                     let mut sys_catalog = self.database.catalog.lock().unwrap();
                     for (col_idx, col) in table.columns.iter().enumerate() {
                         if col.logical_type == kuzu_common::types::LogicalTypeID::Serial
-                            && matches!(values[col_idx], Value::Null) {
-                                let seq_name = kuzu_catalog::SequenceEntry::get_serial_name(
-                                    &c.table_name, &col.name,
-                                );
-                                if let Some(seq) = sys_catalog.get_sequence_mut(&seq_name) {
-                                    let next_val = seq.next_k_val(1);
-                                    values[col_idx] = Value::Int64(next_val);
-                                }
+                            && matches!(values[col_idx], Value::Null)
+                        {
+                            let seq_name = kuzu_catalog::SequenceEntry::get_serial_name(&c.table_name, &col.name);
+                            if let Some(seq) = sys_catalog.get_sequence_mut(&seq_name) {
+                                let next_val = seq.next_k_val(1);
+                                values[col_idx] = Value::Int64(next_val);
                             }
+                        }
                     }
                 }
 
@@ -901,18 +915,17 @@ impl Connection {
                 for (index_name, col_name) in &vec_indexes_on_table {
                     if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name)
                         && let Some(val) = table.get_value(row_id, col_idx)
-                            && let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val)
-                                && let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name) {
-                                    vi.hnsw_mut().insert(vec, row_id);
-                                    tracing::debug!(
-                                        "Auto-populated vector index '{}' with row {}",
-                                        index_name, row_id
-                                    );
-                                }
+                        && let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val)
+                        && let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name)
+                    {
+                        vi.hnsw_mut().insert(vec, row_id);
+                        tracing::debug!("Auto-populated vector index '{}' with row {}", index_name, row_id);
+                    }
                 }
 
                 Ok(Some(QueryResult::success_message(format!(
-                    "Created node in '{}'", c.table_name
+                    "Created node in '{}'",
+                    c.table_name
                 ))))
             }
             BoundStatement::BoundMerge(m) => {
@@ -926,9 +939,10 @@ impl Connection {
 
                 // Evaluate the PK properties from the MERGE pattern
                 let pk_col_idx = table.primary_key_column;
-                let pk_prop = m.properties.iter().find(|(name, _)| {
-                    table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false)
-                });
+                let pk_prop = m
+                    .properties
+                    .iter()
+                    .find(|(name, _)| table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false));
 
                 // Check if the node already exists by PK
                 let exists = if let Some((_, expr)) = pk_prop {
@@ -955,16 +969,18 @@ impl Connection {
                         }
                     }
                     Ok(Some(QueryResult::success_message(format!(
-                        "Matched existing node in '{}'", m.table_name
+                        "Matched existing node in '{}'",
+                        m.table_name
                     ))))
                 } else {
                     // Create new node with pattern properties + ON CREATE SET
                     let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                     for (prop_name, expr) in &m.properties {
                         if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
-                            && let kuzu_parser::ast::Expression::Constant(c) = expr {
-                                values[col_idx] = ast_constant_to_value(c);
-                            }
+                            && let kuzu_parser::ast::Expression::Constant(c) = expr
+                        {
+                            values[col_idx] = ast_constant_to_value(c);
+                        }
                     }
                     for item in &m.on_create {
                         if let kuzu_parser::ast::Expression::Constant(c) = &item.value {
@@ -976,7 +992,8 @@ impl Connection {
                     }
                     table.insert_row(values)?;
                     Ok(Some(QueryResult::success_message(format!(
-                        "Created new node in '{}'", m.table_name
+                        "Created new node in '{}'",
+                        m.table_name
                     ))))
                 }
             }
@@ -1007,63 +1024,78 @@ impl Connection {
                     "table_info" => {
                         let table_name = extract_arg_string(&c.args, 0)?;
                         let cat = self.database.catalog.lock().unwrap();
-                        let entry = cat.get_entry_by_name(&table_name)
+                        let entry = cat
+                            .get_entry_by_name(&table_name)
                             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
                         let columns = entry.columns();
                         let rows: Vec<Vec<Value>> = columns
                             .iter()
-                            .map(|col| vec![
-                                Value::String(table_name.clone()),
-                                Value::String(col.name.clone()),
-                                Value::String(format!("{:?}", col.logical_type)),
-                                Value::String(if col.is_primary_key { "NO" } else { "YES" }.into()),
-                            ])
+                            .map(|col| {
+                                vec![
+                                    Value::String(table_name.clone()),
+                                    Value::String(col.name.clone()),
+                                    Value::String(format!("{:?}", col.logical_type)),
+                                    Value::String(if col.is_primary_key { "NO" } else { "YES" }.into()),
+                                ]
+                            })
                             .collect();
                         Ok(rows)
                     }
                     "show_functions" => {
                         let registry = self.database.function_registry.lock().unwrap();
                         let funcs = registry.list_all();
-                        Ok(funcs.into_iter().map(|(name, kind)| vec![
-                            Value::String(name),
-                            Value::String(kind),
-                        ]).collect())
+                        Ok(funcs
+                            .into_iter()
+                            .map(|(name, kind)| vec![Value::String(name), Value::String(kind)])
+                            .collect())
                     }
                     "show_indexes" => {
                         let cat = self.database.catalog.lock().unwrap();
                         let indexes = cat.indexes();
-                        Ok(indexes.into_iter().map(|(name, table, kind, col)| vec![
-                            Value::String(name),
-                            Value::String(table),
-                            Value::String(kind),
-                            Value::String(col),
-                        ]).collect())
+                        Ok(indexes
+                            .into_iter()
+                            .map(|(name, table, kind, col)| {
+                                vec![
+                                    Value::String(name),
+                                    Value::String(table),
+                                    Value::String(kind),
+                                    Value::String(col),
+                                ]
+                            })
+                            .collect())
                     }
                     "show_sequences" => {
                         let cat = self.database.catalog.lock().unwrap();
                         let seqs = cat.sequences();
-                        Ok(seqs.into_iter().map(|s| vec![
-                            Value::String(s.name.clone()),
-                            Value::Int64(s.curr_val()),
-                        ]).collect())
+                        Ok(seqs
+                            .into_iter()
+                            .map(|s| vec![Value::String(s.name.clone()), Value::Int64(s.curr_val())])
+                            .collect())
                     }
                     "show_macros" => {
                         let cat = self.database.catalog.lock().unwrap();
                         let macros = cat.macros();
-                        Ok(macros.into_iter().map(|m| vec![
-                            Value::String(m.name.clone()),
-                            Value::String(
-                                m.default_args.iter()
-                                    .map(|(k, v)| format!("{k}={v}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        ]).collect())
+                        Ok(macros
+                            .into_iter()
+                            .map(|m| {
+                                vec![
+                                    Value::String(m.name.clone()),
+                                    Value::String(
+                                        m.default_args
+                                            .iter()
+                                            .map(|(k, v)| format!("{k}={v}"))
+                                            .collect::<Vec<_>>()
+                                            .join(", "),
+                                    ),
+                                ]
+                            })
+                            .collect())
                     }
                     "show_connection" => {
                         let table_name = extract_arg_string(&c.args, 0)?;
                         let cat = self.database.catalog.lock().unwrap();
-                        let info = cat.connection_info(&table_name)
+                        let info = cat
+                            .connection_info(&table_name)
                             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
                         Ok(vec![info])
                     }
@@ -1078,14 +1110,22 @@ impl Connection {
                     }
                     // ── Configuration & stats functions ──
                     "current_setting" => {
-                        let key = extract_arg_string(&c.args, 0)
-                            .unwrap_or_else(|_| String::new());
+                        let key = extract_arg_string(&c.args, 0).unwrap_or_else(|_| String::new());
                         let (k, v) = match key.to_lowercase().as_str() {
-                            "spill_threshold" => ("spill_threshold", self.database.effective_spill_threshold().to_string()),
-                            "checkpoint_threshold" => ("checkpoint_threshold", self.database.config.checkpoint_threshold.to_string()),
-                            "buffer_pool_size" => ("buffer_pool_size", self.database.config.buffer_pool_size.to_string()),
+                            "spill_threshold" => {
+                                ("spill_threshold", self.database.effective_spill_threshold().to_string())
+                            }
+                            "checkpoint_threshold" => (
+                                "checkpoint_threshold",
+                                self.database.config.checkpoint_threshold.to_string(),
+                            ),
+                            "buffer_pool_size" => {
+                                ("buffer_pool_size", self.database.config.buffer_pool_size.to_string())
+                            }
                             "max_num_threads" => ("max_num_threads", self.database.config.max_num_threads.to_string()),
-                            "concurrent_writes" => ("concurrent_writes", self.database.config.concurrent_writes.to_string()),
+                            "concurrent_writes" => {
+                                ("concurrent_writes", self.database.config.concurrent_writes.to_string())
+                            }
                             "read_only" => ("read_only", self.database.config.read_only.to_string()),
                             _ => (key.as_str(), "UNKNOWN".to_string()),
                         };
@@ -1095,7 +1135,8 @@ impl Connection {
                         let table_name = extract_arg_string(&c.args, 0)?;
                         let (row_count, storage_size) = {
                             let cat = self.database.catalog.lock().unwrap();
-                            let table_id = cat.get_table_id(&table_name)
+                            let table_id = cat
+                                .get_table_id(&table_name)
                                 .ok_or_else(|| format!("Table '{table_name}' not found"))?;
                             let stats = self.database.stats_store.lock().unwrap();
                             stats.table_stats_by_id(table_id)
@@ -1116,12 +1157,10 @@ impl Connection {
                             Value::Int64(info.free_pages as i64),
                         ]])
                     }
-                    "show_attached_databases" => {
-                        Ok(vec![vec![
-                            Value::String("main".to_string()),
-                            Value::String("local".to_string()),
-                        ]])
-                    }
+                    "show_attached_databases" => Ok(vec![vec![
+                        Value::String("main".to_string()),
+                        Value::String("local".to_string()),
+                    ]]),
                     // ── Storage introspection ──
                     "bm_info" => {
                         let bm = &self.database.storage_manager;
@@ -1159,33 +1198,59 @@ impl Connection {
                             Value::Int64(info.wal_size as i64),
                         ]])
                     }
-                    "storage_version" => {
-                        Ok(vec![vec![Value::String(kuzu_storage::version_info::STORAGE_VERSION.to_string())]])
-                    }
+                    "storage_version" => Ok(vec![vec![Value::String(
+                        kuzu_storage::version_info::STORAGE_VERSION.to_string(),
+                    )]]),
                     // ── Extension info ──
                     "show_loaded_extensions" => {
                         let reg = self.database.extension_registry.lock().unwrap();
-                        let names: Vec<Vec<Value>> = reg.names().iter().map(|n| vec![Value::String(n.clone())]).collect();
+                        let names: Vec<Vec<Value>> =
+                            reg.names().iter().map(|n| vec![Value::String(n.clone())]).collect();
                         Ok(names)
                     }
-                    "show_official_extensions" => {
-                        Ok(vec![
-                            vec![Value::String("json".into()), Value::String("JSON functions".into())],
-                            vec![Value::String("fts".into()), Value::String("Full-Text Search".into())],
-                            vec![Value::String("vector".into()), Value::String("Vector similarity search".into())],
-                            vec![Value::String("httpfs".into()), Value::String("HTTP/S3 file access".into())],
-                            vec![Value::String("duckdb".into()), Value::String("DuckDB integration".into())],
-                            vec![Value::String("sqlite".into()), Value::String("SQLite integration".into())],
-                            vec![Value::String("postgres".into()), Value::String("PostgreSQL integration".into())],
-                            vec![Value::String("delta".into()), Value::String("Delta Lake integration".into())],
-                            vec![Value::String("iceberg".into()), Value::String("Apache Iceberg integration".into())],
-                            vec![Value::String("azure".into()), Value::String("Azure Blob Storage".into())],
-                            vec![Value::String("unity_catalog".into()), Value::String("Unity Catalog integration".into())],
-                            vec![Value::String("neo4j".into()), Value::String("Neo4j integration".into())],
-                            vec![Value::String("llm".into()), Value::String("LLM integration".into())],
-                            vec![Value::String("algo".into()), Value::String("Graph algorithms".into())],
-                        ])
-                    }
+                    "show_official_extensions" => Ok(vec![
+                        vec![Value::String("json".into()), Value::String("JSON functions".into())],
+                        vec![Value::String("fts".into()), Value::String("Full-Text Search".into())],
+                        vec![
+                            Value::String("vector".into()),
+                            Value::String("Vector similarity search".into()),
+                        ],
+                        vec![
+                            Value::String("httpfs".into()),
+                            Value::String("HTTP/S3 file access".into()),
+                        ],
+                        vec![
+                            Value::String("duckdb".into()),
+                            Value::String("DuckDB integration".into()),
+                        ],
+                        vec![
+                            Value::String("sqlite".into()),
+                            Value::String("SQLite integration".into()),
+                        ],
+                        vec![
+                            Value::String("postgres".into()),
+                            Value::String("PostgreSQL integration".into()),
+                        ],
+                        vec![
+                            Value::String("delta".into()),
+                            Value::String("Delta Lake integration".into()),
+                        ],
+                        vec![
+                            Value::String("iceberg".into()),
+                            Value::String("Apache Iceberg integration".into()),
+                        ],
+                        vec![
+                            Value::String("azure".into()),
+                            Value::String("Azure Blob Storage".into()),
+                        ],
+                        vec![
+                            Value::String("unity_catalog".into()),
+                            Value::String("Unity Catalog integration".into()),
+                        ],
+                        vec![Value::String("neo4j".into()), Value::String("Neo4j integration".into())],
+                        vec![Value::String("llm".into()), Value::String("LLM integration".into())],
+                        vec![Value::String("algo".into()), Value::String("Graph algorithms".into())],
+                    ]),
                     // ── Warning context ──
                     "clear_warnings" => {
                         // Clear warnings — no-op for now
@@ -1234,7 +1299,12 @@ impl Connection {
                 self.database
                     .storage_manager
                     .create_art_index(&idx.table_name, &idx.index_name)?;
-                tracing::info!("Created '{}' index '{}' on '{}'", idx.index_type.as_str(), idx.index_name, idx.table_name);
+                tracing::info!(
+                    "Created '{}' index '{}' on '{}'",
+                    idx.index_type.as_str(),
+                    idx.index_name,
+                    idx.table_name
+                );
                 Ok(Some(QueryResult::success_message(format!(
                     "{} index '{}' created on table '{}'",
                     idx.index_type.as_str(),
@@ -1255,18 +1325,27 @@ impl Connection {
             }
             BoundStatement::BoundCreateSequence(s) => {
                 let mut catalog = self.database.catalog.lock().unwrap();
-                let result = catalog.create_sequence(s.name.clone(), s.start_with, s.increment, s.min_value, s.max_value, s.cycle);
+                let result = catalog.create_sequence(
+                    s.name.clone(),
+                    s.start_with,
+                    s.increment,
+                    s.min_value,
+                    s.max_value,
+                    s.cycle,
+                );
                 match result {
                     kuzu_catalog::CatalogResult::Created { .. } => {
                         tracing::info!("Created sequence '{}'", s.name);
                         Ok(Some(QueryResult::success_message(format!(
-                            "Sequence '{}' created", s.name
+                            "Sequence '{}' created",
+                            s.name
                         ))))
                     }
                     kuzu_catalog::CatalogResult::AlreadyExists => {
                         if s.if_not_exists {
                             Ok(Some(QueryResult::success_message(format!(
-                                "Sequence '{}' already exists", s.name
+                                "Sequence '{}' already exists",
+                                s.name
                             ))))
                         } else {
                             Err(format!("Sequence '{}' already exists", s.name))
@@ -1282,13 +1361,15 @@ impl Connection {
                     kuzu_catalog::CatalogResult::Dropped { .. } => {
                         tracing::info!("Dropped sequence '{}'", s.name);
                         Ok(Some(QueryResult::success_message(format!(
-                            "Sequence '{}' dropped", s.name
+                            "Sequence '{}' dropped",
+                            s.name
                         ))))
                     }
                     kuzu_catalog::CatalogResult::NotFound => {
                         if s.if_exists {
                             Ok(Some(QueryResult::success_message(format!(
-                                "Sequence '{}' not found", s.name
+                                "Sequence '{}' not found",
+                                s.name
                             ))))
                         } else {
                             Err(format!("Sequence '{}' not found", s.name))
@@ -1308,12 +1389,11 @@ impl Connection {
                     kuzu_catalog::CatalogResult::Created { .. } => {
                         tracing::info!("Created macro '{}'", m.name);
                         Ok(Some(QueryResult::success_message(format!(
-                            "Macro '{}' created", m.name
+                            "Macro '{}' created",
+                            m.name
                         ))))
                     }
-                    kuzu_catalog::CatalogResult::AlreadyExists => {
-                        Err(format!("Macro '{}' already exists", m.name))
-                    }
+                    kuzu_catalog::CatalogResult::AlreadyExists => Err(format!("Macro '{}' already exists", m.name)),
                     _ => Err("Failed to create macro".into()),
                 }
             }
@@ -1322,9 +1402,10 @@ impl Connection {
             BoundStatement::BoundQuery(q) => {
                 // Check if this is a FOREACH-only query — handle it directly
                 if q.clauses.len() == 1
-                    && let Some(kuzu_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first() {
-                        return self.handle_foreach(fc);
-                    }
+                    && let Some(kuzu_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first()
+                {
+                    return self.handle_foreach(fc);
+                }
                 Ok(None)
             }
             BoundStatement::BoundCreateFtsIndex(_) => Ok(None),
@@ -1353,19 +1434,25 @@ impl Connection {
                                     null_count += 1;
                                 }
                             }
-                            columns.insert(col_idx as u32, kuzu_storage::stats::ColumnStats {
-                                table_id,
-                                column_id: col_idx as u32,
-                                num_distinct_values: distinct_set.len() as u64,
-                                num_null_values: null_count,
-                                min_value: None,
-                                max_value: None,
-                            });
+                            columns.insert(
+                                col_idx as u32,
+                                kuzu_storage::stats::ColumnStats {
+                                    table_id,
+                                    column_id: col_idx as u32,
+                                    num_distinct_values: distinct_set.len() as u64,
+                                    num_null_values: null_count,
+                                    min_value: None,
+                                    max_value: None,
+                                },
+                            );
                         }
-                        stats.update_table_stats(table_id, kuzu_storage::stats::TableStats {
-                            num_rows: row_count,
-                            columns,
-                        });
+                        stats.update_table_stats(
+                            table_id,
+                            kuzu_storage::stats::TableStats {
+                                num_rows: row_count,
+                                columns,
+                            },
+                        );
                     } else {
                         // Try rel table
                         let rel_table = catalog.get_rel_table(table_id);
@@ -1384,19 +1471,25 @@ impl Connection {
                                         }
                                     }
                                 }
-                                columns.insert(col_idx as u32, kuzu_storage::stats::ColumnStats {
-                                    table_id,
-                                    column_id: col_idx as u32,
-                                    num_distinct_values: distinct_set.len() as u64,
-                                    num_null_values: null_count,
-                                    min_value: None,
-                                    max_value: None,
-                                });
+                                columns.insert(
+                                    col_idx as u32,
+                                    kuzu_storage::stats::ColumnStats {
+                                        table_id,
+                                        column_id: col_idx as u32,
+                                        num_distinct_values: distinct_set.len() as u64,
+                                        num_null_values: null_count,
+                                        min_value: None,
+                                        max_value: None,
+                                    },
+                                );
                             }
-                            stats.update_table_stats(table_id, kuzu_storage::stats::TableStats {
-                                num_rows: row_count,
-                                columns,
-                            });
+                            stats.update_table_stats(
+                                table_id,
+                                kuzu_storage::stats::TableStats {
+                                    num_rows: row_count,
+                                    columns,
+                                },
+                            );
                         }
                     }
                 }
@@ -1416,8 +1509,7 @@ impl Connection {
         use std::path::Path;
 
         let dir = Path::new(&e.file_path);
-        fs::create_dir_all(dir)
-            .map_err(|err| format!("Cannot create export directory '{}': {err}", e.file_path))?;
+        fs::create_dir_all(dir).map_err(|err| format!("Cannot create export directory '{}': {err}", e.file_path))?;
 
         let catalog = self.database.catalog.lock().unwrap();
 
@@ -1426,32 +1518,35 @@ impl Connection {
         for entry in catalog.all_entries() {
             match entry {
                 kuzu_catalog::CatalogEntry::NodeTable(t) => {
-                    let cols: Vec<String> = t.columns.iter()
+                    let cols: Vec<String> = t
+                        .columns
+                        .iter()
                         .map(|c| format!("  {} {:?}", c.name, c.logical_type))
                         .collect();
-                    let pk = t.columns.get(t.primary_key_column)
+                    let pk = t
+                        .columns
+                        .get(t.primary_key_column)
                         .map(|c| format!("PRIMARY KEY ({})", c.name))
                         .unwrap_or_default();
-                    schema.push_str(&format!("CREATE NODE TABLE {} (\n{}\n);\n\n",
-                        t.name, cols.join(",\n")));
+                    schema.push_str(&format!("CREATE NODE TABLE {} (\n{}\n);\n\n", t.name, cols.join(",\n")));
                     if !pk.is_empty() {
                         let last_comma = schema.rfind(',').unwrap_or(schema.len() - 2);
                         schema.replace_range(last_comma..last_comma + 1, &format!("\n  {pk},"));
                     }
                 }
                 kuzu_catalog::CatalogEntry::RelTable(t) => {
-                    let cols: Vec<String> = t.columns.iter()
+                    let cols: Vec<String> = t
+                        .columns
+                        .iter()
                         .map(|c| format!("  {} {:?}", c.name, c.logical_type))
                         .collect();
-                    schema.push_str(&format!("CREATE REL TABLE {} (\n{}\n);\n\n",
-                        t.name, cols.join(",\n")));
+                    schema.push_str(&format!("CREATE REL TABLE {} (\n{}\n);\n\n", t.name, cols.join(",\n")));
                 }
                 _ => {}
             }
         }
 
-        fs::write(dir.join("schema.cypher"), &schema)
-            .map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
+        fs::write(dir.join("schema.cypher"), &schema).map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
 
         // Generate copy.cypher (data export)
         if !e.schema_only {
@@ -1468,13 +1563,13 @@ impl Connection {
                     copy.push_str(&format!("COPY {} FROM '{}';\n", table_name, file_name));
                 }
             }
-            fs::write(dir.join("copy.cypher"), &copy)
-                .map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
+            fs::write(dir.join("copy.cypher"), &copy).map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
         }
 
         tracing::info!("Exported database to '{}'", e.file_path);
         Ok(Some(QueryResult::success_message(format!(
-            "Database exported to '{}'", e.file_path
+            "Database exported to '{}'",
+            e.file_path
         ))))
     }
 
@@ -1506,11 +1601,15 @@ impl Connection {
 
         tracing::info!("Imported database from '{}'", i.file_path);
         Ok(Some(QueryResult::success_message(format!(
-            "Database imported from '{}'", i.file_path
+            "Database imported from '{}'",
+            i.file_path
         ))))
     }
 
-    fn handle_foreach(&self, fc: &kuzu_binder::bound_statement::BoundForeachClause) -> Result<Option<QueryResult>, String> {
+    fn handle_foreach(
+        &self,
+        fc: &kuzu_binder::bound_statement::BoundForeachClause,
+    ) -> Result<Option<QueryResult>, String> {
         tracing::info!("FOREACH '{}'", fc.variable);
 
         // Evaluate the list expression
@@ -1622,11 +1721,7 @@ fn substitute_in_bound_expr(
 }
 
 /// Substitute a FOREACH loop variable with a concrete value in a BoundStatement.
-fn substitute_foreach_var(
-    bound: &BoundStatement,
-    var_name: &str,
-    val: &Value,
-) -> Result<BoundStatement, String> {
+fn substitute_foreach_var(bound: &BoundStatement, var_name: &str, val: &Value) -> Result<BoundStatement, String> {
     match bound {
         BoundStatement::BoundCreateDml(c) => {
             let new_props: Vec<(String, kuzu_parser::ast::Expression)> = c
@@ -1637,19 +1732,23 @@ fn substitute_foreach_var(
                     (k.clone(), new_v)
                 })
                 .collect();
-            Ok(BoundStatement::BoundCreateDml(kuzu_binder::bound_statement::BoundCreateDml {
-                table_name: c.table_name.clone(),
-                table_id: c.table_id,
-                properties: new_props,
-            }))
+            Ok(BoundStatement::BoundCreateDml(
+                kuzu_binder::bound_statement::BoundCreateDml {
+                    table_name: c.table_name.clone(),
+                    table_id: c.table_id,
+                    properties: new_props,
+                },
+            ))
         }
         BoundStatement::BoundQuery(q) => {
             let mut new_clauses = Vec::new();
             for clause in &q.clauses {
                 match clause {
                     kuzu_binder::bound_statement::BoundClause::BoundSet(s) => {
-                        let new_items: Vec<_> = s.items.iter().map(|item| {
-                            kuzu_binder::bound_statement::BoundSetItem {
+                        let new_items: Vec<_> = s
+                            .items
+                            .iter()
+                            .map(|item| kuzu_binder::bound_statement::BoundSetItem {
                                 property: substitute_var_in_expr(&item.property, var_name, val),
                                 value: substitute_var_in_expr(&item.value, var_name, val),
                                 column_name: item.column_name.clone(),
@@ -1657,10 +1756,10 @@ fn substitute_foreach_var(
                                 table_name: item.table_name.clone(),
                                 table_id: item.table_id,
                                 is_node: item.is_node,
-                            }
-                        }).collect();
+                            })
+                            .collect();
                         new_clauses.push(kuzu_binder::bound_statement::BoundClause::BoundSet(
-                            kuzu_binder::bound_statement::BoundSetClause { items: new_items }
+                            kuzu_binder::bound_statement::BoundSetClause { items: new_items },
                         ));
                     }
                     other => new_clauses.push(other.clone()),
@@ -1677,35 +1776,28 @@ fn substitute_foreach_var(
 }
 
 /// Substitute a variable reference with a constant Value in an AST expression.
-fn substitute_var_in_expr(expr: &kuzu_parser::ast::Expression, var_name: &str, val: &Value) -> kuzu_parser::ast::Expression {
+fn substitute_var_in_expr(
+    expr: &kuzu_parser::ast::Expression,
+    var_name: &str,
+    val: &Value,
+) -> kuzu_parser::ast::Expression {
     match expr {
-        kuzu_parser::ast::Expression::Variable(name) if name == var_name => {
-            value_to_ast_constant(val)
-        }
-        kuzu_parser::ast::Expression::BinaryOp(op, left, right) => {
-            kuzu_parser::ast::Expression::BinaryOp(
-                *op,
-                Box::new(substitute_var_in_expr(left, var_name, val)),
-                Box::new(substitute_var_in_expr(right, var_name, val)),
-            )
-        }
+        kuzu_parser::ast::Expression::Variable(name) if name == var_name => value_to_ast_constant(val),
+        kuzu_parser::ast::Expression::BinaryOp(op, left, right) => kuzu_parser::ast::Expression::BinaryOp(
+            *op,
+            Box::new(substitute_var_in_expr(left, var_name, val)),
+            Box::new(substitute_var_in_expr(right, var_name, val)),
+        ),
         kuzu_parser::ast::Expression::UnaryOp(op, inner) => {
-            kuzu_parser::ast::Expression::UnaryOp(
-                *op,
-                Box::new(substitute_var_in_expr(inner, var_name, val)),
-            )
+            kuzu_parser::ast::Expression::UnaryOp(*op, Box::new(substitute_var_in_expr(inner, var_name, val)))
         }
         kuzu_parser::ast::Expression::List(items) => {
-            kuzu_parser::ast::Expression::List(
-                items.iter().map(|i| substitute_var_in_expr(i, var_name, val)).collect(),
-            )
+            kuzu_parser::ast::Expression::List(items.iter().map(|i| substitute_var_in_expr(i, var_name, val)).collect())
         }
-        kuzu_parser::ast::Expression::PropertyAccess(obj, prop) => {
-            kuzu_parser::ast::Expression::PropertyAccess(
-                Box::new(substitute_var_in_expr(obj, var_name, val)),
-                prop.clone(),
-            )
-        }
+        kuzu_parser::ast::Expression::PropertyAccess(obj, prop) => kuzu_parser::ast::Expression::PropertyAccess(
+            Box::new(substitute_var_in_expr(obj, var_name, val)),
+            prop.clone(),
+        ),
         other => other.clone(),
     }
 }
@@ -1769,11 +1861,14 @@ fn extract_arg_string(args: &[kuzu_parser::ast::Expression], index: usize) -> Re
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
 #[allow(dead_code)]
 fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> kuzu_common::vector::DataChunk {
-    use kuzu_common::vector::ValueVector;
     use kuzu_common::types::PhysicalTypeID;
+    use kuzu_common::vector::ValueVector;
 
     if rows.is_empty() {
-        let fields = column_names.iter().map(|_| ValueVector::new(PhysicalTypeID::String, 0)).collect();
+        let fields = column_names
+            .iter()
+            .map(|_| ValueVector::new(PhysicalTypeID::String, 0))
+            .collect();
         let mut chunk = kuzu_common::vector::DataChunk::new(fields);
         chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
         return chunk;
@@ -2182,7 +2277,11 @@ mod integration_tests {
         assert!(ceil_result.is_ok(), "ceil() should work: {:?}", ceil_result);
         // Test ceiling alias
         let ceiling_result = conn.query("RETURN ceiling(3) AS v");
-        assert!(ceiling_result.is_ok(), "ceiling() alias should work: {:?}", ceiling_result);
+        assert!(
+            ceiling_result.is_ok(),
+            "ceiling() alias should work: {:?}",
+            ceiling_result
+        );
         // Test upper/lower aliases
         let upper_result = conn.query("RETURN upper('hello') AS v");
         assert!(upper_result.is_ok(), "upper() should work: {:?}", upper_result);
@@ -2436,7 +2535,9 @@ mod integration_tests {
             let wal = db.storage_manager.wal().lock().unwrap();
             // No Checkpoint markers since auto-checkpoint is disabled
             assert!(
-                wal.records().iter().all(|r| matches!(r, kuzu_storage::wal::WALRecord::Commit { .. })),
+                wal.records()
+                    .iter()
+                    .all(|r| matches!(r, kuzu_storage::wal::WALRecord::Commit { .. })),
                 "WAL should have only Commit records (no Checkpoint)"
             );
             assert_eq!(wal.len(), 3, "WAL has 1 Commit record per write operation");
@@ -2509,7 +2610,11 @@ mod merge_tests {
     fn test_merge_creates_new_node() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // MERGE a non-existing node — should create it
         let result = exec_ok(&conn, "MERGE (n:Person {name: 'Alice', age: 30})");
@@ -2525,7 +2630,11 @@ mod merge_tests {
     fn test_merge_matches_existing_node() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // First insert a node
         let csv_path = _dir.path().join("people.csv");
@@ -2546,11 +2655,16 @@ mod merge_tests {
     fn test_merge_on_create_sets_properties() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // MERGE with ON CREATE SET — for a new node, the SET should apply
-        let result = exec_ok(&conn,
-            "MERGE (n:Person {name: 'Bob', age: 25}) ON CREATE SET n.age = 26"
+        let result = exec_ok(
+            &conn,
+            "MERGE (n:Person {name: 'Bob', age: 25}) ON CREATE SET n.age = 26",
         );
         assert!(result.is_ok(), "MERGE ON CREATE should succeed: {:?}", result);
 
@@ -2564,7 +2678,11 @@ mod merge_tests {
     fn test_merge_parse_error_on_bad_syntax() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // MERGE without pattern
         let result = exec_ok(&conn, "MERGE");
@@ -2613,14 +2731,21 @@ mod call_tests {
     #[test]
     fn test_call_show_tables_with_tables() {
         let (_dir, _db, conn) = setup_db();
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
         exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
 
         let result = exec_ok(&conn, "CALL show_tables()");
         assert!(result.is_ok(), "CALL show_tables() with tables: {:?}", result);
         // The result should mention the table names
         let out = result.unwrap().to_lowercase();
-        assert!(out.contains("person") || out.contains("city"), "Should list tables: {out}");
+        assert!(
+            out.contains("person") || out.contains("city"),
+            "Should list tables: {out}"
+        );
     }
 
     #[test]
@@ -2674,7 +2799,11 @@ mod create_dml_tests {
     fn test_create_dml_basic() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // CREATE a node with properties
         let result = exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})");
@@ -2690,7 +2819,11 @@ mod create_dml_tests {
     fn test_create_dml_multiple_nodes() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // Create multiple nodes sequentially
         exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
@@ -2734,7 +2867,11 @@ mod create_dml_tests {
 
         // Use name as the first column (PK) since RETURN expression mapping
         // uses column index 0 for the first projected expression
-        exec_ok(&conn, "CREATE NODE TABLE Product(name STRING, id INT64, price INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Product(name STRING, id INT64, price INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // CREATE with various property types
         exec_ok(&conn, "CREATE (p:Product {name: 'Laptop', id: 1, price: 999})").unwrap();
@@ -2751,7 +2888,11 @@ mod create_dml_tests {
     fn test_create_dml_empty_properties() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // CREATE with no properties (all fields default to null)
         let result = exec_ok(&conn, "CREATE (n:Person {name: 'NullTest', age: 99})");
@@ -2765,7 +2906,11 @@ mod create_dml_tests {
     fn test_create_dml_duplicate_pk_fails() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         exec_ok(&conn, "CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
 
@@ -2817,7 +2962,11 @@ mod foreach_tests {
     fn test_foreach_in_match_context() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // FOREACH in a MATCH context
         let result = exec_ok(&conn, "MATCH (n:Person) FOREACH (x IN [1] | SET n.age = 99)");
@@ -2897,12 +3046,21 @@ mod subquery_tests {
     fn test_exists_subquery_in_where() {
         let (_dir, _db, conn) = setup_db();
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
-        exec_ok(&conn, "CREATE NODE TABLE City(name STRING, pop INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE City(name STRING, pop INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // EXISTS subquery in WHERE — should parse and bind
-        let result = exec_ok(&conn,
-            "MATCH (a:Person) WHERE EXISTS { MATCH (b:City) WHERE b.pop > 1000 } RETURN a.name"
+        let result = exec_ok(
+            &conn,
+            "MATCH (a:Person) WHERE EXISTS { MATCH (b:City) WHERE b.pop > 1000 } RETURN a.name",
         );
         assert!(result.is_ok(), "EXISTS subquery should work: {:?}", result);
     }
@@ -2922,7 +3080,6 @@ mod subquery_tests {
         let bound = kuzu_binder::Binder::new(conn.database.catalog.clone()).bind(parsed.unwrap());
         assert!(bound.is_ok(), "EXISTS should bind: {:?}", bound);
     }
-
 }
 
 // =========================================================================
@@ -2965,7 +3122,11 @@ mod fase_a_verification {
     fn test_verification_insert_and_reopen() {
         let (dir, _db, conn) = setup_test_db(-1);
 
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // Insert 100 rows via CSV
         let csv_path = dir.path().join("people.csv");
@@ -2995,7 +3156,11 @@ mod fase_a_verification {
         let conn = Connection::new(&database);
 
         // Create the same schema and verify we can insert fresh data
-        exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
+        exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+        )
+        .unwrap();
 
         // Insert new data
         let csv_path2 = dir.path().join("people2.csv");
@@ -3073,9 +3238,10 @@ mod fase_a_verification {
             // WAL may have Commit records if threshold wasn't exceeded.
             // No Checkpoint marker means no checkpoint ran — which is fine
             // with a high threshold.
-            let has_checkpoint = wal.records().iter().any(|r| {
-                matches!(r, kuzu_storage::wal::WALRecord::Checkpoint)
-            });
+            let has_checkpoint = wal
+                .records()
+                .iter()
+                .any(|r| matches!(r, kuzu_storage::wal::WALRecord::Checkpoint));
             if !has_checkpoint {
                 // WAL has Commit records (one per DDL/DML operation)
                 assert!(!wal.is_empty(), "WAL should have at least commit records");
@@ -3100,13 +3266,11 @@ mod fase_a_verification {
             let catalog = db.storage_manager.table_catalog();
             catalog.create_node_table(
                 "T".into(),
-                vec![
-                    kuzu_storage::ColumnDefinition {
-                        name: "id".into(),
-                        logical_type: kuzu_common::types::LogicalTypeID::Int64,
-                        is_primary_key: true,
-                    },
-                ],
+                vec![kuzu_storage::ColumnDefinition {
+                    name: "id".into(),
+                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                    is_primary_key: true,
+                }],
             );
         }
 
@@ -3147,7 +3311,10 @@ mod fase_a_verification {
     #[test]
     fn test_analyze_all_tables() {
         let (_dir, _db, conn) = setup_test_db(-1);
-        let _ = exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))");
+        let _ = exec_ok(
+            &conn,
+            "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))",
+        );
         let _ = exec_ok(&conn, "CREATE (:Person {name: 'Alice', age: 30})");
         let _ = exec_ok(&conn, "CREATE (:Person {name: 'Bob', age: 25})");
 

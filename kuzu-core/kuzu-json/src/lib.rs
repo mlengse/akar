@@ -36,8 +36,8 @@ impl Extension for JsonExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::ScalarFunction;
         use kuzu_common::types::Value;
+        use kuzu_function::registry::ScalarFunction;
         use std::sync::Arc;
 
         let ext_fn = |name: &str, f: Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>| {
@@ -49,73 +49,135 @@ impl Extension for JsonExtension {
 
         context.register_scalar_function(
             "json_extract",
-            ext_fn("json_extract", Arc::new(|args| {
-                if args.len() < 2 { return Err("json_extract requires 2 args".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                let path = match &args[1] { Value::String(s) => s, _ => return Err("arg 2 must be string".into()) };
-                match crate::json_extract_value(json, path)? {
-                    Some(s) => Ok(Value::String(s)),
-                    None => Ok(Value::Null),
-                }
-            })),
+            ext_fn(
+                "json_extract",
+                Arc::new(|args| {
+                    if args.len() < 2 {
+                        return Err("json_extract requires 2 args".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    let path = match &args[1] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 2 must be string".into()),
+                    };
+                    match crate::json_extract_value(json, path)? {
+                        Some(s) => Ok(Value::String(s)),
+                        None => Ok(Value::Null),
+                    }
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_array_length",
-            ext_fn("json_array_length", Arc::new(|args| {
-                if args.is_empty() { return Err("json_array_length requires 1 arg".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                let len = crate::json_array_length_of(json)?;
-                Ok(Value::Int64(len as i64))
-            })),
+            ext_fn(
+                "json_array_length",
+                Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("json_array_length requires 1 arg".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    let len = crate::json_array_length_of(json)?;
+                    Ok(Value::Int64(len as i64))
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_valid",
-            ext_fn("json_valid", Arc::new(|args| {
-                if args.is_empty() { return Err("json_valid requires 1 arg".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                Ok(Value::Bool(crate::is_valid_json(json)))
-            })),
+            ext_fn(
+                "json_valid",
+                Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("json_valid requires 1 arg".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    Ok(Value::Bool(crate::is_valid_json(json)))
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_contains",
-            ext_fn("json_contains", Arc::new(|args| {
-                if args.len() < 2 { return Err("json_contains requires 2 args".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                let needle = match &args[1] { Value::String(s) => s, _ => return Err("arg 2 must be string".into()) };
-                Ok(Value::Bool(crate::json_contains_value(json, needle)?))
-            })),
+            ext_fn(
+                "json_contains",
+                Arc::new(|args| {
+                    if args.len() < 2 {
+                        return Err("json_contains requires 2 args".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    let needle = match &args[1] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 2 must be string".into()),
+                    };
+                    Ok(Value::Bool(crate::json_contains_value(json, needle)?))
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_keys",
-            ext_fn("json_keys", Arc::new(|args| {
-                if args.is_empty() { return Err("json_keys requires 1 arg".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                let keys = crate::json_keys_of(json)?;
-                let vals: Vec<Value> = keys.into_iter().map(Value::String).collect();
-                Ok(Value::List(vals))
-            })),
+            ext_fn(
+                "json_keys",
+                Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("json_keys requires 1 arg".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    let keys = crate::json_keys_of(json)?;
+                    let vals: Vec<Value> = keys.into_iter().map(Value::String).collect();
+                    Ok(Value::List(vals))
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_structure",
-            ext_fn("json_structure", Arc::new(|args| {
-                if args.is_empty() { return Err("json_structure requires 1 arg".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                Ok(Value::String(crate::json_structure_of(json)?))
-            })),
+            ext_fn(
+                "json_structure",
+                Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("json_structure requires 1 arg".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    Ok(Value::String(crate::json_structure_of(json)?))
+                }),
+            ),
         );
 
         context.register_scalar_function(
             "json_type",
-            ext_fn("json_type", Arc::new(|args| {
-                if args.is_empty() { return Err("json_type requires 1 arg".into()); }
-                let json = match &args[0] { Value::String(s) => s, _ => return Err("arg 1 must be string".into()) };
-                Ok(Value::String(crate::json_type_of(json)?.to_string()))
-            })),
+            ext_fn(
+                "json_type",
+                Arc::new(|args| {
+                    if args.is_empty() {
+                        return Err("json_type requires 1 arg".into());
+                    }
+                    let json = match &args[0] {
+                        Value::String(s) => s,
+                        _ => return Err("arg 1 must be string".into()),
+                    };
+                    Ok(Value::String(crate::json_type_of(json)?.to_string()))
+                }),
+            ),
         );
 
         tracing::info!("JSON extension loaded: 7 functions registered");

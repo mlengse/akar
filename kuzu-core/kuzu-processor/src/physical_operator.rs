@@ -114,9 +114,7 @@ impl PhysicalOperatorExec for PhysicalSemiMasker {
         for i in 0..num_rows {
             if !field.is_null(i) {
                 // Extract the offset from the INTERNAL_ID value
-                let offset = u64::from_le_bytes(
-                    field.data()[i * 8..i * 8 + 8].try_into().unwrap_or([0u8; 8]),
-                );
+                let offset = u64::from_le_bytes(field.data()[i * 8..i * 8 + 8].try_into().unwrap_or([0u8; 8]));
                 self.mask.mask(offset);
             }
         }
@@ -165,7 +163,6 @@ impl PhysicalScan {
         }
     }
 
-
     /// Set column IDs to scan. These map to column indices in the table data.
     pub fn with_columns(mut self, column_ids: Vec<u32>) -> Self {
         self.column_ids = column_ids;
@@ -191,7 +188,6 @@ impl PhysicalScan {
         self.fts_query = Some(fts_query);
         self
     }
-
 
     /// Convert a Value to bytes in a ValueVector at the given row index.
     fn write_value_to_vector(v: &mut ValueVector, row: usize, val: &Value) {
@@ -373,11 +369,7 @@ impl PhysicalOperatorExec for PhysicalScan {
                         let row_idx = doc_id as usize;
                         if row_idx < num_rows {
                             if let Some(ref filter) = row_filter {
-                                if filter[row_idx] {
-                                    Some(row_idx)
-                                } else {
-                                    None
-                                }
+                                if filter[row_idx] { Some(row_idx) } else { None }
                             } else {
                                 Some(row_idx)
                             }
@@ -434,7 +426,6 @@ impl PhysicalOperatorExec for PhysicalScan {
                 fields.push(v);
             }
 
-
             let names: Vec<String> = cols_to_scan
                 .iter()
                 .filter_map(|&ci| self.table_columns.get(ci).map(|c| c.name.clone()))
@@ -480,8 +471,10 @@ impl PhysicalOperatorExec for PhysicalScanRel {
             let mut fields: Vec<ValueVector> = Vec::with_capacity(num_cols);
             for col in 0..num_cols {
                 // Default to Int64; column definitions provide accurate types when available
-                let phys_type = self.table_columns.get(col).map(|c| {
-                    match c.logical_type {
+                let phys_type = self
+                    .table_columns
+                    .get(col)
+                    .map(|c| match c.logical_type {
                         kuzu_common::types::LogicalTypeID::Int64 => PhysicalTypeID::Int64,
                         kuzu_common::types::LogicalTypeID::Int32 => PhysicalTypeID::Int32,
                         kuzu_common::types::LogicalTypeID::Double => PhysicalTypeID::Double,
@@ -489,8 +482,8 @@ impl PhysicalOperatorExec for PhysicalScanRel {
                         kuzu_common::types::LogicalTypeID::Bool => PhysicalTypeID::Bool,
                         kuzu_common::types::LogicalTypeID::Float => PhysicalTypeID::Float,
                         _ => PhysicalTypeID::Int64,
-                    }
-                }).unwrap_or(PhysicalTypeID::Int64);
+                    })
+                    .unwrap_or(PhysicalTypeID::Int64);
                 let mut v = ValueVector::new(phys_type, num_rows.max(1));
                 for row in 0..num_rows {
                     if let Some(val) = data[col].get(row) {
@@ -503,7 +496,11 @@ impl PhysicalOperatorExec for PhysicalScanRel {
             let names: Vec<String> = (0..num_cols)
                 .filter_map(|ci| self.table_columns.get(ci).map(|c| c.name.clone()))
                 .collect();
-            Ok(vec![DataChunk { fields, size: num_rows, field_names: names }])
+            Ok(vec![DataChunk {
+                fields,
+                size: num_rows,
+                field_names: names,
+            }])
         } else {
             Ok(vec![DataChunk::new(vec![])])
         }
@@ -604,11 +601,14 @@ impl PhysicalFilter {
                 // Simplified: evaluate the object expression, return mask
                 Self::evaluate_expression_legacy(obj, chunk)
             }
-            Expression::FunctionCall(_, _) | Expression::List(_) | Expression::Map(_) | Expression::Parameter(_)
-            | Expression::ExistsSubquery(_) | Expression::Case(_) | Expression::Star
-            | Expression::ListPredicate { .. } => {
-                Ok(vec![true; chunk.size])
-            }
+            Expression::FunctionCall(_, _)
+            | Expression::List(_)
+            | Expression::Map(_)
+            | Expression::Parameter(_)
+            | Expression::ExistsSubquery(_)
+            | Expression::Case(_)
+            | Expression::Star
+            | Expression::ListPredicate { .. } => Ok(vec![true; chunk.size]),
         }
     }
 }
@@ -700,7 +700,11 @@ impl PhysicalOperatorExec for PhysicalProjection {
                     .iter()
                     .filter_map(|&i| chunk.field_names.get(i).cloned())
                     .collect();
-                DataChunk { fields, size, field_names: names }
+                DataChunk {
+                    fields,
+                    size,
+                    field_names: names,
+                }
             })
             .collect();
 
@@ -839,7 +843,9 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
                 indices.sort_by(|a, b| {
                     for &(col, ascending) in &self.sort_keys {
                         let col = col as usize;
-                        if col >= num_fields { continue; }
+                        if col >= num_fields {
+                            continue;
+                        }
                         let cmp = value_cmp(&all_values[col][*a].0, &all_values[col][*b].0);
                         if cmp != std::cmp::Ordering::Equal {
                             return if ascending { cmp } else { cmp.reverse() };
@@ -912,7 +918,9 @@ const RADIX_BUCKETS: usize = 1 << RADIX_BITS; // 256
 /// (converted to u64 with sign flip so negative values sort before positive).
 fn radix_sort_indices(indices: &mut [usize], keys: &[i64]) {
     let len = indices.len();
-    if len < 2 { return; }
+    if len < 2 {
+        return;
+    }
 
     let mut tmp_indices = vec![0usize; len];
     let mut tmp_keys = vec![0u64; len];
@@ -979,7 +987,9 @@ impl BlockMergeSorter {
     /// `all_values` is a per-column vector of (value, is_null).
     pub fn sort(&self, all_values: &[Vec<(Value, bool)>], num_fields: usize) -> Vec<usize> {
         let total_rows = all_values[0].len();
-        if total_rows == 0 { return Vec::new(); }
+        if total_rows == 0 {
+            return Vec::new();
+        }
 
         let num_blocks = (total_rows + self.block_size - 1) / self.block_size;
 
@@ -1007,21 +1017,36 @@ impl BlockMergeSorter {
         self.k_way_merge(&blocks, all_values, num_fields, total_rows)
     }
 
-    fn sort_block(&self, indices: &mut [usize], all_values: &[Vec<(Value, bool)>], num_fields: usize, _start: usize, _end: usize) {
+    fn sort_block(
+        &self,
+        indices: &mut [usize],
+        all_values: &[Vec<(Value, bool)>],
+        num_fields: usize,
+        _start: usize,
+        _end: usize,
+    ) {
         Self::sort_block_static(indices, all_values, num_fields, &self.sort_keys);
     }
 
-    fn sort_block_static(indices: &mut [usize], all_values: &[Vec<(Value, bool)>], num_fields: usize, sort_keys: &[(u32, bool)]) {
+    fn sort_block_static(
+        indices: &mut [usize],
+        all_values: &[Vec<(Value, bool)>],
+        num_fields: usize,
+        sort_keys: &[(u32, bool)],
+    ) {
         if sort_keys.is_empty() {
             return;
         }
         let (col, ascending) = sort_keys[0];
         let col = col as usize;
-        if col >= num_fields { return; }
+        if col >= num_fields {
+            return;
+        }
 
         // Try radix sort for Int64 keys
         if is_radix_eligible(&all_values[col]) {
-            let keys: Vec<i64> = indices.iter()
+            let keys: Vec<i64> = indices
+                .iter()
                 .map(|&i| match &all_values[col][i].0 {
                     Value::Int64(v) => *v,
                     _ => i64::MAX, // NULLs sort last
@@ -1036,7 +1061,9 @@ impl BlockMergeSorter {
                 indices.sort_by(|a, b| {
                     for &(k, asc) in sort_keys {
                         let k = k as usize;
-                        if k >= num_fields { continue; }
+                        if k >= num_fields {
+                            continue;
+                        }
                         let cmp = value_cmp(&all_values[k][*a].0, &all_values[k][*b].0);
                         if cmp != std::cmp::Ordering::Equal {
                             return if asc { cmp } else { cmp.reverse() };
@@ -1050,7 +1077,9 @@ impl BlockMergeSorter {
             indices.sort_by(|a, b| {
                 for &(k, ascending) in sort_keys {
                     let k = k as usize;
-                    if k >= num_fields { continue; }
+                    if k >= num_fields {
+                        continue;
+                    }
                     let cmp = value_cmp(&all_values[k][*a].0, &all_values[k][*b].0);
                     if cmp != std::cmp::Ordering::Equal {
                         return if ascending { cmp } else { cmp.reverse() };
@@ -1062,7 +1091,13 @@ impl BlockMergeSorter {
     }
 
     /// K-way merge of sorted blocks using linear scan for minimum.
-    fn k_way_merge(&self, blocks: &[Vec<usize>], all_values: &[Vec<(Value, bool)>], num_fields: usize, total_rows: usize) -> Vec<usize> {
+    fn k_way_merge(
+        &self,
+        blocks: &[Vec<usize>],
+        all_values: &[Vec<(Value, bool)>],
+        num_fields: usize,
+        total_rows: usize,
+    ) -> Vec<usize> {
         let mut result = Vec::with_capacity(total_rows);
         let mut positions: Vec<usize> = vec![0usize; blocks.len()];
 
@@ -1100,10 +1135,18 @@ impl BlockMergeSorter {
         result
     }
 
-    fn compare_rows(&self, a: usize, b: usize, all_values: &[Vec<(Value, bool)>], num_fields: usize) -> std::cmp::Ordering {
+    fn compare_rows(
+        &self,
+        a: usize,
+        b: usize,
+        all_values: &[Vec<(Value, bool)>],
+        num_fields: usize,
+    ) -> std::cmp::Ordering {
         for &(k, ascending) in &self.sort_keys {
             let k = k as usize;
-            if k >= num_fields { continue; }
+            if k >= num_fields {
+                continue;
+            }
             let cmp = value_cmp(&all_values[k][a].0, &all_values[k][b].0);
             if cmp != std::cmp::Ordering::Equal {
                 return if ascending { cmp } else { cmp.reverse() };
@@ -1427,15 +1470,21 @@ fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Value {
         return Value::Null;
     }
     if group_cols.len() == 1 {
-        chunk.fields
+        chunk
+            .fields
             .get(group_cols[0] as usize)
             .and_then(|f| f.get_value(row))
             .unwrap_or(Value::Null)
     } else {
-        let vals: Vec<Value> = group_cols.iter()
-            .map(|&gc| chunk.fields.get(gc as usize)
-                .and_then(|f| f.get_value(row))
-                .unwrap_or(Value::Null))
+        let vals: Vec<Value> = group_cols
+            .iter()
+            .map(|&gc| {
+                chunk
+                    .fields
+                    .get(gc as usize)
+                    .and_then(|f| f.get_value(row))
+                    .unwrap_or(Value::Null)
+            })
             .collect();
         Value::List(vals)
     }
@@ -1445,11 +1494,15 @@ fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Value {
 fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs: &[AggregateFunction], row: usize) {
     for (i, state) in states.iter_mut().enumerate() {
         if matches!(funcs[i], AggregateFunction::CountStar) {
-            if let AggValueState::Count(n) = state { *n += 1; }
+            if let AggValueState::Count(n) = state {
+                *n += 1;
+            }
             continue;
         }
         let col_idx = i.min(chunk.fields.len().saturating_sub(1));
-        let val = chunk.fields.get(col_idx)
+        let val = chunk
+            .fields
+            .get(col_idx)
             .and_then(|f| f.get_value(row))
             .unwrap_or(Value::Null);
         state.update(&val);
@@ -1520,7 +1573,7 @@ impl PhysicalCrossProduct {
                 output_types.push(field.physical_type());
             }
         }
-        
+
         if let Some(c) = left_chunks.first() {
             field_names.extend(c.field_names.iter().cloned());
         }
@@ -1554,12 +1607,8 @@ impl PhysicalCrossProduct {
         }
 
         // Propagate field names from left ++ right sides
-        let mut output_names: Vec<String> = left_chunks.first()
-            .map(|c| c.field_names.clone())
-            .unwrap_or_default();
-        output_names.extend(right_chunks.first()
-            .map(|c| c.field_names.clone())
-            .unwrap_or_default());
+        let mut output_names: Vec<String> = left_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default();
+        output_names.extend(right_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default());
         Ok(vec![DataChunk {
             fields: output_fields,
             size: total_rows,
@@ -1592,7 +1641,9 @@ impl PhysicalSemiJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
                     let key = field.get_value(row).unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) { continue; }
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     hash_set.insert(value_hash(&key));
                 }
             }
@@ -1612,7 +1663,9 @@ impl PhysicalSemiJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(probe_col) {
                     let key = field.get_value(row).unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) { continue; }
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     if hash_set.contains(&value_hash(&key)) {
                         match_rows.push((ci, row));
                     }
@@ -1644,7 +1697,11 @@ impl PhysicalSemiJoin {
         for field in &mut output_fields {
             field.resize(match_rows.len());
         }
-        Ok(vec![DataChunk { fields: output_fields, size: match_rows.len(), field_names: vec![] }])
+        Ok(vec![DataChunk {
+            fields: output_fields,
+            size: match_rows.len(),
+            field_names: vec![],
+        }])
     }
 }
 
@@ -1676,7 +1733,9 @@ impl PhysicalAntiJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
                     let key = field.get_value(row).unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) { continue; }
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     hash_set.insert(value_hash(&key));
                 }
             }
@@ -1695,7 +1754,9 @@ impl PhysicalAntiJoin {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(probe_col) {
                     let key = field.get_value(row).unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) { continue; }
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     if !hash_set.contains(&value_hash(&key)) {
                         non_match_rows.push((ci, row));
                     }
@@ -1726,7 +1787,11 @@ impl PhysicalAntiJoin {
         for field in &mut output_fields {
             field.resize(non_match_rows.len());
         }
-        Ok(vec![DataChunk { fields: output_fields, size: non_match_rows.len(), field_names: vec![] }])
+        Ok(vec![DataChunk {
+            fields: output_fields,
+            size: non_match_rows.len(),
+            field_names: vec![],
+        }])
     }
 }
 
@@ -1803,7 +1868,9 @@ impl PhysicalIntersect {
                 probe_field_count = chunk.fields.len();
             }
             for row in 0..chunk.size {
-                let probe_key = chunk.fields.get(probe_col)
+                let probe_key = chunk
+                    .fields
+                    .get(probe_col)
                     .and_then(|f| f.get_value(row))
                     .unwrap_or(Value::Null);
                 if matches!(probe_key, Value::Null) {
@@ -1844,7 +1911,9 @@ impl PhysicalIntersect {
 
                 // Collect probe side values (all columns from probe chunk)
                 for col_in_probe in 0..probe_field_count {
-                    let val = chunk.fields.get(col_in_probe)
+                    let val = chunk
+                        .fields
+                        .get(col_in_probe)
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null);
                     row_values.push(val);
@@ -1853,14 +1922,17 @@ impl PhysicalIntersect {
                 // For each build side, emit the first matching row's payload values
                 for matches in matched_build_rows.iter() {
                     if let Some(&(b_ci, b_row)) = matches.first()
-                        && let Some(chunk) = build_chunks.get(b_ci) {
-                            for col in 0..chunk.fields.len() {
-                                let val = chunk.fields.get(col)
-                                    .and_then(|f| f.get_value(b_row))
-                                    .unwrap_or(Value::Null);
-                                row_values.push(val);
-                            }
+                        && let Some(chunk) = build_chunks.get(b_ci)
+                    {
+                        for col in 0..chunk.fields.len() {
+                            let val = chunk
+                                .fields
+                                .get(col)
+                                .and_then(|f| f.get_value(b_row))
+                                .unwrap_or(Value::Null);
+                            row_values.push(val);
                         }
+                    }
                 }
                 output_rows.push(row_values);
             }
@@ -1912,7 +1984,10 @@ pub struct JoinHashTable {
 
 impl JoinHashTable {
     pub fn new(build_columns: Vec<u32>, probe_columns: Vec<u32>) -> Self {
-        Self { build_columns, probe_columns }
+        Self {
+            build_columns,
+            probe_columns,
+        }
     }
 
     pub fn build(&self, build_chunks: &[DataChunk]) -> hashbrown::HashMap<u64, HashJoinBucket> {
@@ -1926,14 +2001,22 @@ impl JoinHashTable {
         }
     }
 
-    fn build_sequential(&self, build_chunks: &[DataChunk], build_col: usize) -> hashbrown::HashMap<u64, HashJoinBucket> {
+    fn build_sequential(
+        &self,
+        build_chunks: &[DataChunk],
+        build_col: usize,
+    ) -> hashbrown::HashMap<u64, HashJoinBucket> {
         let mut table: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                let key = chunk.fields.get(build_col)
+                let key = chunk
+                    .fields
+                    .get(build_col)
                     .and_then(|f| f.get_value(row))
                     .unwrap_or(Value::Null);
-                if matches!(key, Value::Null) { continue; }
+                if matches!(key, Value::Null) {
+                    continue;
+                }
                 let hash = value_hash(&key);
                 table.entry(hash).or_default().push((key, vec![(ci, row)]));
             }
@@ -1950,10 +2033,14 @@ impl JoinHashTable {
             .map(|(ci, chunk)| {
                 let mut local: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
                 for row in 0..chunk.size {
-                    let key = chunk.fields.get(build_col)
+                    let key = chunk
+                        .fields
+                        .get(build_col)
                         .and_then(|f| f.get_value(row))
                         .unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) { continue; }
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
                     let hash = value_hash(&key);
                     local.entry(hash).or_default().push((key, vec![(ci, row)]));
                 }
@@ -1984,24 +2071,34 @@ impl JoinHashTable {
 
         for chunk in probe_chunks {
             for row in 0..chunk.size {
-                let probe_key = chunk.fields.get(probe_col)
+                let probe_key = chunk
+                    .fields
+                    .get(probe_col)
                     .and_then(|f| f.get_value(row))
                     .unwrap_or(Value::Null);
-                if matches!(probe_key, Value::Null) { continue; }
+                if matches!(probe_key, Value::Null) {
+                    continue;
+                }
                 let probe_hash = value_hash(&probe_key);
 
                 if let Some(bucket) = hash_table.get(&probe_hash) {
                     for (build_key, locations) in bucket {
-                        if build_key != &probe_key { continue; }
+                        if build_key != &probe_key {
+                            continue;
+                        }
 
                         if !built_cols {
                             num_build_fields = build_chunks[0].num_fields();
                             let total_cols = num_build_fields + chunk.num_fields();
                             for col in 0..num_build_fields {
-                                if let Some(f) = build_chunks[0].fields.get(col) { output_types.push(f.physical_type()); }
+                                if let Some(f) = build_chunks[0].fields.get(col) {
+                                    output_types.push(f.physical_type());
+                                }
                             }
                             for col in 0..chunk.num_fields() {
-                                if let Some(f) = chunk.fields.get(col) { output_types.push(f.physical_type()); }
+                                if let Some(f) = chunk.fields.get(col) {
+                                    output_types.push(f.physical_type());
+                                }
                             }
                             output_rows = (0..total_cols).map(|_| Vec::new()).collect();
                             built_cols = true;
@@ -2027,7 +2124,9 @@ impl JoinHashTable {
             }
         }
 
-        if !built_cols { return Ok(Vec::new()); }
+        if !built_cols {
+            return Ok(Vec::new());
+        }
 
         let num_rows = output_rows[0].len();
         let mut result_fields = Vec::with_capacity(output_rows.len());
@@ -2036,12 +2135,19 @@ impl JoinHashTable {
             let mut v = ValueVector::new(pt, num_rows);
             v.resize(num_rows);
             for (row, (val, _)) in row_data.iter().enumerate() {
-                if matches!(val, Value::Null) { v.set_null(row, true); }
-                else { store_value_in_vector(&mut v, row, val); }
+                if matches!(val, Value::Null) {
+                    v.set_null(row, true);
+                } else {
+                    store_value_in_vector(&mut v, row, val);
+                }
             }
             result_fields.push(v);
         }
-        Ok(vec![DataChunk { fields: result_fields, size: num_rows, field_names: vec![] }])
+        Ok(vec![DataChunk {
+            fields: result_fields,
+            size: num_rows,
+            field_names: vec![],
+        }])
     }
 }
 
@@ -2085,13 +2191,14 @@ impl PhysicalHashJoin {
             for chunk in build_chunks {
                 for row in 0..chunk.size {
                     if let Some(field) = chunk.fields.get(build_col)
-                        && let Some(val) = field.get_value(row) {
-                            if let Value::InternalID(id) = val {
-                                mask.mask(id.offset);
-                            } else if let Value::Int64(offset) = val {
-                                mask.mask(offset as u64);
-                            }
+                        && let Some(val) = field.get_value(row)
+                    {
+                        if let Value::InternalID(id) = val {
+                            mask.mask(id.offset);
+                        } else if let Value::Int64(offset) = val {
+                            mask.mask(offset as u64);
                         }
+                    }
                 }
             }
         }
@@ -2103,12 +2210,8 @@ impl PhysicalHashJoin {
 
         // Propagate field names
         if !result.is_empty() {
-            let mut output_names: Vec<String> = build_chunks.first()
-                .map(|c| c.field_names.clone())
-                .unwrap_or_default();
-            output_names.extend(probe_chunks.first()
-                .map(|c| c.field_names.clone())
-                .unwrap_or_default());
+            let mut output_names: Vec<String> = build_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default();
+            output_names.extend(probe_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default());
             result[0].field_names = output_names;
         }
 
@@ -2234,11 +2337,12 @@ impl PhysicalOperatorExec for PhysicalSet {
         for chunk in &input {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.first()
-                    && let Some(val) = field.get_i64(row) {
-                        // Evaluate the SET value expression against the current row
-                        let set_val = evaluate_expression_for_row(&self.value, chunk, row);
-                        rows_to_update.push((val as u64, set_val));
-                    }
+                    && let Some(val) = field.get_i64(row)
+                {
+                    // Evaluate the SET value expression against the current row
+                    let set_val = evaluate_expression_for_row(&self.value, chunk, row);
+                    rows_to_update.push((val as u64, set_val));
+                }
             }
         }
 
@@ -2264,7 +2368,10 @@ impl PhysicalOperatorExec for PhysicalSet {
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
                 for (edge_idx, val) in &rows_to_update {
-                    if table.update_cell(*edge_idx as usize, self.column_idx, val.clone()).is_ok() {
+                    if table
+                        .update_cell(*edge_idx as usize, self.column_idx, val.clone())
+                        .is_ok()
+                    {
                         updated += 1;
                     }
                 }
@@ -2334,9 +2441,10 @@ impl PhysicalOperatorExec for PhysicalDelete {
         for chunk in &input {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.first()
-                    && let Some(val) = field.get_i64(row) {
-                        rows_to_delete.push(val as u64);
-                    }
+                    && let Some(val) = field.get_i64(row)
+                {
+                    rows_to_delete.push(val as u64);
+                }
             }
         }
 
@@ -2353,7 +2461,10 @@ impl PhysicalOperatorExec for PhysicalDelete {
         if self.is_node {
             for &row_idx in &rows_to_delete {
                 if !self.detach && self.table_catalog.has_incident_edges(self.table_id, row_idx) {
-                    return Err(format!("Cannot delete node {} because it has incident edges (use DETACH DELETE)", row_idx));
+                    return Err(format!(
+                        "Cannot delete node {} because it has incident edges (use DETACH DELETE)",
+                        row_idx
+                    ));
                 }
             }
             if self.detach {
@@ -2644,8 +2755,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
                         let len = bytes.len().min(255) as u8;
                         v.data_mut()[i * 256] = len;
                         let copy_len = bytes.len().min(255);
-                        v.data_mut()[i * 256 + 1..i * 256 + 1 + copy_len]
-                            .copy_from_slice(&bytes[..copy_len]);
+                        v.data_mut()[i * 256 + 1..i * 256 + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
                         v.set_null(i, false);
                     }
                     Value::Null => {
@@ -2672,7 +2782,11 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         }
         fields.push(dist_v);
 
-        Ok(vec![DataChunk { fields, size: num_results, field_names: vec![] }])
+        Ok(vec![DataChunk {
+            fields,
+            size: num_results,
+            field_names: vec![],
+        }])
     }
 }
 
@@ -2760,18 +2874,21 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 self.table_name
             );
         } else if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
-            let rels: Vec<(u64, u64, Vec<Value>)> = rows.iter().map(|row| {
-                let from = match &row[0] {
-                    Value::Int64(v) => *v as u64,
-                    _ => 0, // Will fail validation below
-                };
-                let to = match &row[1] {
-                    Value::Int64(v) => *v as u64,
-                    _ => 0,
-                };
-                let props = row[2..].to_vec();
-                (from, to, props)
-            }).collect();
+            let rels: Vec<(u64, u64, Vec<Value>)> = rows
+                .iter()
+                .map(|row| {
+                    let from = match &row[0] {
+                        Value::Int64(v) => *v as u64,
+                        _ => 0, // Will fail validation below
+                    };
+                    let to = match &row[1] {
+                        Value::Int64(v) => *v as u64,
+                        _ => 0,
+                    };
+                    let props = row[2..].to_vec();
+                    (from, to, props)
+                })
+                .collect();
             let count = table
                 .insert_rels_batch(&rels)
                 .map_err(|e| format!("Batch insert rel error: {e}"))?;
@@ -2825,10 +2942,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
 
         // Verify ART index exists
         if node_table.art_index.is_none() {
-            return Err(format!(
-                "Table '{}' does not have an ART index",
-                self.table_name
-            ));
+            return Err(format!("Table '{}' does not have an ART index", self.table_name));
         }
 
         // Execute range scan on the ART index
@@ -2893,7 +3007,9 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 let col_data = &output_columns[col_idx];
                 let phys_type = match col_types[col_idx] {
                     kuzu_common::types::LogicalTypeID::Bool => PhysicalTypeID::Bool,
-                    kuzu_common::types::LogicalTypeID::Int64 | kuzu_common::types::LogicalTypeID::Serial => PhysicalTypeID::Int64,
+                    kuzu_common::types::LogicalTypeID::Int64 | kuzu_common::types::LogicalTypeID::Serial => {
+                        PhysicalTypeID::Int64
+                    }
                     kuzu_common::types::LogicalTypeID::Int32 => PhysicalTypeID::Int32,
                     kuzu_common::types::LogicalTypeID::Int16 => PhysicalTypeID::Int16,
                     kuzu_common::types::LogicalTypeID::Int8 => PhysicalTypeID::Int8,
@@ -2947,7 +3063,11 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 fields.push(vv);
             }
 
-            chunks.push(DataChunk { fields, size: count, field_names: col_names.clone() });
+            chunks.push(DataChunk {
+                fields,
+                size: count,
+                field_names: col_names.clone(),
+            });
         }
 
         Ok(chunks)
@@ -3062,37 +3182,45 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                 }
 
                 for (&src, neighbors) in rel_table.fwd_adj.iter() {
-                    fwd_adj.entry(src).or_default().extend(
-                        neighbors.iter().map(|(dst, edge_idx)| (*dst, *edge_idx as u64))
-                    );
+                    fwd_adj
+                        .entry(src)
+                        .or_default()
+                        .extend(neighbors.iter().map(|(dst, edge_idx)| (*dst, *edge_idx as u64)));
                     // Pre-compute edge weights
-                    if is_weighted
-                        && let Some(col_idx) = weight_col_idx.get(&rel_table_id).and_then(|&c| c) {
-                            for &(_dst, edge_idx) in neighbors {
-                                if let Some(weight_val) = rel_table.properties.get(col_idx).and_then(|col| col.get(edge_idx)) {
-                                    let w = match weight_val {
-                                        Value::Int64(i) => *i as f64,
-                                        Value::Double(d) => *d,
-                                        Value::Float(f) => *f as f64,
-                                        Value::Int32(i) => *i as f64,
-                                        _ => 1.0, // default weight for unrecognized types
-                                    };
-                                    edge_weights.insert(edge_idx as u64, w);
-                                }
+                    if is_weighted && let Some(col_idx) = weight_col_idx.get(&rel_table_id).and_then(|&c| c) {
+                        for &(_dst, edge_idx) in neighbors {
+                            if let Some(weight_val) =
+                                rel_table.properties.get(col_idx).and_then(|col| col.get(edge_idx))
+                            {
+                                let w = match weight_val {
+                                    Value::Int64(i) => *i as f64,
+                                    Value::Double(d) => *d,
+                                    Value::Float(f) => *f as f64,
+                                    Value::Int32(i) => *i as f64,
+                                    _ => 1.0, // default weight for unrecognized types
+                                };
+                                edge_weights.insert(edge_idx as u64, w);
                             }
                         }
+                    }
                 }
                 for (&dst, neighbors) in rel_table.rev_adj.iter() {
-                    rev_adj.entry(dst).or_default().extend(
-                        neighbors.iter().map(|(src, edge_idx)| (*src, *edge_idx as u64))
-                    );
+                    rev_adj
+                        .entry(dst)
+                        .or_default()
+                        .extend(neighbors.iter().map(|(src, edge_idx)| (*src, *edge_idx as u64)));
                 }
             }
         }
 
         // Collect source node offsets from input
         let source_offsets: Vec<i64> = if input.is_empty() || input[0].fields.is_empty() {
-            let mut all: Vec<i64> = fwd_adj.keys().chain(rev_adj.keys()).copied().map(|k| k as i64).collect();
+            let mut all: Vec<i64> = fwd_adj
+                .keys()
+                .chain(rev_adj.keys())
+                .copied()
+                .map(|k| k as i64)
+                .collect();
             all.sort();
             all.dedup();
             all
@@ -3102,9 +3230,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             let mut offsets = Vec::with_capacity(num_rows);
             for i in 0..num_rows {
                 if !field.is_null(i) {
-                    let offset = i64::from_le_bytes(
-                        field.data()[i * 8..i * 8 + 8].try_into().unwrap(),
-                    );
+                    let offset = i64::from_le_bytes(field.data()[i * 8..i * 8 + 8].try_into().unwrap());
                     offsets.push(offset);
                 }
             }
@@ -3152,9 +3278,10 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
                     // If we already found a better path to this node, skip
                     if let Some(&(_, _, _, best_cost)) = parents.get(&node)
-                        && cur_cost > best_cost + 1e-9 {
-                            continue;
-                        }
+                        && cur_cost > best_cost + 1e-9
+                    {
+                        continue;
+                    }
 
                     if cur_depth >= self.upper_bound {
                         continue;
@@ -3211,11 +3338,15 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
                     while cur != src_u {
                         if let Some(&(parent, eid, _, _)) = parents.get(&cur) {
-                            if parent == u64::MAX { break; }
+                            if parent == u64::MAX {
+                                break;
+                            }
                             temp_edges.push(eid as i64);
                             temp_nodes.push(parent as i64);
                             cur = parent;
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
 
                     temp_nodes.reverse();
@@ -3236,7 +3367,9 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                 let semantic = self.semantic;
 
                 while let Some((node, depth)) = queue.pop_front() {
-                    if depth >= self.upper_bound { continue; }
+                    if depth >= self.upper_bound {
+                        continue;
+                    }
 
                     let neighbors: Vec<(u64, u64)> = match self.direction {
                         ExtendDirection::Fwd => fwd_adj.get(&node).cloned().unwrap_or_default(),
@@ -3257,8 +3390,12 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                                 PathSemantic::Trail => {
                                     let mut cur = node;
                                     while let Some(&(p, eid, _)) = parents.get(&cur) {
-                                        if eid == edge_id { continue 'neighbors; }
-                                        if p == u64::MAX { break; }
+                                        if eid == edge_id {
+                                            continue 'neighbors;
+                                        }
+                                        if p == u64::MAX {
+                                            break;
+                                        }
                                         cur = p;
                                     }
                                 }
@@ -3273,8 +3410,12 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
                 // Emit results for nodes at valid depths
                 for (&node, &(_parent_node, _edge_id, depth)) in &parents {
-                    if depth < self.lower_bound || depth > self.upper_bound { continue; }
-                    if depth == 0 && self.lower_bound > 0 { continue; }
+                    if depth < self.lower_bound || depth > self.upper_bound {
+                        continue;
+                    }
+                    if depth == 0 && self.lower_bound > 0 {
+                        continue;
+                    }
 
                     result_src.push(src);
                     result_dst.push(node as i64);
@@ -3287,11 +3428,15 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
 
                     while cur != src_u {
                         if let Some(&(parent, eid, _)) = parents.get(&cur) {
-                            if parent == u64::MAX { break; }
+                            if parent == u64::MAX {
+                                break;
+                            }
                             temp_edges.push(eid as i64);
                             temp_nodes.push(parent as i64);
                             cur = parent;
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
 
                     temp_nodes.reverse();
@@ -3394,15 +3539,17 @@ impl PhysicalCreateNode {
             return Ok(input);
         }
 
-        let mut table = self.table_catalog.get_node_table_by_name_mut(&self.table_name)
+        let mut table = self
+            .table_catalog
+            .get_node_table_by_name_mut(&self.table_name)
             .ok_or_else(|| format!("Node table {} not found", self.table_name))?;
 
         // For each input chunk, we create nodes and attach the new node IDs
         let mut output = Vec::with_capacity(input.len());
-        
+
         for mut chunk in input {
             let mut node_ids = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, chunk.size);
-            
+
             for i in 0..chunk.size {
                 let mut values = vec![kuzu_common::types::Value::Null; table.columns.len()];
                 for (prop_name, prop_expr) in &self.properties {
@@ -3410,13 +3557,13 @@ impl PhysicalCreateNode {
                         values[col_idx] = evaluate_expression_for_row(prop_expr, &chunk, i);
                     }
                 }
-                
+
                 let row_offset = table.insert_row(values)?;
                 node_ids.data_mut()[i * 8..(i + 1) * 8].copy_from_slice(&(row_offset as i64).to_le_bytes());
                 node_ids.set_null(i, false);
             }
             node_ids.resize(chunk.size);
-            
+
             chunk.fields.push(node_ids);
             chunk.field_names.push(self.out_var_name.clone());
             output.push(chunk);
@@ -3441,26 +3588,34 @@ impl PhysicalCreateRel {
             return Ok(input);
         }
 
-        let mut table = self.table_catalog.get_rel_table_by_name_mut(&self.table_name)
+        let mut table = self
+            .table_catalog
+            .get_rel_table_by_name_mut(&self.table_name)
             .ok_or_else(|| format!("Rel table {} not found", self.table_name))?;
 
         let mut output = Vec::with_capacity(input.len());
-        
+
         for chunk in input {
             let src_name_id = format!("{}.{}", self.src_node_name, "_id");
             let src_name_pk = format!("{}.{}", self.src_node_name, "id");
-            let src_idx = chunk.field_names.iter().position(|name| name == &src_name_id)
+            let src_idx = chunk
+                .field_names
+                .iter()
+                .position(|name| name == &src_name_id)
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.src_node_name))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &src_name_pk))
                 .ok_or_else(|| format!("Source node variable {} not found", self.src_node_name))?;
-                
+
             let dst_name_id = format!("{}.{}", self.dst_node_name, "_id");
             let dst_name_pk = format!("{}.{}", self.dst_node_name, "id");
-            let dst_idx = chunk.field_names.iter().position(|name| name == &dst_name_id)
+            let dst_idx = chunk
+                .field_names
+                .iter()
+                .position(|name| name == &dst_name_id)
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.dst_node_name))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk))
                 .ok_or_else(|| format!("Destination node variable {} not found", self.dst_node_name))?;
-                
+
             let src_vec = &chunk.fields[src_idx];
             let dst_vec = &chunk.fields[dst_idx];
 
@@ -3469,7 +3624,7 @@ impl PhysicalCreateRel {
                 if src_vec.is_null(i) || dst_vec.is_null(i) {
                     continue; // Skip creating relationships involving NULL nodes
                 }
-                
+
                 let mut src_bytes = [0u8; 8];
                 src_bytes.copy_from_slice(&src_vec.data()[i * 8..(i + 1) * 8]);
                 let src_id = i64::from_le_bytes(src_bytes) as u64;
@@ -3488,8 +3643,11 @@ impl PhysicalCreateRel {
                 table.insert_rel(src_id, dst_id, values)?;
                 inserted += 1;
             }
-            println!("PhysicalCreateRel inserted {} relationships from chunk of size {}", inserted, chunk.size);
-            
+            println!(
+                "PhysicalCreateRel inserted {} relationships from chunk of size {}",
+                inserted, chunk.size
+            );
+
             output.push(chunk);
         }
 
@@ -3532,7 +3690,9 @@ impl PhysicalExtend {
 
         // Collect rel table data upfront (owned)
         let (fwd_adj, rev_adj, rel_props, rel_cols) = {
-            let rel_table = self.table_catalog.get_rel_table_by_name(&self.rel_table_name)
+            let rel_table = self
+                .table_catalog
+                .get_rel_table_by_name(&self.rel_table_name)
                 .ok_or_else(|| format!("Rel table {} not found", self.rel_table_name))?;
             let fwd = rel_table.fwd_adj.clone();
             let rev = rel_table.rev_adj.clone();
@@ -3543,7 +3703,9 @@ impl PhysicalExtend {
 
         // Collect dest node table data upfront (owned)
         let (dest_data, dest_cols, dest_pk_col) = {
-            let dest_table = self.table_catalog.get_node_table_by_name(&self.dst_table_name)
+            let dest_table = self
+                .table_catalog
+                .get_node_table_by_name(&self.dst_table_name)
                 .ok_or_else(|| format!("Node table {} not found", self.dst_table_name))?;
             let data = dest_table.to_column_major_data();
             let cols = dest_table.columns.clone();
@@ -3553,10 +3715,15 @@ impl PhysicalExtend {
 
         // Build PK → row offset map for destination lookups
         let pk_to_row: std::collections::HashMap<u64, usize> = if dest_pk_col < dest_data.len() {
-            dest_data[dest_pk_col].iter().enumerate()
+            dest_data[dest_pk_col]
+                .iter()
+                .enumerate()
                 .filter_map(|(row, val)| {
-                    if let Value::Int64(id) = val { Some((*id as u64, row)) }
-                    else { None }
+                    if let Value::Int64(id) = val {
+                        Some((*id as u64, row))
+                    } else {
+                        None
+                    }
                 })
                 .collect()
         } else {
@@ -3569,12 +3736,17 @@ impl PhysicalExtend {
             // Find the bound node column in the chunk
             let bound_name_id = format!("{}.{}", self.bound_node_var, "_id");
             let bound_name_pk = format!("{}.{}", self.bound_node_var, "id");
-            let bound_idx = chunk.field_names.iter().position(|name| name == &bound_name_id)
+            let bound_idx = chunk
+                .field_names
+                .iter()
+                .position(|name| name == &bound_name_id)
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.bound_node_var))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &bound_name_pk))
                 .ok_or_else(|| {
-                    format!("Bound node variable {} not found in Extend input. Available fields: {:?}",
-                        self.bound_node_var, chunk.field_names)
+                    format!(
+                        "Bound node variable {} not found in Extend input. Available fields: {:?}",
+                        self.bound_node_var, chunk.field_names
+                    )
                 })?;
 
             // Calculate total output rows and build row mapping
@@ -3595,12 +3767,8 @@ impl PhysicalExtend {
                 let src_id = i64::from_le_bytes(src_bytes) as u64;
 
                 let edges: Vec<(u64, usize)> = match self.direction {
-                    kuzu_parser::ast::EdgeDirection::LeftToRight => {
-                        fwd_adj.get(&src_id).cloned().unwrap_or_default()
-                    }
-                    kuzu_parser::ast::EdgeDirection::RightToLeft => {
-                        rev_adj.get(&src_id).cloned().unwrap_or_default()
-                    }
+                    kuzu_parser::ast::EdgeDirection::LeftToRight => fwd_adj.get(&src_id).cloned().unwrap_or_default(),
+                    kuzu_parser::ast::EdgeDirection::RightToLeft => rev_adj.get(&src_id).cloned().unwrap_or_default(),
                     kuzu_parser::ast::EdgeDirection::Both => {
                         let mut all = fwd_adj.get(&src_id).cloned().unwrap_or_default();
                         if let Some(rev) = rev_adj.get(&src_id) {
@@ -3612,9 +3780,10 @@ impl PhysicalExtend {
 
                 for &(dst_offset, edge_idx) in &edges {
                     if !pk_to_row.contains_key(&dst_offset)
-                        && dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0) {
-                            continue;
-                        }
+                        && dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0)
+                    {
+                        continue;
+                    }
                     total_rows += 1;
                     row_mappings.push((i, dst_offset, edge_idx));
                 }
@@ -3643,7 +3812,8 @@ impl PhysicalExtend {
                 }
                 // Copy rel properties
                 for col in 0..num_rel_cols {
-                    let val = rel_props.get(col)
+                    let val = rel_props
+                        .get(col)
                         .and_then(|c| c.get(edge_idx))
                         .cloned()
                         .unwrap_or(Value::Null);
@@ -3656,7 +3826,8 @@ impl PhysicalExtend {
                         .and_then(|r| dest_data.get(col).and_then(|c| c.get(r)))
                         .cloned()
                         .unwrap_or_else(|| {
-                            dest_data.get(col)
+                            dest_data
+                                .get(col)
                                 .and_then(|c| c.get(dst_offset as usize))
                                 .cloned()
                                 .unwrap_or(Value::Null)
@@ -3748,7 +3919,9 @@ impl PhysicalOperatorExec for PhysicalCountRelTable {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        let tc = self.table_catalog.as_ref()
+        let tc = self
+            .table_catalog
+            .as_ref()
             .ok_or_else(|| "No table catalog for CountRelTable".to_string())?;
 
         let count = if let Some(table) = tc.get_rel_table(self.table_id) {
@@ -3789,7 +3962,10 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
             Some(t) => t,
             None => return Err(format!("Table '{}' not found", self.table_name)),
         };
-        let col_idx = source_table.columns.iter().position(|c| c.name == self.column_name)
+        let col_idx = source_table
+            .columns
+            .iter()
+            .position(|c| c.name == self.column_name)
             .ok_or_else(|| format!("Column '{}' not found in '{}'", self.column_name, self.table_name))?;
 
         // Ensure macro tables exist; create if needed
@@ -3826,7 +4002,8 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                     is_primary_key: false,
                 },
             ];
-            self.table_catalog.create_node_table(self.terms_table.clone(), terms_cols);
+            self.table_catalog
+                .create_node_table(self.terms_table.clone(), terms_cols);
         }
 
         // Collect docs data
@@ -3864,7 +4041,6 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 }
             }
 
-
             for (term, freq) in freq_map {
                 let next_id = term_map.len() as i64;
                 let (term_id, doc_freq) = term_map.entry(term).or_insert((next_id, 0));
@@ -3883,32 +4059,36 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
 
         // Insert terms
         if self.table_catalog.get_node_table_by_name(&self.terms_table).is_some() {
-            let mut terms_table = self.table_catalog.get_node_table_by_name_mut(&self.terms_table).unwrap();
-            let mut term_list: Vec<(String, i64, i64)> = term_map.into_iter()
-                .map(|(t, (id, df))| (t, id, df))
-                .collect();
+            let mut terms_table = self
+                .table_catalog
+                .get_node_table_by_name_mut(&self.terms_table)
+                .unwrap();
+            let mut term_list: Vec<(String, i64, i64)> =
+                term_map.into_iter().map(|(t, (id, df))| (t, id, df)).collect();
             term_list.sort_by_key(|(_, id, _)| *id);
             for (term, term_id, doc_freq) in term_list {
-                terms_table.insert_row(vec![
-                    Value::Int64(term_id),
-                    Value::String(term),
-                    Value::Int64(doc_freq),
-                ])?;
+                terms_table.insert_row(vec![Value::Int64(term_id), Value::String(term), Value::Int64(doc_freq)])?;
             }
         }
 
         // Create and populate posting (appears_in) table
-        let docs_table_id = self.table_catalog.get_node_table_by_name(&self.docs_table).unwrap().table_id;
-        let terms_table_id = self.table_catalog.get_node_table_by_name(&self.terms_table).unwrap().table_id;
+        let docs_table_id = self
+            .table_catalog
+            .get_node_table_by_name(&self.docs_table)
+            .unwrap()
+            .table_id;
+        let terms_table_id = self
+            .table_catalog
+            .get_node_table_by_name(&self.terms_table)
+            .unwrap()
+            .table_id;
 
         if self.table_catalog.get_rel_table_by_name(&self.posting_table).is_none() {
-            let posting_cols = vec![
-                kuzu_storage::table::ColumnDefinition {
-                    name: "term_freq".into(),
-                    logical_type: kuzu_common::types::LogicalTypeID::Int64,
-                    is_primary_key: false,
-                },
-            ];
+            let posting_cols = vec![kuzu_storage::table::ColumnDefinition {
+                name: "term_freq".into(),
+                logical_type: kuzu_common::types::LogicalTypeID::Int64,
+                is_primary_key: false,
+            }];
             // FROM terms TO docs
             self.table_catalog.create_rel_table(
                 self.posting_table.clone(),
@@ -3919,7 +4099,10 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
         }
 
         {
-            let mut posting_table = self.table_catalog.get_rel_table_by_name_mut(&self.posting_table).unwrap();
+            let mut posting_table = self
+                .table_catalog
+                .get_rel_table_by_name_mut(&self.posting_table)
+                .unwrap();
             for (term_id, doc_id, freq) in postings {
                 posting_table.insert_rel(term_id as u64, doc_id as u64, vec![Value::Int64(freq)])?;
             }
@@ -3927,7 +4110,12 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
 
         let mut result_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1);
         result_vec.resize(1);
-        result_vec.set_value(0, &Value::String(format!("FTS index '{}' built successfully.", self.index_name))).unwrap();
+        result_vec
+            .set_value(
+                0,
+                &Value::String(format!("FTS index '{}' built successfully.", self.index_name)),
+            )
+            .unwrap();
         let mut result = DataChunk::new(vec![result_vec]);
         result.size = 1;
         result.field_names = vec!["result".to_string()];
@@ -3947,7 +4135,6 @@ pub struct PhysicalFtsScan {
     pub table_catalog: Arc<TableCatalog>,
 }
 
-
 impl PhysicalOperatorExec for PhysicalFtsScan {
     fn operator_type(&self) -> &str {
         "fts_scan"
@@ -3961,15 +4148,21 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
             .filter(|t| !kuzu_fts::STOP_WORDS.contains(&t.as_str()))
             .collect();
 
-
         // Lookup terms table for matching terms
         let terms_table = match self.table_catalog.get_node_table_by_name(&self.terms_table) {
             Some(t) => t,
-            None => return Err(format!("FTS terms table '{}' not found. Has the index been created?", self.terms_table)),
+            None => {
+                return Err(format!(
+                    "FTS terms table '{}' not found. Has the index been created?",
+                    self.terms_table
+                ));
+            }
         };
 
         // Get total doc count from docs table
-        let num_docs = self.table_catalog.get_node_table_by_name(&self.docs_table)
+        let num_docs = self
+            .table_catalog
+            .get_node_table_by_name(&self.docs_table)
             .map(|t| t.num_rows as f64)
             .unwrap_or(1.0);
 
@@ -3980,14 +4173,22 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
 
         for row_idx in 0..num_terms {
             let term_val = terms_data.get(1).and_then(|d| d.get(row_idx));
-            let term_str = if let Some(Value::String(s)) = term_val { s.clone() } else { continue };
+            let term_str = if let Some(Value::String(s)) = term_val {
+                s.clone()
+            } else {
+                continue;
+            };
             if query_tokens.contains(&term_str) {
                 let term_id = if let Some(Value::Int64(id)) = terms_data.get(0).and_then(|d| d.get(row_idx)) {
                     *id
-                } else { continue };
+                } else {
+                    continue;
+                };
                 let doc_freq = if let Some(Value::Int64(df)) = terms_data.get(2).and_then(|d| d.get(row_idx)) {
                     *df
-                } else { 0 };
+                } else {
+                    0
+                };
                 matching_terms.push((term_id, doc_freq));
             }
         }
@@ -4001,7 +4202,11 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 // Scan posting table for this term using get_outgoing_edges(term_id)
                 let posting_rels = posting_table.get_outgoing_edges(term_id as u64);
                 for (doc_id, rel_vals) in posting_rels {
-                    let tf = if let Some(Value::Int64(freq)) = rel_vals.first() { *freq as f64 } else { 1.0 };
+                    let tf = if let Some(Value::Int64(freq)) = rel_vals.first() {
+                        *freq as f64
+                    } else {
+                        1.0
+                    };
                     // BM25: k1=1.5, b=0.75 (simplified, no avg doc len)
                     let k1 = 1.5_f64;
                     let score = idf * (tf * (k1 + 1.0)) / (tf + k1);
@@ -4030,4 +4235,3 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
         Ok(vec![chunk])
     }
 }
-

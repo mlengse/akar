@@ -270,7 +270,7 @@ mod tests {
     use crate::page::DEFAULT_PAGE_SIZE;
     use kuzu_common::memory::MemoryManager;
     use kuzu_common::types::LogicalTypeID;
-    
+
     use std::sync::{Arc, Mutex};
 
     fn setup_column(db_path: &std::path::Path) -> Column {

@@ -285,9 +285,10 @@ impl OptimizationPass for JoinOptimization {
 
         for (i, op) in operators.iter().enumerate() {
             if let LogicalOperator::Filter(f) = op
-                && is_join_condition(&f.expression) {
-                    filters_to_remove.push(i);
-                }
+                && is_join_condition(&f.expression)
+            {
+                filters_to_remove.push(i);
+            }
         }
 
         for (i, op) in operators.iter().enumerate() {
@@ -342,12 +343,7 @@ pub fn extract_root_variable(expr: &kuzu_parser::ast::Expression) -> Option<Stri
 // ========================================================================
 
 /// Names of distance functions that can be accelerated by the vector index.
-const DISTANCE_FUNCTIONS: &[&str] = &[
-    "cosine_similarity",
-    "euclidean_distance",
-    "l2_distance",
-    "dot_product",
-];
+const DISTANCE_FUNCTIONS: &[&str] = &["cosine_similarity", "euclidean_distance", "l2_distance", "dot_product"];
 
 pub struct VectorSimilarityDetection;
 
@@ -376,15 +372,14 @@ impl OptimizationPass for VectorSimilarityDetection {
                     let limit_op = &operators[limit_idx];
 
                     if let (
-                            LogicalOperator::ScanNode(sn),
-                            LogicalOperator::Filter(f),
-                            LogicalOperator::OrderBy(ob),
-                            LogicalOperator::Limit(lim),
-                        ) = (scan, filter, order_by, limit_op) {
+                        LogicalOperator::ScanNode(sn),
+                        LogicalOperator::Filter(f),
+                        LogicalOperator::OrderBy(ob),
+                        LogicalOperator::Limit(lim),
+                    ) = (scan, filter, order_by, limit_op)
+                    {
                         // Check if the Filter contains a distance function call
-                        if let Some((dist_fn_name, _dist_args)) =
-                            extract_distance_function(&f.expression)
-                        {
+                        if let Some((dist_fn_name, _dist_args)) = extract_distance_function(&f.expression) {
                             // Check that the OrderBy sorts by the same distance function
                             let order_matches = ob.sort_keys.iter().any(|(expr, _asc)| {
                                 extract_distance_function(expr)
@@ -397,16 +392,14 @@ impl OptimizationPass for VectorSimilarityDetection {
                                 let query_vector = extract_query_vector(&f.expression);
                                 let top_k = lim.limit;
 
-                                result.push(LogicalOperator::VectorSimilarityScan(
-                                    LogicalVectorSimilarityScan {
-                                        index_name: String::new(), // resolved at execution
-                                        index_id: 0,
-                                        query_vector,
-                                        top_k,
-                                        table_name: sn.table_name.clone(),
-                                        cardinality: top_k,
-                                    },
-                                ));
+                                result.push(LogicalOperator::VectorSimilarityScan(LogicalVectorSimilarityScan {
+                                    index_name: String::new(), // resolved at execution
+                                    index_id: 0,
+                                    query_vector,
+                                    top_k,
+                                    table_name: sn.table_name.clone(),
+                                    cardinality: top_k,
+                                }));
 
                                 // Skip past the consumed operators
                                 if has_proj {
@@ -445,8 +438,7 @@ fn extract_distance_function(expr: &Expression) -> Option<(String, Vec<Expressio
         }
         Expression::BinaryOp(_op, left, right) => {
             // Search both sides for a distance function
-            extract_distance_function(left)
-                .or_else(|| extract_distance_function(right))
+            extract_distance_function(left).or_else(|| extract_distance_function(right))
         }
         Expression::UnaryOp(_op, inner) => extract_distance_function(inner),
         _ => None,
@@ -478,24 +470,21 @@ impl OptimizationPass for ArtRangeScanDetection {
             // Look for: ScanNode + Filter(comparison on PK column)
             if i + 1 < operators.len()
                 && let (LogicalOperator::ScanNode(sn), LogicalOperator::Filter(f)) = (&operators[i], &operators[i + 1])
-                    && let Some((lower, lower_inc, upper, upper_inc)) =
-                        extract_range_bounds(&f.expression)
-                    {
-                        result.push(LogicalOperator::ArtIndexRangeScan(
-                            LogicalArtIndexRangeScan {
-                                table_name: sn.table_name.clone(),
-                                table_id: sn.table_id,
-                                alias: sn.alias.clone(),
-                                lower_bound: lower,
-                                upper_bound: upper,
-                                lower_inclusive: lower_inc,
-                                upper_inclusive: upper_inc,
-                                cardinality: sn.cardinality.max(1),
-                            },
-                        ));
-                        i += 2;
-                        continue;
-                    }
+                && let Some((lower, lower_inc, upper, upper_inc)) = extract_range_bounds(&f.expression)
+            {
+                result.push(LogicalOperator::ArtIndexRangeScan(LogicalArtIndexRangeScan {
+                    table_name: sn.table_name.clone(),
+                    table_id: sn.table_id,
+                    alias: sn.alias.clone(),
+                    lower_bound: lower,
+                    upper_bound: upper,
+                    lower_inclusive: lower_inc,
+                    upper_inclusive: upper_inc,
+                    cardinality: sn.cardinality.max(1),
+                }));
+                i += 2;
+                continue;
+            }
 
             result.push(operators[i].clone());
             i += 1;
@@ -517,7 +506,12 @@ impl OptimizationPass for ArtRangeScanDetection {
 /// Returns `(lower, lower_inclusive, upper, upper_inclusive)`.
 fn extract_range_bounds(
     expr: &Expression,
-) -> Option<(Option<kuzu_common::types::Value>, bool, Option<kuzu_common::types::Value>, bool)> {
+) -> Option<(
+    Option<kuzu_common::types::Value>,
+    bool,
+    Option<kuzu_common::types::Value>,
+    bool,
+)> {
     match expr {
         Expression::BinaryOp(op, left, right) => {
             match op {
@@ -557,7 +551,12 @@ fn extract_range_bounds(
 /// Extract a single bound from a comparison expression like `p.id >= 10`.
 fn extract_single_bound(
     expr: &Expression,
-) -> Option<(Option<kuzu_common::types::Value>, bool, Option<kuzu_common::types::Value>, bool)> {
+) -> Option<(
+    Option<kuzu_common::types::Value>,
+    bool,
+    Option<kuzu_common::types::Value>,
+    bool,
+)> {
     match expr {
         Expression::BinaryOp(op, left, right) => {
             let (_prop_expr, const_val) = match (left.as_ref(), right.as_ref()) {
@@ -604,18 +603,12 @@ fn extract_single_bound(
 /// Convert a parser `Constant` to a runtime `Value`.
 fn constant_to_value(c: &Expression) -> Option<kuzu_common::types::Value> {
     match c {
-        Expression::Constant(kuzu_parser::ast::Constant::Integer(i)) => {
-            Some(kuzu_common::types::Value::Int64(*i))
-        }
-        Expression::Constant(kuzu_parser::ast::Constant::Float(f)) => {
-            Some(kuzu_common::types::Value::Double(*f))
-        }
+        Expression::Constant(kuzu_parser::ast::Constant::Integer(i)) => Some(kuzu_common::types::Value::Int64(*i)),
+        Expression::Constant(kuzu_parser::ast::Constant::Float(f)) => Some(kuzu_common::types::Value::Double(*f)),
         Expression::Constant(kuzu_parser::ast::Constant::String(s)) => {
             Some(kuzu_common::types::Value::String(s.clone()))
         }
-        Expression::Constant(kuzu_parser::ast::Constant::Bool(b)) => {
-            Some(kuzu_common::types::Value::Bool(*b))
-        }
+        Expression::Constant(kuzu_parser::ast::Constant::Bool(b)) => Some(kuzu_common::types::Value::Bool(*b)),
         Expression::Constant(kuzu_parser::ast::Constant::Null) => None,
         _ => None,
     }
@@ -695,27 +688,27 @@ impl OptimizationPass for TopKOptimization {
                     }
                     // Check for ORDER BY with non-adjacent LIMIT (through projection)
                     (LogicalOperator::OrderBy(order), LogicalOperator::Projection(_))
-                        if i + 2 < operators.len()
-                            && matches!(&operators[i + 2], LogicalOperator::Limit(_)) => {
-                                let limit = match &operators[i + 2] {
-                                    LogicalOperator::Limit(l) => l.clone(),
-                                    _ => unreachable!(),
-                                };
-                                result.push(LogicalOperator::OrderBy(LogicalOrderBy {
-                                    sort_keys: order.sort_keys.clone(),
-                                    children: Vec::new(),
-                                    cardinality: 0,
-                                }));
-                                result.push(operators[i + 1].clone()); // projection
-                                result.push(LogicalOperator::Limit(LogicalLimit {
-                                    limit: limit.limit,
-                                    offset: limit.offset,
-                                    children: Vec::new(),
-                                    cardinality: 0,
-                                }));
-                                i += 3;
-                                continue;
-                            }
+                        if i + 2 < operators.len() && matches!(&operators[i + 2], LogicalOperator::Limit(_)) =>
+                    {
+                        let limit = match &operators[i + 2] {
+                            LogicalOperator::Limit(l) => l.clone(),
+                            _ => unreachable!(),
+                        };
+                        result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                            sort_keys: order.sort_keys.clone(),
+                            children: Vec::new(),
+                            cardinality: 0,
+                        }));
+                        result.push(operators[i + 1].clone()); // projection
+                        result.push(LogicalOperator::Limit(LogicalLimit {
+                            limit: limit.limit,
+                            offset: limit.offset,
+                            children: Vec::new(),
+                            cardinality: 0,
+                        }));
+                        i += 3;
+                        continue;
+                    }
                     _ => {}
                 }
             }
@@ -992,14 +985,16 @@ impl TreeOptimizationPass for SIPOptimization {
                     let build_card = hj.build_side.cardinality();
                     let build_op = std::mem::replace(
                         &mut hj.build_side,
-                        Box::new(LogicalOperator::ScanNode(kuzu_planner::logical_operator::LogicalScanNode {
-                            table_name: String::new(),
-                            table_id: 0,
-                            alias: None,
-                            columns: Vec::new(),
-                            cardinality: 0,
-                            fts_query: None,
-                        })),
+                        Box::new(LogicalOperator::ScanNode(
+                            kuzu_planner::logical_operator::LogicalScanNode {
+                                table_name: String::new(),
+                                table_id: 0,
+                                alias: None,
+                                columns: Vec::new(),
+                                cardinality: 0,
+                                fts_query: None,
+                            },
+                        )),
                     );
 
                     let semi_masker = LogicalOperator::SemiMasker(kuzu_planner::logical_operator::LogicalSemiMasker {
@@ -1008,7 +1003,10 @@ impl TreeOptimizationPass for SIPOptimization {
                         children: vec![*build_op],
                         cardinality: build_card,
                     });
-                    println!("SIPOptimization triggered: inserted SemiMasker for table_id {}", table_id);
+                    println!(
+                        "SIPOptimization triggered: inserted SemiMasker for table_id {}",
+                        table_id
+                    );
 
                     *hj.build_side = semi_masker;
                 }
@@ -1065,15 +1063,15 @@ impl TreeOptimizationPass for ForeignJoinPushDown {
 }
 
 /// Known foreign table function name prefixes.
-const FOREIGN_FUNCTION_PREFIXES: &[&str] = &[
-    "duckdb_", "postgres_", "sqlite_", "neo4j_",
-];
+const FOREIGN_FUNCTION_PREFIXES: &[&str] = &["duckdb_", "postgres_", "sqlite_", "neo4j_"];
 
 /// Check if a logical operator is a TableFunctionCall for a foreign database.
 fn is_foreign_table_function_call(op: &LogicalOperator) -> bool {
     if let LogicalOperator::TableFunctionCall(tf) = op {
         let lower = tf.function_name.to_lowercase();
-        FOREIGN_FUNCTION_PREFIXES.iter().any(|&prefix| lower.starts_with(prefix))
+        FOREIGN_FUNCTION_PREFIXES
+            .iter()
+            .any(|&prefix| lower.starts_with(prefix))
     } else {
         false
     }
@@ -1143,12 +1141,13 @@ impl TreeOptimizationPass for CorrelatedSubqueryUnnesting {
 
         LogicalOperator::visit_bottom_up(root, &mut |op| {
             if let LogicalOperator::HashJoin(hj) = op
-                && is_accumulate(&hj.probe_side) {
-                    infos.push(AccHashJoinInfo {
-                        build_side_idx: acc_counter,
-                    });
-                    acc_counter += 1;
-                }
+                && is_accumulate(&hj.probe_side)
+            {
+                infos.push(AccHashJoinInfo {
+                    build_side_idx: acc_counter,
+                });
+                acc_counter += 1;
+            }
         });
 
         // Second pass: wire ExpressionsScans in build sides
@@ -1166,12 +1165,13 @@ impl CorrelatedSubqueryUnnesting {
         let mut found = 0usize;
         LogicalOperator::visit_bottom_up(root, &mut |op| {
             if let LogicalOperator::HashJoin(hj) = op
-                && is_accumulate(&hj.probe_side) {
-                    if found == target_idx {
-                        Self::wire_expressions_scans(&mut hj.build_side, target_idx);
-                    }
-                    found += 1;
+                && is_accumulate(&hj.probe_side)
+            {
+                if found == target_idx {
+                    Self::wire_expressions_scans(&mut hj.build_side, target_idx);
                 }
+                found += 1;
+            }
         });
     }
 }
@@ -1195,10 +1195,11 @@ impl CardinalityEstimation {
                 // Try to get real stats from the stats store
                 if let Some(ref stats_store) = self.stats
                     && let Ok(store) = stats_store.lock()
-                        && let Some(table_stats) = store.get_table_stats(s.table_id)
-                            && table_stats.num_rows > 0 {
-                                return table_stats.num_rows;
-                            }
+                    && let Some(table_stats) = store.get_table_stats(s.table_id)
+                    && table_stats.num_rows > 0
+                {
+                    return table_stats.num_rows;
+                }
                 // Fallback heuristic: 1000 nodes per table
                 1000
             }
@@ -1206,10 +1207,11 @@ impl CardinalityEstimation {
                 // Try to get real stats from the stats store
                 if let Some(ref stats_store) = self.stats
                     && let Ok(store) = stats_store.lock()
-                        && let Some(table_stats) = store.get_table_stats(s.table_id)
-                            && table_stats.num_rows > 0 {
-                                return table_stats.num_rows;
-                            }
+                    && let Some(table_stats) = store.get_table_stats(s.table_id)
+                    && table_stats.num_rows > 0
+                {
+                    return table_stats.num_rows;
+                }
                 // Fallback heuristic: 5000 edges per rel table
                 5000
             }
@@ -1285,24 +1287,22 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 }
                 LogicalOperator::VectorSimilarityScan(vs) => vs.top_k,
                 LogicalOperator::CopyFrom(_) => 10000, // batch insert
-                LogicalOperator::Delete(_) => 1000,     // estimated rows affected
-                LogicalOperator::Set(_) => 1000,        // estimated rows updated
+                LogicalOperator::Delete(_) => 1000,    // estimated rows affected
+                LogicalOperator::Set(_) => 1000,       // estimated rows updated
                 LogicalOperator::OptionalMatch(om) => {
                     om.left.cardinality() // same as left (nullable)
                 }
                 LogicalOperator::Unwind(_) => 10, // list expansion estimate
                 LogicalOperator::Foreach(_) => 1,
-                LogicalOperator::Merge(_) => 1,   // single matched/created node
-                LogicalOperator::Explain(_) => 1, // one row with plan text
+                LogicalOperator::Merge(_) => 1,      // single matched/created node
+                LogicalOperator::Explain(_) => 1,    // one row with plan text
                 LogicalOperator::Intersect(_) => 10, // estimate: intersection reduces cardinality
                 LogicalOperator::RecursiveExtend(re) => {
                     // estimate: upper_bound * source cardinality
                     let src_card = 100;
                     re.upper_bound.saturating_mul(src_card)
                 }
-                LogicalOperator::Accumulate(ac) => {
-                    ac.children.first().map(|c| c.cardinality()).unwrap_or(1)
-                }
+                LogicalOperator::Accumulate(ac) => ac.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::ExpressionsScan(_) => 1,
                 LogicalOperator::SemiMasker(sm) => {
                     // SemiMasker passes through cardinality from its child
@@ -1500,9 +1500,10 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
                     }
                 }
                 (Expression::Constant(Constant::String(a)), Expression::Constant(Constant::String(b)))
-                    if (*op == BinaryOp::Concat || *op == BinaryOp::Add) => {
-                        return Expression::Constant(Constant::String(format!("{}{}", a, b)));
-                    }
+                    if (*op == BinaryOp::Concat || *op == BinaryOp::Add) =>
+                {
+                    return Expression::Constant(Constant::String(format!("{}{}", a, b)));
+                }
                 _ => {}
             }
             Expression::BinaryOp(*op, Box::new(left), Box::new(right))
@@ -1535,43 +1536,52 @@ fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast::Exp
         }
         // Leave these unchanged
         Expression::Variable(_) | Expression::Parameter(_) | Expression::Constant(_) => expr.clone(),
-        Expression::ExistsSubquery(query) => {
-            Expression::ExistsSubquery(Box::new(fold_query(query)))
-        }
+        Expression::ExistsSubquery(query) => Expression::ExistsSubquery(Box::new(fold_query(query))),
         Expression::Case(case_expr) => {
             use kuzu_parser::ast::{CaseAlternative, CaseExpr};
             let subject = case_expr.subject.as_ref().map(|s| Box::new(fold_expression(s)));
-            let alternatives = case_expr.alternatives.iter().map(|alt| CaseAlternative {
-                when: fold_expression(&alt.when),
-                then: fold_expression(&alt.then),
-            }).collect();
+            let alternatives = case_expr
+                .alternatives
+                .iter()
+                .map(|alt| CaseAlternative {
+                    when: fold_expression(&alt.when),
+                    then: fold_expression(&alt.then),
+                })
+                .collect();
             let else_expr = case_expr.else_expr.as_ref().map(|e| Box::new(fold_expression(e)));
-            Expression::Case(CaseExpr { subject, alternatives, else_expr })
+            Expression::Case(CaseExpr {
+                subject,
+                alternatives,
+                else_expr,
+            })
         }
         Expression::Star => expr.clone(),
-        Expression::ListPredicate { quantifier, list, var_name, predicate } => {
-            Expression::ListPredicate {
-                quantifier: *quantifier,
-                list: Box::new(fold_expression(list)),
-                var_name: var_name.clone(),
-                predicate: Box::new(fold_expression(predicate)),
-            }
-        }
+        Expression::ListPredicate {
+            quantifier,
+            list,
+            var_name,
+            predicate,
+        } => Expression::ListPredicate {
+            quantifier: *quantifier,
+            list: Box::new(fold_expression(list)),
+            var_name: var_name.clone(),
+            predicate: Box::new(fold_expression(predicate)),
+        },
     }
 }
 
 /// Fold constant sub-expressions in a Query's clauses.
 fn fold_query(query: &kuzu_parser::ast::Query) -> kuzu_parser::ast::Query {
-    let clauses: Vec<kuzu_parser::ast::Clause> = query.clauses.iter().map(|clause| {
-        match clause {
-            kuzu_parser::ast::Clause::Where(w) => {
-                kuzu_parser::ast::Clause::Where(kuzu_parser::ast::WhereClause {
-                    expression: fold_expression(&w.expression),
-                })
-            }
+    let clauses: Vec<kuzu_parser::ast::Clause> = query
+        .clauses
+        .iter()
+        .map(|clause| match clause {
+            kuzu_parser::ast::Clause::Where(w) => kuzu_parser::ast::Clause::Where(kuzu_parser::ast::WhereClause {
+                expression: fold_expression(&w.expression),
+            }),
             other => other.clone(),
-        }
-    }).collect();
+        })
+        .collect();
     kuzu_parser::ast::Query { clauses }
 }
 
@@ -1623,16 +1633,16 @@ impl TreeOptimizationPass for AggKeyDependency {
                 // (functionally determined by the key).
 
                 // Maps variable → property names that are keys
-                let mut var_key_props: std::collections::HashMap<String, String> =
-                    std::collections::HashMap::new();
+                let mut var_key_props: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
                 // First pass: find ID properties (these take priority as keys)
                 for key in &agg.group_by {
                     if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key
                         && let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref()
-                            && Self::is_id_property(prop) {
-                                var_key_props.entry(var.clone()).or_insert_with(|| prop.clone());
-                            }
+                        && Self::is_id_property(prop)
+                    {
+                        var_key_props.entry(var.clone()).or_insert_with(|| prop.clone());
+                    }
                 }
 
                 // Second pass: for variables without an ID property, use the first
@@ -1640,9 +1650,10 @@ impl TreeOptimizationPass for AggKeyDependency {
                 for key in &agg.group_by {
                     if let kuzu_parser::ast::Expression::PropertyAccess(obj, prop) = key
                         && let kuzu_parser::ast::Expression::Variable(var) = obj.as_ref()
-                            && !var_key_props.contains_key(var) {
-                                var_key_props.insert(var.clone(), prop.clone());
-                            }
+                        && !var_key_props.contains_key(var)
+                    {
+                        var_key_props.insert(var.clone(), prop.clone());
+                    }
                 }
 
                 // Phase 2: Filter keys — keep key expressions and non-property
@@ -1792,23 +1803,22 @@ impl OptimizationPass for CountRelTable {
         let mut result: Vec<LogicalOperator> = Vec::new();
         let mut i = 0;
         while i < operators.len() {
-            if i + 1 < operators.len()
-                && matches!(&operators[i], LogicalOperator::ScanRel(_))
-            {
+            if i + 1 < operators.len() && matches!(&operators[i], LogicalOperator::ScanRel(_)) {
                 if let LogicalOperator::ScanRel(sr) = &operators[i] {
                     if let LogicalOperator::Aggregate(agg) = &operators[i + 1]
                         && agg.aggregates.len() == 1
                         && agg.aggregates[0].0.to_uppercase().contains("COUNT")
-                        && agg.group_by.is_empty() {
-                            // Replace ScanRel with CountRelTable
-                            result.push(LogicalOperator::CountRelTable(LogicalCountRelTable {
-                                table_name: sr.table_name.clone(),
-                                table_id: sr.table_id,
-                            }));
-                            result.push(operators[i + 1].clone());
-                            i += 2;
-                            continue;
-                        }
+                        && agg.group_by.is_empty()
+                    {
+                        // Replace ScanRel with CountRelTable
+                        result.push(LogicalOperator::CountRelTable(LogicalCountRelTable {
+                            table_name: sr.table_name.clone(),
+                            table_id: sr.table_id,
+                        }));
+                        result.push(operators[i + 1].clone());
+                        i += 2;
+                        continue;
+                    }
                 }
             }
             result.push(operators[i].clone());
@@ -2393,18 +2403,9 @@ mod tests {
         });
         let agg = make_aggregate(
             vec![
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "id".into(),
-                ),
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "name".into(),
-                ),
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "age".into(),
-                ),
+                Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "id".into()),
+                Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "name".into()),
+                Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "age".into()),
             ],
             scan,
         );
@@ -2417,11 +2418,9 @@ mod tests {
             LogicalOperator::Aggregate(ref a) => {
                 assert_eq!(a.group_by.len(), 1, "Should keep only a.id");
                 // Only a.id should remain
-                assert_eq!(a.group_by[0],
-                    Expression::PropertyAccess(
-                        Box::new(Expression::Variable("a".into())),
-                        "id".into(),
-                    ),
+                assert_eq!(
+                    a.group_by[0],
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "id".into(),),
                 );
             }
             _ => panic!("Expected Aggregate"),
@@ -2442,14 +2441,8 @@ mod tests {
         });
         let agg = make_aggregate(
             vec![
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "name".into(),
-                ),
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "age".into(),
-                ),
+                Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "name".into()),
+                Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "age".into()),
             ],
             scan,
         );
@@ -2461,11 +2454,9 @@ mod tests {
         match plan {
             LogicalOperator::Aggregate(ref a) => {
                 assert_eq!(a.group_by.len(), 1, "Should keep only first property");
-                assert_eq!(a.group_by[0],
-                    Expression::PropertyAccess(
-                        Box::new(Expression::Variable("a".into())),
-                        "name".into(),
-                    ),
+                assert_eq!(
+                    a.group_by[0],
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "name".into(),),
                 );
             }
             _ => panic!("Expected Aggregate"),
@@ -2516,12 +2507,10 @@ mod tests {
             fts_query: None,
         });
         let agg = make_aggregate(
-            vec![
-                Expression::PropertyAccess(
-                    Box::new(Expression::Variable("a".into())),
-                    "id".into(),
-                ),
-            ],
+            vec![Expression::PropertyAccess(
+                Box::new(Expression::Variable("a".into())),
+                "id".into(),
+            )],
             scan,
         );
 
@@ -2593,7 +2582,7 @@ mod tests {
                         // Verify the SemiMasker wraps the original filtered build side
                         assert_eq!(sm.children.len(), 1, "SemiMasker should have one child");
                         match &sm.children[0] {
-                            LogicalOperator::Filter(_) => {}, // OK — original filter preserved
+                            LogicalOperator::Filter(_) => {} // OK — original filter preserved
                             _ => panic!("SemiMasker child should be the original Filter"),
                         }
                     }
@@ -2640,8 +2629,10 @@ mod tests {
         match plan {
             LogicalOperator::HashJoin(ref hj) => {
                 // Build side should NOT have a SemiMasker (no filter present)
-                assert!(!matches!(&*hj.build_side, LogicalOperator::SemiMasker(_)),
-                    "SIP should NOT inject SemiMasker when build side has no filter");
+                assert!(
+                    !matches!(&*hj.build_side, LogicalOperator::SemiMasker(_)),
+                    "SIP should NOT inject SemiMasker when build side has no filter"
+                );
             }
             _ => panic!("Expected HashJoin"),
         }
@@ -2670,7 +2661,7 @@ impl OptimizationPass for LimitPushDown {
                 {
                     // Swap: push Limit below Filter
                     result.push(operators[i + 1].clone()); // Filter first
-                    result.push(operators[i].clone());     // then Limit
+                    result.push(operators[i].clone()); // then Limit
                     i += 2;
                     continue;
                 }
@@ -2704,35 +2695,38 @@ impl OptimizationPass for CommonSubexpressionElimination {
     }
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
-        operators.iter().map(|op| {
-            match op {
-                LogicalOperator::Projection(p) => {
-                    // Check for duplicate expressions
-                    let mut seen_exprs: Vec<&kuzu_binder::bound_statement::BoundExpression> = Vec::new();
-                    let mut unique_exprs: Vec<kuzu_binder::bound_statement::BoundExpression> = Vec::new();
-                    let mut mapping: Vec<usize> = Vec::new();
-                    for expr in &p.expressions {
-                        if let Some(pos) = seen_exprs.iter().position(|e| e.expression == expr.expression) {
-                            mapping.push(pos);
+        operators
+            .iter()
+            .map(|op| {
+                match op {
+                    LogicalOperator::Projection(p) => {
+                        // Check for duplicate expressions
+                        let mut seen_exprs: Vec<&kuzu_binder::bound_statement::BoundExpression> = Vec::new();
+                        let mut unique_exprs: Vec<kuzu_binder::bound_statement::BoundExpression> = Vec::new();
+                        let mut mapping: Vec<usize> = Vec::new();
+                        for expr in &p.expressions {
+                            if let Some(pos) = seen_exprs.iter().position(|e| e.expression == expr.expression) {
+                                mapping.push(pos);
+                            } else {
+                                seen_exprs.push(expr);
+                                unique_exprs.push(expr.clone());
+                                mapping.push(unique_exprs.len() - 1);
+                            }
+                        }
+                        // Only rewrite if dedup happened
+                        if unique_exprs.len() < p.expressions.len() {
+                            LogicalOperator::Projection(LogicalProjection {
+                                expressions: unique_exprs,
+                                children: p.children.clone(),
+                                cardinality: p.cardinality,
+                            })
                         } else {
-                            seen_exprs.push(expr);
-                            unique_exprs.push(expr.clone());
-                            mapping.push(unique_exprs.len() - 1);
+                            op.clone()
                         }
                     }
-                    // Only rewrite if dedup happened
-                    if unique_exprs.len() < p.expressions.len() {
-                        LogicalOperator::Projection(LogicalProjection {
-                            expressions: unique_exprs,
-                            children: p.children.clone(),
-                            cardinality: p.cardinality,
-                        })
-                    } else {
-                        op.clone()
-                    }
+                    _ => op.clone(),
                 }
-                _ => op.clone(),
-            }
-        }).collect()
+            })
+            .collect()
     }
 }

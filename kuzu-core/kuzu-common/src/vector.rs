@@ -74,8 +74,8 @@ pub const fn physical_type_size(t: PhysicalTypeID) -> usize {
         PhysicalTypeID::Int32 | PhysicalTypeID::UInt32 | PhysicalTypeID::Float => 4,
         PhysicalTypeID::Int64 | PhysicalTypeID::UInt64 | PhysicalTypeID::Double | PhysicalTypeID::Interval => 8,
         PhysicalTypeID::Int128 => 16,
-        PhysicalTypeID::String => 256,                      // inline string up to 255 chars for prototype
-        PhysicalTypeID::Struct => 8,                        // pointer to struct data
+        PhysicalTypeID::String => 256, // inline string up to 255 chars for prototype
+        PhysicalTypeID::Struct => 8,   // pointer to struct data
         PhysicalTypeID::List | PhysicalTypeID::Array => 16, // list header
         PhysicalTypeID::Blob => 256,
         PhysicalTypeID::Any => 1,
@@ -520,7 +520,11 @@ pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
 impl DataChunk {
     pub fn new(fields: Vec<ValueVector>) -> Self {
         let size = fields.first().map(|f| f.size()).unwrap_or(0);
-        Self { fields, size, field_names: vec![] }
+        Self {
+            fields,
+            size,
+            field_names: vec![],
+        }
     }
 
     /// Attach column names to this chunk (builder pattern).

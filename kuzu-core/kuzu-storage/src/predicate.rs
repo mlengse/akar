@@ -104,12 +104,7 @@ fn in_range<T: PartialOrd>(min: &T, max: &T, val: &T) -> bool {
 
 /// Zone map check for constant-value comparison predicates.
 /// Returns `SkipScan` if the predicate cannot possibly match the zone.
-fn check_constant_predicate<T: PartialOrd>(
-    min: &T,
-    max: &T,
-    constant: &T,
-    op: &str,
-) -> ZoneMapCheckResult {
+fn check_constant_predicate<T: PartialOrd>(min: &T, max: &T, constant: &T, op: &str) -> ZoneMapCheckResult {
     match op {
         "=" | "==" => {
             if !in_range(min, max, constant) {
@@ -136,10 +131,9 @@ fn check_constant_predicate<T: PartialOrd>(
                 return ZoneMapCheckResult::SkipScan;
             }
         }
-        "<="
-            if constant < min => {
-                return ZoneMapCheckResult::SkipScan;
-            }
+        "<=" if constant < min => {
+            return ZoneMapCheckResult::SkipScan;
+        }
         _ => {}
     }
     ZoneMapCheckResult::AlwaysScan
@@ -149,11 +143,7 @@ fn check_constant_predicate<T: PartialOrd>(
 /// based on a predicate `(column op constant)`.
 ///
 /// Returns `SkipScan` if the chunk definitely doesn't match.
-pub fn check_zone_map(
-    stats: &ColumnChunkStats,
-    op: &str,
-    constant: &Value,
-) -> ZoneMapCheckResult {
+pub fn check_zone_map(stats: &ColumnChunkStats, op: &str, constant: &Value) -> ZoneMapCheckResult {
     let (Some(min), Some(max)) = (&stats.min, &stats.max) else {
         return ZoneMapCheckResult::AlwaysScan;
     };
@@ -161,25 +151,15 @@ pub fn check_zone_map(
     // Type-based dispatch for comparison
     match (min, max, constant) {
         // Int64
-        (Value::Int64(min_v), Value::Int64(max_v), Value::Int64(c)) => {
-            check_constant_predicate(min_v, max_v, c, op)
-        }
+        (Value::Int64(min_v), Value::Int64(max_v), Value::Int64(c)) => check_constant_predicate(min_v, max_v, c, op),
         // Double
-        (Value::Double(min_v), Value::Double(max_v), Value::Double(c)) => {
-            check_constant_predicate(min_v, max_v, c, op)
-        }
+        (Value::Double(min_v), Value::Double(max_v), Value::Double(c)) => check_constant_predicate(min_v, max_v, c, op),
         // Float
-        (Value::Float(min_v), Value::Float(max_v), Value::Float(c)) => {
-            check_constant_predicate(min_v, max_v, c, op)
-        }
+        (Value::Float(min_v), Value::Float(max_v), Value::Float(c)) => check_constant_predicate(min_v, max_v, c, op),
         // Int32
-        (Value::Int32(min_v), Value::Int32(max_v), Value::Int32(c)) => {
-            check_constant_predicate(min_v, max_v, c, op)
-        }
+        (Value::Int32(min_v), Value::Int32(max_v), Value::Int32(c)) => check_constant_predicate(min_v, max_v, c, op),
         // String
-        (Value::String(min_v), Value::String(max_v), Value::String(c)) => {
-            check_constant_predicate(min_v, max_v, c, op)
-        }
+        (Value::String(min_v), Value::String(max_v), Value::String(c)) => check_constant_predicate(min_v, max_v, c, op),
         // InternalID (compare by offset)
         (Value::InternalID(min_id), Value::InternalID(max_id), Value::InternalID(c_id)) => {
             check_constant_predicate(&min_id.offset, &max_id.offset, &c_id.offset, op)
@@ -342,10 +322,7 @@ mod tests {
             guaranteed_no_nulls: true,
             guaranteed_all_nulls: false,
         };
-        assert_eq!(
-            check_null_zone_map(&stats, true),
-            ZoneMapCheckResult::SkipScan
-        );
+        assert_eq!(check_null_zone_map(&stats, true), ZoneMapCheckResult::SkipScan);
     }
 
     #[test]
@@ -356,10 +333,7 @@ mod tests {
             guaranteed_no_nulls: false,
             guaranteed_all_nulls: false,
         };
-        assert_eq!(
-            check_null_zone_map(&stats, true),
-            ZoneMapCheckResult::AlwaysScan
-        );
+        assert_eq!(check_null_zone_map(&stats, true), ZoneMapCheckResult::AlwaysScan);
     }
 
     #[test]
@@ -370,10 +344,7 @@ mod tests {
             guaranteed_no_nulls: false,
             guaranteed_all_nulls: true,
         };
-        assert_eq!(
-            check_null_zone_map(&stats, false),
-            ZoneMapCheckResult::SkipScan
-        );
+        assert_eq!(check_null_zone_map(&stats, false), ZoneMapCheckResult::SkipScan);
     }
 
     #[test]
@@ -406,10 +377,7 @@ mod tests {
     #[test]
     fn test_internal_id_zone_map() {
         let stats = ColumnChunkStats::new(
-            Some(Value::InternalID(InternalID {
-                offset: 0,
-                table_id: 1,
-            })),
+            Some(Value::InternalID(InternalID { offset: 0, table_id: 1 })),
             Some(Value::InternalID(InternalID {
                 offset: 100,
                 table_id: 1,

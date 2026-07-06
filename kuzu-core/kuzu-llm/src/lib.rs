@@ -28,8 +28,8 @@ impl Extension for LlmExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::ScalarFunction;
         use kuzu_common::types::Value;
+        use kuzu_function::registry::ScalarFunction;
         use std::sync::Arc;
 
         context.register_scalar_function(
@@ -44,11 +44,11 @@ impl Extension for LlmExtension {
                         Value::String(s) => s,
                         _ => return Err("create_embedding: first argument must be string".into()),
                     };
-                    
+
                     // Default config for now
                     let config = crate::EmbeddingConfig::default();
                     let embedding = crate::create_embedding(text, Some(&config))?;
-                    
+
                     // Return the vector as a List of floats
                     let vals: Vec<Value> = embedding.vector.into_iter().map(Value::Double).collect();
                     Ok(Value::List(vals))

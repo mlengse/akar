@@ -18,8 +18,8 @@
 use std::sync::Arc;
 
 use kuzu_extension::{Extension, ExtensionContext};
-use kuzu_graph::gds::BaseBFSGraph;
 use kuzu_graph::CSRAdjacency;
+use kuzu_graph::gds::BaseBFSGraph;
 
 /// The graph algorithms extension.
 pub struct AlgoExtension;
@@ -42,168 +42,245 @@ impl Extension for AlgoExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::TableFunction;
-        use kuzu_common::vector::DataChunk;
         use kuzu_common::types::Value;
+        use kuzu_common::vector::DataChunk;
+        use kuzu_function::registry::TableFunction;
 
         // Helper: create a table function closure that runs a GDS shortest path algorithm.
-        let sp_destinations_fn = Arc::new(
-            |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let source = match args.first() {
-                    Some(Value::Int64(s)) => *s as u64,
-                    Some(Value::UInt64(s)) => *s,
-                    _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
-                };
+        let sp_destinations_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            let source = match args.first() {
+                Some(Value::Int64(s)) => *s as u64,
+                Some(Value::UInt64(s)) => *s,
+                _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
+            };
 
-                // Build sample CSR (5-node chain) for demo — in production this would read from catalog.
-                let edges = vec![
-                    kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
-                ];
-                let csr = CSRAdjacency::build(&edges, 5);
+            // Build sample CSR (5-node chain) for demo — in production this would read from catalog.
+            let edges = vec![
+                kuzu_graph::Edge {
+                    src_offset: 0,
+                    dst_offset: 1,
+                    rel_id: 0,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 1,
+                    dst_offset: 2,
+                    rel_id: 1,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 2,
+                    dst_offset: 3,
+                    rel_id: 2,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 3,
+                    dst_offset: 4,
+                    rel_id: 3,
+                    rel_table_id: 0,
+                },
+            ];
+            let csr = CSRAdjacency::build(&edges, 5);
 
-                // Run BFS shortest path using GDS framework
-                let mut bfs = kuzu_graph::gds::bfs_graph::DenseBFSGraph::new(5);
-                kuzu_graph::gds::utils::GDSUtils::run_single_shortest_path(
-                    &csr, source, &mut bfs, 100,
-                );
+            // Run BFS shortest path using GDS framework
+            let mut bfs = kuzu_graph::gds::bfs_graph::DenseBFSGraph::new(5);
+            kuzu_graph::gds::utils::GDSUtils::run_single_shortest_path(&csr, source, &mut bfs, 100);
 
-                // Collect results: (src, dst, distance)
-                let mut src_col = Vec::new();
-                let mut dst_col = Vec::new();
-                let mut dist_col = Vec::new();
+            // Collect results: (src, dst, distance)
+            let mut src_col = Vec::new();
+            let mut dst_col = Vec::new();
+            let mut dist_col = Vec::new();
 
-                for offset in 0..5 {
-                    if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
-                        let dist = if offset == source as usize {
-                            0i64
-                        } else {
-                            // Trace back to count hops
-                            let mut hops = 0i64;
-                            let mut cur = offset as u64;
-                            while cur != source {
-                                if let Some(parent) = bfs.get_parent_list_head_offset(cur) {
-                                    cur = parent.node_id.offset;
-                                    hops += 1;
-                                } else {
-                                    break;
-                                }
+            for offset in 0..5 {
+                if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
+                    let dist = if offset == source as usize {
+                        0i64
+                    } else {
+                        // Trace back to count hops
+                        let mut hops = 0i64;
+                        let mut cur = offset as u64;
+                        while cur != source {
+                            if let Some(parent) = bfs.get_parent_list_head_offset(cur) {
+                                cur = parent.node_id.offset;
+                                hops += 1;
+                            } else {
+                                break;
                             }
-                            hops
-                        };
-                        src_col.push(Value::Int64(source as i64));
-                        dst_col.push(Value::Int64(offset as i64));
-                        dist_col.push(Value::Int64(dist));
-                    }
+                        }
+                        hops
+                    };
+                    src_col.push(Value::Int64(source as i64));
+                    dst_col.push(Value::Int64(offset as i64));
+                    dist_col.push(Value::Int64(dist));
                 }
+            }
 
-                let n = src_col.len();
-                output.fields = vec![
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                ];
-                for (i, val) in src_col.iter().enumerate() {
-                    output.fields[0].set_value(i, val).ok();
-                }
-                for (i, val) in dst_col.iter().enumerate() {
-                    output.fields[1].set_value(i, val).ok();
-                }
-                for (i, val) in dist_col.iter().enumerate() {
-                    output.fields[2].set_value(i, val).ok();
-                }
-                output.size = n;
-                Ok(())
-            },
-        );
+            let n = src_col.len();
+            output.fields = vec![
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
+            ];
+            for (i, val) in src_col.iter().enumerate() {
+                output.fields[0].set_value(i, val).ok();
+            }
+            for (i, val) in dst_col.iter().enumerate() {
+                output.fields[1].set_value(i, val).ok();
+            }
+            for (i, val) in dist_col.iter().enumerate() {
+                output.fields[2].set_value(i, val).ok();
+            }
+            output.size = n;
+            Ok(())
+        });
 
-        let wsp_destinations_fn = Arc::new(
-            |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let source = match args.first() {
-                    Some(Value::Int64(s)) => *s as u64,
-                    Some(Value::UInt64(s)) => *s,
-                    _ => return Err("weighted_shortest_path: first argument must be source node offset".into()),
-                };
+        let wsp_destinations_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            let source = match args.first() {
+                Some(Value::Int64(s)) => *s as u64,
+                Some(Value::UInt64(s)) => *s,
+                _ => return Err("weighted_shortest_path: first argument must be source node offset".into()),
+            };
 
-                let edges = vec![
-                    kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
-                    kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
-                ];
-                let csr = CSRAdjacency::build(&edges, 5);
+            let edges = vec![
+                kuzu_graph::Edge {
+                    src_offset: 0,
+                    dst_offset: 1,
+                    rel_id: 0,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 1,
+                    dst_offset: 2,
+                    rel_id: 1,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 2,
+                    dst_offset: 3,
+                    rel_id: 2,
+                    rel_table_id: 0,
+                },
+                kuzu_graph::Edge {
+                    src_offset: 3,
+                    dst_offset: 4,
+                    rel_id: 3,
+                    rel_table_id: 0,
+                },
+            ];
+            let csr = CSRAdjacency::build(&edges, 5);
 
-                let mut bfs = kuzu_graph::gds::bfs_graph::DenseBFSGraph::new(5);
-                kuzu_graph::gds::utils::GDSUtils::run_weighted_shortest_path(
-                    &csr, source, &mut bfs, |_src, _dst, _eid| 1.0,
-                );
+            let mut bfs = kuzu_graph::gds::bfs_graph::DenseBFSGraph::new(5);
+            kuzu_graph::gds::utils::GDSUtils::run_weighted_shortest_path(&csr, source, &mut bfs, |_src, _dst, _eid| {
+                1.0
+            });
 
-                let mut src_col = Vec::new();
-                let mut dst_col = Vec::new();
-                let mut cost_col = Vec::new();
+            let mut src_col = Vec::new();
+            let mut dst_col = Vec::new();
+            let mut cost_col = Vec::new();
 
-                for offset in 0..5 {
-                    if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
-                        let cost = if offset == source as usize {
-                            0.0
-                        } else if let Some(_parent) = bfs.get_parent_list_head_offset(offset as u64) {
-                            // Walk back accumulating costs
-                            let mut total = 0.0;
-                            let mut cur = offset as u64;
-                            while cur != source {
-                                if let Some(p) = bfs.get_parent_list_head_offset(cur) {
-                                    total += p.cost;
-                                    cur = p.node_id.offset;
-                                } else {
-                                    break;
-                                }
+            for offset in 0..5 {
+                if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
+                    let cost = if offset == source as usize {
+                        0.0
+                    } else if let Some(_parent) = bfs.get_parent_list_head_offset(offset as u64) {
+                        // Walk back accumulating costs
+                        let mut total = 0.0;
+                        let mut cur = offset as u64;
+                        while cur != source {
+                            if let Some(p) = bfs.get_parent_list_head_offset(cur) {
+                                total += p.cost;
+                                cur = p.node_id.offset;
+                            } else {
+                                break;
                             }
-                            total
-                        } else {
-                            f64::MAX
-                        };
-                        src_col.push(Value::Int64(source as i64));
-                        dst_col.push(Value::Int64(offset as i64));
-                        cost_col.push(Value::Double(cost));
-                    }
+                        }
+                        total
+                    } else {
+                        f64::MAX
+                    };
+                    src_col.push(Value::Int64(source as i64));
+                    dst_col.push(Value::Int64(offset as i64));
+                    cost_col.push(Value::Double(cost));
                 }
+            }
 
-                let n = src_col.len();
-                output.fields = vec![
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                    kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n),
-                ];
-                for (i, val) in src_col.iter().enumerate() {
-                    output.fields[0].set_value(i, val).ok();
-                }
-                for (i, val) in dst_col.iter().enumerate() {
-                    output.fields[1].set_value(i, val).ok();
-                }
-                for (i, val) in cost_col.iter().enumerate() {
-                    output.fields[2].set_value(i, val).ok();
-                }
-                output.size = n;
-                Ok(())
-            },
-        );
+            let n = src_col.len();
+            output.fields = vec![
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
+                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n),
+            ];
+            for (i, val) in src_col.iter().enumerate() {
+                output.fields[0].set_value(i, val).ok();
+            }
+            for (i, val) in dst_col.iter().enumerate() {
+                output.fields[1].set_value(i, val).ok();
+            }
+            for (i, val) in cost_col.iter().enumerate() {
+                output.fields[2].set_value(i, val).ok();
+            }
+            output.size = n;
+            Ok(())
+        });
 
         // Register table functions
-        context.register_table_function("page_rank", TableFunction::Custom { name: "page_rank".into() });
-        context.register_table_function("pr", TableFunction::Custom { name: "page_rank".into() });
-        context.register_table_function("weakly_connected_components", TableFunction::Custom { name: "wcc".into() });
+        context.register_table_function(
+            "page_rank",
+            TableFunction::Custom {
+                name: "page_rank".into(),
+            },
+        );
+        context.register_table_function(
+            "pr",
+            TableFunction::Custom {
+                name: "page_rank".into(),
+            },
+        );
+        context.register_table_function(
+            "weakly_connected_components",
+            TableFunction::Custom { name: "wcc".into() },
+        );
         context.register_table_function("wcc", TableFunction::Custom { name: "wcc".into() });
-        context.register_table_function("strongly_connected_components", TableFunction::Custom { name: "scc_tarjan".into() });
-        context.register_table_function("scc", TableFunction::Custom { name: "scc_tarjan".into() });
-        context.register_table_function("strongly_connected_components_kosaraju", TableFunction::Custom { name: "scc_kosaraju".into() });
-        context.register_table_function("scc_ko", TableFunction::Custom { name: "scc_kosaraju".into() });
+        context.register_table_function(
+            "strongly_connected_components",
+            TableFunction::Custom {
+                name: "scc_tarjan".into(),
+            },
+        );
+        context.register_table_function(
+            "scc",
+            TableFunction::Custom {
+                name: "scc_tarjan".into(),
+            },
+        );
+        context.register_table_function(
+            "strongly_connected_components_kosaraju",
+            TableFunction::Custom {
+                name: "scc_kosaraju".into(),
+            },
+        );
+        context.register_table_function(
+            "scc_ko",
+            TableFunction::Custom {
+                name: "scc_kosaraju".into(),
+            },
+        );
         context.register_table_function("k_core_decomposition", TableFunction::Custom { name: "k_core".into() });
         context.register_table_function("kcore", TableFunction::Custom { name: "k_core".into() });
         context.register_table_function("louvain", TableFunction::Custom { name: "louvain".into() });
-        context.register_table_function("spanning_forest", TableFunction::Custom { name: "spanning_forest".into() });
-        context.register_table_function("sf", TableFunction::Custom { name: "spanning_forest".into() });
+        context.register_table_function(
+            "spanning_forest",
+            TableFunction::Custom {
+                name: "spanning_forest".into(),
+            },
+        );
+        context.register_table_function(
+            "sf",
+            TableFunction::Custom {
+                name: "spanning_forest".into(),
+            },
+        );
 
         // GDS shortest path algorithms — registered as proper CustomTable with executable callbacks
         context.register_table_function(
@@ -796,10 +873,7 @@ where
 /// Uses unit weights (equivalent to BFS shortest path).
 pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
     let (distance, _parent) = weighted_shortest_path(csr, source, |_from, _to| 1.0);
-    let values: Vec<f64> = distance
-        .iter()
-        .map(|d| d.unwrap_or(f64::MAX))
-        .collect();
+    let values: Vec<f64> = distance.iter().map(|d| d.unwrap_or(f64::MAX)).collect();
     AlgoResult {
         name: "weighted_shortest_path".into(),
         values,

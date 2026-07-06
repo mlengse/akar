@@ -68,11 +68,7 @@ pub struct PathsOutputWriter {
 }
 
 impl PathsOutputWriter {
-    pub fn new(
-        info: PathsOutputWriterInfo,
-        bfs_graph: Box<dyn BaseBFSGraph>,
-        source_node_id: InternalID,
-    ) -> Self {
+    pub fn new(info: PathsOutputWriterInfo, bfs_graph: Box<dyn BaseBFSGraph>, source_node_id: InternalID) -> Self {
         Self {
             info,
             bfs_graph,
@@ -97,8 +93,8 @@ impl PathsOutputWriter {
         path.push(first_parent);
 
         // Check if we should stop: we reached the source node (iter == 0 and no parent chain back)
-        let reached_source = first_parent.node_id.offset == self.src_offset
-            || (first_parent.next.is_none() && first_parent.iter == 0);
+        let reached_source =
+            first_parent.node_id.offset == self.src_offset || (first_parent.next.is_none() && first_parent.iter == 0);
 
         if reached_source {
             // Reconstruct path from source to destination
@@ -119,8 +115,8 @@ impl PathsOutputWriter {
     ) {
         path.push(first_parent);
 
-        let reached_source = first_parent.node_id.offset == self.src_offset
-            || (first_parent.next.is_none() && first_parent.iter == 0);
+        let reached_source =
+            first_parent.node_id.offset == self.src_offset || (first_parent.next.is_none() && first_parent.iter == 0);
 
         if reached_source {
             // Check semantic constraints
@@ -128,9 +124,10 @@ impl PathsOutputWriter {
                 self.write_path(path, results);
             }
         } else if let Some(ref next_parent) = first_parent.next
-            && self.is_next_viable(next_parent, path) {
-                self.dfs_slow(next_parent, path, results);
-            }
+            && self.is_next_viable(next_parent, path)
+        {
+            self.dfs_slow(next_parent, path, results);
+        }
 
         path.pop();
     }
@@ -181,9 +178,7 @@ impl PathsOutputWriter {
         row.push(Value::InternalID(self.source_node_id));
         // Destination node ID — the first element in the path (the destination)
         let dst = if !path.is_empty() {
-            path.first()
-                .map(|p| p.node_id)
-                .unwrap_or(self.source_node_id)
+            path.first().map(|p| p.node_id).unwrap_or(self.source_node_id)
         } else {
             self.source_node_id
         };
@@ -199,11 +194,7 @@ impl PathsOutputWriter {
             row.push(Value::List(path_nodes));
 
             // Path edge IDs
-            let path_edges: Vec<Value> = path
-                .iter()
-                .rev()
-                .map(|p| Value::Int64(p.edge_id as i64))
-                .collect();
+            let path_edges: Vec<Value> = path.iter().rev().map(|p| Value::Int64(p.edge_id as i64)).collect();
             row.push(Value::List(path_edges));
         }
 
@@ -219,10 +210,7 @@ pub struct SPPathsOutputWriter {
 }
 
 impl SPPathsOutputWriter {
-    pub fn new(
-        bfs_graph: Box<dyn BaseBFSGraph>,
-        source_node_id: InternalID,
-    ) -> Self {
+    pub fn new(bfs_graph: Box<dyn BaseBFSGraph>, source_node_id: InternalID) -> Self {
         let info = PathsOutputWriterInfo {
             semantic: kuzu_common::enums::PathSemantic::Walk,
             lower_bound: 0,
@@ -236,11 +224,7 @@ impl SPPathsOutputWriter {
     }
 
     /// Write the shortest path for a destination node.
-    pub fn write_path_for_dst(
-        &self,
-        dst_offset: u64,
-        results: &mut Vec<Vec<Value>>,
-    ) {
+    pub fn write_path_for_dst(&self, dst_offset: u64, results: &mut Vec<Vec<Value>>) {
         let first_parent = self.inner.bfs_graph.get_parent_list_head_offset(dst_offset);
         if let Some(parent) = first_parent {
             let mut path = Vec::new();
@@ -304,7 +288,6 @@ impl RJOutputWriter for SPPathsOutputWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_paths_output_writer_info_default() {

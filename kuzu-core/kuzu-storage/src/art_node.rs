@@ -131,10 +131,26 @@ impl ArtNode {
     /// Returns `true` if this node has any offsets (i.e., it's a leaf or contains leaves).
     pub fn has_offsets(&self) -> bool {
         let (offsets, overflow) = match self {
-            ArtNode::Node4 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node16 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node48 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node256 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
+            ArtNode::Node4 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node16 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node48 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node256 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
         };
         !offsets.is_empty() || !overflow.is_empty()
     }
@@ -142,10 +158,26 @@ impl ArtNode {
     /// Get all offsets (primary + overflow) as a slice.
     pub fn all_offsets(&self) -> Vec<u64> {
         let (offsets, overflow) = match self {
-            ArtNode::Node4 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node16 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node48 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
-            ArtNode::Node256 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
+            ArtNode::Node4 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node16 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node48 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
+            ArtNode::Node256 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
         };
         let mut result = offsets.clone();
         result.extend_from_slice(overflow);
@@ -156,7 +188,14 @@ impl ArtNode {
     /// Grows the node if necessary.
     pub fn insert_child(&mut self, byte: u8, child: Box<ArtNode>) {
         match self {
-            ArtNode::Node4 { prefix, keys, children, offsets, overflow_offsets, count } => {
+            ArtNode::Node4 {
+                prefix,
+                keys,
+                children,
+                offsets,
+                overflow_offsets,
+                count,
+            } => {
                 if *count < NODE4_MAX {
                     keys[*count as usize] = byte;
                     children[*count as usize] = Some(child);
@@ -169,13 +208,24 @@ impl ArtNode {
                     let old_children = std::mem::take(children);
                     let old_count = *count;
                     *self = ArtNode::grow_node4_to_node16(
-                        old_prefix, old_offsets, old_overflow,
-                        old_keys, old_children, old_count,
+                        old_prefix,
+                        old_offsets,
+                        old_overflow,
+                        old_keys,
+                        old_children,
+                        old_count,
                     );
                     self.insert_child(byte, child);
                 }
             }
-            ArtNode::Node16 { prefix, keys, children, offsets, overflow_offsets, count } => {
+            ArtNode::Node16 {
+                prefix,
+                keys,
+                children,
+                offsets,
+                overflow_offsets,
+                count,
+            } => {
                 if *count < NODE16_MAX {
                     keys[*count as usize] = byte;
                     children[*count as usize] = Some(child);
@@ -188,13 +238,24 @@ impl ArtNode {
                     let old_children = std::mem::take(children);
                     let old_count = *count;
                     *self = ArtNode::grow_node16_to_node48(
-                        old_prefix, old_offsets, old_overflow,
-                        old_keys, old_children, old_count,
+                        old_prefix,
+                        old_offsets,
+                        old_overflow,
+                        old_keys,
+                        old_children,
+                        old_count,
                     );
                     self.insert_child(byte, child);
                 }
             }
-            ArtNode::Node48 { prefix, child_index, children, offsets, overflow_offsets, count } => {
+            ArtNode::Node48 {
+                prefix,
+                child_index,
+                children,
+                offsets,
+                overflow_offsets,
+                count,
+            } => {
                 if *count < NODE48_MAX {
                     child_index[byte as usize] = *count as u8;
                     children[*count as usize] = Some(child);
@@ -207,8 +268,12 @@ impl ArtNode {
                     let old_children = std::mem::replace(children, Box::new(std::array::from_fn(|_| None)));
                     let old_count = *count;
                     *self = ArtNode::grow_node48_to_node256(
-                        old_prefix, old_offsets, old_overflow,
-                        old_child_index, old_children, old_count,
+                        old_prefix,
+                        old_offsets,
+                        old_overflow,
+                        old_child_index,
+                        old_children,
+                        old_count,
                     );
                     self.insert_child(byte, child);
                 }
@@ -225,7 +290,9 @@ impl ArtNode {
     /// Get a child by byte, if it exists.
     pub fn get_child(&self, byte: u8) -> Option<&ArtNode> {
         match self {
-            ArtNode::Node4 { keys, children, count, .. } => {
+            ArtNode::Node4 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         return children[i].as_deref();
@@ -233,7 +300,9 @@ impl ArtNode {
                 }
                 None
             }
-            ArtNode::Node16 { keys, children, count, .. } => {
+            ArtNode::Node16 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         return children[i].as_deref();
@@ -241,7 +310,9 @@ impl ArtNode {
                 }
                 None
             }
-            ArtNode::Node48 { child_index, children, .. } => {
+            ArtNode::Node48 {
+                child_index, children, ..
+            } => {
                 let idx = child_index[byte as usize];
                 if idx == EMPTY_MARKER {
                     None
@@ -256,7 +327,9 @@ impl ArtNode {
     /// Get a mutable child by byte, if it exists.
     pub fn get_child_mut(&mut self, byte: u8) -> Option<&mut Box<ArtNode>> {
         match self {
-            ArtNode::Node4 { keys, children, count, .. } => {
+            ArtNode::Node4 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         return children[i].as_mut();
@@ -264,7 +337,9 @@ impl ArtNode {
                 }
                 None
             }
-            ArtNode::Node16 { keys, children, count, .. } => {
+            ArtNode::Node16 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         return children[i].as_mut();
@@ -272,7 +347,9 @@ impl ArtNode {
                 }
                 None
             }
-            ArtNode::Node48 { child_index, children, .. } => {
+            ArtNode::Node48 {
+                child_index, children, ..
+            } => {
                 let idx = child_index[byte as usize];
                 if idx == EMPTY_MARKER {
                     None
@@ -298,7 +375,9 @@ impl ArtNode {
     /// Remove a child by byte. Does not shrink the node.
     pub fn remove_child(&mut self, byte: u8) {
         match self {
-            ArtNode::Node4 { keys, children, count, .. } => {
+            ArtNode::Node4 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         // Shift remaining keys/children left
@@ -312,7 +391,9 @@ impl ArtNode {
                     }
                 }
             }
-            ArtNode::Node16 { keys, children, count, .. } => {
+            ArtNode::Node16 {
+                keys, children, count, ..
+            } => {
                 for i in 0..*count as usize {
                     if keys[i] == byte {
                         for j in i..(*count as usize - 1) {
@@ -326,7 +407,12 @@ impl ArtNode {
                     }
                 }
             }
-            ArtNode::Node48 { child_index, children, count, .. } => {
+            ArtNode::Node48 {
+                child_index,
+                children,
+                count,
+                ..
+            } => {
                 let idx = child_index[byte as usize];
                 if idx != EMPTY_MARKER {
                     children[idx as usize] = None;
@@ -345,10 +431,26 @@ impl ArtNode {
     /// Add a value offset to this node.
     pub fn add_offset(&mut self, offset: u64) {
         let (offsets, overflow) = match self {
-            ArtNode::Node4 { offsets, overflow_offsets, .. }
-            | ArtNode::Node16 { offsets, overflow_offsets, .. }
-            | ArtNode::Node48 { offsets, overflow_offsets, .. }
-            | ArtNode::Node256 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
+            ArtNode::Node4 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node16 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node48 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node256 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
         };
         if offsets.is_empty() {
             offsets.push(offset);
@@ -361,10 +463,26 @@ impl ArtNode {
     /// Returns `true` if the offset was found and removed.
     pub fn remove_offset(&mut self, offset: u64) -> bool {
         let (offsets, overflow) = match self {
-            ArtNode::Node4 { offsets, overflow_offsets, .. }
-            | ArtNode::Node16 { offsets, overflow_offsets, .. }
-            | ArtNode::Node48 { offsets, overflow_offsets, .. }
-            | ArtNode::Node256 { offsets, overflow_offsets, .. } => (offsets, overflow_offsets),
+            ArtNode::Node4 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node16 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node48 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node256 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => (offsets, overflow_offsets),
         };
         if let Some(pos) = offsets.iter().position(|&o| o == offset) {
             offsets.remove(pos);
@@ -384,10 +502,26 @@ impl ArtNode {
     /// Clear all offsets from this node.
     pub fn clear_offsets(&mut self) {
         match self {
-            ArtNode::Node4 { offsets, overflow_offsets, .. }
-            | ArtNode::Node16 { offsets, overflow_offsets, .. }
-            | ArtNode::Node48 { offsets, overflow_offsets, .. }
-            | ArtNode::Node256 { offsets, overflow_offsets, .. } => {
+            ArtNode::Node4 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node16 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node48 {
+                offsets,
+                overflow_offsets,
+                ..
+            }
+            | ArtNode::Node256 {
+                offsets,
+                overflow_offsets,
+                ..
+            } => {
                 offsets.clear();
                 overflow_offsets.clear();
             }
@@ -478,38 +612,58 @@ impl ArtNode {
 impl fmt::Debug for ArtNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ArtNode::Node4 { prefix, offsets, overflow_offsets, count, .. } => {
-                f.debug_struct("Node4")
-                    .field("prefix", &prefix)
-                    .field("count", count)
-                    .field("offsets", offsets)
-                    .field("overflow", overflow_offsets)
-                    .finish()
-            }
-            ArtNode::Node16 { prefix, offsets, overflow_offsets, count, .. } => {
-                f.debug_struct("Node16")
-                    .field("prefix", &prefix)
-                    .field("count", count)
-                    .field("offsets", offsets)
-                    .field("overflow", overflow_offsets)
-                    .finish()
-            }
-            ArtNode::Node48 { prefix, offsets, overflow_offsets, count, .. } => {
-                f.debug_struct("Node48")
-                    .field("prefix", &prefix)
-                    .field("count", count)
-                    .field("offsets", offsets)
-                    .field("overflow", overflow_offsets)
-                    .finish()
-            }
-            ArtNode::Node256 { prefix, offsets, overflow_offsets, count, .. } => {
-                f.debug_struct("Node256")
-                    .field("prefix", &prefix)
-                    .field("count", count)
-                    .field("offsets", offsets)
-                    .field("overflow", overflow_offsets)
-                    .finish()
-            }
+            ArtNode::Node4 {
+                prefix,
+                offsets,
+                overflow_offsets,
+                count,
+                ..
+            } => f
+                .debug_struct("Node4")
+                .field("prefix", &prefix)
+                .field("count", count)
+                .field("offsets", offsets)
+                .field("overflow", overflow_offsets)
+                .finish(),
+            ArtNode::Node16 {
+                prefix,
+                offsets,
+                overflow_offsets,
+                count,
+                ..
+            } => f
+                .debug_struct("Node16")
+                .field("prefix", &prefix)
+                .field("count", count)
+                .field("offsets", offsets)
+                .field("overflow", overflow_offsets)
+                .finish(),
+            ArtNode::Node48 {
+                prefix,
+                offsets,
+                overflow_offsets,
+                count,
+                ..
+            } => f
+                .debug_struct("Node48")
+                .field("prefix", &prefix)
+                .field("count", count)
+                .field("offsets", offsets)
+                .field("overflow", overflow_offsets)
+                .finish(),
+            ArtNode::Node256 {
+                prefix,
+                offsets,
+                overflow_offsets,
+                count,
+                ..
+            } => f
+                .debug_struct("Node256")
+                .field("prefix", &prefix)
+                .field("count", count)
+                .field("offsets", offsets)
+                .field("overflow", overflow_offsets)
+                .finish(),
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Database — the main entry point for Kuzu.
 
-use kuzu_common::file_system::VirtualFileSystemRegistry;
 use kuzu_catalog::Catalog;
+use kuzu_common::file_system::VirtualFileSystemRegistry;
 use kuzu_common::memory::MemoryManager;
 use kuzu_common::task_system::TaskSystem;
 use kuzu_extension::{ExtensionContext, ExtensionRegistry};
@@ -192,7 +192,8 @@ impl Database {
                             other => return Err(format!("currval expects a string, got {:?}", other.logical_type())),
                         };
                         let cat = curr_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
-                        let seq = cat.get_sequence(&seq_name)
+                        let seq = cat
+                            .get_sequence(&seq_name)
                             .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
                         Ok(Value::Int64(seq.curr_val()))
                     }),
@@ -214,7 +215,8 @@ impl Database {
                             other => return Err(format!("nextval expects a string, got {:?}", other.logical_type())),
                         };
                         let mut cat = next_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
-                        let seq = cat.get_sequence_mut(&seq_name)
+                        let seq = cat
+                            .get_sequence_mut(&seq_name)
                             .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
                         let result = seq.next_k_val(1);
                         Ok(Value::Int64(result))

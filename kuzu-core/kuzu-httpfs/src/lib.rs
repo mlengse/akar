@@ -5,8 +5,8 @@
 //! - Basic URL parsing
 //! - File download to memory
 
-use kuzu_common::types::Value;
 use kuzu_common::file_system::{FileRead, FileSystem, FileWrite};
+use kuzu_common::types::Value;
 use kuzu_extension::{Extension, ExtensionContext};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -25,7 +25,10 @@ impl FileSystem for HttpFileSystem {
     }
 
     fn open_write(&self, _path: &str) -> std::io::Result<Box<dyn FileWrite>> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "HTTPFS is read-only",
+        ))
     }
 
     fn exists(&self, path: &str) -> bool {
@@ -36,11 +39,17 @@ impl FileSystem for HttpFileSystem {
     }
 
     fn remove(&self, _path: &str) -> std::io::Result<()> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "HTTPFS is read-only",
+        ))
     }
 
     fn create_dir_all(&self, _path: &str) -> std::io::Result<()> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "HTTPFS is read-only"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "HTTPFS is read-only",
+        ))
     }
 }
 
@@ -56,9 +65,7 @@ impl HttpRandomAccessReader {
         let resp = ureq::head(url)
             .call()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        let content_length = resp
-            .header("Content-Length")
-            .and_then(|s| s.parse::<u64>().ok());
+        let content_length = resp.header("Content-Length").and_then(|s| s.parse::<u64>().ok());
         Ok(Self {
             url: url.to_string(),
             position: 0,
@@ -78,7 +85,7 @@ impl Read for HttpRandomAccessReader {
             .set("Range", &range_header)
             .call()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        
+
         let mut reader = resp.into_reader();
         let bytes_read = reader.read(buf)?;
         self.position += bytes_read as u64;
@@ -95,7 +102,10 @@ impl Seek for HttpRandomAccessReader {
             SeekFrom::Current(offset) => {
                 let new_pos = self.position as i64 + offset;
                 if new_pos < 0 {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek to a negative position"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "invalid seek to a negative position",
+                    ));
                 }
                 self.position = new_pos as u64;
             }
@@ -103,11 +113,17 @@ impl Seek for HttpRandomAccessReader {
                 if let Some(len) = self.content_length {
                     let new_pos = len as i64 + offset;
                     if new_pos < 0 {
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek to a negative position"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "invalid seek to a negative position",
+                        ));
                     }
                     self.position = new_pos as u64;
                 } else {
-                    return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "SeekFrom::End requires Content-Length"));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "SeekFrom::End requires Content-Length",
+                    ));
                 }
             }
         }
@@ -187,7 +203,10 @@ impl Extension for HttpfsExtension {
                     let _ = temp_file.keep();
 
                     if chunk.num_fields() == 0 {
-                        chunk.fields.push(kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1));
+                        chunk.fields.push(kuzu_common::vector::ValueVector::new(
+                            kuzu_common::types::PhysicalTypeID::String,
+                            1,
+                        ));
                         chunk.field_names.push("path".to_string());
                     }
 

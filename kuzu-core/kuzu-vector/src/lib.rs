@@ -40,8 +40,8 @@ impl Extension for VectorExtension {
     }
 
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
-        use kuzu_function::registry::ScalarFunction;
         use kuzu_common::types::Value;
+        use kuzu_function::registry::ScalarFunction;
         use std::sync::Arc;
 
         // Register cosine_similarity as a CustomScalar callback
@@ -136,10 +136,7 @@ fn extract_f64_list(val: &kuzu_common::types::Value) -> Result<Vec<f64>, String>
                     kuzu_common::types::Value::Int32(i) => result.push(*i as f64),
                     kuzu_common::types::Value::Float(f) => result.push(*f as f64),
                     other => {
-                        return Err(format!(
-                            "Expected numeric value in vector list, got {:?}",
-                            other
-                        ));
+                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
                     }
                 }
             }

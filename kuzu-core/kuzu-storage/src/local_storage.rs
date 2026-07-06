@@ -150,5 +150,3 @@ impl LocalStorage {
         self.tables.clear();
     }
 }
-
-

@@ -1,7 +1,7 @@
+use crate::{Connection, Database, QueryResult};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use arrow::datatypes::{Schema, Field, DataType};
 use std::sync::Arc;
-use crate::{Database, Connection, QueryResult};
 
 pub struct AdbcDatabase {
     pub db: Arc<Database>,
@@ -86,16 +86,14 @@ impl AdbcStatement {
         if !res.success {
             return Err(res.error_message.unwrap_or_else(|| "Unknown error".to_string()));
         }
-        
+
         if res.chunks.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         // This is a stub for Arrow translation.
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("dummy", DataType::Int32, true),
-        ]));
-        
+        let schema = Arc::new(Schema::new(vec![Field::new("dummy", DataType::Int32, true)]));
+
         let batch = RecordBatch::new_empty(schema);
         Ok(vec![batch])
     }

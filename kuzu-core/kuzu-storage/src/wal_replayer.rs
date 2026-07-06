@@ -37,7 +37,6 @@ impl WALReplayer {
     where
         F: FnMut(&WALRecord) -> std::io::Result<()>,
     {
-        
         use std::io::{BufReader, Read};
 
         if !wal_path.exists() {
@@ -84,13 +83,10 @@ impl WALReplayer {
                     if pos + 12 > buffer.len() as u64 {
                         break;
                     }
-                    let _table_id = u64::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 8].try_into().unwrap(),
-                    );
+                    let _table_id = u64::from_le_bytes(buffer[pos as usize..pos as usize + 8].try_into().unwrap());
                     pos += 8;
-                    let data_len = u32::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 4].try_into().unwrap(),
-                    ) as usize;
+                    let data_len =
+                        u32::from_le_bytes(buffer[pos as usize..pos as usize + 4].try_into().unwrap()) as usize;
                     pos += 4;
                     if pos + data_len as u64 > buffer.len() as u64 {
                         break;
@@ -112,9 +108,8 @@ impl WALReplayer {
                     pos += 8; // table_id
                     pos += 8; // row_id
                     pos += 4; // column
-                    let data_len = u32::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 4].try_into().unwrap(),
-                    ) as usize;
+                    let data_len =
+                        u32::from_le_bytes(buffer[pos as usize..pos as usize + 4].try_into().unwrap()) as usize;
                     pos += 4;
                     if pos + data_len as u64 > buffer.len() as u64 {
                         break;
@@ -136,9 +131,8 @@ impl WALReplayer {
                     pos += 8; // table_id
                     pos += 4; // col_id
                     pos += 8; // page_id
-                    let data_len = u32::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 4].try_into().unwrap(),
-                    ) as usize;
+                    let data_len =
+                        u32::from_le_bytes(buffer[pos as usize..pos as usize + 4].try_into().unwrap()) as usize;
                     pos += 4;
                     if pos + data_len as u64 > buffer.len() as u64 {
                         break;
@@ -150,9 +144,8 @@ impl WALReplayer {
                     if pos + 4 > buffer.len() as u64 {
                         break;
                     }
-                    let data_len = u32::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 4].try_into().unwrap(),
-                    ) as usize;
+                    let data_len =
+                        u32::from_le_bytes(buffer[pos as usize..pos as usize + 4].try_into().unwrap()) as usize;
                     pos += 4;
                     if pos + data_len as u64 > buffer.len() as u64 {
                         break;
@@ -164,9 +157,7 @@ impl WALReplayer {
                     if pos + 8 > buffer.len() as u64 {
                         break;
                     }
-                    let txn_id = u64::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 8].try_into().unwrap(),
-                    );
+                    let txn_id = u64::from_le_bytes(buffer[pos as usize..pos as usize + 8].try_into().unwrap());
                     pos += 8;
                     committed_txns.insert(txn_id);
                     all_records.push((tag, vec![]));
@@ -175,9 +166,7 @@ impl WALReplayer {
                     if pos + 8 > buffer.len() as u64 {
                         break;
                     }
-                    let txn_id = u64::from_le_bytes(
-                        buffer[pos as usize..pos as usize + 8].try_into().unwrap(),
-                    );
+                    let txn_id = u64::from_le_bytes(buffer[pos as usize..pos as usize + 8].try_into().unwrap());
                     pos += 8;
                     rolled_back_txns.insert(txn_id);
                     all_records.push((tag, vec![]));

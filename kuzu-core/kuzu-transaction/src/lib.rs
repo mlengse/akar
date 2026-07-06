@@ -11,8 +11,8 @@
 //! ShadowFile apply → checkpoint). Call it after `TransactionManager::commit()`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -204,10 +204,7 @@ impl TransactionContext {
     /// Commit the active transaction.
     /// Returns the undo records and commit timestamp.
     pub fn commit(&mut self) -> Result<(Vec<UndoRecord>, u64), String> {
-        let mut txn = self
-            .active_txn
-            .take()
-            .ok_or("No active transaction to commit")?;
+        let mut txn = self.active_txn.take().ok_or("No active transaction to commit")?;
         let result = self.manager.commit(&mut txn);
         match result {
             CommitResult::Committed { commit_ts } => Ok((txn.undo_records, commit_ts)),
@@ -217,10 +214,7 @@ impl TransactionContext {
     /// Rollback the active transaction.
     /// Returns undo records for rollback application.
     pub fn rollback(&mut self) -> Result<Vec<UndoRecord>, String> {
-        let mut txn = self
-            .active_txn
-            .take()
-            .ok_or("No active transaction to rollback")?;
+        let mut txn = self.active_txn.take().ok_or("No active transaction to rollback")?;
         Ok(self.manager.rollback(&mut txn))
     }
 
@@ -249,9 +243,7 @@ impl TransactionContext {
 
     /// Lock a table on the active transaction.
     pub fn lock_table(&self, table_id: u64) -> Result<(), String> {
-        let txn_id = self
-            .active_txn_id()
-            .ok_or("No active transaction to lock table")?;
+        let txn_id = self.active_txn_id().ok_or("No active transaction to lock table")?;
         self.manager.lock_table(txn_id, table_id)
     }
 }
@@ -523,7 +515,10 @@ impl TransactionManager {
             }
             let _ = self
                 .cv_active_txns_changed
-                .wait_timeout(self.mtx_for_starting_new_txns.lock().unwrap(), Duration::from_millis(100))
+                .wait_timeout(
+                    self.mtx_for_starting_new_txns.lock().unwrap(),
+                    Duration::from_millis(100),
+                )
                 .unwrap();
         }
 

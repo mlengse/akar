@@ -19,9 +19,9 @@ pub mod local_wal;
 pub mod node_group;
 pub mod page;
 pub mod page_manager;
-pub mod predicate;
 #[cfg(feature = "parquet")]
 pub mod parquet_reader;
+pub mod predicate;
 pub mod shadow_file;
 pub mod spiller;
 pub mod stats;
@@ -46,7 +46,6 @@ pub use art_index::ArtPrimaryKeyIndex;
 pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
-pub use vector_index::{extract_f64_list_from_value, VectorIndexTable};
 pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
@@ -55,6 +54,7 @@ pub use shadow_file::ShadowFile;
 pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 pub use undo_buffer::UndoBuffer;
+pub use vector_index::{VectorIndexTable, extract_f64_list_from_value};
 pub use wal_replayer::{ReplayResult, WALReplayer};
 
 /// The storage manager — root of the storage engine.
@@ -202,7 +202,10 @@ impl StorageManager {
     }
 
     /// Get a mutable vector index by name.
-    pub fn get_vector_index_by_name_mut(&self, name: &str) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
+    pub fn get_vector_index_by_name_mut(
+        &self,
+        name: &str,
+    ) -> Option<dashmap::mapref::one::RefMut<'_, u64, VectorIndexTable>> {
         self.table_catalog.get_vector_index_by_name_mut(name)
     }
 
@@ -312,13 +315,13 @@ impl StorageManager {
 
     /// Get storage-level information for diagnostics.
     pub fn storage_info(&self) -> StorageInfo {
-        let total_pages = self.page_manager.as_ref()
-            .map(|pm| pm.total_pages())
-            .unwrap_or(0);
+        let total_pages = self.page_manager.as_ref().map(|pm| pm.total_pages()).unwrap_or(0);
         let free_pages = 0u64; // FSM query could be added later
         StorageInfo {
             db_path: self.db_path.to_string_lossy().to_string(),
-            page_size: self.page_manager.as_ref()
+            page_size: self
+                .page_manager
+                .as_ref()
                 .map(|pm| pm.page_size())
                 .unwrap_or(page::DEFAULT_PAGE_SIZE),
             total_pages,
@@ -345,13 +348,16 @@ impl StorageManager {
         let wal_size = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
         let data_size = std::fs::read_dir(db_path)
             .map(|entries| {
-                entries.filter_map(|e| e.ok())
+                entries
+                    .filter_map(|e| e.ok())
                     .filter(|e| e.path().extension().map(|x| x == "data").unwrap_or(false))
                     .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
                     .sum::<u64>()
             })
             .unwrap_or(0);
-        let page_size = self.page_manager.as_ref()
+        let page_size = self
+            .page_manager
+            .as_ref()
             .map(|pm| pm.page_size())
             .unwrap_or(page::DEFAULT_PAGE_SIZE) as u64;
         FileInfo {
@@ -363,9 +369,7 @@ impl StorageManager {
 
     /// FSM statistics for CALL free_space_info().
     pub fn fsm_info(&self) -> FsmInfo {
-        let total_pages = self.page_manager.as_ref()
-            .map(|pm| pm.total_pages())
-            .unwrap_or(0);
+        let total_pages = self.page_manager.as_ref().map(|pm| pm.total_pages()).unwrap_or(0);
         let free_pages = 0u64; // FSM query later
         FsmInfo {
             total_free_pages: free_pages.max(0),
@@ -502,19 +506,16 @@ impl StorageManager {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, table.columns.len());
                         if let Err(e) = table.insert_row(values) {
-                            return Err(std::io::Error::other(
-                                format!("WAL recovery insert failed: {e}"),
-                            ));
+                            return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
                         }
                     }
                 }
                 WALRecord::Delete { table_id, row_id } => {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id)
-                        && let Err(e) = table.delete_row(*row_id) {
-                            return Err(std::io::Error::other(
-                                format!("WAL recovery delete failed: {e}"),
-                            ));
-                        }
+                        && let Err(e) = table.delete_row(*row_id)
+                    {
+                        return Err(std::io::Error::other(format!("WAL recovery delete failed: {e}")));
+                    }
                 }
                 WALRecord::Update {
                     table_id,
@@ -525,11 +526,10 @@ impl StorageManager {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, 1);
                         if let Some(val) = values.into_iter().next()
-                            && let Err(e) = table.update_cell(*row_id, *column as usize, val) {
-                                return Err(std::io::Error::other(
-                                    format!("WAL recovery update failed: {e}"),
-                                ));
-                            }
+                            && let Err(e) = table.update_cell(*row_id, *column as usize, val)
+                        {
+                            return Err(std::io::Error::other(format!("WAL recovery update failed: {e}")));
+                        }
                     }
                 }
                 WALRecord::UpdateFsm { .. } => {
@@ -650,9 +650,10 @@ pub(crate) fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) 
                     let len = u32::from_le_bytes(len_buf) as usize;
                     let mut str_buf = vec![0u8; len];
                     if cursor.read_exact(&mut str_buf).is_ok()
-                        && let Ok(s) = String::from_utf8(str_buf) {
-                            values.push(Value::String(s));
-                        }
+                        && let Ok(s) = String::from_utf8(str_buf)
+                    {
+                        values.push(Value::String(s));
+                    }
                 }
             }
             TAG_DATE => {
@@ -778,14 +779,7 @@ mod integration_tests {
             let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
             let mut wal = WAL::new(wal_path.clone());
 
-            let mut col = Column::new(
-                LogicalTypeID::Int64,
-                0,
-                0,
-                dir.path(),
-                bm.clone(),
-                DEFAULT_PAGE_SIZE,
-            );
+            let mut col = Column::new(LogicalTypeID::Int64, 0, 0, dir.path(), bm.clone(), DEFAULT_PAGE_SIZE);
 
             // Write data and log each write to WAL
             for i in 0i64..10 {
@@ -1081,14 +1075,7 @@ mod integration_tests {
         let config = BufferManagerConfig::default();
         let bm = Arc::new(Mutex::new(BufferManager::new(dir.path().to_path_buf(), mm, config)));
 
-        let mut col = Column::new(
-            LogicalTypeID::Int64,
-            0,
-            0,
-            dir.path(),
-            bm.clone(),
-            DEFAULT_PAGE_SIZE,
-        );
+        let mut col = Column::new(LogicalTypeID::Int64, 0, 0, dir.path(), bm.clone(), DEFAULT_PAGE_SIZE);
 
         // Write 10,000 values
         for i in 0i64..10_000 {
@@ -1147,9 +1134,15 @@ mod integration_tests {
             );
 
             // Insert rows
-            table.insert_row(vec![Value::String("Alice".into()), Value::Int64(30)]).unwrap();
-            table.insert_row(vec![Value::String("Bob".into()), Value::Int64(25)]).unwrap();
-            table.insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)]).unwrap();
+            table
+                .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+                .unwrap();
+            table
+                .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+                .unwrap();
+            table
+                .insert_row(vec![Value::String("Charlie".into()), Value::Int64(35)])
+                .unwrap();
 
             // Put the table back into the catalog so WAL knows about it.
             // We re-create the table entry via the catalog API.
@@ -1182,22 +1175,20 @@ mod integration_tests {
                 wal.append(WALRecord::Insert {
                     table_id: table.table_id,
                     data: vec![
-                        TAG_STRING, 5, 0, 0, 0, b'A', b'l', b'i', b'c', b'e',
-                        TAG_INT64, 30, 0, 0, 0, 0, 0, 0, 0,
+                        TAG_STRING, 5, 0, 0, 0, b'A', b'l', b'i', b'c', b'e', TAG_INT64, 30, 0, 0, 0, 0, 0, 0, 0,
                     ],
                 });
                 wal.append(WALRecord::Insert {
                     table_id: table.table_id,
                     data: vec![
-                        TAG_STRING, 3, 0, 0, 0, b'B', b'o', b'b',
-                        TAG_INT64, 25, 0, 0, 0, 0, 0, 0, 0,
+                        TAG_STRING, 3, 0, 0, 0, b'B', b'o', b'b', TAG_INT64, 25, 0, 0, 0, 0, 0, 0, 0,
                     ],
                 });
                 wal.append(WALRecord::Insert {
                     table_id: table.table_id,
                     data: vec![
-                        TAG_STRING, 7, 0, 0, 0, b'C', b'h', b'a', b'r', b'l', b'i', b'e',
-                        TAG_INT64, 35, 0, 0, 0, 0, 0, 0, 0,
+                        TAG_STRING, 7, 0, 0, 0, b'C', b'h', b'a', b'r', b'l', b'i', b'e', TAG_INT64, 35, 0, 0, 0, 0, 0,
+                        0, 0,
                     ],
                 });
                 wal.flush_to_disk().unwrap();
@@ -1255,7 +1246,11 @@ mod integration_tests {
             // exactly 1 record (the Checkpoint marker).
             {
                 let wal = sm.wal.lock().unwrap();
-                assert_eq!(wal.len(), 1, "WAL should have only the checkpoint marker after recovery");
+                assert_eq!(
+                    wal.len(),
+                    1,
+                    "WAL should have only the checkpoint marker after recovery"
+                );
                 assert!(matches!(wal.records()[0], crate::wal::WALRecord::Checkpoint));
             }
         }
@@ -1497,14 +1492,20 @@ mod integration_tests {
 
             // Row 1: "Widget", 19.99
             let mut row = Vec::new();
-            row.push(13); row.extend_from_slice(&6u32.to_le_bytes()); row.extend_from_slice(b"Widget");
-            row.push(11); row.extend_from_slice(&19.99f64.to_le_bytes());
+            row.push(13);
+            row.extend_from_slice(&6u32.to_le_bytes());
+            row.extend_from_slice(b"Widget");
+            row.push(11);
+            row.extend_from_slice(&19.99f64.to_le_bytes());
             txn_table.insert(row);
 
             // Row 2: "Gadget", 29.99
             let mut row = Vec::new();
-            row.push(13); row.extend_from_slice(&6u32.to_le_bytes()); row.extend_from_slice(b"Gadget");
-            row.push(11); row.extend_from_slice(&29.99f64.to_le_bytes());
+            row.push(13);
+            row.extend_from_slice(&6u32.to_le_bytes());
+            row.extend_from_slice(b"Gadget");
+            row.push(11);
+            row.extend_from_slice(&29.99f64.to_le_bytes());
             txn_table.insert(row);
         }
 
@@ -1520,9 +1521,9 @@ mod integration_tests {
     }
     #[test]
     fn test_zone_map_pushdown() {
-        use crate::table::{NodeTable, ColumnDefinition};
-        use kuzu_common::types::{LogicalTypeID, Value};
         use crate::column_chunk::NODE_GROUP_SIZE;
+        use crate::table::{ColumnDefinition, NodeTable};
+        use kuzu_common::types::{LogicalTypeID, Value};
 
         let db_path = "test_zone_map_pushdown.db";
         let _ = std::fs::remove_file(db_path);
@@ -1562,8 +1563,16 @@ mod integration_tests {
 
         // data is Vec<Vec<Value>> where data[col][row].
         // Total rows should be 4096 instead of 8192 because the first node group is skipped.
-        assert_eq!(data[0].len(), NODE_GROUP_SIZE, "Only the second chunk should be returned");
-        assert_eq!(data[0][0], Value::Int64(NODE_GROUP_SIZE as i64), "First element should be from the second chunk");
+        assert_eq!(
+            data[0].len(),
+            NODE_GROUP_SIZE,
+            "Only the second chunk should be returned"
+        );
+        assert_eq!(
+            data[0][0],
+            Value::Int64(NODE_GROUP_SIZE as i64),
+            "First element should be from the second chunk"
+        );
 
         let _ = std::fs::remove_file(db_path);
     }

@@ -237,11 +237,7 @@ fn parse_analyze(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String>
     // Format: "ANALYZE TABLE Foo" or "ANALYZE Foo" or "ANALYZE *"
     let rest = inner.strip_prefix("ANALYZE").unwrap_or(inner).trim();
     let rest = rest.strip_prefix("TABLE").unwrap_or(rest).trim();
-    let table_name = if rest == "*" {
-        None
-    } else {
-        Some(rest.to_string())
-    };
+    let table_name = if rest == "*" { None } else { Some(rest.to_string()) };
     Ok(Statement::Analyze(AnalyzeStatement { table_name }))
 }
 
@@ -280,9 +276,9 @@ fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statem
                             for part in opt.into_inner() {
                                 if part.as_rule() == Rule::integer {
                                     dimensions = Some(
-                                        part.as_str().parse::<u64>().map_err(|e| {
-                                            format!("Invalid dimensions value: {e}")
-                                        })?,
+                                        part.as_str()
+                                            .parse::<u64>()
+                                            .map_err(|e| format!("Invalid dimensions value: {e}"))?,
                                     );
                                 }
                             }
@@ -404,10 +400,7 @@ fn parse_drop_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Stri
         return Err("Missing table name for DROP INDEX".into());
     }
 
-    Ok(Statement::DropIndex(DropIndex {
-        index_name,
-        table_name,
-    }))
+    Ok(Statement::DropIndex(DropIndex { index_name, table_name }))
 }
 
 /// Parse `CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS] name [START WITH n] [INCREMENT [BY] n] [MINVALUE n|NO MINVALUE] [MAXVALUE n|NO MAXVALUE] [CYCLE|NO CYCLE]`.
@@ -439,7 +432,8 @@ fn parse_create_sequence(pair: pest::iterators::Pair<Rule>) -> Result<Statement,
                     Rule::minus => neg = true,
                     Rule::integer => {
                         let raw = part.as_str().trim();
-                        let v = raw.parse::<i64>()
+                        let v = raw
+                            .parse::<i64>()
                             .map_err(|e| format!("Invalid integer '{raw}': {e}"))?;
                         val = Some(if neg { -v } else { v });
                     }
@@ -496,11 +490,19 @@ fn parse_create_sequence(pair: pest::iterators::Pair<Rule>) -> Result<Statement,
             Rule::or_replace => {
                 or_replace = true;
             }
-            Rule::sequence_start_with | Rule::sequence_increment_by
-            | Rule::sequence_minvalue | Rule::sequence_maxvalue
+            Rule::sequence_start_with
+            | Rule::sequence_increment_by
+            | Rule::sequence_minvalue
+            | Rule::sequence_maxvalue
             | Rule::sequence_cycle => {
-                parse_opt(inner, &mut start_with, &mut increment,
-                    &mut min_value, &mut max_value, &mut cycle)?;
+                parse_opt(
+                    inner,
+                    &mut start_with,
+                    &mut increment,
+                    &mut min_value,
+                    &mut max_value,
+                    &mut cycle,
+                )?;
             }
             _ => {}
         }
@@ -609,7 +611,8 @@ fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String>
             Rule::match_clause => {
                 // Check for a trailing using_fts_clause child inside the match_clause subtree
                 let inner_clone = inner.clone();
-                let fts_query = inner_clone.into_inner()
+                let fts_query = inner_clone
+                    .into_inner()
                     .find(|p| p.as_rule() == Rule::using_fts_clause)
                     .map(|fts| parse_using_fts_clause(fts))
                     .transpose()?;
@@ -718,13 +721,13 @@ fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<ForeachClau
                                 .filter(|p| p.as_rule() == Rule::set_item)
                                 .map(|item| {
                                     let mut parts = item.into_inner();
-                                    let prop = parse_expression(
-                                        parts.next().ok_or("Missing SET property".to_string())?,
-                                    )?;
-                                    let val = parse_expression(
-                                        parts.next().ok_or("Missing SET value".to_string())?,
-                                    )?;
-                                    Ok(SetItem { property: prop, value: val })
+                                    let prop =
+                                        parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
+                                    let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
+                                    Ok(SetItem {
+                                        property: prop,
+                                        value: val,
+                                    })
                                 })
                                 .collect();
                             sub_clauses.push(Clause::Set(SetClause { items: items? }));
@@ -916,7 +919,10 @@ fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnIte
     }
     if items.is_empty() {
         // If there are no return_item children, it must be the `*` branch in the grammar.
-        items.push(ReturnItem { expression: Expression::Star, alias: None });
+        items.push(ReturnItem {
+            expression: Expression::Star,
+            alias: None,
+        });
     }
     Ok(items)
 }
@@ -1128,9 +1134,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Expression::FunctionCall(name, args))
         }
-        Rule::property_access => {
-            Err("property_access should be handled within postfix_expr".into())
-        }
+        Rule::property_access => Err("property_access should be handled within postfix_expr".into()),
         _ => {
             // Try unwrapping single child
             if let Some(child) = children.into_iter().next() {
@@ -1143,10 +1147,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Str
 }
 
 /// Parse a comparison suffix operator node into an expression given the left-hand side.
-fn parse_comparison_suffix(
-    pair: pest::iterators::Pair<Rule>,
-    left: Expression,
-) -> Result<Expression, String> {
+fn parse_comparison_suffix(pair: pest::iterators::Pair<Rule>, left: Expression) -> Result<Expression, String> {
     /// Find the additive_expr child inside an operator rule.
     fn get_rhs(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String> {
         let rhs_pair = pair
@@ -1169,7 +1170,11 @@ fn parse_comparison_suffix(
         }
         Rule::starts_with_op => {
             let right = get_rhs(pair)?;
-            Ok(Expression::BinaryOp(BinaryOp::StartsWith, Box::new(left), Box::new(right)))
+            Ok(Expression::BinaryOp(
+                BinaryOp::StartsWith,
+                Box::new(left),
+                Box::new(right),
+            ))
         }
         Rule::not_starts_with_op => {
             let right = get_rhs(pair)?;
@@ -1178,7 +1183,11 @@ fn parse_comparison_suffix(
         }
         Rule::ends_with_op => {
             let right = get_rhs(pair)?;
-            Ok(Expression::BinaryOp(BinaryOp::EndsWith, Box::new(left), Box::new(right)))
+            Ok(Expression::BinaryOp(
+                BinaryOp::EndsWith,
+                Box::new(left),
+                Box::new(right),
+            ))
         }
         Rule::not_ends_with_op => {
             let right = get_rhs(pair)?;
@@ -1187,7 +1196,11 @@ fn parse_comparison_suffix(
         }
         Rule::contains_op => {
             let right = get_rhs(pair)?;
-            Ok(Expression::BinaryOp(BinaryOp::Contains, Box::new(left), Box::new(right)))
+            Ok(Expression::BinaryOp(
+                BinaryOp::Contains,
+                Box::new(left),
+                Box::new(right),
+            ))
         }
         Rule::not_contains_op => {
             let right = get_rhs(pair)?;
@@ -1227,10 +1240,7 @@ fn parse_case_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expression, Stri
                 alternatives.push(CaseAlternative { when, then });
             }
             Rule::case_else => {
-                if let Some(expr_pair) = child
-                    .into_inner()
-                    .find(|p| p.as_rule() == Rule::expression)
-                {
+                if let Some(expr_pair) = child.into_inner().find(|p| p.as_rule() == Rule::expression) {
                     else_expr = Some(parse_expression(expr_pair)?);
                 }
             }
@@ -1255,15 +1265,15 @@ fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, String
         Rule::integer => {
             let s = pair.as_str();
             Ok(Expression::Constant(Constant::Integer(
-            s.trim().parse().map_err(|e| format!("Int: {e} (for string '{s}')"))?,
-        )))
-        },
+                s.trim().parse().map_err(|e| format!("Int: {e} (for string '{s}')"))?,
+            )))
+        }
         Rule::float => {
             let s = pair.as_str();
             Ok(Expression::Constant(Constant::Float(
-            s.trim().parse().map_err(|e| format!("Float: {e} (for string '{s}')"))?,
-        )))
-        },
+                s.trim().parse().map_err(|e| format!("Float: {e} (for string '{s}')"))?,
+            )))
+        }
         Rule::boolean_literal => Ok(Expression::Constant(Constant::Bool(
             pair.as_str().to_uppercase() == "TRUE",
         ))),
@@ -1471,7 +1481,10 @@ fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                                     let mut p = item.into_inner();
                                     let prop = parse_expression(p.next().ok_or("Missing ON CREATE SET property")?)?;
                                     let val = parse_expression(p.next().ok_or("Missing ON CREATE SET value")?)?;
-                                    on_create.push(SetItem { property: prop, value: val });
+                                    on_create.push(SetItem {
+                                        property: prop,
+                                        value: val,
+                                    });
                                 }
                             }
                         }
@@ -1481,7 +1494,10 @@ fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
                                     let mut p = item.into_inner();
                                     let prop = parse_expression(p.next().ok_or("Missing ON MATCH SET property")?)?;
                                     let val = parse_expression(p.next().ok_or("Missing ON MATCH SET value")?)?;
-                                    on_match.push(SetItem { property: prop, value: val });
+                                    on_match.push(SetItem {
+                                        property: prop,
+                                        value: val,
+                                    });
                                 }
                             }
                         }
@@ -2106,23 +2122,26 @@ mod tests {
         let sql = "RETURN ANY(x IN [1,2,3] WHERE x > 2)";
         let stmt = parse(sql).unwrap();
         match stmt {
-            Statement::Query(q) => {
-                match &q.clauses[0] {
-                    Clause::Return(r) => {
-                        assert_eq!(r.expressions.len(), 1);
-                        match &r.expressions[0].expression {
-                            Expression::ListPredicate { quantifier, var_name, list, predicate } => {
-                                assert_eq!(*quantifier, Quantifier::Any);
-                                assert_eq!(var_name, "x");
-                                assert!(matches!(&**list, Expression::List(_)));
-                                assert!(matches!(&**predicate, Expression::BinaryOp(_, _, _)));
-                            }
-                            _ => panic!("Expected ListPredicate"),
+            Statement::Query(q) => match &q.clauses[0] {
+                Clause::Return(r) => {
+                    assert_eq!(r.expressions.len(), 1);
+                    match &r.expressions[0].expression {
+                        Expression::ListPredicate {
+                            quantifier,
+                            var_name,
+                            list,
+                            predicate,
+                        } => {
+                            assert_eq!(*quantifier, Quantifier::Any);
+                            assert_eq!(var_name, "x");
+                            assert!(matches!(&**list, Expression::List(_)));
+                            assert!(matches!(&**predicate, Expression::BinaryOp(_, _, _)));
                         }
+                        _ => panic!("Expected ListPredicate"),
                     }
-                    _ => panic!("Expected Return clause"),
                 }
-            }
+                _ => panic!("Expected Return clause"),
+            },
             _ => panic!("Expected Query"),
         }
     }
@@ -2251,6 +2270,8 @@ fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Result<FtsQuery,
     if index_name.is_empty() {
         return Err("USING FTS INDEX requires an index name".into());
     }
-    Ok(FtsQuery { index_name, query_string })
+    Ok(FtsQuery {
+        index_name,
+        query_string,
+    })
 }
-

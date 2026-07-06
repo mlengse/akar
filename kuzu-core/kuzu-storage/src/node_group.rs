@@ -140,18 +140,21 @@ impl NodeGroup {
 
         // Auto-spill if the memory threshold is exceeded
         if let Some(ref spiller) = self.spiller
-            && !self.columns.is_empty() && spiller.should_spill(&self.columns[0]) {
-                self.spill_and_clear()?;
-            }
+            && !self.columns.is_empty()
+            && spiller.should_spill(&self.columns[0])
+        {
+            self.spill_and_clear()?;
+        }
 
         for (col_idx, value) in row.into_iter().enumerate() {
             self.columns[col_idx].append(value);
         }
         // Record insert in version info if MVCC tracking is enabled
         if let Some(ref vi) = self.version_info
-            && let Some(txn) = txn_id {
-                vi.insert(txn, self.num_nodes as u32);
-            }
+            && let Some(txn) = txn_id
+        {
+            vi.insert(txn, self.num_nodes as u32);
+        }
         self.num_nodes += 1;
         Ok(())
     }
@@ -211,13 +214,8 @@ impl NodeGroup {
 
         // Build the merger
         let sort_col = sort_key_column.unwrap_or(0);
-        let mut merger = MultiWayStreamMerge::new(
-            &self.spill_files,
-            Some(in_memory_rows),
-            sort_col,
-            dedup,
-        )
-        .map_err(std::io::Error::other)?;
+        let mut merger = MultiWayStreamMerge::new(&self.spill_files, Some(in_memory_rows), sort_col, dedup)
+            .map_err(std::io::Error::other)?;
 
         // Stream all merged rows into the target columns
         let mut total: usize = 0;
@@ -373,13 +371,14 @@ impl NodeGroup {
     ) -> Option<&Value> {
         // Check version info visibility (inserts/deletes)
         if let Some(ts) = snapshot_ts
-            && !self.is_row_visible(local_row, ts, commit_history) {
-                return None;
-            }
+            && !self.is_row_visible(local_row, ts, commit_history)
+        {
+            return None;
+        }
         // Get value with update version chain check
-        self.columns.get(col_idx).and_then(|chunk| {
-            chunk.get_value_with_snapshot(local_row, snapshot_ts, commit_history)
-        })
+        self.columns
+            .get(col_idx)
+            .and_then(|chunk| chunk.get_value_with_snapshot(local_row, snapshot_ts, commit_history))
     }
 
     /// Check whether a row is visible at the given snapshot timestamp.

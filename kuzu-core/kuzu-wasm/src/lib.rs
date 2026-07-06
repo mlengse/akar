@@ -1,5 +1,5 @@
-use kuzu_main::{Connection, Database, QueryResult as NativeQueryResult, PreparedStatement as NativePreparedStatement};
 use kuzu_common::types::Value;
+use kuzu_main::{Connection, Database, PreparedStatement as NativePreparedStatement, QueryResult as NativeQueryResult};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
@@ -61,12 +61,13 @@ impl KuzuConnection {
                 key_strings.push(k);
             }
         }
-        
+
         let mut param_vec = Vec::new();
         for k in &key_strings {
             let js_key = JsValue::from_str(k);
-            let js_val = js_sys::Reflect::get(params, &js_key).map_err(|_| JsValue::from_str("Failed to get property"))?;
-            
+            let js_val =
+                js_sys::Reflect::get(params, &js_key).map_err(|_| JsValue::from_str("Failed to get property"))?;
+
             let val = if js_val.is_null() || js_val.is_undefined() {
                 Value::Null
             } else if let Some(b) = js_val.as_bool() {
@@ -82,11 +83,14 @@ impl KuzuConnection {
             } else {
                 return Err(JsValue::from_str(&format!("Unsupported parameter type for key {}", k)));
             };
-            
+
             param_vec.push((k.as_str(), val));
         }
 
-        let result = self.conn.execute(&prepared.stmt, param_vec).map_err(|e| JsValue::from_str(&e))?;
+        let result = self
+            .conn
+            .execute(&prepared.stmt, param_vec)
+            .map_err(|e| JsValue::from_str(&e))?;
         Ok(QueryResult {
             result,
             chunk_idx: 0,

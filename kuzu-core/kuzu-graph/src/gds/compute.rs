@@ -88,14 +88,8 @@ mod tests {
     fn test_edge_compute_default() {
         let mut ec = DefaultEdgeCompute;
         let result = ec.edge_compute(
-            InternalID {
-                table_id: 0,
-                offset: 0,
-            },
-            InternalID {
-                table_id: 0,
-                offset: 1,
-            },
+            InternalID { table_id: 0, offset: 0 },
+            InternalID { table_id: 0, offset: 1 },
             0,
             true,
         );

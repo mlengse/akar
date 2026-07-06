@@ -26,11 +26,7 @@ pub struct VectorUpdateInfo {
 
 impl VectorUpdateInfo {
     pub fn new(version: u64, data: Vec<u8>, prev: Option<Box<VectorUpdateInfo>>) -> Self {
-        Self {
-            version,
-            data,
-            prev,
-        }
+        Self { version, data, prev }
     }
 }
 
@@ -119,19 +115,15 @@ impl UpdateInfo {
     pub fn latest(&self, row: u32) -> Option<Vec<u8>> {
         let v_idx = self.vector_idx(row);
         let vectors = self.vectors.lock().unwrap();
-        vectors.get(v_idx).as_ref().and_then(|o| {
-            o.as_ref().map(|node| node.data.clone())
-        })
+        vectors
+            .get(v_idx)
+            .as_ref()
+            .and_then(|o| o.as_ref().map(|node| node.data.clone()))
     }
 
     /// Number of vectors with at least one update.
     pub fn num_dirty_vectors(&self) -> usize {
-        self.vectors
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|v| v.is_some())
-            .count()
+        self.vectors.lock().unwrap().iter().filter(|v| v.is_some()).count()
     }
 }
 

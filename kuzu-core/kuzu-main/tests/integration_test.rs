@@ -98,8 +98,6 @@ fn test_match_empty_table() {
     );
 }
 
-
-
 #[test]
 fn test_match_nonexistent_table_fails() {
     let (_db, conn) = setup_db();
@@ -165,17 +163,14 @@ fn test_cross_product_different_sizes() {
         &conn,
         "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
     );
-    exec(
-        &conn,
-        "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))",
-    );
-    
+    exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
+
     // Cross product (MATCH (p:Person), (c:City))
     // Empty tables: left size 0, right size 0
     let result = conn.query("MATCH (p:Person), (c:City) RETURN p.name, c.name").unwrap();
     assert!(result.is_success());
     assert_eq!(result.num_rows(), 0);
-    
+
     // In our toy system, MATCH scans might still yield 1 dummy row to allow execution
     // or 0 rows based on implementation. As long as it doesn't panic on split, it succeeds.
 }
@@ -570,7 +565,10 @@ fn test_cross_product_no_crash() {
 #[test]
 fn test_merge_create_new_node() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     // MERGE should create the node since it doesn't exist
     let result = conn.query("MERGE (:Person {name: 'Alice', age: 30})").unwrap();
     assert!(result.is_success());
@@ -583,7 +581,10 @@ fn test_merge_create_new_node() {
 #[test]
 fn test_merge_existing_node() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     exec(&conn, "CREATE (:Person {name: 'Alice', age: 30})");
     // MERGE an existing node — should not create a duplicate
     let result = conn.query("MERGE (:Person {name: 'Alice', age: 30})").unwrap();
@@ -596,9 +597,14 @@ fn test_merge_existing_node() {
 #[test]
 fn test_merge_with_on_create_set() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, score INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, score INT64, PRIMARY KEY (name))",
+    );
     // MERGE with ON CREATE SET
-    let result = conn.query("MERGE (:Person {name: 'Bob', age: 25}) ON CREATE SET p.score = 100").unwrap();
+    let result = conn
+        .query("MERGE (:Person {name: 'Bob', age: 25}) ON CREATE SET p.score = 100")
+        .unwrap();
     assert!(result.is_success());
 }
 
@@ -608,12 +614,15 @@ fn test_merge_with_on_create_set() {
 fn test_optional_match_no_match() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))");
-    exec(&conn, "CREATE NODE TABLE Pet(name STRING, owner STRING, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Pet(name STRING, owner STRING, PRIMARY KEY (name))",
+    );
     exec(&conn, "CREATE (:Person {name: 'Alice'})");
     // Alice has no pet — OPTIONAL MATCH should produce NULL for pet columns
-    let result = conn.query(
-        "MATCH (p:Person) OPTIONAL MATCH (pet:Pet) WHERE pet.owner = p.name RETURN p.name, pet.name"
-    ).unwrap();
+    let result = conn
+        .query("MATCH (p:Person) OPTIONAL MATCH (pet:Pet) WHERE pet.owner = p.name RETURN p.name, pet.name")
+        .unwrap();
     assert!(result.is_success());
     // Should return 1 row with p.name='Alice' and pet.name=NULL
     assert_eq!(result.num_rows(), 1, "OPTIONAL MATCH should return left-side row");
@@ -649,10 +658,7 @@ fn test_create_table_with_serial_column() {
 fn test_create_macro_basic() {
     let (_db, conn) = setup_db();
     let msg = exec(&conn, "CREATE MACRO double(x) AS x * 2");
-    assert!(
-        msg.contains("created"),
-        "CREATE MACRO should succeed: {msg}"
-    );
+    assert!(msg.contains("created"), "CREATE MACRO should succeed: {msg}");
 
     // Verify the macro was stored in the catalog
     let cat = _db.catalog();
@@ -669,10 +675,7 @@ fn test_create_macro_duplicate_fails() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE MACRO double(x) AS x * 2");
     let result = conn.query("CREATE MACRO double(x) AS x * 3");
-    assert!(
-        result.is_err(),
-        "Duplicate macro should fail"
-    );
+    assert!(result.is_err(), "Duplicate macro should fail");
     // Verify only one macro exists
     let cat = _db.catalog();
     let cat = cat.lock().unwrap();
@@ -723,7 +726,11 @@ fn test_serial_auto_increment_on_insert() {
         let table = catalog.get_node_table_by_name("Person").unwrap();
         assert_eq!(table.num_rows, 1, "Should have 1 row");
         if let Some(val) = table.get_value(0, 0) {
-            assert_eq!(*val, kuzu_common::types::Value::Int64(0), "First SERIAL value should be 0");
+            assert_eq!(
+                *val,
+                kuzu_common::types::Value::Int64(0),
+                "First SERIAL value should be 0"
+            );
         } else {
             panic!("Column 0 should have a value");
         }
@@ -736,7 +743,11 @@ fn test_serial_auto_increment_on_insert() {
         let table = catalog.get_node_table_by_name("Person").unwrap();
         assert_eq!(table.num_rows, 2, "Should have 2 rows");
         if let Some(val) = table.get_value(1, 0) {
-            assert_eq!(*val, kuzu_common::types::Value::Int64(1), "Second SERIAL value should be 1");
+            assert_eq!(
+                *val,
+                kuzu_common::types::Value::Int64(1),
+                "Second SERIAL value should be 1"
+            );
         } else {
             panic!("Column 0 should have a value");
         }
@@ -796,7 +807,11 @@ fn test_serial_with_explicit_value() {
         let table = catalog.get_node_table_by_name("Person").unwrap();
         assert_eq!(table.num_rows, 1);
         if let Some(val) = table.get_value(0, 0) {
-            assert_eq!(*val, kuzu_common::types::Value::Int64(42), "Explicit SERIAL value should be 42");
+            assert_eq!(
+                *val,
+                kuzu_common::types::Value::Int64(42),
+                "Explicit SERIAL value should be 42"
+            );
         }
     }
 
@@ -804,13 +819,20 @@ fn test_serial_with_explicit_value() {
     let cat = _db.catalog();
     let cat = cat.lock().unwrap();
     let seq = cat.get_sequence("Person_id_serial").unwrap();
-    assert_eq!(seq.curr_val(), 0, "Sequence should not advance when explicit value provided");
+    assert_eq!(
+        seq.curr_val(),
+        0,
+        "Sequence should not advance when explicit value provided"
+    );
 }
 #[test]
 fn test_sip_optimization() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
-    exec(&conn, "CREATE NODE TABLE Post(id INT64, content STRING, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Post(id INT64, content STRING, PRIMARY KEY (id))",
+    );
     exec(&conn, "CREATE REL TABLE Likes(FROM User TO Post, since INT64)");
 
     // Insert data
@@ -818,15 +840,21 @@ fn test_sip_optimization() {
     exec(&conn, "CREATE (u:User {id: 2, name: 'Bob'})");
     exec(&conn, "CREATE (p:Post {id: 10, content: 'Hello'})");
     exec(&conn, "CREATE (p:Post {id: 20, content: 'World'})");
-    
-    let msg = exec(&conn, "MATCH (u:User {id: 1}), (p:Post {id: 10}) CREATE (u)-[:Likes]->(p)");
+
+    let msg = exec(
+        &conn,
+        "MATCH (u:User {id: 1}), (p:Post {id: 10}) CREATE (u)-[:Likes]->(p)",
+    );
     println!("CREATE 1: {}", msg);
-    let msg = exec(&conn, "MATCH (u:User {id: 2}), (p:Post {id: 20}) CREATE (u)-[:Likes]->(p)");
+    let msg = exec(
+        &conn,
+        "MATCH (u:User {id: 2}), (p:Post {id: 20}) CREATE (u)-[:Likes]->(p)",
+    );
     println!("CREATE 2: {}", msg);
 
     // Query that triggers SIP
     let query_str = "MATCH (u:User)-[:Likes]->(p:Post) WHERE u.id = 1 RETURN p.content";
-    
+
     // Print the plan for debugging
     let statements = kuzu_parser::parse(query_str).unwrap();
     let binder = kuzu_binder::Binder::new(_db.catalog());

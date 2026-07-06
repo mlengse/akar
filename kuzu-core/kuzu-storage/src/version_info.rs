@@ -65,20 +65,14 @@ impl VectorVersionInfo {
     ///
     /// `commit_history` is used to look up commit timestamps for
     /// transaction IDs.
-    pub fn is_visible(
-        &self,
-        row_in_vector: u32,
-        snapshot_ts: u64,
-        commit_history: &[(u64, u64)],
-    ) -> bool {
+    pub fn is_visible(&self, row_in_vector: u32, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
         // Check deletions: if any committed txn with commit_ts ≤ snapshot_ts
         // deleted this row, it's not visible.
         if let Ok(del) = self.deleted.lock() {
             for (&txn_id, rows) in del.iter() {
-                if rows.contains(&row_in_vector)
-                    && is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
-                        return false;
-                    }
+                if rows.contains(&row_in_vector) && is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
+                    return false;
+                }
             }
         }
 
@@ -148,10 +142,7 @@ impl VersionInfo {
         let vector_size = 1024u32;
         let num_vectors = total_rows.div_ceil(vector_size as usize);
         let vectors = (0..num_vectors).map(|_| VectorVersionInfo::new()).collect();
-        Self {
-            vectors,
-            vector_size,
-        }
+        Self { vectors, vector_size }
     }
 
     fn vector_idx(&self, row: u32) -> usize {
@@ -228,7 +219,7 @@ mod tests {
         let history = vec![(1u64, 10u64)];
 
         assert!(!vvi.is_visible(7, 10, &history)); // Deleted
-        assert!(vvi.is_visible(7, 5, &history));   // Before delete committed
+        assert!(vvi.is_visible(7, 5, &history)); // Before delete committed
     }
 
     // Need NODE_GROUP_SIZE for the VersionInfo::new() test

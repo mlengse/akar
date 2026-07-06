@@ -267,7 +267,11 @@ impl BufferManager {
         if let Some(fh) = self.files.get(file_name) {
             use std::fs::OpenOptions;
             use std::io::{Seek, SeekFrom, Write};
-            let mut file = OpenOptions::new().create(true).write(true).truncate(false).open(&fh.path)?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&fh.path)?;
             file.seek(SeekFrom::Start(page_num * self.page_size as u64))?;
             file.write_all(data)?;
         }

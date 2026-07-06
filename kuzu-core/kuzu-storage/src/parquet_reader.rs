@@ -98,14 +98,20 @@ pub type ParquetResult<T> = Result<T, ParquetReaderError>;
 ///
 /// A vector of rows, where each row is a `Vec<Value>` with length equal to
 /// `columns.len()`.
-pub fn read_parquet(path: &str, vfs: &kuzu_common::file_system::VirtualFileSystemRegistry, columns: &[CatalogColumn]) -> ParquetResult<Vec<Vec<Value>>> {
-    let mut file =
-        vfs.open_read(path).map_err(|e| ParquetReaderError::ParquetError(format!("Cannot open file: {e}")))?;
+pub fn read_parquet(
+    path: &str,
+    vfs: &kuzu_common::file_system::VirtualFileSystemRegistry,
+    columns: &[CatalogColumn],
+) -> ParquetResult<Vec<Vec<Value>>> {
+    let mut file = vfs
+        .open_read(path)
+        .map_err(|e| ParquetReaderError::ParquetError(format!("Cannot open file: {e}")))?;
 
     // For now, read the entire file into memory to pass it to ParquetRecordBatchReaderBuilder
     // as bytes::Bytes, since Box<dyn FileRead> doesn't natively implement ChunkReader.
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).map_err(|e| ParquetReaderError::ParquetError(format!("Read error: {e}")))?;
+    file.read_to_end(&mut buffer)
+        .map_err(|e| ParquetReaderError::ParquetError(format!("Read error: {e}")))?;
     let bytes = bytes::Bytes::from(buffer);
 
     let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes)?;
@@ -674,7 +680,11 @@ mod tests {
             default_value: None,
         }];
 
-        let result = read_parquet(path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &columns);
+        let result = read_parquet(
+            path.to_str().unwrap(),
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &columns,
+        );
         assert!(result.is_err());
         match result.unwrap_err() {
             ParquetReaderError::ColumnNotFound { column_name, .. } => {
@@ -698,7 +708,11 @@ mod tests {
             default_value: None,
         }];
 
-        let result = read_parquet(path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &columns);
+        let result = read_parquet(
+            path.to_str().unwrap(),
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &columns,
+        );
         assert!(result.is_err());
         match result.unwrap_err() {
             ParquetReaderError::TypeMismatch { .. } => {} // expected
@@ -708,7 +722,11 @@ mod tests {
 
     #[test]
     fn test_file_not_found() {
-        let result = read_parquet("nonexistent.parquet", &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &test_schema());
+        let result = read_parquet(
+            "nonexistent.parquet",
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &test_schema(),
+        );
         assert!(result.is_err());
         match result.unwrap_err() {
             ParquetReaderError::ParquetError(_) => {} // expected
@@ -856,7 +874,12 @@ mod tests {
 
         // Read it back using our reader
         let columns = test_schema();
-        let rows = read_parquet(parquet_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &columns).unwrap();
+        let rows = read_parquet(
+            parquet_path.to_str().unwrap(),
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &columns,
+        )
+        .unwrap();
 
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0][0], Value::String("Alice".into()));
@@ -906,7 +929,12 @@ mod tests {
             },
         ];
 
-        let rows = read_parquet(parquet_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &columns).unwrap();
+        let rows = read_parquet(
+            parquet_path.to_str().unwrap(),
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &columns,
+        )
+        .unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0][0], Value::String("Alice".into()));
         assert_eq!(rows[0][1], Value::Int64(30));
@@ -967,7 +995,12 @@ mod tests {
             },
         ];
 
-        let rows = read_parquet(parquet_path.to_str().unwrap(), &kuzu_common::file_system::VirtualFileSystemRegistry::new(), &columns).unwrap();
+        let rows = read_parquet(
+            parquet_path.to_str().unwrap(),
+            &kuzu_common::file_system::VirtualFileSystemRegistry::new(),
+            &columns,
+        )
+        .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0][0], Value::UInt8(100));
         assert_eq!(rows[0][1], Value::UInt32(1000));

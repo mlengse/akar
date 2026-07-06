@@ -173,9 +173,10 @@ fn extract_equality_join(expr: &kuzu_parser::ast::Expression) -> Option<(String,
             let left_var = extract_root_var(left);
             let right_var = extract_root_var(right);
             if let (Some(lv), Some(rv)) = (&left_var, &right_var)
-                && lv != rv {
-                    return Some((lv.clone(), rv.clone()));
-                }
+                && lv != rv
+            {
+                return Some((lv.clone(), rv.clone()));
+            }
             None
         }
         _ => None,
@@ -267,7 +268,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
         let mut conds = Vec::new();
         extract_conditions_recursive(op, &mut conds);
         conditions.extend(conds);
-        
+
         let mut keys = Vec::new();
         extract_join_keys_recursive(op, &mut keys);
         original_join_keys.extend(keys);
@@ -277,7 +278,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
     if n < 2 {
         return None;
     }
-    
+
     if n > 15 {
         return None;
     }
@@ -314,7 +315,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
         if k < 2 {
             continue;
         }
-        
+
         let mut best_state: Option<DpState> = None;
         let mut submask = (mask - 1) & mask;
 
@@ -338,7 +339,13 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
 
                     let (new_card, new_cost) = if has_edge {
                         let c = left_state.cardinality * right_state.cardinality * EQUALITY_PREDICATE_SELECTIVITY;
-                        (c, left_state.cost + right_state.cost + c + left_state.cardinality.min(right_state.cardinality))
+                        (
+                            c,
+                            left_state.cost
+                                + right_state.cost
+                                + c
+                                + left_state.cardinality.min(right_state.cardinality),
+                        )
                     } else {
                         let c = left_state.cardinality * right_state.cardinality;
                         (c, left_state.cost + right_state.cost + c + 1e9)
@@ -365,20 +372,20 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
     }
 
     let optimal_tree = build_optimal_tree(
-        optimal_mask, 
-        &dp, 
-        &scans_with_pos, 
-        &conditions, 
-        &original_join_keys, 
-        &alias_to_idx
+        optimal_mask,
+        &dp,
+        &scans_with_pos,
+        &conditions,
+        &original_join_keys,
+        &alias_to_idx,
     );
 
     let mut result = vec![];
     result.push(optimal_tree);
-    
+
     for op in operators {
         match op {
-            LogicalOperator::HashJoin(_) 
+            LogicalOperator::HashJoin(_)
             | LogicalOperator::CrossProduct(_)
             | LogicalOperator::ScanNode(_)
             | LogicalOperator::ScanRel(_) => {
@@ -436,7 +443,14 @@ fn build_optimal_tree(
 
     let state = dp[mask].as_ref().unwrap();
     let left_op = build_optimal_tree(state.left_mask, dp, scans, conditions, original_join_keys, alias_to_idx);
-    let right_op = build_optimal_tree(state.right_mask, dp, scans, conditions, original_join_keys, alias_to_idx);
+    let right_op = build_optimal_tree(
+        state.right_mask,
+        dp,
+        scans,
+        conditions,
+        original_join_keys,
+        alias_to_idx,
+    );
 
     let mut join_keys = Vec::new();
     for key_expr in original_join_keys {
@@ -455,7 +469,7 @@ fn build_optimal_tree(
             }
         }
     }
-    
+
     for (left_var, right_var) in conditions {
         if let (Some(&i), Some(&j)) = (alias_to_idx.get(left_var), alias_to_idx.get(right_var)) {
             let left_in_left = (state.left_mask & (1 << i)) != 0;
@@ -485,7 +499,7 @@ fn build_optimal_tree(
     } else {
         let left_card = dp[state.left_mask].as_ref().unwrap().cardinality;
         let right_card = dp[state.right_mask].as_ref().unwrap().cardinality;
-        
+
         if left_card >= right_card {
             LogicalOperator::HashJoin(LogicalHashJoin {
                 join_keys,
@@ -639,7 +653,7 @@ mod tests {
             cardinality: 300,
             fts_query: None,
         });
-        
+
         let filter_ac = LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
             expression: kuzu_parser::ast::Expression::BinaryOp(
                 kuzu_parser::ast::BinaryOp::Equal,
@@ -649,7 +663,7 @@ mod tests {
             children: vec![],
             cardinality: 0,
         });
-        
+
         let filter_bc = LogicalOperator::Filter(kuzu_planner::logical_operator::LogicalFilter {
             expression: kuzu_parser::ast::Expression::BinaryOp(
                 kuzu_parser::ast::BinaryOp::Equal,
@@ -659,11 +673,11 @@ mod tests {
             children: vec![],
             cardinality: 0,
         });
-        
+
         let operators = vec![scan_a, scan_b, scan_c, filter_ac, filter_bc];
         let result = reorder_joins_dp_bushy(&operators);
         assert!(result.is_some());
-        
+
         let reordered = result.unwrap();
         assert_eq!(reordered.len(), 1); // all scans and join filters replaced by a single HashJoin tree
         assert!(matches!(reordered[0], LogicalOperator::HashJoin(_)));

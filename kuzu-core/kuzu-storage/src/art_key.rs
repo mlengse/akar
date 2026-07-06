@@ -102,25 +102,19 @@ impl ArtKey {
     fn from_int64(v: i64) -> Self {
         let mut bytes = v.to_be_bytes();
         bytes[0] ^= 0x80; // flip sign bit
-        Self {
-            bytes: bytes.to_vec(),
-        }
+        Self { bytes: bytes.to_vec() }
     }
 
     fn from_int32(v: i32) -> Self {
         let mut bytes = v.to_be_bytes();
         bytes[0] ^= 0x80;
-        Self {
-            bytes: bytes.to_vec(),
-        }
+        Self { bytes: bytes.to_vec() }
     }
 
     fn from_int16(v: i16) -> Self {
         let mut bytes = v.to_be_bytes();
         bytes[0] ^= 0x80;
-        Self {
-            bytes: bytes.to_vec(),
-        }
+        Self { bytes: bytes.to_vec() }
     }
 
     fn from_int8(v: i8) -> Self {
@@ -149,9 +143,7 @@ impl ArtKey {
     }
 
     fn from_uint8(v: u8) -> Self {
-        Self {
-            bytes: vec![v],
-        }
+        Self { bytes: vec![v] }
     }
 
     /// Encode a 64-bit float: IEEE 754 bytes with sign flip.
@@ -173,11 +165,7 @@ impl ArtKey {
     /// Encode a 32-bit float: IEEE 754 bytes with sign flip.
     fn from_float(v: f32) -> Self {
         let bits = v.to_bits();
-        let encoded = if (bits >> 31) != 0 {
-            !bits
-        } else {
-            bits ^ (1 << 31)
-        };
+        let encoded = if (bits >> 31) != 0 { !bits } else { bits ^ (1 << 31) };
         Self {
             bytes: encoded.to_be_bytes().to_vec(),
         }
@@ -344,10 +332,12 @@ mod tests {
 
         // 'a' (0x61), then escaped null (0x01 0x00), then 'b' (0x62)
         assert_eq!(with_null.bytes(), &[0x61, 0x01, 0x00, 0x62, 0x00]);
-        // The escaped null (0x01 0x00) should be > plain 'b' (0x62) after 'a'... 
+        // The escaped null (0x01 0x00) should be > plain 'b' (0x62) after 'a'...
         // Actually 0x01 < 0x62, so a\x00b < ab in lex order
-        assert!(with_null.bytes < without.bytes,
-            "string with escaped null should sort before same string without null");
+        assert!(
+            with_null.bytes < without.bytes,
+            "string with escaped null should sort before same string without null"
+        );
     }
 
     #[test]
@@ -432,6 +422,9 @@ mod tests {
         // months is the most significant field, so (1,0,0) > (0,1,0) in signed comparison
         assert!(a.bytes < b.bytes, "zero < (0,1,0)");
         assert!(a.bytes < c.bytes, "zero < (1,0,0)");
-        assert!(b.bytes < c.bytes, "(0,1,0) < (1,0,0) because months > days in significance");
+        assert!(
+            b.bytes < c.bytes,
+            "(0,1,0) < (1,0,0) because months > days in significance"
+        );
     }
 }

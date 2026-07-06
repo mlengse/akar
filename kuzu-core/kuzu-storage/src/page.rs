@@ -85,7 +85,7 @@ impl FileHandle {
             free_space_manager: None,
         }
     }
-    
+
     pub fn with_free_space_manager(mut self, fsm: std::sync::Arc<crate::free_space_manager::FreeSpaceManager>) -> Self {
         self.free_space_manager = Some(fsm);
         self
@@ -118,7 +118,11 @@ impl FileHandle {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_page(&self, page_num: PageNum, data: &[u8]) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
-        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&self.path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)?;
         let offset = self.page_offset(page_num);
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(data)?;
@@ -142,7 +146,7 @@ impl FileHandle {
         self.num_pages += 1;
         page_num
     }
-    
+
     /// Free a page for reuse.
     pub fn free_page(&self, page_num: PageNum) {
         if let Some(fsm) = &self.free_space_manager {
@@ -160,10 +164,7 @@ impl FileHandle {
         let start_page = self.num_pages;
         let extend_bytes = (num_pages as usize) * self.page_size;
 
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
 
         let zeros = vec![0u8; extend_bytes];
         file.write_all(&zeros)?;

@@ -81,17 +81,14 @@ impl DistanceMetric {
                     1.0 - dot / (norm_a * norm_b)
                 }
             }
-            DistanceMetric::Euclidean => {
-                a.iter()
-                    .zip(b.iter())
-                    .map(|(x, y)| (x - y) * (x - y))
-                    .sum::<f64>()
-                    .sqrt()
-            }
+            DistanceMetric::Euclidean => a
+                .iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x - y) * (x - y))
+                .sum::<f64>()
+                .sqrt(),
             DistanceMetric::L1 => a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum(),
-            DistanceMetric::L2Squared => {
-                a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
-            }
+            DistanceMetric::L2Squared => a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum(),
             DistanceMetric::DotProduct => {
                 // Dot product: higher = more similar → negate for smaller-distance convention
                 -a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
@@ -178,7 +175,10 @@ impl HnswIndex {
     /// distribution: `floor(-ln(uniform(0,1)) * ML)`.
     fn random_level(&mut self) -> usize {
         // Simple LCG random number generator
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let r = (self.rng_state >> 33) as f64 / (1u64 << 31) as f64;
         let level = (-r.ln() * ml()).floor() as usize;
         level.min(MAX_M)
@@ -295,10 +295,7 @@ impl HnswIndex {
 
         if self.entry_point.is_none() {
             // First node: just add it
-            self.nodes.push(HnswNode {
-                vector,
-                connections,
-            });
+            self.nodes.push(HnswNode { vector, connections });
             self.entry_point = Some(0);
             self.max_level = new_level;
             return;
@@ -330,13 +327,12 @@ impl HnswIndex {
                 // First, pre-compute distances for ALL existing connections of
                 // this neighbor at this level, plus the new connection to new_id.
                 // We do this BEFORE taking any mutable borrow.
-                let existing_connections: Vec<usize> = if neighbor_id < self.nodes.len()
-                    && level < self.nodes[neighbor_id].connections.len()
-                {
-                    self.nodes[neighbor_id].connections[level].clone()
-                } else {
-                    Vec::new()
-                };
+                let existing_connections: Vec<usize> =
+                    if neighbor_id < self.nodes.len() && level < self.nodes[neighbor_id].connections.len() {
+                        self.nodes[neighbor_id].connections[level].clone()
+                    } else {
+                        Vec::new()
+                    };
 
                 // Compute distances: existing connections + new_id
                 // Use the self.nodes entries for existing connections, and the
@@ -376,10 +372,7 @@ impl HnswIndex {
         }
 
         // Add the new node
-        self.nodes.push(HnswNode {
-            vector,
-            connections,
-        });
+        self.nodes.push(HnswNode { vector, connections });
     }
 
     /// Search for the `k` approximate nearest neighbours to `query`.
@@ -415,7 +408,11 @@ impl HnswIndex {
 
     /// Collect index statistics.
     pub fn stats(&self) -> HnswStats {
-        let total_connections: usize = self.nodes.iter().map(|n| n.connections.iter().map(|c| c.len()).sum::<usize>()).sum();
+        let total_connections: usize = self
+            .nodes
+            .iter()
+            .map(|n| n.connections.iter().map(|c| c.len()).sum::<usize>())
+            .sum();
         HnswStats {
             num_vectors: self.nodes.len(),
             max_level: self.max_level,
@@ -511,10 +508,16 @@ mod tests {
         let b = vec![0.0, 1.0];
 
         let cos = DistanceMetric::Cosine.compute(&a, &b);
-        assert!((cos - 1.0).abs() < 0.01, "Cosine of orthogonal vectors ≈ 1.0, got {cos}");
+        assert!(
+            (cos - 1.0).abs() < 0.01,
+            "Cosine of orthogonal vectors ≈ 1.0, got {cos}"
+        );
 
         let euc = DistanceMetric::Euclidean.compute(&a, &b);
-        assert!((euc - 2.0_f64.sqrt()).abs() < 0.01, "Euclidean distance ≈ √2, got {euc}");
+        assert!(
+            (euc - 2.0_f64.sqrt()).abs() < 0.01,
+            "Euclidean distance ≈ √2, got {euc}"
+        );
 
         let l2 = DistanceMetric::L2Squared.compute(&a, &b);
         assert!((l2 - 2.0).abs() < 0.01, "L2 squared = 2.0, got {l2}");
@@ -540,9 +543,7 @@ mod tests {
         assert_eq!(idx.len(), num_vectors);
 
         // Test recall against brute-force for several queries
-        let vectors: Vec<Vec<f64>> = (0..num_vectors)
-            .map(|i| idx.get_vector(i).unwrap().to_vec())
-            .collect();
+        let vectors: Vec<Vec<f64>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
 
         for test_idx in 0..10 {
             let query = random_vector(&mut rng, dims);
@@ -611,9 +612,7 @@ mod tests {
         }
 
         // Test recall for 20 random queries
-        let vectors: Vec<Vec<f64>> = (0..num_vectors)
-            .map(|i| idx.get_vector(i).unwrap().to_vec())
-            .collect();
+        let vectors: Vec<Vec<f64>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
 
         let mut total_recall = 0.0;
         let num_queries = 20;
@@ -637,7 +636,10 @@ mod tests {
         }
 
         let avg_recall = total_recall / num_queries as f64;
-        assert!(avg_recall > 0.95, "Average recall too low: {avg_recall} (expected > 0.95)");
+        assert!(
+            avg_recall > 0.95,
+            "Average recall too low: {avg_recall} (expected > 0.95)"
+        );
     }
 
     #[test]
