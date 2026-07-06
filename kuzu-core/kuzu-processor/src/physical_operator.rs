@@ -991,7 +991,7 @@ impl BlockMergeSorter {
             return Vec::new();
         }
 
-        let num_blocks = (total_rows + self.block_size - 1) / self.block_size;
+        let num_blocks = total_rows.div_ceil(self.block_size);
 
         if num_blocks <= 1 {
             // Single block: sort directly (possibly with radix)
@@ -4179,7 +4179,7 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 continue;
             };
             if query_tokens.contains(&term_str) {
-                let term_id = if let Some(Value::Int64(id)) = terms_data.get(0).and_then(|d| d.get(row_idx)) {
+                let term_id = if let Some(Value::Int64(id)) = terms_data.first().and_then(|d| d.get(row_idx)) {
                     *id
                 } else {
                     continue;

@@ -259,17 +259,13 @@ impl Binder {
         }
 
         // Bind optional FTS query
-        let fts_query = if let Some(ref fq) = m.fts_query {
-            Some(BoundFtsQuery {
+        let fts_query = m.fts_query.as_ref().map(|fq| BoundFtsQuery {
                 index_name: fq.index_name.clone(),
                 query_string: fq.query_string.clone(),
                 docs_table: format!("fts_{}_docs", fq.index_name),
                 terms_table: format!("fts_{}_terms", fq.index_name),
                 posting_table: format!("fts_{}_appears_in", fq.index_name),
-            })
-        } else {
-            None
-        };
+            });
 
         Ok((
             BoundMatchClause {
@@ -1187,9 +1183,9 @@ impl Binder {
         if increment == 0 {
             return Err("INCREMENT must not be zero".into());
         }
-        let start_with = s.start_with.unwrap_or({ if increment > 0 { 1 } else { -1 } });
-        let min_value = s.min_value.unwrap_or({ if increment > 0 { 1 } else { i64::MIN } });
-        let max_value = s.max_value.unwrap_or({ if increment > 0 { i64::MAX } else { -1 } });
+        let start_with = s.start_with.unwrap_or(if increment > 0 { 1 } else { -1 });
+        let min_value = s.min_value.unwrap_or(if increment > 0 { 1 } else { i64::MIN });
+        let max_value = s.max_value.unwrap_or(if increment > 0 { i64::MAX } else { -1 });
         let cycle = s.cycle.unwrap_or(false);
 
         // Validate min/max/start consistency

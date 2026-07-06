@@ -16,7 +16,6 @@ bytes.workspace = true
 uuid.workspace = true
 time.workspace = true
 rust_decimal.workspace = true
-fast-float.workspace = true
 hashbrown.workspace = true
 rayon.workspace = true
 

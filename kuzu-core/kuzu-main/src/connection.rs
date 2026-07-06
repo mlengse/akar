@@ -141,7 +141,7 @@ impl Connection {
                 &mut res.local_storage,
                 &mut res.shadow_file,
                 txn_id,
-                &records.iter().cloned().collect::<Vec<_>>(),
+                &records.to_vec(),
             );
         }
 

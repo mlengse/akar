@@ -261,7 +261,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
     for op in operators {
         let mut scans = Vec::new();
         collect_scans_recursive(op, &mut scans);
-        for (_, (card, scan_op)) in scans.into_iter().enumerate() {
+        for (card, scan_op) in scans.into_iter() {
             scans_with_pos.push((scans_with_pos.len(), card, scan_op));
         }
 
@@ -367,9 +367,7 @@ pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<Logic
     }
 
     let optimal_mask = max_mask - 1;
-    if dp[optimal_mask].is_none() {
-        return None;
-    }
+    dp[optimal_mask].as_ref()?;
 
     let optimal_tree = build_optimal_tree(
         optimal_mask,

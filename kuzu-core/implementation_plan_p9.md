@@ -1,6 +1,6 @@
 # P9: Production Hardening & CI/CD
 
-> **Status:** In Progress (P9.1 ✅, P9.2–P9.6 pending) | **Target Date:** 2026-07-12
+> **Status:** In Progress (P9.1 ✅, P9.2 ✅, P9.3–P9.6 pending) | **Target Date:** 2026-07-12
 > **Prerequisites:** P8 (Native FTS) — ✅ COMPLETE
 
 ---
@@ -27,13 +27,19 @@ Dengan selesainya fitur inti query engine (P0–P8) dan **954 test lulus**, fase
 - `[x]` **cargo fmt --all** — pre-existing formatting diffs fixed
 - `[ ]` **Release workflow** — `cargo publish` untuk 28 crate (deferred: needs crates.io setup)
 
-### 🟡 P9.2 — Code Quality & Linting
+### 🟡 P9.2 — Code Quality & Linting ✅ COMPLETE (2026-07-07)
 
-- `[ ]` **Clippy strict mode** — audit `clippy.toml` dan enable `#![warn(clippy::pedantic)]` bertahap
-- `[ ]` **`rustdoc` lint** — `#![warn(missing_docs)]` untuk crate publik (kuzu-main, kuzu-common)
-- `[ ]` **Safety audit** — `cargo audit` + `cargo geiger` untuk unsafe code detection
-- `[ ]` **Unused dependencies** — `cargo udeps` untuk 28 crate
-- `[ ]` **`Cargo.toml` standardization** — uniform `[package]` metadata (license, repository, documentation, keywords)
+- `[x]` **Clippy — 0 warnings dengan `-D warnings`** — fixed ~15 issues across 7 crates
+  - `[x]` `clippy.toml` populated (cognitive: 50, type: 500, args: 12)
+  - `[x]` Removed unknown `manual_sort` lint, added `collapsible_if` allow
+  - `[x]` Fixed: `unnecessary_unwrap`, `ErrorKind::Other→Error::other`, `sort_by→sort_by_key`, `enumerate→iter`, `is_none→?`, `div_ceil`, `get(0)→first()`, `iter().cloned().collect()→to_vec()`, unit let-binding
+- `[x]` **Security audit — `cargo audit` clean** (0 vulnerabilities)
+  - `[x]` Removed unused+unsound `fast-float` dependency
+  - `[x]` Upgraded `time` from 0.3→0.3.47 (DoS fix)
+  - `[x]` `paste` unmaintained noted (informational, no fix available)
+- `[x]` **`Cargo.toml` standardization** — all 28 crates already well-standardized (workspace-level version/edition/license/repository, `publish = false` for internal crates)
+- `[ ]` **`rustdoc` lint** — `#![warn(missing_docs)]` deferred (requires significant doc additions)
+- `[ ]` **`cargo udeps`** — deferred (requires nightly toolchain)
 
 ### 🟡 P9.3 — Benchmark Comparison: Rust vs C++
 

@@ -372,7 +372,7 @@ impl StorageManager {
         let total_pages = self.page_manager.as_ref().map(|pm| pm.total_pages()).unwrap_or(0);
         let free_pages = 0u64; // FSM query later
         FsmInfo {
-            total_free_pages: free_pages.max(0),
+            total_free_pages: free_pages,
             num_entries: total_pages as usize,
         }
     }

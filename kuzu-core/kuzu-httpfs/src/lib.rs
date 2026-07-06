@@ -64,7 +64,7 @@ impl HttpRandomAccessReader {
     pub fn new(url: &str) -> std::io::Result<Self> {
         let resp = ureq::head(url)
             .call()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         let content_length = resp.header("Content-Length").and_then(|s| s.parse::<u64>().ok());
         Ok(Self {
             url: url.to_string(),
@@ -84,7 +84,7 @@ impl Read for HttpRandomAccessReader {
         let resp = ureq::get(&self.url)
             .set("Range", &range_header)
             .call()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         let mut reader = resp.into_reader();
         let bytes_read = reader.read(buf)?;

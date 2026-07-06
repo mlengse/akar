@@ -72,6 +72,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Native FTS Index | ❌ TIDAK ADA | ✅ DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX`, BM25, 3 macro tables, Porter stemmer, tokenizer, stop words | `[P8]` |
 | Projection column resolution | ❌ Bug: selalu kolom 0 | ✅ `resolve_projection_column_index()` + `evaluate_variable` field-name matching | `[fix]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
+| Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean, `cargo audit` clean (0 vulns), removed unused `fast-float`, upgraded `time` | `[P9.2]` |
 
 ---
 
@@ -452,10 +453,11 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - `kuzu-fts`: **Selesai (Native)**. Full pipeline: DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX doc_idx('query')`, BM25 scoring, 3 macro tables (`{name}_docs`, `{name}_terms`, `{name}_appears_in`), Porter stemmer, stop word filtering, tokenizer. Diuji via `kuzu-main/tests/test_fts.rs`.
 
 ### 4.3 Code Quality
-- Clippy warnings di extension crates **sudah diperbaiki** (`unused_imports` di kuzu-postgres, kuzu-iceberg, dll).
-- **CI/CD pipeline implemented** — 8 job GitHub Actions (fmt, clippy, test×3 OS, feature-gated build, WASM check, bench compilation, coverage via tarpaulin) + Dependabot untuk weekly dependency updates. File: `.github/workflows/rust-ci.yml`, `.github/dependabot.yml`.
+- **Clippy: 0 warnings** dengan `-D warnings` — ~15 issues fixed across 7 crates (kuzu-transaction, kuzu-httpfs, kuzu-fts, kuzu-optimizer, kuzu-processor, kuzu-main, kuzu-storage). `clippy.toml` configured.
+- **Security: `cargo audit` clean** — 0 vulnerabilities. Removed unused+unsound `fast-float`, upgraded `time` 0.3.36→0.3.47 (DoS fix). `paste` unmaintained (informational only).
+- **CI/CD pipeline implemented** — 8 job GitHub Actions + Dependabot (`.github/workflows/rust-ci.yml`, `.github/dependabot.yml`).
 - `cargo fmt --all` applied — 0 formatting diffs.
-- `cargo audit` + `cargo udeps` belum dijalankan (P9.2).
+- `cargo udeps` + `rustdoc` linting deferred (requires nightly / significant doc additions).
 
 ---
 
@@ -500,5 +502,5 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD: 8 job GitHub Actions + Dependabot) selesai. Projection bug fix (`resolve_projection_column_index` + `evaluate_variable` field-name matching) selesai.
+- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. P9.1 (CI/CD) + P9.2 (Code Quality: clippy clean, cargo-audit clean) selesai. Projection bug fix selesai.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.

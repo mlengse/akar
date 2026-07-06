@@ -77,7 +77,7 @@ impl WALReplayer {
             let tag = buffer[pos as usize];
             pos += 1;
 
-            let _record_data = match tag {
+            match tag {
                 b'I' => {
                     // Insert: table_id(u64) + data_len(u32) + data
                     if pos + 12 > buffer.len() as u64 {

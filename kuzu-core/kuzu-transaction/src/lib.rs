@@ -193,8 +193,8 @@ impl TransactionContext {
     /// Begin a write transaction (implicit, for AUTO mode DDL/DML).
     /// If already active, returns the existing transaction.
     pub fn begin_implicit(&mut self) -> Result<&Transaction, String> {
-        if self.active_txn.is_some() {
-            return Ok(self.active_txn.as_ref().unwrap());
+        if let Some(ref txn) = self.active_txn {
+            return Ok(txn);
         }
         let txn = self.manager.begin_write()?;
         self.active_txn = Some(txn);

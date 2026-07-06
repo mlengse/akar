@@ -255,7 +255,7 @@ pub fn term_frequencies(tokens: &[String]) -> Vec<(String, usize)> {
         *freq.entry(token.clone()).or_insert(0) += 1;
     }
     let mut result: Vec<(String, usize)> = freq.into_iter().collect();
-    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     result
 }
 
