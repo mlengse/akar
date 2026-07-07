@@ -1,6 +1,6 @@
 # Kuzu Rust — Consolidated Implementation Plan
 
-> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13 ✅ | P14 ❌
+> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13 ✅ | P14 ✅ | P15 ❌
 > **Audit:** `cargo test --workspace` → 952 passed, 0 failed | 50 logical ops, 31 physical ops
 > **Prerequisites:** P9 (Production Hardening) ✅, P10 (Critical C++ Parity) ✅
 
@@ -14,7 +14,7 @@
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL, error() | 🟢 P2 | 13 | ✅ COMPLETE |
-| **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap | 🟢 P2 | 8 | ❌ |
+| **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ❌ |
 | **Total** | | | **75** | |
 
