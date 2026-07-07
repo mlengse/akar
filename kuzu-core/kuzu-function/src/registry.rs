@@ -303,15 +303,15 @@ pub enum BooleanOp {
     Not,
 }
 
+/// Utility functions.
 #[derive(Debug, Clone, Copy)]
 pub enum UtilityOp {
     Coalesce,
     IfNull,
     TypeOf,
-    /// NULLIF(expr, value) — return NULL if expr == value, else expr.
     NullIf,
-    /// SIZE(expr) — polymorphic length/cardinality for lists, strings, arrays, maps.
     Size,
+    Error,
 }
 
 /// Schema functions — access metadata about nodes, relationships, and values.
@@ -1079,6 +1079,7 @@ impl FunctionRegistry {
         self.register_scalar("nullif", ScalarFunction::Utility { op: UtilityOp::NullIf });
         self.register_scalar("size", ScalarFunction::Utility { op: UtilityOp::Size });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
+        self.register_scalar("error", ScalarFunction::Utility { op: UtilityOp::Error });
 
         // --- Schema ---
         self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
