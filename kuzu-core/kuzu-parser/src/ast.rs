@@ -131,6 +131,11 @@ pub enum Statement {
     DetachDatabase(DetachDatabase),
     UseDatabase(UseDatabase),
     LoadFrom(LoadFrom),
+    CreateType(CreateType),
+    CommentOnTable(CommentOnTable),
+    CreateGraph(CreateGraph),
+    UseGraph(UseGraph),
+    DropGraph(DropGraph),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).
@@ -559,4 +564,37 @@ pub struct CreateVectorIndex {
 pub struct ColumnDef {
     pub name: String,
     pub type_name: String,
+}
+
+/// CREATE TYPE name AS type — user-defined type alias.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateType {
+    pub name: String,
+    pub type_name: String,
+}
+
+/// COMMENT ON TABLE name IS 'string' — add a comment to a table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentOnTable {
+    pub table_name: String,
+    pub comment: String,
+}
+
+/// CREATE [PROJECTION] GRAPH name [ANY] — create a projected graph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateGraph {
+    pub name: String,
+    pub is_any: bool,
+}
+
+/// USE GRAPH name — set the current graph context.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseGraph {
+    pub name: String,
+}
+
+/// DROP GRAPH name — remove a projected graph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropGraph {
+    pub name: String,
 }
