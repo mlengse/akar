@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-07 (diperbarui — P10 ✅, P11 ✅, P12 in progress)
+> **Tanggal:** 2026-07-07 (diperbarui — P10 ✅, P11 ✅, P12 ✅ complete)
 > **Hasil audit:** `cargo test --workspace` → **952 passed, 0 failed** | 28 crate, ~224 file .rs
 
 ---
@@ -618,7 +618,7 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | `count_if` | Aggregate | P1 | ✅ P10.5 |
 | `export_csv` / `export_parquet` | Export | P1 | ✅ P11.2 |
 | `size` (generic) | Utility | P1 | ✅ P11.1 |
-| `list_transform/reduce/filter` | Lambda list | P2 | ❌ P12 |
+| `list_transform/reduce/filter` | Lambda list | P2 | ✅ P12.4 |
 | Path `properties`, `semantic` | Path | P2 | ✅ P12.5 |
 | Pattern `cost/id/label/rowid` | Pattern | P2 | ✅ P12.6 |
 | `error` | Utility | P3 | ❌ P14 |
@@ -695,7 +695,7 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 |------|--------|-----------|-----|--------|
 | **P10** | COPY TO + TRANSACTION + EXTENSION + nullif/count_if | 🔴 P0 | 20 | ✅ COMPLETE |
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH/USE, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
-| P12 | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern (4 remaining) | 🟡 P1 | 13 | 🔄 In Progress (5/6 done) |
+| P12 | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern (6/6 done) | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | GDS expansion: Dijkstra, Louvain, K-Core, CREATE GRAPH | 🟢 P2 | 13 | ❌ |
 | **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap, error() | 🟢 P2 | 8 | ❌ |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union | 🟢 P3 | 5 | ❌ |
