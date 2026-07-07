@@ -106,6 +106,9 @@ impl ExpressionEvaluator {
                 var_name,
                 predicate,
             } => self.evaluate_list_predicate(quantifier, list, var_name, predicate, chunk),
+            Expression::Lambda { .. } => {
+                Err("Lambda expression should only appear as argument to list_transform/filter/reduce".into())
+            }
         }
     }
 
@@ -578,6 +581,195 @@ impl ExpressionEvaluator {
                 kuzu_parser::ast::Quantifier::Single => true_count == 1,
             };
             store_value_in_vector(&mut result, row, &Value::Bool(bool_result));
+        }
+
+        Ok(result)
+    }
+
+    /// Extract the Lambda expression from function call arguments, if present.
+    fn extract_lambda_arg<'a>(&self, args: &'a [Expression]) -> Option<&'a Expression> {
+        args.iter().find(|a| matches!(a, Expression::Lambda { .. }))
+    }
+
+    /// Evaluate `list_transform(list, x -> body)` — apply lambda to each element.
+    fn evaluate_list_transform(
+        &self,
+        args: &[Expression],
+        lambda: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        let list_expr = args.iter().find(|a| !matches!(a, Expression::Lambda { .. }))
+            .ok_or("list_transform requires a list argument")?;
+
+        let (var_name, body) = match lambda {
+            Expression::Lambda { var_name, body } => (var_name, body),
+            _ => return Err("Expected lambda expression".into()),
+        };
+
+        let list_vec = self.evaluate(list_expr, chunk)?;
+        let num_rows = chunk.size;
+        let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::List, num_rows);
+        result.resize(num_rows);
+
+        for row in 0..num_rows {
+            let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
+            let items = match list_val {
+                Value::List(ref items) => items.clone(),
+                _ => {
+                    store_value_in_vector(&mut result, row, &Value::List(vec![]));
+                    continue;
+                }
+            };
+
+            let mut transformed: Vec<Value> = Vec::with_capacity(items.len());
+            for item in &items {
+                let mut elem_vec = ValueVector::new(item.physical_type(), 1);
+                elem_vec.resize(1);
+                store_value_in_vector(&mut elem_vec, 0, item);
+                let mut mini_chunk = DataChunk::new(vec![elem_vec]);
+                mini_chunk.field_names.push(var_name.clone());
+
+                let body_vec = self.evaluate(body, &mini_chunk)?;
+                let body_val = body_vec.get_value(0).unwrap_or(Value::Null);
+                transformed.push(body_val);
+            }
+            store_value_in_vector(&mut result, row, &Value::List(transformed));
+        }
+
+        Ok(result)
+    }
+
+    /// Evaluate `list_filter(list, x -> predicate)` — keep elements where predicate is true.
+    fn evaluate_list_filter(
+        &self,
+        args: &[Expression],
+        lambda: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        let list_expr = args.iter().find(|a| !matches!(a, Expression::Lambda { .. }))
+            .ok_or("list_filter requires a list argument")?;
+
+        let (var_name, body) = match lambda {
+            Expression::Lambda { var_name, body } => (var_name, body),
+            _ => return Err("Expected lambda expression".into()),
+        };
+
+        let list_vec = self.evaluate(list_expr, chunk)?;
+        let num_rows = chunk.size;
+        let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::List, num_rows);
+        result.resize(num_rows);
+
+        for row in 0..num_rows {
+            let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
+            let items = match list_val {
+                Value::List(ref items) => items.clone(),
+                _ => {
+                    store_value_in_vector(&mut result, row, &Value::List(vec![]));
+                    continue;
+                }
+            };
+
+            let mut filtered: Vec<Value> = Vec::new();
+            for item in &items {
+                let mut elem_vec = ValueVector::new(item.physical_type(), 1);
+                elem_vec.resize(1);
+                store_value_in_vector(&mut elem_vec, 0, item);
+                let mut mini_chunk = DataChunk::new(vec![elem_vec]);
+                mini_chunk.field_names.push(var_name.clone());
+
+                let pred_vec = self.evaluate(body, &mini_chunk)?;
+                let pred_val = pred_vec.get_value(0).unwrap_or(Value::Null);
+
+                if matches!(pred_val, Value::Bool(true)) {
+                    filtered.push(item.clone());
+                } else if let Value::Int64(x) = pred_val {
+                    if x != 0 {
+                        filtered.push(item.clone());
+                    }
+                }
+            }
+            store_value_in_vector(&mut result, row, &Value::List(filtered));
+        }
+
+        Ok(result)
+    }
+
+    /// Evaluate `list_reduce(list, (acc, x) -> body, initial)` — fold over list.
+    fn evaluate_list_reduce(
+        &self,
+        args: &[Expression],
+        lambda: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, String> {
+        let list_expr = args.iter().find(|a| !matches!(a, Expression::Lambda { .. }))
+            .ok_or("list_reduce requires a list argument")?;
+
+        // Find initial value — the argument that is not the list and not the lambda
+        let initial_expr = args.iter()
+            .filter(|a| !matches!(a, Expression::Lambda { .. }))
+            .nth(1) // Second non-lambda arg (first is list)
+            .ok_or("list_reduce requires an initial value argument")?;
+
+        let (var_name, body) = match lambda {
+            Expression::Lambda { var_name, body } => (var_name, body),
+            _ => return Err("Expected lambda expression".into()),
+        };
+
+        // list_reduce uses (acc, x) -> expr where acc is first var, x is second
+        let acc_name = var_name.clone();
+        let elem_name = match body.as_ref() {
+            Expression::BinaryOp(op, left, right) => {
+                // Try to infer the element variable from the body pattern
+                // Most common: acc + x where x is a Variable
+                let left_var = if let Expression::Variable(v) = left.as_ref() { Some(v.clone()) } else { None };
+                let right_var = if let Expression::Variable(v) = right.as_ref() { Some(v.clone()) } else { None };
+
+                if left_var.as_deref() == Some(&acc_name) {
+                    right_var.unwrap_or_default()
+                } else if right_var.as_deref() == Some(&acc_name) {
+                    left_var.unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        };
+
+        let list_vec = self.evaluate(list_expr, chunk)?;
+        let initial_vec = self.evaluate(initial_expr, chunk)?;
+        let num_rows = chunk.size;
+        let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, num_rows);
+        result.resize(num_rows);
+
+        for row in 0..num_rows {
+            let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
+            let items = match list_val {
+                Value::List(ref items) => items.clone(),
+                _ => {
+                    store_value_in_vector(&mut result, row, &Value::Null);
+                    continue;
+                }
+            };
+
+            let mut acc = initial_vec.get_value(row).unwrap_or(Value::Null);
+            for item in &items {
+                // Create mini-chunk with acc as field 0 and item as field 1
+                let mut acc_vec = ValueVector::new(acc.physical_type(), 1);
+                acc_vec.resize(1);
+                store_value_in_vector(&mut acc_vec, 0, &acc);
+                let mut elem_vec = ValueVector::new(item.physical_type(), 1);
+                elem_vec.resize(1);
+                store_value_in_vector(&mut elem_vec, 0, item);
+                let mut mini_chunk = DataChunk::new(vec![acc_vec, elem_vec]);
+                mini_chunk.field_names.push(acc_name.clone());
+                if !elem_name.is_empty() {
+                    mini_chunk.field_names.push(elem_name.clone());
+                }
+
+                let body_vec = self.evaluate(body, &mini_chunk)?;
+                acc = body_vec.get_value(0).unwrap_or(Value::Null);
+            }
+            store_value_in_vector(&mut result, row, &acc);
         }
 
         Ok(result)
