@@ -180,6 +180,10 @@ pub fn fold_expression(expr: &kuzu_parser::ast::Expression) -> kuzu_parser::ast:
             var_name: var_name.clone(),
             predicate: Box::new(fold_expression(predicate)),
         },
+        Expression::Lambda { var_name, body } => Expression::Lambda {
+            var_name: var_name.clone(),
+            body: Box::new(fold_expression(body)),
+        },
     }
 }
 
