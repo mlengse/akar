@@ -128,6 +128,9 @@ impl Binder {
             "TIMESTAMP_TZ" => Ok(LogicalTypeID::TimestampTz),
             "INTERVAL" => Ok(LogicalTypeID::Interval),
             "SERIAL" => Ok(LogicalTypeID::Serial),
+            "UINT128" => Ok(LogicalTypeID::UInt128),
+            "JSON" => Ok(LogicalTypeID::Json),
+            "TIME" | "DTIME" => Ok(LogicalTypeID::Time),
             _ => Err(format!("Unknown type: {type_name}")),
         }
     }
