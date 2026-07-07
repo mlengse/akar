@@ -151,6 +151,10 @@ impl PhysicalScan {
             | Value::TimestampSec(_)
             | Value::Interval(_) => PhysicalTypeID::String,
             Value::Blob(_) => PhysicalTypeID::Blob,
+            Value::UInt128(_) => PhysicalTypeID::Int128,
+            Value::Json(_) => PhysicalTypeID::String,
+            Value::DTime(_) => PhysicalTypeID::Int64,
+            Value::Union(_, _) => PhysicalTypeID::Struct,
             Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => PhysicalTypeID::Int64,
         }
     }
@@ -159,7 +163,7 @@ impl PhysicalScan {
     pub(crate) fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
         match logical {
             LogicalTypeID::Bool => PhysicalTypeID::Bool,
-            LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial => {
+            LogicalTypeID::Int64 | LogicalTypeID::UInt64 | LogicalTypeID::Int128 | LogicalTypeID::Serial | LogicalTypeID::UInt128 => {
                 PhysicalTypeID::Int64
             }
             LogicalTypeID::Int32 | LogicalTypeID::UInt32 => PhysicalTypeID::Int32,
@@ -174,7 +178,9 @@ impl PhysicalScan {
             | LogicalTypeID::TimestampMs
             | LogicalTypeID::TimestampNs
             | LogicalTypeID::TimestampSec
-            | LogicalTypeID::Interval => PhysicalTypeID::String,
+            | LogicalTypeID::Interval
+            | LogicalTypeID::Time
+            | LogicalTypeID::Json => PhysicalTypeID::String,
             LogicalTypeID::Blob => PhysicalTypeID::Blob,
             LogicalTypeID::Any
             | LogicalTypeID::Node
