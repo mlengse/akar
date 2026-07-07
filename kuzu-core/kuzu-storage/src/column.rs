@@ -54,6 +54,10 @@ pub(crate) const TAG_INTERNAL_ID: u8 = 22;
 pub(crate) const TAG_LIST: u8 = 23;
 pub(crate) const TAG_MAP: u8 = 24;
 pub(crate) const TAG_STRUCT: u8 = 25;
+pub(crate) const TAG_UINT128: u8 = 26;
+pub(crate) const TAG_JSON: u8 = 27;
+pub(crate) const TAG_DTIME: u8 = 28;
+pub(crate) const TAG_UNION: u8 = 29;
 
 /// Maximum values stored per page (keeps the offset array fixed-size).
 const MAX_VALS_PER_PAGE: usize = 256;
@@ -354,6 +358,26 @@ impl Column {
                 buf.push(TAG_TIMESTAMP_TZ);
                 buf.extend_from_slice(&v.0.to_le_bytes());
             }
+            Value::UInt128(v) => {
+                buf.push(TAG_UINT128);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Json(v) => {
+                buf.push(TAG_JSON);
+                let json_str = v.to_string();
+                buf.extend_from_slice(&(json_str.len() as u32).to_le_bytes());
+                buf.extend_from_slice(json_str.as_bytes());
+            }
+            Value::DTime(v) => {
+                buf.push(TAG_DTIME);
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Union(tag, val) => {
+                buf.push(TAG_UNION);
+                buf.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                buf.extend_from_slice(tag.as_bytes());
+                Self::serialize_into(buf, val);
+            }
             Value::Interval(v) => {
                 buf.push(TAG_INTERVAL);
                 buf.extend_from_slice(&v.months.to_le_bytes());
@@ -534,6 +558,39 @@ impl Column {
                     fields.push((name, val));
                 }
                 Ok(Value::Struct(fields))
+            }
+            TAG_UINT128 => Ok(Value::UInt128(read_le!(u128))),
+            TAG_JSON => {
+                let len = read_le!(u32) as usize;
+                if *pos + len > data.len() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "eof reading json data",
+                    ));
+                }
+                let s = String::from_utf8_lossy(&data[*pos..*pos + len]).into_owned();
+                *pos += len;
+                match serde_json::from_str(&s) {
+                    Ok(v) => Ok(Value::Json(v)),
+                    Err(e) => Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid json: {}", e),
+                    )),
+                }
+            }
+            TAG_DTIME => Ok(Value::DTime(read_le!(i64))),
+            TAG_UNION => {
+                let len = read_le!(u32) as usize;
+                if *pos + len > data.len() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "eof reading union tag",
+                    ));
+                }
+                let tag = String::from_utf8_lossy(&data[*pos..*pos + len]).into_owned();
+                *pos += len;
+                let val = Self::deserialize_value(data, pos)?;
+                Ok(Value::Union(tag, Box::new(val)))
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
