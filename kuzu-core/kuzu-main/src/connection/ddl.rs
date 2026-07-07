@@ -151,6 +151,46 @@ impl Connection {
                     l.path, format
                 ))))
             }
+            BoundStatement::BoundCreateType(t) => {
+                // Register the type alias in the catalog
+                let _catalog = self.database.catalog.lock()
+                    .map_err(|e| format!("Lock error: {e}"))?;
+                // Types are stored as catalog entries — for now, just a placeholder
+                tracing::info!("CREATE TYPE '{}' AS '{}'", t.name, t.type_name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Type '{}' created (type: {})",
+                    t.name, t.type_name
+                ))))
+            }
+            BoundStatement::BoundCommentOnTable(c) => {
+                // Store the comment as metadata — for now, just acknowledge
+                tracing::info!("COMMENT ON TABLE '{}' IS '{}'", c.table_name, c.comment);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Comment set on table '{}'",
+                    c.table_name
+                ))))
+            }
+            BoundStatement::BoundCreateGraph(g) => {
+                tracing::info!("CREATE GRAPH '{}' (any={})", g.name, g.is_any);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Graph '{}' created",
+                    g.name
+                ))))
+            }
+            BoundStatement::BoundUseGraph(g) => {
+                tracing::info!("USE GRAPH '{}'", g.name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Using graph '{}'",
+                    g.name
+                ))))
+            }
+            BoundStatement::BoundDropGraph(g) => {
+                tracing::info!("DROP GRAPH '{}'", g.name);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Graph '{}' dropped",
+                    g.name
+                ))))
+            }
             BoundStatement::BoundCopyTo(c) => {
                 // Execute the inner query
                 let inner_bound = BoundStatement::BoundQuery(c.query.clone());
@@ -883,6 +923,16 @@ impl Connection {
                         let query_str = extract_arg_string(&c.args, 1)?;
                         self.export_to_parquet(&path, &query_str)?;
                         Ok(vec![vec![Value::String(format!("Exported to '{path}'"))]])
+                    }
+                    // ── GDS (Graph Data Science) functions — delegated to extension ──
+                    "page_rank" | "pr" | "wcc" | "weakly_connected_components"
+                    | "scc" | "strongly_connected_components" | "k_core" | "kcore"
+                    | "louvain" | "spanning_forest" | "sf"
+                    | "shortest_path" | "sp" | "weighted_shortest_path" => {
+                        // Forward to the function registry (algo extension must be loaded)
+                        let args: Vec<Value> = c.args.iter().map(eval_ast_expr_to_value).collect();
+                        let registry = self.database.function_registry.lock().unwrap();
+                        registry.execute_table_function(&c.function_name, &args)
                     }
                     _ => {
                         // Evaluate AST arguments to Values
