@@ -32,6 +32,9 @@ pub enum LogicalTypeID {
     Interval = 40,
     Decimal = 41,
     InternalID = 42,
+    UInt128 = 43,
+    Json = 44,
+    Time = 45,
     String = 50,
     Blob = 51,
     List = 52,
@@ -120,6 +123,10 @@ pub enum Value {
     TimestampSec(Timestamp),
     Interval(Interval),
     InternalID(InternalID),
+    UInt128(u128),
+    Json(serde_json::Value),
+    DTime(i64),
+    Union(String, Box<Value>),
     List(Vec<Value>),
     Map(Vec<(Value, Value)>),
     Struct(Vec<(String, Value)>),
@@ -212,6 +219,16 @@ impl From<InternalID> for Value {
         Value::InternalID(v)
     }
 }
+impl From<u128> for Value {
+    fn from(v: u128) -> Self {
+        Value::UInt128(v)
+    }
+}
+impl From<serde_json::Value> for Value {
+    fn from(v: serde_json::Value) -> Self {
+        Value::Json(v)
+    }
+}
 
 impl Value {
     /// Get the LogicalTypeID corresponding to this Value.
@@ -235,6 +252,10 @@ impl Value {
             Value::Timestamp(_) => LogicalTypeID::Timestamp,
             Value::Interval(_) => LogicalTypeID::Interval,
             Value::InternalID(_) => LogicalTypeID::InternalID,
+            Value::UInt128(_) => LogicalTypeID::UInt128,
+            Value::Json(_) => LogicalTypeID::Json,
+            Value::DTime(_) => LogicalTypeID::Time,
+            Value::Union(_, _) => LogicalTypeID::Union,
             Value::List(_) => LogicalTypeID::List,
             Value::Map(_) => LogicalTypeID::Map,
             Value::Struct(_) => LogicalTypeID::Struct,
@@ -267,15 +288,16 @@ pub const fn physical_type_from_logical(logical: LogicalTypeID) -> PhysicalTypeI
         LogicalTypeID::UInt8 => PhysicalTypeID::UInt8,
         LogicalTypeID::Double => PhysicalTypeID::Double,
         LogicalTypeID::Float => PhysicalTypeID::Float,
-        LogicalTypeID::Int128 | LogicalTypeID::Decimal => PhysicalTypeID::Int128,
+        LogicalTypeID::Int128 | LogicalTypeID::Decimal | LogicalTypeID::UInt128 => PhysicalTypeID::Int128,
         LogicalTypeID::Date
         | LogicalTypeID::Timestamp
         | LogicalTypeID::TimestampSec
         | LogicalTypeID::TimestampMs
         | LogicalTypeID::TimestampNs
-        | LogicalTypeID::TimestampTz => PhysicalTypeID::Int64,
+        | LogicalTypeID::TimestampTz
+        | LogicalTypeID::Time => PhysicalTypeID::Int64,
         LogicalTypeID::Interval => PhysicalTypeID::Interval,
-        LogicalTypeID::String | LogicalTypeID::Blob | LogicalTypeID::Uuid => PhysicalTypeID::String,
+        LogicalTypeID::String | LogicalTypeID::Blob | LogicalTypeID::Uuid | LogicalTypeID::Json => PhysicalTypeID::String,
         LogicalTypeID::InternalID => PhysicalTypeID::Struct,
         LogicalTypeID::List | LogicalTypeID::Array => PhysicalTypeID::List,
         LogicalTypeID::Map | LogicalTypeID::Struct | LogicalTypeID::Union => PhysicalTypeID::Struct,
