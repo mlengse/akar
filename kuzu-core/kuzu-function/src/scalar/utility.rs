@@ -41,5 +41,15 @@ pub(crate) fn evaluate_utility(op: UtilityOp, args: &[Value]) -> Result<Value, S
                 _ => Err(format!("SIZE does not support type {:?}", args[0].logical_type())),
             }
         }
+        UtilityOp::Error => {
+            if args.is_empty() {
+                return Err("ERROR requires 1 argument".into());
+            }
+            match &args[0] {
+                Value::String(s) => Err(s.clone()),
+                Value::Null => Err("user-triggered error".into()),
+                other => Err(format!("{:?}", other)),
+            }
+        }
     }
 }
