@@ -130,22 +130,37 @@ fn infer_column_type(rows: &[Vec<Value>], col_idx: usize, _num_cols: usize) -> (
 }
 
 fn append_value_to_builder(builder: &mut Box<dyn ArrayBuilder>, val: &Value) {
+    macro_rules! append_or_null {
+        ($builder_type:ty, $val_expr:expr) => {
+            if let Some(b) = builder.as_any_mut().downcast_mut::<$builder_type>() {
+                b.append_value($val_expr);
+                return;
+            }
+        };
+        (null $builder_type:ty) => {
+            if let Some(b) = builder.as_any_mut().downcast_mut::<$builder_type>() {
+                b.append_null();
+                return;
+            }
+        };
+    }
+
     match val {
         Value::Null => {
-            match builder.as_any_mut().downcast_mut::<BooleanBuilder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Int8Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Int16Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Int32Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Int64Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<UInt8Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<UInt16Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<UInt32Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<UInt64Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Float32Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Float64Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<StringBuilder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<Date32Builder>() { Some(b) => { b.append_null(); return; } _ => {} }
-            match builder.as_any_mut().downcast_mut::<BinaryBuilder>() { Some(b) => { b.append_null(); return; } _ => {} }
+            append_or_null!(null BooleanBuilder);
+            append_or_null!(null Int8Builder);
+            append_or_null!(null Int16Builder);
+            append_or_null!(null Int32Builder);
+            append_or_null!(null Int64Builder);
+            append_or_null!(null UInt8Builder);
+            append_or_null!(null UInt16Builder);
+            append_or_null!(null UInt32Builder);
+            append_or_null!(null UInt64Builder);
+            append_or_null!(null Float32Builder);
+            append_or_null!(null Float64Builder);
+            append_or_null!(null StringBuilder);
+            append_or_null!(null Date32Builder);
+            append_or_null!(null BinaryBuilder);
         }
         Value::Bool(v) => { if let Some(b) = builder.as_any_mut().downcast_mut::<BooleanBuilder>() { b.append_value(*v); } }
         Value::Int8(v) => { if let Some(b) = builder.as_any_mut().downcast_mut::<Int8Builder>() { b.append_value(*v); } }
@@ -164,7 +179,6 @@ fn append_value_to_builder(builder: &mut Box<dyn ArrayBuilder>, val: &Value) {
         Value::Interval(_) => { if let Some(b) = builder.as_any_mut().downcast_mut::<Int64Builder>() { b.append_null(); } }
         Value::Blob(data) => { if let Some(b) = builder.as_any_mut().downcast_mut::<BinaryBuilder>() { b.append_value(data.as_slice()); } }
         _ => {
-            // Other types → null
             if let Some(b) = builder.as_any_mut().downcast_mut::<StringBuilder>() { b.append_null(); }
         }
     }
