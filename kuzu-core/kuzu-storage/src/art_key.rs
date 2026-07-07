@@ -82,6 +82,18 @@ impl ArtKey {
                 bytes.extend_from_slice(&id.offset.to_be_bytes());
                 Some(Self { bytes })
             }
+            Value::UInt128(v) => Some(Self::from_uint128(*v)),
+            Value::DTime(v) => Some(Self::from_int64(*v)),
+            Value::Json(v) => Some(Self::from_string(&v.to_string())),
+            Value::Union(tag, val) => {
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(&(tag.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(tag.as_bytes());
+                if let Some(key) = Self::from_value(val) {
+                    bytes.extend_from_slice(&key.bytes);
+                }
+                Some(Self { bytes })
+            }
             Value::List(_) | Value::Map(_) | Value::Struct(_) => {
                 // Compound types are not supported as ART keys.
                 // Return an empty key — caller should handle.
@@ -221,6 +233,15 @@ impl ArtKey {
         let high_encoded = high ^ (1u64 << 63);
         let mut bytes = Vec::with_capacity(16);
         bytes.extend_from_slice(&high_encoded.to_be_bytes());
+        bytes.extend_from_slice(&low.to_be_bytes());
+        Self { bytes }
+    }
+
+    fn from_uint128(v: u128) -> Self {
+        let high = (v >> 64) as u64;
+        let low = v as u64;
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(&high.to_be_bytes());
         bytes.extend_from_slice(&low.to_be_bytes());
         Self { bytes }
     }
