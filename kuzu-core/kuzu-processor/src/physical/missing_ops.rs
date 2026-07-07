@@ -1,12 +1,10 @@
-use kuzu_common::vector::DataChunk;
+use kuzu_common::vector::{DataChunk, ValueVector};
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 
-/// Accumulate — materializes all input into memory.
+/// Accumulate — materializes all input into a single contiguous chunk in memory.
 ///
-/// Currently acts as a pass-through (input is already materialized by upstream ops).
-/// In a full implementation this would explicitly collect all rows into an in-memory
-/// table for operations that require random access (hash join build side, correlated
-/// subqueries, etc.).
+/// This is required for operations that need random access to all rows,
+/// such as hash join build side, correlated subqueries, etc.
 pub struct PhysicalAccumulate;
 
 impl PhysicalOperatorExec for PhysicalAccumulate {
@@ -15,14 +13,39 @@ impl PhysicalOperatorExec for PhysicalAccumulate {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
+        if input.is_empty() {
+            return Ok(input);
+        }
+
+        // Concatenate all chunks into a single chunk
+        let num_fields = input[0].num_fields();
+        let merged_fields: Vec<ValueVector> = (0..num_fields)
+            .map(|i| {
+                let first_type = input[0].field(i).physical_type();
+                let total_size: usize = input.iter().map(|c| c.field(i).size()).sum();
+                let mut merged = ValueVector::new(first_type, total_size.max(1));
+                for chunk in &input {
+                    merged.append(chunk.field(i));
+                }
+                merged
+            })
+            .collect();
+
+        let size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+        let field_names = input[0].field_names.clone();
+
+        Ok(vec![DataChunk {
+            fields: merged_fields,
+            size,
+            field_names,
+        }])
     }
 }
 
 /// Union — concatenates results from two child pipelines.
 ///
-/// Executes left and right sub-plans independently, then concatenates
-/// corresponding columns. Deduplicates if `!all` (UNION DISTINCT).
+/// This operator is not currently used in the pipeline (Union is handled inline
+/// in QueryProcessor::execute_internal). Kept for API compatibility with C++.
 pub struct PhysicalUnion {
     pub all: bool,
 }
@@ -32,12 +55,9 @@ impl PhysicalOperatorExec for PhysicalUnion {
         "union"
     }
 
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let left = input;
-        if left.is_empty() {
-            return Ok(left);
-        }
-        Ok(left)
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // Not used - Union is handled inline in execute_internal
+        Ok(Vec::new())
     }
 }
 
