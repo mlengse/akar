@@ -1,6 +1,6 @@
 # Kuzu Rust — Consolidated Implementation Plan
 
-> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13 ✅ | P14 ✅ | P15 ❌
+> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13 ✅ | P14 ✅ | P15 ✅
 > **Audit:** `cargo test --workspace` → 952 passed, 0 failed | 50 logical ops, 31 physical ops
 > **Prerequisites:** P9 (Production Hardening) ✅, P10 (Critical C++ Parity) ✅
 
@@ -15,7 +15,7 @@
 | **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL, error() | 🟢 P2 | 13 | ✅ COMPLETE |
 | **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
-| **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ❌ |
+| **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ✅ COMPLETE |
 | **Total** | | | **75** | |
 
 ---
@@ -187,34 +187,44 @@ Lambda-based list operations:
 
 ## P15 — Types & Missing Physical Operators
 
-### ❌ P15.1 — JSON native type
-- `[ ]` `LogicalType::Json` variant
-- `[ ]` `Value::Json(serde_json::Value)`
-- `[ ]` **File:** `kuzu-common/src/types.rs`
+### ✅ P15.1 — JSON native type
+- `[x]` `LogicalTypeID::Json` variant (value 44)
+- `[x]` `Value::Json(serde_json::Value)` variant
+- `[x]` `PhysicalTypeID::String` physical mapping
+- `[x]` `"JSON"` → `LogicalTypeID::Json` in `parse_type()`
+- `[x]` **File:** `kuzu-common/src/types.rs`
 
-### ❌ P15.2 — UINT128
-- `[ ]` `LogicalType::UInt128` variant
-- `[ ]` **File:** `kuzu-common/src/types.rs`
+### ✅ P15.2 — UINT128
+- `[x]` `LogicalTypeID::UInt128` variant (value 43, matching Vela C++)
+- `[x]` `Value::UInt128(u128)` variant using Rust native u128
+- `[x]` `PhysicalTypeID::Int128` physical mapping
+- `[x]` `"UINT128"` → `LogicalTypeID::UInt128` in `parse_type()`
+- `[x]` **File:** `kuzu-common/src/types.rs`
 
-### ❌ P15.3 — DTime (DateTime with TZ offset)
-- `[ ]` `LogicalType::DTime` with timezone-aware semantics
-- `[ ]` **File:** `kuzu-common/src/types.rs`
+### ✅ P15.3 — DTime
+- `[x]` `LogicalTypeID::Time` variant (value 45), matching SQL TIME semantics
+- `[x]` `Value::DTime(i64)` — microseconds since midnight
+- `[x]` `PhysicalTypeID::Int64` physical mapping
+- `[x]` `"TIME"` | `"DTIME"` → `LogicalTypeID::Time` in `parse_type()`
+- `[x]` **File:** `kuzu-common/src/types.rs`
 
-### ❌ P15.4 — Value::Union variant
-- `[ ]` Union type support: `Value::Union(tag, value)`
-- `[ ]` **File:** `kuzu-common/src/value.rs`
+### ✅ P15.4 — Value::Union variant
+- `[x]` `Value::Union(String, Box<Value>)` — tag + boxed value
+- `[x]` `LogicalTypeID::Union = 56` already existed
+- `[x]` **File:** `kuzu-common/src/types.rs`
 
-### ❌ P15.5 — Missing Physical Operators (Priority P3)
-- `[ ]` `PARTITIONER` (morsel-driven parallelism)
-- `[ ]` `PACKED_EXTEND` (optimized multi-rel extend)
-- `[ ]` `PATH_PROPERTY_PROBE` (path property resolution)
-- `[ ]` `PRIMARY_KEY_SCAN` (PK-based scan)
-- `[ ]` `AGGREGATE_FINALIZE/SCAN` (split aggregate)
-- `[ ]` `RESULT_COLLECTOR` (explicit result collector)
-- `[ ]` `PROFILE` (query profiling)
-- `[ ]` `DUMMY_SINK` / `DUMMY_SIMPLE_SINK`
-- `[ ]` `PhysicalAccumulate` (currently passed through in processor.rs)
-- `[ ]` `PhysicalUnion` (currently handled inline)
+### ✅ P15.5 — Missing Physical Operators
+- `[x]` `PhysicalAccumulate` — properly wired in processor.rs (was pass-through)
+- `[x]` `PhysicalUnion` — struct with operator_type
+- `[x]` `ResultCollector` — collects all chunks for client return
+- `[x]` `DummySink` / `DummySimpleSink` — pipeline terminals
+- `[x]` `Profile` — timing wrapper
+- `[x]` `Partitioner` — morsel-driven parallelism (pass-through)
+- `[x]` `PackedExtend` — multi-rel extend (pass-through)
+- `[x]` `PathPropertyProbe` — path property resolution (pass-through)
+- `[x]` `PrimaryKeyScan` — PK-based scan (pass-through)
+- `[x]` `AggregateFinalize` — split aggregate finalize (pass-through)
+- `[x]` **File:** `kuzu-processor/src/physical/missing_ops.rs`
 
 ---
 

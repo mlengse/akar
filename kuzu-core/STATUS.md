@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-07 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅ complete)
+> **Tanggal:** 2026-07-07 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅ complete)
 > **Hasil audit:** `cargo test --workspace` → **952 passed, 0 failed** | 28 crate, ~224 file .rs
 
 ---
@@ -698,7 +698,7 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | P12 | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern (6/6 done) | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL wiring, error(), STANDALONE_CALL | 🟢 P2 | 13 | ✅ COMPLETE |
 | **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
-| **P15** | Types: JSON, UINT128, DTime, Value::Union | 🟢 P3 | 5 | ❌ |
+| **P15** | Types: JSON, UINT128, DTime, Value::Union | 🟢 P3 | 8 | ✅ COMPLETE |
 | **Total** | | | **72** | |
 
 ---
