@@ -36,6 +36,11 @@ pub enum BoundStatement {
     BoundDetachDatabase(BoundDetachDatabase),
     BoundUseDatabase(BoundUseDatabase),
     BoundLoadFrom(BoundLoadFrom),
+    BoundCreateType(BoundCreateType),
+    BoundCommentOnTable(BoundCommentOnTable),
+    BoundCreateGraph(BoundCreateGraph),
+    BoundUseGraph(BoundUseGraph),
+    BoundDropGraph(BoundDropGraph),
 }
 
 /// Bound TRANSACTION statement.
@@ -396,4 +401,37 @@ pub struct BoundCreateFtsIndex {
     pub docs_table: String,
     pub terms_table: String,
     pub posting_table: String,
+}
+
+/// Bound CREATE TYPE — user-defined type alias.
+#[derive(Debug, Clone)]
+pub struct BoundCreateType {
+    pub name: String,
+    pub type_name: String,
+}
+
+/// Bound COMMENT ON TABLE — table comment.
+#[derive(Debug, Clone)]
+pub struct BoundCommentOnTable {
+    pub table_name: String,
+    pub comment: String,
+}
+
+/// Bound CREATE GRAPH — projected graph.
+#[derive(Debug, Clone)]
+pub struct BoundCreateGraph {
+    pub name: String,
+    pub is_any: bool,
+}
+
+/// Bound USE GRAPH — set graph context.
+#[derive(Debug, Clone)]
+pub struct BoundUseGraph {
+    pub name: String,
+}
+
+/// Bound DROP GRAPH — remove projected graph.
+#[derive(Debug, Clone)]
+pub struct BoundDropGraph {
+    pub name: String,
 }
