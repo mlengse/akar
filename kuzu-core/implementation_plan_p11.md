@@ -2,6 +2,7 @@
 
 > **Status:** ✅ COMPLETE (2026-07-07) | **Audit:** semua item selesai — lihat `STATUS.md` dan `implementation_plan.md`
 > **Prerequisites:** P10 (Critical C++ Parity) — ✅ COMPLETE
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed
 
 ---
 
@@ -65,6 +66,7 @@ Table function wrappers around existing COPY TO infrastructure:
 cargo check --workspace
 cargo test -p kuzu-function                  # 159 ✅
 cargo test -p kuzu-main --lib                # 55 ✅
+cargo test --workspace                       # 960 ✅
 cargo clippy --workspace -- -D warnings      # clean
 ```
 

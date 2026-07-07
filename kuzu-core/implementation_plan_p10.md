@@ -2,6 +2,7 @@
 
 > **Status:** ✅ COMPLETE (P10.1–P10.6 done; P10.3 deferred) | **Completed:** 2026-07-07
 > **Prerequisites:** P9 (Production Hardening) — ✅ COMPLETE
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed
 
 ---
 
@@ -165,6 +166,6 @@ Semua operator dipindahkan ke `kuzu-processor/src/physical/{types,common,scan_fi
 | 3 | `CALL show_tables()` returns results via parsed statement | ✅ (existing) |
 | 4 | `LOAD EXTENSION json` returns informative message | ✅ |
 | 5 | `nullif(expr, val)`, `count_if(cond)` return correct results | ✅ |
-| 6 | All 955+ existing tests still pass | ✅ |
+| 6 | All 960+ existing tests still pass | ✅ |
 | 7 | Clippy `-D warnings` clean | ✅ |
 | 8 | `physical_operator.rs` → `physical/{6 files}` re-export stub | ✅ (P-MOD2A) | |

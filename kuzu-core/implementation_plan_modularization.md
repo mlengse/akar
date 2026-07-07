@@ -3,6 +3,7 @@
 > **Status:** ✅ ALL PHASES COMPLETE | **Target:** 2026-07-14
 > **Prerequisites:** P10.1 (COPY TO) ✅
 > **Referensi:** `STATUS.md` §4.4 Technical Debt Register + §9 Architecture Audit
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed
 
 ---
 
@@ -82,9 +83,9 @@ kuzu-function/src/
 ### Verifikasi
 
 ```bash
-cargo check -p kuzu-function
-cargo test -p kuzu-function       # Harus tetap 159 passing
-cargo test --workspace             # Harus tetap 954 passing
+cargo check -p kuzu-optimizer
+cargo test -p kuzu-optimizer        # Harus tetap 49 passing
+cargo test --workspace              # Harus tetap 960 passing
 ```
 
 ---
@@ -108,7 +109,9 @@ kuzu-processor/src/
 │   └── write_ops.rs         # PhysicalUnwind, PhysicalSet, PhysicalDelete, PhysicalForeach, PhysicalVectorSimilarityScan, PhysicalCopyFrom, PhysicalExplain, PhysicalRecursiveExtend, PhysicalCreateFtsIndex, PhysicalFtsScan, PhysicalCountRelTable, PhysicalCreateNode, PhysicalCreateRel, PhysicalExtend, PhysicalArtIndexRangeScan
 ```
 
-### 2B: `processor.rs` (2.702 lines) — QueryProcessor + Helpers
+### 2B: `processor.rs` (2.755 lines) — QueryProcessor + Helpers ✅ DONE (P-MOD2B)
+
+**Actual implementation:** 6 modules extracted from the monolithic `processor.rs`:
 
 ```
 kuzu-processor/src/processor/
@@ -123,7 +126,7 @@ kuzu-processor/src/processor/
 ### Langkah
 
 - `[x]` **2.1** Phase 2A — Split `physical_operator.rs` (3,794 lines → 5 files)
-- `[x]` **2.2** Phase 2B — Split `processor.rs` helpers → **Deferred** (stable at 2,702 lines; helpers tightly coupled to `QueryProcessor`)
+- `[x]` **2.2** Phase 2B — Split `processor.rs` helpers (2,755 lines → 6 files: mod, join_helpers, union_helpers, chunk_helpers, projection_helper, plan_serializer)
 - `[x]` **2.3** Verifikasi: `cargo test -p kuzu-processor` (77 passing)
 
 ---
@@ -310,7 +313,7 @@ cargo check -p <crate>
 cargo test -p <crate>
 
 # Final regression
-cargo test --workspace          # Harus tetap 954 passing
+cargo test --workspace          # Harus tetap 960 passing
 cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
 cargo build --workspace --release
@@ -338,7 +341,7 @@ cargo build --workspace --release
 |---|----------|
 | 1 | Semua file >1500 lines sudah dipecah menjadi ≤500 lines per file |
 | 2 | Struktur direktori modular untuk semua 7 crate |
-| 3 | Semua 954 test tetap passing tanpa perubahan behavior |
+| 3 | Semua 960 test tetap passing tanpa perubahan behavior |
 | 4 | Clippy `-D warnings` clean |
 | 5 | `cargo build --workspace --release` sukses |
 | 6 | Tidak ada regresi performa (compiler mengoptimalkan sama) |

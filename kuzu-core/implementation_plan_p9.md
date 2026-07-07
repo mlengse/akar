@@ -4,12 +4,13 @@
 
 Next: See [`implementation_plan_p10.md`](../implementation_plan_p10.md) — Critical C++ Parity
 > **Prerequisites:** P8 (Native FTS) — ✅ COMPLETE
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed
 
 ---
 
 ## Overview
 
-Dengan selesainya fitur inti query engine (P0–P8) dan **954 test lulus**, fase P9 fokus pada **production hardening**: CI/CD pipeline, code quality enforcement, dokumentasi developer, publikasi crate, dan benchmark comparison terhadap C++.
+Dengan selesainya fitur inti query engine (P0–P8) dan **960 test lulus**, fase P9 fokus pada **production hardening**: CI/CD pipeline, code quality enforcement, dokumentasi developer, publikasi crate, dan benchmark comparison terhadap C++.
 
 ---
 
