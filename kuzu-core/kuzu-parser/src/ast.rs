@@ -34,6 +34,36 @@ pub struct AnalyzeStatement {
     pub table_name: Option<String>,
 }
 
+/// Transaction action type.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransactionAction {
+    Begin,
+    Commit,
+    Rollback,
+    Checkpoint,
+}
+
+/// TRANSACTION statement (BEGIN, COMMIT, ROLLBACK, CHECKPOINT).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransactionStatement {
+    pub action: TransactionAction,
+}
+
+/// Extension management action.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExtensionAction {
+    Install,
+    Load,
+    Uninstall,
+}
+
+/// EXTENSION management statement (INSTALL/LOAD/UNINSTALL EXTENSION name).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtensionStatement {
+    pub action: ExtensionAction,
+    pub name: String,
+}
+
 /// EXPLAIN statement wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainStatement {
@@ -68,6 +98,8 @@ pub enum Statement {
     ImportDatabase(ImportDatabase),
     Analyze(AnalyzeStatement),
     CreateFtsIndex(CreateFtsIndex),
+    Transaction(TransactionStatement),
+    Extension(ExtensionStatement),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).

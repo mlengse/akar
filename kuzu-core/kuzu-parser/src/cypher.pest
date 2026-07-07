@@ -8,7 +8,7 @@ COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
 
 kuzu_query = { statement ~ EOI }
 
-statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement }
+statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement }
 
 export_database = { "EXPORT" ~ "DATABASE" ~ string ~ export_options? }
 export_options  = { "(" ~ export_option ~ ("," ~ export_option)* ~ ")" }
@@ -22,6 +22,25 @@ union_statement      = { query_statement ~ ("UNION" ~ "ALL"?) ~ query_statement 
 // ==================== ANALYZE ====================
 
 analyze_statement = { "ANALYZE" ~ ("TABLE" ~ identifier | identifier | "*") }
+
+// ==================== TRANSACTION ====================
+
+transaction_statement = {
+    "BEGIN" ~ ("TRANSACTION" | "WORK")?
+  | "COMMIT" ~ ("TRANSACTION" | "WORK")?
+  | "ROLLBACK" ~ ("TRANSACTION" | "WORK")?
+  | "CHECKPOINT"
+}
+
+// ==================== EXTENSION ====================
+
+extension_statement = {
+    "INSTALL" ~ "EXTENSION"? ~ identifier
+  | "LOAD" ~ "EXTENSION"? ~ identifier
+  | "UNINSTALL" ~ "EXTENSION"? ~ identifier
+}
+
+// ==================== DDL ====================
 
 alter_table   = { "ALTER" ~ "TABLE" ~ identifier ~ alter_action }
 alter_action  = {

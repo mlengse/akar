@@ -73,6 +73,8 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         Rule::export_database => ddl::parse_export_database(inner),
         Rule::import_database => ddl::parse_import_database(inner),
         Rule::analyze_statement => ddl::parse_analyze(inner),
+        Rule::transaction_statement => ddl::parse_transaction(inner),
+        Rule::extension_statement => ddl::parse_extension(inner),
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
 }

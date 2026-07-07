@@ -762,5 +762,46 @@ pub(crate) fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Resul
     })
 }
 
+pub(crate) fn parse_transaction(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let text = pair.as_str();
+    let upper = text.to_uppercase();
+    let action = if upper.starts_with("BEGIN") {
+        TransactionAction::Begin
+    } else if upper.starts_with("COMMIT") {
+        TransactionAction::Commit
+    } else if upper.starts_with("ROLLBACK") {
+        TransactionAction::Rollback
+    } else if upper == "CHECKPOINT" {
+        TransactionAction::Checkpoint
+    } else {
+        return Err(format!("Unknown transaction command: {text}"));
+    };
+    Ok(Statement::Transaction(TransactionStatement { action }))
+}
+
+pub(crate) fn parse_extension(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let text = pair.as_str();
+    let mut name = String::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::identifier {
+            name = inner.as_str().to_string();
+        }
+    }
+    let upper = text.to_uppercase();
+    let action = if upper.starts_with("INSTALL") {
+        ExtensionAction::Install
+    } else if upper.starts_with("LOAD") {
+        ExtensionAction::Load
+    } else if upper.starts_with("UNINSTALL") {
+        ExtensionAction::Uninstall
+    } else {
+        return Err(format!("Unknown extension command: {text}"));
+    };
+    if name.is_empty() {
+        return Err("Extension name is required".into());
+    }
+    Ok(Statement::Extension(ExtensionStatement { action, name }))
+}
+
 
 

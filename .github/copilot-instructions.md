@@ -2,53 +2,39 @@
 
 This repository contains the Kùzu embedded graph database. The Rust workspace lives in `kuzu-core/`; the C++ source is in `src/`.
 
-## Cargo commands — use MCP tools, never the terminal
+## Cargo & diagnostics — strategy
 
-When working in this Rust/Cargo project, ALWAYS use the `cargo-mcp` MCP tools
-instead of running `cargo` commands in a terminal. This applies even inside a
-larger workflow — do not switch to the terminal for cargo just because a
-previous step used the terminal.
+This project uses two sets of tools for Rust development:
 
-| MCP tool | Replaces |
+### Rust-analyzer MCP (primary — use whenever possible)
+
+| MCP tool | Purpose |
 |---|---|
-| `cargo_check` | `cargo check` |
-| `cargo_build` | `cargo build` |
-| `cargo_test` | `cargo test` |
-| `cargo_clippy` | `cargo clippy` |
-| `cargo_fmt_check` | `cargo fmt --check` |
-| `cargo_fmt` | `cargo fmt` |
-| `cargo_metadata` | `cargo metadata` |
-| `cargo_tree` | `cargo tree` |
-| `cargo_doc` | `cargo doc` |
-| `cargo_clean` | `cargo clean` |
-| `cargo_update` | `cargo update` |
-| `cargo_fix` | `cargo fix` |
-| `cargo_add` | `cargo add` |
-| `cargo_remove` | `cargo remove` |
-| `cargo_publish` | `cargo publish` |
-| `cargo_nextest_run` | `cargo nextest run` |
-| `cargo_nextest_list` | `cargo nextest list` |
+| `rust_analyzer_diagnostics` | Per-file errors, warnings, hints (instant, no compilation) |
+| `rust_analyzer_workspace_diagnostics` | All workspace diagnostics |
+| `rust_analyzer_format` | Format a Rust file |
+| `rust_analyzer_symbols` | Document symbols (functions, structs, etc.) |
+| `rust_analyzer_definition` | Go to definition |
+| `rust_analyzer_references` | Find all references |
+| `rust_analyzer_hover` | Type info and docs |
+| `rust_analyzer_code_actions` | Available code actions |
+| `rust_analyzer_completion` | Code completion suggestions |
+| `rust_analyzer_set_workspace` | Set workspace root to `kuzu-core/` |
 
-Always pass `working_dir` set to the absolute path of the workspace root
-(`kuzu-core/`). All boolean flags (`all_targets`, `release`, `workspace`,
-`lib`, `bins`, `tests`, `benches`, `examples`, `all_features`,
-`no_default_features`, `frozen`, `locked`, `offline`) expect JSON
-`true`/`false`.
+**Workflow after every edit:**
+1. `rust_analyzer_set_workspace` → `kuzu-core/`
+2. `rust_analyzer_diagnostics` on each edited file
+3. Fix any errors before moving on
 
-### cargo_test timeouts
+### Terminal (secondary — only when MCP lacks the capability)
 
-- `timeout_secs` — hard overall wall-clock cap for the entire test-execution phase.
-- `per_test_timeout_secs` — per-test budget (filter mode only).
+| Terminal command | When to use |
+|---|---|
+| `cargo check --workspace` | Cross-crate verification after multi-file changes |
+| `cargo build --workspace` | Release build verification |
+| `cargo test -p <crate>` | Run tests for a specific crate |
+| `cargo test --workspace` | Full test suite (use `timeout_secs`) |
+| `cargo clippy --workspace -- -D warnings` | Final gate before marking work complete |
+| `cargo fmt --all -- --check` | Format verification |
 
-### Redirecting output (`output_path`)
-
-`cargo_check`, `cargo_build`, `cargo_test`, `cargo_clippy`, and `cargo_doc`
-accept `output_path` to redirect the full NDJSON transcript to a file, keeping
-the tool result compact. Use for large runs; read the file for full details
-when errors are reported.
-
-### Environment variables (`env`)
-
-Every `cargo_*` tool accepts an optional `env` object for one-shot environment
-overrides. Use for debug knobs (`RUSTFLAGS`, `RUST_LOG`, `RUST_BACKTRACE`) —
-do not use for secrets or permanent config.
+Always `cd kuzu-core` before running terminal cargo commands.

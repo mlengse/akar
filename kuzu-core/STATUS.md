@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-07 (diperbarui dari 2026-07-05)
+> **Tanggal:** 2026-07-07 (diperbarui — P10 complete, P11 in progress)
 
 ---
 
@@ -14,13 +14,14 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **954 total, 0 failed** ✅ |
+| **Tests passing** | **~960 total, 0 failed** ✅ |
 | **Integration tests** | **61 passed, 0 failed** ✅ |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **21** (14 flat + 7 tree) — melebihi C++ |
 | **Join Order** | **DP Bushy Trees** (cost-based) ✅ |
-| **Functions** | **150+** registered (scalar + aggregate + table) |
+| **Functions** | **155+** registered (scalar + aggregate + table) |
 | **Logical operators** | **34** variants |
+| **BoundStatement variants** | **24** (ditambah BoundTransaction, BoundExtension, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
@@ -80,6 +81,10 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
 | Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |
 | Modularization Phase 3 | ❌ Monolith `connection.rs` (3.133 lines) | ✅ 8 modules: `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` + `connection_test.rs` | `[P-MOD3]` |
+| TRANSACTION via pipeline | ❌ String matching in query.rs | ✅ `Statement::Transaction` + `BoundTransaction` + parsed handler in ddl.rs | `[P10.2]` |
+| nullif / count_if | ❌ TIDAK ADA | ✅ `UtilityOp::NullIf` + `AggregateFunction::CountIf` + `AggValueState::CountIf` | `[P10.5]` |
+| size() utility function | ❌ TIDAK ADA | ✅ `UtilityOp::Size` — polymorphic length for lists/strings/maps | `[P11.1]` |
+| export_csv / export_parquet | ❌ TIDAK ADA | ✅ CALL wrappers around COPY TO infrastructure | `[P11.2]` |
 
 ---
 
@@ -240,16 +245,16 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Array** | array_cosine_similarity, array_distance, array_inner_product, array_cross_product, array_squared_distance | ✅ 5 ops |
 | **Path** | **nodes, rels/relationships** | ✅ 2 ops |
 | **UUID** | **gen_random_uuid** | ✅ 1 op |
-| **Utility** | coalesce, ifnull, typeof | ✅ 3 ops |
+| **Utility** | coalesce, ifnull, typeof, **nullif**, **size** | ✅ 5 ops |
 | **Sequence** | nextval, currval | ✅ 2 ops |
 | **CustomScalar** | Extension callbacks | ✅ |
 | **Array aliases** | array_concat/cat, array_append/push_back, array_prepend/push_front, array_contains/has, array_slice, array_value | ✅ 10 aliases |
 
 #### Aggregate Functions
-COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC, PERCENTILE_CONT — ✅ 11 ops
+COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC, PERCENTILE_CONT, **COUNT_IF** — ✅ 12 ops
 
 #### Table Functions
-12 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases) + 8 registry ops (list_tables, ScanCsv, ScanParquet, ScanJson, ShowColumns, CurrentSetting, Custom, CustomTable) — ✅ 20 ops
+14 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases, **export_csv**, **export_parquet**) + 8 registry ops — ✅ 22 ops
 
 **Paritas fungsional:** ~93% dari C++ (~15 fungsi C++ masih missing — lihat §8 Ladybug Gap Analysis)
 
@@ -476,18 +481,19 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 | # | Debt | Severity | File(s) | Rencana |
 |---|------|----------|---------|---------|
-| 1 | **Monolith `scalar.rs`** (4.578 lines) | 🔴 HIGH | `kuzu-function/src/scalar.rs` | P-MOD1: Split ke `scalar/*.rs` (20+ files) + `aggregate/*.rs` |
-| 2 | **Monolith `physical_operator.rs`** (3.794 lines) | 🔴 HIGH | `kuzu-processor/src/physical_operator.rs` | P-MOD2: Split ke `operators/*.rs` (P10.6) |
+| 1 | ~~**Monolith `scalar.rs`** (4.578 lines)~~ | ✅ DONE | ~~`kuzu-function/src/scalar.rs`~~ → `scalar/{18 files}` | P-MOD1: ✅ Complete |
+| 2 | ~~**Monolith `physical_operator.rs`** (3.794 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/physical_operator.rs`~~ → `physical/{6 files}` (4-line re-export stub) | P-MOD2A: ✅ Complete |
 | 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
-| 4 | **Monolith `processor.rs`** (2.702 lines) | 🔴 HIGH | `kuzu-processor/src/processor.rs` | P-MOD2: Split helpers dari pipeline |
-| 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{10 files},tree/{7 files}}` | P-MOD4: ✅ Complete (Phase 4) |
+| 4 | **Monolith `processor.rs`** (2.702 lines) | 🟡 DEFERRED | `kuzu-processor/src/processor.rs` | P-MOD2B: Helpers tightly coupled to QueryProcessor |
+| 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{11 files},tree/{8 files}}` | P-MOD4: ✅ Complete (Phase 4) |
 | 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
 | 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/mod.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
-| 8 | **TRANSACTION via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.2 — pindahkan ke pipeline parser→binder→planner→processor |
-| 9 | **STANDALONE_CALL via string matching** | 🔴 HIGH | `kuzu-main/src/connection/ddl.rs` | P10.3 — pindahkan ke pipeline proper |
+| 8 | ~~**TRANSACTION via string matching**~~ | ✅ DONE | ~~`kuzu-main/src/connection/query.rs`~~ → `Statement::Transaction` pipeline | P10.2 — ✅ Complete |
+| 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/ddl.rs` | P10.3 — Architectural cleanup; CALL already functional |
 | 10 | **Missing physical operators** | 🟡 MEDIUM | `kuzu-processor/` | P12 — Partitioner, IndexLookup, TopK, dll |
 | 11 | **Missing ATTACH/DETACH DATABASE** | 🟡 MEDIUM | Multi-crate | P11 — fitur multi-DB fundamental |
-| 12 | **README klaim TRANSACTION ✅ tapi P10.2 bilang belum** | 🟡 MEDIUM | `README.md` | P10.2 akan resolve |
+| 12 | ~~**nullif / count_if functions**~~ | ✅ DONE | `kuzu-function/src/` | P10.5 — ✅ Complete |
+| 13 | ~~**EXTENSION mgmt not parsed**~~ | ✅ DONE | `kuzu-parser/` + `kuzu-main/` | P10.4 — ✅ Complete |
 
 > 📋 **Rencana modularization lengkap:** `implementation_plan_modularization.md` — 6 phase, 7 file → ~90 files modular, 34 SP
 
@@ -560,20 +566,20 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | **GDS** | 15+ algorithms | 8 | 11 | 53% |
 | **Types** | 35+ types | 33 | 3 | 91% |
 
-### 8.2 Critical Gaps — Fundamental Missing Features
+### 8.2 Critical Gaps — Status Update (2026-07-07)
 
-| # | Feature | Priority |
-|---|---------|----------|
-| 1 | **COPY TO** (export data) | 🔴 P0 |
-| 2 | **TRANSACTION** statement (BEGIN/COMMIT/ROLLBACK as parsed) | 🔴 P0 |
-| 3 | **STANDALONE_CALL** (top-level CALL procedures) | 🔴 P0 |
-| 4 | **INSTALL/LOAD/UNINSTALL EXTENSION** | 🔴 P0 |
-| 5 | **ATTACH/DETACH/USE DATABASE** (multi-DB) | 🟡 P1 |
-| 6 | **CREATE TYPE** (custom types) | 🟡 P1 |
-| 7 | **COMMENT ON TABLE** | 🟡 P1 |
-| 8 | **LOAD FROM** (external scan) | 🟡 P1 |
-| 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 |
-| 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 |
+| # | Feature | Priority | Status |
+|---|---------|----------|--------|
+| 1 | **COPY TO** (export data) | 🔴 P0 | ✅ P10.1 |
+| 2 | **TRANSACTION** statement (parsed pipeline) | 🔴 P0 | ✅ P10.2 |
+| 3 | **STANDALONE_CALL** refactor | 🔴 P0 | 🟡 Deferred (CALL already functional) |
+| 4 | **INSTALL/LOAD/UNINSTALL EXTENSION** | 🔴 P0 | ✅ P10.4 (compile-time guidance) |
+| 5 | **ATTACH/DETACH/USE DATABASE** (multi-DB) | 🟡 P1 | ❌ P11 |
+| 6 | **CREATE TYPE** (custom types) | 🟡 P1 | ❌ P12 |
+| 7 | **COMMENT ON TABLE** | 🟡 P1 | ❌ P12 |
+| 8 | **LOAD FROM** (external scan) | 🟡 P1 | ❌ P11 |
+| 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 | ❌ P13 |
+| 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 | ❌ P13 |
 
 ### 8.3 Missing Physical Operators
 
@@ -591,19 +597,19 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | `PROFILE` | Query profiling | P2 |
 | `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 |
 
-### 8.4 Missing Functions
+### 8.4 Missing Functions — Status Update
 
-| Function | Type | Priority |
-|----------|------|----------|
-| `nullif` | Utility | P1 |
-| `count_if` | Aggregate | P1 |
-| `export_csv` / `export_parquet` | Export | P1 |
-| `list_transform/reduce/filter` | Lambda list | P2 |
-| `size` (generic) | Utility | P1 |
-| Path `properties`, `semantic` | Path | P2 |
-| Pattern `cost/id/label/rowid` | Pattern | P2 |
-| `error` | Utility | P3 |
-| Graph management: `show_graphs`, `project_*_graph`, etc. | Table | P2 |
+| Function | Type | Priority | Status |
+|----------|------|----------|--------|
+| `nullif` | Utility | P1 | ✅ P10.5 |
+| `count_if` | Aggregate | P1 | ✅ P10.5 |
+| `export_csv` / `export_parquet` | Export | P1 | ✅ P11.2 |
+| `size` (generic) | Utility | P1 | ✅ P11.1 |
+| `list_transform/reduce/filter` | Lambda list | P2 | ❌ P12 |
+| Path `properties`, `semantic` | Path | P2 | ❌ P12 |
+| Pattern `cost/id/label/rowid` | Pattern | P2 | ❌ P12 |
+| `error` | Utility | P3 | ❌ P14 |
+| Graph management: `show_graphs`, `project_*_graph` | Table | P2 | ❌ P13 |
 
 ### 8.5 Missing Storage Features
 
@@ -662,18 +668,17 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | **Code quality** | Clippy `-D warnings` clean, `cargo-audit` clean |
 | **Tests** | 954 tests, 0 failures |
 
-### 8.10 Estimasi Fase Selanjutnya
+### 8.10 Fase Implementasi
 
-| Fase | Konten | Prioritas | Estimasi Story Points |
-|------|--------|-----------|----------------------|
-| **P10** | COPY TO + TRANSACTION + missing functions (nullif, count_if, export) | 🔴 P0 | 8 |
-| **P11** | ATTACH/DETACH/USE DATABASE + CREATE TYPE + LOAD FROM | 🟡 P1 | 13 |
-| **P12** | Physical operators: TOP_K, INDEX_LOOKUP, BATCH_INSERT, PACKED_EXTEND | 🟡 P1 | 13 |
-| **P13** | GDS expansion: Dijkstra, Louvain, K-Core, Recursive Joins | 🟢 P2 | 13 |
-| **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap | 🟢 P2 | 8 |
-| **P15** | CREATE/USE GRAPH, projected graph functions | 🟢 P2 | 8 |
-| **P16** | Types: JSON, UINT128 | 🟢 P3 | 5 |
-| **Total** | | | **68** |
+| Fase | Konten | Prioritas | SP | Status |
+|------|--------|-----------|-----|--------|
+| **P10** | COPY TO + TRANSACTION + EXTENSION + nullif/count_if | 🔴 P0 | 20 | ✅ COMPLETE |
+| **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | 🔄 In Progress |
+| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ❌ |
+| **P13** | GDS expansion: Dijkstra, Louvain, K-Core, CREATE GRAPH | 🟢 P2 | 13 | ❌ |
+| **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap, error() | 🟢 P2 | 8 | ❌ |
+| **P15** | Types: JSON, UINT128, DTime, Value::Union | 🟢 P3 | 5 | ❌ |
+| **Total** | | | **72** | |
 
 ---
 
@@ -681,13 +686,12 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 
 ### 9.1 Ringkasan Audit
 
-Audit dilakukan dengan membandingkan struktur direktori Rust (`kuzu-core/`) vs C++ Ladybug (`ladybug/src/`). Temuan utama:
-
-| Area | Temuan | Dampak |
+| Area | Temuan | Status |
 |------|--------|--------|
-| **Processor operators** | 28 operator types dalam 1 file (`physical_operator.rs`, ~2500+ LOC) vs C++: 32 file `.cpp` + 50 file mapper | Maintainability risk, menyulitkan kontributor baru |
-| **Planner mapper** | Logic mapping logical→physical operator tersebar di planner/processor | Tidak ada separation of concerns yang jelas |
-| **Plan mapper** | C++ punya 50 file `map_*.cpp` di `processor/map/`, Rust tidak ada | Physical plan construction logic bercampur dengan execution |
+| **Processor operators** | 28 operator types previously in 1 file → ✅ refactored to `physical/{6 files}` (4-line re-export stub) | ✅ P-MOD2A |
+| **Planner mapper** | Logic mapping logical→physical operator tersebar di planner/processor | 🟡 Deferred |
+| **Plan mapper** | C++ punya 50 file `map_*.cpp` di `processor/map/`, Rust tidak ada | 🟡 Deferred |
+| **Processor pipeline** | `processor.rs` masih 2.702 lines single file | 🟡 Deferred (P-MOD2B) |
 
 ### 9.2 Rencana Refactor: Processor Operators
 

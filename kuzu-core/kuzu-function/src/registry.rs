@@ -308,6 +308,10 @@ pub enum UtilityOp {
     Coalesce,
     IfNull,
     TypeOf,
+    /// NULLIF(expr, value) — return NULL if expr == value, else expr.
+    NullIf,
+    /// SIZE(expr) — polymorphic length/cardinality for lists, strings, arrays, maps.
+    Size,
 }
 
 /// Schema functions — access metadata about nodes, relationships, and values.
@@ -439,6 +443,8 @@ pub enum AggregateFunction {
     PercentileCont {
         percentile: f64,
     },
+    /// COUNT_IF(condition) — count rows where condition is TRUE.
+    CountIf,
 }
 
 // ==================== Table Function Types ====================
@@ -1060,6 +1066,8 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("ifnull", ScalarFunction::Utility { op: UtilityOp::IfNull });
+        self.register_scalar("nullif", ScalarFunction::Utility { op: UtilityOp::NullIf });
+        self.register_scalar("size", ScalarFunction::Utility { op: UtilityOp::Size });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
 
         // --- Schema ---
@@ -1124,6 +1132,7 @@ impl FunctionRegistry {
         // --- Aggregate ---
         self.register_aggregate("COUNT", AggregateFunction::Count);
         self.register_aggregate("COUNT(*)", AggregateFunction::CountStar);
+        self.register_aggregate("COUNT_IF", AggregateFunction::CountIf);
         self.register_aggregate("SUM", AggregateFunction::Sum);
         self.register_aggregate("AVG", AggregateFunction::Avg);
         self.register_aggregate("MIN", AggregateFunction::Min);

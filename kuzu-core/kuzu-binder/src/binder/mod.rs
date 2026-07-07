@@ -91,6 +91,8 @@ impl Binder {
             Statement::ImportDatabase(i) => self.bind_import_database(i),
             Statement::Analyze(a) => self.bind_analyze(a),
             Statement::CreateFtsIndex(f) => self.bind_create_fts_index(f),
+            Statement::Transaction(t) => self.bind_transaction(t),
+            Statement::Extension(e) => self.bind_extension(e),
         }
     }
 
@@ -1316,6 +1318,21 @@ impl Binder {
         Ok(BoundStatement::BoundAnalyze(BoundAnalyze {
             table_name: a.table_name,
             table_ids,
+        }))
+    }
+
+    /// Bind TRANSACTION statement — trivial (no catalog resolution needed).
+    fn bind_transaction(&self, t: TransactionStatement) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundTransaction(BoundTransaction {
+            action: t.action,
+        }))
+    }
+
+    /// Bind EXTENSION statement — trivial (validated at execution time).
+    fn bind_extension(&self, e: ExtensionStatement) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundExtension(BoundExtension {
+            action: e.action,
+            name: e.name,
         }))
     }
 

@@ -2,7 +2,7 @@
 
 use kuzu_catalog::IndexType;
 use kuzu_common::types::LogicalTypeID;
-use kuzu_parser::ast::Expression;
+use kuzu_parser::ast::{Expression, ExtensionAction, TransactionAction};
 use std::collections::HashMap;
 
 /// A bound statement after semantic analysis.
@@ -30,6 +30,21 @@ pub enum BoundStatement {
     BoundImportDatabase(BoundImportDatabase),
     BoundCreateFtsIndex(BoundCreateFtsIndex),
     BoundAnalyze(BoundAnalyze),
+    BoundTransaction(BoundTransaction),
+    BoundExtension(BoundExtension),
+}
+
+/// Bound TRANSACTION statement.
+#[derive(Debug, Clone)]
+pub struct BoundTransaction {
+    pub action: TransactionAction,
+}
+
+/// Bound EXTENSION management statement.
+#[derive(Debug, Clone)]
+pub struct BoundExtension {
+    pub action: ExtensionAction,
+    pub name: String,
 }
 
 /// Bound ANALYZE statement.

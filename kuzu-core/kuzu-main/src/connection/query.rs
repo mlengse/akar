@@ -21,71 +21,6 @@ impl Connection {
             return Ok(QueryResult::new(Vec::new()));
         }
 
-        // Handle BEGIN TRANSACTION / COMMIT / ROLLBACK explicitly
-        let upper = trimmed.to_uppercase();
-        if upper == "BEGIN" || upper == "BEGIN TRANSACTION" || upper == "BEGIN WORK" {
-            let txn = self.begin_write_txn()?;
-            return Ok(QueryResult::success_message(format!(
-                "Transaction started (txn#{})",
-                txn.transaction_id
-            )));
-        }
-        if upper == "COMMIT" || upper == "COMMIT TRANSACTION" || upper == "COMMIT WORK" {
-            // Find the active write txn — in this simplified model, we look for
-            // the most recently started write transaction.
-            let tm = &self.database.transaction_manager;
-            // We need to know which txn to commit. For now, find it from resources.
-            let txn_ids: Vec<u64> = self
-                .txn_resources
-                .lock()
-                .map_err(|e| format!("Lock: {e}"))?
-                .keys()
-                .copied()
-                .collect();
-            if txn_ids.is_empty() {
-                return Err("No active transaction to commit".into());
-            }
-            // Get the first active write transaction from TM
-            if let Ok(mut active) = tm.active_snapshot() {
-                for txn_id in &txn_ids {
-                    if let Some(txn) = active.remove(txn_id) {
-                        let mut t = txn;
-                        self.commit_write_txn(&mut t)?;
-                        return Ok(QueryResult::success_message("Transaction committed".into()));
-                    }
-                }
-            }
-            return Err("No active transaction to commit".into());
-        }
-        if upper == "ROLLBACK" || upper == "ROLLBACK TRANSACTION" || upper == "ROLLBACK WORK" {
-            let txn_ids: Vec<u64> = self
-                .txn_resources
-                .lock()
-                .map_err(|e| format!("Lock: {e}"))?
-                .keys()
-                .copied()
-                .collect();
-            if txn_ids.is_empty() {
-                return Err("No active transaction to rollback".into());
-            }
-            let tm = &self.database.transaction_manager;
-            if let Ok(mut active) = tm.active_snapshot() {
-                for txn_id in &txn_ids {
-                    if let Some(mut txn) = active.remove(txn_id) {
-                        self.rollback_write_txn(&mut txn);
-                        return Ok(QueryResult::success_message("Transaction rolled back".into()));
-                    }
-                }
-            }
-            return Err("No active transaction to rollback".into());
-        }
-
-        // Handle CHECKPOINT explicitly
-        if upper == "CHECKPOINT" {
-            self.do_sync_checkpoint()?;
-            return Ok(QueryResult::success_message("Checkpoint completed".into()));
-        }
-
         // Handle SET spill_threshold
         if let Some(value) = trimmed
             .strip_prefix("SET")
@@ -396,7 +331,7 @@ impl Connection {
     }
 
     /// Wait for checkpoint to finish (for CHECKPOINT command).
-    fn do_sync_checkpoint(&self) -> Result<(), String> {
+    pub(crate) fn do_sync_checkpoint(&self) -> Result<(), String> {
         self.database
             .storage_manager
             .checkpoint_with_drain()

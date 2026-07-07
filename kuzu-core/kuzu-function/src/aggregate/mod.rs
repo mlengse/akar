@@ -31,6 +31,8 @@ pub enum AggValueState {
         values: Vec<f64>,
         percentile: f64,
     },
+    /// COUNT_IF state — counts rows where the condition evaluated to TRUE.
+    CountIf(u64),
 }
 
 impl AggValueState {
@@ -64,6 +66,7 @@ impl AggValueState {
                 values: Vec::new(),
                 percentile: *percentile,
             },
+            AggregateFunction::CountIf => AggValueState::CountIf(0),
         }
     }
 
@@ -124,6 +127,13 @@ impl AggValueState {
                     values.push(v);
                 }
             }
+            AggValueState::CountIf(n) => {
+                // Only count if the condition value is TRUE (non-null and Bool(true))
+                if matches!(val, Value::Bool(true)) {
+                    *n += 1;
+                }
+                // NULL and false are ignored (not counted)
+            }
         }
     }
 
@@ -131,6 +141,7 @@ impl AggValueState {
     pub fn finalize(&self) -> Value {
         match self {
             AggValueState::Count(n) => Value::Int64(*n as i64),
+            AggValueState::CountIf(n) => Value::Int64(*n as i64),
             AggValueState::Sum(v) => v.clone(),
             AggValueState::Min(v) => v.clone(),
             AggValueState::Max(v) => v.clone(),
@@ -257,6 +268,7 @@ impl AggValueState {
             (AggValueState::Percentile { values: a, .. }, AggValueState::Percentile { values: b, .. }) => {
                 a.extend(b.iter().cloned());
             }
+            (AggValueState::CountIf(a), AggValueState::CountIf(b)) => *a += b,
             _ => { /* type mismatch — should not happen in practice */ }
         }
     }

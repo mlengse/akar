@@ -17,6 +17,100 @@ impl Connection {
                 // EXPLAIN is handled by the query processor pipeline
                 Ok(None)
             }
+            BoundStatement::BoundTransaction(t) => {
+                match t.action {
+                    kuzu_parser::ast::TransactionAction::Begin => {
+                        let txn = self.begin_write_txn()?;
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Transaction started (txn#{})",
+                            txn.transaction_id
+                        ))))
+                    }
+                    kuzu_parser::ast::TransactionAction::Commit => {
+                        let txn_ids: Vec<u64> = self
+                            .txn_resources
+                            .lock()
+                            .map_err(|e| format!("Lock: {e}"))?
+                            .keys()
+                            .copied()
+                            .collect();
+                        if txn_ids.is_empty() {
+                            return Err("No active transaction to commit".into());
+                        }
+                        let tm = &self.database.transaction_manager;
+                        if let Ok(mut active) = tm.active_snapshot() {
+                            for txn_id in &txn_ids {
+                                if let Some(txn) = active.remove(txn_id) {
+                                    let mut t = txn;
+                                    self.commit_write_txn(&mut t)?;
+                                    return Ok(Some(QueryResult::success_message(
+                                        "Transaction committed".into(),
+                                    )));
+                                }
+                            }
+                        }
+                        Err("No active transaction to commit".into())
+                    }
+                    kuzu_parser::ast::TransactionAction::Rollback => {
+                        let txn_ids: Vec<u64> = self
+                            .txn_resources
+                            .lock()
+                            .map_err(|e| format!("Lock: {e}"))?
+                            .keys()
+                            .copied()
+                            .collect();
+                        if txn_ids.is_empty() {
+                            return Err("No active transaction to rollback".into());
+                        }
+                        let tm = &self.database.transaction_manager;
+                        if let Ok(mut active) = tm.active_snapshot() {
+                            for txn_id in &txn_ids {
+                                if let Some(mut txn) = active.remove(txn_id) {
+                                    self.rollback_write_txn(&mut txn);
+                                    return Ok(Some(QueryResult::success_message(
+                                        "Transaction rolled back".into(),
+                                    )));
+                                }
+                            }
+                        }
+                        Err("No active transaction to rollback".into())
+                    }
+                    kuzu_parser::ast::TransactionAction::Checkpoint => {
+                        self.do_sync_checkpoint()?;
+                        Ok(Some(QueryResult::success_message(
+                            "Checkpoint completed".into(),
+                        )))
+                    }
+                }
+            }
+            BoundStatement::BoundExtension(e) => {
+                let msg = match e.action {
+                    kuzu_parser::ast::ExtensionAction::Load => {
+                        format!(
+                            "Extension '{}': Extensions are compile-time features in Kuzu Rust. \
+                             Rebuild with --features {}-extension to enable.",
+                            e.name,
+                            e.name.to_lowercase()
+                        )
+                    }
+                    kuzu_parser::ast::ExtensionAction::Install => {
+                        format!(
+                            "INSTALL EXTENSION '{}' is not yet supported in Kuzu Rust. \
+                             Extensions are compile-time features; rebuild with --features {}-extension.",
+                            e.name,
+                            e.name.to_lowercase()
+                        )
+                    }
+                    kuzu_parser::ast::ExtensionAction::Uninstall => {
+                        format!(
+                            "UNINSTALL EXTENSION '{}': Extensions are compile-time features in Kuzu Rust. \
+                             Rebuild without the feature flag to disable.",
+                            e.name
+                        )
+                    }
+                };
+                Ok(Some(QueryResult::success_message(msg)))
+            }
             BoundStatement::BoundCopyTo(c) => {
                 // Execute the inner query
                 let inner_bound = BoundStatement::BoundQuery(c.query.clone());
@@ -736,6 +830,19 @@ impl Connection {
                     "show_warnings" => {
                         // No warning infrastructure yet — return empty
                         Ok(vec![])
+                    }
+                    // ── Export functions ──
+                    "export_csv" => {
+                        let path = extract_arg_string(&c.args, 0)?;
+                        let query_str = extract_arg_string(&c.args, 1)?;
+                        self.export_to_csv(&path, &query_str)?;
+                        Ok(vec![vec![Value::String(format!("Exported to '{path}'"))]])
+                    }
+                    "export_parquet" => {
+                        let path = extract_arg_string(&c.args, 0)?;
+                        let query_str = extract_arg_string(&c.args, 1)?;
+                        self.export_to_parquet(&path, &query_str)?;
+                        Ok(vec![vec![Value::String(format!("Exported to '{path}'"))]])
                     }
                     _ => {
                         // Evaluate AST arguments to Values
