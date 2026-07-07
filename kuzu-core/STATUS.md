@@ -192,7 +192,11 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | PhysicalTopK | ✅ P12.1 (BinaryHeap O(n log k), DirectedSortKey) |
 | PhysicalLimit | ✅ |
 | PhysicalAggregate (Value-based) | ✅ (with AggregateHashTable parallel aggregation) |
+| PhysicalAccumulate (materialize) | ✅ P16.1 (contiguous chunk) |
 | PhysicalUnion | ✅ |
+| PhysicalResultCollector | ✅ P16.1 (merge chunks) |
+| PhysicalProfile | ✅ P16.1 (Cell<Duration>) |
+| PhysicalDummySink / PhysicalDummySimpleSink | ✅ (no-op) |
 | PhysicalFlatten | ✅ |
 | PhysicalIntersect (execute_binary) | ✅ |
 | PhysicalSemiJoin (execute_binary) | ✅ |
@@ -205,7 +209,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | + DDL operators | ✅ |
 
 **Paritas esensial:** ~90% (semua operator inti query engine ter-port).
-**Paritas total:** ~51% (33 vs 65+ physical operators C++ — lihat §8 untuk gap analysis).
+**Paritas total:** ~55% (36 vs 65+ physical operators C++ — lihat §8 untuk gap analysis).
 > ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (~6 files). ✅ Sudah direfactor (Phase 2).
 
 ### 1.6 Storage Engine
@@ -594,21 +598,23 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 | ✅ P13.3 |
 | 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 | ✅ P13.4 |
 
-### 8.3 Missing Physical Operators (Updated — P15 stubs added)
+### 8.3 Missing Physical Operators (Updated — P16.1 done)
 
 | Operator | Purpose | Priority | Status |
 |----------|---------|----------|--------|
 | `TOP_K` / `TOP_K_SCAN` | Fused top-k (ORDER BY + LIMIT) | ✅ P12.1 | ✅ Done |
 | `INDEX_LOOKUP` | Point index lookup | ✅ P12.2 | ✅ Done |
 | `BATCH_INSERT` | Dedicated batch insert operator | ✅ P12.3 | ✅ Done |
+| `ACCUMULATE` | Materialize input for random access | ✅ P16.1 | ✅ Done (contiguous chunk) |
+| `UNION` | Concatenate + dedup | ✅ P16.1 | ✅ Done (real impl) |
+| `RESULT_COLLECTOR` | Consolidate output chunks | ✅ P16.1 | ✅ Done (merge chunks) |
+| `PROFILE` | Timing wrapper | ✅ P16.1 | ✅ Done (Cell<Duration>) |
 | `PACKED_EXTEND` | Optimized multi-rel extend | P2 | 🟡 Stub (pass-through) |
 | `PARTITIONER` | Morsel-driven parallelism | P2 | 🟡 Stub (pass-through) |
 | `PATH_PROPERTY_PROBE` | Path property resolution | P2 | 🟡 Stub (pass-through) |
 | `PRIMARY_KEY_SCAN` | PK-based scan | P2 | 🟡 Stub (pass-through) |
 | `AGGREGATE_FINALIZE/SCAN` | Split aggregate | P2 | 🟡 Stub (pass-through) |
-| `RESULT_COLLECTOR` | Explicit result collector | P2 | 🟡 Stub (pass-through) |
-| `PROFILE` | Query profiling | P2 | 🟡 Stub (pass-through) |
-| `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 | 🟡 Stub (pass-through) |
+| `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 | ✅ Correct (no-op) |
 
 ### 8.4 Missing Functions — Status Update (2026-07-08)
 
@@ -703,7 +709,8 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL wiring, error(), STANDALONE_CALL | 🟢 P2 | 13 | ✅ COMPLETE |
 | **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union + 11 missing physical operators | 🟢 P3 | 8 | ✅ COMPLETE |
-| **Total** | | | **75** | |
+| **P16.1** | Real physical operator implementations (Accumulate, Union, ResultCollector, Profile) | 🟡 P2 | 5 | ✅ DONE |
+| **Total** | | | **80** | |
 
 ---
 

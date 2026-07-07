@@ -65,6 +65,7 @@ impl PhysicalOperatorExec for PhysicalUnion {
 ///
 /// This is the final operator in the query pipeline. It consolidates
 /// all chunks into a single `Vec<DataChunk>` ready for client return.
+/// If there are multiple input chunks, they are merged into one.
 pub struct ResultCollector;
 
 impl PhysicalOperatorExec for ResultCollector {
@@ -73,7 +74,35 @@ impl PhysicalOperatorExec for ResultCollector {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
+        if input.is_empty() {
+            return Ok(input);
+        }
+        if input.len() == 1 {
+            return Ok(input);
+        }
+
+        // Merge multiple chunks into one
+        let num_fields = input[0].num_fields();
+        let merged_fields: Vec<ValueVector> = (0..num_fields)
+            .map(|i| {
+                let first_type = input[0].field(i).physical_type();
+                let total_size: usize = input.iter().map(|c| c.field(i).size()).sum();
+                let mut merged = ValueVector::new(first_type, total_size.max(1));
+                for chunk in &input {
+                    merged.append(chunk.field(i));
+                }
+                merged
+            })
+            .collect();
+
+        let size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+        let field_names = input[0].field_names.clone();
+
+        Ok(vec![DataChunk {
+            fields: merged_fields,
+            size,
+            field_names,
+        }])
     }
 }
 
@@ -111,10 +140,24 @@ impl PhysicalOperatorExec for DummySimpleSink {
 /// Profile — wraps an operator with timing instrumentation.
 ///
 /// Measures wall-clock execution time of the wrapped operator.
-/// Currently passes through; full implementation would expose timing
-/// via profiling output compatible with EXPLAIN ANALYZE.
+/// The elapsed time is stored in `elapsed` field for later inspection
+/// via EXPLAIN ANALYZE or profiling output.
 pub struct Profile {
     pub inner: Box<dyn PhysicalOperatorExec + Send>,
+    pub elapsed: std::cell::Cell<std::time::Duration>,
+}
+
+impl Profile {
+    pub fn new(inner: Box<dyn PhysicalOperatorExec + Send>) -> Self {
+        Self {
+            inner,
+            elapsed: std::cell::Cell::new(std::time::Duration::ZERO),
+        }
+    }
+
+    pub fn elapsed_ns(&self) -> u64 {
+        self.elapsed.get().as_nanos() as u64
+    }
 }
 
 impl PhysicalOperatorExec for Profile {
@@ -123,9 +166,10 @@ impl PhysicalOperatorExec for Profile {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let _start = std::time::Instant::now();
+        let start = std::time::Instant::now();
         let result = self.inner.execute(input);
-        let _elapsed = _start.elapsed();
+        let elapsed = start.elapsed();
+        self.elapsed.set(elapsed);
         result
     }
 }
