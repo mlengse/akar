@@ -173,6 +173,9 @@ fn collect_params_from_expr(expr: &Expression, params: &mut Vec<String>) {
             collect_params_from_expr(list, params);
             collect_params_from_expr(predicate, params);
         }
+        Expression::Lambda { body, .. } => {
+            collect_params_from_expr(body, params);
+        }
     }
 }
 
@@ -261,6 +264,13 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
                 list: Box::new(new_list),
                 var_name: var_name.clone(),
                 predicate: Box::new(new_predicate),
+            })
+        }
+        Expression::Lambda { var_name, body } => {
+            let new_body = substitute_params(body, param_values)?;
+            Ok(Expression::Lambda {
+                var_name: var_name.clone(),
+                body: Box::new(new_body),
             })
         }
     }
