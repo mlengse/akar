@@ -309,13 +309,24 @@ mod tests {
 
     #[test]
     fn test_parse_simple_header() {
-        let data = b"\x93NUMPY\x01\x00\x1e\x00{'descr': '<f8', 'fortran_order': False, 'shape': (3,)}\n          ";
-        let mut buf = data.to_vec();
-        buf.resize(10 + 30 + 3 * 8, 0);
-        // Write some float values
-        buf[10 + 30..10 + 30 + 8].copy_from_slice(&1.0f64.to_le_bytes());
-        buf[10 + 30 + 8..10 + 30 + 16].copy_from_slice(&2.0f64.to_le_bytes());
-        buf[10 + 30 + 16..10 + 30 + 24].copy_from_slice(&3.0f64.to_le_bytes());
+        let header_str = "{'descr': '<f8', 'fortran_order': False, 'shape': (3,), }";
+        let mut header_bytes = header_str.as_bytes().to_vec();
+        while (10 + header_bytes.len()) % 16 != 0 {
+            header_bytes.push(b' ');
+        }
+        header_bytes.push(b'\n');
+        let header_len = header_bytes.len() as u16;
+        let data_offset: usize = 10 + header_len as usize;
+
+        let mut buf = vec![];
+        buf.extend_from_slice(b"\x93NUMPY\x01\x00");
+        buf.extend_from_slice(&header_len.to_le_bytes());
+        buf.extend_from_slice(&header_bytes);
+        // Pad to data_offset + data
+        buf.resize(data_offset + 3 * 8, 0);
+        buf[data_offset..data_offset + 8].copy_from_slice(&1.0f64.to_le_bytes());
+        buf[data_offset + 8..data_offset + 16].copy_from_slice(&2.0f64.to_le_bytes());
+        buf[data_offset + 16..data_offset + 24].copy_from_slice(&3.0f64.to_le_bytes());
 
         let header = parse_header(&buf).unwrap();
         assert_eq!(header.shape, vec![3]);
@@ -330,11 +341,22 @@ mod tests {
 
     #[test]
     fn test_npy_int32() {
-        let data = b"\x93NUMPY\x01\x00\x1e\x00{'descr': '<i4', 'fortran_order': False, 'shape': (2,)}\n          ";
-        let mut buf = data.to_vec();
-        buf.resize(10 + 30 + 2 * 4, 0);
-        buf[10 + 30..10 + 30 + 4].copy_from_slice(&42i32.to_le_bytes());
-        buf[10 + 30 + 4..10 + 30 + 8].copy_from_slice(&(-7i32).to_le_bytes());
+        let header_str = "{'descr': '<i4', 'fortran_order': False, 'shape': (2,), }";
+        let mut header_bytes = header_str.as_bytes().to_vec();
+        while (10 + header_bytes.len()) % 16 != 0 {
+            header_bytes.push(b' ');
+        }
+        header_bytes.push(b'\n');
+        let header_len = header_bytes.len() as u16;
+        let data_offset: usize = 10 + header_len as usize;
+
+        let mut buf = vec![];
+        buf.extend_from_slice(b"\x93NUMPY\x01\x00");
+        buf.extend_from_slice(&header_len.to_le_bytes());
+        buf.extend_from_slice(&header_bytes);
+        buf.resize(data_offset + 2 * 4, 0);
+        buf[data_offset..data_offset + 4].copy_from_slice(&42i32.to_le_bytes());
+        buf[data_offset + 4..data_offset + 8].copy_from_slice(&(-7i32).to_le_bytes());
 
         let header = parse_header(&buf).unwrap();
         let vals = read_values(&buf[header.data_offset..], &header.dtype, 2).unwrap();
