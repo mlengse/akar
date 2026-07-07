@@ -718,7 +718,7 @@ impl ExpressionEvaluator {
         // list_reduce uses (acc, x) -> expr where acc is first var, x is second
         let acc_name = var_name.clone();
         let elem_name = match body.as_ref() {
-            Expression::BinaryOp(op, left, right) => {
+            Expression::BinaryOp(_op, left, right) => {
                 // Try to infer the element variable from the body pattern
                 // Most common: acc + x where x is a Variable
                 let left_var = if let Expression::Variable(v) = left.as_ref() { Some(v.clone()) } else { None };
