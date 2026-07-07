@@ -8,7 +8,7 @@ COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
 
 kuzu_query = { statement ~ EOI }
 
-statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement }
+statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement | multi_db_statement }
 
 export_database = { "EXPORT" ~ "DATABASE" ~ string ~ export_options? }
 export_options  = { "(" ~ export_option ~ ("," ~ export_option)* ~ ")" }
@@ -39,6 +39,27 @@ extension_statement = {
   | "LOAD" ~ "EXTENSION"? ~ identifier
   | "UNINSTALL" ~ "EXTENSION"? ~ identifier
 }
+
+// ==================== Multi-DB ====================
+
+multi_db_statement = {
+    attach_database
+  | detach_database
+  | use_database
+  | load_from
+}
+
+attach_database = { "ATTACH" ~ "DATABASE"? ~ string ~ "AS" ~ identifier ~ attach_options? }
+attach_options  = { "(" ~ attach_option ~ ("," ~ attach_option)* ~ ")" }
+attach_option   = { identifier ~ "=" ~ literal }
+
+detach_database = { "DETACH" ~ "DATABASE"? ~ identifier }
+
+use_database    = { "USE" ~ "DATABASE"? ~ identifier }
+
+load_from       = { "LOAD" ~ "FROM" ~ string ~ load_options? }
+load_options    = { "(" ~ load_option ~ ("," ~ load_option)* ~ ")" }
+load_option     = { identifier ~ "=" ~ literal }
 
 // ==================== DDL ====================
 

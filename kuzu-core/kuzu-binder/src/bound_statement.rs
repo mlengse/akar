@@ -32,6 +32,10 @@ pub enum BoundStatement {
     BoundAnalyze(BoundAnalyze),
     BoundTransaction(BoundTransaction),
     BoundExtension(BoundExtension),
+    BoundAttachDatabase(BoundAttachDatabase),
+    BoundDetachDatabase(BoundDetachDatabase),
+    BoundUseDatabase(BoundUseDatabase),
+    BoundLoadFrom(BoundLoadFrom),
 }
 
 /// Bound TRANSACTION statement.
@@ -45,6 +49,33 @@ pub struct BoundTransaction {
 pub struct BoundExtension {
     pub action: ExtensionAction,
     pub name: String,
+}
+
+/// Bound ATTACH DATABASE statement.
+#[derive(Debug, Clone)]
+pub struct BoundAttachDatabase {
+    pub path: String,
+    pub alias: String,
+    pub options: HashMap<String, String>,
+}
+
+/// Bound DETACH DATABASE statement.
+#[derive(Debug, Clone)]
+pub struct BoundDetachDatabase {
+    pub alias: String,
+}
+
+/// Bound USE DATABASE statement.
+#[derive(Debug, Clone)]
+pub struct BoundUseDatabase {
+    pub alias: String,
+}
+
+/// Bound LOAD FROM statement.
+#[derive(Debug, Clone)]
+pub struct BoundLoadFrom {
+    pub path: String,
+    pub options: HashMap<String, String>,
 }
 
 /// Bound ANALYZE statement.

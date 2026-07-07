@@ -803,5 +803,106 @@ pub(crate) fn parse_extension(pair: pest::iterators::Pair<Rule>) -> Result<State
     Ok(Statement::Extension(ExtensionStatement { action, name }))
 }
 
+// ==================== Multi-DB ====================
+
+pub(crate) fn parse_multi_db(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    match pair.as_rule() {
+        Rule::attach_database => parse_attach_database(pair),
+        Rule::detach_database => parse_detach_database(pair),
+        Rule::use_database => parse_use_database(pair),
+        Rule::load_from => parse_load_from(pair),
+        _ => Err(format!("Unexpected multi-DB rule: {:?}", pair.as_rule())),
+    }
+}
+
+fn parse_attach_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut path = String::new();
+    let mut alias = String::new();
+    let mut options = HashMap::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::string => path = unescape_string(inner.as_str()),
+            Rule::identifier => alias = inner.as_str().to_string(),
+            Rule::attach_options => {
+                for opt in inner.into_inner() {
+                    let mut key = String::new();
+                    let mut val = String::new();
+                    for part in opt.into_inner() {
+                        match part.as_rule() {
+                            Rule::identifier => key = part.as_str().to_string(),
+                            Rule::literal => val = parse_literal_value(part),
+                            _ => {}
+                        }
+                    }
+                    options.insert(key, val);
+                }
+            }
+            _ => {}
+        }
+    }
+    if path.is_empty() || alias.is_empty() {
+        return Err("ATTACH requires a path and an alias".into());
+    }
+    Ok(Statement::AttachDatabase(AttachDatabase { path, alias, options }))
+}
+
+fn parse_detach_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let alias = pair
+        .into_inner()
+        .find(|p| p.as_rule() == Rule::identifier)
+        .map(|p| p.as_str().to_string())
+        .ok_or("DETACH requires an alias")?;
+    Ok(Statement::DetachDatabase(DetachDatabase { alias }))
+}
+
+fn parse_use_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let alias = pair
+        .into_inner()
+        .find(|p| p.as_rule() == Rule::identifier)
+        .map(|p| p.as_str().to_string())
+        .ok_or("USE requires a database alias")?;
+    Ok(Statement::UseDatabase(UseDatabase { alias }))
+}
+
+fn parse_load_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut path = String::new();
+    let mut options = HashMap::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::string => path = unescape_string(inner.as_str()),
+            Rule::load_options => {
+                for opt in inner.into_inner() {
+                    let mut key = String::new();
+                    let mut val = String::new();
+                    for part in opt.into_inner() {
+                        match part.as_rule() {
+                            Rule::identifier => key = part.as_str().to_string(),
+                            Rule::literal => val = parse_literal_value(part),
+                            _ => {}
+                        }
+                    }
+                    options.insert(key, val);
+                }
+            }
+            _ => {}
+        }
+    }
+    if path.is_empty() {
+        return Err("LOAD FROM requires a file path".into());
+    }
+    Ok(Statement::LoadFrom(LoadFrom { path, options }))
+}
+
+fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> String {
+    let text = pair.as_str().to_string();
+    if let Some(inner) = pair.into_inner().next() {
+        match inner.as_rule() {
+            Rule::string => return unescape_string(inner.as_str()),
+            _ => return inner.as_str().to_string(),
+        }
+    }
+    text
+}
+
 
 

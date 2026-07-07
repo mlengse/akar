@@ -914,6 +914,32 @@ impl Catalog {
         self.entries.is_empty()
     }
 
+    /// Get the next available table ID.
+    pub fn next_table_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Add a foreign table entry (from ATTACH DATABASE).
+    pub fn add_foreign_entry(&mut self, entry: ForeignTableEntry) {
+        let name = entry.name.clone();
+        let id = entry.table_id;
+        self.name_to_id.insert(name, id);
+        self.entries.insert(id, CatalogEntry::Foreign(entry));
+        self.next_id += 1;
+    }
+
+    /// Remove a foreign table entry (from DETACH DATABASE).
+    pub fn remove_foreign_entry(&mut self, alias: &str) -> Result<(), String> {
+        let id = self.name_to_id.remove(alias)
+            .ok_or_else(|| format!("Attached database '{}' not found", alias))?;
+        if !matches!(self.entries.get(&id), Some(CatalogEntry::Foreign(_))) {
+            self.name_to_id.insert(alias.to_string(), id);
+            return Err(format!("'{}' is not an attached database", alias));
+        }
+        self.entries.remove(&id);
+        Ok(())
+    }
+
     /// Iterate over all catalog entries.
     pub fn all_entries(&self) -> impl Iterator<Item = &CatalogEntry> {
         self.entries.values()

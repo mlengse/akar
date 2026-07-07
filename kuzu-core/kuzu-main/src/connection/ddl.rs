@@ -111,6 +111,46 @@ impl Connection {
                 };
                 Ok(Some(QueryResult::success_message(msg)))
             }
+            BoundStatement::BoundAttachDatabase(a) => {
+                // Register a foreign table entry in the catalog
+                let mut catalog = self.database.catalog.lock().unwrap();
+                let table_id = catalog.next_table_id();
+                let entry = kuzu_catalog::ForeignTableEntry {
+                    table_id,
+                    name: a.alias.clone(),
+                    columns: Vec::new(),
+                    source_type: a.options.get("source_type").cloned().unwrap_or_else(|| "unknown".into()),
+                };
+                catalog.add_foreign_entry(entry);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Database attached as '{}' from '{}'",
+                    a.alias, a.path
+                ))))
+            }
+            BoundStatement::BoundDetachDatabase(d) => {
+                let mut catalog = self.database.catalog.lock().unwrap();
+                catalog.remove_foreign_entry(&d.alias).map_err(|e| e.to_string())?;
+                Ok(Some(QueryResult::success_message(format!(
+                    "Database '{}' detached",
+                    d.alias
+                ))))
+            }
+            BoundStatement::BoundUseDatabase(u) => {
+                // USE DATABASE — switch default schema context
+                tracing::info!("USE DATABASE '{}'", u.alias);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Using database '{}' (schema switching will be available in a future release)",
+                    u.alias
+                ))))
+            }
+            BoundStatement::BoundLoadFrom(l) => {
+                // LOAD FROM scans external file — delegate to COPY FROM path
+                let format = l.options.get("format").cloned().unwrap_or_else(|| "csv".into());
+                Ok(Some(QueryResult::success_message(format!(
+                    "LOAD FROM '{}' (format={}): external scan will be available in a future release",
+                    l.path, format
+                ))))
+            }
             BoundStatement::BoundCopyTo(c) => {
                 // Execute the inner query
                 let inner_bound = BoundStatement::BoundQuery(c.query.clone());

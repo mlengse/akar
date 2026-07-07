@@ -75,6 +75,10 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         Rule::analyze_statement => ddl::parse_analyze(inner),
         Rule::transaction_statement => ddl::parse_transaction(inner),
         Rule::extension_statement => ddl::parse_extension(inner),
+        Rule::multi_db_statement => {
+            let db_inner = inner.into_inner().next().ok_or("Empty multi-DB statement")?;
+            ddl::parse_multi_db(db_inner)
+        }
         _ => Err(format!("Unexpected rule: {:?}", inner.as_rule())),
     }
 }

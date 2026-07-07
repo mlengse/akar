@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-07 (diperbarui — P10 complete, P11 in progress)
+> **Tanggal:** 2026-07-07 (diperbarui — P10 ✅, P11 ✅, P12 in progress)
 
 ---
 
@@ -14,14 +14,14 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **~960 total, 0 failed** ✅ |
+| **Tests passing** | **~965 total, 0 failed** ✅ |
 | **Integration tests** | **61 passed, 0 failed** ✅ |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **21** (14 flat + 7 tree) — melebihi C++ |
 | **Join Order** | **DP Bushy Trees** (cost-based) ✅ |
 | **Functions** | **155+** registered (scalar + aggregate + table) |
 | **Logical operators** | **34** variants |
-| **BoundStatement variants** | **24** (ditambah BoundTransaction, BoundExtension, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
+| **BoundStatement variants** | **28** (termasuk BoundTransaction, BoundExtension, BoundAttachDatabase, BoundDetachDatabase, BoundUseDatabase, BoundLoadFrom, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
@@ -85,6 +85,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | nullif / count_if | ❌ TIDAK ADA | ✅ `UtilityOp::NullIf` + `AggregateFunction::CountIf` + `AggValueState::CountIf` | `[P10.5]` |
 | size() utility function | ❌ TIDAK ADA | ✅ `UtilityOp::Size` — polymorphic length for lists/strings/maps | `[P11.1]` |
 | export_csv / export_parquet | ❌ TIDAK ADA | ✅ CALL wrappers around COPY TO infrastructure | `[P11.2]` |
+| ATTACH/DETACH/USE DATABASE | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→catalog→handler | `[P11.3-5]` |
+| LOAD FROM | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→handler | `[P11.6]` |
 
 ---
 
@@ -93,7 +95,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 ### 1.1 Parser
 - **Engine:** `pest.rs` PEG (bukan ANTLR4 C++)
 - **Grammar:** `cypher.pest` — modular rules, composable
-- **AST:** 34+ Statement variants, semua ekspresi Cypher
+- **AST:** 38+ Statement variants (termasuk Transaction, Extension, AttachDatabase, DetachDatabase, UseDatabase, LoadFrom)
 - **DDL:** Full: CREATE/DROP TABLE, INDEX, SEQUENCE, VECTOR INDEX, COPY, ALTER, EXPORT/IMPORT DB, ANALYZE
 - **DML:** Full: MATCH, RETURN, WHERE, CREATE, DELETE, SET, MERGE, UNWIND, FOREACH, OPTIONAL MATCH, WITH
 - **Expressions:** Full: semua operator, function calls, CASE, list/map/struct literals, subqueries, parameters, STAR
@@ -102,7 +104,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 ### 1.2 Binder
 - Symbol resolution via `Arc<Mutex<Catalog>>`
-- 18 BoundStatement variants (BoundQuery, BoundCreateNodeTable, BoundCreateRelTable, BoundDropTable, BoundAlterTable, BoundCreateSequence, BoundDropSequence, BoundCreateIndex, BoundDropIndex, BoundCreateVectorIndex, BoundExplain, BoundCopyFrom, BoundMerge, BoundDelete, BoundSet, BoundExportDatabase, BoundImportDatabase, BoundCreateDml)
+- 28 BoundStatement variants
 - **Paritas:** ~90%
 
 ### 1.3 Planner
@@ -491,7 +493,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | 8 | ~~**TRANSACTION via string matching**~~ | ✅ DONE | ~~`kuzu-main/src/connection/query.rs`~~ → `Statement::Transaction` pipeline | P10.2 — ✅ Complete |
 | 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/ddl.rs` | P10.3 — Architectural cleanup; CALL already functional |
 | 10 | **Missing physical operators** | 🟡 MEDIUM | `kuzu-processor/` | P12 — Partitioner, IndexLookup, TopK, dll |
-| 11 | **Missing ATTACH/DETACH DATABASE** | 🟡 MEDIUM | Multi-crate | P11 — fitur multi-DB fundamental |
+| 11 | ~~**Missing ATTACH/DETACH DATABASE**~~ | ✅ DONE | Multi-crate | P11 — ✅ Complete (P11.3-5) |
 | 12 | ~~**nullif / count_if functions**~~ | ✅ DONE | `kuzu-function/src/` | P10.5 — ✅ Complete |
 | 13 | ~~**EXTENSION mgmt not parsed**~~ | ✅ DONE | `kuzu-parser/` + `kuzu-main/` | P10.4 — ✅ Complete |
 
@@ -522,7 +524,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-main (delete_set) | 1 | ✅ Pass |
 | kuzu-main (fts) | 1 | ✅ Pass |
 | Extension crates | 88 | ✅ Pass |
-| **Total** | **~954** | **✅ All pass, 0 failed** |
+| **Total** | **~965** | **✅ All pass, 0 failed** |
 
 ---
 
@@ -542,7 +544,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-07: **954 test lulus, 0 gagal** di seluruh workspace. **P9 (Production Hardening) COMPLETE** — P9.1 (CI/CD) + P9.2 (Code Quality) + P9.3 (Benchmark Framework) + P9.4 (Documentation) + P9.5 (WASM) + P9.6 (Regex cache) selesai.
+- Per 2026-07-07: **~965 test lulus, 0 gagal**. **P9 ✅, P10 ✅, P11 ✅**. P12 in progress.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
 ---
@@ -574,10 +576,10 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | 2 | **TRANSACTION** statement (parsed pipeline) | 🔴 P0 | ✅ P10.2 |
 | 3 | **STANDALONE_CALL** refactor | 🔴 P0 | 🟡 Deferred (CALL already functional) |
 | 4 | **INSTALL/LOAD/UNINSTALL EXTENSION** | 🔴 P0 | ✅ P10.4 (compile-time guidance) |
-| 5 | **ATTACH/DETACH/USE DATABASE** (multi-DB) | 🟡 P1 | ❌ P11 |
+| 5 | **ATTACH/DETACH/USE DATABASE** (multi-DB) | 🟡 P1 | ✅ P11 |
 | 6 | **CREATE TYPE** (custom types) | 🟡 P1 | ❌ P12 |
 | 7 | **COMMENT ON TABLE** | 🟡 P1 | ❌ P12 |
-| 8 | **LOAD FROM** (external scan) | 🟡 P1 | ❌ P11 |
+| 8 | **LOAD FROM** (external scan) | 🟡 P1 | ✅ P11 |
 | 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 | ❌ P13 |
 | 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 | ❌ P13 |
 
@@ -673,8 +675,8 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | Fase | Konten | Prioritas | SP | Status |
 |------|--------|-----------|-----|--------|
 | **P10** | COPY TO + TRANSACTION + EXTENSION + nullif/count_if | 🔴 P0 | 20 | ✅ COMPLETE |
-| **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | 🔄 In Progress |
-| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ❌ |
+| **P11** | size(), export_csv/parquet, ATTACH/DETACH/USE, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
+| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | 🔄 In Progress |
 | **P13** | GDS expansion: Dijkstra, Louvain, K-Core, CREATE GRAPH | 🟢 P2 | 13 | ❌ |
 | **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap, error() | 🟢 P2 | 8 | ❌ |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union | 🟢 P3 | 5 | ❌ |

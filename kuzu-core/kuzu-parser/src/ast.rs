@@ -64,6 +64,33 @@ pub struct ExtensionStatement {
     pub name: String,
 }
 
+/// ATTACH DATABASE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttachDatabase {
+    pub path: String,
+    pub alias: String,
+    pub options: std::collections::HashMap<String, String>,
+}
+
+/// DETACH DATABASE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetachDatabase {
+    pub alias: String,
+}
+
+/// USE DATABASE statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDatabase {
+    pub alias: String,
+}
+
+/// LOAD FROM statement — scan external file without importing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadFrom {
+    pub path: String,
+    pub options: std::collections::HashMap<String, String>,
+}
+
 /// EXPLAIN statement wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainStatement {
@@ -100,6 +127,10 @@ pub enum Statement {
     CreateFtsIndex(CreateFtsIndex),
     Transaction(TransactionStatement),
     Extension(ExtensionStatement),
+    AttachDatabase(AttachDatabase),
+    DetachDatabase(DetachDatabase),
+    UseDatabase(UseDatabase),
+    LoadFrom(LoadFrom),
 }
 
 /// A Cypher query (e.g., MATCH ... RETURN ...).

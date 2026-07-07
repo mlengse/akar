@@ -93,6 +93,10 @@ impl Binder {
             Statement::CreateFtsIndex(f) => self.bind_create_fts_index(f),
             Statement::Transaction(t) => self.bind_transaction(t),
             Statement::Extension(e) => self.bind_extension(e),
+            Statement::AttachDatabase(a) => self.bind_attach_database(a),
+            Statement::DetachDatabase(d) => self.bind_detach_database(d),
+            Statement::UseDatabase(u) => self.bind_use_database(u),
+            Statement::LoadFrom(l) => self.bind_load_from(l),
         }
     }
 
@@ -1333,6 +1337,33 @@ impl Binder {
         Ok(BoundStatement::BoundExtension(BoundExtension {
             action: e.action,
             name: e.name,
+        }))
+    }
+
+    fn bind_attach_database(&self, a: AttachDatabase) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundAttachDatabase(BoundAttachDatabase {
+            path: a.path,
+            alias: a.alias,
+            options: a.options,
+        }))
+    }
+
+    fn bind_detach_database(&self, d: DetachDatabase) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundDetachDatabase(BoundDetachDatabase {
+            alias: d.alias,
+        }))
+    }
+
+    fn bind_use_database(&self, u: UseDatabase) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundUseDatabase(BoundUseDatabase {
+            alias: u.alias,
+        }))
+    }
+
+    fn bind_load_from(&self, l: LoadFrom) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundLoadFrom(BoundLoadFrom {
+            path: l.path,
+            options: l.options,
         }))
     }
 
