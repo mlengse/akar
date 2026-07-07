@@ -493,7 +493,8 @@ impl PhysicalFilter {
             | Expression::ExistsSubquery(_)
             | Expression::Case(_)
             | Expression::Star
-            | Expression::ListPredicate { .. } => Ok(vec![true; chunk.size]),
+            | Expression::ListPredicate { .. }
+            | Expression::Lambda { .. } => Ok(vec![true; chunk.size]),
         }
     }
 }
