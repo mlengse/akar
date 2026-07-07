@@ -119,6 +119,11 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
         Rule::create_fts_index => parse_create_fts_index(pair),
         Rule::export_database => parse_export_database(pair),
         Rule::import_database => parse_import_database(pair),
+        Rule::create_type => parse_create_type(pair),
+        Rule::comment_on_table => parse_comment_on_table(pair),
+        Rule::create_graph => parse_create_graph(pair),
+        Rule::use_graph => parse_use_graph(pair),
+        Rule::drop_graph => parse_drop_graph(pair),
         _ => Err(format!("Unknown DDL: {:?}", pair.as_rule())),
     }
 }
@@ -902,6 +907,68 @@ fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> String {
         }
     }
     text
+}
+
+fn parse_create_type(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    let mut type_name = String::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if name.is_empty() => name = inner.as_str().to_string(),
+            Rule::type_name if type_name.is_empty() => type_name = inner.as_str().to_string(),
+            _ => {}
+        }
+    }
+    if name.is_empty() { return Err("CREATE TYPE requires a name".into()); }
+    if type_name.is_empty() { return Err("CREATE TYPE requires a type".into()); }
+    Ok(Statement::CreateType(CreateType { name, type_name }))
+}
+
+fn parse_comment_on_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut table_name = String::new();
+    let mut comment = String::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier if table_name.is_empty() => table_name = inner.as_str().to_string(),
+            Rule::string => comment = unescape_string(inner.as_str()),
+            _ => {}
+        }
+    }
+    if table_name.is_empty() { return Err("COMMENT ON requires a table name".into()); }
+    Ok(Statement::CommentOnTable(CommentOnTable { table_name, comment }))
+}
+
+fn parse_create_graph(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    let mut is_any = false;
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::identifier => name = inner.as_str().to_string(),
+            _ => {
+                if inner.as_str().to_uppercase() == "ANY" { is_any = true; }
+            }
+        }
+    }
+    if name.is_empty() { return Err("CREATE GRAPH requires a name".into()); }
+    Ok(Statement::CreateGraph(CreateGraph { name, is_any }))
+}
+
+fn parse_use_graph(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::identifier { name = inner.as_str().to_string(); }
+    }
+    if name.is_empty() { return Err("USE GRAPH requires a name".into()); }
+    Ok(Statement::UseGraph(UseGraph { name }))
+}
+
+fn parse_drop_graph(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+    let mut name = String::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::identifier { name = inner.as_str().to_string(); }
+    }
+    if name.is_empty() { return Err("DROP GRAPH requires a name".into()); }
+    Ok(Statement::DropGraph(DropGraph { name }))
 }
 
 
