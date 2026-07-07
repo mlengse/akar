@@ -303,6 +303,12 @@ pub enum Expression {
         var_name: String,
         predicate: Box<Expression>,
     },
+    /// Lambda expression for list_transform, list_filter, list_reduce.
+    /// Example: x -> x + 1  or  (x, y) -> x + y
+    Lambda {
+        var_name: String,
+        body: Box<Expression>,
+    },
 }
 
 /// Quantifier for list predicates.

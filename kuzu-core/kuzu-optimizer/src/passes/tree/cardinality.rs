@@ -99,6 +99,9 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 }
                 LogicalOperator::Projection(p) => p.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::OrderBy(o) => o.children.first().map(|c| c.cardinality()).unwrap_or(1),
+                LogicalOperator::TopK(tk) => {
+                    std::cmp::min(tk.limit, tk.children.first().map(|c| c.cardinality()).unwrap_or(u64::MAX))
+                }
                 LogicalOperator::Limit(l) => {
                     // Cardinality is at most the limit value
                     std::cmp::min(l.limit, l.children.first().map(|c| c.cardinality()).unwrap_or(u64::MAX))
@@ -128,6 +131,8 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 }
                 LogicalOperator::VectorSimilarityScan(vs) => vs.top_k,
                 LogicalOperator::CopyFrom(_) => 10000, // batch insert
+                LogicalOperator::BatchInsert(bi) => bi.rows.len() as u64,
+                LogicalOperator::IndexLookup(_) => 1, // point lookup = at most 1 row
                 LogicalOperator::Delete(_) => 1000,    // estimated rows affected
                 LogicalOperator::Set(_) => 1000,       // estimated rows updated
                 LogicalOperator::OptionalMatch(om) => {

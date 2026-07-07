@@ -212,6 +212,18 @@ impl ExpressionEvaluator {
         args: &[Expression],
         chunk: &DataChunk,
     ) -> Result<ValueVector, String> {
+        // Handle lambda-based list functions at expression level.
+        // These cannot go through the normal scalar function pipeline because
+        // lambda expressions are not Values and must be evaluated per-element.
+        if let Some(lambda) = self.extract_lambda_arg(args) {
+            match name {
+                "list_transform" => return self.evaluate_list_transform(args, lambda, chunk),
+                "list_filter" => return self.evaluate_list_filter(args, lambda, chunk),
+                "list_reduce" => return self.evaluate_list_reduce(args, lambda, chunk),
+                _ => {}
+            }
+        }
+
         // Evaluate all argument expressions first
         let arg_vectors: Vec<ValueVector> = args
             .iter()

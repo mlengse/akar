@@ -61,6 +61,11 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::TopK(tk) => {
+            for child in &tk.children {
+                collect_scans_recursive(child, scans);
+            }
+        }
         LogicalOperator::Limit(l) => {
             for child in &l.children {
                 collect_scans_recursive(child, scans);
@@ -123,7 +128,9 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::ExportDatabase(_)
         | LogicalOperator::ImportDatabase(_)
         | LogicalOperator::CreateFtsIndex(_)
-        | LogicalOperator::FtsScan(_) => {
+        | LogicalOperator::FtsScan(_)
+        | LogicalOperator::BatchInsert(_)
+        | LogicalOperator::IndexLookup(_) => {
             // Leaf operator with no children — nothing to recurse into.
         }
     }

@@ -1,6 +1,6 @@
 // ========================================================================
 // Pass 4: Top-K Optimization
-// Detects ORDER BY + LIMIT patterns and marks them for Top-K execution.
+// Fuses ORDER BY + LIMIT into a single LogicalTopK for BinaryHeap execution.
 // ========================================================================
 
 use crate::passes::OptimizationPass;
@@ -17,41 +17,37 @@ impl OptimizationPass for TopKOptimization {
         let mut result = Vec::new();
         let mut i = 0;
         while i < operators.len() {
+            // Pattern: ORDER BY + LIMIT → TopK
             if i + 1 < operators.len() {
                 match (&operators[i], &operators[i + 1]) {
                     (LogicalOperator::OrderBy(order), LogicalOperator::Limit(limit)) => {
-                        result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                        result.push(LogicalOperator::TopK(LogicalTopK {
                             sort_keys: order.sort_keys.clone(),
-                            children: Vec::new(),
-                            cardinality: 0,
-                        }));
-                        result.push(LogicalOperator::Limit(LogicalLimit {
                             limit: limit.limit,
                             offset: limit.offset,
                             children: Vec::new(),
-                            cardinality: 0,
+                            cardinality: limit.limit,
                         }));
                         i += 2;
                         continue;
                     }
+                    // Pattern: ORDER BY + Projection + LIMIT → ORDER BY pushed through projection as TopK
                     (LogicalOperator::OrderBy(order), LogicalOperator::Projection(_))
-                        if i + 2 < operators.len() && matches!(&operators[i + 2], LogicalOperator::Limit(_)) =>
+                        if i + 2 < operators.len()
+                            && matches!(&operators[i + 2], LogicalOperator::Limit(_)) =>
                     {
                         let limit = match &operators[i + 2] {
                             LogicalOperator::Limit(l) => l.clone(),
                             _ => unreachable!(),
                         };
-                        result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                        // Keep the projection, push TopK after it
+                        result.push(operators[i + 1].clone()); // Projection
+                        result.push(LogicalOperator::TopK(LogicalTopK {
                             sort_keys: order.sort_keys.clone(),
-                            children: Vec::new(),
-                            cardinality: 0,
-                        }));
-                        result.push(operators[i + 1].clone());
-                        result.push(LogicalOperator::Limit(LogicalLimit {
                             limit: limit.limit,
                             offset: limit.offset,
                             children: Vec::new(),
-                            cardinality: 0,
+                            cardinality: limit.limit,
                         }));
                         i += 3;
                         continue;

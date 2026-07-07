@@ -78,11 +78,14 @@ pub enum LogicalOperator {
     CrossProduct(LogicalCrossProduct),
     OrderBy(LogicalOrderBy),
     Limit(LogicalLimit),
+    TopK(LogicalTopK),
     Aggregate(LogicalAggregate),
     Union(LogicalUnion),
     Flatten(LogicalFlatten),
     TableFunctionCall(LogicalTableFunctionCall),
     CopyFrom(LogicalCopyFrom),
+    BatchInsert(LogicalBatchInsert),
+    IndexLookup(LogicalIndexLookup),
     Delete(LogicalDelete),
     Set(LogicalSet),
     OptionalMatch(LogicalOptionalMatch),
@@ -131,12 +134,15 @@ impl LogicalOperator {
             LogicalOperator::HashJoin(s) => s.cardinality,
             LogicalOperator::CrossProduct(s) => s.cardinality,
             LogicalOperator::OrderBy(s) => s.cardinality,
+            LogicalOperator::TopK(s) => s.cardinality,
             LogicalOperator::Limit(s) => s.cardinality,
             LogicalOperator::Aggregate(s) => s.cardinality,
             LogicalOperator::Union(s) => s.cardinality,
             LogicalOperator::Flatten(s) => s.cardinality,
             LogicalOperator::TableFunctionCall(s) => s.cardinality,
             LogicalOperator::CopyFrom(s) => s.cardinality,
+            LogicalOperator::BatchInsert(s) => s.cardinality,
+            LogicalOperator::IndexLookup(s) => s.cardinality,
             LogicalOperator::Delete(s) => s.cardinality,
             LogicalOperator::Set(s) => s.cardinality,
             LogicalOperator::OptionalMatch(s) => s.cardinality,
@@ -185,12 +191,15 @@ impl LogicalOperator {
             LogicalOperator::HashJoin(s) => s.cardinality = card,
             LogicalOperator::CrossProduct(s) => s.cardinality = card,
             LogicalOperator::OrderBy(s) => s.cardinality = card,
+            LogicalOperator::TopK(s) => s.cardinality = card,
             LogicalOperator::Limit(s) => s.cardinality = card,
             LogicalOperator::Aggregate(s) => s.cardinality = card,
             LogicalOperator::Union(s) => s.cardinality = card,
             LogicalOperator::Flatten(s) => s.cardinality = card,
             LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
+            LogicalOperator::BatchInsert(s) => s.cardinality = card,
+            LogicalOperator::IndexLookup(s) => s.cardinality = card,
             LogicalOperator::Delete(s) => s.cardinality = card,
             LogicalOperator::Set(s) => s.cardinality = card,
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
@@ -244,6 +253,7 @@ impl LogicalOperator {
             LogicalOperator::HashJoin(s) => vec![&mut *s.probe_side, &mut *s.build_side],
             LogicalOperator::CrossProduct(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::OrderBy(s) => s.children.iter_mut().collect(),
+            LogicalOperator::TopK(s) => s.children.iter_mut().collect(),
             LogicalOperator::Limit(s) => s.children.iter_mut().collect(),
             LogicalOperator::Aggregate(s) => s.children.iter_mut().collect(),
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
@@ -260,6 +270,8 @@ impl LogicalOperator {
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
+            | LogicalOperator::BatchInsert(_)
+            | LogicalOperator::IndexLookup(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
@@ -298,6 +310,7 @@ impl LogicalOperator {
             LogicalOperator::HashJoin(s) => vec![&*s.probe_side, &*s.build_side],
             LogicalOperator::CrossProduct(s) => vec![&*s.left, &*s.right],
             LogicalOperator::OrderBy(s) => s.children.iter().collect(),
+            LogicalOperator::TopK(s) => s.children.iter().collect(),
             LogicalOperator::Limit(s) => s.children.iter().collect(),
             LogicalOperator::Aggregate(s) => s.children.iter().collect(),
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
@@ -314,6 +327,8 @@ impl LogicalOperator {
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
+            | LogicalOperator::BatchInsert(_)
+            | LogicalOperator::IndexLookup(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
@@ -454,6 +469,21 @@ pub struct LogicalCrossProduct {
 #[derive(Debug, Clone)]
 pub struct LogicalOrderBy {
     pub sort_keys: Vec<(Expression, bool)>, // (expression, ascending)
+    pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// A fused ORDER BY + LIMIT operator for Top-K optimization.
+///
+/// When the optimizer detects a consecutive ORDER BY followed by LIMIT,
+/// it fuses them into a single LogicalTopK. This signals the processor
+/// to use a BinaryHeap-based TopK execution (O(n log k)) instead of
+/// full sort + limit (O(n log n)).
+#[derive(Debug, Clone)]
+pub struct LogicalTopK {
+    pub sort_keys: Vec<(Expression, bool)>,
+    pub limit: u64,
+    pub offset: u64,
     pub children: Vec<LogicalOperator>,
     pub cardinality: u64,
 }
@@ -609,6 +639,29 @@ pub struct LogicalCopyFrom {
     pub table_id: u64,
     pub file_path: String,
     pub options: std::collections::HashMap<String, String>,
+    pub cardinality: u64,
+}
+
+/// Batch insert operator — inserts multiple rows/rels in a single operation.
+///
+/// Unlike `CopyFrom` which reads from a file, `BatchInsert` takes pre-collected
+/// data from the plan pipeline (e.g., multiple fused CREATE statements).
+/// Uses `NodeTable::insert_rows_batch()` / `RelTable::insert_rels_batch()`.
+#[derive(Debug, Clone)]
+pub struct LogicalBatchInsert {
+    pub table_name: String,
+    pub table_id: u64,
+    /// Rows to insert: each row is a Vec<Value> matching column order.
+    pub rows: Vec<Vec<kuzu_common::types::Value>>,
+    pub cardinality: u64,
+}
+
+/// Index lookup operator — point lookup via ART index on a PK column.
+#[derive(Debug, Clone)]
+pub struct LogicalIndexLookup {
+    pub table_name: String,
+    pub table_id: u64,
+    pub key_value: kuzu_common::types::Value,
     pub cardinality: u64,
 }
 

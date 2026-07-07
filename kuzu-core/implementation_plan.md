@@ -1,6 +1,7 @@
 # Kuzu Rust — Consolidated Implementation Plan
 
-> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 🔄 | P13-P15 ❌
+> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 🔄 (5/6) | P13-P14 ❌
+> **Audit:** `cargo test --workspace` → 952 passed, 0 failed | 50 logical ops, 31 physical ops
 > **Prerequisites:** P9 (Production Hardening) ✅, P10 (Critical C++ Parity) ✅
 
 ---
@@ -11,11 +12,11 @@
 |-------|---------|----------|-----|--------|
 | **P10** | COPY TO, TRANSACTION, EXTENSION, nullif, count_if | 🔴 P0 | 20 | ✅ COMPLETE |
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
-| **P12** | TOP_K, INDEX_LOOKUP, lambda list, path/pattern funcs | 🟡 P1 | 13 | ❌ |
-| **P13** | GDS expansion, CREATE GRAPH, GDS_CALL | 🟢 P2 | 13 | ❌ |
-| **P14** | Storage features, error() func, misc | 🟢 P2 | 8 | ❌ |
-| **P15** | Types: JSON, UINT128, DTime | 🟢 P3 | 5 | ❌ |
-| **Total** | | | **72** | |
+| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | 🔄 5/6 done |
+| **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL, error() | 🟢 P2 | 13 | ❌ |
+| **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap | 🟢 P2 | 8 | ❌ |
+| **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ❌ |
+| **Total** | | | **75** | |
 
 ---
 
@@ -65,90 +66,148 @@
 
 ---
 
-## P12 — Physical Operators & Lambda Functions
+## P12 — Physical Operators & Lambda Functions (5/6 Complete)
 
-### ❌ P12.1 — TOP_K physical operator
+### ✅ P12.1 — TOP_K physical operator (COMPLETE)
 
-- `[ ]` **Planner** — `LogicalOperator::TopK(LogicalTopK)`
-- `[ ]` **Optimizer** — Update `TopKOptimization` pass to fuse ORDER BY + LIMIT
-- `[ ]` **Processor** — `PhysicalTopK` with `BinaryHeap` (size k)
-- `[ ]` **Verify** — `cargo test -p kuzu-processor` (77 passing)
+- `[x]` **Planner** — `LogicalOperator::TopK(LogicalTopK)` with sort_keys, limit, offset
+- `[x]` **Optimizer** — `TopKOptimization` pass fuses OrderBy+Limit into single TopK
+- `[x]` **Processor** — `PhysicalTopK` with BinaryHeap (O(n log k) vs O(n log n) full sort)
+  - Uses `DirectedSortKey` encoding for mixed ASC/DESC multi-column sort
+  - `into_sorted_vec()` returns best-first order directly
+- `[x]` **Mapping** — `processor.rs` maps `LogicalOperator::TopK` → `PhysicalTopK`
+- `[x]` **Serialization** — `serialize_plan_tree` supports `TopK(limit=N, offset=M, K keys)`
+- `[x]` **Cardinality** — `std::cmp::min(tk.limit, child_card)`
+- `[x]` **Tests** — `test_top_k_detection` + `test_top_k_with_projection`
+- `[x]` **Verify** — `cargo check` clean, `cargo test --workspace` all pass
 
-### ❌ P12.2 — INDEX_LOOKUP
+### ✅ P12.2 — INDEX_LOOKUP (COMPLETE)
 
-- `[ ]` **Planner** — `LogicalOperator::IndexLookup`
-- `[ ]` **Processor** — `PhysicalIndexLookup` using ART index point lookup
-- `[ ]` **Verify** — point queries via primary key
+- `[x]` **Planner** — `LogicalOperator::IndexLookup(LogicalIndexLookup)` with table_name, key_value
+- `[x]` **Processor** — `PhysicalIndexLookup` using ART index `lookup_by_pk_range` point lookup
+- `[x]` **Module** — `kuzu-processor/src/physical/index_lookup.rs`
+- `[x]` **Verify** — `cargo check` clean
 
-### ❌ P12.3 — BATCH_INSERT
+### ✅ P12.3 — BATCH_INSERT (COMPLETE)
 
-- `[ ]` **Planner** — `LogicalOperator::BatchInsert`
-- `[ ]` **Processor** — `PhysicalBatchInsert` using existing `insert_rows_batch()`
-- `[ ]` **Verify** — large COPY FROM performance
+- `[x]` **Planner** — `LogicalOperator::BatchInsert(LogicalBatchInsert)` with table_name, rows
+- `[x]` **Processor** — `PhysicalBatchInsert` wrapping `insert_rows_batch()` / `insert_rels_batch()`
+- `[x]` **Module** — `kuzu-processor/src/physical/batch_insert.rs`
+- `[x]` **Verify** — `cargo check` clean, `cargo test` all pass
 
-### ❌ P12.4 — `list_transform` / `list_reduce` / `list_filter`
+### ❌ P12.4 — `list_transform` / `list_reduce` / `list_filter` (REMAINING ITEM)
 
 Lambda-based list operations:
 - `[ ]` `list_transform(list, x -> expr)` — apply expression to each element
 - `[ ]` `list_reduce(list, (acc, x) -> expr, initial)` — fold
 - `[ ]` `list_filter(list, x -> condition)` — filter by predicate
 - `[ ]` **Files:** `kuzu-function/src/scalar/list.rs`, `registry.rs`
+- `[ ]` **Grammar:** perlu tambah lambda expression syntax di `cypher.pest`
+- `[ ]` **Evaluator:** reuse existing `evaluate_list_predicate()` infrastructure
 
-### ❌ P12.5 — Path functions: `properties`, `is_trail`, `is_acyclic`
+### ✅ P12.5 — Path functions: `properties`, `is_trail`, `is_acyclic` (COMPLETE)
 
-- `[ ]` `properties(path)` — extract all properties from path
-- `[ ]` `is_trail(path)`, `is_acyclic(path)` — path validation
-- `[ ]` Already have `PathOp` infrastructure in `scalar/path.rs`
+- `[x]` `properties(path)` — extract all properties from path
+- `[x]` `is_trail(path)`, `is_acyclic(path)` — path validation
+- `[x]` Added to `PathOp` enum + `scalar/path.rs` evaluator
 
-### ❌ P12.6 — Pattern functions: `cost`, `id`, `label`, `rowid`
+### ✅ P12.6 — Pattern functions: `cost`, `rowid` (COMPLETE)
 
-- `[ ]` `cost(pattern)`, `id(pattern)`, `label(pattern)`, `rowid(pattern)`
-- `[ ]` **Files:** `kuzu-function/src/scalar/schema.rs`
+- `[x]` `cost(pattern)` — extract cost from weighted path
+- `[x]` `rowid(pattern)` — extract row offset from InternalID
+- `[x]` Added to `SchemaOp` enum + `scalar/schema.rs` evaluator
 
 ---
 
-## P13 — GDS Expansion & Graph Management
+## P13 — DDL Completeness & Graph Management
 
-### ❌ P13.1 — Dijkstra (weighted shortest path)
+> **Catatan audit:** GDS algorithms (Dijkstra, Louvain, K-Core, PageRank, WCC, SCC, BFS, Spanning Forest) sudah selesai di `kuzu-algo/src/lib.rs`. P13 fokus pada DDL dan glue code, bukan algoritma baru.
 
-- `[ ]` Already have weighted `RecursiveExtend` — expose as standalone GDS function
-- `[ ]` `CALL dijkstra(source, target, weight_prop)`
+### ❌ P13.1 — CREATE TYPE
+- `[ ]` `CREATE TYPE name AS type` — custom type definition
+- `[ ]` **Files:** parser, binder, catalog
+- `[ ]` **Reference:** LadybugDB `StatementType::CREATE_TYPE`, `BoundCreateType`, `LogicalCreateType`
 
-### ❌ P13.2 — Louvain Community Detection
+### ❌ P13.2 — COMMENT ON TABLE
+- `[ ]` `COMMENT ON TABLE t IS 'description'` — table comments
+- `[ ]` **Files:** parser, binder, catalog (AlterType::COMMENT)
+- `[ ]` **Reference:** LadybugDB `AlterInfo::comment`
 
-- `[ ]` Implement Louvain algorithm in `kuzu-algo`
-
-### ❌ P13.3 — K-Core Decomposition
-
-- `[ ]` Implement K-Core in `kuzu-algo`
-
-### ❌ P13.4 — CREATE/USE/DROP GRAPH
-
-- `[ ]` `CREATE PROJECTION GRAPH name AS (MATCH pattern)`
+### ❌ P13.3 — CREATE/USE/DROP GRAPH (projected graph)
+- `[ ]` `CREATE [PROJECTION] GRAPH name AS (MATCH pattern)`
 - `[ ]` `USE GRAPH name`
 - `[ ]` `DROP GRAPH name`
+- `[ ]` **Files:** parser, binder, catalog (GraphCatalogEntry), planner
 
-### ❌ P13.5 — GDS_CALL
+### ❌ P13.4 — GDS_CALL (CALL with GDS functions)
+- `[ ]` `CALL page_rank(...)`, `CALL wcc(...)`, `CALL scc(...)` → glue ke `kuzu-algo`
+- `[ ]` GDS functions sudah ada di `kuzu-algo/src/lib.rs`, perlu wiring ke CALL pipeline
 
-- `[ ]` `CALL page_rank(...)`, `CALL wcc(...)`, `CALL scc(...)`
+### ❌ P13.5 — `error()` utility function
+- `[ ]` `error(msg)` — raise error with message
+- `[ ]` **File:** `kuzu-function/src/scalar/utility.rs`
+
+### ❌ P13.6 — STANDALONE_CALL refactor (deferred from P10.3)
+- `[ ]` Refactor CALL dispatch dari string matching ke `Statement::StandaloneCall` pipeline proper
+- `[ ]` **Files:** parser (grammar), binder (BoundStandaloneCall), planner, processor
 
 ---
 
-## P14 — Storage & Utilities
+## P14 — Storage Enhancements
 
 ### ❌ P14.1 — Parquet writer improvements
+- `[ ]` Column-level parquet writing (currently uses Arrow writer, basic)
+
 ### ❌ P14.2 — NPY reader
+- `[ ]` Read NumPy NPY files as scan source
+- `[ ]` **File:** `kuzu-storage/src/`
+
 ### ❌ P14.3 — HyperLogLog cardinality stats
+- `[ ]` Approximate cardinality estimation for StatsStore
+- `[ ]` **File:** `kuzu-storage/src/stats_store.rs`
+
 ### ❌ P14.4 — Roaring bitmap
-### ❌ P14.5 — `error()` utility function
+- `[ ]` Compressed bitmap for fast set operations
+- `[ ]` **Dependency:** `roaring` crate
+
+### ❌ P14.5 — Lazy segment scanner
+- `[ ]` Deferred segment loading for large columnar scans
+
+### ❌ P14.6 — Float compression (delta/offset)
+- `[ ]` Delta and offset compression for float columns
 
 ---
 
-## P15 — Types
+## P15 — Types & Missing Physical Operators
 
 ### ❌ P15.1 — JSON native type
+- `[ ]` `LogicalType::Json` variant
+- `[ ]` `Value::Json(serde_json::Value)`
+- `[ ]` **File:** `kuzu-common/src/types.rs`
+
 ### ❌ P15.2 — UINT128
+- `[ ]` `LogicalType::UInt128` variant
+- `[ ]` **File:** `kuzu-common/src/types.rs`
+
 ### ❌ P15.3 — DTime (DateTime with TZ offset)
+- `[ ]` `LogicalType::DTime` with timezone-aware semantics
+- `[ ]` **File:** `kuzu-common/src/types.rs`
+
+### ❌ P15.4 — Value::Union variant
+- `[ ]` Union type support: `Value::Union(tag, value)`
+- `[ ]` **File:** `kuzu-common/src/value.rs`
+
+### ❌ P15.5 — Missing Physical Operators (Priority P3)
+- `[ ]` `PARTITIONER` (morsel-driven parallelism)
+- `[ ]` `PACKED_EXTEND` (optimized multi-rel extend)
+- `[ ]` `PATH_PROPERTY_PROBE` (path property resolution)
+- `[ ]` `PRIMARY_KEY_SCAN` (PK-based scan)
+- `[ ]` `AGGREGATE_FINALIZE/SCAN` (split aggregate)
+- `[ ]` `RESULT_COLLECTOR` (explicit result collector)
+- `[ ]` `PROFILE` (query profiling)
+- `[ ]` `DUMMY_SINK` / `DUMMY_SIMPLE_SINK`
+- `[ ]` `PhysicalAccumulate` (currently passed through in processor.rs)
+- `[ ]` `PhysicalUnion` (currently handled inline)
 
 ---
 

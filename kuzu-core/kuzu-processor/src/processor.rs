@@ -411,6 +411,25 @@ impl QueryProcessor {
                     let result = limit.execute(input)?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::TopK(tk) => {
+                    // Build sort_keys from expressions: each key is (column_index, ascending)
+                    let sort_keys: Vec<(u32, bool)> = tk
+                        .sort_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _s)| {
+                            (i as u32, tk.sort_keys.get(i).map(|s| s.1).unwrap_or(true))
+                        })
+                        .collect();
+                    let topk = PhysicalTopK {
+                        sort_keys,
+                        limit: tk.limit,
+                        offset: tk.offset,
+                    };
+                    let input = current;
+                    let result = topk.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 LogicalOperator::OrderBy(o) => {
                     // Build sort_keys: each key is (column_index, ascending)
                     let sort_keys: Vec<(u32, bool)> = o
@@ -679,6 +698,38 @@ impl QueryProcessor {
                     };
                     let input = current;
                     let result = copy_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::BatchInsert(bi) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for BATCH INSERT".to_string())?;
+
+                    let batch_op = PhysicalBatchInsert {
+                        table_name: bi.table_name.clone(),
+                        table_id: bi.table_id,
+                        rows: bi.rows.clone(),
+                        table_catalog,
+                    };
+                    let input = current;
+                    let result = batch_op.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::IndexLookup(il) => {
+                    let table_catalog = self
+                        .table_catalog
+                        .clone()
+                        .ok_or_else(|| "No table catalog available for INDEX LOOKUP".to_string())?;
+
+                    let lookup_op = PhysicalIndexLookup {
+                        table_name: il.table_name.clone(),
+                        table_id: il.table_id,
+                        key_value: il.key_value.clone(),
+                        table_catalog,
+                    };
+                    let input = current;
+                    let result = lookup_op.execute(input)?;
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::TableFunctionCall(tf) => {
@@ -1419,6 +1470,7 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::HashJoin(hj) => format!("HashJoin({} keys)", hj.join_keys.len()),
         LogicalOperator::CrossProduct(_) => "CrossProduct".to_string(),
         LogicalOperator::OrderBy(ob) => format!("OrderBy({} keys)", ob.sort_keys.len()),
+        LogicalOperator::TopK(tk) => format!("TopK(limit={}, offset={}, {} keys)", tk.limit, tk.offset, tk.sort_keys.len()),
         LogicalOperator::Limit(l) => format!("Limit({})", l.limit),
         LogicalOperator::Aggregate(a) => {
             format!("Aggregate({} aggs, {} group_by)", a.aggregates.len(), a.group_by.len())
@@ -1427,6 +1479,8 @@ fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::Flatten(_) => "Flatten".to_string(),
         LogicalOperator::TableFunctionCall(tf) => format!("TableFunctionCall({})", tf.function_name),
         LogicalOperator::CopyFrom(cf) => format!("CopyFrom({})", cf.table_name),
+        LogicalOperator::BatchInsert(bi) => format!("BatchInsert({}, {} rows)", bi.table_name, bi.rows.len()),
+        LogicalOperator::IndexLookup(il) => format!("IndexLookup({})", il.table_name),
         LogicalOperator::Delete(dl) => format!("Delete({})", dl.table_name),
         LogicalOperator::Set(sl) => format!("Set({}.{})", sl.table_name, sl.column_name),
         LogicalOperator::OptionalMatch(_) => "OptionalMatch".to_string(),

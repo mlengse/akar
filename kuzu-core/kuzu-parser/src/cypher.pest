@@ -370,12 +370,15 @@ primary = {
   | case_expr
   | literal
   | exists_subquery
+  | lambda_expr
   | variable ~ function_args?
   | parameter
   | list_literal
   | map_literal
   | "(" ~ expression ~ ")"
 }
+
+lambda_expr = { variable ~ "->" ~ expression }
 
 list_predicate = {
     ("ANY" | "ALL" | "NONE" | "SINGLE") ~ "(" ~ variable ~ "IN" ~ expression ~ "WHERE" ~ expression ~ ")"

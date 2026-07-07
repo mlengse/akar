@@ -196,6 +196,19 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
                 predicate: Box::new(predicate),
             })
         }
+        Rule::lambda_expr => {
+            let mut children = pair.clone().into_inner();
+            let var_name = children
+                .next()
+                .ok_or("Lambda missing variable")?
+                .as_str()
+                .to_string();
+            let body = parse_expression(children.next().ok_or("Lambda missing body")?)?;
+            Ok(Expression::Lambda {
+                var_name,
+                body: Box::new(body),
+            })
+        }
         Rule::function_args => {
             // function_call can appear as child of postfix_expr
             // The parent variable is the function name

@@ -53,7 +53,71 @@ pub(crate) fn evaluate_path(op: PathOp, args: &[Value]) -> Result<Value, String>
                 _ => Err(format!("LENGTH() requires a path/recursive rel, got {:?}", path)),
             }
         }
+        PathOp::Properties => {
+            let path = &args[0];
+            match path {
+                Value::Struct(fields) => {
+                    let mut props: Vec<(Value, Value)> = Vec::new();
+                    for (key, val) in fields {
+                        if key != "_nodes" && key != "_rels" && key != "_src" && key != "_dst" {
+                            props.push((Value::String(key.clone()), val.clone()));
+                        }
+                    }
+                    Ok(Value::Map(props))
+                }
+                Value::List(items) => {
+                    let mut all_props: Vec<(Value, Value)> = Vec::new();
+                    for (i, item) in items.iter().enumerate() {
+                        all_props.push((Value::Int64(i as i64), item.clone()));
+                    }
+                    Ok(Value::Map(all_props))
+                }
+                _ => Err(format!("PROPERTIES() requires a path, got {:?}", path)),
+            }
+        }
+        PathOp::IsTrail => {
+            let path = &args[0];
+            let result = match path {
+                Value::Struct(fields) => {
+                    if let Some((_, Value::List(rels))) = fields.iter().find(|(k, _)| k == "_rels") {
+                        !has_duplicates(rels)
+                    } else {
+                        true
+                    }
+                }
+                Value::List(items) => !has_duplicates(items),
+                _ => true,
+            };
+            Ok(Value::Bool(result))
+        }
+        PathOp::IsAcyclic => {
+            let path = &args[0];
+            let result = match path {
+                Value::Struct(fields) => {
+                    if let Some((_, Value::List(nodes))) = fields.iter().find(|(k, _)| k == "_nodes") {
+                        !has_duplicates(nodes)
+                    } else {
+                        true
+                    }
+                }
+                Value::List(items) => !has_duplicates(items),
+                _ => true,
+            };
+            Ok(Value::Bool(result))
+        }
     }
+}
+
+/// Check if a list of Values has any duplicates (by equality).
+fn has_duplicates(items: &[Value]) -> bool {
+    for i in 0..items.len() {
+        for j in (i + 1)..items.len() {
+            if items[i] == items[j] {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Generate a random UUID v4 string.

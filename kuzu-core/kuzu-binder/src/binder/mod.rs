@@ -723,6 +723,17 @@ impl Binder {
                     is_constant: false,
                 })
             }
+            Expression::Lambda { var_name: _, body } => {
+                // Bind the lambda body — the variable binding is deferred
+                // to the evaluator which creates a per-element mini-chunk.
+                // For binding purposes, treat the body as unresolved.
+                self.resolve_expression(body, variables)?;
+                Ok(BoundExpression {
+                    expression: expr.clone(),
+                    resolved_type: LogicalTypeID::Any,
+                    is_constant: false,
+                })
+            }
         }
     }
 

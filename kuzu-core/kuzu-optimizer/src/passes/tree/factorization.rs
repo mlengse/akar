@@ -63,6 +63,11 @@ impl TreeOptimizationPass for FactorizationRewriting {
                         Self::append_flattens(first, &[0]);
                     }
                 }
+                LogicalOperator::TopK(tk) => {
+                    if let Some(first) = tk.children.first_mut() {
+                        Self::append_flattens(first, &[0]);
+                    }
+                }
                 LogicalOperator::Limit(l) => {
                     if let Some(first) = l.children.first_mut() {
                         Self::append_flattens(first, &[0]);
@@ -134,7 +139,9 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::ImportDatabase(_)
                 | LogicalOperator::CreateFtsIndex(_)
                 | LogicalOperator::FtsScan(_)
-                | LogicalOperator::CountRelTable(_) => {}
+                | LogicalOperator::CountRelTable(_)
+                | LogicalOperator::BatchInsert(_)
+                | LogicalOperator::IndexLookup(_) => {}
             }
         });
     }

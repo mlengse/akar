@@ -109,5 +109,35 @@ pub(crate) fn evaluate_schema(op: SchemaOp, args: &[Value]) -> Result<Value, Str
                 )),
             }
         }
+        SchemaOp::Cost => {
+            let path = &args[0];
+            match path {
+                Value::Struct(fields) => {
+                    for (k, v) in fields {
+                        if k == "_cost" || k == "cost" {
+                            return Ok(v.clone());
+                        }
+                    }
+                    Ok(Value::Double(0.0))
+                }
+                _ => Ok(Value::Double(0.0)),
+            }
+        }
+        SchemaOp::RowId => {
+            match &args[0] {
+                Value::InternalID(id) => Ok(Value::UInt64(id.offset)),
+                Value::Struct(entries) => {
+                    for (k, v) in entries {
+                        if k == "_id" || k == "id" {
+                            if let Value::InternalID(id) = v {
+                                return Ok(Value::UInt64(id.offset));
+                            }
+                        }
+                    }
+                    Ok(Value::UInt64(0))
+                }
+                _ => Ok(Value::UInt64(0)),
+            }
+        }
     }
 }

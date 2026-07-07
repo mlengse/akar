@@ -329,6 +329,10 @@ pub enum SchemaOp {
     StartNode,
     EndNode,
     Label,
+    /// COST(pattern) — extract total cost from a weighted path.
+    Cost,
+    /// ROWID(pattern) — extract row offset from InternalID.
+    RowId,
 }
 
 /// Path functions — operate on recursive rel / path values (NODES, RELS, LENGTH).
@@ -342,6 +346,12 @@ pub enum PathOp {
     Nodes,
     Rels,
     Length,
+    /// PROPERTIES(path) — extract all properties from path nodes and rels.
+    Properties,
+    /// IS_TRAIL(path) — check if path has no repeated edges (a trail).
+    IsTrail,
+    /// IS_ACYCLIC(path) — check if path has no repeated nodes (acyclic).
+    IsAcyclic,
 }
 
 /// Array math functions — element-wise operations on numeric lists.
@@ -1081,6 +1091,8 @@ impl FunctionRegistry {
         );
         self.register_scalar("END_NODE", ScalarFunction::Schema { op: SchemaOp::EndNode });
         self.register_scalar("LABEL", ScalarFunction::Schema { op: SchemaOp::Label });
+        self.register_scalar("COST", ScalarFunction::Schema { op: SchemaOp::Cost });
+        self.register_scalar("ROWID", ScalarFunction::Schema { op: SchemaOp::RowId });
 
         // --- Array ---
         self.register_scalar(
@@ -1113,6 +1125,9 @@ impl FunctionRegistry {
         self.register_scalar("nodes", ScalarFunction::Path { op: PathOp::Nodes });
         self.register_scalar("rels", ScalarFunction::Path { op: PathOp::Rels });
         self.register_scalar("relationships", ScalarFunction::Path { op: PathOp::Rels });
+        self.register_scalar("properties", ScalarFunction::Path { op: PathOp::Properties });
+        self.register_scalar("is_trail", ScalarFunction::Path { op: PathOp::IsTrail });
+        self.register_scalar("is_acyclic", ScalarFunction::Path { op: PathOp::IsAcyclic });
 
         // --- UUID ---
         self.register_scalar("gen_random_uuid", ScalarFunction::Uuid);

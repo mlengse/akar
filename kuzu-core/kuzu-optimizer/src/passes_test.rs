@@ -199,9 +199,9 @@ mod tests {
         let plan = vec![make_order(), make_limit()];
         let pass = TopKOptimization;
         let result = pass.apply(&plan);
-        assert_eq!(result.len(), 2);
-        assert!(matches!(result[0], LogicalOperator::OrderBy(_)));
-        assert!(matches!(result[1], LogicalOperator::Limit(_)));
+        // OrderBy + Limit fused into a single TopK
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], LogicalOperator::TopK(_)));
     }
 
     #[test]
@@ -209,8 +209,10 @@ mod tests {
         let plan = vec![make_order(), make_projection(), make_limit()];
         let pass = TopKOptimization;
         let result = pass.apply(&plan);
-        // Should still have 3 operators
-        assert_eq!(result.len(), 3);
+        // OrderBy + Projection + Limit → Projection + TopK (2 operators)
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], LogicalOperator::Projection(_)));
+        assert!(matches!(result[1], LogicalOperator::TopK(_)));
     }
 
     // ==================== Remove Unnecessary / Tautology Tests ====================
