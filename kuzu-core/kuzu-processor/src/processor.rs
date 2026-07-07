@@ -292,11 +292,8 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Accumulate(_ac) => {
-                    // Accumulate passes through its input (collects all rows in memory)
-                    // For now, treat as pass-through since we don't have PhysicalAccumulate yet.
-                    // The input is already fully materialized by earlier operators.
-                    let input = current;
-                    intermediate_result = Some(input);
+                    let result = PhysicalAccumulate.execute(current)?;
+                    intermediate_result = Some(result);
                 }
                 LogicalOperator::RecursiveExtend(re) => {
                     let scan = PhysicalRecursiveExtend {
@@ -1443,6 +1440,10 @@ fn value_to_physical_type(val: &Value) -> PhysicalTypeID {
         | Value::TimestampSec(_)
         | Value::Interval(_) => PhysicalTypeID::Int64,
         Value::InternalID(_) => PhysicalTypeID::Int64,
+        Value::UInt128(_) => PhysicalTypeID::Int128,
+        Value::Json(_) => PhysicalTypeID::String,
+        Value::DTime(_) => PhysicalTypeID::Int64,
+        Value::Union(_, _) => PhysicalTypeID::Struct,
         Value::List(_) => PhysicalTypeID::List,
         Value::Map(_) => PhysicalTypeID::Struct,
         Value::Struct(_) => PhysicalTypeID::Struct,
