@@ -97,6 +97,11 @@ impl Binder {
             Statement::DetachDatabase(d) => self.bind_detach_database(d),
             Statement::UseDatabase(u) => self.bind_use_database(u),
             Statement::LoadFrom(l) => self.bind_load_from(l),
+            Statement::CreateType(t) => self.bind_create_type(t),
+            Statement::CommentOnTable(c) => self.bind_comment_on_table(c),
+            Statement::CreateGraph(g) => self.bind_create_graph(g),
+            Statement::UseGraph(g) => self.bind_use_graph(g),
+            Statement::DropGraph(g) => self.bind_drop_graph(g),
         }
     }
 
@@ -1375,6 +1380,48 @@ impl Binder {
         Ok(BoundStatement::BoundLoadFrom(BoundLoadFrom {
             path: l.path,
             options: l.options,
+        }))
+    }
+
+    fn bind_create_type(&self, t: CreateType) -> Result<BoundStatement, String> {
+        // Validate the type name is a known type
+        Self::parse_type(&t.type_name)?;
+        Ok(BoundStatement::BoundCreateType(BoundCreateType {
+            name: t.name,
+            type_name: t.type_name,
+        }))
+    }
+
+    fn bind_comment_on_table(&self, c: CommentOnTable) -> Result<BoundStatement, String> {
+        // Validate table exists
+        {
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+            catalog
+                .get_entry_by_name(&c.table_name)
+                .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;
+        }
+        Ok(BoundStatement::BoundCommentOnTable(BoundCommentOnTable {
+            table_name: c.table_name,
+            comment: c.comment,
+        }))
+    }
+
+    fn bind_create_graph(&self, g: CreateGraph) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundCreateGraph(BoundCreateGraph {
+            name: g.name,
+            is_any: g.is_any,
+        }))
+    }
+
+    fn bind_use_graph(&self, g: UseGraph) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundUseGraph(BoundUseGraph {
+            name: g.name,
+        }))
+    }
+
+    fn bind_drop_graph(&self, g: DropGraph) -> Result<BoundStatement, String> {
+        Ok(BoundStatement::BoundDropGraph(BoundDropGraph {
+            name: g.name,
         }))
     }
 
