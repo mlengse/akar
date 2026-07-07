@@ -8,7 +8,7 @@ COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
 
 kuzu_query = { statement ~ EOI }
 
-statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement | multi_db_statement }
+statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement | multi_db_statement | graph_statement }
 
 export_database = { "EXPORT" ~ "DATABASE" ~ string ~ export_options? }
 export_options  = { "(" ~ export_option ~ ("," ~ export_option)* ~ ")" }
@@ -89,7 +89,17 @@ ddl_statement = {
   | create_sequence
   | drop_sequence
   | create_macro
+  | create_type
+  | comment_on_table
 }
+
+// ==================== CREATE TYPE ====================
+
+create_type = { "CREATE" ~ "TYPE" ~ identifier ~ "AS" ~ type_name }
+
+// ==================== COMMENT ON TABLE ====================
+
+comment_on_table = { "COMMENT" ~ "ON" ~ "TABLE" ~ identifier ~ "IS" ~ string }
 
 // ==================== CREATE MACRO ====================
 
@@ -423,3 +433,15 @@ map_literal  = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
 variable = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+// ==================== Graph Management ====================
+
+graph_statement = {
+    create_graph
+  | use_graph
+  | drop_graph
+}
+
+create_graph = { "CREATE" ~ "GRAPH" ~ identifier ~ ("ANY")? }
+use_graph    = { "USE" ~ "GRAPH" ~ identifier }
+drop_graph   = { "DROP" ~ "GRAPH" ~ identifier }
