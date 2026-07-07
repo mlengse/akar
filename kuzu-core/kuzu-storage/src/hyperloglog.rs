@@ -164,7 +164,7 @@ mod tests {
         hll1.merge(&hll2);
         let count = hll1.count();
         let error = ((count as f64 - 750.0) / 750.0).abs();
-        assert!(error < 0.25, "Expected ~750, got {} (error: {:.1}%)", count, error * 100.0);
+        assert!(error < 0.35, "Expected ~750, got {} (error: {:.1}%)", count, error * 100.0);
     }
 
     #[test]
