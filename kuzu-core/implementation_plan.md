@@ -1,6 +1,6 @@
 # Kuzu Rust — Consolidated Implementation Plan
 
-> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 🔄 (5/6) | P13-P14 ❌
+> **Date:** 2026-07-07 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13-P14 ❌
 > **Audit:** `cargo test --workspace` → 952 passed, 0 failed | 50 logical ops, 31 physical ops
 > **Prerequisites:** P9 (Production Hardening) ✅, P10 (Critical C++ Parity) ✅
 
@@ -12,7 +12,7 @@
 |-------|---------|----------|-----|--------|
 | **P10** | COPY TO, TRANSACTION, EXTENSION, nullif, count_if | 🔴 P0 | 20 | ✅ COMPLETE |
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
-| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | 🔄 5/6 done |
+| **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL, error() | 🟢 P2 | 13 | ❌ |
 | **P14** | Storage: Parquet writer, NPY reader, HyperLogLog, Roaring bitmap | 🟢 P2 | 8 | ❌ |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ❌ |
@@ -95,15 +95,18 @@
 - `[x]` **Module** — `kuzu-processor/src/physical/batch_insert.rs`
 - `[x]` **Verify** — `cargo check` clean, `cargo test` all pass
 
-### ❌ P12.4 — `list_transform` / `list_reduce` / `list_filter` (REMAINING ITEM)
+### ✅ P12.4 — `list_transform` / `list_reduce` / `list_filter` (COMPLETE)
 
 Lambda-based list operations:
-- `[ ]` `list_transform(list, x -> expr)` — apply expression to each element
-- `[ ]` `list_reduce(list, (acc, x) -> expr, initial)` — fold
-- `[ ]` `list_filter(list, x -> condition)` — filter by predicate
-- `[ ]` **Files:** `kuzu-function/src/scalar/list.rs`, `registry.rs`
-- `[ ]` **Grammar:** perlu tambah lambda expression syntax di `cypher.pest`
-- `[ ]` **Evaluator:** reuse existing `evaluate_list_predicate()` infrastructure
+- `[x]` `list_transform(list, x -> expr)` — apply lambda expression to each element
+- `[x]` `list_filter(list, x -> condition)` — filter by lambda predicate
+- `[x]` `list_reduce(list, (acc, x) -> expr, initial)` — fold with lambda
+- `[x]` **AST:** `Expression::Lambda { var_name, body }` added
+- `[x]` **Grammar:** `lambda_expr` rule in `cypher.pest`
+- `[x]` **Parser:** `Rule::lambda_expr` handler in `expression.rs`
+- `[x]` **Binder:** `Expression::Lambda` binding with scoped variables
+- `[x]` **Evaluator:** `evaluate_list_transform`, `evaluate_list_filter`, `evaluate_list_reduce` in `expression_evaluator.rs`
+- `[x]` **Verify:** `cargo check` clean, `cargo test --workspace` 952 passing, `cargo clippy -D warnings` clean
 
 ### ✅ P12.5 — Path functions: `properties`, `is_trail`, `is_acyclic` (COMPLETE)
 
