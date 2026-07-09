@@ -933,7 +933,7 @@ impl QueryProcessor {
                     // (via rayon::par_iter) requires making execute_internal accept
                     // pre-computed input, which is a deeper architecture change.
                     let mut results = Vec::new();
-                    for morsel in morsels {
+                    for _morsel in morsels {
                         let child_result = self.execute_internal(&p.children, sip_masks)?;
                         results.extend(child_result);
                     }

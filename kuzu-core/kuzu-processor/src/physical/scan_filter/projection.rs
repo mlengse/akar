@@ -1,13 +1,6 @@
 //! Auto-extracted from physical_operator.rs
-use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
-use kuzu_common::vector::{DataChunk, ValueVector, physical_type_size};
-use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
-use kuzu_storage::table::ColumnDefinition;
-use std::sync::{Arc, Mutex};
-use crate::expression_evaluator::ExpressionEvaluator;
-use crate::physical::types::{OperatorResult, NodeSemiMask, PhysicalOperatorExec};
-use crate::physical::write_ops::PhysicalFtsScan;
-use crate::physical::common::store_value_in_vector;
+use kuzu_common::vector::{DataChunk, ValueVector};
+use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 
 // ==================== Projection ====================
 

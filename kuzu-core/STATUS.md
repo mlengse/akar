@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-09 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅ complete)
+> **Tanggal:** 2026-07-10 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅, P19 ✅, P20 ✅, P21 ✅, P22 ✅, P23 ✅ complete)
 > **Hasil audit:** `cargo test --workspace` → **~1000 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
@@ -98,7 +98,11 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | LOAD FROM | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→handler | `[P11.6]` |
 | Path: properties/is_trail/is_acyclic | ❌ TIDAK ADA | ✅ PathOp::Properties/IsTrail/IsAcyclic | `[P12.5]` |
 | Schema: cost/rowid | ❌ TIDAK ADA | ✅ SchemaOp::Cost/RowId | `[P12.6]` |
-
+| GDS: Random Walk & Node2Vec | ❌ TIDAK ADA | ✅ `compute_random_walk`, `compute_node2vec` (10 tests) | `[P19]` |
+| Storage: ICE Disk Format | ❌ TIDAK ADA | ✅ Native `ice_format.rs` with mmaps | `[P20]` |
+| Operator Modularization | ❌ 87k baris write_ops.rs | ✅ Pecah jadi 5+ file per physical operator module | `[P21]` |
+| STANDALONE_CALL Refactor | ❌ Bypassed pipeline | ✅ `Statement::StandaloneCall` + `PhysicalStandaloneCall` + `StandaloneCallHandler` | `[P22]` |
+| PathPropertyProbe | ❌ Stub kosong | ✅ Pipeline dirangkai di processor | `[P23]` |
 ---
 
 ## 1. Arsitektur Pipeline — Status per Layer

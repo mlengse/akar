@@ -1,10 +1,9 @@
 //! Auto-extracted from physical_operator.rs
-use kuzu_common::types::{PhysicalTypeID, Value};
+use kuzu_common::types::Value;
 use crate::physical::write_ops::ast_constant_to_value;
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_parser::ast::{Constant, Expression};
-use kuzu_storage::table::{ColumnDefinition, TableCatalog};
-use std::path::Path;
+use kuzu_parser::ast::Expression;
+use kuzu_storage::table::TableCatalog;
 use std::sync::{Arc, Mutex};
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::scan_filter::PhysicalScan;

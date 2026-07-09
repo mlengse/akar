@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 const ARRAY_MAX_SIZE: usize = 4096;
 
 /// Bits per bitmap container (1024 × 64).
-const BITMAP_CAPACITY: usize = 65536;
+
 
 // ---------------------------------------------------------------------------
 // Container enum
@@ -30,10 +30,6 @@ enum Container {
 impl Container {
     fn new_array() -> Self {
         Container::Array(Vec::new())
-    }
-
-    fn new_bitmap() -> Self {
-        Container::Bitmap(Box::new([0u64; 1024]))
     }
 
     fn len(&self) -> usize {
@@ -223,7 +219,7 @@ impl Container {
         }
     }
 
-    fn iter(&self) -> ContainerIter {
+    fn iter(&self) -> ContainerIter<'_> {
         match self {
             Container::Array(v) => ContainerIter::Array { data: v, pos: 0 },
             Container::Bitmap(bm) => ContainerIter::Bitmap { data: bm, word_idx: 0, bit: 0 },
@@ -465,7 +461,7 @@ impl RoaringBitmap {
     }
 
     /// Iterator over all values in sorted order.
-    pub fn iter(&self) -> RoaringIter {
+    pub fn iter(&self) -> RoaringIter<'_> {
         RoaringIter {
             containers: self.containers.iter(),
             current: None,

@@ -1,14 +1,13 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::scan_filter::PhysicalFilter;
 use kuzu_common::types::{LogicalTypeID, PhysicalTypeID, Value};
-use kuzu_common::vector::{DataChunk, ValueVector, physical_type_size};
-use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
+use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_parser::ast::Expression;
 use kuzu_storage::table::ColumnDefinition;
 use std::sync::{Arc, Mutex};
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, NodeSemiMask, PhysicalOperatorExec};
 use crate::physical::write_ops::PhysicalFtsScan;
-use crate::physical::common::store_value_in_vector;
 
 // ==================== Scan ====================
 
@@ -288,7 +287,7 @@ impl PhysicalOperatorExec for PhysicalScan {
                 (0..num_rows).collect()
             };
 
-            let mut valid_count = rows_to_emit.len();
+            let _valid_count = rows_to_emit.len();
 
             // Find columns needed for the predicate
             let mut predicate_col_names = Vec::new();
@@ -318,7 +317,7 @@ impl PhysicalOperatorExec for PhysicalScan {
             let mut fields = vec![None; cols_to_scan.len()];
             
             // Helper to materialize a single column
-            let mut materialize_col = |col_idx: usize, current_rows: &[usize]| -> ValueVector {
+            let materialize_col = |col_idx: usize, current_rows: &[usize]| -> ValueVector {
                 let col_data = &data[col_idx];
                 let phys_type = if let Some(col_def) = self.table_columns.get(col_idx) {
                     Self::logical_to_physical(&col_def.logical_type)

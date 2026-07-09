@@ -19,7 +19,7 @@ use kuzu_catalog::Catalog;
 use kuzu_main::{Connection, Database, SystemConfig};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::highlight::Highlighter;
+use rustyline::highlight::{CmdKind, Highlighter};
 use rustyline::hint::Hinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, KeyEvent};
@@ -234,7 +234,7 @@ impl Highlighter for CypherCompleter {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         Cow::Borrowed(line)
     }
-    fn highlight_char(&self, _line: &str, _pos: usize, _appended: bool) -> bool {
+    fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
         false
     }
 }

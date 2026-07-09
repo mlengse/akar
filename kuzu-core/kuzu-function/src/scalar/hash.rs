@@ -1,7 +1,6 @@
 use crate::registry::*;
 use kuzu_common::types::Value;
 use md5::{Digest, Md5};
-use md5::digest::Output;
 use sha2::Sha256;
 use super::{get_string};
 

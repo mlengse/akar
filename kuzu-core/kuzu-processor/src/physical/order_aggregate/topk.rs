@@ -1,10 +1,8 @@
 //! Auto-extracted from physical_operator.rs
 use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_function::AggregateFunction;
-use kuzu_function::aggregate::AggValueState;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::common::{store_value_in_vector, value_cmp, value_hash};
+use crate::physical::common::{store_value_in_vector, value_cmp};
 use std::collections::BinaryHeap;
 
 

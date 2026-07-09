@@ -36,13 +36,7 @@ pub(crate) fn ast_constant_to_value(c: &kuzu_parser::ast::Constant) -> Value {
     }
 }
 
-/// Evaluate an AST expression to a Value (for constant expressions).
-pub(crate) fn eval_ast_expr_to_value(expr: &kuzu_parser::ast::Expression) -> Value {
-    match expr {
-        kuzu_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
-        _ => Value::Null,
-    }
-}
+
 /// Convert a Value to its string representation for hash index key lookup.
 pub(crate) fn pk_value_to_string(v: &Value) -> String {
     match v {

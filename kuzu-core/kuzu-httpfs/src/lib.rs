@@ -86,7 +86,8 @@ impl Read for HttpRandomAccessReader {
             .call()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        let bytes_read = resp.into_body().read(buf)?;
+        let mut reader = resp.into_body().into_reader();
+        let bytes_read = reader.read(buf)?;
         self.position += bytes_read as u64;
         Ok(bytes_read)
     }
@@ -189,7 +190,7 @@ impl Extension for HttpfsExtension {
                 }
                 if let Value::String(url) = &args[0] {
                     let resp = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
-                    let mut reader = resp.into_body();
+                    let mut reader = resp.into_body().into_reader();
                     let mut temp_file =
                         NamedTempFile::new().map_err(|e| format!("Failed to create temp file: {}", e))?;
                     std::io::copy(&mut reader, &mut temp_file)
