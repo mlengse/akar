@@ -130,11 +130,19 @@ fn test_verification_call_show_tables() {
 
     let result = query(&conn, "CALL show_tables()");
     assert!(result.is_success(), "CALL show_tables() after CREATE should succeed");
-    let summary = result.result_summary().to_lowercase();
-    assert!(
-        summary.contains("person") || summary.contains("city"),
-        "Should list tables: {summary}"
-    );
+    let mut found_person = false;
+    let mut found_city = false;
+    for chunk in &result.chunks {
+        for row in 0..chunk.size {
+            if let Some(val) = chunk.fields[0].get_value(row) {
+                let s = format!("{:?}", val).to_lowercase();
+                if s.contains("person") { found_person = true; }
+                if s.contains("city") { found_city = true; }
+            }
+        }
+    }
+    assert!(found_person, "Should list Person table");
+    assert!(found_city, "Should list City table");
 }
 
 #[test]

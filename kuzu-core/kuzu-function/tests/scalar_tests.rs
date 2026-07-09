@@ -654,7 +654,7 @@ fn test_cast_int64() {
         target_type: CastTarget::Int64,
     };
     assert_eq!(evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(), Value::Int64(42));
-    assert_eq!(evaluate_scalar(&func, &[Value::Double(3.14)]).unwrap(), Value::Int64(3));
+    assert_eq!(evaluate_scalar(&func, &[Value::Double(std::f64::consts::PI)]).unwrap(), Value::Int64(3));
 }
 
 #[test]
@@ -1473,7 +1473,7 @@ fn test_cast_int32() {
         target_type: CastTarget::Int32,
     };
     assert_eq!(evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(), Value::Int32(42));
-    assert_eq!(evaluate_scalar(&func, &[Value::Double(3.14)]).unwrap(), Value::Int32(3));
+    assert_eq!(evaluate_scalar(&func, &[Value::Double(std::f64::consts::PI)]).unwrap(), Value::Int32(3));
     assert_eq!(
         evaluate_scalar(&func, &[Value::String("99".into())]).unwrap(),
         Value::Int32(99)
@@ -1488,7 +1488,8 @@ fn test_cast_float() {
     assert_eq!(evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(), Value::Float(42.0));
     let result = evaluate_scalar(&func, &[Value::String("3.14".into())]).unwrap();
     match result {
-        Value::Float(x) => assert!((x - 3.14).abs() < 0.001),
+        #[allow(clippy::approx_constant)]
+        Value::Float(x) => assert!((x - 3.14_f32).abs() < 0.001),
         _ => panic!("Expected float"),
     }
 }

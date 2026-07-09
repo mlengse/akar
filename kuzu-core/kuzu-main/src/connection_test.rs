@@ -785,11 +785,17 @@ mod call_tests {
         conn.query(sql).map(|r| r.to_string())
     }
 
+    fn query_result(conn: &Connection, sql: &str) -> Result<crate::query_result::QueryResult, String> {
+        conn.query(sql)
+    }
+
     #[test]
     fn test_call_show_tables_empty() {
         let (_dir, _db, conn) = setup_db();
-        let result = exec_ok(&conn, "CALL show_tables()");
+        let result = query_result(&conn, "CALL show_tables()");
         assert!(result.is_ok(), "CALL show_tables() should succeed: {:?}", result);
+        let qr = result.unwrap();
+        assert!(qr.num_rows == 0, "Expected 0 tables, got {}", qr.num_rows);
     }
 
     #[test]
@@ -802,26 +808,38 @@ mod call_tests {
         .unwrap();
         exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
 
-        let result = exec_ok(&conn, "CALL show_tables()");
+        let result = query_result(&conn, "CALL show_tables()");
         assert!(result.is_ok(), "CALL show_tables() with tables: {:?}", result);
-        let out = result.unwrap().to_lowercase();
-        assert!(
-            out.contains("person") || out.contains("city"),
-            "Should list tables: {out}"
-        );
+        let qr = result.unwrap();
+        assert!(qr.num_rows >= 2, "Expected at least 2 tables, got {}", qr.num_rows);
+
+        // Check table names appear in the output data
+        let mut found_person = false;
+        let mut found_city = false;
+        for chunk in &qr.chunks {
+            for row in 0..chunk.size {
+                if let Some(val) = chunk.fields[0].get_value(row) {
+                    let s = format!("{:?}", val).to_lowercase();
+                    if s.contains("person") { found_person = true; }
+                    if s.contains("city") { found_city = true; }
+                }
+            }
+        }
+        assert!(found_person, "Should list Person table");
+        assert!(found_city, "Should list City table");
     }
 
     #[test]
     fn test_call_nonexistent_function() {
         let (_dir, _db, conn) = setup_db();
-        let result = exec_ok(&conn, "CALL nonexistent_function()");
+        let result = query_result(&conn, "CALL nonexistent_function()");
         assert!(result.is_err(), "Calling non-existent function should fail");
     }
 
     #[test]
     fn test_call_syntax_no_args() {
         let (_dir, _db, conn) = setup_db();
-        let result = exec_ok(&conn, "CALL tables()");
+        let result = query_result(&conn, "CALL tables()");
         assert!(result.is_ok(), "CALL tables() should succeed: {:?}", result);
     }
 }

@@ -4,6 +4,7 @@
 //! supporting both in-memory and on-disk graph representations.
 
 use kuzu_common::types::InternalID;
+use kuzu_storage::table::RelTable;
 
 /// An entry in the graph representing a node label's adjacency.
 #[derive(Debug, Clone)]
@@ -185,15 +186,39 @@ impl OnDiskGraph {
     }
 
     /// Scan a relationship table and build an in-memory graph.
-    pub fn build_from_storage(&self, _rel_table_id: u64, _num_nodes: u64) -> Result<Graph, String> {
-        // TODO: read from storage engine
-        Ok(Graph::new())
+    pub fn build_from_storage(&self, rel_table: &RelTable) -> Result<Graph, String> {
+        let mut graph = Graph::new();
+
+        graph.add_entry(GraphEntry {
+            node_label: String::new(),
+            node_table_id: rel_table.src_table_id,
+            rel_label: rel_table.name.clone(),
+            rel_table_id: rel_table.table_id,
+            is_directed: false,
+        });
+
+        let edges: Vec<Edge> = rel_table
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(src, dst))| src != u64::MAX && dst != u64::MAX)
+            .map(|(edge_idx, &(src, dst))| Edge {
+                src_offset: src,
+                dst_offset: dst,
+                rel_id: edge_idx as u64,
+                rel_table_id: rel_table.table_id,
+            })
+            .collect();
+
+        graph.build_adjacency(&edges);
+        Ok(graph)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzu_storage::table::RelTable;
 
     fn sample_edges() -> Vec<Edge> {
         vec![
@@ -228,6 +253,10 @@ mod tests {
                 rel_table_id: 0,
             },
         ]
+    }
+
+    fn sample_rel_table() -> RelTable {
+        RelTable::new(1, "knows".into(), 10, 20, vec![])
     }
 
     #[test]
@@ -314,5 +343,45 @@ mod tests {
         let csr = CSRAdjacency::build(&edges, 1);
         assert_eq!(csr.num_nodes(), 1);
         assert_eq!(csr.num_edges(), 2); // Self-loop counted twice in undirected
+    }
+
+    #[test]
+    fn test_build_from_storage_empty() {
+        let rel_table = sample_rel_table();
+        let disk = OnDiskGraph::new();
+        let graph = disk.build_from_storage(&rel_table).unwrap();
+        assert_eq!(graph.num_nodes(), 0);
+        assert_eq!(graph.num_edges(), 0);
+        assert_eq!(graph.entries().len(), 1);
+        assert_eq!(graph.entries()[0].rel_table_id, 1);
+        assert_eq!(graph.entries()[0].rel_label, "knows");
+    }
+
+    #[test]
+    fn test_build_from_storage_with_edges() {
+        let mut rel_table = sample_rel_table();
+        rel_table.insert_rel(0, 1, vec![]).unwrap();
+        rel_table.insert_rel(0, 2, vec![]).unwrap();
+        rel_table.insert_rel(1, 2, vec![]).unwrap();
+
+        let disk = OnDiskGraph::new();
+        let graph = disk.build_from_storage(&rel_table).unwrap();
+        assert_eq!(graph.num_nodes(), 3);
+        assert_eq!(graph.num_edges(), 6); // 3 undirected = 6 directed
+        let n0 = graph.get_neighbors(0).unwrap();
+        assert_eq!(n0.len(), 2); // connected to 1 and 2
+    }
+
+    #[test]
+    fn test_build_from_storage_skips_tombstones() {
+        let mut rel_table = sample_rel_table();
+        rel_table.insert_rel(0, 1, vec![]).unwrap();
+        rel_table.insert_rel(0, 2, vec![]).unwrap();
+        // tombstones are edges with u64::MAX
+        rel_table.edges[1] = (u64::MAX, u64::MAX);
+
+        let disk = OnDiskGraph::new();
+        let graph = disk.build_from_storage(&rel_table).unwrap();
+        assert_eq!(graph.num_edges(), 2); // only 1 valid edge = 2 directed
     }
 }

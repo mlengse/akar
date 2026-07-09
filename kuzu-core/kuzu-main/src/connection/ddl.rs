@@ -13,7 +13,8 @@ impl Connection {
     pub(crate) fn handle_ddl(&self, bound: &BoundStatement) -> Result<Option<QueryResult>, String> {
         match bound {
             BoundStatement::BoundStandaloneCall(_) => {
-                unreachable!("StandaloneCall is executed via QueryProcessor")
+                // StandaloneCall is executed via QueryProcessor pipeline
+                Ok(None)
             }
             BoundStatement::BoundExplain(_) => {
                 // EXPLAIN is handled by the query processor pipeline
