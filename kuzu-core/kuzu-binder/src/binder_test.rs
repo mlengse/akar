@@ -4,7 +4,6 @@ use crate::binder::Binder;
 use crate::bound_statement::*;
 use kuzu_catalog::{Catalog, CatalogColumn};
 use kuzu_common::types::LogicalTypeID;
-use kuzu_parser::ast::*;
 use kuzu_parser::parse;
 use std::sync::{Arc, Mutex};
 

@@ -3,7 +3,8 @@
 //! Measures BufferManager throughput (pin/unpin), table scan throughput,
 //! and columnar read/write performance.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use kuzu_common::memory::MemoryManager;
 use kuzu_main::connection::Connection;
 use kuzu_main::database::{Database, SystemConfig};

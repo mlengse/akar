@@ -1,6 +1,7 @@
 //! PhysicalOrderBy throughput benchmarks — single-key vs multi-key sorting.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+use criterion::{Criterion, criterion_group, criterion_main};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_processor::physical_operator::{PhysicalOperatorExec, PhysicalOrderBy};

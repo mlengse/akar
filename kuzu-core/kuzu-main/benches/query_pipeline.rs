@@ -3,7 +3,8 @@
 //! Measures end-to-end throughput: parse → bind → plan → optimize → execute
 //! for representative Cypher queries.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use kuzu_main::connection::Connection;
 use kuzu_main::database::{Database, SystemConfig};
 use std::sync::Arc;

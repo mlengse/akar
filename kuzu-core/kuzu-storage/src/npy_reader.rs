@@ -279,6 +279,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    #[allow(dead_code)]
     fn write_test_npy(path: &str, values: &[f64]) {
         let mut file = std::fs::File::create(path).unwrap();
 

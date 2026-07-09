@@ -1,6 +1,7 @@
 //! PhysicalScan throughput benchmarks at various table sizes.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use kuzu_common::types::{LogicalTypeID, Value};
 use kuzu_processor::physical_operator::{PhysicalOperatorExec, PhysicalScan};
 use kuzu_common::enums::CompressionType;

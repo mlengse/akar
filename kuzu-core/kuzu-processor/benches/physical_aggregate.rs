@@ -1,6 +1,7 @@
 //! PhysicalAggregate throughput benchmarks — COUNT, SUM, AVG with/without GROUP BY.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_processor::physical_operator::{PhysicalAggregate, PhysicalOperatorExec};
