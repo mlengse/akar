@@ -49,7 +49,7 @@ impl QueryPlanner {
                     cardinality: 1,
                 })])
             }
-            BoundStatement::BoundCall(c) => self.plan_call(c),
+            BoundStatement::BoundStandaloneCall(c) => self.plan_standalone_call(c),
             _ => Ok(Vec::new()),
         }
     }
@@ -91,8 +91,8 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_call(&self, c: BoundCall) -> Result<Vec<LogicalOperator>, String> {
-        Ok(vec![LogicalOperator::TableFunctionCall(LogicalTableFunctionCall {
+    fn plan_standalone_call(&self, c: kuzu_binder::bound_statement::BoundStandaloneCall) -> Result<Vec<LogicalOperator>, String> {
+        Ok(vec![LogicalOperator::StandaloneCall(LogicalStandaloneCall {
             function_name: c.function_name,
             args: c.args,
             cardinality: 1,

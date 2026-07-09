@@ -287,7 +287,10 @@ impl Connection {
                     db.storage_manager.table_catalog(),
                     db.vfs.clone(),
                 )
-                .with_sequence_fn(seq_fn_inner);
+                .with_sequence_fn(seq_fn_inner)
+                .with_standalone_call_handler(Arc::new(crate::connection::standalone_call::DbStandaloneCallHandler {
+                    database: db.clone(),
+                }));
                 // Note: Not attaching subquery_fn recursively to avoid complex ARC dependencies for now.
 
                 processor
@@ -303,6 +306,9 @@ impl Connection {
         )
         .with_sequence_fn(seq_fn)
         .with_subquery_fn(subquery_fn)
+        .with_standalone_call_handler(Arc::new(crate::connection::standalone_call::DbStandaloneCallHandler {
+            database: self.database.clone(),
+        }))
     }
 
     /// The checkpoint_threshold config controls this:

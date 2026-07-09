@@ -25,6 +25,7 @@ fn collect_scans_sorted(op: &LogicalOperator) -> Vec<(u64, LogicalOperator)> {
 /// Recursively collect all leaf scan operators from the tree.
 fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOperator)>) {
     match op {
+        LogicalOperator::StandaloneCall(_) => {}
         LogicalOperator::ScanNode(s) => {
             scans.push((s.cardinality, op.clone()));
         }
@@ -114,7 +115,6 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::Unwind(_)
         | LogicalOperator::Foreach(_)
         | LogicalOperator::Merge(_)
-        | LogicalOperator::Explain(_)
         | LogicalOperator::Intersect(_)
         | LogicalOperator::RecursiveExtend(_)
         | LogicalOperator::Accumulate(_)

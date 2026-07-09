@@ -115,7 +115,7 @@ pub enum Statement {
     DropIndex(DropIndex),
     Union(UnionStatement),
     Merge(MergeStatement),
-    Call(CallStatement),
+    StandaloneCall(StandaloneCall),
     CreateDml(CreateClause),
     Explain(ExplainStatement),
     CreateSequence(CreateSequence),
@@ -488,9 +488,9 @@ pub struct MergeStatement {
     pub on_match: Vec<SetItem>,
 }
 
-/// CALL statement — invoke a table function or procedure.
+/// CALL statement — invoke a table function or procedure as a standalone statement.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CallStatement {
+pub struct StandaloneCall {
     pub function_name: String,
     pub args: Vec<Expression>,
 }

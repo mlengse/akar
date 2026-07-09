@@ -43,7 +43,6 @@ pub(crate) fn eval_ast_expr_to_value(expr: &kuzu_parser::ast::Expression) -> Val
         _ => Value::Null,
     }
 }
-
 /// Convert a Value to its string representation for hash index key lookup.
 pub(crate) fn pk_value_to_string(v: &Value) -> String {
     match v {
@@ -57,19 +56,6 @@ pub(crate) fn pk_value_to_string(v: &Value) -> String {
         Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
         other => format!("{other:?}"),
     }
-}
-
-/// Extract a string argument at `index` from a list of AST expressions.
-pub(crate) fn extract_arg_string(
-    args: &[kuzu_parser::ast::Expression],
-    index: usize,
-) -> Result<String, String> {
-    args.get(index)
-        .ok_or_else(|| format!("Missing argument at index {index}"))
-        .and_then(|arg| match arg {
-            kuzu_parser::ast::Expression::Constant(kuzu_parser::ast::Constant::String(s)) => Ok(s.clone()),
-            _ => Err(format!("Argument {index} must be a string literal")),
-        })
 }
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.

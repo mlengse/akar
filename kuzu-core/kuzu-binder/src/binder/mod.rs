@@ -81,7 +81,7 @@ impl Binder {
             Statement::DropIndex(v) => self.bind_drop_index(v),
             Statement::Union(u) => self.bind_union(u),
             Statement::Merge(m) => self.bind_merge(m),
-            Statement::Call(c) => self.bind_call(c),
+            Statement::StandaloneCall(c) => self.bind_standalone_call(c),
             Statement::CreateDml(c) => self.bind_create_dml(c, &[]),
             Statement::Explain(e) => self.bind_explain(e),
             Statement::CreateSequence(s) => self.bind_create_sequence(s),
@@ -1201,12 +1201,12 @@ impl Binder {
         }))
     }
 
-    fn bind_call(&self, c: kuzu_parser::ast::CallStatement) -> Result<BoundStatement, String> {
+    fn bind_standalone_call(&self, c: kuzu_parser::ast::StandaloneCall) -> Result<BoundStatement, String> {
         // Note: CALL create_fts_index is superseded by the DDL `CREATE FTS INDEX` statement.
         // CALL is a table function invocation ΓÇö validate the function exists
         // in the function registry. At binding time we just pass through;
         // resolution happens at execution time.
-        Ok(BoundStatement::BoundCall(BoundCall {
+        Ok(BoundStatement::BoundStandaloneCall(BoundStandaloneCall {
             function_name: c.function_name,
             args: c.args,
         }))

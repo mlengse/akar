@@ -23,6 +23,7 @@ bytes.workspace = true
 csv.workspace = true
 arrow = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
+flate2 = { workspace = true }
 dashmap = "6"
 
 [dev-dependencies]

@@ -1626,6 +1626,7 @@ dependencies = [
  "criterion",
  "csv",
  "dashmap",
+ "flate2",
  "hashbrown 0.17.1",
  "kuzu-catalog",
  "kuzu-common",

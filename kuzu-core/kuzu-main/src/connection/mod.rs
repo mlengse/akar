@@ -21,6 +21,7 @@ pub mod query;
 pub mod substitute;
 pub mod transaction;
 pub mod utils;
+pub mod standalone_call;
 
 use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;

@@ -13,6 +13,7 @@ pub mod compression;
 pub mod csr;
 pub mod csv_reader;
 pub mod free_space_manager;
+pub mod ice_format;
 pub mod index;
 pub mod local_storage;
 pub mod local_wal;

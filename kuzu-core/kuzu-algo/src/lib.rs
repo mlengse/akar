@@ -21,6 +21,10 @@ use kuzu_extension::{Extension, ExtensionContext};
 use kuzu_graph::CSRAdjacency;
 use kuzu_graph::gds::BaseBFSGraph;
 
+pub mod gds;
+pub use gds::random_walk::compute_random_walk;
+pub use gds::node2vec::compute_node2vec;
+
 /// The graph algorithms extension.
 pub struct AlgoExtension;
 
@@ -289,7 +293,10 @@ impl Extension for AlgoExtension {
         context.register_table_function("cc", TableFunction::Custom { name: "closeness_centrality".into() });
         context.register_table_function("triangle_count", TableFunction::Custom { name: "triangle_count".into() });
         context.register_table_function("tc", TableFunction::Custom { name: "triangle_count".into() });
-
+        context.register_table_function("random_walk", TableFunction::Custom { name: "random_walk".into() });
+        context.register_table_function("rw", TableFunction::Custom { name: "random_walk".into() });
+        context.register_table_function("node2vec", TableFunction::Custom { name: "node2vec".into() });
+        context.register_table_function("n2v", TableFunction::Custom { name: "node2vec".into() });
 
         // GDS shortest path algorithms — registered as proper CustomTable with executable callbacks
         context.register_table_function(
@@ -1466,5 +1473,22 @@ mod tests {
         // Nodes 2 and 3 can reach each other (1 destination each)
         assert_eq!(result.values[2], 1.0);
         assert_eq!(result.values[3], 1.0);
+    }
+
+    #[test]
+    fn test_random_walk() {
+        let csr = small_csr();
+        let result = compute_random_walk(&csr, None, 5, 2);
+        assert_eq!(result.values.len(), 7);
+        // Ensure values are populated
+        assert!(result.values.iter().sum::<f64>() > 0.0);
+    }
+
+    #[test]
+    fn test_node2vec() {
+        let csr = small_csr();
+        let result = compute_node2vec(&csr, 1.0, 1.0, 16, 2, 5);
+        // Length should be num_nodes * dimensions = 7 * 16 = 112
+        assert_eq!(result.values.len(), 112);
     }
 }

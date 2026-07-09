@@ -76,6 +76,9 @@ pub struct LogicalPartitioner {
 pub struct LogicalPathPropertyProbe {
     pub children: Vec<LogicalOperator>,
     pub cardinality: u64,
+    pub node_ids_col_idx: usize,
+    pub edge_ids_col_idx: Option<usize>,
+    pub properties: Vec<(String, bool, Vec<String>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +98,7 @@ pub enum LogicalOperator {
     Union(LogicalUnion),
     Flatten(LogicalFlatten),
     TableFunctionCall(LogicalTableFunctionCall),
+    StandaloneCall(LogicalStandaloneCall),
     CopyFrom(LogicalCopyFrom),
     BatchInsert(LogicalBatchInsert),
     IndexLookup(LogicalIndexLookup),
@@ -154,6 +158,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => s.cardinality,
             LogicalOperator::Flatten(s) => s.cardinality,
             LogicalOperator::TableFunctionCall(s) => s.cardinality,
+            LogicalOperator::StandaloneCall(s) => s.cardinality,
             LogicalOperator::CopyFrom(s) => s.cardinality,
             LogicalOperator::BatchInsert(s) => s.cardinality,
             LogicalOperator::IndexLookup(s) => s.cardinality,
@@ -213,6 +218,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => s.cardinality = card,
             LogicalOperator::Flatten(s) => s.cardinality = card,
             LogicalOperator::TableFunctionCall(s) => s.cardinality = card,
+            LogicalOperator::StandaloneCall(s) => s.cardinality = card,
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
             LogicalOperator::BatchInsert(s) => s.cardinality = card,
             LogicalOperator::IndexLookup(s) => s.cardinality = card,
@@ -289,6 +295,7 @@ impl LogicalOperator {
             LogicalOperator::CountRelTable(_) => vec![],
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
+            LogicalOperator::StandaloneCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::IndexLookup(_)
@@ -348,6 +355,7 @@ impl LogicalOperator {
             LogicalOperator::CountRelTable(_) => vec![],
             LogicalOperator::ExpressionsScan(_) => vec![],
             LogicalOperator::TableFunctionCall(_) => vec![],
+            LogicalOperator::StandaloneCall(_) => vec![],
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::IndexLookup(_)
@@ -705,6 +713,13 @@ pub struct LogicalForeach {
 /// in the FunctionRegistry during execution.
 #[derive(Debug, Clone)]
 pub struct LogicalTableFunctionCall {
+    pub function_name: String,
+    pub args: Vec<kuzu_parser::ast::Expression>,
+    pub cardinality: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalStandaloneCall {
     pub function_name: String,
     pub args: Vec<kuzu_parser::ast::Expression>,
     pub cardinality: u64,

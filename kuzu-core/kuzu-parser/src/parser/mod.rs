@@ -68,7 +68,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         }
         Rule::call_statement => {
             let call = dml::parse_call(inner)?;
-            Ok(Statement::Call(call))
+            Ok(Statement::StandaloneCall(call))
         }
         Rule::export_database => ddl::parse_export_database(inner),
         Rule::import_database => ddl::parse_import_database(inner),

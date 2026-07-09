@@ -328,7 +328,7 @@ pub(crate) fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Ve
     Ok(items)
 }
 
-pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<CallStatement, String> {
+pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<StandaloneCall, String> {
     let mut function_name = String::new();
     let mut args = Vec::new();
 
@@ -362,7 +362,7 @@ pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<CallStatement, St
         return Err("CALL requires a function name".into());
     }
 
-    Ok(CallStatement { function_name, args })
+    Ok(StandaloneCall { function_name, args })
 }
 
 /// Parse a MERGE statement.

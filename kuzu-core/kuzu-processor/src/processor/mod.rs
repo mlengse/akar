@@ -31,11 +31,16 @@ use std::sync::{Arc, Mutex};
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
 pub type SubqueryFn = Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
 
+pub trait StandaloneCallHandler: Send + Sync {
+    fn execute_call(&self, name: &str, args: &[kuzu_parser::ast::Expression]) -> Result<Vec<kuzu_common::vector::DataChunk>, String>;
+}
+
 /// The query processor executes a physical plan and produces result chunks.
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     table_catalog: Option<Arc<TableCatalog>>,
     vfs: Option<Arc<kuzu_common::file_system::VirtualFileSystemRegistry>>,
+    standalone_call_handler: Option<Arc<dyn StandaloneCallHandler>>,
     /// Callback for sequence operations (nextval/currval).
     /// Takes (sequence_name, is_nextval) and returns the resulting value.
     sequence_fn: Option<SequenceFn>,
@@ -49,6 +54,7 @@ impl QueryProcessor {
             function_registry: None,
             table_catalog: None,
             vfs: None,
+            standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
         }
@@ -60,6 +66,7 @@ impl QueryProcessor {
             function_registry: Some(registry),
             table_catalog: None,
             vfs: None,
+            standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
         }
@@ -75,12 +82,19 @@ impl QueryProcessor {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
             vfs: Some(vfs),
+            standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
         }
     }
 
     /// Set the sequence operation callback (for nextval/currval).
+
+    pub fn with_standalone_call_handler(mut self, handler: Arc<dyn StandaloneCallHandler>) -> Self {
+        self.standalone_call_handler = Some(handler);
+        self
+    }
+
     pub fn with_sequence_fn(mut self, f: SequenceFn) -> Self {
         self.sequence_fn = Some(f);
         self
@@ -926,10 +940,18 @@ impl QueryProcessor {
                     intermediate_result = Some(results);
                 }
                 LogicalOperator::PathPropertyProbe(p) => {
+                    let properties = p.properties.iter().map(|(t, is_node, props)| {
+                        crate::physical::scan_filter::PathPropertySpec {
+                            table_name: t.clone(),
+                            is_node: *is_node,
+                            property_names: props.clone(),
+                        }
+                    }).collect();
+
                     let probe = crate::physical::scan_filter::PhysicalPathPropertyProbe {
-                        node_ids_col_idx: 0,
-                        edge_ids_col_idx: None,
-                        properties: Vec::new(),
+                        node_ids_col_idx: p.node_ids_col_idx,
+                        edge_ids_col_idx: p.edge_ids_col_idx,
+                        properties,
                         table_catalog: self.table_catalog.clone().ok_or_else(|| "table catalog required for PathPropertyProbe".to_string())?,
                     };
 
@@ -940,6 +962,16 @@ impl QueryProcessor {
                     };
 
                     let result = probe.execute(input)?;
+                    intermediate_result = Some(result);
+                }
+                LogicalOperator::StandaloneCall(c) => {
+                    let handler = self.standalone_call_handler.clone().ok_or("No standalone call handler provided")?;
+                    let exec = crate::physical::write_ops::PhysicalStandaloneCall {
+                        function_name: c.function_name.clone(),
+                        args: c.args.clone(),
+                        handler,
+                    };
+                    let result = exec.execute(current)?;
                     intermediate_result = Some(result);
                 }
                 // DDL operators — produce a single-row success result

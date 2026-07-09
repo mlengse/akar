@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub enum BoundStatement {
     BoundQuery(BoundQuery),
-    BoundCall(BoundCall),
+    BoundStandaloneCall(BoundStandaloneCall),
     BoundCreateNodeTable(BoundCreateNodeTable),
     BoundCreateRelTable(BoundCreateRelTable),
     BoundDropTable(BoundDropTable),
@@ -318,7 +318,7 @@ pub struct BoundDropIndex {
 
 /// Bound CALL statement — invoke a table function.
 #[derive(Debug, Clone)]
-pub struct BoundCall {
+pub struct BoundStandaloneCall {
     pub function_name: String,
     pub args: Vec<kuzu_parser::ast::Expression>,
 }
