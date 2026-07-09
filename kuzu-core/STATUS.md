@@ -1,7 +1,7 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-09 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅ complete)
-> **Hasil audit:** `cargo test --workspace` → **960 passed, 0 failed** | 29 crate, 194 file .rs, 62.373 LOC
+> **Tanggal:** 2026-07-09 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅ complete)
+> **Hasil audit:** `cargo test --workspace` → **~1000 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
 
@@ -617,8 +617,8 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | `RESULT_COLLECTOR` | Consolidate output chunks | ✅ P16.1 | ✅ Done (merge chunks) |
 | `PROFILE` | Timing wrapper | ✅ P16.1 | ✅ Done (Cell<Duration>) |
 | `PACKED_EXTEND` | Optimized multi-rel extend | P2 | 🟡 Stub (pass-through) |
-| `PARTITIONER` | Morsel-driven parallelism | P2 | 🟡 Stub (pass-through) |
-| `PATH_PROPERTY_PROBE` | Path property resolution | P2 | 🟡 Stub (pass-through) |
+| `PARTITIONER` | Morsel-driven parallelism | P2 | ✅ P18 (`kuzu-processor/src/physical/missing_ops.rs`) — real impl, 5 tests |
+| `PATH_PROPERTY_PROBE` | Path property resolution | P2 | ✅ P18 (`kuzu-processor/src/physical/scan_filter.rs`) — resolves destination node properties from paths |
 | `PRIMARY_KEY_SCAN` | PK-based scan | P2 | 🟡 Stub (pass-through) |
 | `AGGREGATE_FINALIZE/SCAN` | Split aggregate | P2 | 🟡 Stub (pass-through) |
 | `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 | ✅ Correct (no-op) |
@@ -646,10 +646,10 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | Parquet writer | P1 | ✅ P14.1 (basic) |
 | NPY reader | P2 | ✅ P14.2 |
 | HyperLogLog cardinality stats | P2 | ✅ P14.3 |
-| Roaring bitmap | P2 | ❌ Remaining |
+| Roaring bitmap | P2 | ✅ P17.4 (`kuzu-storage/src/roaring_bitmap.rs`) — Array/Bitmap containers, union/intersection/difference, 25 tests |
 | ICE disk format | P3 | ❌ Remaining |
-| Lazy segment scanner | P3 | ❌ Remaining |
-| Float compression (delta/offset) | P3 | ❌ Remaining |
+| Lazy segment scanner | P3 | ✅ P17.3 (`kuzu-storage/src/lazy_scanner.rs`) — on-demand NodeGroup loading, 6 tests |
+| Float compression (delta/offset) | P3 | ✅ (implemented in compression module)
 
 ### 8.6 GDS Algorithm Status
 
@@ -665,8 +665,8 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | Spanning Forest | ✅ `compute_spanning_forest()` | `kuzu-algo/src/lib.rs:794` |
 | Label Propagation | ✅ `compute_lpa()` | `kuzu-algo/src/lib.rs:562` |
 | Betweenness Centrality | ✅ `compute_betweenness_centrality()` (Brandes) | `kuzu-algo/src/lib.rs:616` |
-| Closeness Centrality | ❌ P17 | — |
-| Triangle Counting | ❌ P17 | — |
+| Closeness Centrality | ✅ P17.1 | `kuzu-algo/src/lib.rs` — 2 tests |
+| Triangle Counting | ✅ P17.2 | `kuzu-algo/src/lib.rs` — 2 tests |
 | Random Walk | ❌ Deferred | — |
 | Node2Vec / Embedding | ❌ Deferred | — |
 

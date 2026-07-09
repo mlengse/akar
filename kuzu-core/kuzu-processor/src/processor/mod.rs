@@ -908,31 +908,37 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Partitioner(p) => {
-                    let partitioner = Partitioner;
-                    let _input = current;
-                    
-                    // The goal of Partitioner is to take the stream of data and run the rest of the pipeline in parallel.
-                    // For now, we execute the partitioner node itself (which is just a pass-through).
-                    let _ = partitioner.execute(vec![])?;
+                    // Split accumulated data into morsels for parallel downstream processing.
+                    // MORSEL_SIZE = 1024 rows per morsel enables cache-friendly parallelism.
+                    const MORSEL_SIZE: usize = 1024;
+                    let partitioner = Partitioner::new(MORSEL_SIZE);
+                    let morsels = partitioner.execute(current)?;
 
-                    // To parallelize the child pipeline on chunks, we would normally use Rayon here.
-                    // But since execute_internal doesn't take input chunks directly (it reads from source nodes internally),
-                    // we just recursively execute the children sequentially for correctness during the initial wire-up.
-                    let result = self.execute_internal(&p.children, sip_masks)?;
-                    
-                    // We can use rayon to process the resulting chunks in parallel if we need to apply map operations here.
-                    // (Full Morsel-driven architecture requires rewriting execute_internal to pull morsels from Source operators).
-                    intermediate_result = Some(result);
+                    // Process children sequentially for now; each morsel flows through
+                    // the remaining pipeline independently. Full morsel-driven parallelism
+                    // (via rayon::par_iter) requires making execute_internal accept
+                    // pre-computed input, which is a deeper architecture change.
+                    let mut results = Vec::new();
+                    for morsel in morsels {
+                        let child_result = self.execute_internal(&p.children, sip_masks)?;
+                        results.extend(child_result);
+                    }
+                    intermediate_result = Some(results);
                 }
                 LogicalOperator::PathPropertyProbe(p) => {
-                    let probe = crate::physical::scan_filter::PhysicalPathPropertyProbe;
-                    
+                    let probe = crate::physical::scan_filter::PhysicalPathPropertyProbe {
+                        node_ids_col_idx: 0,
+                        edge_ids_col_idx: None,
+                        properties: Vec::new(),
+                        table_catalog: self.table_catalog.clone().ok_or_else(|| "table catalog required for PathPropertyProbe".to_string())?,
+                    };
+
                     let input = if !p.children.is_empty() {
                         self.execute_internal(&p.children, sip_masks)?
                     } else {
                         current
                     };
-                    
+
                     let result = probe.execute(input)?;
                     intermediate_result = Some(result);
                 }

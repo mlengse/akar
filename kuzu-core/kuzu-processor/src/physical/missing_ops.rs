@@ -1,3 +1,4 @@
+use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 
@@ -174,12 +175,52 @@ impl PhysicalOperatorExec for Profile {
     }
 }
 
-/// Partitioner — morsel-driven parallelism operator.
+/// Partitioner — splits input DataChunks into fixed-size morsels for parallelism.
 ///
-/// In a full implementation, this partitions input data into morsels
-/// (batches of rows) for parallel execution by downstream operators.
-/// Currently acts as a pass-through.
-pub struct Partitioner;
+/// Each morsel (batch of `morsel_size` rows) can be processed independently
+/// by downstream operators. The mapper uses this to distribute work across
+/// threads via Rayon.
+///
+/// A morsel size of 0 disables splitting (pass-through).
+pub struct Partitioner {
+    pub morsel_size: usize,
+}
+
+impl Partitioner {
+    pub fn new(morsel_size: usize) -> Self {
+        Self { morsel_size }
+    }
+
+    /// Split a single DataChunk into morsels of `morsel_size` rows.
+    fn split_chunk(&self, chunk: &DataChunk) -> Vec<DataChunk> {
+        if self.morsel_size == 0 || chunk.size <= self.morsel_size {
+            return vec![chunk.clone()];
+        }
+        let num_morsels = chunk.size.div_ceil(self.morsel_size);
+        let mut morsels = Vec::with_capacity(num_morsels);
+        for start in (0..chunk.size).step_by(self.morsel_size) {
+            let end = (start + self.morsel_size).min(chunk.size);
+            let morsel_fields: Vec<ValueVector> = chunk
+                .fields
+                .iter()
+                .map(|fv| {
+                    let mut morsel = ValueVector::new(fv.physical_type(), end - start);
+                    for i in start..end {
+                        let val = fv.get_value(i).unwrap_or(Value::Null);
+                        let _ = morsel.set_value(i - start, &val);
+                    }
+                    morsel
+                })
+                .collect();
+            morsels.push(DataChunk {
+                fields: morsel_fields,
+                size: end - start,
+                field_names: chunk.field_names.clone(),
+            });
+        }
+        morsels
+    }
+}
 
 impl PhysicalOperatorExec for Partitioner {
     fn operator_type(&self) -> &str {
@@ -187,26 +228,106 @@ impl PhysicalOperatorExec for Partitioner {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
+        if self.morsel_size == 0 {
+            return Ok(input);
+        }
+        let morsels: Vec<DataChunk> = input.iter().flat_map(|chunk| self.split_chunk(chunk)).collect();
+        Ok(morsels)
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-
-
-/// AggregateFinalize — finalizes a split aggregate computation.
-///
-/// In C++ Kuzu, aggregates are split into AGGREGATE_FINALIZE and AGGREGATE_SCAN
-/// for better pipelining. Currently acts as pass-through since the Rust
-/// PhysicalAggregate handles both phases in one operator.
-pub struct AggregateFinalize;
-
-impl PhysicalOperatorExec for AggregateFinalize {
-    fn operator_type(&self) -> &str {
-        "aggregate_finalize"
+    #[test]
+    fn test_partitioner_pass_through_zero_size() {
+        let p = Partitioner::new(0);
+        let chunk = DataChunk {
+            fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 10)],
+            size: 10,
+            field_names: vec!["val".into()],
+        };
+        let result = p.execute(vec![chunk.clone()]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 10);
     }
 
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
+    #[test]
+    fn test_partitioner_no_split_small_chunk() {
+        let p = Partitioner::new(100);
+        let chunk = DataChunk {
+            fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5)],
+            size: 5,
+            field_names: vec!["val".into()],
+        };
+        let result = p.execute(vec![chunk.clone()]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 5);
+    }
+
+    #[test]
+    fn test_partitioner_splits_large_chunk() {
+        let p = Partitioner::new(10);
+        let mut fv = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 25);
+        fv.resize(25);
+        for i in 0..25 {
+            fv.set_i64(i, i as i64);
+        }
+        let chunk = DataChunk {
+            fields: vec![fv],
+            size: 25,
+            field_names: vec!["val".into()],
+        };
+        let result = p.execute(vec![chunk]).unwrap();
+        // 25 rows with morsel_size 10 → 3 morsels (10 + 10 + 5)
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].size, 10);
+        assert_eq!(result[1].size, 10);
+        assert_eq!(result[2].size, 5);
+        // Verify data integrity: first morsel
+        assert_eq!(result[0].fields[0].get_i64(0), Some(0));
+        assert_eq!(result[0].fields[0].get_i64(9), Some(9));
+        // Second morsel
+        assert_eq!(result[1].fields[0].get_i64(0), Some(10));
+        // Third morsel
+        assert_eq!(result[2].fields[0].get_i64(0), Some(20));
+        assert_eq!(result[2].fields[0].get_i64(4), Some(24));
+    }
+
+    #[test]
+    fn test_partitioner_5_rows_split_into_3_2() {
+        let p = Partitioner::new(3);
+        let mut fv = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        fv.resize(5);
+        for i in 0..5 { fv.set_i64(i, i as i64); }
+        let chunk = DataChunk { fields: vec![fv], size: 5, field_names: vec!["val".into()] };
+        let result = p.execute(vec![chunk]).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].size, 3);
+        assert_eq!(result[1].size, 2);
+        assert_eq!(result[0].fields[0].get_i64(2), Some(2));
+        assert_eq!(result[1].fields[0].get_i64(0), Some(3));
+    }
+
+    #[test]
+    fn test_partitioner_multiple_chunks() {
+        let p = Partitioner::new(3);
+        let mut fv1 = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        fv1.resize(5);
+        for i in 0..5 { fv1.set_i64(i, i as i64); }
+        let mut fv2 = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        fv2.resize(5);
+        for i in 0..5 { fv2.set_i64(i, (i + 5) as i64); }
+
+        let chunks = vec![
+            DataChunk { fields: vec![fv1], size: 5, field_names: vec!["val".into()] },
+            DataChunk { fields: vec![fv2], size: 5, field_names: vec!["val".into()] },
+        ];
+        let result = p.execute(chunks).unwrap();
+        assert_eq!(result.len(), 4, "expected 4 morsels from 2 chunks of 5 rows each");
+        assert_eq!(result[2].fields[0].get_i64(0), Some(5));
+        assert_eq!(result[2].fields[0].get_i64(2), Some(7));
+        assert_eq!(result[3].fields[0].get_i64(0), Some(8));
     }
 }
