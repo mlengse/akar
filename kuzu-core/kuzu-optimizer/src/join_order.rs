@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_collect_scans_empty() {
-        let scans = collect_scans_sorted(&LogicalOperator::ScanNode(LogicalScanNode {
+        let scans = collect_scans_sorted(&LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "A".into(),
             table_id: 0,
             alias: None,
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_collect_scans_sorted_by_cardinality() {
-        let small = LogicalOperator::ScanNode(LogicalScanNode {
+        let small = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Small".into(),
             table_id: 0,
             alias: None,
@@ -561,7 +561,7 @@ mod tests {
             cardinality: 10,
             fts_query: None,
         });
-        let large = LogicalOperator::ScanNode(LogicalScanNode {
+        let large = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Large".into(),
             table_id: 1,
             alias: None,
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_reorder_no_join_needed() {
-        let single = LogicalOperator::ScanNode(LogicalScanNode {
+        let single = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "A".into(),
             table_id: 0,
             alias: None,
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_get_scan_alias() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("p".into()),
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn test_reorder_joins_dp_prefers_join_over_cross_product() {
-        let scan_a = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan_a = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "A".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -650,7 +650,7 @@ mod tests {
             cardinality: 100,
             fts_query: None,
         });
-        let scan_b = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan_b = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "B".into(),
             table_id: 1,
             alias: Some("b".into()),
@@ -658,7 +658,7 @@ mod tests {
             cardinality: 200,
             fts_query: None,
         });
-        let scan_c = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan_c = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "C".into(),
             table_id: 2,
             alias: Some("c".into()),

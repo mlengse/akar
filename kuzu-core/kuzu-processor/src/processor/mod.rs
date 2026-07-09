@@ -226,6 +226,10 @@ impl QueryProcessor {
                             table_catalog: self.table_catalog.clone().expect("table catalog required for FTS scan"),
                         });
                     }
+                    if let Some(ref pred) = s.predicate {
+                        scan = scan.with_predicate(pred.clone());
+                        scan = scan.with_evaluator(Arc::new(Mutex::new(ExpressionEvaluator::new(self.function_registry.clone().unwrap()))));
+                    }
                     let mut result = scan.execute(current.clone())?;
                     let prefix = s.alias.as_ref().unwrap_or(&s.table_name);
 
@@ -1176,7 +1180,7 @@ mod tests {
     use kuzu_storage::table::ColumnDefinition;
 
     fn make_scan_op() -> LogicalOperator {
-        LogicalOperator::ScanNode(kuzu_planner::logical_operator::LogicalScanNode {
+        LogicalOperator::ScanNode(kuzu_planner::logical_operator::LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -1222,12 +1226,12 @@ mod tests {
             catalog.create_node_table(
                 "Person".into(),
                 vec![
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "name".into(),
                         logical_type: LogicalTypeID::String,
                         is_primary_key: true,
                     },
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "age".into(),
                         logical_type: LogicalTypeID::Int64,
                         is_primary_key: false,
@@ -1731,12 +1735,12 @@ mod tests {
             ],
         ];
         let columns = vec![
-            ColumnDefinition {
+            ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "id".into(),
                 logical_type: LogicalTypeID::InternalID,
                 is_primary_key: false,
             },
-            ColumnDefinition {
+            ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "val".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
@@ -2511,7 +2515,7 @@ mod tests {
         use kuzu_planner::logical_operator::{LogicalHashJoin, LogicalOperator, LogicalScanNode};
         use kuzu_storage::table::{ColumnDefinition, TableCatalog};
 
-        let col_id = ColumnDefinition {
+        let col_id = ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
             name: "id".into(),
             logical_type: LogicalTypeID::Int64,
             is_primary_key: true,
@@ -2556,7 +2560,7 @@ mod tests {
         );
         let plan = vec![LogicalOperator::HashJoin(LogicalHashJoin {
             join_keys: vec![join_key],
-            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "A".into(),
                 table_id: 1,
                 alias: Some("a".into()),
@@ -2564,7 +2568,7 @@ mod tests {
                 cardinality: 2,
                 fts_query: None,
             })),
-            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "B".into(),
                 table_id: 2,
                 alias: Some("b".into()),

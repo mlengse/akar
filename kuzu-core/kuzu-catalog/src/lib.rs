@@ -1088,14 +1088,14 @@ mod tests {
                 logical_type: LogicalTypeID::String,
                 is_primary_key: true,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             },
             CatalogColumn {
                 name: "age".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             },
         ]
     }
@@ -1121,7 +1121,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             }],
         );
         assert!(matches!(result, CatalogResult::Created { .. }));
@@ -1353,14 +1353,14 @@ mod tests {
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                     default_value: None,
-                    compression: None,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
                 CatalogColumn {
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: false,
                     default_value: None,
-                    compression: None,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
             ],
             "duckdb".into(),
@@ -1387,7 +1387,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             }],
             "postgres".into(),
         );
@@ -1452,14 +1452,14 @@ mod tests {
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                     default_value: None,
-                    compression: None,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
                 CatalogColumn {
                     name: "b".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: false,
                     default_value: None,
-                    compression: None,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
             ],
             "duckdb".into(),
@@ -1481,7 +1481,7 @@ mod tests {
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             },
         );
         assert!(result.is_err());
@@ -1498,7 +1498,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
-                compression: None,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             }],
             "duckdb".into(),
         );

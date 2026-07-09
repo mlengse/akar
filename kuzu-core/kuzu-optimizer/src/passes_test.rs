@@ -15,7 +15,7 @@ mod tests {
     use kuzu_planner::logical_operator::*;
 
     fn make_scan(name: &str) -> LogicalOperator {
-        LogicalOperator::ScanNode(LogicalScanNode {
+        LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: name.into(),
             table_id: 0,
             alias: None,
@@ -94,6 +94,42 @@ mod tests {
         let filter_pos = result.iter().position(|op| matches!(op, LogicalOperator::Filter(_)));
         let scan_pos = result.iter().position(|op| matches!(op, LogicalOperator::ScanNode(_)));
         assert!(filter_pos.unwrap() < scan_pos.unwrap());
+    }
+
+    #[test]
+    fn test_predicate_push_down() {
+        let plan = vec![make_filter(), make_scan("Person"), make_projection()];
+        let pass = PredicatePushDown;
+        let result = pass.apply(&plan);
+        // Filter should be merged into ScanNode
+        assert_eq!(result.len(), 2);
+        assert!(matches!(&result[0], LogicalOperator::ScanNode(s) if s.predicate.is_some()));
+        assert!(matches!(&result[1], LogicalOperator::Projection(_)));
+    }
+
+    #[test]
+    fn test_predicate_push_down_no_filter() {
+        let plan = vec![make_scan("Person"), make_projection()];
+        let pass = PredicatePushDown;
+        let result = pass.apply(&plan);
+        // No filter to push, plan unchanged
+        assert_eq!(result.len(), 2);
+        assert!(matches!(&result[0], LogicalOperator::ScanNode(s) if s.predicate.is_none()));
+    }
+
+    #[test]
+    fn test_predicate_push_down_skip_existing_predicate() {
+        let mut scan_with_pred = make_scan("Person");
+        if let LogicalOperator::ScanNode(ref mut s) = scan_with_pred {
+            s.predicate = Some(Expression::Constant(Constant::Bool(true)));
+        }
+        let plan = vec![make_filter(), scan_with_pred, make_projection()];
+        let pass = PredicatePushDown;
+        let result = pass.apply(&plan);
+        // Scan already has predicate, so Filter should NOT be merged
+        assert_eq!(result.len(), 3);
+        assert!(matches!(result[0], LogicalOperator::Filter(_)));
+        assert!(matches!(&result[1], LogicalOperator::ScanNode(s) if s.predicate.is_some()));
     }
 
     // ==================== Projection Push-Down Tests ====================
@@ -420,7 +456,7 @@ mod tests {
         // Build a small tree: HashJoin(ScanNode("A"), ScanNode("B"))
         let mut root = LogicalOperator::HashJoin(LogicalHashJoin {
             join_keys: vec![],
-            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            build_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "A".into(),
                 table_id: 0,
                 alias: None,
@@ -428,7 +464,7 @@ mod tests {
                 cardinality: 0,
                 fts_query: None,
             })),
-            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            probe_side: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "B".into(),
                 table_id: 1,
                 alias: None,
@@ -461,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_cardinality_estimation_scan_node() {
-        let mut root = LogicalOperator::ScanNode(LogicalScanNode {
+        let mut root = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: None,
@@ -483,7 +519,7 @@ mod tests {
         let mut root = LogicalOperator::Aggregate(LogicalAggregate {
             group_by: vec![],
             aggregates: vec![],
-            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "T".into(),
                 table_id: 0,
                 alias: None,
@@ -510,7 +546,7 @@ mod tests {
         let mut root = LogicalOperator::Limit(LogicalLimit {
             limit: 10,
             offset: 0,
-            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "T".into(),
                 table_id: 0,
                 alias: None,
@@ -534,7 +570,7 @@ mod tests {
     #[test]
     fn test_cardinality_estimation_cross_product() {
         let mut root = LogicalOperator::CrossProduct(LogicalCrossProduct {
-            left: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            left: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "A".into(),
                 table_id: 0,
                 alias: None,
@@ -542,7 +578,7 @@ mod tests {
                 cardinality: 0,
                 fts_query: None,
             })),
-            right: Box::new(LogicalOperator::ScanNode(LogicalScanNode {
+            right: Box::new(LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "B".into(),
                 table_id: 1,
                 alias: None,
@@ -574,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_agg_key_dependency_pk_only() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -609,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_agg_key_dependency_no_pk_in_keys() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -643,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_agg_key_dependency_non_property_keys_unchanged() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -674,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_agg_key_dependency_single_key_unchanged() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -715,7 +751,7 @@ mod tests {
                 )),
                 Box::new(Expression::Constant(Constant::Integer(25))),
             ),
-            children: vec![LogicalOperator::ScanNode(LogicalScanNode {
+            children: vec![LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
                 table_name: "User".into(),
                 table_id: 1,
                 alias: Some("a".into()),
@@ -726,7 +762,7 @@ mod tests {
             cardinality: 10,
         });
 
-        let probe_side = LogicalOperator::ScanNode(LogicalScanNode {
+        let probe_side = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "User".into(),
             table_id: 1,
             alias: Some("a".into()),
@@ -768,7 +804,7 @@ mod tests {
 
     #[test]
     fn test_sip_optimization_no_filter_no_semi_masker() {
-        let build_side = LogicalOperator::ScanNode(LogicalScanNode {
+        let build_side = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "User".into(),
             table_id: 1,
             alias: Some("a".into()),
@@ -777,7 +813,7 @@ mod tests {
             fts_query: None,
         });
 
-        let probe_side = LogicalOperator::ScanNode(LogicalScanNode {
+        let probe_side = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Post".into(),
             table_id: 2,
             alias: Some("p".into()),

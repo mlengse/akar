@@ -1007,12 +1007,12 @@ mod tests {
             1,
             "Person".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: true,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "age".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
@@ -1029,12 +1029,12 @@ mod tests {
             1,
             "Person".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: true,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "age".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
@@ -1058,7 +1058,7 @@ mod tests {
         let mut table = NodeTable::new(
             1,
             "T".into(),
-            vec![ColumnDefinition {
+            vec![ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "val".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
@@ -1079,12 +1079,12 @@ mod tests {
             1,
             "T".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "x".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "y".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
@@ -1105,7 +1105,7 @@ mod tests {
         let mut table = NodeTable::new(
             1,
             "T".into(),
-            vec![ColumnDefinition {
+            vec![ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "v".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
@@ -1136,12 +1136,12 @@ mod tests {
             0,
             1,
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "since".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "weight".into(),
                     logical_type: LogicalTypeID::Double,
                     is_primary_key: false,
@@ -1305,7 +1305,7 @@ mod tests {
         let cat = TableCatalog::new();
         let node_table = cat.create_node_table(
             "Person".into(),
-            vec![ColumnDefinition {
+            vec![ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "id".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: true,
@@ -1317,7 +1317,7 @@ mod tests {
             "Knows".into(),
             0,
             1,
-            vec![ColumnDefinition {
+            vec![ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "since".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,

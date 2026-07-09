@@ -22,6 +22,12 @@ pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Sen
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
 
 /// Evaluates expressions against DataChunks using the function registry.
+impl std::fmt::Debug for ExpressionEvaluator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExpressionEvaluator").finish()
+    }
+}
+
 pub struct ExpressionEvaluator {
     registry: Arc<Mutex<FunctionRegistry>>,
     /// Optional callback to execute subqueries at evaluation time.

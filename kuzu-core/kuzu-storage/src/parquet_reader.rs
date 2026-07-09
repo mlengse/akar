@@ -571,25 +571,25 @@ mod tests {
 
     fn test_schema() -> Vec<CatalogColumn> {
         vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: true,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "age".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "score".into(),
                 logical_type: LogicalTypeID::Double,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "active".into(),
                 logical_type: LogicalTypeID::Bool,
                 is_primary_key: false,
@@ -673,7 +673,7 @@ mod tests {
         .unwrap();
         let path = write_parquet_batch(&dir, "test.parquet", &batch);
 
-        let columns = vec![CatalogColumn {
+        let columns = vec![CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
             name: "missing_col".into(),
             logical_type: LogicalTypeID::Int64,
             is_primary_key: false,
@@ -701,7 +701,7 @@ mod tests {
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(BooleanArray::from(vec![true]))]).unwrap();
         let path = write_parquet_batch(&dir, "mismatch.parquet", &batch);
 
-        let columns = vec![CatalogColumn {
+        let columns = vec![CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
             name: "val".into(),
             logical_type: LogicalTypeID::Int64,
             is_primary_key: false,
@@ -915,13 +915,13 @@ mod tests {
         let parquet_path = write_parquet_batch(&dir, "nulls.parquet", &batch);
 
         let columns = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "age".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
@@ -969,25 +969,25 @@ mod tests {
         let parquet_path = write_parquet_batch(&dir, "uints.parquet", &batch);
 
         let columns = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "small".into(),
                 logical_type: LogicalTypeID::UInt8,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "medium".into(),
                 logical_type: LogicalTypeID::UInt32,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "large".into(),
                 logical_type: LogicalTypeID::UInt64,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "temp".into(),
                 logical_type: LogicalTypeID::Float,
                 is_primary_key: false,

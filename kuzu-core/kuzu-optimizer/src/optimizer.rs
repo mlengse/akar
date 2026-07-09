@@ -24,29 +24,31 @@ impl Optimizer {
             Box::new(RemoveUnnecessaryOperators),
             // Pass 2: Push filters toward scan nodes (reduces intermediate rows)
             Box::new(FilterPushDown),
-            // Pass 3: Remove unused columns from scans (reduces I/O)
+            // Pass 3: Push predicate into ScanNode (reduces I/O)
+            Box::new(PredicatePushDown),
+            // Pass 4: Remove unused columns from scans (reduces I/O)
             Box::new(ProjectionPushDown),
-            // Pass 4: Fold constant expressions
+            // Pass 5: Fold constant expressions
             Box::new(ConstantFolding),
-            // Pass 5: Detect aggregate functions in projections
+            // Pass 6: Detect aggregate functions in projections
             Box::new(AggregateDetection),
-            // Pass 6: Reorder joins for efficiency
+            // Pass 7: Reorder joins for efficiency
             Box::new(JoinOptimization),
-            // Pass 7: Detect and combine top-k patterns (ORDER BY + LIMIT)
+            // Pass 8: Detect and combine top-k patterns (ORDER BY + LIMIT)
             Box::new(TopKOptimization),
-            // Pass 8: Detect vector similarity search patterns and use index
+            // Pass 9: Detect vector similarity search patterns and use index
             Box::new(VectorSimilarityDetection),
-            // Pass 9: Detect range scans on PK columns with ART index
+            // Pass 10: Detect range scans on PK columns with ART index
             Box::new(ArtRangeScanDetection),
-            // Pass 10: Push Limit below Filter/Projection (reduces data early)
+            // Pass 11: Push Limit below Filter/Projection (reduces data early)
             Box::new(LimitPushDown),
-            // Pass 11: Eliminate duplicate expressions in projections
+            // Pass 12: Eliminate duplicate expressions in projections
             Box::new(CommonSubexpressionElimination),
-            // Pass 12: Push ORDER BY below UNION ALL (Ladybug)
+            // Pass 13: Push ORDER BY below UNION ALL (Ladybug)
             Box::new(OrderByPushDown),
-            // Pass 13: Deduplicate consecutive UNWIND (Ladybug)
+            // Pass 14: Deduplicate consecutive UNWIND (Ladybug)
             Box::new(UnwindDedup),
-            // Pass 14: Replace ScanRel+COUNT with CSR metadata (Ladybug)
+            // Pass 15: Replace ScanRel+COUNT with CSR metadata (Ladybug)
             Box::new(CountRelTable),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
@@ -73,6 +75,7 @@ impl Optimizer {
         let passes: Vec<Box<dyn OptimizationPass>> = vec![
             Box::new(RemoveUnnecessaryOperators),
             Box::new(FilterPushDown),
+            Box::new(PredicatePushDown),
             Box::new(ProjectionPushDown),
             Box::new(ConstantFolding),
             Box::new(AggregateDetection),
@@ -166,7 +169,8 @@ mod tests {
         assert!(names.contains(&"order_by_push_down"));
         assert!(names.contains(&"unwind_dedup"));
         assert!(names.contains(&"count_rel_table"));
-        assert_eq!(names.len(), 21);
+        assert!(names.contains(&"predicate_push_down"));
+        assert_eq!(names.len(), 22);
     }
 
     #[test]
@@ -179,7 +183,7 @@ mod tests {
     #[test]
     fn test_optimizer_preserves_valid_plan() {
         use kuzu_planner::logical_operator::*;
-        let plan = vec![LogicalOperator::ScanNode(LogicalScanNode {
+        let plan = vec![LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),

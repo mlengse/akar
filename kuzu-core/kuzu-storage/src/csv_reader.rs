@@ -817,25 +817,25 @@ mod tests {
 
     fn test_schema() -> Vec<CatalogColumn> {
         vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: true,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "age".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "score".into(),
                 logical_type: LogicalTypeID::Double,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "active".into(),
                 logical_type: LogicalTypeID::Bool,
                 is_primary_key: false,
@@ -1026,19 +1026,19 @@ mod tests {
         .unwrap();
 
         let schema = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "birth".into(),
                 logical_type: LogicalTypeID::Date,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "updated".into(),
                 logical_type: LogicalTypeID::Timestamp,
                 is_primary_key: false,
@@ -1081,13 +1081,13 @@ mod tests {
         .unwrap();
 
         let schema = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "duration".into(),
                 logical_type: LogicalTypeID::Interval,
                 is_primary_key: false,
@@ -1126,19 +1126,19 @@ mod tests {
         .unwrap();
 
         let schema = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "tags".into(),
                 logical_type: LogicalTypeID::List,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "metadata".into(),
                 logical_type: LogicalTypeID::Struct,
                 is_primary_key: false,
@@ -1176,13 +1176,13 @@ mod tests {
         std::fs::write(&csv_path, "name,data\nBlob1,\\xAA\\xBB\\xCC\\xDD\n").unwrap();
 
         let schema = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "name".into(),
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "data".into(),
                 logical_type: LogicalTypeID::Blob,
                 is_primary_key: false,
@@ -1213,19 +1213,19 @@ mod tests {
         std::fs::write(&csv_path, "small,medium,large\n100,1000,100000\n").unwrap();
 
         let schema = vec![
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "small".into(),
                 logical_type: LogicalTypeID::UInt8,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "medium".into(),
                 logical_type: LogicalTypeID::UInt32,
                 is_primary_key: false,
                 default_value: None,
             },
-            CatalogColumn {
+            CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "large".into(),
                 logical_type: LogicalTypeID::UInt64,
                 is_primary_key: false,

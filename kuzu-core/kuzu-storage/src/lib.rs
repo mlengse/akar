@@ -727,12 +727,12 @@ mod integration_tests {
         let mut table = sm.create_node_table(
             "Person".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: true,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "age".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
@@ -931,12 +931,12 @@ mod integration_tests {
             1,
             "BigTable".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "id".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "value".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
@@ -1124,12 +1124,12 @@ mod integration_tests {
             let mut table = sm.create_node_table(
                 "Person".into(),
                 vec![
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "name".into(),
                         logical_type: LogicalTypeID::String,
                         is_primary_key: true,
                     },
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "age".into(),
                         logical_type: LogicalTypeID::Int64,
                         is_primary_key: false,
@@ -1156,12 +1156,12 @@ mod integration_tests {
                 sm.table_catalog.create_node_table(
                     "Person".into(),
                     vec![
-                        ColumnDefinition {
+                        ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                             name: "name".into(),
                             logical_type: LogicalTypeID::String,
                             is_primary_key: true,
                         },
-                        ColumnDefinition {
+                        ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                             name: "age".into(),
                             logical_type: LogicalTypeID::Int64,
                             is_primary_key: false,
@@ -1216,12 +1216,12 @@ mod integration_tests {
             sm.create_node_table(
                 "Person".into(),
                 vec![
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "name".into(),
                         logical_type: LogicalTypeID::String,
                         is_primary_key: true,
                     },
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "age".into(),
                         logical_type: LogicalTypeID::Int64,
                         is_primary_key: false,
@@ -1385,12 +1385,12 @@ mod integration_tests {
             let table = sm.table_catalog.create_node_table(
                 "Person".into(),
                 vec![
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "name".into(),
                         logical_type: LogicalTypeID::String,
                         is_primary_key: true,
                     },
-                    ColumnDefinition {
+                    ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                         name: "age".into(),
                         logical_type: LogicalTypeID::Int64,
                         is_primary_key: false,
@@ -1476,12 +1476,12 @@ mod integration_tests {
         sm.create_node_table(
             "Item".into(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: true,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "price".into(),
                     logical_type: LogicalTypeID::Double,
                     is_primary_key: false,
@@ -1536,12 +1536,12 @@ mod integration_tests {
             0,
             db_path.to_string(),
             vec![
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "id".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: true,
                 },
-                ColumnDefinition {
+                ColumnDefinition { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "value".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,

@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_flatten_join_plan() {
-        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "T".into(),
             table_id: 0,
             alias: None,
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_flatten_cross_product() {
-        let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan1 = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "A".into(),
             table_id: 0,
             alias: None,
@@ -355,7 +355,7 @@ mod tests {
             cardinality: 0,
             fts_query: None,
         });
-        let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
+        let scan2 = LogicalOperator::ScanNode(LogicalScanNode { predicate: None,
             table_name: "B".into(),
             table_id: 1,
             alias: None,

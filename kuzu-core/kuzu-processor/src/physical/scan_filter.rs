@@ -29,6 +29,7 @@ pub struct PhysicalScan {
     pub mask_id_column: usize,
     pub fts_query: Option<PhysicalFtsScan>,
     pub predicate: Option<Expression>,
+    pub evaluator: Option<Arc<Mutex<ExpressionEvaluator>>>,
 }
 
 impl PhysicalScan {
@@ -44,6 +45,7 @@ impl PhysicalScan {
             mask_id_column: 0,
             fts_query: None,
             predicate: None,
+            evaluator: None,
         }
     }
 
@@ -75,6 +77,11 @@ impl PhysicalScan {
 
     pub fn with_predicate(mut self, predicate: Expression) -> Self {
         self.predicate = Some(predicate);
+        self
+    }
+
+    pub fn with_evaluator(mut self, evaluator: Arc<Mutex<ExpressionEvaluator>>) -> Self {
+        self.evaluator = Some(evaluator);
         self
     }
 
@@ -329,14 +336,16 @@ impl PhysicalOperatorExec for PhysicalScan {
             // 1. Materialize predicate columns
             let mut pred_chunk_fields = Vec::new();
             let mut pred_chunk_names = Vec::new();
-            for (i, &col_idx) in cols_to_scan.iter().enumerate() {
-                if col_idx >= data.len() { continue; }
-                if let Some(col_def) = self.table_columns.get(col_idx) {
-                    if predicate_col_names.contains(&col_def.name) || self.predicate.is_none() {
-                        let v = materialize_col(col_idx, &rows_to_emit);
-                        pred_chunk_fields.push(v);
-                        pred_chunk_names.push(col_def.name.clone());
-                        fields[i] = Some(true); // Mark as materialized (dummy bool, we'll replace with actual fields later if we need to reconstruct)
+            if self.predicate.is_some() {
+                for (i, &col_idx) in cols_to_scan.iter().enumerate() {
+                    if col_idx >= data.len() { continue; }
+                    if let Some(col_def) = self.table_columns.get(col_idx) {
+                        if predicate_col_names.contains(&col_def.name) {
+                            let v = materialize_col(col_idx, &rows_to_emit);
+                            pred_chunk_fields.push(v);
+                            pred_chunk_names.push(col_def.name.clone());
+                            fields[i] = Some(true); // Mark as materialized temporarily for evaluation
+                        }
                     }
                 }
             }
@@ -345,7 +354,8 @@ impl PhysicalOperatorExec for PhysicalScan {
             let mut final_fields = Vec::new();
             if let Some(ref pred) = self.predicate {
                 let pred_chunk = DataChunk::new(pred_chunk_fields).with_names(pred_chunk_names.clone());
-                let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, None).unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
+                let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap());
+                let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref()).unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
                 
                 let mut filtered_rows = Vec::with_capacity(rows_to_emit.len());
                 for (i, &keep) in mask.iter().enumerate() {
@@ -354,12 +364,10 @@ impl PhysicalOperatorExec for PhysicalScan {
                     }
                 }
                 rows_to_emit = filtered_rows;
-                valid_count = rows_to_emit.len();
                 
-                // Re-materialize the predicate columns with the filtered rows so they match the final size
-                // (Alternatively we could slice the vectors, but re-materializing is simpler for now)
+                // We re-materialize ALL columns with the final rows_to_emit
                 for i in 0..fields.len() {
-                    fields[i] = None; // Reset so everything is materialized with the final rows_to_emit
+                    fields[i] = None; 
                 }
             }
 

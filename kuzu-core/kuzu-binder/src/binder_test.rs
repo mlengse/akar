@@ -17,19 +17,19 @@ mod tests {
         catalog.create_node_table(
             "Person".into(),
             vec![
-                CatalogColumn {
+                CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: true,
                     default_value: None,
                 },
-                CatalogColumn {
+                CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "age".into(),
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                     default_value: None,
                 },
-                CatalogColumn {
+                CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                     name: "score".into(),
                     logical_type: LogicalTypeID::Double,
                     is_primary_key: false,
@@ -41,7 +41,7 @@ mod tests {
             "Knows".into(),
             0,
             0,
-            vec![CatalogColumn {
+            vec![CatalogColumn { compression: kuzu_common::enums::CompressionType::Uncompressed,
                 name: "since".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
