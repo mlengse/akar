@@ -27,24 +27,12 @@ Now let me update the physical operators table in §1.5 and the phase table.
   - **P-MOD2B — processor.rs split:** 2,755→6 modules (mod, join_helpers, union_helpers, chunk_helpers, projection_helper, plan_serializer). 960 tests pass, clippy clean.
   - **P16.1 — PhysicalAccumulate:** Real materialize (concatenates all input chunks into one). Previously pass-through.
   - **P16.1 — PhysicalUnion:** Kept (not used — Union handled inline in execute_internal).
-  - **P16.2a — ResultCollector:** Real consolidate (merges multiple chunks into one). Previously pass-through.
+  - **P16.2a — ResultCollector/Profile:** Real consolidate and timings.
+  - **P16.2 — Missing physical ops implementations:** `PrimaryKeyScan`, `PackedExtend`, `Partitioner`, `AggregateScan`, `AggregateFinalize` (Split Aggregation), `PathPropertyProbe` completed.
   - **P10.3/P14.4-6:** Confirmed as intentionally deferred (no functional gap / P3 low priority).
-- Active: Continuing P16 physical operator implementations.
+- Active: Preparing for Phase 17 (Advanced Storage Features).
 - Blocked: None.
 
 ## Next Move
-1. Implement remaining P16.2 operators: Profile (timing wrapper), DummySink/DummySimpleSink (already correct as no-ops), PackedExtend/Partitioner/PathPropertyProbe/PrimaryKeyScan/AggregateFinalize (deeper architecture work).
-2. Run `cargo test --workspace` and `cargo clippy --workspace -- -D warnings` after each change.
-3. Keep STATUS.md markdown synced with each implementation step.
-
-Remaining P16.2 stubs all require architectural integration:
-
-| Operator | What's needed |
-|----------|--------------|
-| `PackedExtend` | Adjacency list resolution for multi-rel extends |
-| `Partitioner` | Morsel-driven parallelism framework |
-| `PathPropertyProbe` | Storage engine property resolution |
-| `PrimaryKeyScan` | ART index integration |
-| `AggregateFinalize/Scan` | Split aggregate architecture (partial→finalize) |
-
-These aren't simple stubs — each requires deeper integration with the execution/storage engine. Want to tackle any of these, pivot to another area (e.g., P10.3 STANDALONE_CALL test, optimizer passes, more aggregate/table functions), or stop here?
+1. Move to Phase 17: Implement advanced storage features (lazy segment scanners, float compression, GDS algorithms).
+2. Keep STATUS.md markdown synced with each implementation step.

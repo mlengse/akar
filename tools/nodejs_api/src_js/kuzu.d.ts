@@ -387,7 +387,7 @@ export class QueryResult {
 /**
  * Default export for the Kuzu module.
  */
-declare const kuzu: {
+declare let kuzu: {
     Database: typeof Database;
     Connection: typeof Connection;
     PreparedStatement: typeof PreparedStatement;

@@ -148,15 +148,128 @@ fn decompress_integer_bitpacking(data: &[u8], expected_size: usize) -> Vec<u8> {
 }
 
 // =====================================================================
-// Float compression — store raw bytes (placeholder for future delta/offset)
+// Float compression (Delta/Offset + Integer Bitpacking)
 // =====================================================================
-//
-/// Float compression: currently stores the raw bytes with a header.
-/// Format: [value_size: u8][num_values: u32][raw_value_bytes...]
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatCompressionStrategy {
+    Raw = 0,
+    Delta = 1,
+    Offset = 2,
+}
+
+/// Float compression: uses integer bitpacking on delta/offset representations.
+/// Format: [value_size: u8][num_values: u32][strategy: u8][payload]
 pub fn compress_float(data: &[u8], num_values: usize, value_size: usize) -> CompressedChunk {
-    let mut compressed = Vec::with_capacity(5 + data.len());
+    if num_values == 0 || (value_size != 4 && value_size != 8) {
+        return compress_float_raw(data, num_values, value_size);
+    }
+    
+    let mut ints_u32 = Vec::new();
+    let mut ints_u64 = Vec::new();
+    
+    if value_size == 4 {
+        ints_u32.reserve(num_values);
+        let mut offset = 0;
+        for _ in 0..num_values {
+            if offset + 4 > data.len() { break; }
+            ints_u32.push(u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()));
+            offset += 4;
+        }
+    } else {
+        ints_u64.reserve(num_values);
+        let mut offset = 0;
+        for _ in 0..num_values {
+            if offset + 8 > data.len() { break; }
+            ints_u64.push(u64::from_le_bytes(data[offset..offset+8].try_into().unwrap()));
+            offset += 8;
+        }
+    }
+    
+    let actual_values = if value_size == 4 { ints_u32.len() } else { ints_u64.len() };
+    if actual_values == 0 {
+        return compress_float_raw(data, num_values, value_size);
+    }
+
+    let mut offset_data = Vec::with_capacity(actual_values * value_size);
+    let mut delta_data = Vec::with_capacity(actual_values * value_size);
+
+    if value_size == 4 {
+        let min_val = *ints_u32.iter().min().unwrap_or(&0);
+        for &v in &ints_u32 {
+            let diff = v.wrapping_sub(min_val);
+            offset_data.extend_from_slice(&diff.to_le_bytes());
+        }
+        
+        let mut prev = 0u32;
+        for (i, &v) in ints_u32.iter().enumerate() {
+            let diff = if i == 0 { v } else { v.wrapping_sub(prev) };
+            delta_data.extend_from_slice(&diff.to_le_bytes());
+            prev = v;
+        }
+    } else {
+        let min_val = *ints_u64.iter().min().unwrap_or(&0);
+        for &v in &ints_u64 {
+            let diff = v.wrapping_sub(min_val);
+            offset_data.extend_from_slice(&diff.to_le_bytes());
+        }
+        
+        let mut prev = 0u64;
+        for (i, &v) in ints_u64.iter().enumerate() {
+            let diff = if i == 0 { v } else { v.wrapping_sub(prev) };
+            delta_data.extend_from_slice(&diff.to_le_bytes());
+            prev = v;
+        }
+    }
+
+    let offset_chunk = compress_integer_bitpacking(&offset_data, actual_values, value_size);
+    let delta_chunk = compress_integer_bitpacking(&delta_data, actual_values, value_size);
+    
+    let raw_len = actual_values * value_size;
+    let offset_payload_len = value_size + offset_chunk.data.len().saturating_sub(5);
+    let delta_payload_len = delta_chunk.data.len().saturating_sub(5);
+    
+    let min_len = raw_len.min(offset_payload_len).min(delta_payload_len);
+    
+    let mut compressed = Vec::new();
     compressed.push(value_size as u8);
     compressed.extend_from_slice(&(num_values as u32).to_le_bytes());
+    
+    if min_len == raw_len {
+        compressed.push(FloatCompressionStrategy::Raw as u8);
+        compressed.extend_from_slice(&data[..raw_len]);
+    } else if min_len == offset_payload_len {
+        compressed.push(FloatCompressionStrategy::Offset as u8);
+        if value_size == 4 {
+            let min_val = *ints_u32.iter().min().unwrap();
+            compressed.extend_from_slice(&min_val.to_le_bytes());
+        } else {
+            let min_val = *ints_u64.iter().min().unwrap();
+            compressed.extend_from_slice(&min_val.to_le_bytes());
+        }
+        if offset_chunk.data.len() >= 5 {
+            compressed.extend_from_slice(&offset_chunk.data[5..]);
+        }
+    } else {
+        compressed.push(FloatCompressionStrategy::Delta as u8);
+        if delta_chunk.data.len() >= 5 {
+            compressed.extend_from_slice(&delta_chunk.data[5..]);
+        }
+    }
+    
+    CompressedChunk {
+        compression: CompressionType::Float,
+        data: compressed,
+        num_values,
+    }
+}
+
+fn compress_float_raw(data: &[u8], num_values: usize, value_size: usize) -> CompressedChunk {
+    let mut compressed = Vec::with_capacity(6 + data.len());
+    compressed.push(value_size as u8);
+    compressed.extend_from_slice(&(num_values as u32).to_le_bytes());
+    compressed.push(FloatCompressionStrategy::Raw as u8);
     let byte_count = num_values * value_size;
     compressed.extend_from_slice(&data[..byte_count.min(data.len())]);
 
@@ -168,18 +281,86 @@ pub fn compress_float(data: &[u8], num_values: usize, value_size: usize) -> Comp
 }
 
 fn decompress_float(data: &[u8], expected_size: usize) -> Vec<u8> {
-    if data.len() < 5 {
+    if data.len() < 6 {
         return Vec::new();
     }
     let value_size = data[0] as usize;
     let num_values = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
-    let byte_count = num_values * value_size;
-    let expected = expected_size.max(byte_count);
-    let mut result = vec![0u8; expected];
-    let avail = data.len().saturating_sub(5);
-    let copy = byte_count.min(avail);
-    result[..copy].copy_from_slice(&data[5..5 + copy]);
-    result
+    let strategy = data[5];
+    let expected = expected_size.max(num_values * value_size);
+    
+    if strategy == FloatCompressionStrategy::Raw as u8 {
+        let mut result = vec![0u8; expected];
+        let avail = data.len().saturating_sub(6);
+        let byte_count = num_values * value_size;
+        let copy = byte_count.min(avail);
+        result[..copy].copy_from_slice(&data[6..6 + copy]);
+        return result;
+    }
+    
+    let mut int_pack_data = Vec::new();
+    int_pack_data.push(value_size as u8);
+    int_pack_data.extend_from_slice(&(num_values as u32).to_le_bytes());
+    
+    if strategy == FloatCompressionStrategy::Offset as u8 {
+        let mut offset_idx = 6;
+        if offset_idx + value_size > data.len() {
+            return Vec::new();
+        }
+        let min_val_bytes = &data[offset_idx..offset_idx+value_size];
+        offset_idx += value_size;
+        int_pack_data.extend_from_slice(&data[offset_idx..]);
+        
+        let unpacked = decompress_integer_bitpacking(&int_pack_data, num_values * value_size);
+        let mut result = vec![0u8; expected];
+        if value_size == 4 {
+            let min_val = u32::from_le_bytes(min_val_bytes.try_into().unwrap());
+            for i in 0..num_values {
+                if i * 4 + 4 > unpacked.len() { break; }
+                let diff = u32::from_le_bytes(unpacked[i*4..i*4+4].try_into().unwrap());
+                let val = diff.wrapping_add(min_val);
+                result[i*4..i*4+4].copy_from_slice(&val.to_le_bytes());
+            }
+        } else {
+            let min_val = u64::from_le_bytes(min_val_bytes.try_into().unwrap());
+            for i in 0..num_values {
+                if i * 8 + 8 > unpacked.len() { break; }
+                let diff = u64::from_le_bytes(unpacked[i*8..i*8+8].try_into().unwrap());
+                let val = diff.wrapping_add(min_val);
+                result[i*8..i*8+8].copy_from_slice(&val.to_le_bytes());
+            }
+        }
+        return result;
+    }
+    
+    if strategy == FloatCompressionStrategy::Delta as u8 {
+        int_pack_data.extend_from_slice(&data[6..]);
+        let unpacked = decompress_integer_bitpacking(&int_pack_data, num_values * value_size);
+        
+        let mut result = vec![0u8; expected];
+        if value_size == 4 {
+            let mut prev = 0u32;
+            for i in 0..num_values {
+                if i * 4 + 4 > unpacked.len() { break; }
+                let diff = u32::from_le_bytes(unpacked[i*4..i*4+4].try_into().unwrap());
+                let val = if i == 0 { diff } else { prev.wrapping_add(diff) };
+                result[i*4..i*4+4].copy_from_slice(&val.to_le_bytes());
+                prev = val;
+            }
+        } else {
+            let mut prev = 0u64;
+            for i in 0..num_values {
+                if i * 8 + 8 > unpacked.len() { break; }
+                let diff = u64::from_le_bytes(unpacked[i*8..i*8+8].try_into().unwrap());
+                let val = if i == 0 { diff } else { prev.wrapping_add(diff) };
+                result[i*8..i*8+8].copy_from_slice(&val.to_le_bytes());
+                prev = val;
+            }
+        }
+        return result;
+    }
+    
+    Vec::new()
 }
 
 // =====================================================================
@@ -452,18 +633,61 @@ mod tests {
     // --- Float compression ---
 
     #[test]
-    fn test_float_batch_roundtrip() {
-        let values: Vec<f64> = vec![1.0, 3.15, -2.5, 0.0, 1e10];
+    fn test_float_batch_roundtrip_raw() {
+        // High variance, will likely use Raw
+        let values: Vec<f64> = vec![1.0, 3.15, -2.5, 0.0, 1e10, f64::MAX, f64::MIN];
         let value_size = 8;
         let mut data = Vec::with_capacity(values.len() * value_size);
         for v in &values {
             data.extend_from_slice(&v.to_le_bytes());
         }
         let chunk = compress(CompressionType::Float, &data, values.len());
+        assert_eq!(chunk.data[5], FloatCompressionStrategy::Raw as u8);
         let dec = decompress(&chunk, values.len() * value_size);
         for (i, v) in values.iter().enumerate() {
             let val = f64::from_le_bytes(dec[i * value_size..(i + 1) * value_size].try_into().unwrap());
-            assert!((val - v).abs() < 1e-10, "mismatch at index {}", i);
+            assert_eq!(val.to_bits(), v.to_bits(), "mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_float_batch_roundtrip_delta() {
+        // Linearly increasing, suitable for Delta compression
+        let mut values: Vec<f32> = Vec::new();
+        for i in 0..100 {
+            values.push(i as f32 * 1.5);
+        }
+        let value_size = 4;
+        let mut data = Vec::with_capacity(values.len() * value_size);
+        for v in &values {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let chunk = compress(CompressionType::Float, &data, values.len());
+        assert_eq!(chunk.data[5], FloatCompressionStrategy::Delta as u8);
+        assert!(chunk.data.len() < data.len() + 6);
+        let dec = decompress(&chunk, values.len() * value_size);
+        for (i, v) in values.iter().enumerate() {
+            let val = f32::from_le_bytes(dec[i * value_size..(i + 1) * value_size].try_into().unwrap());
+            assert_eq!(val.to_bits(), v.to_bits(), "mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_float_batch_roundtrip_offset() {
+        // Near values, suitable for Offset compression
+        let values: Vec<f64> = vec![1000.1, 1000.15, 1000.0, 1000.05, 1000.2];
+        let value_size = 8;
+        let mut data = Vec::with_capacity(values.len() * value_size);
+        for v in &values {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let chunk = compress(CompressionType::Float, &data, values.len());
+        // Could be offset or delta depending on sizes, both should compress well
+        assert!(chunk.data[5] == FloatCompressionStrategy::Offset as u8 || chunk.data[5] == FloatCompressionStrategy::Delta as u8);
+        let dec = decompress(&chunk, values.len() * value_size);
+        for (i, v) in values.iter().enumerate() {
+            let val = f64::from_le_bytes(dec[i * value_size..(i + 1) * value_size].try_into().unwrap());
+            assert_eq!(val.to_bits(), v.to_bits(), "mismatch at index {}", i);
         }
     }
 
