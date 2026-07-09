@@ -328,6 +328,26 @@ impl PhysicalOperatorExec for PhysicalScan {
 }
 
 
+// ==================== PathPropertyProbe ====================
+
+/// PathPropertyProbe — resolves properties on path-typed results.
+///
+/// In Kuzu, paths are often materialized lazily. This operator probes the
+/// node/rel tables to fetch the actual property values for paths.
+pub struct PhysicalPathPropertyProbe;
+
+impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
+    fn operator_type(&self) -> &str {
+        "path_property_probe"
+    }
+
+    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        // Currently acts as a pass-through since full path materialization
+        // requires integrating with the catalog and storage property scanners.
+        // The logical-to-physical mapper will instantiate this when encountering LogicalPathPropertyProbe.
+        Ok(input)
+    }
+}
 
 // ==================== ScanRel ====================
 

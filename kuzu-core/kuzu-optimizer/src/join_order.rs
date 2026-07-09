@@ -106,6 +106,8 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         LogicalOperator::ArtIndexRangeScan(_)
         | LogicalOperator::VectorSimilarityScan(_)
         | LogicalOperator::CopyFrom(_)
+        | LogicalOperator::PathPropertyProbe(..)
+        | LogicalOperator::Explain(_)
         | LogicalOperator::Delete(_)
         | LogicalOperator::Set(_)
         | LogicalOperator::OptionalMatch(_)

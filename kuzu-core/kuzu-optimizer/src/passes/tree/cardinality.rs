@@ -175,6 +175,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 | LogicalOperator::ImportDatabase(_)
                 | LogicalOperator::CreateFtsIndex(_)
                 | LogicalOperator::FtsScan(_)
+                | LogicalOperator::PathPropertyProbe(_)
                 | LogicalOperator::CountRelTable(_) => 1,
             };
             op.set_cardinality(card);

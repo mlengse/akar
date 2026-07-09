@@ -920,6 +920,18 @@ impl QueryProcessor {
                     // (Full Morsel-driven architecture requires rewriting execute_internal to pull morsels from Source operators).
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::PathPropertyProbe(p) => {
+                    let probe = crate::physical::scan_filter::PhysicalPathPropertyProbe;
+                    
+                    let input = if !p.children.is_empty() {
+                        self.execute_internal(&p.children, sip_masks)?
+                    } else {
+                        current
+                    };
+                    
+                    let result = probe.execute(input)?;
+                    intermediate_result = Some(result);
+                }
                 // DDL operators — produce a single-row success result
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)

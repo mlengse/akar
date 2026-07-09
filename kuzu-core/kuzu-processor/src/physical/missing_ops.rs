@@ -193,22 +193,6 @@ impl PhysicalOperatorExec for Partitioner {
 
 
 
-/// PathPropertyProbe — resolves properties on path-typed results.
-///
-/// Given a path (sequence of nodes and rels), probes each element's
-/// properties from storage. Currently acts as pass-through.
-pub struct PathPropertyProbe;
-
-impl PhysicalOperatorExec for PathPropertyProbe {
-    fn operator_type(&self) -> &str {
-        "path_property_probe"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
-    }
-}
-
 
 /// AggregateFinalize — finalizes a split aggregate computation.
 ///
