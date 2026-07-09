@@ -39,7 +39,7 @@ impl NodeSemiMask {
     }
 }
 
-pub trait PhysicalOperatorExec {
+pub trait PhysicalOperatorExec: Send + Sync {
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult;
     fn operator_type(&self) -> &str;
 }

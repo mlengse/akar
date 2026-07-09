@@ -141,7 +141,8 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::FtsScan(_)
                 | LogicalOperator::CountRelTable(_)
                 | LogicalOperator::BatchInsert(_)
-                | LogicalOperator::IndexLookup(_) => {}
+                | LogicalOperator::IndexLookup(_)
+                | LogicalOperator::Partitioner(_) => {}
             }
         });
     }

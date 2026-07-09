@@ -143,20 +143,20 @@ impl PhysicalOperatorExec for DummySimpleSink {
 /// The elapsed time is stored in `elapsed` field for later inspection
 /// via EXPLAIN ANALYZE or profiling output.
 pub struct Profile {
-    pub inner: Box<dyn PhysicalOperatorExec + Send>,
-    pub elapsed: std::cell::Cell<std::time::Duration>,
+    pub inner: Box<dyn PhysicalOperatorExec + Send + Sync>,
+    pub elapsed_nanos: std::sync::atomic::AtomicU64,
 }
 
 impl Profile {
-    pub fn new(inner: Box<dyn PhysicalOperatorExec + Send>) -> Self {
+    pub fn new(inner: Box<dyn PhysicalOperatorExec + Send + Sync>) -> Self {
         Self {
             inner,
-            elapsed: std::cell::Cell::new(std::time::Duration::ZERO),
+            elapsed_nanos: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
     pub fn elapsed_ns(&self) -> u64 {
-        self.elapsed.get().as_nanos() as u64
+        self.elapsed_nanos.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -169,7 +169,7 @@ impl PhysicalOperatorExec for Profile {
         let start = std::time::Instant::now();
         let result = self.inner.execute(input);
         let elapsed = start.elapsed();
-        self.elapsed.set(elapsed);
+        self.elapsed_nanos.fetch_add(elapsed.as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         result
     }
 }
@@ -224,21 +224,6 @@ impl PhysicalOperatorExec for PathPropertyProbe {
     }
 }
 
-/// PrimaryKeyScan — scans a table by primary key lookup.
-///
-/// Performs point lookups using the ART index for the given key values.
-/// Currently acts as pass-through; full implementation requires ART index integration.
-pub struct PrimaryKeyScan;
-
-impl PhysicalOperatorExec for PrimaryKeyScan {
-    fn operator_type(&self) -> &str {
-        "primary_key_scan"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
-    }
-}
 
 /// AggregateFinalize — finalizes a split aggregate computation.
 ///

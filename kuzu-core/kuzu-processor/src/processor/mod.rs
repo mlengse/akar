@@ -884,6 +884,23 @@ impl QueryProcessor {
                     let result = physical.execute(vec![])?;
                     intermediate_result = Some(result);
                 }
+                LogicalOperator::Partitioner(p) => {
+                    let partitioner = Partitioner;
+                    let input = current;
+                    
+                    // The goal of Partitioner is to take the stream of data and run the rest of the pipeline in parallel.
+                    // For now, we execute the partitioner node itself (which is just a pass-through).
+                    let _ = partitioner.execute(vec![])?;
+
+                    // To parallelize the child pipeline on chunks, we would normally use Rayon here.
+                    // But since execute_internal doesn't take input chunks directly (it reads from source nodes internally),
+                    // we just recursively execute the children sequentially for correctness during the initial wire-up.
+                    let result = self.execute_internal(&p.children, sip_masks)?;
+                    
+                    // We can use rayon to process the resulting chunks in parallel if we need to apply map operations here.
+                    // (Full Morsel-driven architecture requires rewriting execute_internal to pull morsels from Source operators).
+                    intermediate_result = Some(result);
+                }
                 // DDL operators — produce a single-row success result
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)

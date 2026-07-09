@@ -154,6 +154,9 @@ impl TreeOptimizationPass for CardinalityEstimation {
                     // SemiMasker passes through cardinality from its child
                     sm.children.first().map(|c| c.cardinality()).unwrap_or(1)
                 }
+                LogicalOperator::Partitioner(p) => {
+                    p.children.first().map(|c| c.cardinality()).unwrap_or(1)
+                }
                 // DDL operators produce exactly one row (success message)
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)

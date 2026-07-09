@@ -98,6 +98,11 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::Partitioner(p) => {
+            for child in &p.children {
+                collect_scans_recursive(child, scans);
+            }
+        }
         LogicalOperator::ArtIndexRangeScan(_)
         | LogicalOperator::VectorSimilarityScan(_)
         | LogicalOperator::CopyFrom(_)
