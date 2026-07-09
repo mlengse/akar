@@ -15,8 +15,6 @@ kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 tracing.workspace = true
-thiserror.workspace = true
-serde_json.workspace = true
 arrow = { workspace = true, optional = true }
 
 [lints]

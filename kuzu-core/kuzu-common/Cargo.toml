@@ -9,18 +9,9 @@ publish = false
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-bitflags.workspace = true
-bytes.workspace = true
-uuid.workspace = true
-time.workspace = true
-rust_decimal.workspace = true
-hashbrown.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]
-tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

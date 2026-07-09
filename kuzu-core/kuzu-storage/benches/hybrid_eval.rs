@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use kuzu_storage::csr::CsrIndex;
 use kuzu_storage::page::FileHandle;
 use std::path::PathBuf;
@@ -12,8 +12,8 @@ fn bench_csr_insert(c: &mut Criterion) {
         let mut csr = CsrIndex::new(file_handle);
 
         b.iter(|| {
-            let src = black_box(1);
-            let dst = black_box(2);
+            let src = std::hint::black_box(1);
+            let dst = std::hint::black_box(2);
             let _ = csr.add_edge(src, dst);
         });
     });

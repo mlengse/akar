@@ -1,6 +1,7 @@
 use crate::registry::*;
 use kuzu_common::types::Value;
 use md5::{Digest, Md5};
+use md5::digest::Output;
 use sha2::Sha256;
 use super::{get_string};
 
@@ -69,14 +70,14 @@ pub(crate) fn evaluate_hash(op: HashOp, args: &[Value]) -> Result<Value, String>
             let mut hasher = Md5::new();
             hasher.update(s.as_bytes());
             let result = hasher.finalize();
-            Ok(Value::String(format!("{:x}", result)))
+            Ok(Value::String(result.iter().map(|b| format!("{:02x}", b)).collect()))
         }
         HashOp::Sha256 => {
             let s = get_string(&args[0])?;
             let mut hasher = Sha256::new();
             hasher.update(s.as_bytes());
             let result = hasher.finalize();
-            Ok(Value::String(format!("{:x}", result)))
+            Ok(Value::String(result.iter().map(|b| format!("{:02x}", b)).collect()))
         }
         HashOp::Hash => {
             if args.is_empty() {

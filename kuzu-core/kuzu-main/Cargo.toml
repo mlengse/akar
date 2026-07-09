@@ -35,7 +35,6 @@ kuzu-planner = { path = "../kuzu-planner" }
 kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-processor = { path = "../kuzu-processor" }
 kuzu-function = { path = "../kuzu-function" }
-kuzu-graph = { path = "../kuzu-graph" }
 kuzu-extension = { path = "../kuzu-extension" }
 kuzu-json = { path = "../kuzu-json", optional = true }
 kuzu-fts = { path = "../kuzu-fts", optional = true }
@@ -52,14 +51,13 @@ kuzu-azure = { path = "../kuzu-azure", optional = true }
 kuzu-postgres = { path = "../kuzu-postgres", optional = true }
 kuzu-unity-catalog = { path = "../kuzu-unity-catalog", optional = true }
 tracing.workspace = true
-thiserror.workspace = true
 arrow = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
 csv.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-parquet = "53"
+parquet = "59.1.0"
 arrow = { workspace = true }
 criterion.workspace = true
 

@@ -7,13 +7,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
-kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
 tracing.workspace = true
-thiserror.workspace = true
 
 [features]
 default = []

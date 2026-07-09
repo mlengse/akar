@@ -7,9 +7,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
-kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-extension = { path = "../kuzu-extension" }
 tracing.workspace = true
 

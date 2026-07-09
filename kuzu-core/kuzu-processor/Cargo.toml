@@ -14,13 +14,11 @@ parquet = ["kuzu-storage/parquet"]
 kuzu-common = { path = "../kuzu-common" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 kuzu-planner = { path = "../kuzu-planner" }
-kuzu-optimizer = { path = "../kuzu-optimizer" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-storage = { path = "../kuzu-storage" }
 kuzu-parser = { path = "../kuzu-parser" }
 kuzu-fts = { path = "../kuzu-fts" }
 tracing.workspace = true
-thiserror.workspace = true
 hashbrown.workspace = true
 rayon.workspace = true
 

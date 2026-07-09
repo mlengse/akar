@@ -65,7 +65,7 @@ impl HttpRandomAccessReader {
         let resp = ureq::head(url)
             .call()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        let content_length = resp.header("Content-Length").and_then(|s| s.parse::<u64>().ok());
+        let content_length = resp.headers().get("Content-Length").and_then(|s| s.to_str().ok()).and_then(|s| s.parse::<u64>().ok());
         Ok(Self {
             url: url.to_string(),
             position: 0,
@@ -82,12 +82,11 @@ impl Read for HttpRandomAccessReader {
         let end = self.position + buf.len() as u64 - 1;
         let range_header = format!("bytes={}-{}", self.position, end);
         let resp = ureq::get(&self.url)
-            .set("Range", &range_header)
+            .header("Range", &range_header)
             .call()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        let mut reader = resp.into_reader();
-        let bytes_read = reader.read(buf)?;
+        let bytes_read = resp.into_body().read(buf)?;
         self.position += bytes_read as u64;
         Ok(bytes_read)
     }
@@ -166,11 +165,10 @@ impl Extension for HttpfsExtension {
                         return Err("http_get requires 1 argument (URL)".into());
                     }
                     if let Value::String(url) = &args[0] {
-                        let resp = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
-                        let body = resp
-                            .into_string()
+                        let body = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
+                        let body_text = body.into_body().read_to_string()
                             .map_err(|e| format!("Failed to read response body: {}", e))?;
-                        Ok(Value::String(body))
+                        Ok(Value::String(body_text))
                     } else {
                         Err("http_get argument must be a string".into())
                     }
@@ -191,7 +189,7 @@ impl Extension for HttpfsExtension {
                 }
                 if let Value::String(url) = &args[0] {
                     let resp = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
-                    let mut reader = resp.into_reader();
+                    let mut reader = resp.into_body();
                     let mut temp_file =
                         NamedTempFile::new().map_err(|e| format!("Failed to create temp file: {}", e))?;
                     std::io::copy(&mut reader, &mut temp_file)

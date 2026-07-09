@@ -7,17 +7,11 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-kuzu-common = { path = "../kuzu-common" }
-tracing.workspace = true
-thiserror.workspace = true
-serde.workspace = true
 pest = "2"
 pest_derive = "2"
 
 [dev-dependencies]
-tracing-subscriber.workspace = true
 pest = "2"
-pest_meta = "2"
 
 [lints]
 workspace = true

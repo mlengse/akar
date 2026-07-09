@@ -14,8 +14,6 @@ kuzu-main = { path = "../../kuzu-core/kuzu-main" }
 kuzu-common = { path = "../../kuzu-core/kuzu-common" }
 
 [dev-dependencies]
-anyhow = "1"
-tempfile = "3"
 
 [package.metadata.docs.rs]
 all-features = true

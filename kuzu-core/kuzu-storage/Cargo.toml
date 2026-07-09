@@ -18,7 +18,6 @@ kuzu-vector = { path = "../kuzu-vector" }
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 hashbrown.workspace = true
 bytes.workspace = true
 csv.workspace = true

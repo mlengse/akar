@@ -8,11 +8,10 @@ repository.workspace = true
 [dependencies]
 kuzu-main = { path = "../kuzu-main" }
 kuzu-common = { path = "../kuzu-common" }
-kuzu-parser = { path = "../kuzu-parser" }
 kuzu-catalog = { path = "../kuzu-catalog" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-rustyline = "12"
+rustyline = "18.0.1"
 dirs = "6.0.0"
 
 [lints]

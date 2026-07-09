@@ -8,10 +8,6 @@ publish = false
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
-kuzu-transaction = { path = "../kuzu-transaction" }
-tracing.workspace = true
-serde.workspace = true
-thiserror.workspace = true
 hashbrown.workspace = true
 
 [lints]

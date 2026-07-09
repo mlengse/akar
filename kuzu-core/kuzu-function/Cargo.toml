@@ -8,8 +8,6 @@ publish = false
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
-tracing.workspace = true
-thiserror.workspace = true
 hashbrown.workspace = true
 regex.workspace = true
 time.workspace = true

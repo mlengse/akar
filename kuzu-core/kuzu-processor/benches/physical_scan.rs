@@ -3,6 +3,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kuzu_common::types::{LogicalTypeID, Value};
 use kuzu_processor::physical_operator::{PhysicalOperatorExec, PhysicalScan};
+use kuzu_common::enums::CompressionType;
 use kuzu_storage::table::ColumnDefinition;
 
 /// Generate a Vec<Vec<Value>> table with num_rows rows and the given schema.
@@ -38,21 +39,25 @@ fn schema() -> Vec<ColumnDefinition> {
             name: String::from("id"),
             logical_type: LogicalTypeID::Int64,
             is_primary_key: true,
+            compression: CompressionType::Uncompressed,
         },
         ColumnDefinition {
             name: String::from("name"),
             logical_type: LogicalTypeID::String,
             is_primary_key: false,
+            compression: CompressionType::Uncompressed,
         },
         ColumnDefinition {
             name: String::from("score"),
             logical_type: LogicalTypeID::Double,
             is_primary_key: false,
+            compression: CompressionType::Uncompressed,
         },
         ColumnDefinition {
             name: String::from("active"),
             logical_type: LogicalTypeID::Bool,
             is_primary_key: false,
+            compression: CompressionType::Uncompressed,
         },
     ]
 }
