@@ -21,7 +21,7 @@ Berdasarkan audit ukuran file (2026-07-07), ada **7 file Rust >1500 lines** yang
 | 🔴 | `processor.rs` | 2.702 | 119,0 | kuzu-processor | Split helpers from pipeline |
 | 🟡 | `passes.rs` | 2.486 | 104,5 | kuzu-optimizer | Split by pass (flat/tree × 21) |
 | 🟡 | `parser.rs` | 2.183 | 84,2 | kuzu-parser | Split by statement type |
-| 🟡 | `binder.rs` | 1.667 | 72,9 | kuzu-binder | Split by bind_* category |
+| 🟡 | `binder.rs` | 1.667 | 72,9 | kuzu-binder | Split into binder/{mod,ddl,dml,helpers}.rs + test |
 
 ---
 
@@ -285,14 +285,13 @@ kuzu-parser/src/
 
 ```
 kuzu-binder/src/
-├── bind/
-│   ├── mod.rs              # bind() main entry
+├── binder/
+│   ├── mod.rs              # Binder struct + bind() main entry + helpers
 │   ├── ddl.rs              # bind_create_table, bind_drop_table, bind_alter, bind_copy_from, bind_copy_to, bind_create_sequence, bind_create_index, bind_explain, bind_export_db, bind_import_db
 │   ├── dml.rs              # bind_query, bind_match, bind_return, bind_create, bind_delete, bind_set, bind_merge, bind_foreach, bind_unwind, bind_with
-│   ├── expression.rs       # bind_expression, bind_function_call, bind_case, etc
 │   └── helpers.rs          # resolve_symbol, type_check, etc
 ├── bound_statement.rs      # Tetap
-├── binder.rs               # Binder struct (tetap atau digabung ke bind/mod.rs)
+├── binder_test.rs          # All tests extracted
 └── lib.rs
 ```
 
@@ -300,8 +299,11 @@ kuzu-binder/src/
 
 - `[x]` **6.1** Buat direktori `kuzu-binder/src/binder/`
 - `[x]` **6.2** `binder/mod.rs` — all Binder logic (Binder struct + impl + helpers)
-- `[x]` **6.3** `binder_test.rs` — all tests extracted
-- `[x]` **6.4** Verifikasi: `cargo test -p kuzu-binder` (14 passing, 0 failed)
+- `[x]` **6.3** `binder/ddl.rs` — DDL binding
+- `[x]` **6.4** `binder/dml.rs` — DML binding
+- `[x]` **6.5** `binder/helpers.rs` — shared helpers
+- `[x]` **6.6** `binder_test.rs` — all tests extracted
+- `[x]` **6.7** Verifikasi: `cargo test -p kuzu-binder` (14 passing, 0 failed)
 
 ---
 
@@ -325,12 +327,12 @@ cargo build --workspace --release
 
 | Phase | File | Lines | SP | Risk | Dependensi |
 |-------|------|-------|-----|------|------------|
-| **P-MOD1** | `scalar.rs` → 20+ files | 4.578 | **8** | Medium | Registry refactor |
+| **P-MOD1** | `scalar.rs` → scalar/{18 files} | 4.578 | **8** | Medium | Registry refactor |
 | **P-MOD2** | `physical_operator.rs` + `processor.rs` | 6.496 | **8** | Low | P-MOD1 |
 | **P-MOD3** | `connection.rs` → connection/ + test | 3.133 | **5** ✅ | Low | P-MOD2 |
 | **P-MOD4** | `passes.rs` → 17 files | 2.486 | **5** ✅ | Low | — |
 | **P-MOD5** | `parser.rs` → parser/ | 2.183 | **5** ✅ | Low | — |
-| **P-MOD6** | `binder.rs` → binder/ + test | 1.667 | **3** ✅ | Low | P-MOD5 |
+| **P-MOD6** | `binder.rs` → binder/{mod,ddl,dml,helpers}.rs + test | 1.667 | **3** ✅ | Low | P-MOD5 |
 | **Total** | **7 files → ~90 files modular** | **20.543** | **34** | | |
 
 ---
@@ -339,7 +341,7 @@ cargo build --workspace --release
 
 | # | Criteria |
 |---|----------|
-| 1 | Semua file >1500 lines sudah dipecah menjadi ≤500 lines per file |
+| 1 | Semua file >1500 lines sudah dipecah menjadi modul-modul terpisah |
 | 2 | Struktur direktori modular untuk semua 7 crate |
 | 3 | Semua 960 test tetap passing tanpa perubahan behavior |
 | 4 | Clippy `-D warnings` clean |

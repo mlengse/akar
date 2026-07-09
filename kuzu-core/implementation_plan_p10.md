@@ -2,7 +2,7 @@
 
 > **Status:** ✅ COMPLETE (P10.1–P10.6 done; P10.3 deferred) | **Completed:** 2026-07-07
 > **Prerequisites:** P9 (Production Hardening) — ✅ COMPLETE
-> **Audit:** `cargo test --workspace` → 960 passed, 0 failed
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed | 43 physical ops
 
 ---
 
@@ -93,10 +93,8 @@ Berdasarkan Ladybug Gap Analysis (§8 STATUS.md) + Architecture Audit (§9 STATU
   - File: `kuzu-function/src/scalar/utility.rs` + `registry.rs`, `UtilityOp::NullIf`
 - `[x]` **`count_if(condition)`** — aggregate: COUNT rows where condition is TRUE
   - File: `kuzu-function/src/aggregate/mod.rs` + `registry.rs`, `AggregateFunction::CountIf` + `AggValueState::CountIf`
-- `[ ]` **`export_csv(path, query)`** — table function
-  - Deferred (COPY TO already covers export use case)
-- `[ ]` **`export_parquet(path, query)`** — table function
-  - Deferred (COPY TO already covers export use case)
+- `[x]` **`export_csv(path, query)`** — table function (done in P11.2)
+- `[x]` **`export_parquet(path, query)`** — table function (done in P11.2)
 - `[x]` **Verifikasi** — `cargo test -p kuzu-function` (159 passing), `cargo clippy` clean
 
 ---

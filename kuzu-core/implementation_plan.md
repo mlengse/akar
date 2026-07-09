@@ -1,7 +1,7 @@
 # Kuzu Rust — Consolidated Implementation Plan
 
 > **Date:** 2026-07-08 | **Status:** P10 ✅ | P11 ✅ | P12 ✅ | P13 ✅ | P14 ✅ | P15 ✅
-> **Audit:** `cargo test --workspace` → 960 passed, 0 failed | 51 logical ops, 33 physical ops
+> **Audit:** `cargo test --workspace` → 960 passed, 0 failed | 51 logical ops, 43 physical ops
 > **Prerequisites:** P9 (Production Hardening) ✅, P10 (Critical C++ Parity) ✅
 
 ---
@@ -10,13 +10,15 @@
 
 | Phase | Content | Priority | SP | Status |
 |-------|---------|----------|-----|--------|
-| **P10** | COPY TO, TRANSACTION, EXTENSION, nullif, count_if | 🔴 P0 | 20 | ✅ COMPLETE |
+| **P10** | COPY TO, TRANSACTION, EXTENSION, nullif, count_if, physical_operator.rs refactor | 🔴 P0 | 23 | ✅ COMPLETE |
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P12** | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern funcs | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL, error() | 🟢 P2 | 13 | ✅ COMPLETE |
 | **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ✅ COMPLETE |
-| **Total** | | | **75** | |
+| **P16.1** | Real physical operator impls (Accumulate, Union, ResultCollector, Profile) | 🟡 P2 | 5 | ✅ DONE |
+| **P16.2** | Missing physical ops (PrimaryKeyScan, PackedExtend, AggFinalize, PathPropertyProbe) | 🟡 P2 | 5 | ✅ DONE |
+| **Total** | | | **85** | |
 
 ---
 

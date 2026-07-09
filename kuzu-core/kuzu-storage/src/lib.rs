@@ -24,6 +24,7 @@ pub mod parquet_reader;
 #[cfg(feature = "parquet")]
 pub mod parquet_writer;
 pub mod hyperloglog;
+pub mod lazy_scanner;
 pub mod npy_reader;
 pub mod predicate;
 pub mod shadow_file;

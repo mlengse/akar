@@ -1,16 +1,16 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-08 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅ complete)
-> **Hasil audit:** `cargo test --workspace` → **960 passed, 0 failed** | 29 crate, 189 file .rs, 61.432 LOC
+> **Tanggal:** 2026-07-09 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅ complete)
+> **Hasil audit:** `cargo test --workspace` → **960 passed, 0 failed** | 29 crate, 194 file .rs, 62.373 LOC
 
 ---
 
 ## 0. Ringkasan Eksekutif
 
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
-**29 crate**, **189 file .rs**, **61.432 LOC**.
+**29 crate**, **194 file .rs**, **62.373 LOC**.
 
-> **Modularization:** ALL PHASES COMPLETE — `scalar.rs` (4.578 → 20 files), `physical_operator.rs` (3.794 → 7 files), `connection.rs` (3.133 → 9 files), `passes.rs` (2.486 → 17 files), `parser.rs` (2.183 → 4 files + test), `binder.rs` (1.667 → 2 files).
+> **Modularization:** ALL PHASES COMPLETE — `scalar.rs` (4.578 → 18 files), `physical_operator.rs` (3.794 → 10 files), `connection.rs` (3.133 → 9 files), `passes.rs` (2.486 → 19 files), `parser.rs` (2.183 → 4 files + test), `binder.rs` (1.667 → 4 files + test).
 
 | Metrik | Nilai |
 |--------|-------|
@@ -22,7 +22,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
 | **Logical operators** | **51** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
-| **Physical operators** | **33** variants (C++ Vela: 65+) |
+| **Physical operators** | **43** variants (C++ Ladybug: 67) |
 | **BoundStatement variants** | **43** (termasuk BoundTransaction, BoundExtension, BoundAttachDatabase, BoundDetachDatabase, BoundUseDatabase, BoundLoadFrom, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
@@ -147,25 +147,26 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas:** ~90%
 
-### 1.4 Optimizer — 21 Passes (14 flat + 7 tree)
+### 1.4 Optimizer — 22 Passes (15 flat + 7 tree)
 
 #### Flat Passes
 | # | Pass | Status |
 |---|------|--------|
 | 1 | RemoveUnnecessaryOperators | ✅ |
 | 2 | FilterPushDown | ✅ |
-| 3 | ProjectionPushDown | ✅ |
-| 4 | ConstantFolding | ✅ |
-| 5 | AggregateDetection | ✅ |
-| 6 | JoinOptimization (greedy cardinality-aware) | ✅ |
-| 7 | TopKOptimization | ✅ |
-| 8 | VectorSimilarityDetection | ✅ |
-| 9 | ArtRangeScanDetection | ✅ |
-| 10 | LimitPushDown | ✅ |
-| 11 | CommonSubexpressionElimination | ✅ |
-| 12 | **OrderByPushDown** | ✅ Push ORDER BY below UNION ALL (Ladybug port) |
-| 13 | **UnwindDedup** | ✅ Dedup consecutive UNWIND operators (Ladybug port) |
-| 14 | **CountRelTable** | ✅ Replace ScanRel+COUNT with CSR metadata (Ladybug port) |
+| 3 | **PredicatePushDown** | ✅ Merge Filter predicates into ScanNode (reduces I/O) |
+| 4 | ProjectionPushDown | ✅ |
+| 5 | ConstantFolding | ✅ |
+| 6 | AggregateDetection | ✅ |
+| 7 | JoinOptimization (greedy cardinality-aware) | ✅ |
+| 8 | TopKOptimization | ✅ |
+| 9 | VectorSimilarityDetection | ✅ |
+| 10 | ArtRangeScanDetection | ✅ |
+| 11 | LimitPushDown | ✅ |
+| 12 | CommonSubexpressionElimination | ✅ |
+| 13 | **OrderByPushDown** | ✅ Push ORDER BY below UNION ALL (Ladybug port) |
+| 14 | **UnwindDedup** | ✅ Dedup consecutive UNWIND operators (Ladybug port) |
+| 15 | **CountRelTable** | ✅ Replace ScanRel+COUNT with CSR metadata (Ladybug port) |
 
 #### Tree Passes
 | # | Pass | Status |
@@ -178,7 +179,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | 6 | AggKeyDependency | ✅ |
 | 7 | CardinalityEstimation (static + StatsStore) | ✅ |
 
-**Total: 21 passes (14 flat + 7 tree) — melebihi C++ (17)**
+**Total: 22 passes (15 flat + 7 tree) — melebihi C++ (17)**
 
 **Paritas:** ~95%
 
@@ -215,8 +216,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | + DDL operators | ✅ |
 
 **Paritas esensial:** ~90% (semua operator inti query engine ter-port).
-**Paritas total:** ~55% (36 vs 65+ physical operators C++ — lihat §8 untuk gap analysis).
-> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (~6 files). ✅ Sudah direfactor (Phase 2).
+**Paritas total:** ~64% (43 vs 67 physical operators C++ — lihat §8 untuk gap analysis).
+> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (10 files). ✅ Sudah direfactor (Phase 2).
 
 ### 1.6 Storage Engine
 
@@ -500,13 +501,13 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 | # | Debt | Severity | File(s) | Rencana |
 |---|------|----------|---------|---------|
-| 1 | ~~**Monolith `scalar.rs`** (4.578 lines)~~ | ✅ DONE | ~~`kuzu-function/src/scalar.rs`~~ → `scalar/{18 files}` | P-MOD1: ✅ Complete |
+| 1 | ~~**Monolith `scalar.rs`** (4.578 lines)~~ | ✅ DONE | ~~`kuzu-function/src/scalar.rs`~~ → `scalar/{mod,arithmetic,array,blob,boolean,cast,comparison,date,hash,interval,list,map_struct,path,schema,string,union_funcs,utility,utils}.rs` | P-MOD1: ✅ Complete |
 | 2 | ~~**Monolith `physical_operator.rs`** (3.794 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/physical_operator.rs`~~ → `physical/{6 files}` (4-line re-export stub) | P-MOD2A: ✅ Complete |
 | 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
 | 4 | ~~**Monolith `processor.rs`** (2.755 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/processor.rs`~~ → `processor/{mod,join_helpers,union_helpers,chunk_helpers,projection_helper,plan_serializer}.rs` | P-MOD2B: ✅ Complete |
 | 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{11 files},tree/{8 files}}` | P-MOD4: ✅ Complete (Phase 4) |
 | 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
-| 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/mod.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
+| 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/{mod,ddl,dml,helpers}.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
 | 8 | ~~**TRANSACTION via string matching**~~ | ✅ DONE | ~~`kuzu-main/src/connection/query.rs`~~ → `Statement::Transaction` pipeline | P10.2 — ✅ Complete |
 | 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/ddl.rs` | P10.3 — Architectural cleanup; CALL already functional |
 | 10 | **Missing physical operators** | 🟡 MEDIUM → 🟢 LOW | `kuzu-processor/` | P12 — Partitioner, IndexLookup, BatchInsert, dll (TopK ✅ done) |
@@ -565,7 +566,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-08: **960 test lulus, 0 gagal**. **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
+- Per 2026-07-09: **960 test lulus, 0 gagal**. **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
 ---
@@ -582,11 +583,11 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | **Parser** | 30+ statement types | 58 | 0 (Rust EXCEEDS) | 100% |
 | **Binder** | 30+ bound statements | 43 | 0 (Rust EXCEEDS) | 100% |
 | **Planner** | 38 logical ops | 51 | 0 (Rust EXCEEDS) | 100% |
-| **Processor** | 65+ physical ops | 33 | ~32 | 51% |
+| **Processor** | 67 physical ops | 43 | ~24 | 64% |
 | **Optimizer** | 17 passes | 21 | 0 (+4 extras) | 100% |
 | **Functions** | 607 registrations | 234 | ~373 (many are overloads/aliases) | 39% |
 | **Storage** | 27 features | 22 | 5 | 81% |
-| **GDS** | 15+ algorithms | 14 | 3 (BC, CC, Triangle) | 93% |
+| **GDS** | 12+ algorithms | 10 | 2 (Closeness, Triangle) | 83% |
 | **Types** | 35+ types | 36 | 0 (Rust EXCEEDS) | 100% |
 
 ### 8.2 Critical Gaps — Status Update (2026-07-08)
@@ -638,7 +639,7 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 
 > **Catatan:** C++ Ladybug memiliki 607 registrasi fungsi (termasuk banyak overload dan alias). Rust memiliki 234 fungsi unik. Gap ~373 sebagian besar adalah overload yang tidak diperlukan untuk porting.
 
-### 8.5 Missing Storage Features (Updated — 2026-07-08)
+### 8.5 Missing Storage Features (Updated — 2026-07-09)
 
 | Feature | Priority | Status |
 |---------|----------|--------|
@@ -650,28 +651,26 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | Lazy segment scanner | P3 | ❌ Remaining |
 | Float compression (delta/offset) | P3 | ❌ Remaining |
 
-### 8.6 GDS Algorithm Status — Semua Algoritma Inti ✅ Selesai
-
-> **Catatan audit:** §1.8 dan §8.6 sebelumnya kontradiktif. Audit 2026-07-07 mengonfirmasi semua algoritma inti sudah diimplementasi di `kuzu-algo/src/lib.rs`.
+### 8.6 GDS Algorithm Status
 
 | Algorithm | Status | File |
 |-----------|--------|------|
-| Dijkstra (SSSP weighted) | ✅ `compute_weighted_shortest_path()` | `kuzu-algo/src/lib.rs:874` |
-| Louvain Community Detection | ✅ `compute_louvain()` | `kuzu-algo/src/lib.rs:558` |
-| K-Core Decomposition | ✅ `compute_k_core()` | `kuzu-algo/src/lib.rs:504` |
-| BFS (unweighted shortest path) | ✅ | `kuzu-algo/src/lib.rs` |
-| PageRank | ✅ | `kuzu-algo/src/lib.rs` |
-| WCC (Weakly Connected Components) | ✅ | `kuzu-algo/src/lib.rs` |
-| SCC (Tarjan + Kosaraju) | ✅ | `kuzu-algo/src/lib.rs` |
-| Spanning Forest | ✅ | `kuzu-algo/src/lib.rs` |
-| Betweenness Centrality | ❌ P3 | — |
-| Closeness Centrality | ❌ P3 | — |
-| Triangle Counting | ❌ P3 | — |
-| Label Propagation | ❌ P3 | — |
-| Random Walk | ❌ P3 | — |
-| Node2Vec / Embedding | ❌ P3 | — |
+| Dijkstra (SSSP weighted) | ✅ `compute_weighted_shortest_path()` | `kuzu-algo/src/lib.rs:992` |
+| Louvain Community Detection | ✅ `compute_louvain()` | `kuzu-algo/src/lib.rs:676` |
+| K-Core Decomposition | ✅ `compute_k_core()` | `kuzu-algo/src/lib.rs:509` |
+| BFS (unweighted shortest path) | ✅ `compute_shortest_path()` | `kuzu-algo/src/lib.rs:900` |
+| PageRank | ✅ `compute_page_rank()` | `kuzu-algo/src/lib.rs:339` |
+| WCC (Weakly Connected Components) | ✅ `compute_wcc()` | `kuzu-algo/src/lib.rs:350` |
+| SCC (Tarjan + Kosaraju) | ✅ `compute_scc_tarjan()` + `compute_scc_kosaraju()` | `kuzu-algo/src/lib.rs:362,441` |
+| Spanning Forest | ✅ `compute_spanning_forest()` | `kuzu-algo/src/lib.rs:794` |
+| Label Propagation | ✅ `compute_lpa()` | `kuzu-algo/src/lib.rs:562` |
+| Betweenness Centrality | ✅ `compute_betweenness_centrality()` (Brandes) | `kuzu-algo/src/lib.rs:616` |
+| Closeness Centrality | ❌ P17 | — |
+| Triangle Counting | ❌ P17 | — |
+| Random Walk | ❌ Deferred | — |
+| Node2Vec / Embedding | ❌ Deferred | — |
 
-**Paritas GDS:** 93% (8 major algorithms ported out of 14+ target)
+**Paritas GDS:** 83% (10 algorithms ported out of 12 target)
 
 ### 8.7 Missing Types — All Implemented ✅ (P15)
 
@@ -682,18 +681,40 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | `DTime` (time since midnight) | P3 | ✅ P15.3 — `LogicalTypeID::Time=45`, `Value::DTime(i64)` |
 | `Value::Union` variant | P3 | ✅ P15.4 — `Value::Union(String, Box<Value>)` |
 
-### 8.8 Missing Optimizer Passes — All Implemented ✅
+### 8.8 Optimizer Passes — All Implemented ✅
 
-| C++ Pass | Status |
-|-----------|--------|
-| `remove_unnecessary_join` | ✅ In `scan_ops.rs` as `RemoveUnnecessaryOperators` |
-| `remove_factorization` | ✅ In `tree/factorization.rs` as `FactorizationRewriting` |
+Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exceeds by 5: VectorSimilarityDetection, ArtRangeScanDetection, PredicatePushDown, CSE, OrderByPushDown, UnwindDedup, CountRelTable)
+
+| Rust Pass | C++ Equivalent | Status |
+|-----------|----------------|--------|
+| RemoveUnnecessaryOperators | `remove_unnecessary_join` | ✅ |
+| FilterPushDown | `filter_push_down` | ✅ |
+| PredicatePushDown | (merge Filter→ScanNode) | ✅ Rust-specific |
+| ProjectionPushDown | `projection_push_down` | ✅ |
+| ConstantFolding | `constant_folding` | ✅ |
+| AggregateDetection | `aggregate_detection` | ✅ |
+| JoinOptimization | `join_order` (greedy) | ✅ |
+| TopKOptimization | `top_k_optimization` | ✅ |
+| VectorSimilarityDetection | — Rust-specific | ✅ |
+| ArtRangeScanDetection | — Rust-specific | ✅ |
+| LimitPushDown | `limit_push_down` | ✅ |
+| CommonSubexpressionElimination | — Rust-specific | ✅ |
+| OrderByPushDown | — Rust-specific (Ladybug port) | ✅ |
+| UnwindDedup | — Rust-specific (Ladybug port) | ✅ |
+| CountRelTable | — Rust-specific (Ladybug port) | ✅ |
+| FactorizationRewriting | `remove_factorization` | ✅ |
+| ForeignJoinPushDown | `foreign_join_pushdown` | ✅ |
+| AccHashJoinOptimization | `acc_hash_join` | ✅ |
+| SIPOptimization | `sip_optimization` | ✅ |
+| CorrelatedSubqueryUnnesting | `correlated_subquery_unnesting` | ✅ |
+| AggKeyDependency | `agg_key_dependency` | ✅ |
+| CardinalityEstimation | `cardinality_estimation` | ✅ |
 
 ### 8.9 Areas Where Rust EXCEEDS C++
 
 | Area | Rust Advantage |
 |------|---------------|
-| **Optimizer passes** | 21 vs 17 (extra: `VectorSimilarityDetection`, `ArtRangeScanDetection`, `CSE`, `OrderByPushDown`, `UnwindDedup`, `CountRelTable`) |
+| **Optimizer passes** | 22 vs 17 (extra: `PredicatePushDown`, `VectorSimilarityDetection`, `ArtRangeScanDetection`, `CSE`, `OrderByPushDown`, `UnwindDedup`, `CountRelTable`) |
 | **Join order** | DP Bushy Trees (cost-based) vs C++ greedy |
 | **Multiwriter** | `AtomicBool` + `Condvar` concurrent writes |
 | **ADBC** | Native Arrow Flight SQL interface |
@@ -709,14 +730,18 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 
 | Fase | Konten | Prioritas | SP | Status |
 |------|--------|-----------|-----|--------|
-| **P10** | COPY TO + TRANSACTION + EXTENSION + nullif/count_if | 🔴 P0 | 20 | ✅ COMPLETE |
+| **P10** | COPY TO + TRANSACTION + EXTENSION + nullif/count_if + refactor physical_operator.rs | 🔴 P0 | 23 | ✅ COMPLETE |
 | **P11** | size(), export_csv/parquet, ATTACH/DETACH/USE, LOAD FROM | 🟡 P1 | 13 | ✅ COMPLETE |
 | P12 | TOP_K, INDEX_LOOKUP, BATCH_INSERT, lambda list, path/pattern (6/6 done) | 🟡 P1 | 13 | ✅ COMPLETE |
 | **P13** | CREATE TYPE, COMMENT ON, CREATE/USE/DROP GRAPH, GDS_CALL wiring, error(), STANDALONE_CALL | 🟢 P2 | 13 | ✅ COMPLETE |
 | **P14** | Parquet writer, NPY reader, HyperLogLog, RoaringBitmap, compression | 🟢 P2 | 8 | ✅ COMPLETE |
 | **P15** | Types: JSON, UINT128, DTime, Value::Union + 11 missing physical operators | 🟢 P3 | 8 | ✅ COMPLETE |
 | **P16.1** | Real physical operator implementations (Accumulate, Union, ResultCollector, Profile) | 🟡 P2 | 5 | ✅ DONE |
-| **Total** | | | **80** | |
+| **P16.2** | Missing physical ops (PrimaryKeyScan, PackedExtend, AggFinalize, PathPropertyProbe) | 🟡 P2 | 5 | ✅ DONE |
+| **P17.1** | Closeness Centrality algorithm | 🟢 P3 | 2 | ✅ DONE |
+| **P17.2** | Triangle Counting algorithm | 🟢 P3 | 2 | ✅ DONE |
+| **P17.3** | Lazy segment scanner (on-demand NodeGroup loading) | 🟢 P3 | 2 | ✅ DONE |
+| **Total** | | | **91** | |
 
 ---
 

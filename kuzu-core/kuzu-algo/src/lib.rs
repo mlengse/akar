@@ -285,6 +285,10 @@ impl Extension for AlgoExtension {
         context.register_table_function("lpa", TableFunction::Custom { name: "lpa".into() });
         context.register_table_function("betweenness_centrality", TableFunction::Custom { name: "betweenness_centrality".into() });
         context.register_table_function("bc", TableFunction::Custom { name: "betweenness_centrality".into() });
+        context.register_table_function("closeness_centrality", TableFunction::Custom { name: "closeness_centrality".into() });
+        context.register_table_function("cc", TableFunction::Custom { name: "closeness_centrality".into() });
+        context.register_table_function("triangle_count", TableFunction::Custom { name: "triangle_count".into() });
+        context.register_table_function("tc", TableFunction::Custom { name: "triangle_count".into() });
 
 
         // GDS shortest path algorithms — registered as proper CustomTable with executable callbacks
@@ -316,7 +320,7 @@ impl Extension for AlgoExtension {
             },
         );
 
-        tracing::info!("ALGO extension loaded: 17 function registrations (10 algorithms + 7 aliases)");
+        tracing::info!("ALGO extension loaded: 21 function registrations (12 algorithms + 9 aliases)");
 
         Ok(())
     }
@@ -668,6 +672,102 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     }
 }
 
+
+// --------------- Closeness Centrality ---------------
+
+/// Compute Closeness Centrality using BFS from each node.
+/// Uses Wasserman-Faust normalization for disconnected graphs.
+/// C(u) = (|R(u)| / (n-1))² * (|R(u)| / sum_{v in R(u)} d(u,v))
+/// where R(u) is the set of nodes reachable from u.
+pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
+    let n = csr.num_nodes();
+    if n <= 2 {
+        return AlgoResult {
+            name: "closeness_centrality".into(),
+            values: vec![0.0; n],
+        };
+    }
+
+    let n_minus_1 = (n - 1) as f64;
+    let mut values = vec![0.0; n];
+
+    for source in 0..n {
+        let (distances, _) = shortest_path_bfs(csr, source);
+        let (sum_dist, reachable): (f64, usize) = distances.iter().enumerate()
+            .filter(|(i, d)| d.is_some() && *i != source)
+            .fold((0.0, 0), |(sum, cnt), (_, d)| (sum + d.unwrap() as f64, cnt + 1));
+
+        if reachable == 0 || sum_dist == 0.0 {
+            continue;
+        }
+
+        let r = reachable as f64;
+        // Wasserman-Faust normalized closeness
+        values[source] = (r / n_minus_1) * (r / n_minus_1) * (r / sum_dist);
+    }
+
+    AlgoResult {
+        name: "closeness_centrality".into(),
+        values,
+    }
+}
+
+// --------------- Triangle Counting ---------------
+
+/// Count triangles per node using neighbor intersection.
+/// For each node, counts how many pairs of its neighbors are connected.
+/// Returns triangle count per node. Total triangles = sum(values) / 3.
+pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
+    let n = csr.num_nodes();
+    let mut values = vec![0.0; n];
+
+    // Collect sorted neighbor lists for efficient intersection
+    let mut neighbors: Vec<Vec<usize>> = Vec::with_capacity(n);
+    for v in 0..n {
+        let mut neigh: Vec<usize> = csr.neighbors(v)
+            .iter()
+            .map(|(_, dst)| dst.offset as usize)
+            .filter(|&dst| dst < n && dst != v)
+            .collect();
+        neigh.sort_unstable();
+        neigh.dedup();
+        neighbors.push(neigh);
+    }
+
+    // For each node, check if neighbor pairs are connected
+    for v in 0..n {
+        for &u in &neighbors[v] {
+            if u <= v { continue; }
+            // Count common neighbors of v and u
+            let mut common = 0usize;
+            let mut i = 0usize;
+            let mut j = 0usize;
+            while i < neighbors[v].len() && j < neighbors[u].len() {
+                let a = neighbors[v][i];
+                let b = neighbors[u][j];
+                if a == b {
+                    if a != v && a != u {
+                        common += 1;
+                    }
+                    i += 1;
+                    j += 1;
+                } else if a < b {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+            }
+            values[v] += common as f64;
+            values[u] += common as f64;
+        }
+        values[v] /= 2.0; // each triangle counted twice per node
+    }
+
+    AlgoResult {
+        name: "triangle_count".into(),
+        values,
+    }
+}
 
 // --------------- Louvain Community Detection ---------------
 
@@ -1206,6 +1306,67 @@ mod tests {
         // Node 1 and 2 and 4 should have some positive centrality since they are on shortest paths
         assert!(result.values[1] >= 0.0);
         assert!(result.values[2] >= 0.0);
+    }
+
+    #[test]
+    fn test_closeness_centrality() {
+        let csr = small_csr();
+        let result = compute_closeness_centrality(&csr);
+        assert_eq!(result.values.len(), 7);
+        // All nodes should have some closeness centrality
+        for &v in &result.values {
+            assert!(v >= 0.0, "Closeness centrality should be >= 0, got {v}");
+        }
+        // Node 3 is most central (middle of chain), closeness values should differ
+        assert!(result.values[3] > 0.0, "Node 3 should have positive centrality");
+    }
+
+    #[test]
+    fn test_closeness_centrality_disconnected() {
+        let csr = disconnected_csr();
+        let result = compute_closeness_centrality(&csr);
+        assert_eq!(result.values.len(), 4);
+        // Disconnected nodes have limited reachability
+        assert!(result.values[0] > 0.0);
+        assert!(result.values[2] > 0.0);
+        // Different components are independent
+        let sum_01 = result.values[0] + result.values[1];
+        let sum_23 = result.values[2] + result.values[3];
+        assert!(sum_01 > 0.0);
+        assert!(sum_23 > 0.0);
+    }
+
+    #[test]
+    fn test_triangle_count() {
+        // Graph with triangles: 0-1-2 triangle (0-1, 1-2, 0-2)
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            Edge { src_offset: 0, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
+            Edge { src_offset: 2, dst_offset: 3, rel_id: 3, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 4);
+        let result = compute_triangle_count(&csr);
+        assert_eq!(result.values.len(), 4);
+        // Nodes 0,1,2 should each have 1 triangle, node 3 should have 0
+        assert_eq!(result.values[0], 1.0, "Node 0 should have 1 triangle");
+        assert_eq!(result.values[1], 1.0, "Node 1 should have 1 triangle");
+        assert_eq!(result.values[2], 1.0, "Node 2 should have 1 triangle");
+        assert_eq!(result.values[3], 0.0, "Node 3 should have 0 triangles");
+        // Total triangles = sum/3 = 3/3 = 1
+        let total: f64 = result.values.iter().sum();
+        assert_eq!(total, 3.0, "Total triangle weight should be 3");
+    }
+
+    #[test]
+    fn test_triangle_count_small_csr() {
+        let csr = small_csr();
+        let result = compute_triangle_count(&csr);
+        assert_eq!(result.values.len(), 7);
+        // The small CSR (0-1-2-3 and 0-4-5-6) should have no triangles
+        for &v in &result.values {
+            assert_eq!(v, 0.0, "No triangles in small CSR, got {v} for node");
+        }
     }
 
     #[test]
