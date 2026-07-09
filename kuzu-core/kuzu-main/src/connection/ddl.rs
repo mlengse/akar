@@ -270,6 +270,7 @@ impl Connection {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
+                        compression: kuzu_common::enums::CompressionType::Uncompressed,
                     })
                     .collect();
                 self.database
@@ -320,6 +321,7 @@ impl Connection {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
+                        compression: kuzu_common::enums::CompressionType::Uncompressed,
                     })
                     .collect();
                 let src_id = 0; // src table ID resolved during binding
@@ -454,6 +456,7 @@ impl Connection {
                                     name: name.clone(),
                                     logical_type,
                                     is_primary_key: false,
+                                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                                     default_value: None,
                                 },
                             )

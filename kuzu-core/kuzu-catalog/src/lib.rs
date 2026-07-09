@@ -9,6 +9,7 @@ pub struct CatalogColumn {
     pub name: String,
     pub logical_type: LogicalTypeID,
     pub is_primary_key: bool,
+    pub compression: kuzu_common::enums::CompressionType,
     pub default_value: Option<Vec<u8>>,
 }
 
@@ -1087,12 +1088,14 @@ mod tests {
                 logical_type: LogicalTypeID::String,
                 is_primary_key: true,
                 default_value: None,
+                compression: None,
             },
             CatalogColumn {
                 name: "age".into(),
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
+                compression: None,
             },
         ]
     }
@@ -1118,6 +1121,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
+                compression: None,
             }],
         );
         assert!(matches!(result, CatalogResult::Created { .. }));
@@ -1349,12 +1353,14 @@ mod tests {
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                     default_value: None,
+                    compression: None,
                 },
                 CatalogColumn {
                     name: "name".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: false,
                     default_value: None,
+                    compression: None,
                 },
             ],
             "duckdb".into(),
@@ -1381,6 +1387,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
+                compression: None,
             }],
             "postgres".into(),
         );
@@ -1445,12 +1452,14 @@ mod tests {
                     logical_type: LogicalTypeID::Int64,
                     is_primary_key: false,
                     default_value: None,
+                    compression: None,
                 },
                 CatalogColumn {
                     name: "b".into(),
                     logical_type: LogicalTypeID::String,
                     is_primary_key: false,
                     default_value: None,
+                    compression: None,
                 },
             ],
             "duckdb".into(),
@@ -1472,6 +1481,7 @@ mod tests {
                 logical_type: LogicalTypeID::String,
                 is_primary_key: false,
                 default_value: None,
+                compression: None,
             },
         );
         assert!(result.is_err());
@@ -1488,6 +1498,7 @@ mod tests {
                 logical_type: LogicalTypeID::Int64,
                 is_primary_key: false,
                 default_value: None,
+                compression: None,
             }],
             "duckdb".into(),
         );

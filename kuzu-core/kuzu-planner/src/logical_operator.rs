@@ -411,6 +411,7 @@ pub struct LogicalScanNode {
     pub columns: Vec<String>,
     pub cardinality: u64,
     pub fts_query: Option<LogicalFtsScan>,
+    pub predicate: Option<Expression>,
 }
 
 #[derive(Debug, Clone)]

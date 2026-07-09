@@ -564,6 +564,7 @@ pub struct CreateVectorIndex {
 pub struct ColumnDef {
     pub name: String,
     pub type_name: String,
+    pub compression: Option<String>,
 }
 
 /// CREATE TYPE name AS type — user-defined type alias.

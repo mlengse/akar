@@ -36,6 +36,7 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
             columns: Vec::new(),
             cardinality: 0,
             fts_query: None,
+            predicate: None,
         }));
     }
 
@@ -217,6 +218,7 @@ mod tests {
             columns: Vec::new(),
             cardinality: 0,
             fts_query: None,
+            predicate: None,
         });
         let plan = build_join_tree(vec![scan], None);
         match plan {
@@ -234,6 +236,7 @@ mod tests {
             columns: Vec::new(),
             cardinality: 0,
             fts_query: None,
+            predicate: None,
         });
         let scan2 = LogicalOperator::ScanNode(LogicalScanNode {
             table_name: "City".into(),
@@ -242,6 +245,7 @@ mod tests {
             columns: Vec::new(),
             cardinality: 0,
             fts_query: None,
+            predicate: None,
         });
         let plan = build_join_tree(vec![scan1, scan2], None);
         match plan {

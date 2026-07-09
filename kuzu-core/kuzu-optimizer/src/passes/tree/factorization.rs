@@ -17,12 +17,13 @@ impl FactorizationRewriting {
             let old = std::mem::replace(
                 child,
                 LogicalOperator::ScanNode(LogicalScanNode {
-                    table_name: "placeholder".into(),
+                    table_name: String::new(),
                     table_id: 0,
                     alias: None,
                     columns: Vec::new(),
                     cardinality: 0,
                     fts_query: None,
+                    predicate: None,
                 }),
             );
             let flatten = LogicalOperator::Flatten(LogicalFlatten {

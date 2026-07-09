@@ -243,7 +243,7 @@ drop_table = {
 }
 
 column_definitions = { column_def ~ ("," ~ column_def)* }
-column_def         = { identifier ~ type_name }
+column_def         = { identifier ~ type_name ~ ("COMPRESSION" ~ string)? }
 type_name          = {
     "STRING"
   | "INT64"

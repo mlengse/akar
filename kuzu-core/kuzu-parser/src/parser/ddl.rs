@@ -19,16 +19,19 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
                         for col in inner.into_inner() {
                             let mut cn = String::new();
                             let mut ct = String::new();
+                            let mut comp = None;
                             for part in col.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => cn = part.as_str().to_string(),
                                     Rule::type_name => ct = part.as_str().to_string(),
+                                    Rule::string => comp = Some(unescape_string(part.as_str())),
                                     _ => {}
                                 }
                             }
                             columns.push(ColumnDef {
                                 name: cn,
                                 type_name: ct,
+                                compression: comp,
                             });
                         }
                     }
@@ -68,16 +71,19 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
                         for col in inner.into_inner() {
                             let mut cn = String::new();
                             let mut ct = String::new();
+                            let mut comp = None;
                             for part in col.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => cn = part.as_str().to_string(),
                                     Rule::type_name => ct = part.as_str().to_string(),
+                                    Rule::string => comp = Some(unescape_string(part.as_str())),
                                     _ => {}
                                 }
                             }
                             columns.push(ColumnDef {
                                 name: cn,
                                 type_name: ct,
+                                compression: comp,
                             });
                         }
                     }

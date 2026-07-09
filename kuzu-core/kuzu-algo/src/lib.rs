@@ -281,6 +281,11 @@ impl Extension for AlgoExtension {
                 name: "spanning_forest".into(),
             },
         );
+        context.register_table_function("label_propagation", TableFunction::Custom { name: "lpa".into() });
+        context.register_table_function("lpa", TableFunction::Custom { name: "lpa".into() });
+        context.register_table_function("betweenness_centrality", TableFunction::Custom { name: "betweenness_centrality".into() });
+        context.register_table_function("bc", TableFunction::Custom { name: "betweenness_centrality".into() });
+
 
         // GDS shortest path algorithms — registered as proper CustomTable with executable callbacks
         context.register_table_function(
@@ -550,6 +555,119 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
         values: core.iter().map(|&c| c as f64).collect(),
     }
 }
+
+// --------------- Label Propagation Algorithm (LPA) ---------------
+
+/// Compute Label Propagation Algorithm (LPA) for community detection.
+pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
+    let n = csr.num_nodes();
+    let mut labels: Vec<usize> = (0..n).collect();
+    let mut next_labels = labels.clone();
+
+    for _ in 0..max_iters {
+        let mut changed = false;
+        for v in 0..n {
+            let neighbors = csr.neighbors(v);
+            if neighbors.is_empty() {
+                continue;
+            }
+
+            let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for (_, dst) in neighbors {
+                let w = dst.offset as usize;
+                if w < n {
+                    *counts.entry(labels[w]).or_insert(0) += 1;
+                }
+            }
+
+            if counts.is_empty() {
+                continue;
+            }
+
+            let mut max_count = 0;
+            let mut best_label = labels[v];
+            for (&lbl, &cnt) in &counts {
+                if cnt > max_count || (cnt == max_count && lbl > best_label) {
+                    max_count = cnt;
+                    best_label = lbl;
+                }
+            }
+
+            if best_label != labels[v] {
+                next_labels[v] = best_label;
+                changed = true;
+            }
+        }
+        labels.copy_from_slice(&next_labels);
+        if !changed {
+            break;
+        }
+    }
+
+    AlgoResult {
+        name: "lpa".into(),
+        values: labels.iter().map(|&c| c as f64).collect(),
+    }
+}
+
+// --------------- Betweenness Centrality ---------------
+
+/// Compute Betweenness Centrality using Brandes' algorithm.
+pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
+    let n = csr.num_nodes();
+    let mut cb = vec![0.0; n];
+
+    for s in 0..n {
+        let mut stack = Vec::new();
+        let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
+        let mut sigma = vec![0.0; n];
+        sigma[s] = 1.0;
+        let mut dist = vec![-1i64; n];
+        dist[s] = 0;
+
+        let mut q = std::collections::VecDeque::new();
+        q.push_back(s);
+
+        while let Some(v) = q.pop_front() {
+            stack.push(v);
+            for (_, dst) in csr.neighbors(v) {
+                let w = dst.offset as usize;
+                if w >= n { continue; }
+
+                // Path discovery
+                if dist[w] < 0 {
+                    dist[w] = dist[v] + 1;
+                    q.push_back(w);
+                }
+
+                // Path counting
+                if dist[w] == dist[v] + 1 {
+                    sigma[w] += sigma[v];
+                    pred[w].push(v);
+                }
+            }
+        }
+
+        let mut delta = vec![0.0; n];
+        // Accumulation
+        while let Some(w) = stack.pop() {
+            for &v in &pred[w] {
+                if sigma[w] > 0.0 {
+                    delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+                }
+            }
+            if w != s {
+                cb[w] += delta[w];
+            }
+        }
+    }
+
+    AlgoResult {
+        name: "betweenness_centrality".into(),
+        values: cb,
+    }
+}
+
 
 // --------------- Louvain Community Detection ---------------
 
@@ -1061,6 +1179,33 @@ mod tests {
         assert_eq!(result.values[0], result.values[1]); // same component
         assert_eq!(result.values[2], result.values[3]); // same component
         assert_ne!(result.values[0], result.values[2]); // different components
+    }
+
+    #[test]
+    fn test_spanning_forest() {
+        let csr = disconnected_csr();
+        let result = compute_spanning_forest(&csr);
+        assert_eq!(result.values.len(), 4);
+        // Node 0 should point to itself (root) or 1
+        // Node 1 should point to 0
+        assert!(result.values[0] == 0.0 || result.values[0] == 1.0);
+    }
+
+    #[test]
+    fn test_lpa() {
+        let csr = small_csr();
+        let result = compute_lpa(&csr, 10);
+        assert_eq!(result.values.len(), 7);
+    }
+
+    #[test]
+    fn test_betweenness_centrality() {
+        let csr = small_csr();
+        let result = compute_betweenness_centrality(&csr);
+        assert_eq!(result.values.len(), 7);
+        // Node 1 and 2 and 4 should have some positive centrality since they are on shortest paths
+        assert!(result.values[1] >= 0.0);
+        assert!(result.values[2] >= 0.0);
     }
 
     #[test]

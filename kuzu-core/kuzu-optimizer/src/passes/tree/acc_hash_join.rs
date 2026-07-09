@@ -40,6 +40,7 @@ impl TreeOptimizationPass for AccHashJoinOptimization {
                         columns: Vec::new(),
                         cardinality: 0,
                         fts_query: None,
+                        predicate: None,
                     })),
                 );
 

@@ -17,6 +17,7 @@ pub struct ColumnDefinition {
     pub name: String,
     pub logical_type: LogicalTypeID,
     pub is_primary_key: bool,
+    pub compression: kuzu_common::enums::CompressionType,
 }
 
 /// A node table stores properties for a node label using NodeGroup-based

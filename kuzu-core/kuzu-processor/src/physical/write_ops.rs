@@ -569,6 +569,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 name: c.name.clone(),
                 logical_type: c.logical_type,
                 is_primary_key: c.is_primary_key,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
                 default_value: None,
             })
             .collect();
@@ -1718,11 +1719,13 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                     name: "doc_id".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: true,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
                 kuzu_storage::table::ColumnDefinition {
                     name: "text".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::String,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
             ];
             self.table_catalog.create_node_table(self.docs_table.clone(), docs_cols);
@@ -1733,16 +1736,19 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                     name: "term_id".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: true,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
                 kuzu_storage::table::ColumnDefinition {
                     name: "term".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::String,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
                 kuzu_storage::table::ColumnDefinition {
                     name: "doc_freq".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                 },
             ];
             self.table_catalog
@@ -1831,6 +1837,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 name: "term_freq".into(),
                 logical_type: kuzu_common::types::LogicalTypeID::Int64,
                 is_primary_key: false,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
             }];
             // FROM terms TO docs
             self.table_catalog.create_rel_table(

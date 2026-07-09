@@ -135,6 +135,25 @@ impl Binder {
         }
     }
 
+    /// Parse compression option.
+    pub fn parse_compression(comp: Option<&str>) -> Result<kuzu_common::enums::CompressionType, String> {
+        use kuzu_common::enums::CompressionType;
+        match comp {
+            None => Ok(CompressionType::Uncompressed), // Or default based on type
+            Some(s) => match s.to_uppercase().as_str() {
+                "UNCOMPRESSED" => Ok(CompressionType::Uncompressed),
+                "CONSTANT" => Ok(CompressionType::Constant),
+                "ONEVALUE" => Ok(CompressionType::OneValue),
+                "BOOLEAN" => Ok(CompressionType::Boolean),
+                "INTEGER_BITPACKING" => Ok(CompressionType::IntegerBitpacking),
+                "STRING_DICTIONARY" => Ok(CompressionType::StringDictionary),
+                "FLOAT" => Ok(CompressionType::Float),
+                "LIST_DELTA" => Ok(CompressionType::ListDelta),
+                _ => Err(format!("Unknown compression type: {s}")),
+            }
+        }
+    }
+
     // ==================== Query Binding ====================
 
     fn bind_query(&self, query: Query) -> Result<BoundStatement, String> {
@@ -755,10 +774,12 @@ impl Binder {
         let mut columns = Vec::new();
         for col in &t.columns {
             let logical_type = Self::parse_type(&col.type_name)?;
+            let compression = Self::parse_compression(col.compression.as_deref())?;
             columns.push(CatalogColumn {
                 name: col.name.clone(),
                 logical_type,
                 is_primary_key: col.name == t.primary_key,
+                compression,
                 default_value: None,
             });
         }
@@ -933,10 +954,12 @@ impl Binder {
         let mut columns = Vec::new();
         for col in &t.columns {
             let logical_type = Self::parse_type(&col.type_name)?;
+            let compression = Self::parse_compression(col.compression.as_deref())?;
             columns.push(CatalogColumn {
                 name: col.name.clone(),
                 logical_type,
                 is_primary_key: false,
+                compression,
                 default_value: None,
             });
         }
@@ -1457,12 +1480,14 @@ impl Binder {
                     name: "doc_id".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: true,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                     default_value: None,
                 },
                 kuzu_catalog::CatalogColumn {
                     name: "text".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::String,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                     default_value: None,
                 },
             ];
@@ -1479,18 +1504,21 @@ impl Binder {
                     name: "term_id".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: true,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                     default_value: None,
                 },
                 kuzu_catalog::CatalogColumn {
                     name: "term".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::String,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                     default_value: None,
                 },
                 kuzu_catalog::CatalogColumn {
                     name: "doc_freq".into(),
                     logical_type: kuzu_common::types::LogicalTypeID::Int64,
                     is_primary_key: false,
+                    compression: kuzu_common::enums::CompressionType::Uncompressed,
                     default_value: None,
                 },
             ];
@@ -1506,6 +1534,7 @@ impl Binder {
                 name: "term_freq".into(),
                 logical_type: kuzu_common::types::LogicalTypeID::Int64,
                 is_primary_key: false,
+                compression: kuzu_common::enums::CompressionType::Uncompressed,
                 default_value: None,
             }];
             match catalog.create_rel_table(posting_table.clone(), terms_id, docs_id, posting_cols) {

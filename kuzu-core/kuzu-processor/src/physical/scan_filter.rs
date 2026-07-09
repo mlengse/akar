@@ -28,6 +28,7 @@ pub struct PhysicalScan {
     /// Only used when `semi_mask` is `Some`.
     pub mask_id_column: usize,
     pub fts_query: Option<PhysicalFtsScan>,
+    pub predicate: Option<Expression>,
 }
 
 impl PhysicalScan {
@@ -42,6 +43,7 @@ impl PhysicalScan {
             semi_mask: None,
             mask_id_column: 0,
             fts_query: None,
+            predicate: None,
         }
     }
 
@@ -68,6 +70,11 @@ impl PhysicalScan {
 
     pub fn with_fts_query(mut self, fts_query: PhysicalFtsScan) -> Self {
         self.fts_query = Some(fts_query);
+        self
+    }
+
+    pub fn with_predicate(mut self, predicate: Expression) -> Self {
+        self.predicate = Some(predicate);
         self
     }
 
@@ -272,7 +279,25 @@ impl PhysicalOperatorExec for PhysicalScan {
                 (0..num_rows).collect()
             };
 
-            let valid_count = rows_to_emit.len();
+            let mut valid_count = rows_to_emit.len();
+
+            // Find columns needed for the predicate
+            let mut predicate_col_names = Vec::new();
+            if let Some(ref pred) = self.predicate {
+                fn get_vars(e: &Expression, out: &mut Vec<String>) {
+                    match e {
+                        Expression::PropertyAccess(_, prop) => out.push(prop.clone()),
+                        Expression::Variable(v) => out.push(v.clone()),
+                        Expression::BinaryOp(_, l, r) => { get_vars(l, out); get_vars(r, out); }
+                        Expression::UnaryOp(_, inner) => get_vars(inner, out),
+                        Expression::FunctionCall(_, args) => { for a in args { get_vars(a, out); } }
+                        _ => {}
+                    }
+                }
+                get_vars(pred, &mut predicate_col_names);
+            }
+
+            let mut rows_to_emit = rows_to_emit;
 
             // Use column_ids if specified, otherwise scan all columns
             let cols_to_scan: Vec<usize> = if self.column_ids.is_empty() {
@@ -281,44 +306,77 @@ impl PhysicalOperatorExec for PhysicalScan {
                 self.column_ids.iter().map(|&id| id as usize).collect()
             };
 
-            let mut fields = Vec::with_capacity(cols_to_scan.len());
-            for &col_idx in &cols_to_scan {
-                if col_idx >= data.len() {
-                    continue;
-                }
+            let mut fields = vec![None; cols_to_scan.len()];
+            
+            // Helper to materialize a single column
+            let mut materialize_col = |col_idx: usize, current_rows: &[usize]| -> ValueVector {
                 let col_data = &data[col_idx];
-
-                // Determine physical type from the first non-null value or column definition
                 let phys_type = if let Some(col_def) = self.table_columns.get(col_idx) {
                     Self::logical_to_physical(&col_def.logical_type)
                 } else {
-                    col_data
-                        .iter()
-                        .find_map(|v| {
-                            if !matches!(v, Value::Null) {
-                                Some(Self::value_to_physical_type(v))
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(PhysicalTypeID::Int64)
+                    col_data.iter().find_map(|v| if !matches!(v, Value::Null) { Some(Self::value_to_physical_type(v)) } else { None }).unwrap_or(PhysicalTypeID::Int64)
                 };
-
-                let mut v = ValueVector::new(phys_type, valid_count);
-                v.resize(valid_count);
-                for (write_row, &row_idx) in rows_to_emit.iter().enumerate() {
-                    if let Some(val) = col_data.get(row_idx) {
+                let mut v = ValueVector::new(phys_type, current_rows.len().max(1));
+                v.resize(current_rows.len());
+                for (write_row, &r_idx) in current_rows.iter().enumerate() {
+                    if let Some(val) = col_data.get(r_idx) {
                         Self::write_value_to_vector(&mut v, write_row, val);
                     }
                 }
-                fields.push(v);
+                v
+            };
+
+            // 1. Materialize predicate columns
+            let mut pred_chunk_fields = Vec::new();
+            let mut pred_chunk_names = Vec::new();
+            for (i, &col_idx) in cols_to_scan.iter().enumerate() {
+                if col_idx >= data.len() { continue; }
+                if let Some(col_def) = self.table_columns.get(col_idx) {
+                    if predicate_col_names.contains(&col_def.name) || self.predicate.is_none() {
+                        let v = materialize_col(col_idx, &rows_to_emit);
+                        pred_chunk_fields.push(v);
+                        pred_chunk_names.push(col_def.name.clone());
+                        fields[i] = Some(true); // Mark as materialized (dummy bool, we'll replace with actual fields later if we need to reconstruct)
+                    }
+                }
+            }
+
+            // 2. Evaluate predicate and filter rows
+            let mut final_fields = Vec::new();
+            if let Some(ref pred) = self.predicate {
+                let pred_chunk = DataChunk::new(pred_chunk_fields).with_names(pred_chunk_names.clone());
+                let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, None).unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
+                
+                let mut filtered_rows = Vec::with_capacity(rows_to_emit.len());
+                for (i, &keep) in mask.iter().enumerate() {
+                    if keep {
+                        filtered_rows.push(rows_to_emit[i]);
+                    }
+                }
+                rows_to_emit = filtered_rows;
+                valid_count = rows_to_emit.len();
+                
+                // Re-materialize the predicate columns with the filtered rows so they match the final size
+                // (Alternatively we could slice the vectors, but re-materializing is simpler for now)
+                for i in 0..fields.len() {
+                    fields[i] = None; // Reset so everything is materialized with the final rows_to_emit
+                }
+            }
+
+            // 3. Materialize remaining columns with final rows_to_emit
+            for (i, &col_idx) in cols_to_scan.iter().enumerate() {
+                if col_idx >= data.len() { continue; }
+                if fields[i].is_none() {
+                    let v = materialize_col(col_idx, &rows_to_emit);
+                    final_fields.push(v);
+                }
             }
 
             let names: Vec<String> = cols_to_scan
                 .iter()
                 .filter_map(|&ci| self.table_columns.get(ci).map(|c| c.name.clone()))
                 .collect();
-            let chunk = DataChunk::new(fields).with_names(names);
+            let chunk = DataChunk::new(final_fields).with_names(names);
             return Ok(vec![chunk]);
         }
 

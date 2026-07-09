@@ -349,6 +349,7 @@ impl QueryPlanner {
                                         columns: Vec::new(),
                                         cardinality: 0,
                                         fts_query: fts_to_assign.take(),
+                                        predicate: None,
                                     }));
                                 }
 
@@ -390,6 +391,7 @@ impl QueryPlanner {
                                     columns: Vec::new(),
                                     cardinality: 0,
                                     fts_query: fts_to_assign.take(),
+                                    predicate: None,
                                 }));
                             }
 
@@ -427,6 +429,7 @@ impl QueryPlanner {
                                 columns: Vec::new(),
                                 cardinality: 0,
                                 fts_query: fts_to_assign.take(),
+                                predicate: None,
                             }));
                         }
                     }
@@ -482,6 +485,7 @@ impl QueryPlanner {
                             columns: Vec::new(),
                             cardinality: 0,
                             fts_query: None,
+                            predicate: None,
                         })
                     } else {
                         LogicalOperator::Projection(LogicalProjection {
@@ -502,6 +506,7 @@ impl QueryPlanner {
                                 columns: Vec::new(),
                                 cardinality: 0,
                                 fts_query: None,
+                                predicate: None,
                             }));
                         }
                         if let Some(edge) = &pattern.edge
@@ -525,6 +530,7 @@ impl QueryPlanner {
                             columns: Vec::new(),
                             cardinality: 0,
                             fts_query: None,
+                            predicate: None,
                         })
                     } else {
                         LogicalOperator::Projection(LogicalProjection {
