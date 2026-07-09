@@ -741,7 +741,8 @@ Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exce
 | **P17.1** | Closeness Centrality algorithm | 🟢 P3 | 2 | ✅ DONE |
 | **P17.2** | Triangle Counting algorithm | 🟢 P3 | 2 | ✅ DONE |
 | **P17.3** | Lazy segment scanner (on-demand NodeGroup loading) | 🟢 P3 | 2 | ✅ DONE |
-| **Total** | | | **91** | |
+| **P17.4** | Roaring bitmap (compressed bitset for node/edge ID sets) | 🟢 P3 | 3 | ✅ DONE |
+| **Total** | | | **94** | |
 
 ---
 

@@ -27,6 +27,7 @@ pub mod hyperloglog;
 pub mod lazy_scanner;
 pub mod npy_reader;
 pub mod predicate;
+pub mod roaring_bitmap;
 pub mod shadow_file;
 pub mod spiller;
 pub mod stats;

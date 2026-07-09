@@ -33,9 +33,10 @@ Now let me update the physical operators table in §1.5 and the phase table.
   - **P17.1 — Closeness Centrality:** Implemented in `kuzu-algo/src/lib.rs` (Wasserman-Faust normalization, 2 tests).
   - **P17.2 — Triangle Counting:** Implemented in `kuzu-algo/src/lib.rs` (neighbor-list intersection, 2 tests). Total algo tests: 26/26 pass.
   - **P17.3 — Lazy segment scanner:** `kuzu-storage/src/lazy_scanner.rs` — `LazyColumnScan` iterator + `FilteredLazyScan` with predicate + `lazy_scan_table` free function. 6 tests pass.
-- Active: None (P17.4 Roaring bitmap not started).
+  - **P17.4 — Roaring bitmap:** `kuzu-storage/src/roaring_bitmap.rs` — compressed bitset with Array/Bitmap containers, auto-upgrade at 4096 elements, union/intersection/difference, sorted iteration. 25 tests pass.
+- Active: None (Phase 17 complete).
 - Blocked: None.
 
 ## Next Move
-1. Implement P17.4 — Roaring bitmap for node/edge ID sets (optional, P3 deferred).
+1. All Phase 17 items complete. Awaiting next phase assignment.
 2. Keep STATUS.md markdown synced with each implementation step.
