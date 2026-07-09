@@ -465,16 +465,35 @@ impl QueryProcessor {
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::Aggregate(a) => {
-                    let agg = PhysicalAggregate {
-                        group_by_cols: if a.group_by.is_empty() {
-                            Vec::new()
-                        } else {
-                            (0..a.group_by.len() as u32).collect()
-                        },
-                        aggregate_functions: a.aggregates.iter().map(|(n, _)| n.clone()).collect(),
+                    let funcs: Vec<kuzu_function::AggregateFunction> = a.aggregates.iter()
+                        .map(|(n, _)| crate::physical::order_aggregate::parse_aggregate_function(n))
+                        .collect();
+                    let group_by_cols = if a.group_by.is_empty() {
+                        Vec::new()
+                    } else {
+                        (0..a.group_by.len() as u32).collect()
                     };
+                    
+                    let shared_state = std::sync::Arc::new(crate::physical::order_aggregate::SharedAggregateState::new(
+                        funcs,
+                        group_by_cols,
+                    ));
+                    
+                    let agg_scan = crate::physical::order_aggregate::PhysicalAggregateScan {
+                        shared_state: shared_state.clone(),
+                    };
+                    let agg_finalize = crate::physical::order_aggregate::PhysicalAggregateFinalize {
+                        shared_state,
+                    };
+
                     let input = current;
-                    let result = agg.execute(input)?;
+                    
+                    // Phase 1: Scan and accumulate (returns empty chunk in sequential push-down)
+                    let _ = agg_scan.execute(input)?;
+                    
+                    // Phase 2: Finalize and yield grouped chunks
+                    let result = agg_finalize.execute(vec![])?;
+                    
                     intermediate_result = Some(result);
                 }
                 LogicalOperator::HashJoin(h) => {
