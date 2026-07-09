@@ -18,7 +18,15 @@
 | **P15** | Types: JSON, UINT128, DTime, Value::Union, missing physical ops | 🟢 P3 | 8 | ✅ COMPLETE |
 | **P16.1** | Real physical operator impls (Accumulate, Union, ResultCollector, Profile) | 🟡 P2 | 5 | ✅ DONE |
 | **P16.2** | Missing physical ops (PrimaryKeyScan, PackedExtend, AggFinalize, PathPropertyProbe) | 🟡 P2 | 5 | ✅ DONE |
-| **Total** | | | **85** | |
+| **P19** | GDS: Random Walk + Node2Vec | 🟢 P3 | 6 | ✅ DONE |
+| **P20** | ICE disk format | 🟢 P3 | 5 | ✅ DONE |
+| **P21** | Physical operator file split | 🟡 P2 | 8 | ✅ DONE |
+| **P22** | STANDALONE_CALL pipeline | 🟡 P2 | 5 | ✅ DONE |
+| **P23** | Minor fixes (PathPropertyProbe, PackedExtend, PrimaryKeyScan) | 🟢 P3 | 3 | ✅ DONE |
+| **P24** | Missing physical operators + stub hardening | 🟡 P2 | 14.5 | 🆕 PLANNED |
+| **P25** | Technical debt closure (STANDALONE_CALL, refactor, publish) | 🟡 P2 | 18 | 🆕 PLANNED |
+| **P26** | Testing, fuzzing & documentation polish | 🟢 P3 | 21 | 🆕 PLANNED |
+| **Total** | | | **146.5** | |
 
 ---
 
@@ -244,8 +252,13 @@ cargo fmt --all -- --check
 
 ## Current Technical Debt (non-blocking)
 
-| # | Item | Severity |
-|---|------|----------|
-| 1 | ~~`processor.rs` 2.755 lines single file~~ | ✅ DONE — Split into 6 modules |
-| 2 | CALL dispatch via string matching in ddl.rs | 🟡 DEFERRED |
-| 3 | Planner→Physical mapping logic scattered | 🟡 DEFERRED |
+| # | Item | Severity | Plan |
+|---|------|----------|------|
+| 1 | ~~`processor.rs` 2.755 lines single file~~ | ✅ DONE — Split into 6 modules | → P25.2 |
+| 2 | CALL dispatch via string matching in ddl.rs | 🟡 DEFERRED | → P25.3 |
+| 3 | Planner→Physical mapping logic scattered | 🟡 DEFERRED | → P25.2 |
+| 4 | STANDALONE_CALL not a proper pipeline | 🟡 DEFERRED | → P25.1 |
+| 5 | Missing physical operators (5) + stub hardening (3) | 🟡 MEDIUM | → P24 |
+| 6 | C++ benchmark binary not built | 🟢 LOW | → P25.4 |
+| 7 | NPM / crates.io publish pending | 🟢 LOW | → P25.5 |
+| 8 | Edge case test coverage < 50% | 🟡 MEDIUM | → P26.1 |
