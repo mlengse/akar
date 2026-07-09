@@ -886,7 +886,7 @@ impl QueryProcessor {
                 }
                 LogicalOperator::Partitioner(p) => {
                     let partitioner = Partitioner;
-                    let input = current;
+                    let _input = current;
                     
                     // The goal of Partitioner is to take the stream of data and run the rest of the pipeline in parallel.
                     // For now, we execute the partitioner node itself (which is just a pass-through).

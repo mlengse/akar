@@ -191,22 +191,7 @@ impl PhysicalOperatorExec for Partitioner {
     }
 }
 
-/// PackedExtend — optimized multi-rel extend.
-///
-/// Extends from multiple relationships in a single pass, producing
-/// packed columns. Currently acts as pass-through (caller must handle
-/// the actual extend logic externally).
-pub struct PackedExtend;
 
-impl PhysicalOperatorExec for PackedExtend {
-    fn operator_type(&self) -> &str {
-        "packed_extend"
-    }
-
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        Ok(input)
-    }
-}
 
 /// PathPropertyProbe — resolves properties on path-typed results.
 ///
