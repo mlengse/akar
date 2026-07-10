@@ -12,6 +12,7 @@ pub mod copyfrom;
 pub use copyfrom::*;
 pub mod physicalexplain;
 pub use physicalexplain::*;
+
 pub mod recursiveextend;
 pub use recursiveextend::*;
 pub mod ddl_fts;
@@ -20,3 +21,7 @@ pub mod packedextend;
 pub use packedextend::*;
 pub mod standalonecall;
 pub use standalonecall::*;
+pub mod insert;
+pub use insert::*;
+pub mod merge;
+pub use merge::*;

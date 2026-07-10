@@ -9,6 +9,7 @@ pub mod write_ops;
 pub mod batch_insert;
 pub mod index_lookup;
 pub mod missing_ops;
+pub mod misc;
 
 pub use types::{
     HashJoinBucket, HashJoinTable, NodeSemiMask, OperatorResult, PhysicalOperatorExec, PhysicalSemiMasker,
@@ -20,3 +21,4 @@ pub use write_ops::*;
 pub use batch_insert::*;
 pub use index_lookup::*;
 pub use missing_ops::*;
+pub use misc::*;

@@ -647,7 +647,7 @@ impl QueryProcessor {
                         .clone()
                         .ok_or_else(|| "No table catalog available for CREATE".to_string())?;
 
-                    let create_node_op = PhysicalCreateNode {
+                    let create_node_op = PhysicalInsertNode {
                         table_name: cn.table_name.clone(),
                         table_id: cn.table_id,
                         out_var_name: cn.out_var_name.clone(),
@@ -664,11 +664,11 @@ impl QueryProcessor {
                         .clone()
                         .ok_or_else(|| "No table catalog available for CREATE".to_string())?;
 
-                    let create_rel_op = PhysicalCreateRel {
+                    let create_rel_op = PhysicalInsertRel {
                         table_name: cr.table_name.clone(),
                         table_id: cr.table_id,
-                        src_node_name: cr.src_node_name.clone(),
-                        dst_node_name: cr.dst_node_name.clone(),
+                        src_node_col_idx: 0, // Placeholder
+                        dst_node_col_idx: 1, // Placeholder
                         properties: cr.properties.clone(),
                         table_catalog,
                     };
@@ -801,111 +801,43 @@ impl QueryProcessor {
                         .clone()
                         .ok_or_else(|| "No table catalog available for MERGE".to_string())?;
 
-                    // Helper: evaluate a constant expression to a Value
-                    let eval_const = |expr: &kuzu_parser::ast::Expression| -> Value {
-                        match expr {
-                            kuzu_parser::ast::Expression::Constant(c) => match c {
-                                kuzu_parser::ast::Constant::Null => Value::Null,
-                                kuzu_parser::ast::Constant::Bool(b) => Value::Bool(*b),
-                                kuzu_parser::ast::Constant::Integer(i) => Value::Int64(*i),
-                                kuzu_parser::ast::Constant::Float(f) => Value::Double(*f),
-                                kuzu_parser::ast::Constant::String(s) => Value::String(s.clone()),
-                            },
-                            _ => Value::Null,
-                        }
+                    let mut on_match_ops = Vec::new();
+                    for set_item in &m.on_match {
+                        on_match_ops.push(PhysicalSet {
+                            table_name: set_item.table_name.clone(),
+                            table_id: set_item.table_id,
+                            column_name: set_item.column_name.clone(),
+                            column_idx: set_item.column_idx,
+                            value: set_item.value.clone(),
+                            is_node: set_item.is_node,
+                            table_catalog: table_catalog.clone(),
+                        });
+                    }
+
+                    let mut on_create_ops = Vec::new();
+                    for set_item in &m.on_create {
+                        on_create_ops.push(PhysicalSet {
+                            table_name: set_item.table_name.clone(),
+                            table_id: set_item.table_id,
+                            column_name: set_item.column_name.clone(),
+                            column_idx: set_item.column_idx,
+                            value: set_item.value.clone(),
+                            is_node: set_item.is_node,
+                            table_catalog: table_catalog.clone(),
+                        });
+                    }
+
+                    let merge_op = PhysicalMerge {
+                        table_name: m.table_name.clone(),
+                        table_id: m.table_id,
+                        properties: m.properties.clone(),
+                        on_match: on_match_ops,
+                        on_create: on_create_ops,
+                        table_catalog,
                     };
-
-                    // Get table info to build the row
-                    let num_cols = {
-                        let tbl = table_catalog
-                            .get_node_table_by_name(&m.table_name)
-                            .ok_or_else(|| format!("Table '{}' not found for MERGE", m.table_name))?;
-                        tbl.columns.len()
-                    };
-
-                    // Build values from properties
-                    let mut new_values: Vec<Value> = Vec::new();
-                    let table_info = table_catalog
-                        .get_node_table_by_name(&m.table_name)
-                        .ok_or_else(|| format!("Table '{}' not found", m.table_name))?;
-                    for col_idx in 0..num_cols {
-                        let col_name = &table_info.columns[col_idx].name;
-                        if let Some((_, expr)) = m.properties.iter().find(|(n, _)| n == col_name) {
-                            new_values.push(eval_const(expr));
-                        } else if table_info.columns[col_idx].is_primary_key {
-                            return Err(format!("MERGE requires primary key '{}'", col_name));
-                        } else {
-                            new_values.push(Value::Null);
-                        }
-                    }
-                    drop(table_info);
-
-                    // Simple match detection: scan the PK column for a match
-                    let mut matched = false;
-                    if let Some(tbl) = table_catalog.get_node_table_by_name(&m.table_name)
-                        && let Some((prop_name, first_expr)) = m.properties.first()
-                    {
-                        let first_val = eval_const(first_expr);
-                        // Find which column index this property maps to
-                        if let Some(prop_col) = tbl.columns.iter().position(|c| &c.name == prop_name) {
-                            let _ = prop_col; // Column index for matching
-                            // Scan the column for matching values
-                            for row_idx in 0..tbl.num_rows as usize {
-                                if let Some(val) = tbl.get_value(row_idx, prop_col)
-                                    && val == &first_val
-                                {
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if matched {
-                        // Apply ON MATCH SET
-                        for set_item in &m.on_match {
-                            let set_op = PhysicalSet {
-                                table_name: set_item.table_name.clone(),
-                                table_id: set_item.table_id,
-                                column_name: set_item.column_name.clone(),
-                                column_idx: set_item.column_idx,
-                                value: set_item.value.clone(),
-                                is_node: set_item.is_node,
-                                table_catalog: table_catalog.clone(),
-                            };
-                            let _ = set_op.execute(vec![])?;
-                        }
-                        intermediate_result = Some(vec![DataChunk {
-                            fields: vec![],
-                            size: 1,
-                            field_names: vec![],
-                        }]);
-                    } else {
-                        // CREATE new node
-                        if let Some(mut tbl) = table_catalog.get_node_table_by_name_mut(&m.table_name) {
-                            tbl.insert_row(new_values)
-                                .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
-                        }
-
-                        // Apply ON CREATE SET
-                        for set_item in &m.on_create {
-                            let set_op = PhysicalSet {
-                                table_name: set_item.table_name.clone(),
-                                table_id: set_item.table_id,
-                                column_name: set_item.column_name.clone(),
-                                column_idx: set_item.column_idx,
-                                value: set_item.value.clone(),
-                                is_node: set_item.is_node,
-                                table_catalog: table_catalog.clone(),
-                            };
-                            let _ = set_op.execute(vec![])?;
-                        }
-                        intermediate_result = Some(vec![DataChunk {
-                            fields: vec![],
-                            size: 1,
-                            field_names: vec![],
-                        }]);
-                    }
+                    let input = current;
+                    let result = merge_op.execute(input)?;
+                    intermediate_result = Some(result);
                 }
                 LogicalOperator::ExpressionsScan(_es) => {
                     // ExpressionsScan reads correlated variables from outer context.
@@ -974,7 +906,7 @@ impl QueryProcessor {
                     let result = exec.execute(current)?;
                     intermediate_result = Some(result);
                 }
-                // DDL operators — produce a single-row success result
+
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)
                 | LogicalOperator::DropTable(_)
