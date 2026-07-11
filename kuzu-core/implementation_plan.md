@@ -24,9 +24,9 @@
 | **P22** | STANDALONE_CALL pipeline | 🟡 P2 | 5 | ✅ DONE |
 | **P23** | Minor fixes (PathPropertyProbe, PackedExtend, PrimaryKeyScan) | 🟢 P3 | 3 | ✅ DONE |
 | **P24** | Missing physical operators + stub hardening | 🟡 P2 | 14.5 | 🆕 PLANNED |
-| **P25** | Technical debt closure (STANDALONE_CALL, refactor, publish) | 🟡 P2 | 18 | 🆕 PLANNED |
+| **P25** | Technical debt closure (STANDALONE_CALL, refactor, publish) | 🟡 P2 | 13 | 🆕 PLANNED |
 | **P26** | Testing, fuzzing & documentation polish | 🟢 P3 | 21 | 🆕 PLANNED |
-| **Total** | | | **146.5** | |
+| **Total** | | | **141.5** | |
 
 ---
 
@@ -254,10 +254,10 @@ cargo fmt --all -- --check
 
 | # | Item | Severity | Plan |
 |---|------|----------|------|
-| 1 | ~~`processor.rs` 2.755 lines single file~~ | ✅ DONE — Split into 6 modules | → P25.2 |
-| 2 | CALL dispatch via string matching in ddl.rs | 🟡 DEFERRED | → P25.3 |
+| 1 | `processor.rs` monolith `execute_internal` | 🟡 PARTIAL — Split into 6 modules but mod.rs is still large | → P25.2 |
+| 2 | CALL dispatch via string matching in standalone_call.rs | 🟡 DEFERRED | → P25.3 |
 | 3 | Planner→Physical mapping logic scattered | 🟡 DEFERRED | → P25.2 |
-| 4 | STANDALONE_CALL not a proper pipeline | 🟡 DEFERRED | → P25.1 |
+| 4 | ~~STANDALONE_CALL not a proper pipeline~~ | ✅ DONE (P22) | — |
 | 5 | Missing physical operators (5) + stub hardening (3) | 🟡 MEDIUM | → P24 |
 | 6 | C++ benchmark binary not built | 🟢 LOW | → P25.4 |
 | 7 | NPM / crates.io publish pending | 🟢 LOW | → P25.5 |
@@ -413,36 +413,12 @@ Menutup item-item technical debt yang sudah di-defer dari fase sebelumnya:
 
 ---
 
-## 🔴 P25.1 — STANDALONE_CALL Pipeline Refactor
+## 🔴 P25.1 — STANDALONE_CALL Pipeline Refactor (✅ Selesai di P22)
 
-**Deferred sejak:** P10.3 (2026-07-07)
-**Rationale originally:** "CALL already works through string matching — defer for architectural purity."
+**Status:** ✅ Selesai di P22.
+**Catatan:** Pipeline AST (`Statement::StandaloneCall` -> `PhysicalStandaloneCall` -> `StandaloneCallHandler`) sudah diimplementasikan di `connection/standalone_call.rs`. Sisa pekerjaan adalah refactor *dispatch* yang masih menggunakan *string matching* (dilanjutkan di P25.3).
 
-**Now:** Sudah waktunya refactor karena:
-- CALL makin banyak fungsinya (14+ table functions, GDS CALL, export_csv/parquet)
-- String matching di `ddl.rs` makin panjang → maintenance burden
-- Pipeline yang proper memungkinkan error handling lebih baik
-
-### Plan
-
-- `[ ]` **Parser** — `Statement::StandaloneCall` baru (bedakan dari `Statement::Call`)
-  - `[ ]` Rule `standalone_call` di `cypher.pest`
-  - `[ ]` `CALL func(args)` → `StandaloneCall { name, args }`
-  - `[ ]]` `CALL func(args) RETURN *` → `StandaloneCallReturn { name, args, return_all }`
-- `[ ]]` **Binder** — `BoundStandaloneCall { function_name, args, return_all }`
-  - `[ ]` Resolve function name di FunctionRegistry saat binding
-  - `[ ]` Validasi arg count + types
-- `[ ]` **Planner** — `LogicalOperator::StandaloneCall(LogicalStandaloneCall)`
-- `[ ]` **Processor** — `PhysicalStandaloneCall`
-  - `[ ]` Dispatch melalui `FunctionRegistry::execute_table_function()`
-  - `[ ]` Support RETURN clause
-- `[ ]]` **Hapus** string matching `handle_call()` di `ddl.rs`
-- `[ ]` **Tests:** `test_standalone_call_pipeline`:
-  - `[ ]` `CALL show_tables()`
-  - `[ ]` `CALL table_info('Person')`
-  - `[ ]` `CALL show_functions()`
-  - `[ ]]` Error: unknown function
-- **Effort:** 5 SP | **Risk:** 🟡 Medium
+- **Effort:** 0 SP (Sudah selesai)
 
 ---
 
@@ -471,7 +447,7 @@ Helper modules sudah dipisah (chunk_helpers, join_helpers, etc.) tapi match bloc
 
 ## 🟡 P25.3 — CALL Dispatch String Matching → Proper Trait
 
-**Current state:** `connection/ddl.rs` punya `handle_call()` dengan match string pattern:
+**Current state:** `connection/standalone_call.rs` punya `execute_call()` dengan match string pattern:
 ```rust
 "table_info" => ...
 "show_tables" => ...
@@ -488,7 +464,7 @@ Helper modules sudah dipisah (chunk_helpers, join_helpers, etc.) tapi match bloc
   }
   ```
 - `[ ]]` Registrasikan semua table function sebagai struct implementor trait
-- `[ ]` Hapus match arms string di `handle_call()` → ganti dengan registry lookup
+- `[ ]` Hapus match arms string di `execute_call()` → ganti dengan registry lookup
 - **Effort:** 3 SP | **Risk:** 🟢 Low
 
 ---
@@ -527,12 +503,12 @@ Helper modules sudah dipisah (chunk_helpers, join_helpers, etc.) tapi match bloc
 
 | Item | SP | Risk |
 |------|----|------|
-| P25.1 STANDALONE_CALL refactor | 5 | 🟡 Medium |
+| P25.1 STANDALONE_CALL refactor | 0 | ✅ Selesai |
 | P25.2 processor.rs refactor | 5 | 🟢 Low |
 | P25.3 CALL dispatch trait | 3 | 🟢 Low |
 | P25.4 C++ benchmark binary | 3 | 🟡 Medium |
 | P25.5 Release & publish | 2 | 🟢 Low |
-| **Total P25** | **18** | |
+| **Total P25** | **13** | |
 
 ---
 
