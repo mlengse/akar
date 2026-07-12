@@ -61,9 +61,9 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | FileHandle extend_file | ❌ No extend | ✅ `extend_file()` method | `[P0]` |
 | P16.1 PhysicalAccumulate | ❌ Pass-through | ✅ True materialization | `[new]` |
 | P16.2a ResultCollector/Profile | ❌ Pass-through | ✅ True consolidation / Timings | `[new]` |
-| P16.2 PrimaryKeyScan | ❌ Stub | ✅ Read from IndexLookup | `[new]` |
-| P16.2 PackedExtend | ❌ Stub | ✅ Read from CSR Index | `[new]` |
-| P16.2 Split Aggregation | ❌ Stub | ✅ SharedAggregateState + Scan/Finalize | `[new]` |
+| P16.2 PrimaryKeyScan | ❌ Stub | ✅ Vectorized batch ART index lookup | `[new]` |
+| P16.2 PackedExtend | ❌ Stub | ✅ Flattened DataChunk + Capacity estimation | `[new]` |
+| P16.2 Split Aggregation | ❌ Stub | ✅ Thread-local sharded state (64 shards) | `[new]` |
 | P16.2 PathPropertyProbe | ❌ Stub | ✅ Lazy property probe | `[new]` |
 | StorageManager rollback undo | ❌ Clear-only | ✅ Apply undo_records in reverse | `[P0]` |
 | Table Functions (CALL) | ❌ 1 fungsi (`show_tables`) | ✅ 12 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases) | `[P1]` |
