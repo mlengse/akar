@@ -59,7 +59,8 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
 
             // Batch lookup: single pass over the hash index for all keys.
             // Explicitly deref through the DashMap Ref guard to reach NodeTable.
-            let lookups = node_table.value().lookup_by_pk_batch(&keys);
+            let table: &kuzu_storage::NodeTable = &*node_table;
+            let lookups = table.lookup_by_pk_batch(&keys);
 
             for lookup in lookups {
                 if let Some(row_id) = lookup {

@@ -224,7 +224,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas esensial:** ~90% (semua operator inti query engine ter-port).
 **Paritas total:** ~64% (43 vs 67 physical operators C++ — lihat §8 untuk gap analysis).
-> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (10 files). ✅ Sudah direfactor (Phase 2).
+> ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (10 files). ✅ Sudah direfactor (Phase 2A). Dispatch layer (`processor/mod.rs`) juga telah direfactor (Phase 2B) menjadi modul `mapper/` dan ukurannya mengecil dari 2,400+ baris menjadi ~220 baris.
 
 ### 1.6 Storage Engine
 
@@ -511,7 +511,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | 1 | ~~**Monolith `scalar.rs`** (4.578 lines)~~ | ✅ DONE | ~~`kuzu-function/src/scalar.rs`~~ → `scalar/{mod,arithmetic,array,blob,boolean,cast,comparison,date,hash,interval,list,map_struct,path,schema,string,union_funcs,utility,utils}.rs` | P-MOD1: ✅ Complete |
 | 2 | ~~**Monolith `physical_operator.rs`** (3.794 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/physical_operator.rs`~~ → `physical/{6 files}` (4-line re-export stub) | P-MOD2A: ✅ Complete |
 | 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
-| 4 | **Monolith `processor.rs`** (2.755 lines) | 🟡 PARTIAL | `kuzu-processor/src/processor/mod.rs` still contains monolith `execute_internal` | P-MOD2B: Partial (deferred to P25.2) |
+| 4 | ~~**Monolith `processor.rs`** (2.755 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/processor/mod.rs`~~ → `processor/mapper/` (down to ~220 lines) | P-MOD2B: ✅ Complete |
 | 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{11 files},tree/{8 files}}` | P-MOD4: ✅ Complete (Phase 4) |
 | 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
 | 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/{mod,ddl,dml,helpers}.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
@@ -624,11 +624,11 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | `UNION` | Concatenate + dedup | ✅ P16.1 | ✅ Done (real impl) |
 | `RESULT_COLLECTOR` | Consolidate output chunks | ✅ P16.1 | ✅ Done (merge chunks) |
 | `PROFILE` | Timing wrapper | ✅ P16.1 | ✅ Done (Cell<Duration>) |
-| `PACKED_EXTEND` | Optimized multi-rel extend | P2 | 🟡 Stub (pass-through) |
+| `PACKED_EXTEND` | Optimized multi-rel extend | ✅ P2 | ✅ Done (flattened + capacity bounds) |
 | `PARTITIONER` | Morsel-driven parallelism | P2 | ✅ P18 (`kuzu-processor/src/physical/missing_ops.rs`) — real impl, 5 tests |
 | `PATH_PROPERTY_PROBE` | Path property resolution | P2 | ✅ P18 (`kuzu-processor/src/physical/scan_filter.rs`) — resolves destination node properties from paths |
-| `PRIMARY_KEY_SCAN` | PK-based scan | P2 | 🟡 Stub (pass-through) |
-| `AGGREGATE_FINALIZE/SCAN` | Split aggregate | P2 | 🟡 Stub (pass-through) |
+| `PRIMARY_KEY_SCAN` | PK-based scan | ✅ P2 | ✅ Done (vectorized batched ART lookup) |
+| `AGGREGATE_FINALIZE/SCAN` | Split aggregate | ✅ P2 | ✅ Done (split computation/scan) |
 | `DUMMY_SINK / DUMMY_SIMPLE_SINK` | Plan sink operators | P3 | ✅ Correct (no-op) |
 
 ### 8.4 Missing Functions — Status Update (2026-07-08)
