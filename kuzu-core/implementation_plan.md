@@ -26,7 +26,10 @@
 | **P24** | Missing physical operators + stub hardening | 🟡 P2 | 14.5 | ✅ COMPLETE |
 | **P25** | Technical debt closure (STANDALONE_CALL, refactor, publish) | 🟡 P2 | 13 | ✅ COMPLETE |
 | **P26** | Testing, fuzzing & documentation polish | 🟢 P3 | 21 | 🟡 SEBAGIAN |
-| **Total** | | | **141.5** | **✅ Semua implementasi selesai** |
+| **P27** | Performance — zero-copy Arrow, JoinHashTable, quick wins | 🔴 P0 | 14 | 🆕 PLANNED |
+| **P28** | Drop-in replacement — C++ storage reader, extension ABI, CLI | 🔴 P0 | 23 | 🆕 PLANNED |
+| **P29** | Functions, fuzz, proptest, edge cases | 🟡 P1 | 18 | 🆕 PLANNED |
+| **Total** | | | **196.5** | **✅ Inti selesai, 🆕 P27-P29 strategis** |
 
 ---
 
@@ -76,7 +79,7 @@
 
 ---
 
-## P12 — Physical Operators & Lambda Functions (5/6 Complete)
+## P12 — Physical Operators & Lambda Functions ✅ COMPLETE
 
 ### ✅ P12.1 — TOP_K physical operator (COMPLETE)
 
@@ -184,15 +187,18 @@ Lambda-based list operations:
 - `[x]` Approximate cardinality estimation for StatsStore
 - `[x]` **File:** `kuzu-storage/src/stats_store.rs`
 
-### ❌ P14.4 — Roaring bitmap (DEFERRED)
-- `[ ]` Compressed bitmap for fast set operations
-- `[ ]` **Dependency:** `roaring` crate
+### ✅ P14.4 — Roaring bitmap (COMPLETE — via P17.4)
+- `[x]` Compressed bitmap for fast set operations
+- `[x]` Array/Bitmap containers, union/intersection/difference
+- `[x]` **File:** `kuzu-storage/src/roaring_bitmap.rs` — 25 tests
 
-### ❌ P14.5 — Lazy segment scanner (DEFERRED)
-- `[ ]` Deferred segment loading for large columnar scans
+### ✅ P14.5 — Lazy segment scanner (COMPLETE — via P17.3)
+- `[x]` On-demand NodeGroup loading for large columnar scans
+- `[x]` **File:** `kuzu-storage/src/lazy_scanner.rs` — 6 tests
 
-### ❌ P14.6 — Float compression (delta/offset) (DEFERRED)
-- `[ ]` Delta and offset compression for float columns
+### ✅ P14.6 — Float compression (delta/offset) (COMPLETE)
+- `[x]` Delta and offset compression for float columns
+- `[x]` **File:** compressed in `kuzu-storage/src/compression/` module
 
 ---
 
@@ -250,18 +256,18 @@ cargo fmt --all -- --check
 
 ---
 
-## Current Technical Debt (non-blocking)
+## Current Technical Debt ✅ TERSELESAIKAN
 
-| # | Item | Severity | Plan |
-|---|------|----------|------|
-| 1 | `processor.rs` monolith `execute_internal` | 🟡 PARTIAL — Split into 6 modules but mod.rs is still large | → P25.2 |
-| 2 | CALL dispatch via string matching in standalone_call.rs | 🟡 DEFERRED | → P25.3 |
-| 3 | Planner→Physical mapping logic scattered | 🟡 DEFERRED | → P25.2 |
-| 4 | ~~STANDALONE_CALL not a proper pipeline~~ | ✅ DONE (P22) | — |
-| 5 | Missing physical operators (5) + stub hardening (3) | 🟡 MEDIUM | → P24 |
-| 6 | C++ benchmark binary not built | 🟢 LOW | → P25.4 |
-| 7 | NPM / crates.io publish pending | 🟢 LOW | → P25.5 |
-| 8 | Edge case test coverage < 50% | 🟡 MEDIUM | → P26.1 |
+| # | Item | Status |
+|---|------|--------|
+| 1 | `processor.rs` monolith `execute_internal` | ✅ Resolved via P25.2 — `mapper/` module, ~220 lines |
+| 2 | CALL dispatch via string matching in standalone_call.rs | ✅ Resolved via P25.3 — trait-based dispatch |
+| 3 | Planner→Physical mapping logic scattered | ✅ Resolved via P25.2 — PlanMapper trait |
+| 4 | ~~STANDALONE_CALL not a proper pipeline~~ | ✅ DONE (P22) |
+| 5 | Missing physical operators (5) + stub hardening (3) | ✅ Resolved via P24 |
+| 6 | C++ benchmark binary not built | 🟡 DEFERRED — P25.4 |
+| 7 | NPM / crates.io publish pending | 🟡 DEFERRED — P25.5 |
+| 8 | Edge case test coverage < 50% | 🟡 PENDING — P26.1 |
 # P24: Physical Operator Completeness & Stub Hardening
 
 > **Status:** ✅ COMPLETE | **Audit:** 2026-07-13
@@ -503,3 +509,127 @@ Gunakan `proptest` crate:
 | P26.4 Performance profiling | 3 | 🟡 Partial |
 | P26.5 Documentation | 5 | 🟡 Partial |
 | **Total P26** | **21** | **🟡 ~6/21 complete** |
+
+---
+
+# P27–P29: Strategic Roadmap — Drop-in Replacement & Performance Parity
+
+> **Status:** 🆕 PLANNED | **Target:** 2026-08-15 → 2026-10-01
+> **Prerequisites:** P24 ✅, P25 ✅, P26 🟡
+> **Goal:** 1:1 drop-in replacement with C++ Vela + LadybugDB, performa kompetitif (<1.5× gap)
+
+---
+
+## 🔴 P27: Performa — Zero-Copy & Optimasi (14 SP)
+
+**Target:** Menutup gap 3.7× → <1.5× dalam 3 sprint paralel.
+
+### P27.1 — Zero-Copy Arrow Storage Layer (8 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| Storage output `ArrayRef` langsung | `NodeTable`, `Column` → `ArrayRef`, skip ValueVector | 4 |
+| Eliminasi `from_legacy` | Variable lookup langsung dari Arrow array | 2 |
+| Pipeline fused ops | Filter+Projection dalam 1 pass | 2 |
+
+**Dampak:** 2-3× speedup E2E — eliminasi bottleneck utama (0.09× variable lookup).
+
+### P27.2 — JoinHashTable Optimasi (3 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| `hashbrown::raw::RawTable` API | Skip HashMap wrapper, direct bucket access | 1 |
+| Parallel build `par_extend` | Chunked keys parallel insertion | 1 |
+| SIMD hash multi-column | SWAR hash untuk multi-key join | 1 |
+
+**Dampak:** 1.5-2× speedup hash join.
+
+### P27.3 — Quick Wins (3 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| `SmallVec<[u32; 8]>` untuk SelectionVector | Heap alloc → stack untuk kasus umum | 1 |
+| `Arc<[Value]>` constant pools | Skip ref-counting overhead | 1 |
+| `#[inline]` hot path annotation | Pada `evaluate_binary`, `evaluate_aggregate` | 1 |
+
+---
+
+## 🔴 P28: Drop-in Replacement 1:1 — C++ Vela + LadybugDB (23 SP)
+
+**Target:** Rust bisa membaca database C++, memuat ekstensi C++, dan CLI identik.
+
+### P28.1 — C++ Storage Reader (10 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| C++ page layout reader | Page size, header format | 3 |
+| C++ catalog deserialization | `catalog.h` format → Rust struct | 3 |
+| C++ WAL reader | Format parsing untuk crash recovery | 2 |
+| C++ index reader | ART/HashIndex format compatibility | 2 |
+
+**Mode:** Read-only — Rust membaca database C++, tidak perlu menulis format C++.
+
+### P28.2 — Extension ABI Compatibility (8 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| C API boundary | `extern "C"` wrapper untuk extension entry points | 3 |
+| Extension loader | Load `.so`/`.dll` dengan symbol resolution | 3 |
+| Fallback: port ekstensi | Rust native untuk DuckDB, Postgres, SQLite, HTTPFS | 2 |
+
+### P28.3 — CLI Feature Parity (5 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| Interactive history | rustyline/reedline integration | 1.5 |
+| Multi-line query | Input parsing multi-baris | 1 |
+| `.import` / `.export` commands | Shell built-in commands | 1 |
+| Tab completion | Table/function name completion | 1 |
+| Output formats | Aligned table, CSV, JSON, box | 0.5 |
+
+---
+
+## 🟡 P29: Fitur & Fungsi Completeness (18 SP)
+
+### P29.1 — 18 Missing Functions Unik (6 SP)
+| Kategori | Fungsi | SP |
+|----------|--------|:--:|
+| Math | `atan2`, `degrees`, `radians`, `sinh`, `cosh`, `tanh`, `asin`, `acos`, `atan`, `log2`, `gcd`, `lcm`, `factorial`, `sign` | 2 |
+| String | `levenshtein`, `soundex`, `encode/decode_base64`, `sha256` | 1 |
+| List | `list_contains_all`, `list_has_any`, `list_has_all`, `list_sort` | 1 |
+| Map | `map_from_entries`, `map_values`, `map_keys` | 0.5 |
+| Blob | `blob_from_bytes`, `to_base64`, `from_base64` | 1 |
+| Net | `pg_isready` | 0.5 |
+
+### P29.2 — Fuzz Testing (4 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| `cargo-fuzz` target 1 | `cypher_query` — parse → bind → plan → execute | 2 |
+| `cargo-fuzz` target 2 | `expression_eval` — random expressions | 1 |
+| `cargo-fuzz` target 3 | `copy_from_csv` — malformed CSV | 1 |
+
+### P29.3 — Property-Based Testing (4 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| Round-trip | Insert → query → value match | 1 |
+| Associativity | `(A JOIN B) JOIN C` == `A JOIN (B JOIN C)` | 1.5 |
+| Filter pushdown | Filter before join == filter after join | 1.5 |
+
+### P29.4 — Edge Case Tests (4 SP)
+| Item | Detail | SP |
+|------|--------|:--:|
+| `test_edge_cases.rs` | ~60 tests organized by category | 4 |
+
+---
+
+## Ringkasan Strategis
+
+| Fase | Fokus | SP | Timeline | Dampak |
+|------|-------|:--:|:--------:|--------|
+| **P27.1** | Zero-copy Arrow storage | 8 | Sprint 1 (2 minggu) | 2-3× speedup E2E |
+| **P27.2** | JoinHashTable SIMD | 3 | Sprint 1 (paralel) | 1.5-2× join |
+| **P27.3** | Quick wins | 3 | Sprint 1 (paralel) | 10-20% micro |
+| **P28.1** | C++ storage reader | 10 | Sprint 2-3 | Drop-in replacement |
+| **P28.2** | Extension ABI | 8 | Sprint 2-3 | Load C++ extensions |
+| **P28.3** | CLI parity | 5 | Sprint 3 | UX parity |
+| **P29.1** | 18 missing functions | 6 | Sprint 2 (paralel) | Feature parity |
+| **P29.2** | Fuzz testing | 4 | Sprint 3 | Production readiness |
+| **P29.3** | Property-based tests | 4 | Sprint 3 | Correctness |
+| **P29.4** | Edge case tests | 4 | Sprint 3 | Coverage |
+| **Total** | | **55** | **~6 minggu** | |
+
+> **Asumsi:** 1 full-time engineer @ 8 SP/sprint (2 minggu). Dengan parallel sprint, target **6 minggu** untuk 1:1 drop-in replacement dengan performa kompetitif.

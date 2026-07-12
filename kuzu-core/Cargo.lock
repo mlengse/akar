@@ -1599,7 +1599,6 @@ dependencies = [
  "arrow 59.1.0",
  "criterion",
  "hashbrown 0.17.1",
- "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
  "kuzu-fts",
