@@ -1,5 +1,6 @@
+use arrow::array::Array;
+use kuzu_common::arrow_vector::VectorAccess;
 use kuzu_common::selection::SelectionVector;
-use kuzu_common::types::Value;
 use kuzu_common::vector::DataChunk;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use std::sync::{Arc, Mutex};
@@ -50,7 +51,7 @@ impl PhysicalFilter {
         if let Some(eval) = evaluator {
             let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
             let size = arrow_result.size();
-            if arrow_result.physical_type() == kuzu_common::types::PhysicalTypeID::Bool {
+            if arrow_result.physical_type == kuzu_common::types::PhysicalTypeID::Bool {
                 if let Some(bool_arr) = arrow_result.array.as_any().downcast_ref::<arrow::array::BooleanArray>() {
                     let mut mask = Vec::with_capacity(size);
                     for i in 0..size {
@@ -95,7 +96,7 @@ impl PhysicalFilter {
     ) -> Result<SelectionVector, String> {
         if let Some(eval) = evaluator {
             let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
-            if arrow_result.physical_type() == kuzu_common::types::PhysicalTypeID::Bool {
+            if arrow_result.physical_type == kuzu_common::types::PhysicalTypeID::Bool {
                 if let Some(bool_arr) = arrow_result.array.as_any().downcast_ref::<arrow::array::BooleanArray>() {
                     return Ok(boolean_array_to_selection(bool_arr));
                 }

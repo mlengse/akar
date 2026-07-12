@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-13 (diperbarui — Fase 1 Arrow/SelectionVector ✅)
+> **Tanggal:** 2026-07-13 (diperbarui — Fase 1 Arrow/SelectionVector ✅, Fase 2 evaluate_arrow Native Arrow Output ✅)
 > **Hasil audit:** `cargo test --workspace` → **~974 passed, 0 failed** | 29 crate, ~202 file .rs, ~66k LOC
 
 ---
@@ -111,6 +111,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | GDS CALL Wiring | ❌ 15 algorithms registered as `Custom` stubs (no callbacks) | ✅ All 15 → `CustomTable` with real execution closures, 34 tests | `[GDS]` |
 | InsertRel column index fix | ❌ Hardcoded src=0/dst=1 → corrupted edge IDs on cross-product | ✅ Dynamic lookup via `field_names` matching (`{var}._id` / `{var}` / `{var}.id`) | `[fix]` |
 | Arrow/SelectionVector Fase 1 | ❌ `ValueVector` + `Vec<u16>` sel_vector inline | ✅ `arrow-rs` dep, `SelectionVector(Vec<u32>)`, `ArrowVector(ArrayRef)`, `VectorAccess` trait, `DataChunk.sel_vector`, zero-copy `PhysicalFilter`, `evaluate_to_arrow()`, `AggregateHashTable.iter_rows()` | `[new]` |
+| Arrow/SelectionVector Fase 2 | ❌ `evaluate_to_arrow` forwarded to `evaluate` + `from_legacy` (Value enum boxing) | ✅ `evaluate_arrow` native path: Arrow Builders for constants, Arrow compute kernels for cmp/arith/boolean, type-safe kernel fallback, `build_arrow_from_values` typed Vec for function calls, `boolean_array_to_selection` bit-packed filter path | `[new]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -202,7 +203,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | PhysicalScanRel | ✅ |
 | PhysicalVectorSimilarityScan | ✅ |
 | PhysicalArtIndexRangeScan | ✅ |
-| PhysicalFilter (ExpressionEvaluator) | ✅ |
+| PhysicalFilter (ExpressionEvaluator) | ✅ (Arrow-native `evaluate_to_arrow` + `boolean_array_to_selection` bit-packed filter) |
 | PhysicalProjection | ✅ |
 | PhysicalHashJoin (execute_binary) | ✅ (with JoinHashTable parallel build) |
 | PhysicalCrossProduct (execute_binary) | ✅ |
@@ -581,7 +582,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-13: **~974 test lulus, 0 gagal** (`test_sip_optimization` fixed). **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P-MOD2B ✅, GDS CALL ✅, Arrow/SelectionVector Fase 1 ✅**.
+- Per 2026-07-13: **~974 test lulus, 0 gagal** (`test_sip_optimization` fixed). **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P-MOD2B ✅, GDS CALL ✅, Arrow/SelectionVector Fase 1 ✅, Arrow/SelectionVector Fase 2 ✅**.
 - Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
