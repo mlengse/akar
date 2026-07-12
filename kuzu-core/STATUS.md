@@ -508,12 +508,12 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | 1 | ~~**Monolith `scalar.rs`** (4.578 lines)~~ | ✅ DONE | ~~`kuzu-function/src/scalar.rs`~~ → `scalar/{mod,arithmetic,array,blob,boolean,cast,comparison,date,hash,interval,list,map_struct,path,schema,string,union_funcs,utility,utils}.rs` | P-MOD1: ✅ Complete |
 | 2 | ~~**Monolith `physical_operator.rs`** (3.794 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/physical_operator.rs`~~ → `physical/{6 files}` (4-line re-export stub) | P-MOD2A: ✅ Complete |
 | 3 | ~~**Monolith `connection.rs`** (3.133 lines)~~ | ✅ DONE | ~~`kuzu-main/src/connection.rs`~~ → `connection/{mod,query,ddl,dml,copy,transaction,substitute,utils}.rs` | P-MOD3: ✅ Complete (Phase 3) |
-| 4 | ~~**Monolith `processor.rs`** (2.755 lines)~~ | ✅ DONE | ~~`kuzu-processor/src/processor.rs`~~ → `processor/{mod,join_helpers,union_helpers,chunk_helpers,projection_helper,plan_serializer}.rs` | P-MOD2B: ✅ Complete |
+| 4 | **Monolith `processor.rs`** (2.755 lines) | 🟡 PARTIAL | `kuzu-processor/src/processor/mod.rs` still contains monolith `execute_internal` | P-MOD2B: Partial (deferred to P25.2) |
 | 5 | ~~**Monolith `passes.rs`** (2.486 lines)~~ | ✅ DONE | ~~`kuzu-optimizer/src/passes.rs`~~ → `passes/{flat/{11 files},tree/{8 files}}` | P-MOD4: ✅ Complete (Phase 4) |
 | 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
 | 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/{mod,ddl,dml,helpers}.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
 | 8 | ~~**TRANSACTION via string matching**~~ | ✅ DONE | ~~`kuzu-main/src/connection/query.rs`~~ → `Statement::Transaction` pipeline | P10.2 — ✅ Complete |
-| 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/ddl.rs` | P10.3 — Architectural cleanup; CALL already functional |
+| 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/standalone_call.rs` | P10.3 — Pipeline exists (P22) but dispatch needs trait (P25.3) |
 | 10 | **Missing physical operators** | 🟡 MEDIUM → 🟢 LOW | `kuzu-processor/` | P12 — Partitioner, IndexLookup, BatchInsert, dll (TopK ✅ done) |
 | 11 | ~~**Missing ATTACH/DETACH DATABASE**~~ | ✅ DONE | Multi-crate | P11 — ✅ Complete (P11.3-5) |
 | 12 | ~~**nullif / count_if functions**~~ | ✅ DONE | `kuzu-function/src/` | P10.5 — ✅ Complete |
