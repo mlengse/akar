@@ -20,14 +20,12 @@ pub use plan_serializer::*;
 pub use projection_helper::*;
 pub use union_helpers::*;
 
-use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::{FunctionRegistry, TableFunction};
-use kuzu_parser::ast::Expression;
 use kuzu_planner::logical_operator::LogicalOperator;
-use kuzu_storage::table::{ColumnDefinition, TableCatalog};
+use kuzu_storage::table::TableCatalog;
 use std::sync::{Arc, Mutex};
 
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;

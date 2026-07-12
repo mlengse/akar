@@ -57,8 +57,9 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                 continue;
             }
 
-            // Batch lookup: single pass over the hash index for all keys
-            let lookups = node_table.lookup_by_pk_batch(&keys);
+            // Batch lookup: single pass over the hash index for all keys.
+            // Explicitly deref through the DashMap Ref guard to reach NodeTable.
+            let lookups = node_table.value().lookup_by_pk_batch(&keys);
 
             for lookup in lookups {
                 if let Some(row_id) = lookup {
