@@ -104,6 +104,16 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::MultiplicityReducer(mr) => {
+            for child in &mr.children {
+                collect_scans_recursive(child, scans);
+            }
+        }
+        LogicalOperator::Skip(s) => {
+            for child in &s.children {
+                collect_scans_recursive(child, scans);
+            }
+        }
         LogicalOperator::ArtIndexRangeScan(_)
         | LogicalOperator::VectorSimilarityScan(_)
         | LogicalOperator::CopyFrom(_)
@@ -137,8 +147,11 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::CreateFtsIndex(_)
         | LogicalOperator::FtsScan(_)
         | LogicalOperator::BatchInsert(_)
-        | LogicalOperator::IndexLookup(_) => {
-            // Leaf operator with no children — nothing to recurse into.
+        | LogicalOperator::IndexLookup(_)
+        | LogicalOperator::EmptyResult(_)
+        | LogicalOperator::Insert(_)
+        | LogicalOperator::ExtensionClause(_) => {
+            // Leaf operators or non-scan operations: do nothing
         }
     }
 }

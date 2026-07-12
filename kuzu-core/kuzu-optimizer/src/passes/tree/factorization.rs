@@ -105,6 +105,16 @@ impl TreeOptimizationPass for FactorizationRewriting {
                         Self::append_flattens(child, &[0]);
                     }
                 }
+                LogicalOperator::Skip(s) => {
+                    if let Some(first) = s.children.first_mut() {
+                        Self::append_flattens(first, &[0]);
+                    }
+                }
+                LogicalOperator::MultiplicityReducer(mr) => {
+                    if let Some(first) = mr.children.first_mut() {
+                        Self::append_flattens(first, &[0]);
+                    }
+                }
                 // Leaf and Flatten operators: no transformation needed
                 LogicalOperator::ArtIndexRangeScan(_)
                 | LogicalOperator::ScanNode(_)
@@ -145,6 +155,9 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::BatchInsert(_)
                 | LogicalOperator::IndexLookup(_)
                 | LogicalOperator::PathPropertyProbe(_)
+                | LogicalOperator::EmptyResult(_)
+                | LogicalOperator::Insert(_)
+                | LogicalOperator::ExtensionClause(_)
                 | LogicalOperator::Partitioner(_) => {}
             }
         });

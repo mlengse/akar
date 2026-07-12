@@ -157,6 +157,15 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::Partitioner(p) => {
                     p.children.first().map(|c| c.cardinality()).unwrap_or(1)
                 }
+                LogicalOperator::Skip(s) => {
+                    s.children.first().map(|c| c.cardinality()).unwrap_or(1)
+                }
+                LogicalOperator::MultiplicityReducer(mr) => {
+                    mr.children.first().map(|c| c.cardinality()).unwrap_or(1)
+                }
+                LogicalOperator::EmptyResult(_) => 0,
+                LogicalOperator::Insert(i) => i.values.len() as u64,
+                LogicalOperator::ExtensionClause(_) => 1,
                 // DDL operators produce exactly one row (success message)
                 LogicalOperator::CreateNodeTable(_)
                 | LogicalOperator::CreateRelTable(_)

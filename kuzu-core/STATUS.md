@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-12 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅, P19 ✅, P20 ✅, P21 ✅, P22 ✅, P23 ✅, P24 ✅ complete)
+> **Tanggal:** 2026-07-12 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅, P19 ✅, P20 ✅, P21 ✅, P22 ✅, P23 ✅, P24 ✅, P25.1 ✅ complete)
 > **Hasil audit:** `cargo test --workspace` → **~1000 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
@@ -34,6 +34,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 | Item | Status Lama | Status Baru | Commit |
 |------|------------|------------|--------|
+| P25.1 Write & Extension | ❌ Placeholder stubs | ✅ Full implementasi `MERGE`, `INSERT`, `EXTENSION` | `[P25.1]` |
 | GDS Framework + Shortest Path | ❌ Placeholder | ✅ 8 algoritma, 13 test | `a75e0dc` |
 | PhysicalRecursiveExtend path tracking | ❌ Basic BFS | ✅ GDS-style path + WALK/TRAIL/ACYCLIC | `7defc50` |
 | SIP/SemiMask kerangka | ❌ TIDAK ADA | ✅ LogicalSemiMasker + PhysicalSemiMasker + SIPOptimization pass | `6996865` |
@@ -748,7 +749,8 @@ Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exce
 | **P17.2** | Triangle Counting algorithm | 🟢 P3 | 2 | ✅ DONE |
 | **P17.3** | Lazy segment scanner (on-demand NodeGroup loading) | 🟢 P3 | 2 | ✅ DONE |
 | **P17.4** | Roaring bitmap (compressed bitset for node/edge ID sets) | 🟢 P3 | 3 | ✅ DONE |
-| **Total** | | | **94** | |
+| **P25** | P25.1: PhysicalMerge, PhysicalInsert, PhysicalExtensionClause | 🔴 P0 | 4 | ✅ DONE |
+| **Total** | | | **98** | |
 
 ---
 
