@@ -24,7 +24,6 @@ rayon.workspace = true
 arrow.workspace = true
 
 [dev-dependencies]
-kuzu-binder = { path = "../kuzu-binder" }
 criterion.workspace = true
 
 [[bench]]
@@ -45,6 +44,10 @@ harness = false
 
 [[bench]]
 name = "physical_aggregate"
+harness = false
+
+[[bench]]
+name = "evaluate_arrow"
 harness = false
 
 [lints]
