@@ -47,6 +47,10 @@ harness = false
 name = "physical_aggregate"
 harness = false
 
+[[bench]]
+name = "evaluate_arrow"
+harness = false
+
 [lints]
 workspace = true
 

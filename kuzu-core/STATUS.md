@@ -586,6 +586,27 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
+### Performa: evaluate_arrow vs evaluate (10.000 rows, Criterion.rs)
+
+| Benchmark | Old (µs) | New (µs) | Speedup |
+|-----------|----------|----------|---------|
+| Constant True + selection | 88.6 | 50.6 | **1.75×** |
+| Variable (dispatch only) | 1.9 | 15.7 | 0.12× (from_legacy overhead) |
+| `x > 5` + selection | 825 | 65.5 | **12.6×** |
+| `x + y` (eval only) | 832 | 40.5 | **20.5×** |
+| `x > 5 AND y < 10` + selection | 2,258 | 105 | **21.5×** |
+| `NOT (x > 5)` + selection | 1,378 | 57.9 | **23.8×** |
+| `x IS NULL` + selection | 143 | 41.6 | **3.4×** |
+| Selection building (10k, 50%) | 6.3 | 14.7 | 0.43× (bit-pack overhead) |
+
+**Interpretasi:**
+- **Hot path (cmp/boolean/arithmetic): 10–24× speedup** — Arrow compute kernels eliminate per-row Value enum boxing and scalar function dispatch
+- **Selection building** is slightly slower (+8 µs) due to BooleanArray bit-unpacking vs Vec<bool>, but this is negligible compared to the ~760+ µs saved in evaluation
+- **Variable lookup** is slower due to `from_legacy` conversion (Phase 3 target: storage-layer native Arrow arrays)
+- **Overall filter hot path (`x > 5` → SelectionVector): ~10× faster** (831→80 µs), far exceeding the 3.65× gap closure target
+
+Benchmark file: `kuzu-processor/benches/evaluate_arrow.rs` (8 benchmark groups, Criterion.rs).
+
 ---
 
 ## 8. Ladybug C++ Parity Gap Analysis (2026-07-08)
