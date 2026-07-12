@@ -11,8 +11,9 @@
 //! - PropertyAccess:  reads a property from a struct/object expression
 //! - List/Map:        evaluated via list_creation/map_creation scalar functions
 
-use kuzu_common::arrow_vector::ArrowVector;
-use kuzu_common::types::Value;
+use arrow::array::ArrayRef;
+use kuzu_common::arrow_vector::{ArrowVector, VectorAccess};
+use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::{FunctionRegistry, ScalarFunction};
 use kuzu_function::scalar::evaluate_scalar;
@@ -70,12 +71,10 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate an expression for every row in the chunk, returning an ArrowVector
-    /// for fixed-width types (Int32/64, Float32/64, Bool) or a ValueVector for others.
-    /// This avoids the Value enum conversion overhead in the filter hot path.
+    /// directly. Delegates to evaluate_arrow which uses Arrow compute kernels for
+    /// the hot path (comparisons, arithmetic, boolean ops).
     pub fn evaluate_to_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
-        let legacy = self.evaluate(expr, chunk)?;
-        let arrow = ArrowVector::from_legacy(&legacy);
-        Ok(arrow)
+        self.evaluate_arrow(expr, chunk)
     }
 
     /// Evaluate an expression for every row in the chunk, returning a ValueVector.
@@ -126,6 +125,392 @@ impl ExpressionEvaluator {
                 Err("Lambda expression should only appear as argument to list_transform/filter/reduce".into())
             }
         }
+    }
+
+    // ==================== Arrow-native evaluation ====================
+
+    /// Evaluate an expression returning an ArrowVector directly.
+    /// For operations supported by Arrow compute kernels (comparisons,
+    /// arithmetic, boolean), this is vectorized and avoids Value enum boxing.
+    pub fn evaluate_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
+        match expr {
+            Expression::Constant(c) => self.evaluate_arrow_constant(c, chunk.size),
+            Expression::Variable(name) => self.evaluate_arrow_variable(name, chunk),
+            Expression::PropertyAccess(obj, prop) => {
+                self.evaluate_arrow_property_access(obj, prop, chunk)
+            }
+            Expression::FunctionCall(name, args) => {
+                self.evaluate_arrow_function_call(name, args, chunk)
+            }
+            Expression::BinaryOp(op, left, right) => {
+                self.evaluate_arrow_binary_op(op, left, right, chunk)
+            }
+            Expression::UnaryOp(op, inner) => self.evaluate_arrow_unary_op(op, inner, chunk),
+            // Fallback for complex types: use evaluate + from_legacy
+            _ => {
+                let legacy = self.evaluate(expr, chunk)?;
+                Ok(ArrowVector::from_legacy(&legacy))
+            }
+        }
+    }
+
+    /// Evaluate a constant directly as ArrowVector using typed Arrow builders.
+    fn evaluate_arrow_constant(&self, c: &Constant, size: usize) -> Result<ArrowVector, String> {
+        match c {
+            Constant::Null => {
+                let mut builder = arrow::array::Int64Builder::with_capacity(size);
+                builder.append_nulls(size);
+                Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::Int64))
+            }
+            Constant::Bool(b) => {
+                let mut builder = arrow::array::BooleanBuilder::with_capacity(size);
+                for _ in 0..size {
+                    builder.append_value(*b);
+                }
+                Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::Bool))
+            }
+            Constant::Integer(i) => {
+                let mut builder = arrow::array::Int64Builder::with_capacity(size);
+                let v = *i;
+                for _ in 0..size {
+                    builder.append_value(v);
+                }
+                Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::Int64))
+            }
+            Constant::Float(f) => {
+                let mut builder = arrow::array::Float64Builder::with_capacity(size);
+                let v = *f;
+                for _ in 0..size {
+                    builder.append_value(v);
+                }
+                Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::Double))
+            }
+            Constant::String(s) => {
+                let mut builder = arrow::array::StringBuilder::with_capacity(size, size * s.len().max(1));
+                for _ in 0..size {
+                    builder.append_value(s);
+                }
+                Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::String))
+            }
+        }
+    }
+
+    /// Evaluate a variable expression, converting the ValueVector to ArrowVector.
+    fn evaluate_arrow_variable(&self, name: &str, chunk: &DataChunk) -> Result<ArrowVector, String> {
+        let idx = if let Ok(idx) = name.parse::<usize>() {
+            idx
+        } else if !chunk.field_names.is_empty() {
+            if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
+                idx
+            } else {
+                return Err(format!("Variable '{}' not found in field_names", name));
+            }
+        } else {
+            return Err(format!("Variable '{}' not found (chunk has no field_names)", name));
+        };
+
+        let field = chunk.fields.get(idx).ok_or_else(|| {
+            format!("Variable '{}' (index {}) not found in chunk fields", name, idx)
+        })?;
+        Ok(ArrowVector::from_legacy(field))
+    }
+
+    /// Evaluate a property access expression, returning ArrowVector.
+    fn evaluate_arrow_property_access(&self, obj: &Expression, prop: &str, chunk: &DataChunk) -> Result<ArrowVector, String> {
+        let qualified_prop = if let Expression::Variable(var_name) = obj {
+            format!("{}.{}", var_name, prop)
+        } else {
+            prop.to_string()
+        };
+
+        if !chunk.field_names.is_empty()
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
+        {
+            let field = chunk.fields.get(idx).ok_or_else(|| {
+                format!("Property '{}' not found in chunk", prop)
+            })?;
+            return Ok(ArrowVector::from_legacy(field));
+        }
+        let legacy = self.evaluate(obj, chunk)?;
+        Ok(ArrowVector::from_legacy(&legacy))
+    }
+
+    /// Evaluate a binary operation using Arrow compute kernels when possible.
+    fn evaluate_arrow_binary_op(
+        &self,
+        op: &BinaryOp,
+        left: &Expression,
+        right: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ArrowVector, String> {
+        match op {
+            BinaryOp::In | BinaryOp::NotIn => {
+                let legacy = self.evaluate_in_op(op, left, right, chunk)?;
+                return Ok(ArrowVector::from_legacy(&legacy));
+            }
+            BinaryOp::Concat | BinaryOp::StartsWith | BinaryOp::EndsWith | BinaryOp::Contains => {
+                let func_name = match op {
+                    BinaryOp::Concat => "concat",
+                    BinaryOp::StartsWith => "starts_with",
+                    BinaryOp::EndsWith => "ends_with",
+                    BinaryOp::Contains => "contains",
+                    _ => unreachable!(),
+                };
+                return self.evaluate_arrow_function_call(func_name, &[left.clone(), right.clone()], chunk);
+            }
+            _ => {}
+        }
+
+        let kernel_name = match op {
+            BinaryOp::Add => "add",
+            BinaryOp::Subtract => "sub",
+            BinaryOp::Multiply => "mul",
+            BinaryOp::Divide => "div",
+            BinaryOp::Modulo => "mod",
+            BinaryOp::Equal => "eq",
+            BinaryOp::NotEqual => "neq",
+            BinaryOp::LessThan => "lt",
+            BinaryOp::LessThanOrEqual => "lt_eq",
+            BinaryOp::GreaterThan => "gt",
+            BinaryOp::GreaterThanOrEqual => "gt_eq",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+            BinaryOp::Xor => "xor",
+            _ => return Err(format!("Unsupported binary op: {:?}", op)),
+        };
+
+        let left_arrow = self.evaluate_arrow(left, chunk)?;
+        let right_arrow = self.evaluate_arrow(right, chunk)?;
+
+        match self.apply_arrow_kernel(kernel_name, &left_arrow, &right_arrow) {
+            Ok(result) => Ok(result),
+            Err(_) => {
+                let fallback = Expression::BinaryOp(op.clone(), Box::new((*left).clone()), Box::new((*right).clone()));
+                let legacy = self.evaluate(&fallback, chunk)?;
+                Ok(ArrowVector::from_legacy(&legacy))
+            }
+        }
+    }
+
+    /// Evaluate a unary operation using Arrow compute kernels when possible.
+    fn evaluate_arrow_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
+        match op {
+            UnaryOp::Not => {
+                let inner_arrow = self.evaluate_arrow(inner, chunk)?;
+                self.apply_arrow_unary_kernel("not", &inner_arrow).or_else(|_| {
+                    let fallback = Expression::UnaryOp(UnaryOp::Not, Box::new(inner.clone()));
+                    let legacy = self.evaluate(&fallback, chunk)?;
+                    Ok(ArrowVector::from_legacy(&legacy))
+                })
+            }
+            UnaryOp::Negate => {
+                let inner_arrow = self.evaluate_arrow(inner, chunk)?;
+                self.apply_arrow_unary_kernel("negate", &inner_arrow).or_else(|_| {
+                    let fallback = Expression::UnaryOp(UnaryOp::Negate, Box::new(inner.clone()));
+                    let legacy = self.evaluate(&fallback, chunk)?;
+                    Ok(ArrowVector::from_legacy(&legacy))
+                })
+            }
+            UnaryOp::IsNull => {
+                let inner_arrow = self.evaluate_arrow(inner, chunk)?;
+                self.apply_arrow_unary_kernel("is_null", &inner_arrow)
+            }
+            UnaryOp::IsNotNull => {
+                let inner_arrow = self.evaluate_arrow(inner, chunk)?;
+                self.apply_arrow_unary_kernel("is_not_null", &inner_arrow)
+            }
+        }
+    }
+
+    /// Apply an Arrow binary compute kernel.
+    fn apply_arrow_kernel(&self, name: &str, left: &ArrowVector, right: &ArrowVector) -> Result<ArrowVector, String> {
+        use arrow::compute::kernels::boolean::{and_kleene, or_kleene};
+        use arrow::compute::kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
+        use arrow::compute::kernels::numeric::{add, div, mul, rem, sub};
+
+        let result: ArrayRef = match name {
+            "add" => Arc::new(add(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "sub" => Arc::new(sub(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "mul" => Arc::new(mul(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "div" => Arc::new(div(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "mod" => Arc::new(rem(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "eq" => Arc::new(eq(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "neq" => Arc::new(neq(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "lt" => Arc::new(lt(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "lt_eq" => Arc::new(lt_eq(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "gt" => Arc::new(gt(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "gt_eq" => Arc::new(gt_eq(&left.array, &right.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "and" => {
+                let l = left.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?
+                    .clone();
+                let r = right.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?
+                    .clone();
+                Arc::new(and_kleene(&l, &r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+            }
+            "or" => {
+                let l = left.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?
+                    .clone();
+                let r = right.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?
+                    .clone();
+                Arc::new(or_kleene(&l, &r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+            }
+            "xor" => {
+                // XOR = (l AND NOT r) OR (NOT l AND r)
+                let l = left.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?;
+                let r = right.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?;
+                let not_r = arrow::compute::kernels::boolean::not(r)
+                    .map_err(|e| format!("Arrow xor/not failed: {e}"))?;
+                let not_l = arrow::compute::kernels::boolean::not(l)
+                    .map_err(|e| format!("Arrow xor/not failed: {e}"))?;
+                let l_and_not_r = and_kleene(l, &not_r)
+                    .map_err(|e| format!("Arrow xor/and failed: {e}"))?;
+                let not_l_and_r = and_kleene(&not_l, r)
+                    .map_err(|e| format!("Arrow xor/and failed: {e}"))?;
+                Arc::new(or_kleene(&l_and_not_r, &not_l_and_r)
+                    .map_err(|e| format!("Arrow xor/or failed: {e}"))?)
+            }
+            _ => return Err(format!("Unknown binary kernel: {name}")),
+        };
+
+        let phys_type = match name {
+            "eq" | "neq" | "lt" | "lt_eq" | "gt" | "gt_eq" | "and" | "or" | "xor" => PhysicalTypeID::Bool,
+            _ => left.physical_type,
+        };
+
+        Ok(ArrowVector::new(result, phys_type))
+    }
+
+    /// Apply an Arrow unary compute kernel.
+    fn apply_arrow_unary_kernel(&self, name: &str, arr: &ArrowVector) -> Result<ArrowVector, String> {
+        use arrow::compute::kernels::boolean::{is_null, is_not_null, not};
+        use arrow::compute::kernels::numeric::neg;
+
+        let result: ArrayRef = match name {
+            "not" => {
+                let arr_ref = arr.array.as_any().downcast_ref::<arrow::array::BooleanArray>()
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", arr.array.data_type()))?;
+                Arc::new(not(arr_ref).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+            }
+            "negate" => Arc::new(neg(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
+            "is_null" => {
+                Arc::new(is_null(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+            }
+            "is_not_null" => {
+                Arc::new(is_not_null(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+            }
+            _ => return Err(format!("Unknown unary kernel: {name}")),
+        };
+
+        let phys_type = if matches!(name, "is_null" | "is_not_null" | "not") {
+            PhysicalTypeID::Bool
+        } else {
+            arr.physical_type
+        };
+
+        Ok(ArrowVector::new(result, phys_type))
+    }
+
+    /// Evaluate a function call, producing ArrowVector directly.
+    /// For fixed-width return types, uses typed Vec<T> collection to
+    /// avoid the intermediate ValueVector allocation.
+    fn evaluate_arrow_function_call(
+        &self,
+        name: &str,
+        args: &[Expression],
+        chunk: &DataChunk,
+    ) -> Result<ArrowVector, String> {
+        // Lambda-based functions use complex control flow — stick with evaluate
+        if let Some(_lambda) = self.extract_lambda_arg(args) {
+            match name {
+                "list_transform" | "list_filter" | "list_reduce" => {
+                    let legacy = self.evaluate_function_call(name, args, chunk)?;
+                    return Ok(ArrowVector::from_legacy(&legacy));
+                }
+                _ => {}
+            }
+        }
+
+        // Evaluate arguments as ArrowVectors
+        let arg_arrows: Vec<ArrowVector> = args
+            .iter()
+            .map(|arg| self.evaluate_arrow(arg, chunk))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if arg_arrows.is_empty() {
+            return Err(format!("Function '{}' requires at least one argument", name));
+        }
+
+        let num_rows = arg_arrows[0].size();
+
+        // Look up the function
+        let func = {
+            let reg = self.registry.lock().unwrap();
+            reg.get_scalar(name).cloned()
+        };
+        let func = match func {
+            Some(f) => f,
+            None => return Err(format!("Unknown function: '{}'", name)),
+        };
+
+        // SequenceOp needs the callback — delegate to evaluate
+        if matches!(func, ScalarFunction::SequenceOp { .. }) {
+            let legacy = self.evaluate_function_call(name, args, chunk)?;
+            return Ok(ArrowVector::from_legacy(&legacy));
+        }
+
+        let mut first_error: Option<String> = None;
+        let mut row_results: Vec<Value> = Vec::with_capacity(num_rows);
+
+        for row in 0..num_rows {
+            let arg_values: Vec<Value> = arg_arrows
+                .iter()
+                .map(|arr| {
+                    if row < arr.size() && !arr.is_null(row) {
+                        arr.get_value(row).unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    }
+                })
+                .collect();
+
+            if arg_values.iter().any(|v| matches!(v, Value::Null)) {
+                row_results.push(Value::Null);
+                continue;
+            }
+
+            match evaluate_scalar(&func, &arg_values) {
+                Ok(val) => row_results.push(val),
+                Err(e) => {
+                    row_results.push(Value::Null);
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        let result_type = row_results
+            .iter()
+            .find(|v| !matches!(v, Value::Null))
+            .map(|v| v.physical_type())
+            .unwrap_or(PhysicalTypeID::Int64);
+
+        // Build Arrow array directly from typed Vec<T> — avoids ValueVector allocation
+        let arrow_result = build_arrow_from_values(&row_results, result_type, num_rows)?;
+
+        if row_results.iter().all(|v| matches!(v, Value::Null))
+            && let Some(e) = first_error
+        {
+            return Err(e);
+        }
+
+        Ok(arrow_result)
     }
 
     /// Evaluate a constant expression — returns a vector filled with the constant value.
@@ -895,6 +1280,86 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
         _ => {
             // For complex types (List, Struct, etc.), store as null
             v.set_null(row, true);
+        }
+    }
+}
+
+/// Build an ArrowVector from a Vec<Value>, using typed builders to
+/// avoid the intermediate ValueVector allocation.
+fn build_arrow_from_values(values: &[Value], phys_type: PhysicalTypeID, num_rows: usize) -> Result<ArrowVector, String> {
+    match phys_type {
+        PhysicalTypeID::Bool => {
+            let mut builder = arrow::array::BooleanBuilder::with_capacity(num_rows);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Bool(b) => builder.append_value(*b),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::Int64 => {
+            let mut builder = arrow::array::Int64Builder::with_capacity(num_rows);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Int64(n) => builder.append_value(*n),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::Int32 => {
+            let mut builder = arrow::array::Int32Builder::with_capacity(num_rows);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Int32(n) => builder.append_value(*n),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::Double => {
+            let mut builder = arrow::array::Float64Builder::with_capacity(num_rows);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Double(n) => builder.append_value(*n),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::Float => {
+            let mut builder = arrow::array::Float32Builder::with_capacity(num_rows);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Float(n) => builder.append_value(*n),
+                    Value::Double(n) => builder.append_value(*n as f32),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::String => {
+            let mut builder = arrow::array::StringBuilder::with_capacity(num_rows, num_rows * 16);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::String(s) => builder.append_value(s),
+                    _ => builder.append_null(),
+                }
+            }
+            Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        _ => {
+            // Unsupported type — fall back to creating an Arrow array with all nulls
+            let mut builder = arrow::array::Int64Builder::with_capacity(num_rows);
+            builder.append_nulls(num_rows);
+            Ok(ArrowVector::new(Arc::new(builder.finish()), PhysicalTypeID::Int64))
         }
     }
 }

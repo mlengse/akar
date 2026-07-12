@@ -6,6 +6,20 @@ use std::sync::{Arc, Mutex};
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 
+/// Build a SelectionVector from a BooleanArray, reading the packed bit buffer directly.
+/// Avoids the intermediate Vec<bool> allocation used by the legacy path.
+fn boolean_array_to_selection(bool_arr: &arrow::array::BooleanArray) -> SelectionVector {
+    let len = bool_arr.len();
+    let count = (0..len).filter(|&i| bool_arr.is_valid(i) && bool_arr.value(i)).count();
+    let mut sel = SelectionVector::new(count);
+    for i in 0..len {
+        if bool_arr.is_valid(i) && bool_arr.value(i) {
+            sel.push(i as u32);
+        }
+    }
+    sel
+}
+
 pub struct PhysicalFilter {
     pub expression: Expression,
     pub evaluator: Option<Arc<Mutex<ExpressionEvaluator>>>,
@@ -27,23 +41,32 @@ impl PhysicalFilter {
     }
 
     /// Evaluate a filter expression against values and return a boolean mask.
+    /// Uses the Arrow-native evaluator path when available (avoids Value enum boxing).
     pub fn evaluate_expression(
         expr: &Expression,
         chunk: &DataChunk,
         evaluator: Option<&ExpressionEvaluator>,
     ) -> Result<Vec<bool>, String> {
         if let Some(eval) = evaluator {
-            let result_vec = eval.evaluate(expr, chunk)?;
-            let size = result_vec.size();
+            let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
+            let size = arrow_result.size();
+            if arrow_result.physical_type() == kuzu_common::types::PhysicalTypeID::Bool {
+                if let Some(bool_arr) = arrow_result.array.as_any().downcast_ref::<arrow::array::BooleanArray>() {
+                    let mut mask = Vec::with_capacity(size);
+                    for i in 0..size {
+                        if bool_arr.is_valid(i) {
+                            mask.push(bool_arr.value(i));
+                        } else {
+                            mask.push(false);
+                        }
+                    }
+                    return Ok(mask);
+                }
+            }
+            // Fallback: if the result isn't a BooleanArray, treat non-null as truthy
             let mut mask = Vec::with_capacity(size);
             for i in 0..size {
-                let val = result_vec.get_value(i);
-                match val {
-                    Some(Value::Bool(b)) => mask.push(b),
-                    Some(Value::Null) => mask.push(false),
-                    Some(_) => mask.push(true),
-                    None => mask.push(false),
-                }
+                mask.push(!arrow_result.is_null(i));
             }
             return Ok(mask);
         }
@@ -61,6 +84,28 @@ impl PhysicalFilter {
             }
         }
         sel
+    }
+
+    /// Evaluate a filter expression and return a SelectionVector directly,
+    /// using the Arrow-native path. This is the zero-allocation hot path.
+    pub fn evaluate_to_selection(
+        expr: &Expression,
+        chunk: &DataChunk,
+        evaluator: Option<&ExpressionEvaluator>,
+    ) -> Result<SelectionVector, String> {
+        if let Some(eval) = evaluator {
+            let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
+            if arrow_result.physical_type() == kuzu_common::types::PhysicalTypeID::Bool {
+                if let Some(bool_arr) = arrow_result.array.as_any().downcast_ref::<arrow::array::BooleanArray>() {
+                    return Ok(boolean_array_to_selection(bool_arr));
+                }
+            }
+            // Fallback: all rows pass (non-boolean result type)
+            return Ok(SelectionVector::from_range(chunk.size));
+        }
+        // No evaluator — fall back to legacy mask path
+        let mask = Self::evaluate_expression_legacy(expr, chunk)?;
+        Ok(Self::mask_to_selection(&mask))
     }
 
     fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, String> {
