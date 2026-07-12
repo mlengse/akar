@@ -167,7 +167,7 @@ The C++ benchmark binary needs to be built from the CMake project at the repo ro
 # Step 1: Build the C++ project
 cd /path/to/kuzu
 mkdir -p build/release && cd build/release
-cmake ../.. -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARKS=ON
+cmake ../.. -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARK=ON
 cmake --build . --target kuzu_benchmark --parallel $(nproc)
 
 # Step 2: Serialize a test dataset (tinysnb)
