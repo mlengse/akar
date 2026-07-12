@@ -1,11 +1,11 @@
 //! Physical operator for MERGE.
 
+use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use crate::physical::write_ops::set::PhysicalSet;
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_storage::table::TableCatalog;
 use std::sync::Arc;
-use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::set::{PhysicalSet, evaluate_expression_for_row};
 
 /// Physical operator for MERGE.
 /// Represents a combination of MATCH and INSERT (Upsert).
@@ -23,8 +23,8 @@ impl PhysicalOperatorExec for PhysicalMerge {
         "merge"
     }
 
-    fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let mut merged_count = 0u64;
+    fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        let mut _merged_count: u64 = 0;
 
         // Evaluate constant helper
         let eval_const = |expr: &kuzu_parser::ast::Expression| -> Value {
@@ -42,7 +42,8 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
         // Get table info to build the row
         let num_cols = {
-            let tbl = self.table_catalog
+            let tbl = self
+                .table_catalog
                 .get_node_table_by_name(&self.table_name)
                 .ok_or_else(|| format!("Table '{}' not found for MERGE", self.table_name))?;
             tbl.columns.len()
@@ -50,7 +51,8 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
         // Build values from properties
         let mut new_values: Vec<Value> = Vec::new();
-        let table_info = self.table_catalog
+        let table_info = self
+            .table_catalog
             .get_node_table_by_name(&self.table_name)
             .ok_or_else(|| format!("Table '{}' not found", self.table_name))?;
         for col_idx in 0..num_cols {
@@ -96,7 +98,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
             if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
                 tbl.insert_row(new_values)
                     .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
-                merged_count += 1;
+                _merged_count += 1;
             }
 
             // Apply ON CREATE SET

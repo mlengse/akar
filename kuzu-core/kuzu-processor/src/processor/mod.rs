@@ -962,6 +962,48 @@ impl QueryProcessor {
                         field_names: vec![],
                     }]);
                 }
+                LogicalOperator::EmptyResult(_) => {
+                    let exec = crate::physical::misc::PhysicalEmptyResult;
+                    intermediate_result = Some(exec.execute(current)?);
+                }
+                LogicalOperator::MultiplicityReducer(m) => {
+                    let exec = crate::physical::misc::PhysicalMultiplicityReducer {
+                        key_columns: m.key_columns.clone(),
+                    };
+                    let input = if !m.children.is_empty() {
+                        self.execute_internal(&m.children, sip_masks)?
+                    } else {
+                        current
+                    };
+                    intermediate_result = Some(exec.execute(input)?);
+                }
+                LogicalOperator::Skip(s) => {
+                    let exec = crate::physical::misc::PhysicalSkip {
+                        skip_count: s.offset as usize,
+                    };
+                    let input = if !s.children.is_empty() {
+                        self.execute_internal(&s.children, sip_masks)?
+                    } else {
+                        current
+                    };
+                    intermediate_result = Some(exec.execute(input)?);
+                }
+                LogicalOperator::Insert(i) => {
+                    let exec = crate::physical::misc::PhysicalInsert {
+                        table_name: i.table_name.clone(),
+                        table_id: i.table_id,
+                        columns: i.columns.clone(),
+                        values: i.values.clone(),
+                    };
+                    intermediate_result = Some(exec.execute(current)?);
+                }
+                LogicalOperator::ExtensionClause(e) => {
+                    let exec = crate::physical::misc::PhysicalExtensionClause {
+                        action: e.action.clone(),
+                        extension_name: e.extension_name.clone(),
+                    };
+                    intermediate_result = Some(exec.execute(current)?);
+                }
             }
         }
 

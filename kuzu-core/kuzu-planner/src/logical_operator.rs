@@ -137,6 +137,11 @@ pub enum LogicalOperator {
     ImportDatabase(LogicalImportDatabase),
     CreateFtsIndex(LogicalCreateFtsIndex),
     FtsScan(LogicalFtsScan),
+    EmptyResult(LogicalEmptyResult),
+    MultiplicityReducer(LogicalMultiplicityReducer),
+    Skip(LogicalSkip),
+    Insert(LogicalInsert),
+    ExtensionClause(LogicalExtensionClause),
 }
 
 impl LogicalOperator {
@@ -197,6 +202,11 @@ impl LogicalOperator {
             LogicalOperator::ImportDatabase(s) => s.cardinality,
             LogicalOperator::CreateFtsIndex(s) => s.cardinality,
             LogicalOperator::FtsScan(s) => s.cardinality,
+            LogicalOperator::EmptyResult(s) => s.cardinality,
+            LogicalOperator::MultiplicityReducer(s) => s.cardinality,
+            LogicalOperator::Skip(s) => s.cardinality,
+            LogicalOperator::Insert(s) => s.cardinality,
+            LogicalOperator::ExtensionClause(s) => s.cardinality,
         }
     }
 
@@ -257,6 +267,11 @@ impl LogicalOperator {
             LogicalOperator::ImportDatabase(s) => s.cardinality = card,
             LogicalOperator::CreateFtsIndex(s) => s.cardinality = card,
             LogicalOperator::FtsScan(s) => s.cardinality = card,
+            LogicalOperator::EmptyResult(s) => s.cardinality = card,
+            LogicalOperator::MultiplicityReducer(s) => s.cardinality = card,
+            LogicalOperator::Skip(s) => s.cardinality = card,
+            LogicalOperator::Insert(s) => s.cardinality = card,
+            LogicalOperator::ExtensionClause(s) => s.cardinality = card,
         }
     }
 
@@ -325,7 +340,12 @@ impl LogicalOperator {
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_)
             | LogicalOperator::CreateFtsIndex(_)
-            | LogicalOperator::FtsScan(_) => vec![],
+            | LogicalOperator::FtsScan(_)
+            | LogicalOperator::EmptyResult(_)
+            | LogicalOperator::Insert(_)
+            | LogicalOperator::ExtensionClause(_) => vec![],
+            LogicalOperator::MultiplicityReducer(s) => s.children.iter_mut().collect(),
+            LogicalOperator::Skip(s) => s.children.iter_mut().collect(),
         }
     }
 
@@ -384,7 +404,12 @@ impl LogicalOperator {
             | LogicalOperator::ExportDatabase(_)
             | LogicalOperator::ImportDatabase(_)
             | LogicalOperator::CreateFtsIndex(_)
-            | LogicalOperator::FtsScan(_) => vec![],
+            | LogicalOperator::FtsScan(_)
+            | LogicalOperator::EmptyResult(_)
+            | LogicalOperator::Insert(_)
+            | LogicalOperator::ExtensionClause(_) => vec![],
+            LogicalOperator::MultiplicityReducer(s) => s.children.iter().collect(),
+            LogicalOperator::Skip(s) => s.children.iter().collect(),
         }
     }
 }
@@ -927,5 +952,46 @@ pub struct LogicalFtsScan {
     pub docs_table: String,
     pub terms_table: String,
     pub posting_table: String,
+    pub cardinality: u64,
+}
+
+/// EmptyResult operator — returns an empty result set (0 rows).
+/// Inserted when planner knows the query will yield no rows (e.g. WHERE false).
+#[derive(Debug, Clone)]
+pub struct LogicalEmptyResult {
+    pub cardinality: u64,
+}
+
+/// MultiplicityReducer operator — deduplicates rows from pattern matching fan-out.
+#[derive(Debug, Clone)]
+pub struct LogicalMultiplicityReducer {
+    pub key_columns: Vec<usize>,
+    pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// Skip operator — skips the first N rows (like LIMIT offset without limit).
+#[derive(Debug, Clone)]
+pub struct LogicalSkip {
+    pub offset: u64,
+    pub children: Vec<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// Insert operator — row-level insertion (unlike BatchInsert).
+#[derive(Debug, Clone)]
+pub struct LogicalInsert {
+    pub table_name: String,
+    pub table_id: u64,
+    pub columns: Vec<String>,
+    pub values: Vec<Vec<kuzu_common::types::Value>>,
+    pub cardinality: u64,
+}
+
+/// ExtensionClause operator — handles EXTENSION commands (INSTALL, LOAD).
+#[derive(Debug, Clone)]
+pub struct LogicalExtensionClause {
+    pub action: kuzu_parser::ast::ExtensionAction,
+    pub extension_name: String,
     pub cardinality: u64,
 }
