@@ -71,8 +71,8 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
 pub struct PhysicalInsertRel {
     pub table_name: String,
     pub table_id: u64,
-    pub src_node_col_idx: usize,
-    pub dst_node_col_idx: usize,
+    pub src_node_name: String,
+    pub dst_node_name: String,
     pub properties: Vec<(String, kuzu_parser::ast::Expression)>,
     pub table_catalog: Arc<TableCatalog>,
 }
@@ -93,13 +93,33 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
         let mut rels_to_insert = Vec::new();
 
         for chunk in &input {
-            if self.src_node_col_idx >= chunk.fields.len() || self.dst_node_col_idx >= chunk.fields.len() {
+            let src_name_id = format!("{}.{}", self.src_node_name, "_id");
+            let src_name_pk = format!("{}.{}", self.src_node_name, "id");
+            let src_node_col_idx = chunk
+                .field_names
+                .iter()
+                .position(|name| name == &src_name_id)
+                .or_else(|| chunk.field_names.iter().position(|name| name == &self.src_node_name))
+                .or_else(|| chunk.field_names.iter().position(|name| name == &src_name_pk))
+                .ok_or_else(|| format!("Source node variable {} not found", self.src_node_name))?;
+
+            let dst_name_id = format!("{}.{}", self.dst_node_name, "_id");
+            let dst_name_pk = format!("{}.{}", self.dst_node_name, "id");
+            let dst_node_col_idx = chunk
+                .field_names
+                .iter()
+                .position(|name| name == &dst_name_id)
+                .or_else(|| chunk.field_names.iter().position(|name| name == &self.dst_node_name))
+                .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk))
+                .ok_or_else(|| format!("Destination node variable {} not found", self.dst_node_name))?;
+
+            if src_node_col_idx >= chunk.fields.len() || dst_node_col_idx >= chunk.fields.len() {
                 return Err("Src/Dst node column index out of bounds in INSERT REL".into());
             }
             
             for row in 0..chunk.size {
-                let src_id = chunk.fields[self.src_node_col_idx].get_i64(row).unwrap_or(0) as u64;
-                let dst_id = chunk.fields[self.dst_node_col_idx].get_i64(row).unwrap_or(0) as u64;
+                let src_id = chunk.fields[src_node_col_idx].get_i64(row).unwrap_or(0) as u64;
+                let dst_id = chunk.fields[dst_node_col_idx].get_i64(row).unwrap_or(0) as u64;
                 
                 let mut props = vec![Value::Null; num_cols];
                 for (prop_name, expr) in &self.properties {

@@ -665,7 +665,7 @@ impl PhysicalExtend {
                     kuzu_parser::ast::EdgeDirection::Both => {
                         let mut all = fwd_adj.get(&src_id).cloned().unwrap_or_default();
                         if let Some(rev) = rev_adj.get(&src_id) {
-                            all.extend(rev.clone());
+                            all.extend(rev.iter().cloned());
                         }
                         all
                     }

@@ -667,8 +667,8 @@ impl QueryProcessor {
                     let create_rel_op = PhysicalInsertRel {
                         table_name: cr.table_name.clone(),
                         table_id: cr.table_id,
-                        src_node_col_idx: 0, // Placeholder
-                        dst_node_col_idx: 1, // Placeholder
+                        src_node_name: cr.src_node_name.clone(),
+                        dst_node_name: cr.dst_node_name.clone(),
                         properties: cr.properties.clone(),
                         table_catalog,
                     };

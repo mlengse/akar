@@ -1,7 +1,7 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
 > **Tanggal:** 2026-07-12 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅, P19 ✅, P20 ✅, P21 ✅, P22 ✅, P23 ✅, P24 ✅, P25.1 ✅ complete)
-> **Hasil audit:** `cargo test --workspace` → **~960 passed, 1 failed** | 29 crate, ~200 file .rs, ~65k LOC
+> **Hasil audit:** `cargo test --workspace` → **~960 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
 
@@ -15,8 +15,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **960 total, 1 failed** ⚠️ |
-| **Integration tests** | **60 passed, 1 failed** ⚠️ (`test_sip_optimization`) |
+| **Tests passing** | **960 total, 0 failed** ✅ |
+| **Integration tests** | **61 passed, 0 failed** ✅ |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **21** (14 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
@@ -543,7 +543,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-vector | 20 | ✅ Pass |
 | kuzu-transaction | 12 | ✅ Pass |
 | kuzu-main (unit + connection_test) | 55 | ✅ Pass |
-| kuzu-main (integration) | 44 | ⚠️ Fail (1 test: `test_sip_optimization`) |
+| kuzu-main (integration) | 44 | ✅ Pass |
 | kuzu-main (fase_b_verification) | 15 | ✅ Pass |
 | kuzu-main (copy_to) | 4 | ✅ Pass |
 | kuzu-main (delete_set) | 1 | ✅ Pass |
@@ -553,7 +553,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-binder-test | 19 | ✅ Pass |
 | kuzu-httpfs | 12 | ✅ Pass |
 | Extension crates (others) | 9+7+1+3 | ✅ Pass |
-| **Total** | **960** | **⚠️ 959 pass, 1 failed** |
+| **Total** | **960** | **✅ 960 pass, 0 failed** |
 
 ---
 
@@ -573,7 +573,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-12: **959 test lulus, 1 gagal (`test_sip_optimization`)**. **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
+- Per 2026-07-12: **960 test lulus, 0 gagal** (`test_sip_optimization` fixed). **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
 - Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
