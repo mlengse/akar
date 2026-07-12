@@ -994,6 +994,7 @@ impl QueryProcessor {
                         table_id: i.table_id,
                         columns: i.columns.clone(),
                         values: i.values.clone(),
+                        table_catalog: self.table_catalog.clone().unwrap(),
                     };
                     intermediate_result = Some(exec.execute(current)?);
                 }
