@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-12 (diperbarui — P-MOD2B ✅, P1 ✅, GDS CALL ✅, P10–P25.1 ✅ complete)
+> **Tanggal:** 2026-07-12 (diperbarui — P-MOD2B ✅, P1 ✅, GDS CALL ✅, P10–P25.1 ✅, PhysicalFlatten ✅, ICE Streaming ✅)
 > **Hasil audit:** `cargo test --workspace` → **~970 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
@@ -22,7 +22,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
 | **Logical operators** | **58** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
-| **Physical operators** | **45** variants (C++ Ladybug: 67) — parity ~90% core query engine, ~66% total (gap = split-phase C++ accounting) |
+| **Physical operators** | **46** variants (C++ Ladybug: 67) — parity ~90% core query engine, ~66% total (gap = split-phase C++ accounting) |
 | **BoundStatement variants** | **43** (termasuk BoundTransaction, BoundExtension, BoundAttachDatabase, BoundDetachDatabase, BoundUseDatabase, BoundLoadFrom, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
@@ -100,7 +100,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Path: properties/is_trail/is_acyclic | ❌ TIDAK ADA | ✅ PathOp::Properties/IsTrail/IsAcyclic | `[P12.5]` |
 | Schema: cost/rowid | ❌ TIDAK ADA | ✅ SchemaOp::Cost/RowId | `[P12.6]` |
 | GDS: Random Walk & Node2Vec | ❌ TIDAK ADA | ✅ `compute_random_walk`, `compute_node2vec`, CALL wiring | `[P19]` |
-| Storage: ICE Disk Format | ❌ TIDAK ADA | ✅ Basic `ice_format.rs` (Parquet wrapper — mmap/columnar pending) | `[P20]` |
+| Storage: ICE Disk Format | ❌ Full `Vec<Vec<Value>>` in memory | ✅ `ParquetStreamReader` streaming — `IceDiskRelTableScanState` holds lazy iterator, materializes one batch at a time | `[P20]` |
 | GDS CALL Wiring (all 15 algorithms) | ❌ `Custom` stubs | ✅ `CustomTable` closures — `page_rank`, `wcc`, `scc`, `k_core`, `louvain`, `spanning_forest`, `lpa`, `betweenness_centrality`, `closeness`, `triangle_count`, `random_walk`, `node2vec` | `[GDS]` |
 | Operator Modularization | ❌ 87k baris write_ops.rs | ✅ Pecah jadi 5+ file per physical operator module | `[P21]` |
 | STANDALONE_CALL Refactor | ❌ Bypassed pipeline | ✅ `Statement::StandaloneCall` + `PhysicalStandaloneCall` + `StandaloneCallHandler` | `[P22]` |
@@ -215,7 +215,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | PhysicalResultCollector | ✅ P16.1 (merge chunks) |
 | PhysicalProfile | ✅ P16.1 (Cell<Duration>) |
 | PhysicalDummySink / PhysicalDummySimpleSink | ✅ (no-op) |
-| PhysicalFlatten | ✅ |
+| PhysicalFlatten | ✅ (proper struct, structural parity) |
 | PhysicalIntersect (execute_binary) | ✅ |
 | PhysicalSemiJoin (execute_binary) | ✅ |
 | PhysicalAntiJoin (execute_binary) | ✅ |
@@ -651,7 +651,7 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 | NPY reader | P2 | ✅ P14.2 |
 | HyperLogLog cardinality stats | P2 | ✅ P14.3 |
 | Roaring bitmap | P2 | ✅ P17.4 (`kuzu-storage/src/roaring_bitmap.rs`) — Array/Bitmap containers, union/intersection/difference, 25 tests |
-| ICE disk format | P3 | ❌ Remaining |
+| ICE disk format | P3 | ✅ P20 (`ParquetStreamReader` lazy streaming) |
 | Lazy segment scanner | P3 | ✅ P17.3 (`kuzu-storage/src/lazy_scanner.rs`) — on-demand NodeGroup loading, 6 tests |
 | Float compression (delta/offset) | P3 | ✅ (implemented in compression module)
 
