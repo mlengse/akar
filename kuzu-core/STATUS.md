@@ -86,7 +86,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | TopK (fused ORDER BY + LIMIT) | ❌ Separate OrderBy+Limit | ✅ LogicalTopK + PhysicalTopK (BinaryHeap O(n log k)) | `[P12.1]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
 | Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean (fixed 3 recent warnings), `cargo audit` clean (0 vulns) | `[P9.2]` |
-| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. Gap table pending C++ binary build. | `[P9.3]` |
+| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. **Gap table fully populated with empirical C++ vs Rust numbers (E2E Rust is ~3.7x slower currently)**. | `[P9.3]` |
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
 | Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |

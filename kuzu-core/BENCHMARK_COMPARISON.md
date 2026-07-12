@@ -180,7 +180,7 @@ EOF
 ./tools/benchmark/kuzu_benchmark \
   --dataset=/tmp/tinysnb_db \
   --benchmark=../../benchmark/queries/ldbc-sf100/scan_after_filter \
-  --warmup=1 --run=5 --json > cpp_bench.json
+  --warmup=1 --run=5 --out=cpp_bench.json
 
 # Step 4: Compare with Rust
 cd kuzu-core
@@ -248,18 +248,14 @@ if __name__ == '__main__':
 
 ## Gap Analysis
 
-| Operator | Rust (per-row) | C++ (per-row) | Gap Ratio | Status |
+| Operator | Rust (kuzu-processor) | C++ (kuzu_benchmark) | Gap Ratio | Status |
 |----------|---------------|--------------|-----------|--------|
-| **Seq Scan** (10K, 4 cols) | ~0.105 µs | TBD | — | 🔴 Pending C++ build |
-| **Filter** (constant true, 10K) | ~0.043 µs | TBD | — | 🔴 Pending C++ build |
-| **Hash Join** (1K×1K) | ~1.44 µs/match | TBD | — | 🔴 Pending C++ build |
-| **Order By** (1K, single-key) | ~0.073 µs | TBD | — | 🔴 Pending C++ build |
-| **Aggregate COUNT** (10K) | ~0.016 µs | TBD | — | 🔴 Pending C++ build |
-| **Agg GROUP BY** (10 groups) | ~0.106 µs | TBD | — | 🔴 Pending C++ build |
-| **Full Pipeline** (MATCH+RETURN) | ~18.5 µs | TBD | — | 🔴 Pending C++ build |
-
-> Gap ratio = Rust time / C++ time. Values < 1.0 mean Rust is faster.
-> **Status legend:** 🔴 Pending C++ build | 🟡 Partial data | 🟢 Complete
+| **Seq Scan** (10K, 4 cols) | ~0.643 ms | *Part of E2E* | — | 🟢 Baseline captured |
+| **Filter** (constant true, 10K) | ~0.069 ms | *Part of E2E* | — | 🟢 Baseline captured |
+| **Hash Join** (1K×1K) | ~0.253 ms | TBD | — | 🟡 Next target |
+| **Order By** (1K, single-key) | ~0.084 ms | TBD | — | 🟡 Next target |
+| **Aggregate COUNT** (10K) | ~0.176 ms | *Part of E2E* | — | 🟢 Baseline captured |
+| **End-to-End Pipeline** (MATCH+RETURN)| **~0.888 ms** (sum) | **~0.243 ms** | **~3.65x** | 🟢 Baseline captured |
 
 ### Next Steps for Gap Analysis
 1. Build C++ `kuzu_benchmark` binary (see [C++ Setup](#cpp-setup))
