@@ -145,12 +145,13 @@ pub fn map_and_execute_projection(
             Ok(result)
         }
         LogicalOperator::Flatten(f) => {
-            let result = if f.children.is_empty() {
+            let input = if f.children.is_empty() {
                 current_input
             } else {
                 ctx.execute_children(&f.children)?
             };
-            Ok(result)
+            let flatten = PhysicalFlatten::new(f.group_pos);
+            flatten.execute(input)
         }
         LogicalOperator::SemiMasker(s) => {
             let mask = NodeSemiMask::new(s.table_id);

@@ -181,6 +181,110 @@ pub fn read_parquet(
     Ok(results)
 }
 
+/// A streaming parquet reader that yields batches of rows on demand.
+///
+/// Unlike `read_parquet`, this avoids materializing the entire file into
+/// `Vec<Vec<Value>>` at once. Each call to `next()` reads and converts one
+/// Arrow `RecordBatch`.
+pub struct ParquetStreamReader {
+    reader: parquet::arrow::arrow_reader::ParquetRecordBatchReader,
+    col_indices: Vec<usize>,
+    columns: Vec<CatalogColumn>,
+}
+
+impl Iterator for ParquetStreamReader {
+    type Item = ParquetResult<Vec<Vec<Value>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.reader.next() {
+            Some(Ok(batch)) => {
+                let num_rows = batch.num_rows();
+                let mut rows = Vec::with_capacity(num_rows);
+                for row_idx in 0..num_rows {
+                    let mut row = Vec::with_capacity(self.columns.len());
+                    for (catalog_idx, &arrow_col_idx) in self.col_indices.iter().enumerate() {
+                        let col = &self.columns[catalog_idx];
+                        let array = batch.column(arrow_col_idx);
+                        let value = match arrow_array_to_value(array, row_idx, &col.name, col.logical_type, rows.len()) {
+                            Ok(v) => v,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        row.push(value);
+                    }
+                    rows.push(row);
+                }
+                Some(Ok(rows))
+            }
+            Some(Err(e)) => Some(Err(ParquetReaderError::ParquetError(e.to_string()))),
+            None => None,
+        }
+    }
+}
+
+/// Open a Parquet file and return a streaming reader that yields row batches.
+///
+/// The file is read into memory (required by the Parquet format for footer
+/// access), but rows are converted to `Vec<Value>` per batch rather than
+/// materializing the entire dataset at once.
+pub fn stream_parquet(
+    path: &str,
+    vfs: &kuzu_common::file_system::VirtualFileSystemRegistry,
+    columns: &[CatalogColumn],
+) -> ParquetResult<ParquetStreamReader> {
+    let mut file = vfs
+        .open_read(path)
+        .map_err(|e| ParquetReaderError::ParquetError(format!("Cannot open file: {e}")))?;
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)
+        .map_err(|e| ParquetReaderError::ParquetError(format!("Read error: {e}")))?;
+    let bytes = bytes::Bytes::from(buffer);
+
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes)?;
+    let schema = builder.schema().clone();
+    let reader = builder.build()?;
+
+    let arrow_fields: Vec<(String, &arrow::datatypes::DataType)> = schema
+        .fields()
+        .iter()
+        .map(|f| (f.name().clone(), f.data_type()))
+        .collect();
+
+    let available_names: Vec<String> = arrow_fields.iter().map(|(n, _)| n.clone()).collect();
+
+    let mut col_indices: Vec<usize> = Vec::with_capacity(columns.len());
+    for col in columns {
+        let pos = arrow_fields
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(&col.name));
+        match pos {
+            Some(idx) => {
+                let (_, arrow_type) = &arrow_fields[idx];
+                validate_type_compatibility(arrow_type, col.logical_type).map_err(|_| {
+                    ParquetReaderError::TypeMismatch {
+                        column_name: col.name.clone(),
+                        arrow_type: format!("{arrow_type:?}"),
+                        expected_type: format!("{:?}", col.logical_type),
+                    }
+                })?;
+                col_indices.push(idx);
+            }
+            None => {
+                return Err(ParquetReaderError::ColumnNotFound {
+                    column_name: col.name.clone(),
+                    available: available_names.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(ParquetStreamReader {
+        reader,
+        col_indices,
+        columns: columns.to_vec(),
+    })
+}
+
 // ─── Type validation ────────────────────────────────────────────────────────────
 
 /// Check that an Arrow `DataType` is compatible with the expected Kuzu `LogicalTypeID`.

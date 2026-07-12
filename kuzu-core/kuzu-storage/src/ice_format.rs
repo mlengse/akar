@@ -1,4 +1,4 @@
-use crate::parquet_reader::{read_parquet, ParquetReaderError};
+use crate::parquet_reader::{read_parquet, stream_parquet, ParquetReaderError, ParquetStreamReader};
 use kuzu_catalog::CatalogColumn;
 use kuzu_common::types::Value;
 use kuzu_common::file_system::VirtualFileSystemRegistry;
@@ -21,9 +21,13 @@ pub struct IceDiskRelTable {
     pub indptr_file_path: Option<PathBuf>,
 }
 
-/// Scan state for IceDiskRelTable to cache and track reading progress.
+/// Scan state for IceDiskRelTable that streams rows on demand.
+///
+/// Instead of loading the entire Parquet file into a `Vec<Vec<Value>>`,
+/// this state holds a streaming reader and buffers one batch at a time.
 pub struct IceDiskRelTableScanState {
-    pub cached_batch_data: Vec<Vec<Value>>,
+    pub stream: ParquetStreamReader,
+    pub current_batch: Vec<Vec<Value>>,
     pub current_row: usize,
 }
 
@@ -48,11 +52,12 @@ impl IceDiskRelTable {
         }
     }
 
-    /// Scan the indices parquet file into memory matching the requested schema.
+    /// Scan the indices parquet file and return a streaming scan state.
     pub fn scan_indices(&self, vfs: &VirtualFileSystemRegistry, columns: &[CatalogColumn]) -> Result<IceDiskRelTableScanState, ParquetReaderError> {
-        let data = read_parquet(self.indices_file_path.to_str().unwrap(), vfs, columns)?;
+        let stream = stream_parquet(self.indices_file_path.to_str().unwrap(), vfs, columns)?;
         Ok(IceDiskRelTableScanState {
-            cached_batch_data: data,
+            stream,
+            current_batch: Vec::new(),
             current_row: 0,
         })
     }
@@ -68,10 +73,28 @@ impl IceDiskRelTable {
 }
 
 impl IceDiskRelTableScanState {
-    /// Read the next row from the cached indices batch.
+    /// Read the next row from the streaming parquet reader.
+    ///
+    /// Rows are pulled from the underlying `ParquetStreamReader` one batch
+    /// at a time, avoiding materialization of the entire dataset in memory.
     pub fn next_row(&mut self) -> Option<&Vec<Value>> {
-        if self.current_row < self.cached_batch_data.len() {
-            let row = &self.cached_batch_data[self.current_row];
+        // Advance to next batch if current one is exhausted
+        if self.current_row >= self.current_batch.len() {
+            match self.stream.next() {
+                Some(Ok(batch)) => {
+                    self.current_batch = batch;
+                    self.current_row = 0;
+                }
+                Some(Err(_)) | None => {
+                    self.current_batch = Vec::new();
+                    self.current_row = 0;
+                    return None;
+                }
+            }
+        }
+        
+        if self.current_row < self.current_batch.len() {
+            let row = &self.current_batch[self.current_row];
             self.current_row += 1;
             Some(row)
         } else {

@@ -12,3 +12,5 @@ pub mod limit;
 pub use limit::*;
 pub mod primarykeyscan;
 pub use primarykeyscan::*;
+pub mod flatten;
+pub use flatten::*;
