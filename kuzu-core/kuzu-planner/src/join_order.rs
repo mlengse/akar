@@ -8,6 +8,7 @@ use kuzu_parser::ast::{BinaryOp, Expression};
 
 /// A join plan tree representing how to combine scan operators.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum JoinPlan {
     /// A single leaf operator (ScanNode or ScanRel).
     Leaf(LogicalOperator),

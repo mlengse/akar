@@ -377,7 +377,7 @@ impl RoaringBitmap {
     pub fn contains(&self, value: u32) -> bool {
         let key = (value >> 16) as u16;
         let low = (value & 0xFFFF) as u16;
-        self.containers.get(&key).map_or(false, |c| c.contains(low))
+        self.containers.get(&key).is_some_and(|c| c.contains(low))
     }
 
     /// Number of elements in the bitmap.

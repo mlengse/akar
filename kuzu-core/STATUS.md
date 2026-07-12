@@ -1,7 +1,7 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
 > **Tanggal:** 2026-07-12 (diperbarui — P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅, P16 ✅, P17 ✅, P18 ✅, P19 ✅, P20 ✅, P21 ✅, P22 ✅, P23 ✅, P24 ✅, P25.1 ✅ complete)
-> **Hasil audit:** `cargo test --workspace` → **~1000 passed, 0 failed** | 29 crate, ~200 file .rs, ~65k LOC
+> **Hasil audit:** `cargo test --workspace` → **~960 passed, 1 failed** | 29 crate, ~200 file .rs, ~65k LOC
 
 ---
 
@@ -15,8 +15,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **960 total, 0 failed** ✅ |
-| **Integration tests** | **61 passed, 0 failed** ✅ |
+| **Tests passing** | **960 total, 1 failed** ⚠️ |
+| **Integration tests** | **60 passed, 1 failed** ⚠️ (`test_sip_optimization`) |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **21** (14 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
@@ -85,7 +85,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Projection column resolution | ❌ Bug: selalu kolom 0 | ✅ `resolve_projection_column_index()` + `evaluate_variable` field-name matching | `[fix]` |
 | TopK (fused ORDER BY + LIMIT) | ❌ Separate OrderBy+Limit | ✅ LogicalTopK + PhysicalTopK (BinaryHeap O(n log k)) | `[P12.1]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
-| Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean, `cargo audit` clean (0 vulns), removed unused `fast-float`, upgraded `time` | `[P9.2]` |
+| Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean (fixed 3 recent warnings), `cargo audit` clean (0 vulns) | `[P9.2]` |
 | Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. Gap table pending C++ binary build. | `[P9.3]` |
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
@@ -543,7 +543,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-vector | 20 | ✅ Pass |
 | kuzu-transaction | 12 | ✅ Pass |
 | kuzu-main (unit + connection_test) | 55 | ✅ Pass |
-| kuzu-main (integration) | 44 | ✅ Pass |
+| kuzu-main (integration) | 44 | ⚠️ Fail (1 test: `test_sip_optimization`) |
 | kuzu-main (fase_b_verification) | 15 | ✅ Pass |
 | kuzu-main (copy_to) | 4 | ✅ Pass |
 | kuzu-main (delete_set) | 1 | ✅ Pass |
@@ -553,7 +553,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-binder-test | 19 | ✅ Pass |
 | kuzu-httpfs | 12 | ✅ Pass |
 | Extension crates (others) | 9+7+1+3 | ✅ Pass |
-| **Total** | **960** | **✅ All pass, 0 failed** |
+| **Total** | **960** | **⚠️ 959 pass, 1 failed** |
 
 ---
 
@@ -573,7 +573,8 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-09: **960 test lulus, 0 gagal**. **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
+- Per 2026-07-12: **959 test lulus, 1 gagal (`test_sip_optimization`)**. **P9 ✅, P10 ✅, P11 ✅, P12 ✅, P13 ✅, P14 ✅, P15 ✅**.
+- Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
 ---
