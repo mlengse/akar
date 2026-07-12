@@ -13,5 +13,8 @@ kuzu-extension = { path = "../kuzu-extension" }
 kuzu-graph = { path = "../kuzu-graph" }
 tracing.workspace = true
 
+[dev-dependencies]
+kuzu-catalog = { path = "../kuzu-catalog" }
+
 [lints]
 workspace = true

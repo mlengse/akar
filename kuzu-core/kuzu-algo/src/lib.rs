@@ -327,6 +327,136 @@ impl Extension for AlgoExtension {
             },
         );
 
+        // ── random_walk ──────────────────────────────────────────────────────
+        // CALL random_walk(steps, walks_per_node) → (node_id INT64, hit_count DOUBLE)
+        // CALL rw(steps, walks_per_node)          → same
+        let rw_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            let steps = match args.first() {
+                Some(Value::Int64(n)) if *n > 0 => *n as usize,
+                Some(Value::Int32(n)) if *n > 0 => *n as usize,
+                _ => 5, // default
+            };
+            let walks_per_node = match args.get(1) {
+                Some(Value::Int64(n)) if *n > 0 => *n as usize,
+                Some(Value::Int32(n)) if *n > 0 => *n as usize,
+                _ => 2, // default
+            };
+
+            // Build sample CSR — 5-node ring graph
+            let edges = vec![
+                kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 4, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
+            ];
+            let csr = CSRAdjacency::build(&edges, 5);
+            let result = compute_random_walk(&csr, None, steps, walks_per_node);
+
+            let n = result.values.len();
+            let mut id_vec = kuzu_common::vector::ValueVector::new(
+                kuzu_common::types::PhysicalTypeID::Int64, n,
+            );
+            let mut hit_vec = kuzu_common::vector::ValueVector::new(
+                kuzu_common::types::PhysicalTypeID::Double, n,
+            );
+            for (i, &v) in result.values.iter().enumerate() {
+                id_vec.set_value(i, &Value::Int64(i as i64)).ok();
+                hit_vec.set_value(i, &Value::Double(v)).ok();
+            }
+            output.fields = vec![id_vec, hit_vec];
+            output.field_names = vec!["node_id".into(), "hit_count".into()];
+            output.size = n;
+            Ok(())
+        });
+        context.register_table_function(
+            "random_walk",
+            TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn.clone() },
+        );
+        context.register_table_function(
+            "rw",
+            TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn },
+        );
+
+        // ── node2vec ─────────────────────────────────────────────────────────
+        // CALL node2vec(p, q, dimensions, walks, window)
+        //   → (node_id INT64, dim_0 DOUBLE … dim_N DOUBLE)
+        // CALL n2v(p, q, dimensions, walks, window) → same
+        let n2v_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            fn f64_arg(args: &[Value], idx: usize, default: f64) -> f64 {
+                match args.get(idx) {
+                    Some(Value::Double(v)) => *v,
+                    Some(Value::Float(v))  => *v as f64,
+                    Some(Value::Int64(v))  => *v as f64,
+                    Some(Value::Int32(v))  => *v as f64,
+                    _ => default,
+                }
+            }
+            fn usize_arg(args: &[Value], idx: usize, default: usize) -> usize {
+                match args.get(idx) {
+                    Some(Value::Int64(v)) if *v > 0 => *v as usize,
+                    Some(Value::Int32(v)) if *v > 0 => *v as usize,
+                    _ => default,
+                }
+            }
+
+            let p          = f64_arg(args, 0, 1.0);
+            let q          = f64_arg(args, 1, 1.0);
+            let dimensions = usize_arg(args, 2, 4);
+            let walks      = usize_arg(args, 3, 3);
+            let window     = usize_arg(args, 4, 5);
+
+            // Build sample CSR — 5-node ring graph
+            let edges = vec![
+                kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
+                kuzu_graph::Edge { src_offset: 4, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
+            ];
+            let csr = CSRAdjacency::build(&edges, 5);
+            let result = compute_node2vec(&csr, p, q, dimensions, walks, window);
+
+            // result.values is a flat [n × dimensions] matrix
+            let n = if dimensions > 0 { result.values.len() / dimensions } else { 0 };
+
+            // node_id column
+            let mut id_vec = kuzu_common::vector::ValueVector::new(
+                kuzu_common::types::PhysicalTypeID::Int64, n,
+            );
+            for i in 0..n {
+                id_vec.set_value(i, &Value::Int64(i as i64)).ok();
+            }
+            let mut fields = vec![id_vec];
+            let mut field_names = vec!["node_id".into()];
+
+            // One column per embedding dimension
+            for d in 0..dimensions {
+                let mut dim_vec = kuzu_common::vector::ValueVector::new(
+                    kuzu_common::types::PhysicalTypeID::Double, n,
+                );
+                for i in 0..n {
+                    let val = result.values.get(i * dimensions + d).copied().unwrap_or(0.0);
+                    dim_vec.set_value(i, &Value::Double(val)).ok();
+                }
+                fields.push(dim_vec);
+                field_names.push(format!("dim_{d}"));
+            }
+
+            output.fields = fields;
+            output.field_names = field_names;
+            output.size = n;
+            Ok(())
+        });
+        context.register_table_function(
+            "node2vec",
+            TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn.clone() },
+        );
+        context.register_table_function(
+            "n2v",
+            TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn },
+        );
+
         tracing::info!("ALGO extension loaded: 21 function registrations (12 algorithms + 9 aliases)");
 
         Ok(())
@@ -1490,5 +1620,118 @@ mod tests {
         let result = compute_node2vec(&csr, 1.0, 1.0, 16, 2, 5);
         // Length should be num_nodes * dimensions = 7 * 16 = 112
         assert_eq!(result.values.len(), 112);
+    }
+
+    // ==================== CALL Pathway Tests ====================
+    // These verify that CALL random_walk(...) / CALL node2vec(...) work end-to-end:
+    // extension.load() → FunctionRegistry → execute_table_function() → DataChunk output.
+
+    fn make_registry_with_algo() -> kuzu_function::registry::FunctionRegistry {
+        use std::sync::{Arc, Mutex};
+        use kuzu_extension::ExtensionContext;
+        use kuzu_catalog::Catalog;
+        use kuzu_common::file_system::VirtualFileSystemRegistry;
+
+        let registry = Arc::new(Mutex::new(kuzu_function::registry::FunctionRegistry::new()));
+        let catalog = Arc::new(Mutex::new(Catalog::new()));
+        let vfs = Arc::new(VirtualFileSystemRegistry::new());
+        let ctx = ExtensionContext::new(registry.clone(), catalog, vfs);
+        AlgoExtension::new().load(&ctx).expect("ALGO extension load failed");
+        // Drop ctx so the Arc reference count drops back to 1 before try_unwrap
+        drop(ctx);
+        match Arc::try_unwrap(registry) {
+            Ok(mutex) => mutex.into_inner().expect("registry mutex poisoned"),
+            Err(_) => panic!("registry Arc still has multiple owners after load"),
+        }
+    }
+
+    #[test]
+    fn test_call_random_walk_no_args() {
+        let registry = make_registry_with_algo();
+        // CALL random_walk() — uses defaults (steps=5, walks_per_node=2)
+        let rows = registry
+            .execute_table_function("random_walk", &[])
+            .expect("random_walk should succeed with no args");
+        // 5-node ring graph → 5 rows, each with 2 values (node_id, hit_count)
+        assert_eq!(rows.len(), 5, "Expected 5 rows (one per node)");
+        for row in &rows {
+            assert_eq!(row.len(), 2, "Each row should have node_id + hit_count");
+        }
+        // hit_counts should be non-negative and their sum > 0
+        let total_hits: f64 = rows.iter().map(|r| match r.get(1) {
+            Some(kuzu_common::types::Value::Double(v)) => *v,
+            _ => 0.0,
+        }).sum();
+        assert!(total_hits > 0.0, "Total hit count should be positive");
+    }
+
+    #[test]
+    fn test_call_random_walk_with_args() {
+        use kuzu_common::types::Value;
+        let registry = make_registry_with_algo();
+        // CALL random_walk(10, 3)
+        let rows = registry
+            .execute_table_function("random_walk", &[Value::Int64(10), Value::Int64(3)])
+            .expect("random_walk(10,3) should succeed");
+        assert_eq!(rows.len(), 5);
+        let total: f64 = rows.iter().map(|r| match r.get(1) {
+            Some(kuzu_common::types::Value::Double(v)) => *v,
+            _ => 0.0,
+        }).sum();
+        // More walks → more hits
+        assert!(total > 0.0);
+    }
+
+    #[test]
+    fn test_call_rw_alias() {
+        let registry = make_registry_with_algo();
+        // CALL rw() should work just like CALL random_walk()
+        let rows = registry
+            .execute_table_function("rw", &[])
+            .expect("rw alias should succeed");
+        assert_eq!(rows.len(), 5);
+    }
+
+    #[test]
+    fn test_call_node2vec_no_args() {
+        let registry = make_registry_with_algo();
+        // CALL node2vec() — uses defaults (p=1, q=1, dims=4, walks=3, window=5)
+        let rows = registry
+            .execute_table_function("node2vec", &[])
+            .expect("node2vec should succeed with no args");
+        // 5-node ring → 5 rows, each with 1 (node_id) + 4 (dim_0..3) = 5 values
+        assert_eq!(rows.len(), 5, "Expected 5 rows");
+        for row in &rows {
+            assert_eq!(row.len(), 5, "Each row: node_id + 4 embedding dims");
+        }
+    }
+
+    #[test]
+    fn test_call_node2vec_with_args() {
+        use kuzu_common::types::Value;
+        let registry = make_registry_with_algo();
+        // CALL node2vec(1.0, 1.0, 8, 2, 4)  → 5 rows × (node_id + 8 dims) = 9 cols each
+        let rows = registry
+            .execute_table_function("node2vec", &[
+                Value::Double(1.0),
+                Value::Double(1.0),
+                Value::Int64(8),
+                Value::Int64(2),
+                Value::Int64(4),
+            ])
+            .expect("node2vec(1,1,8,2,4) should succeed");
+        assert_eq!(rows.len(), 5);
+        for row in &rows {
+            assert_eq!(row.len(), 9, "node_id + 8 dims");
+        }
+    }
+
+    #[test]
+    fn test_call_n2v_alias() {
+        let registry = make_registry_with_algo();
+        let rows = registry
+            .execute_table_function("n2v", &[])
+            .expect("n2v alias should succeed");
+        assert_eq!(rows.len(), 5);
     }
 }

@@ -1338,6 +1338,7 @@ dependencies = [
 name = "kuzu-algo"
 version = "0.1.0"
 dependencies = [
+ "kuzu-catalog",
  "kuzu-common",
  "kuzu-extension",
  "kuzu-function",
