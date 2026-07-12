@@ -208,6 +208,22 @@ impl NodeTable {
         self.hash_index.lookup(&pk_key)
     }
 
+    /// Batch look up row offsets for multiple primary key values.
+    ///
+    /// Returns a `Vec<Option<u64>>` parallel to the input, where each element
+    /// is `Some(row_offset)` if the PK exists, or `None` if not found.
+    /// Uses the in-memory hash index for O(1) per-key lookup, avoiding
+    /// per-row method-call overhead by inlining the lookup logic.
+    pub fn lookup_by_pk_batch(&self, pk_values: &[Value]) -> Vec<Option<u64>> {
+        pk_values
+            .iter()
+            .map(|pk_value| {
+                let pk_key = pk_value_to_string(pk_value);
+                self.hash_index.lookup(&pk_key)
+            })
+            .collect()
+    }
+
     /// Perform a range scan on the primary key column using the ART index.
     ///
     /// Returns up to `max_results` row offsets for keys within `[lower, upper]`
