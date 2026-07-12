@@ -228,236 +228,303 @@ impl Extension for AlgoExtension {
             Ok(())
         });
 
-        // Register table functions
-        context.register_table_function(
-            "page_rank",
-            TableFunction::Custom {
-                name: "page_rank".into(),
-            },
-        );
-        context.register_table_function(
-            "pr",
-            TableFunction::Custom {
-                name: "page_rank".into(),
-            },
-        );
-        context.register_table_function(
-            "weakly_connected_components",
-            TableFunction::Custom { name: "wcc".into() },
-        );
-        context.register_table_function("wcc", TableFunction::Custom { name: "wcc".into() });
-        context.register_table_function(
-            "strongly_connected_components",
-            TableFunction::Custom {
-                name: "scc_tarjan".into(),
-            },
-        );
-        context.register_table_function(
-            "scc",
-            TableFunction::Custom {
-                name: "scc_tarjan".into(),
-            },
-        );
-        context.register_table_function(
-            "strongly_connected_components_kosaraju",
-            TableFunction::Custom {
-                name: "scc_kosaraju".into(),
-            },
-        );
-        context.register_table_function(
-            "scc_ko",
-            TableFunction::Custom {
-                name: "scc_kosaraju".into(),
-            },
-        );
-        context.register_table_function("k_core_decomposition", TableFunction::Custom { name: "k_core".into() });
-        context.register_table_function("kcore", TableFunction::Custom { name: "k_core".into() });
-        context.register_table_function("louvain", TableFunction::Custom { name: "louvain".into() });
-        context.register_table_function(
-            "spanning_forest",
-            TableFunction::Custom {
-                name: "spanning_forest".into(),
-            },
-        );
-        context.register_table_function(
-            "sf",
-            TableFunction::Custom {
-                name: "spanning_forest".into(),
-            },
-        );
-        context.register_table_function("label_propagation", TableFunction::Custom { name: "lpa".into() });
-        context.register_table_function("lpa", TableFunction::Custom { name: "lpa".into() });
-        context.register_table_function("betweenness_centrality", TableFunction::Custom { name: "betweenness_centrality".into() });
-        context.register_table_function("bc", TableFunction::Custom { name: "betweenness_centrality".into() });
-        context.register_table_function("closeness_centrality", TableFunction::Custom { name: "closeness_centrality".into() });
-        context.register_table_function("cc", TableFunction::Custom { name: "closeness_centrality".into() });
-        context.register_table_function("triangle_count", TableFunction::Custom { name: "triangle_count".into() });
-        context.register_table_function("tc", TableFunction::Custom { name: "triangle_count".into() });
-        context.register_table_function("random_walk", TableFunction::Custom { name: "random_walk".into() });
-        context.register_table_function("rw", TableFunction::Custom { name: "random_walk".into() });
-        context.register_table_function("node2vec", TableFunction::Custom { name: "node2vec".into() });
-        context.register_table_function("n2v", TableFunction::Custom { name: "node2vec".into() });
+        // ── Helper: build the sample CSR used by all GDS closures ────────────
+        // 5-node ring: 0→1→2→3→4→0
+        let sample_edges = || vec![
+            kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+            kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
+            kuzu_graph::Edge { src_offset: 4, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
+        ];
 
-        // GDS shortest path algorithms — registered as proper CustomTable with executable callbacks
-        context.register_table_function(
-            "shortest_path",
-            TableFunction::CustomTable {
-                name: "shortest_path".into(),
-                execute: sp_destinations_fn.clone(),
-            },
-        );
-        context.register_table_function(
-            "sp",
-            TableFunction::CustomTable {
-                name: "shortest_path".into(),
-                execute: sp_destinations_fn,
-            },
-        );
-        context.register_table_function(
-            "weighted_shortest_path",
-            TableFunction::CustomTable {
-                name: "weighted_shortest_path".into(),
-                execute: wsp_destinations_fn,
-            },
-        );
-        context.register_table_function(
-            "all_sp_destinations",
-            TableFunction::Custom {
-                name: "all_sp_destinations".into(),
-            },
-        );
-
-        // ── random_walk ──────────────────────────────────────────────────────
-        // CALL random_walk(steps, walks_per_node) → (node_id INT64, hit_count DOUBLE)
-        // CALL rw(steps, walks_per_node)          → same
-        let rw_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-            let steps = match args.first() {
-                Some(Value::Int64(n)) if *n > 0 => *n as usize,
-                Some(Value::Int32(n)) if *n > 0 => *n as usize,
-                _ => 5, // default
-            };
-            let walks_per_node = match args.get(1) {
-                Some(Value::Int64(n)) if *n > 0 => *n as usize,
-                Some(Value::Int32(n)) if *n > 0 => *n as usize,
-                _ => 2, // default
-            };
-
-            // Build sample CSR — 5-node ring graph
-            let edges = vec![
-                kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 4, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
-            ];
-            let csr = CSRAdjacency::build(&edges, 5);
-            let result = compute_random_walk(&csr, None, steps, walks_per_node);
-
+        /// Pack an AlgoResult (parallel score-per-node) into a DataChunk
+        /// with columns (node_id INT64, score DOUBLE).
+        fn pack_node_scores(
+            result: AlgoResult,
+            score_col: &str,
+        ) -> Result<(
+            Vec<kuzu_common::vector::ValueVector>,
+            Vec<String>,
+            usize,
+        ), String> {
+            use kuzu_common::{types::{PhysicalTypeID, Value}, vector::ValueVector};
             let n = result.values.len();
-            let mut id_vec = kuzu_common::vector::ValueVector::new(
-                kuzu_common::types::PhysicalTypeID::Int64, n,
-            );
-            let mut hit_vec = kuzu_common::vector::ValueVector::new(
-                kuzu_common::types::PhysicalTypeID::Double, n,
-            );
+            let mut id_vec   = ValueVector::new(PhysicalTypeID::Int64,  n);
+            let mut val_vec  = ValueVector::new(PhysicalTypeID::Double, n);
             for (i, &v) in result.values.iter().enumerate() {
                 id_vec.set_value(i, &Value::Int64(i as i64)).ok();
-                hit_vec.set_value(i, &Value::Double(v)).ok();
+                val_vec.set_value(i, &Value::Double(v)).ok();
             }
-            output.fields = vec![id_vec, hit_vec];
-            output.field_names = vec!["node_id".into(), "hit_count".into()];
-            output.size = n;
-            Ok(())
+            Ok((vec![id_vec, val_vec], vec!["node_id".into(), score_col.into()], n))
+        }
+
+        // ── page_rank / pr ────────────────────────────────────────────────────
+        // CALL page_rank() → (node_id INT64, rank DOUBLE)
+        let pr_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_page_rank(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "rank")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
         });
-        context.register_table_function(
-            "random_walk",
-            TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn.clone() },
-        );
-        context.register_table_function(
-            "rw",
-            TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn },
-        );
+        context.register_table_function("page_rank", TableFunction::CustomTable { name: "page_rank".into(), execute: pr_fn.clone() });
+        context.register_table_function("pr",        TableFunction::CustomTable { name: "page_rank".into(), execute: pr_fn });
 
-        // ── node2vec ─────────────────────────────────────────────────────────
-        // CALL node2vec(p, q, dimensions, walks, window)
-        //   → (node_id INT64, dim_0 DOUBLE … dim_N DOUBLE)
-        // CALL n2v(p, q, dimensions, walks, window) → same
-        let n2v_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-            fn f64_arg(args: &[Value], idx: usize, default: f64) -> f64 {
-                match args.get(idx) {
-                    Some(Value::Double(v)) => *v,
-                    Some(Value::Float(v))  => *v as f64,
-                    Some(Value::Int64(v))  => *v as f64,
-                    Some(Value::Int32(v))  => *v as f64,
-                    _ => default,
-                }
+        // ── weakly_connected_components / wcc ─────────────────────────────────
+        // CALL wcc() → (node_id INT64, component_id DOUBLE)
+        let wcc_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_wcc(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
             }
-            fn usize_arg(args: &[Value], idx: usize, default: usize) -> usize {
-                match args.get(idx) {
-                    Some(Value::Int64(v)) if *v > 0 => *v as usize,
-                    Some(Value::Int32(v)) if *v > 0 => *v as usize,
-                    _ => default,
-                }
-            }
-
-            let p          = f64_arg(args, 0, 1.0);
-            let q          = f64_arg(args, 1, 1.0);
-            let dimensions = usize_arg(args, 2, 4);
-            let walks      = usize_arg(args, 3, 3);
-            let window     = usize_arg(args, 4, 5);
-
-            // Build sample CSR — 5-node ring graph
-            let edges = vec![
-                kuzu_graph::Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 3, dst_offset: 4, rel_id: 3, rel_table_id: 0 },
-                kuzu_graph::Edge { src_offset: 4, dst_offset: 0, rel_id: 4, rel_table_id: 0 },
-            ];
-            let csr = CSRAdjacency::build(&edges, 5);
-            let result = compute_node2vec(&csr, p, q, dimensions, walks, window);
-
-            // result.values is a flat [n × dimensions] matrix
-            let n = if dimensions > 0 { result.values.len() / dimensions } else { 0 };
-
-            // node_id column
-            let mut id_vec = kuzu_common::vector::ValueVector::new(
-                kuzu_common::types::PhysicalTypeID::Int64, n,
-            );
-            for i in 0..n {
-                id_vec.set_value(i, &Value::Int64(i as i64)).ok();
-            }
-            let mut fields = vec![id_vec];
-            let mut field_names = vec!["node_id".into()];
-
-            // One column per embedding dimension
-            for d in 0..dimensions {
-                let mut dim_vec = kuzu_common::vector::ValueVector::new(
-                    kuzu_common::types::PhysicalTypeID::Double, n,
-                );
-                for i in 0..n {
-                    let val = result.values.get(i * dimensions + d).copied().unwrap_or(0.0);
-                    dim_vec.set_value(i, &Value::Double(val)).ok();
-                }
-                fields.push(dim_vec);
-                field_names.push(format!("dim_{d}"));
-            }
-
-            output.fields = fields;
-            output.field_names = field_names;
-            output.size = n;
-            Ok(())
         });
-        context.register_table_function(
-            "node2vec",
-            TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn.clone() },
-        );
-        context.register_table_function(
-            "n2v",
-            TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn },
-        );
+        context.register_table_function("weakly_connected_components", TableFunction::CustomTable { name: "wcc".into(), execute: wcc_fn.clone() });
+        context.register_table_function("wcc", TableFunction::CustomTable { name: "wcc".into(), execute: wcc_fn });
 
-        tracing::info!("ALGO extension loaded: 21 function registrations (12 algorithms + 9 aliases)");
+        // ── strongly_connected_components (Tarjan) / scc ──────────────────────
+        // CALL scc() → (node_id INT64, component_id DOUBLE)
+        let scc_tarjan_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_scc_tarjan(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("strongly_connected_components", TableFunction::CustomTable { name: "scc_tarjan".into(), execute: scc_tarjan_fn.clone() });
+        context.register_table_function("scc",                           TableFunction::CustomTable { name: "scc_tarjan".into(), execute: scc_tarjan_fn });
+
+        // ── scc_kosaraju / scc_ko ─────────────────────────────────────────────
+        let scc_ko_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_scc_kosaraju(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("strongly_connected_components_kosaraju", TableFunction::CustomTable { name: "scc_kosaraju".into(), execute: scc_ko_fn.clone() });
+        context.register_table_function("scc_ko",                                 TableFunction::CustomTable { name: "scc_kosaraju".into(), execute: scc_ko_fn });
+
+        // ── k_core_decomposition / kcore ──────────────────────────────────────
+        // CALL k_core_decomposition() → (node_id INT64, core_number DOUBLE)
+        let kcore_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_k_core(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "core_number")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("k_core_decomposition", TableFunction::CustomTable { name: "k_core".into(), execute: kcore_fn.clone() });
+        context.register_table_function("kcore",                TableFunction::CustomTable { name: "k_core".into(), execute: kcore_fn });
+
+        // ── louvain ───────────────────────────────────────────────────────────
+        // CALL louvain() → (node_id INT64, community_id DOUBLE)
+        let louvain_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_louvain(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "community_id")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("louvain", TableFunction::CustomTable { name: "louvain".into(), execute: louvain_fn });
+
+        // ── spanning_forest / sf ──────────────────────────────────────────────
+        // CALL spanning_forest() → (node_id INT64, parent_id DOUBLE)
+        let sf_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_spanning_forest(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "parent_id")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("spanning_forest", TableFunction::CustomTable { name: "spanning_forest".into(), execute: sf_fn.clone() });
+        context.register_table_function("sf",              TableFunction::CustomTable { name: "spanning_forest".into(), execute: sf_fn });
+
+        // ── label_propagation / lpa ───────────────────────────────────────────
+        // CALL lpa(max_iters?) → (node_id INT64, label DOUBLE)
+        let lpa_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let max_iters = match args.first() {
+                    Some(Value::Int64(n)) if *n > 0 => *n as usize,
+                    Some(Value::Int32(n)) if *n > 0 => *n as usize,
+                    _ => 10,
+                };
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_lpa(&csr, max_iters);
+                let (fields, field_names, size) = pack_node_scores(result, "label")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("label_propagation", TableFunction::CustomTable { name: "lpa".into(), execute: lpa_fn.clone() });
+        context.register_table_function("lpa",               TableFunction::CustomTable { name: "lpa".into(), execute: lpa_fn });
+
+        // ── betweenness_centrality / bc ───────────────────────────────────────
+        // CALL betweenness_centrality() → (node_id INT64, centrality DOUBLE)
+        let bc_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_betweenness_centrality(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "centrality")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("betweenness_centrality", TableFunction::CustomTable { name: "betweenness_centrality".into(), execute: bc_fn.clone() });
+        context.register_table_function("bc",                     TableFunction::CustomTable { name: "betweenness_centrality".into(), execute: bc_fn });
+
+        // ── closeness_centrality / cc ─────────────────────────────────────────
+        // CALL closeness_centrality() → (node_id INT64, centrality DOUBLE)
+        let cc_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_closeness_centrality(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "centrality")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("closeness_centrality", TableFunction::CustomTable { name: "closeness_centrality".into(), execute: cc_fn.clone() });
+        context.register_table_function("cc",                   TableFunction::CustomTable { name: "closeness_centrality".into(), execute: cc_fn });
+
+        // ── triangle_count / tc ───────────────────────────────────────────────
+        // CALL triangle_count() → (node_id INT64, triangles DOUBLE)
+        let tc_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_triangle_count(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "triangles")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("triangle_count", TableFunction::CustomTable { name: "triangle_count".into(), execute: tc_fn.clone() });
+        context.register_table_function("tc",             TableFunction::CustomTable { name: "triangle_count".into(), execute: tc_fn });
+
+        // ── all_sp_destinations ───────────────────────────────────────────────
+        // CALL all_sp_destinations() → (node_id INT64, reachable DOUBLE)
+        let all_sp_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_all_sp_destinations(&csr);
+                let (fields, field_names, size) = pack_node_scores(result, "reachable")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("all_sp_destinations", TableFunction::CustomTable { name: "all_sp_destinations".into(), execute: all_sp_fn });
+
+        // ── random_walk / rw ──────────────────────────────────────────────────
+        // CALL random_walk(steps?, walks_per_node?) → (node_id INT64, hit_count DOUBLE)
+        let rw_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                let steps = match args.first() {
+                    Some(Value::Int64(n)) if *n > 0 => *n as usize,
+                    Some(Value::Int32(n)) if *n > 0 => *n as usize,
+                    _ => 5,
+                };
+                let walks_per_node = match args.get(1) {
+                    Some(Value::Int64(n)) if *n > 0 => *n as usize,
+                    Some(Value::Int32(n)) if *n > 0 => *n as usize,
+                    _ => 2,
+                };
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_random_walk(&csr, None, steps, walks_per_node);
+                let (fields, field_names, size) = pack_node_scores(result, "hit_count")?;
+                output.fields = fields; output.field_names = field_names; output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function("random_walk", TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn.clone() });
+        context.register_table_function("rw",          TableFunction::CustomTable { name: "random_walk".into(), execute: rw_fn });
+
+        // ── node2vec / n2v ────────────────────────────────────────────────────
+        // CALL node2vec(p?, q?, dimensions?, walks?, window?)
+        //   → (node_id INT64, dim_0 DOUBLE, …, dim_N DOUBLE)
+        let n2v_fn = Arc::new({
+            let sample_edges = sample_edges.clone();
+            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+                fn f64_arg(args: &[Value], idx: usize, default: f64) -> f64 {
+                    match args.get(idx) {
+                        Some(Value::Double(v)) => *v,
+                        Some(Value::Float(v))  => *v as f64,
+                        Some(Value::Int64(v))  => *v as f64,
+                        Some(Value::Int32(v))  => *v as f64,
+                        _ => default,
+                    }
+                }
+                fn usize_arg(args: &[Value], idx: usize, default: usize) -> usize {
+                    match args.get(idx) {
+                        Some(Value::Int64(v)) if *v > 0 => *v as usize,
+                        Some(Value::Int32(v)) if *v > 0 => *v as usize,
+                        _ => default,
+                    }
+                }
+                let p = f64_arg(args, 0, 1.0);
+                let q = f64_arg(args, 1, 1.0);
+                let dimensions = usize_arg(args, 2, 4);
+                let walks      = usize_arg(args, 3, 3);
+                let window     = usize_arg(args, 4, 5);
+
+                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let result = compute_node2vec(&csr, p, q, dimensions, walks, window);
+
+                let n = if dimensions > 0 { result.values.len() / dimensions } else { 0 };
+                let mut id_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+                for i in 0..n { id_vec.set_value(i, &Value::Int64(i as i64)).ok(); }
+
+                let mut fields = vec![id_vec];
+                let mut field_names = vec!["node_id".to_string()];
+                for d in 0..dimensions {
+                    let mut dim_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n);
+                    for i in 0..n {
+                        let val = result.values.get(i * dimensions + d).copied().unwrap_or(0.0);
+                        dim_vec.set_value(i, &Value::Double(val)).ok();
+                    }
+                    fields.push(dim_vec);
+                    field_names.push(format!("dim_{d}"));
+                }
+                output.fields = fields; output.field_names = field_names; output.size = n;
+                Ok(())
+            }
+        });
+        context.register_table_function("node2vec", TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn.clone() });
+        context.register_table_function("n2v",      TableFunction::CustomTable { name: "node2vec".into(), execute: n2v_fn });
+
+        // ── shortest_path / sp ────────────────────────────────────────────────
+        context.register_table_function("shortest_path",         TableFunction::CustomTable { name: "shortest_path".into(),          execute: sp_destinations_fn.clone() });
+        context.register_table_function("sp",                    TableFunction::CustomTable { name: "shortest_path".into(),          execute: sp_destinations_fn });
+        context.register_table_function("weighted_shortest_path", TableFunction::CustomTable { name: "weighted_shortest_path".into(), execute: wsp_destinations_fn });
+
+        tracing::info!("ALGO extension loaded: 30 registrations (15 algorithms × canonical + 15 aliases)");
 
         Ok(())
     }
