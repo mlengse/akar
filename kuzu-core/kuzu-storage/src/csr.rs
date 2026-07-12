@@ -29,8 +29,8 @@ impl CsrIndex {
         }
     }
 
-    /// Gets the neighborhood of a given node ID.
-    pub fn get_neighbors(&self, _node_id: u64) -> Result<Vec<u64>, String> {
+    /// Gets the neighborhood of a given node ID based on direction.
+    pub fn get_neighbors(&self, _node_id: u64, _is_fwd: bool) -> Result<Vec<u64>, String> {
         // Mock implementation for retrieving neighbors using CSR offsets
         Ok(Vec::new())
     }

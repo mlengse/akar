@@ -209,7 +209,31 @@ impl AggregateHashTable {
             output.push(v);
         }
 
-        Ok(vec![DataChunk::new(output)])
+        // Split output into chunks of 2048
+        const CHUNK_SIZE: usize = 2048;
+        let mut chunks = Vec::new();
+        
+        for chunk_start in (0..num_rows).step_by(CHUNK_SIZE) {
+            let chunk_end = (chunk_start + CHUNK_SIZE).min(num_rows);
+            let chunk_len = chunk_end - chunk_start;
+            
+            let mut chunk_fields = Vec::with_capacity(output.len());
+            for field in &output {
+                let mut new_v = ValueVector::new(field.physical_type(), chunk_len);
+                new_v.resize(chunk_len);
+                for i in 0..chunk_len {
+                    if field.is_null(chunk_start + i) {
+                        new_v.set_null(i, true);
+                    } else if let Some(val) = field.get_value(chunk_start + i) {
+                        store_value_in_vector(&mut new_v, i, &val);
+                    }
+                }
+                chunk_fields.push(new_v);
+            }
+            chunks.push(DataChunk::new(chunk_fields));
+        }
+
+        Ok(chunks)
     }
 }
 

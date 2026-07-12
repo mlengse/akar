@@ -46,8 +46,16 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
             for i in 0..chunk.size {
                 if key_field.is_null(i) { continue; }
                 let val = key_field.get_value(i).unwrap();
-                let matched = node_table.lookup_by_pk(&val);
-                if let Some(row_id) = matched {
+                // Use ART index via lookup_by_pk_range to match C++ architecture for index scans
+                let row_ids_from_idx = node_table.lookup_by_pk_range(
+                    Some(&val),
+                    true,
+                    Some(&val),
+                    true,
+                    1,
+                );
+                
+                if let Some(&row_id) = row_ids_from_idx.first() {
                     row_ids.push(row_id as usize);
                 }
             }

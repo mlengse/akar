@@ -85,7 +85,8 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
 
                 // Read from CsrIndex if available, otherwise fallback to adjacency list
                 let neighbors = if let Some(csr) = &rel_table.csr_index {
-                    csr.get_neighbors(src_id).unwrap_or_default()
+                    let is_fwd = matches!(self.direction, kuzu_parser::ast::EdgeDirection::LeftToRight);
+                    csr.get_neighbors(src_id, is_fwd).unwrap_or_default()
                 } else {
                     // Fallback to simple adjacency lookup
                     match self.direction {
