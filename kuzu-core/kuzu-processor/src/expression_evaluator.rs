@@ -11,6 +11,7 @@
 //! - PropertyAccess:  reads a property from a struct/object expression
 //! - List/Map:        evaluated via list_creation/map_creation scalar functions
 
+use kuzu_common::arrow_vector::ArrowVector;
 use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::registry::{FunctionRegistry, ScalarFunction};
@@ -66,6 +67,15 @@ impl ExpressionEvaluator {
         } else {
             Err("No subquery executor configured".into())
         }
+    }
+
+    /// Evaluate an expression for every row in the chunk, returning an ArrowVector
+    /// for fixed-width types (Int32/64, Float32/64, Bool) or a ValueVector for others.
+    /// This avoids the Value enum conversion overhead in the filter hot path.
+    pub fn evaluate_to_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
+        let legacy = self.evaluate(expr, chunk)?;
+        let arrow = ArrowVector::from_legacy(&legacy);
+        Ok(arrow)
     }
 
     /// Evaluate an expression for every row in the chunk, returning a ValueVector.

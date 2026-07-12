@@ -130,6 +130,7 @@ impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
                 fields,
                 size: chunk.size,
                 field_names,
+                sel_vector: None,
             });
         }
 

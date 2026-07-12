@@ -55,6 +55,7 @@ pub fn map_and_execute_ddl(
                 fields: vec![],
                 size: 1,
                 field_names: vec![],
+            sel_vector: None,
             }])
         }
         LogicalOperator::CreateSequence(_)
@@ -66,6 +67,7 @@ pub fn map_and_execute_ddl(
                 fields: vec![],
                 size: 0,
                 field_names: vec![],
+            sel_vector: None,
             }])
         }
         LogicalOperator::CreateFtsIndex(c) => {

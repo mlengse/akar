@@ -69,6 +69,7 @@ impl PhysicalOperatorExec for PhysicalMultiplicityReducer {
                     fields: new_fields,
                     size: filtered_size,
                     field_names: chunk.field_names.clone(),
+            sel_vector: None,
                 });
             }
         }
@@ -117,6 +118,7 @@ impl PhysicalOperatorExec for PhysicalSkip {
                 fields: sliced_fields,
                 size: keep_size,
                 field_names: chunk.field_names.clone(),
+            sel_vector: None,
             });
             remaining_skip = 0;
         }
@@ -231,6 +233,7 @@ impl PhysicalOperatorExec for PhysicalExtensionClause {
             fields: vec![field],
             size: 1,
             field_names: vec!["message".into()],
+            sel_vector: None,
         }])
     }
 }

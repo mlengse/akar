@@ -78,6 +78,7 @@ impl PhysicalOperatorExec for PhysicalIndexLookup {
             fields,
             size: 1,
             field_names,
+            sel_vector: None,
         }])
     }
 }

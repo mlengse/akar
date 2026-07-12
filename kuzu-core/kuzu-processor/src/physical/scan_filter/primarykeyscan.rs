@@ -74,6 +74,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                 fields: vec![],
                 size: 0,
                 field_names: vec![],
+            sel_vector: None,
             }]);
         }
 
@@ -108,6 +109,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
             fields: new_fields,
             size: total,
             field_names,
+            sel_vector: None,
         }])
     }
 }

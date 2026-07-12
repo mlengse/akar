@@ -65,6 +65,7 @@ impl PhysicalOperatorExec for PhysicalScanRel {
                 fields,
                 size: num_rows,
                 field_names: names,
+            sel_vector: None,
             }])
         } else {
             Ok(vec![DataChunk::new(vec![])])

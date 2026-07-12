@@ -122,6 +122,7 @@ impl QueryProcessor {
                 fields: vec![],
                 size: 0,
                 field_names: vec![],
+                sel_vector: None,
             }]);
         }
 

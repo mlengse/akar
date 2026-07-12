@@ -39,6 +39,7 @@ impl PhysicalOperatorExec for PhysicalAccumulate {
             fields: merged_fields,
             size,
             field_names,
+            sel_vector: None,
         }])
     }
 }
@@ -103,6 +104,7 @@ impl PhysicalOperatorExec for ResultCollector {
             fields: merged_fields,
             size,
             field_names,
+            sel_vector: None,
         }])
     }
 }
@@ -216,6 +218,7 @@ impl Partitioner {
                 fields: morsel_fields,
                 size: end - start,
                 field_names: chunk.field_names.clone(),
+            sel_vector: None,
             });
         }
         morsels
@@ -247,6 +250,7 @@ mod tests {
             fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 10)],
             size: 10,
             field_names: vec!["val".into()],
+            sel_vector: None,
         };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
@@ -260,6 +264,7 @@ mod tests {
             fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5)],
             size: 5,
             field_names: vec!["val".into()],
+            sel_vector: None,
         };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
@@ -278,6 +283,7 @@ mod tests {
             fields: vec![fv],
             size: 25,
             field_names: vec!["val".into()],
+            sel_vector: None,
         };
         let result = p.execute(vec![chunk]).unwrap();
         // 25 rows with morsel_size 10 → 3 morsels (10 + 10 + 5)
@@ -301,7 +307,7 @@ mod tests {
         let mut fv = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
         fv.resize(5);
         for i in 0..5 { fv.set_i64(i, i as i64); }
-        let chunk = DataChunk { fields: vec![fv], size: 5, field_names: vec!["val".into()] };
+        let chunk = DataChunk { fields: vec![fv], size: 5, field_names: vec!["val".into()], sel_vector: None };
         let result = p.execute(vec![chunk]).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].size, 3);
@@ -321,8 +327,8 @@ mod tests {
         for i in 0..5 { fv2.set_i64(i, (i + 5) as i64); }
 
         let chunks = vec![
-            DataChunk { fields: vec![fv1], size: 5, field_names: vec!["val".into()] },
-            DataChunk { fields: vec![fv2], size: 5, field_names: vec!["val".into()] },
+            DataChunk { fields: vec![fv1], size: 5, field_names: vec!["val".into()], sel_vector: None },
+            DataChunk { fields: vec![fv2], size: 5, field_names: vec!["val".into()], sel_vector: None },
         ];
         let result = p.execute(chunks).unwrap();
         assert_eq!(result.len(), 4, "expected 4 morsels from 2 chunks of 5 rows each");

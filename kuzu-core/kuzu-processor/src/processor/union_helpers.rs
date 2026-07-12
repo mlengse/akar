@@ -70,6 +70,7 @@ pub fn merge_union_chunks(
         fields: merged_fields,
         size: final_size,
         field_names,
+        sel_vector: None,
     }])
 }
 
@@ -115,5 +116,6 @@ pub fn merge_optional_chunks(
         fields,
         size,
         field_names: vec![],
+            sel_vector: None,
     }])
 }

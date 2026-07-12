@@ -37,6 +37,7 @@ impl PhysicalOperatorExec for PhysicalExplain {
             fields: vec![vv],
             size: 1,
             field_names: vec![],
+            sel_vector: None,
         };
         Ok(vec![chunk])
     }

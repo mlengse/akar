@@ -108,6 +108,7 @@ impl PhysicalCrossProduct {
             fields: output_fields,
             size: total_rows,
             field_names: output_names,
+            sel_vector: None,
         }])
     }
 }
@@ -198,6 +199,7 @@ impl PhysicalSemiJoin {
             fields: output_fields,
             size: match_rows.len(),
             field_names: vec![],
+            sel_vector: None,
         }])
     }
 }
@@ -289,6 +291,7 @@ impl PhysicalAntiJoin {
             fields: output_fields,
             size: non_match_rows.len(),
             field_names: vec![],
+            sel_vector: None,
         }])
     }
 }
@@ -469,6 +472,7 @@ impl PhysicalIntersect {
             fields: output_fields,
             size: output_size,
             field_names: vec![],
+            sel_vector: None,
         }])
     }
 }
@@ -647,6 +651,7 @@ impl JoinHashTable {
             fields: result_fields,
             size: num_rows,
             field_names: vec![],
+            sel_vector: None,
         }])
     }
 }

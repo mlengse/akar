@@ -1274,6 +1274,7 @@ impl FunctionRegistry {
                     fields: Vec::new(),
                     size: 0,
                     field_names: vec![],
+                    sel_vector: None,
                 };
                 execute(args, &mut chunk).map(|_| {
                     let mut rows = Vec::new();

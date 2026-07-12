@@ -1,12 +1,10 @@
-//! Auto-extracted from physical_operator.rs
+use kuzu_common::selection::SelectionVector;
 use kuzu_common::types::Value;
-use kuzu_common::vector::{DataChunk, ValueVector, physical_type_size};
+use kuzu_common::vector::DataChunk;
 use kuzu_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use std::sync::{Arc, Mutex};
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-
-// ==================== Filter ====================
 
 pub struct PhysicalFilter {
     pub expression: Expression,
@@ -29,13 +27,11 @@ impl PhysicalFilter {
     }
 
     /// Evaluate a filter expression against values and return a boolean mask.
-    /// Uses the new ExpressionEvaluator when available, falls back to legacy logic.
     pub fn evaluate_expression(
         expr: &Expression,
         chunk: &DataChunk,
         evaluator: Option<&ExpressionEvaluator>,
     ) -> Result<Vec<bool>, String> {
-        // If we have a proper ExpressionEvaluator, use it
         if let Some(eval) = evaluator {
             let result_vec = eval.evaluate(expr, chunk)?;
             let size = result_vec.size();
@@ -45,18 +41,28 @@ impl PhysicalFilter {
                 match val {
                     Some(Value::Bool(b)) => mask.push(b),
                     Some(Value::Null) => mask.push(false),
-                    Some(_) => mask.push(true), // non-null, non-bool = truthy
-                    None => mask.push(false),   // null = false
+                    Some(_) => mask.push(true),
+                    None => mask.push(false),
                 }
             }
             return Ok(mask);
         }
 
-        // Legacy fallback
         Self::evaluate_expression_legacy(expr, chunk)
     }
 
-    /// Legacy evaluate_expression — preserved for backward compatibility.
+    /// Build a SelectionVector from a boolean mask.
+    pub fn mask_to_selection(mask: &[bool]) -> SelectionVector {
+        let count = mask.iter().filter(|&v| *v).count();
+        let mut sel = SelectionVector::new(count);
+        for (i, &keep) in mask.iter().enumerate() {
+            if keep {
+                sel.push(i as u32);
+            }
+        }
+        sel
+    }
+
     fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, String> {
         match expr {
             Expression::BinaryOp(op, left, right) => {
@@ -68,21 +74,12 @@ impl PhysicalFilter {
                 let vals = Self::evaluate_expression_legacy(inner, chunk)?;
                 match op {
                     UnaryOp::Not => Ok(vals.iter().map(|v| !v).collect()),
-                    UnaryOp::Negate => {
-                        // Negation on a boolean mask inverts it
-                        Ok(vals.iter().map(|v| !v).collect())
-                    }
-                    UnaryOp::IsNull => {
-                        // IS NULL: if the inner expression returned all-false, mark as null
-                        Ok(vec![false; chunk.size]) // conservative: non-null by default
-                    }
-                    UnaryOp::IsNotNull => {
-                        Ok(vals) // pass through as-is
-                    }
+                    UnaryOp::Negate => Ok(vals.iter().map(|v| !v).collect()),
+                    UnaryOp::IsNull => Ok(vec![false; chunk.size]),
+                    UnaryOp::IsNotNull => Ok(vals),
                 }
             }
             Expression::Variable(_name) => {
-                // Treat any non-null first field as true
                 if let Some(field) = chunk.fields.first() {
                     Ok((0..chunk.size).map(|i| !field.is_null(i)).collect())
                 } else {
@@ -97,7 +94,6 @@ impl PhysicalFilter {
                 Ok(vec![val; chunk.size])
             }
             Expression::PropertyAccess(obj, _prop) => {
-                // Simplified: evaluate the object expression, return mask
                 Self::evaluate_expression_legacy(obj, chunk)
             }
             Expression::FunctionCall(_, _)
@@ -122,33 +118,22 @@ impl PhysicalOperatorExec for PhysicalFilter {
         let evaluator = self.evaluator.as_ref().and_then(|e| e.lock().ok());
 
         let mut output = Vec::new();
-        for chunk in input {
+        for mut chunk in input {
             let mask = Self::evaluate_expression(&self.expression, &chunk, evaluator.as_deref())?;
-            // Filter rows based on mask
-            let selected: Vec<usize> = mask.iter().enumerate().filter(|&(_, v)| *v).map(|(i, _)| i).collect();
+            let sel = Self::mask_to_selection(&mask);
 
-            if selected.is_empty() {
+            if sel.is_empty() {
                 continue;
             }
 
-            let mut new_fields = Vec::new();
-            for field in &chunk.fields {
-                let mut new_v = ValueVector::new(field.physical_type(), selected.len());
-                new_v.resize(selected.len()); // Pre-allocate so data_mut() is writable
-                for (new_idx, &old_idx) in selected.iter().enumerate() {
-                    let type_size = physical_type_size(field.physical_type());
-                    let src_offset = old_idx * type_size;
-                    let dst_offset = new_idx * type_size;
-                    let src_data = field.data();
-                    if src_offset + type_size <= src_data.len() && dst_offset + type_size <= new_v.data().len() {
-                        new_v.data_mut()[dst_offset..dst_offset + type_size]
-                            .copy_from_slice(&src_data[src_offset..src_offset + type_size]);
-                    }
-                    new_v.set_null(new_idx, field.is_null(old_idx));
-                }
-                new_fields.push(new_v);
+            if sel.size == chunk.size {
+                // All rows passed — no selection needed
+                output.push(chunk);
+            } else {
+                // Zero-copy: attach selection vector
+                chunk.sel_vector = Some(sel);
+                output.push(chunk);
             }
-            output.push(DataChunk::new(new_fields).with_names(chunk.field_names.clone()));
         }
         Ok(output)
     }
@@ -163,10 +148,8 @@ fn evaluate_binary_op_legacy(op: &BinaryOp, left: &[bool], right: &[bool], size:
             BinaryOp::Xor => left[i] ^ right[i],
             BinaryOp::Equal => left[i] == right[i],
             BinaryOp::NotEqual => left[i] != right[i],
-            _ => true, // default pass-through for other comparisons
+            _ => true,
         })
         .collect();
     Ok(result)
 }
-
-

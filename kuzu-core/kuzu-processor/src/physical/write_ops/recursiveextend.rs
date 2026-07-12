@@ -407,12 +407,14 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
                 fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v, cost_v],
                 size: num_results,
                 field_names: vec![],
+                sel_vector: None,
             }])
         } else {
             Ok(vec![DataChunk {
                 fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v],
                 size: num_results,
                 field_names: vec![],
+                sel_vector: None,
             }])
         }
     }
@@ -789,6 +791,7 @@ impl PhysicalExtend {
                 fields,
                 size: total_rows,
                 field_names,
+                sel_vector: None,
             });
         }
 

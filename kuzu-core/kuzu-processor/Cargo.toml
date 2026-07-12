@@ -21,6 +21,7 @@ kuzu-fts = { path = "../kuzu-fts" }
 tracing.workspace = true
 hashbrown.workspace = true
 rayon.workspace = true
+arrow.workspace = true
 
 [dev-dependencies]
 kuzu-binder = { path = "../kuzu-binder" }

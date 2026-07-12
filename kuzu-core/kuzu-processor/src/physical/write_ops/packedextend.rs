@@ -140,6 +140,7 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                 fields: out_fields,
                 size: total_output_rows,
                 field_names: new_names,
+                sel_vector: None,
             });
         }
 
@@ -148,6 +149,7 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                 fields: vec![],
                 size: 0,
                 field_names: vec![],
+                sel_vector: None,
             }])
         } else {
             Ok(output_chunks)

@@ -70,7 +70,7 @@ impl AggregateHashTable {
             .par_iter()
             .map(|chunk| {
                 let mut local: LocalTable = hashbrown::HashMap::new();
-                for row in 0..chunk.size {
+                for row in chunk.iter_rows() {
                     let key = build_group_key(chunk, group_cols, row);
                     let hash = value_hash(&key);
                     let bucket = local.entry(hash).or_default();
@@ -114,7 +114,7 @@ impl AggregateHashTable {
         let funcs = &self.funcs;
 
         for chunk in chunks {
-            for row in 0..chunk.size {
+            for row in chunk.iter_rows() {
                 let key = build_group_key(chunk, group_cols, row);
                 let hash = value_hash(&key);
                 let bucket = groups.entry(hash).or_default();

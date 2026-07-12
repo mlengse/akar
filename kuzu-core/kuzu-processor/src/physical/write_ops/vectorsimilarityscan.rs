@@ -144,6 +144,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
             fields,
             size: num_results,
             field_names: vec![],
+            sel_vector: None,
         }])
     }
 }

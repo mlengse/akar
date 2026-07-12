@@ -284,6 +284,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 fields,
                 size: count,
                 field_names: col_names.clone(),
+                sel_vector: None,
             });
         }
 

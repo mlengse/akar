@@ -68,6 +68,7 @@ pub fn map_and_execute_projection(
                             fields,
                             size,
                             field_names: vec![],
+            sel_vector: None,
                         });
                     }
                     output

@@ -500,58 +500,12 @@ impl ValueVector {
     }
 }
 
-/// A collection of ValueVectors that represent a subset of a table's columns.
-#[derive(Debug, Clone)]
-pub struct DataChunk {
-    pub fields: Vec<ValueVector>,
-    pub size: usize,
-    /// Column names parallel to `fields`. Empty when names are not tracked.
-    pub field_names: Vec<String>,
-}
+/// Type alias for backward compatibility during Arrow migration.
+/// Use `ValueVector` in existing code; new code should prefer `Vector` from arrow_vector.
+pub type LegacyValueVector = ValueVector;
 
-/// Resize a DataChunk to the given number of rows.
-pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
-    chunk.size = new_size;
-    for field in &mut chunk.fields {
-        field.resize(new_size);
-    }
-}
-
-impl DataChunk {
-    pub fn new(fields: Vec<ValueVector>) -> Self {
-        let size = fields.first().map(|f| f.size()).unwrap_or(0);
-        Self {
-            fields,
-            size,
-            field_names: vec![],
-        }
-    }
-
-    /// Attach column names to this chunk (builder pattern).
-    pub fn with_names(mut self, names: Vec<String>) -> Self {
-        self.field_names = names;
-        self
-    }
-
-    pub fn field(&self, idx: usize) -> &ValueVector {
-        &self.fields[idx]
-    }
-
-    pub fn field_mut(&mut self, idx: usize) -> &mut ValueVector {
-        &mut self.fields[idx]
-    }
-
-    pub fn num_fields(&self) -> usize {
-        self.fields.len()
-    }
-
-    pub fn resize(&mut self, new_size: usize) {
-        self.size = new_size;
-        for field in &mut self.fields {
-            field.resize(new_size);
-        }
-    }
-}
+/// Re-export DataChunk from its own module.
+pub use crate::data_chunk::DataChunk;
 
 #[cfg(test)]
 mod tests {

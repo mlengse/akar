@@ -47,6 +47,7 @@ pub fn duckdb_results_to_kuzu(results: Vec<Vec<duckdb::types::Value>>) -> Result
         fields,
         size: num_rows,
         field_names: vec![],
+            sel_vector: None,
     }])
 }
 

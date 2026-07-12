@@ -37,6 +37,7 @@ impl PhysicalOperatorExec for PhysicalProjection {
                     fields,
                     size,
                     field_names: names,
+            sel_vector: None,
                 }
             })
             .collect();
@@ -46,6 +47,7 @@ impl PhysicalOperatorExec for PhysicalProjection {
                 fields: vec![],
                 size: 0,
                 field_names: vec![],
+            sel_vector: None,
             }])
         } else {
             Ok(output)
