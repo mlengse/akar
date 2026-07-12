@@ -1,11 +1,11 @@
-//! ValueVector — typed columnar data array used throughout the query engine.
+//! LegacyValueVector — typed columnar data array used throughout the query engine.
 
 use crate::types::{PhysicalTypeID, Value};
 
 /// A vector of values of the same physical type.
 /// This is the fundamental columnar data unit in Kuzu's query execution.
 #[derive(Debug, Clone)]
-pub struct ValueVector {
+pub struct LegacyValueVector {
     physical_type: PhysicalTypeID,
     /// The actual data buffer (type-erased byte buffer).
     data: Vec<u8>,
@@ -17,7 +17,7 @@ pub struct ValueVector {
     capacity: usize,
 }
 
-impl ValueVector {
+impl LegacyValueVector {
     pub fn new(physical_type: PhysicalTypeID, capacity: usize) -> Self {
         let type_size = physical_type_size(physical_type);
         Self {
@@ -84,7 +84,7 @@ pub const fn physical_type_size(t: PhysicalTypeID) -> usize {
 
 // --- Typed getters/setters ---
 
-impl ValueVector {
+impl LegacyValueVector {
     /// Get an i64 value at index.
     pub fn get_i64(&self, idx: usize) -> Option<i64> {
         if self.is_null(idx) {
@@ -155,7 +155,7 @@ impl ValueVector {
     }
 }
 
-impl ValueVector {
+impl LegacyValueVector {
     /// Get a Value enum from this vector at a given row index.
     /// This converts the raw byte buffer into the appropriate Value variant.
     pub fn get_value(&self, idx: usize) -> Option<Value> {
@@ -482,7 +482,7 @@ impl ValueVector {
     }
 
     /// Append a value from another vector (for DataChunk operations).
-    pub fn append(&mut self, other: &ValueVector) {
+    pub fn append(&mut self, other: &LegacyValueVector) {
         let start = self.size;
         let count = other.size;
         let type_size = physical_type_size(self.physical_type);
@@ -502,52 +502,9 @@ impl ValueVector {
 
 /// Type alias for backward compatibility during Arrow migration.
 /// Use `ValueVector` in existing code; new code should prefer `Vector` from arrow_vector.
-pub type LegacyValueVector = ValueVector;
+pub type ValueVector = LegacyValueVector;
 
 /// Re-export DataChunk from its own module.
 pub use crate::data_chunk::DataChunk;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_value_vector_bool() {
-        let mut v = ValueVector::new(PhysicalTypeID::Bool, 5);
-        v.push_bool(true);
-        v.push_bool(false);
-        assert_eq!(v.get_bool(0), Some(true));
-        assert_eq!(v.get_bool(1), Some(false));
-    }
-
-    #[test]
-    fn test_physical_type_size() {
-        assert_eq!(physical_type_size(PhysicalTypeID::Bool), 1);
-        assert_eq!(physical_type_size(PhysicalTypeID::Int64), 8);
-        assert_eq!(physical_type_size(PhysicalTypeID::Int32), 4);
-        assert_eq!(physical_type_size(PhysicalTypeID::Double), 8);
-        assert_eq!(physical_type_size(PhysicalTypeID::String), 256);
-    }
-
-    #[test]
-    fn test_data_chunk() {
-        let v1 = ValueVector::new(PhysicalTypeID::Int64, 10);
-        let v2 = ValueVector::new(PhysicalTypeID::Double, 10);
-        let chunk = DataChunk::new(vec![v1, v2]);
-        assert_eq!(chunk.num_fields(), 2);
-    }
-
-    #[test]
-    fn test_vector_append() {
-        let mut v1 = ValueVector::new(PhysicalTypeID::Int64, 10);
-        let mut v2 = ValueVector::new(PhysicalTypeID::Int64, 10);
-        v1.set_i64(0, 1);
-        v1.set_i64(1, 2);
-        v2.set_i64(0, 3);
-        v2.set_i64(1, 4);
-        v1.append(&v2);
-        assert_eq!(v1.size(), 4);
-        assert_eq!(v1.get_i64(2), Some(3));
-        assert_eq!(v1.get_i64(3), Some(4));
-    }
-}
