@@ -1,105 +1,161 @@
-# Kuzu Rust — Forward Implementation Plan
+# Kuzu Rust — Revised Forward Implementation Plan
 
-> **Note:** For the current status of the project and all completed phases (P1-P25), please refer to [`STATUS.md`](./STATUS.md).
-> This document strictly focuses on the strategic roadmap and pending implementation tasks, completely separated from the status report to avoid duplication.
+> **Revision:** 2026-07-13 (post-design review)
+> **Baseline:** 954 tests passing, 1 failed (`test_sip_optimization`), 29 crates, ~66k LOC
+> **For completed phases (P1-P25):** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
 
-## 🎯 Roadmap Overview
+## 🔧 P0: Fix Regression (Pre-Sprint)
+
+> [!CAUTION]
+> Must be resolved before any new work begins.
+
+- `[ ]` Fix `test_sip_optimization` regression in `kuzu-main/tests/integration_test.rs`
+- `[ ]` Verify `cargo test --workspace` → **955 passed, 0 failed**
+
+---
+
+## 🎯 Revised Roadmap Overview
 
 | Phase | Content | Priority | SP | Target |
 |-------|---------|----------|:---:|--------|
-| **P26** | Testing, fuzzing & documentation polish | 🟢 P3 | 21 | Sprint 1 |
-| **P27** | Performance — zero-copy Arrow, JoinHashTable | 🔴 P0 | 14 | Sprint 1-2 |
-| **P28** | Drop-in replacement — C++ storage, ABI, CLI | 🔴 P0 | 23 | Sprint 2-3 |
-| **P29** | Functions, fuzz, proptest, edge cases | 🟡 P1 | 18 | Sprint 3 |
-| **Total** | | | **76** | **~6 weeks** |
+| **P0** | Fix `test_sip_optimization` regression | 🔴 P0 | 1 | Immediate |
+| **P26** | Testing, fuzzing & profiling | 🟢 P3 | 17 | Sprint 1 |
+| **P27** | Performance — profiling-driven Arrow migration | 🔴 P0 | 14 | Sprint 1-2 |
+| **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | Sprint 2-3 |
+| **P29** | Functions & completeness | 🟡 P1 | 6 | Sprint 3 |
+| **Total** | | | **50** | **~5 weeks** |
+
+> [!IMPORTANT]
+> **Freed ~16 SP** vs. original plan by:
+> - Dropping C++ Extension ABI (−8 SP)
+> - Scoping CLI to Box mode only (−3 SP)
+> - Read-only migration tool vs. dual reader (−5 SP)
+> - Deferring quick wins until after profiling
 
 ---
 
-## 🟡 P26: Testing, Fuzzing & Documentation Polish
-*Target: 2026-07-21*
+## 🟢 P26: Testing, Fuzzing & Profiling
+*Target: Sprint 1 (2026-07-21)*
 
 ### P26.1 — Edge Case Test Suite (5 SP)
-- `[ ]` Create `kuzu-main/tests/test_edge_cases.rs` organized by category:
-  - Null handling (Target: 30+ tests)
-  - Empty tables (Target: 15+ tests)
-  - Boundary values (Target: 15+ tests)
-  - Concurrency (Target: 10+ tests)
-  - DDL error paths (Target: 20+ tests)
-  - Nested types (Target: 15+ tests)
-  - Unicode/UTF-8 (Target: 10+ tests)
+
+Separate files per category under `kuzu-main/tests/`:
+
+| File | Category | Target Count |
+|------|----------|:---:|
+| `test_null_handling.rs` | Null handling | 30+ |
+| `test_empty_tables.rs` | Empty tables | 15+ |
+| `test_boundary_values.rs` | Boundary values | 15+ |
+| `test_concurrency.rs` | Concurrency | 10+ |
+| `test_ddl_errors.rs` | DDL error paths | 20+ |
+| `test_nested_types.rs` | Nested types | 15+ |
+| `test_unicode.rs` | Unicode/UTF-8 | 10+ |
+
+- `[ ]` Create 7 test files (115+ tests total)
+- `[ ]` Concurrency tests use `std::thread::spawn` with shared `Database` instance
 
 ### P26.2 — Fuzz Testing (4 SP)
-- `[ ]` Integrate `cargo-fuzz` for AFL/libfuzzer-based fuzzing
+
+- `[ ]` Integrate `cargo-fuzz` (libFuzzer backend, nightly-only)
 - `[ ]` Target 1: `cypher_query` (raw string → parse → bind → plan → execute)
 - `[ ]` Target 2: `expression_eval` (random expressions against random data)
 - `[ ]` Target 3: `copy_from_csv` (malformed CSV files)
 
 ### P26.3 — Property-Based Testing (4 SP)
+
 - `[ ]` Integrate `proptest` crate:
   - Round-trip: Insert value → query → value should match original
   - Associativity: `(A JOIN B) JOIN C` == `A JOIN (B JOIN C)`
   - Filter pushdown: Filter before join == filter after join
 
-### P26.4 — Performance Profiling (3 SP)
-- `[ ]` Profile top 5 slowest queries with `flamegraph-rs`
-- `[ ]` Optimize bottlenecks (ValueVector memory layout, JoinHashTable bucket contention)
+### P26.4 — Performance Profiling (4 SP)
 
-### P26.5 — Documentation & Deployment (8 SP)
-- `[ ]` English `MIGRATION.md`
-- `[ ]` Build C++ benchmark binary (`kuzu_benchmark`) from CMake (deferred from P25.4)
-- `[ ]` NPM / crates.io publish release (deferred from P25.5)
+> [!IMPORTANT]
+> **This gates P27.** Profile first, then decide Arrow migration scope.
+
+- `[ ]` Profile the LDBC queries that showed the 3.7× gap using `flamegraph-rs`
+- `[ ]` Identify top 5 bottleneck call sites
+- `[ ]` Determine if `ValueVector`/`from_legacy` is the primary bottleneck
+- `[ ]` Produce profiling report with actionable recommendations for P27
 
 ---
 
-## 🔴 P27: Performance — Zero-Copy & Optimization
-*Target: Close the 3.7× performance gap to <1.5× within 3 parallel sprints.*
+## 🔴 P27: Performance — Profiling-Driven Optimization
+*Target: Close the 3.7× gap to <1.5× based on profiling data*
 
-### P27.1 — Zero-Copy Arrow Storage Layer (8 SP)
-- `[ ]` Storage output `ArrayRef` directly (skip `ValueVector`)
-- `[ ]` Eliminate `from_legacy` variable lookup
-- `[ ]` Pipeline fused operations (Filter + Projection in 1 pass)
+### P27.1 — Hybrid Arrow Migration (8 SP)
+
+**Strategy:** Make [`ValueVector`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-common/src/vector.rs#L505) a thin wrapper over Arrow `ArrayRef`. Keep `DataChunk` API unchanged so all 40+ operator files compile without modification.
+
+- `[ ]` Replace `LegacyValueVector` internals with `ArrayRef` backing store
+- `[ ]` Maintain existing `get_value()`, `set_value()`, `data()` API surface
+- `[ ]` Storage outputs `ArrayRef` directly (skip byte-buffer allocation)
+- `[ ]` Eliminate `from_legacy` variable lookup in expression evaluator
+
+**Fused operations (Filter + Projection in 1 pass):**
+- `[ ]` Attempt if easy; do **not** block Arrow migration on this
 
 ### P27.2 — JoinHashTable Optimization (3 SP)
-- `[ ]` Use `hashbrown::raw::RawTable` API (direct bucket access)
-- `[ ]` Parallel build `par_extend` (chunked keys parallel insertion)
-- `[ ]` SIMD hash for multi-column (SWAR hash for multi-key join)
+
+**Strategy:** Tune existing `hashbrown::HashMap`, NOT `RawTable` (avoid unsafe).
+
+- `[ ]` Pre-size HashMap based on estimated build-side cardinality
+- `[ ]` Evaluate and adopt faster hasher (`ahash` or `foldhash`)
+- `[ ]` Parallel build with `par_extend` (chunked keys parallel insertion)
 
 ### P27.3 — Quick Wins (3 SP)
-- `[ ]` Use `SmallVec<[u32; 8]>` for `SelectionVector` (stack allocation)
-- `[ ]` `Arc<[Value]>` constant pools (skip ref-counting overhead)
-- `[ ]` Add `#[inline(always)]` to hot paths (`evaluate_binary`, `evaluate_aggregate`)
+
+> [!NOTE]
+> **Deferred until profiling (P26.4) validates impact.** Only proceed with items confirmed as bottlenecks.
+
+- `[ ]` `SmallVec<[u32; 8]>` for `SelectionVector` (stack allocation) — *if profiled*
+- `[ ]` `Arc<[Value]>` constant pools — *if profiled*
+- `[ ]` `#[inline(always)]` on hot paths — *always add, zero-cost*
 
 ---
 
-## 🔴 P28: Drop-in Replacement 1:1 — C++ Vela + LadybugDB
-*Target: Read C++ DBs, load C++ extensions, provide identical CLI.*
+## 🔴 P28: Drop-in Replacement — Migration & CLI
+*Target: Read C++ DBs, provide CLI parity*
 
-### P28.1 — C++ Storage Reader (Read-Only) (10 SP)
+### P28.1 — C++ Storage Migration Tool (Read-Only) (7 SP)
+
+**Strategy:** One-time `kuzu-migrate` CLI tool that reads C++ format and writes Rust format. NOT a permanent dual-format reader.
+
 - `[ ]` C++ page layout reader (page size, header format)
 - `[ ]` C++ catalog deserialization (`catalog.h` format → Rust struct)
-- `[ ]` C++ WAL reader (format parsing for crash recovery)
 - `[ ]` C++ index reader (ART/HashIndex format compatibility)
+- `[ ]` Migration CLI: `kuzu-migrate --from <cpp-db-path> --to <rust-db-path>`
+- `[ ]` Migration verification: compare row counts and sample data post-migration
 
-### P28.2 — Extension ABI Compatibility (8 SP)
-- `[ ]` C API boundary (`extern "C"` wrapper for extension entry points)
-- `[ ]` Extension loader (load `.so`/`.dll` with symbol resolution)
-- `[ ]` Fallback: Port remaining extensions natively (if ABI is too unstable)
+> [!NOTE]
+> WAL reader is **not needed** for read-only migration — we read committed pages only.
+
+### ~~P28.2 — Extension ABI Compatibility~~ ❌ DROPPED
+
+All major extensions are already ported natively to Rust (15 crates). C++ ABI compatibility has high maintenance burden for no user value.
 
 ### P28.3 — CLI Feature Parity (5 SP)
-- `[ ]` Interactive history (`rustyline`/`reedline` integration)
-- `[ ]` Multi-line query parsing
-- `[ ]` `.import` / `.export` shell built-in commands
-- `[ ]` Tab completion for table and function names
-- `[ ]` Exact output formatting parity (Aligned table, CSV, JSON, box)
+
+The Rust CLI already has: rustyline, multi-line, `.import/.export`, tab completion, 5 output modes.
+
+**Remaining gap:**
+- `[ ]` Add Box output mode (box-drawing characters `┌─┐│└─┘`) — this is the C++ default
+
+**Nice-to-have (not scoped):**
+- `:max_rows` / `:max_width` truncation
+- Syntax highlighting
 
 ---
 
 ## 🟡 P29: Feature & Function Completeness
-*Target: 100% API compatibility with Ladybug.*
+*Target: 100% API compatibility*
 
 ### P29.1 — 18 Missing Unique Functions (6 SP)
+
+All 18 functions are required for API compatibility:
+
 - `[ ]` **Math**: `atan2`, `degrees`, `radians`, `sinh`, `cosh`, `tanh`, `asin`, `acos`, `atan`, `log2`, `gcd`, `lcm`, `factorial`, `sign`
 - `[ ]` **String**: `levenshtein`, `soundex`, `encode/decode_base64`, `sha256`
 - `[ ]` **List**: `list_contains_all`, `list_has_any`, `list_has_all`, `list_sort`
@@ -107,15 +163,57 @@
 - `[ ]` **Blob**: `blob_from_bytes`, `to_base64`, `from_base64`
 - `[ ]` **Net**: `pg_isready`
 
-### P29.2 — Verification & Validation (Same as P26)
-*(Execution testing handled in P26.2, P26.3, P26.4)*
+---
+
+## 📋 Documentation (P26.5 revised, 4 SP)
+
+- `[ ]` English `MIGRATION.md` for external users
+- `[ ]` Keep Indonesian `STATUS.md` for internal team
+- `[ ]` GitHub Releases binary distribution (no crates.io, no NPM)
+- `[ ]` Build C++ benchmark binary (`kuzu_benchmark`) from CMake (deferred from P25.4)
 
 ---
 
-## 📅 Execution Strategy
+## 📅 Revised Execution Strategy
 
-| Focus Area | Effort | Expected Outcome |
-|------------|:------:|------------------|
-| **Sprint 1** | 22 SP | Zero-copy Arrow (2-3x speedup), Edge cases |
-| **Sprint 2** | 24 SP | C++ Storage Reader, Missing Functions |
-| **Sprint 3** | 25 SP | ABI Compat, CLI Parity, Fuzz & Prop tests |
+| Sprint | Focus | SP | Key Deliverables |
+|--------|-------|:---:|-----------------|
+| **Pre-Sprint** | P0: Fix regression | 1 | 0 failed tests |
+| **Sprint 1** | P26: Tests + Profiling | 17 | 115+ edge case tests, fuzz targets, profiling report |
+| **Sprint 2** | P27 + P28.1: Performance + Migration | 18 | Arrow wrapper, HashMap tuning, migration tool |
+| **Sprint 3** | P28.3 + P29: CLI + Functions | 11 | Box mode, 18 functions |
+| **Ongoing** | P26.5: Documentation | 4 | MIGRATION.md, GH releases |
+
+---
+
+## Dependency Graph
+
+```mermaid
+graph TD
+    P0["P0: Fix test_sip_optimization"] --> P26["P26: Testing & Profiling"]
+    P26 --> P26_4["P26.4: Profile LDBC queries"]
+    P26_4 -->|gates| P27["P27: Arrow Migration"]
+    P26_4 -->|validates| P27_3["P27.3: Quick Wins"]
+    P27 --> P28_1["P28.1: Migration Tool"]
+    P28_1 --> P28_3["P28.3: CLI Box Mode"]
+    P26 --> P29["P29: 18 Functions"]
+```
+
+## Design Decisions Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| 1 | Primary use case | All three (production + OSS + perf) | Sprint interleaving is intentional |
+| 2 | 3.7× gap source | Real, measured on LDBC end-to-end | Not estimated |
+| 3 | Arrow migration strategy | Hybrid — ValueVector wraps ArrayRef | Keep 40+ operator files compiling |
+| 4 | Fused operations | Attempt if easy, don't block | Separate concern from data representation |
+| 5 | JoinHashTable approach | Tune HashMap (pre-size + hasher) | Avoid unsafe RawTable API |
+| 6 | C++ storage compat | Read-only migration tool | One-time tool, not permanent dual reader |
+| 7 | C++ extension ABI | **Dropped** | 15 native Rust extensions already ported |
+| 8 | CLI parity scope | Box output mode only | Other modes are niche |
+| 9 | Edge case test org | Separate files per category | Easier to navigate and run independently |
+| 10 | Fuzzing framework | cargo-fuzz (libFuzzer, nightly) | Rust ecosystem standard |
+| 11 | Publishing | GitHub releases only | Defer crates.io/NPM until API stable |
+| 12 | Quick wins timing | After profiling validates them | Data-driven, avoid premature optimization |
+| 13 | Documentation language | Dual: Indonesian STATUS.md + English MIGRATION.md | Team + external users |
+| 14 | Pre-sprint blocker | Fix `test_sip_optimization` first | No new work until regression cleared |
