@@ -137,7 +137,7 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
         if !rels_to_insert.is_empty() {
             inserted_count = table
                 .insert_rels_batch(&rels_to_insert)
-                .map_err(|e| format!("BatchInsert rel error: {e}"))? as u64;
+                .map_err(|e| format!("BatchInsert rel error: {e}"))?;
         }
 
         tracing::info!("INSERT REL: added {inserted_count} rels to '{}'", self.table_name);

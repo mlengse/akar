@@ -172,7 +172,7 @@ impl PhysicalOperatorExec for PhysicalInsert {
             }
             if !rels_to_insert.is_empty() {
                 if let Ok(count) = rel_tbl.insert_rels_batch(&rels_to_insert) {
-                    inserted += count as u64;
+                    inserted += count;
                 }
             }
         } else if let Some(mut node_tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {

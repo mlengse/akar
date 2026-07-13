@@ -367,9 +367,7 @@ impl PhysicalOperatorExec for PhysicalScan {
                 rows_to_emit = filtered_rows;
                 
                 // We re-materialize ALL columns with the final rows_to_emit
-                for i in 0..fields.len() {
-                    fields[i] = None; 
-                }
+                fields.fill(None);
             }
 
             // 3. Materialize remaining columns with final rows_to_emit
