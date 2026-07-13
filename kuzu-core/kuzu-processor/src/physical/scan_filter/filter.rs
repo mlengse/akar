@@ -176,8 +176,9 @@ impl PhysicalOperatorExec for PhysicalFilter {
                 // All rows passed — no selection needed
                 output.push(chunk);
             } else {
-                // Zero-copy: attach selection vector
+                // Materialize the selection to shrink the chunk
                 chunk.sel_vector = Some(sel);
+                chunk.materialize();
                 output.push(chunk);
             }
         }
