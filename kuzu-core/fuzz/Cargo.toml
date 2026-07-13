@@ -1,0 +1,33 @@
+[package]
+name = "kuzu-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+kuzu-main = { path = "../kuzu-main" }
+tempfile = "3.8"
+
+[[bin]]
+name = "cypher_query"
+path = "fuzz_targets/cypher_query.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "expression_eval"
+path = "fuzz_targets/expression_eval.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "copy_from_csv"
+path = "fuzz_targets/copy_from_csv.rs"
+test = false
+doc = false
+
+[workspace]
