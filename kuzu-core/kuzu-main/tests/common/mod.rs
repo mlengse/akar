@@ -2,7 +2,7 @@ use kuzu_main::{Connection, Database, SystemConfig};
 use std::sync::Arc;
 
 /// Create a temporary database for testing.
-pub fn setup_db() -> (Arc<Database>, Connection) {
+pub fn setup_test_db() -> (Arc<Database>, Connection) {
     let db = Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
     let conn = Connection::new(&db);
     (db, conn)
