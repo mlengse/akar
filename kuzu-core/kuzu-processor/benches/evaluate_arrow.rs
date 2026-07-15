@@ -30,7 +30,7 @@ fn make_int64_chunk(name: &str, values: &[i64]) -> DataChunk {
     for (i, val) in values.iter().enumerate() {
         v.set_i64(i, *val);
     }
-    let mut chunk = DataChunk::new(vec![v]);
+    let mut chunk = DataChunk::from_legacy(vec![v]);
     chunk.field_names.push(name.into());
     chunk
 }
@@ -47,7 +47,7 @@ fn make_multi_chunk(names: &[&str], cols: &[&[i64]]) -> DataChunk {
             v
         })
         .collect();
-    let mut chunk = DataChunk::new(fields);
+    let mut chunk = DataChunk::from_legacy(fields);
     for name in names {
         chunk.field_names.push(name.to_string());
     }
@@ -300,7 +300,7 @@ fn bench_is_null(c: &mut Criterion) {
             v.set_i64(i, i as i64);
         }
     }
-    let mut chunk = DataChunk::new(vec![v]);
+    let mut chunk = DataChunk::from_legacy(vec![v]);
     chunk.field_names.push("x".into());
 
     let mut group = c.benchmark_group("evaluate/is_null_x_10k");
