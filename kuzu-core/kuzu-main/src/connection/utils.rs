@@ -62,11 +62,13 @@ pub(crate) fn rows_to_datachunk(
     use kuzu_common::vector::ValueVector;
 
     if rows.is_empty() {
-        let fields = column_names
+        let fields_legacy: Vec<ValueVector> = column_names
             .iter()
             .map(|_| ValueVector::new(PhysicalTypeID::String, 0))
             .collect();
-        let mut chunk = kuzu_common::vector::DataChunk::new(fields);
+        let fields = fields_legacy.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let field_types = fields_legacy.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        let mut chunk = kuzu_common::vector::DataChunk::new(fields, field_types);
         chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
         return chunk;
     }
@@ -91,7 +93,9 @@ pub(crate) fn rows_to_datachunk(
         }
     }
 
-    let mut chunk = kuzu_common::vector::DataChunk::new(cols);
+    let arrow_cols = cols.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+    let arrow_col_types = cols.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+    let mut chunk = kuzu_common::vector::DataChunk::new(arrow_cols, arrow_col_types);
     chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
     chunk.size = num_rows;
     chunk
