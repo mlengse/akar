@@ -651,14 +651,11 @@ impl PhysicalExtend {
                 if chunk.fields[bound_idx].is_null(i) {
                     continue;
                 }
-                let offset = i * 8;
-                let src_vec_data = chunk.fields[bound_idx].to_data();
-                if offset + 8 > src_vec_data.len() {
+                let src_id = if let Some(kuzu_common::types::Value::Int64(val)) = chunk.get_value(bound_idx, i) {
+                    val as u64
+                } else {
                     continue;
-                }
-                let mut src_bytes = [0u8; 8];
-                src_bytes.copy_from_slice(&src_vec_data.buffers()[0].as_slice()[offset..offset + 8]);
-                let src_id = i64::from_le_bytes(src_bytes) as u64;
+                };
 
                 let edges: Vec<(u64, usize)> = match self.direction {
                     kuzu_parser::ast::EdgeDirection::LeftToRight => fwd_adj.get(&src_id).cloned().unwrap_or_default(),
