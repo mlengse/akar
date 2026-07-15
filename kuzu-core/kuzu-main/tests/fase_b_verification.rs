@@ -38,7 +38,7 @@ fn query_column(conn: &Connection, sql: &str) -> Vec<kuzu_common::types::Value> 
     result
         .chunks
         .iter()
-        .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+        .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
         .collect()
 }
 
@@ -134,7 +134,7 @@ fn test_verification_call_show_tables() {
     let mut found_city = false;
     for chunk in &result.chunks {
         for row in 0..chunk.size {
-            if let Some(val) = chunk.fields[0].get_value(row) {
+            if let Some(val) = chunk.get_value(0, row) {
                 let s = format!("{:?}", val).to_lowercase();
                 if s.contains("person") { found_person = true; }
                 if s.contains("city") { found_city = true; }
