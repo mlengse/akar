@@ -459,7 +459,7 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
     let mut rows: Vec<Vec<String>> = Vec::new();
     for chunk in &result.chunks {
         for r in 0..chunk.size {
-            rows.push(chunk.fields.iter().map(|v| fmt_val(v, r)).collect());
+            rows.push((0..chunk.fields.len()).map(|col| fmt_val(&chunk.get_value(col, r).unwrap_or(kuzu_common::types::Value::Null))).collect());
         }
     }
     if rows.is_empty() || rows[0].is_empty() {
@@ -574,7 +574,7 @@ fn export_to_csv(result: &kuzu_main::QueryResult, file_path: &str) -> Result<(),
     let mut f = File::create(file_path).map_err(|e| format!("Cannot create: {e}"))?;
     for chunk in &result.chunks {
         for r in 0..chunk.size {
-            let row: Vec<String> = chunk.fields.iter().map(|v| fmt_val(v, r)).collect();
+            let row: Vec<String> = (0..chunk.fields.len()).map(|col| fmt_val(&chunk.get_value(col, r).unwrap_or(kuzu_common::types::Value::Null))).collect();
             let csv: Vec<String> = row
                 .iter()
                 .map(|v| {
@@ -618,18 +618,17 @@ fn run_script(conn: &Connection, reader: impl BufRead, output: &mut dyn Write) {
 
 // ==================== Value Formatting ====================
 
-fn fmt_val(v: &kuzu_common::vector::ValueVector, row: usize) -> String {
-    if v.is_null(row) {
-        return "NULL".into();
-    }
-    match v.physical_type() {
-        kuzu_common::types::PhysicalTypeID::Int64
-        | kuzu_common::types::PhysicalTypeID::Int32
-        | kuzu_common::types::PhysicalTypeID::Int16 => v.get_i64(row).map_or("NULL".into(), |n| n.to_string()),
-        kuzu_common::types::PhysicalTypeID::Double | kuzu_common::types::PhysicalTypeID::Float => {
-            v.get_double(row).map_or("NULL".into(), |n| format!("{:.4}", n))
-        }
-        kuzu_common::types::PhysicalTypeID::Bool => v.get_bool(row).map_or("NULL".into(), |b| b.to_string()),
+fn fmt_val(v: &kuzu_common::types::Value) -> String {
+    use kuzu_common::types::Value;
+    match v {
+        Value::Null => "NULL".into(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int16(i) => i.to_string(),
+        Value::Double(d) => format!("{:.4}", d),
+        Value::Float(f) => format!("{:.4}", f),
+        Value::Bool(b) => b.to_string(),
+        Value::String(s) => s.clone(),
         _ => "<val>".into(),
     }
 }
