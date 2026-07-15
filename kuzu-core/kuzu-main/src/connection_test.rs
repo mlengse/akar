@@ -37,7 +37,7 @@ mod integration_tests {
         result
             .chunks
             .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
             .collect()
     }
 
@@ -675,7 +675,7 @@ mod merge_tests {
         result
             .chunks
             .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
             .collect()
     }
 
@@ -818,7 +818,7 @@ mod call_tests {
         let mut found_city = false;
         for chunk in &qr.chunks {
             for row in 0..chunk.size {
-                if let Some(val) = chunk.fields[0].get_value(row) {
+                if let Some(val) = chunk.get_value(0, row) {
                     let s = format!("{:?}", val).to_lowercase();
                     if s.contains("person") { found_person = true; }
                     if s.contains("city") { found_city = true; }
@@ -873,7 +873,7 @@ mod create_dml_tests {
         result
             .chunks
             .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.fields.first().and_then(|f| f.get_value(i))))
+            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
             .collect()
     }
 
