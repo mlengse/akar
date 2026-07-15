@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc c0fd61f3b900868b6647618d8c8214118f92ade7034951af0ac78edef41fdeac # shrinks to val = -1
+cc bead2e330a24b7588b0c5115f983e3220948fa622c9c72d7fb4fd66c3a7bf10f # shrinks to a_nodes = 1, b_nodes = 13, c_nodes = 1
