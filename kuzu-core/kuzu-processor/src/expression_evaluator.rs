@@ -539,48 +539,48 @@ impl ExpressionEvaluator {
     /// 3. Falls back to the first field (legacy compatibility) if no match found.
     fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
         if let Ok(idx) = name.parse::<usize>() {
-            let arc = chunk.fields.get(idx).cloned().ok_or_else(|| {
-                format!("Variable '{}' (index {}) not found in chunk with {} fields", name, idx, chunk.fields.len())
-            })?;
+            if idx >= chunk.fields.len() {
+                return Err(format!("Variable '{}' (index {}) not found in chunk with {} fields", name, idx, chunk.fields.len()));
+            }
             let phys_type = chunk.field_types[idx];
             let mut v = ValueVector::new(phys_type, chunk.size);
             v.resize(chunk.size);
-            let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
-            if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
-                v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+            for i in 0..chunk.size {
+                if let Some(val) = chunk.get_value(idx, i) {
+                    store_value_in_vector(&mut v, i, &val);
+                } else {
+                    v.set_null(i, true);
+                }
             }
-            for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
             return Ok(v);
         }
 
         if !chunk.field_names.is_empty() {
             if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
-                let arc = chunk.fields.get(idx).cloned().ok_or_else(|| {
-                    format!("Variable '{}' (field name match at index {}) not found in chunk", name, idx)
-                })?;
                 let phys_type = chunk.field_types[idx];
                 let mut v = ValueVector::new(phys_type, chunk.size);
                 v.resize(chunk.size);
-                let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
-                if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
-                    v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+                for i in 0..chunk.size {
+                    if let Some(val) = chunk.get_value(idx, i) {
+                        store_value_in_vector(&mut v, i, &val);
+                    } else {
+                        v.set_null(i, true);
+                    }
                 }
-                for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
                 return Ok(v);
             }
         }
 
-        if let Some(field) = chunk.fields.first() {
+        if !chunk.fields.is_empty() {
             let phys_type = chunk.field_types[0];
             let mut v = ValueVector::new(phys_type, chunk.size);
             v.resize(chunk.size);
-            let type_size = kuzu_common::vector::physical_type_size(phys_type);
-            let copy_size = chunk.size * type_size;
-            if copy_size <= field.to_data().buffers()[0].len() && copy_size <= v.data().len() {
-                v.data_mut()[..copy_size].copy_from_slice(&field.to_data().buffers()[0].as_slice()[..copy_size]);
-            }
             for i in 0..chunk.size {
-                v.set_null(i, field.is_null(i));
+                if let Some(val) = chunk.get_value(0, i) {
+                    store_value_in_vector(&mut v, i, &val);
+                } else {
+                    v.set_null(i, true);
+                }
             }
             Ok(v)
         } else {
@@ -613,11 +613,13 @@ impl ExpressionEvaluator {
             let phys_type = chunk.field_types[idx];
             let mut v = ValueVector::new(phys_type, chunk.size);
             v.resize(chunk.size);
-            let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
-            if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
-                v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+            for i in 0..chunk.size {
+                if let Some(val) = chunk.get_value(idx, i) {
+                    store_value_in_vector(&mut v, i, &val);
+                } else {
+                    v.set_null(i, true);
+                }
             }
-            for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
             return Ok(v);
         }
         // Fallback: evaluate the object expression (returns first column — legacy behaviour).
