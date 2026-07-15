@@ -39,6 +39,13 @@ impl DataChunk {
         }
     }
 
+    /// Construct a DataChunk from legacy vectors (for backward-compatibility in benchmarks)
+    pub fn from_legacy(legacy_fields: Vec<crate::vector::ValueVector>) -> Self {
+        let field_types = legacy_fields.iter().map(|f| f.physical_type()).collect();
+        let arrow_fields = legacy_fields.iter().map(|f| crate::arrow_vector::ArrowVector::from_legacy(f).array.clone()).collect();
+        Self::new(arrow_fields, field_types)
+    }
+
     /// Attach column names to this chunk (builder pattern).
     pub fn with_names(mut self, names: Vec<String>) -> Self {
         self.field_names = names;
