@@ -1272,6 +1272,7 @@ impl FunctionRegistry {
             TableFunction::CustomTable { name: _, execute } => {
                 let mut chunk = DataChunk {
                     fields: Vec::new(),
+                    field_types: Vec::new(),
                     size: 0,
                     field_names: vec![],
                     sel_vector: None,
@@ -1280,8 +1281,8 @@ impl FunctionRegistry {
                     let mut rows = Vec::new();
                     for row in 0..chunk.size {
                         let mut row_vals = Vec::new();
-                        for field in &chunk.fields {
-                            row_vals.push(field.get_value(row).unwrap_or(Value::Null));
+                        for field_idx in 0..chunk.fields.len() {
+                            row_vals.push(chunk.get_value(field_idx, row).unwrap_or(Value::Null));
                         }
                         rows.push(row_vals);
                     }
