@@ -36,6 +36,7 @@ enum OutputMode {
     Json,
     Line,
     Column,
+    Box,
 }
 
 impl OutputMode {
@@ -46,6 +47,7 @@ impl OutputMode {
             "json" => Some(Self::Json),
             "line" => Some(Self::Line),
             "column" => Some(Self::Column),
+            "box" => Some(Self::Box),
             _ => None,
         }
     }
@@ -89,7 +91,7 @@ impl CliState {
             "exit" | "quit" => return Err("__EXIT__".into()),
             "help" => {
                 writeln!(output, "Kuzu CLI commands:").ok();
-                writeln!(output, "  .mode <mode>    Output: table|csv|json|line|column").ok();
+                writeln!(output, "  .mode <mode>    Output: table|csv|json|line|column|box").ok();
                 writeln!(output, "  .tables         List tables").ok();
                 writeln!(output, "  .schema         Show schemas").ok();
                 writeln!(output, "  .import f t     CSV import: file table").ok();
@@ -125,13 +127,13 @@ impl CliState {
             }
             "mode" => {
                 if parts.len() < 2 {
-                    writeln!(output, "Usage: .mode <table|csv|json|line|column>").ok();
+                    writeln!(output, "Usage: .mode <table|csv|json|line|column|box>").ok();
                     writeln!(output, "Current: {:?}", self.mode).ok();
                 } else if let Some(m) = OutputMode::from_str(parts[1]) {
                     self.mode = m;
                     writeln!(output, "Mode set to {:?}", m).ok();
                 } else {
-                    writeln!(output, "Unknown: {}. Options: table, csv, json, line, column", parts[1]).ok();
+                    writeln!(output, "Unknown: {}. Options: table, csv, json, line, column, box", parts[1]).ok();
                 }
             }
             "import" => {
@@ -508,6 +510,55 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
                 writeln!(output, "{line}").ok();
             }
             writeln!(output, "{sep}").ok();
+            writeln!(output, "({} rows)", rows.len()).ok();
+        }
+        OutputMode::Box => {
+            let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+            for row in &rows {
+                for (i, v) in row.iter().enumerate() {
+                    if i < widths.len() {
+                        widths[i] = widths[i].max(v.len());
+                    }
+                }
+            }
+            
+            let top_border = format!(
+                "┌{}┐",
+                widths.iter().map(|w| "─".repeat(*w + 2)).collect::<Vec<_>>().join("┬")
+            );
+            let hdr = format!(
+                "│ {} │",
+                headers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| format!("{:w$}", h, w = widths[i]))
+                    .collect::<Vec<_>>()
+                    .join(" │ ")
+            );
+            let mid_border = format!(
+                "├{}┤",
+                widths.iter().map(|w| "─".repeat(*w + 2)).collect::<Vec<_>>().join("┼")
+            );
+            let bot_border = format!(
+                "└{}┘",
+                widths.iter().map(|w| "─".repeat(*w + 2)).collect::<Vec<_>>().join("┴")
+            );
+
+            let _ = writeln!(output, "{top_border}");
+            let _ = writeln!(output, "{hdr}");
+            let _ = writeln!(output, "{mid_border}");
+            for row in &rows {
+                let line = format!(
+                    "│ {} │",
+                    row.iter()
+                        .enumerate()
+                        .map(|(i, v)| format!("{:w$}", v, w = widths[i]))
+                        .collect::<Vec<_>>()
+                        .join(" │ ")
+                );
+                writeln!(output, "{line}").ok();
+            }
+            writeln!(output, "{bot_border}").ok();
             writeln!(output, "({} rows)", rows.len()).ok();
         }
         OutputMode::Csv => {
