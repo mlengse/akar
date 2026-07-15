@@ -33,6 +33,11 @@ pub enum AggValueState {
     },
     /// COUNT_IF state — counts rows where the condition evaluated to TRUE.
     CountIf(u64),
+    /// STRING_AGG state — collects string pieces to be concatenated.
+    StringAgg {
+        pieces: Vec<String>,
+        delimiter: String,
+    },
 }
 
 impl AggValueState {
@@ -67,6 +72,10 @@ impl AggValueState {
                 percentile: *percentile,
             },
             AggregateFunction::CountIf => AggValueState::CountIf(0),
+            AggregateFunction::StringAgg { delimiter } => AggValueState::StringAgg {
+                pieces: Vec::new(),
+                delimiter: delimiter.clone(),
+            },
         }
     }
 
@@ -134,6 +143,12 @@ impl AggValueState {
                 }
                 // NULL and false are ignored (not counted)
             }
+            AggValueState::StringAgg { pieces, .. } => {
+                match val {
+                    Value::String(s) => pieces.push(s.clone()),
+                    other => pieces.push(format!("{:?}", other)),
+                }
+            }
         }
     }
 
@@ -183,6 +198,12 @@ impl AggValueState {
                 // Discrete percentile: pick the value at ceil(p * n) - 1 index
                 let idx = ((p * n as f64).ceil() as usize).saturating_sub(1).min(n - 1);
                 Value::Double(sorted[idx])
+            }
+            AggValueState::StringAgg { pieces, delimiter } => {
+                if pieces.is_empty() {
+                    return Value::Null;
+                }
+                Value::String(pieces.join(delimiter))
             }
         }
     }
@@ -265,11 +286,14 @@ impl AggValueState {
                 *sq1 += sq2;
                 *c1 += c2;
             }
-            (AggValueState::Percentile { values: a, .. }, AggValueState::Percentile { values: b, .. }) => {
-                a.extend(b.iter().cloned());
+            (AggValueState::Percentile { values: a_vals, .. }, AggValueState::Percentile { values: b_vals, .. }) => {
+                a_vals.extend_from_slice(b_vals);
             }
             (AggValueState::CountIf(a), AggValueState::CountIf(b)) => *a += b,
-            _ => { /* type mismatch — should not happen in practice */ }
+            (AggValueState::StringAgg { pieces: a_pieces, .. }, AggValueState::StringAgg { pieces: b_pieces, .. }) => {
+                a_pieces.extend_from_slice(b_pieces);
+            }
+            _ => {}
         }
     }
 }
