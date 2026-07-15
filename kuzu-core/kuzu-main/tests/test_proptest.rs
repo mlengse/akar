@@ -64,12 +64,12 @@ proptest! {
         let ab_edges = a_nodes;
         let bc_edges = b_nodes;
         for i in 0..ab_edges {
-            let from = i;
+            let from = (i * 7) % a_nodes;
             let to = (i * 11) % b_nodes;
             conn.query(&format!("MATCH (a:A {{id: {}}}), (b:B {{id: {}}}) CREATE (a)-[:AB]->(b)", from, to)).unwrap();
         }
         for i in 0..bc_edges {
-            let from = i;
+            let from = (i * 13) % b_nodes;
             let to = (i * 17) % c_nodes;
             conn.query(&format!("MATCH (b:B {{id: {}}}), (c:C {{id: {}}}) CREATE (b)-[:BC]->(c)", from, to)).unwrap();
         }
@@ -111,7 +111,7 @@ proptest! {
 
         let edges = nodes;
         for i in 0..edges {
-            let from = i;
+            let from = (i * 3) % nodes;
             let to = (i * 5) % nodes;
             conn.query(&format!("MATCH (a:A {{id: {}}}), (b:B {{id: {}}}) CREATE (a)-[:E]->(b)", from, to)).unwrap();
         }
