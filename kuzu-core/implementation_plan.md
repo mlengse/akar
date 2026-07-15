@@ -65,10 +65,10 @@ Separate files per category under `kuzu-main/tests/`:
 
 ### P26.3 — Property-Based Testing (4 SP)
 
-- `[ ]` Integrate `proptest` crate:
-  - Round-trip: Insert value → query → value should match original
-  - Associativity: `(A JOIN B) JOIN C` == `A JOIN (B JOIN C)`
-  - Filter pushdown: Filter before join == filter after join
+- `[x]` Integrate `proptest` crate:
+  - `[x]` Round-trip: Insert value → query → value should match original
+  - `[x]` Associativity: `(A JOIN B) JOIN C` == `A JOIN (B JOIN C)`
+  - `[x]` Filter pushdown: Filter before join == filter after join
 
 ### P26.4 — Performance Profiling (4 SP)
 
