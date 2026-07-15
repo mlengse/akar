@@ -201,15 +201,13 @@ impl Extension for HttpfsExtension {
                     // in a real implementation we would manage its lifecycle via the query context.
                     let _ = temp_file.keep();
 
-                    if chunk.num_fields() == 0 {
-                        chunk.fields.push(kuzu_common::vector::ValueVector::new(
-                            kuzu_common::types::PhysicalTypeID::String,
-                            1,
-                        ));
-                        chunk.field_names.push("path".to_string());
-                    }
-
-                    chunk.field_mut(0).push_string(&path_str);
+                    let array = std::sync::Arc::new(arrow::array::StringArray::from(vec![path_str.as_str()])) as arrow::array::ArrayRef;
+                    chunk.fields.clear();
+                    chunk.field_types.clear();
+                    chunk.field_names.clear();
+                    chunk.fields.push(array);
+                    chunk.field_types.push(kuzu_common::types::PhysicalTypeID::String);
+                    chunk.field_names.push("path".to_string());
                     chunk.resize(1);
                     Ok(())
                 } else {
