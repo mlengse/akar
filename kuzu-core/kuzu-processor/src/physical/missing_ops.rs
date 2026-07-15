@@ -237,6 +237,7 @@ mod tests {
     fn test_partitioner_pass_through_zero_size() {
         let p = Partitioner::new(0);
         let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 10);
+        fv.resize(10);
         let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
@@ -247,6 +248,7 @@ mod tests {
     fn test_partitioner_no_split_small_chunk() {
         let p = Partitioner::new(100);
         let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        fv.resize(5);
         let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
