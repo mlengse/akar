@@ -278,6 +278,10 @@ pub enum ListOp {
     All,
     None,
     Single,
+    Count,
+    Min,
+    Max,
+    HasAny,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -367,8 +371,10 @@ pub enum ArrayOp {
     CosineSimilarity,
     Distance,
     InnerProduct,
+    DotProduct,
     CrossProduct,
     SquaredDistance,
+    Intersect,
 }
 
 /// Hash functions — ported from C++ `function/hash/`.
@@ -445,6 +451,10 @@ pub enum AggregateFunction {
     CountStar,
     StdDev,
     Variance,
+    /// STRING_AGG(expr, delimiter) — concatenates strings.
+    StringAgg {
+        delimiter: String,
+    },
     /// PERCENTILE_DISC(expr, percentile) — discrete percentile.
     PercentileDisc {
         percentile: f64,
@@ -1024,6 +1034,10 @@ impl FunctionRegistry {
         self.register_scalar("list_position", ScalarFunction::List { op: ListOp::Position });
         self.register_scalar("list_indexof", ScalarFunction::List { op: ListOp::Position });
         self.register_scalar("list_has_all", ScalarFunction::List { op: ListOp::HasAll });
+        self.register_scalar("list_has_any", ScalarFunction::List { op: ListOp::HasAny });
+        self.register_scalar("list_count", ScalarFunction::List { op: ListOp::Count });
+        self.register_scalar("list_min", ScalarFunction::List { op: ListOp::Min });
+        self.register_scalar("list_max", ScalarFunction::List { op: ListOp::Max });
         self.register_scalar(
             "list_reverse_sort",
             ScalarFunction::List {
@@ -1110,6 +1124,12 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar(
+            "array_dot_product",
+            ScalarFunction::Array {
+                op: ArrayOp::DotProduct,
+            },
+        );
+        self.register_scalar(
             "array_cross_product",
             ScalarFunction::Array {
                 op: ArrayOp::CrossProduct,
@@ -1119,6 +1139,12 @@ impl FunctionRegistry {
             "array_squared_distance",
             ScalarFunction::Array {
                 op: ArrayOp::SquaredDistance,
+            },
+        );
+        self.register_scalar(
+            "array_intersect",
+            ScalarFunction::Array {
+                op: ArrayOp::Intersect,
             },
         );
 
@@ -1156,6 +1182,8 @@ impl FunctionRegistry {
         self.register_aggregate("COLLECT", AggregateFunction::Collect);
         self.register_aggregate("STDDEV", AggregateFunction::StdDev);
         self.register_aggregate("VARIANCE", AggregateFunction::Variance);
+        self.register_aggregate("STRING_AGG", AggregateFunction::StringAgg { delimiter: ",".to_string() });
+        self.register_aggregate("GROUP_CONCAT", AggregateFunction::StringAgg { delimiter: ",".to_string() });
         self.register_aggregate("PERCENTILE_DISC", AggregateFunction::PercentileDisc { percentile: 0.5 });
         self.register_aggregate("PERCENTILE_CONT", AggregateFunction::PercentileCont { percentile: 0.5 });
 
