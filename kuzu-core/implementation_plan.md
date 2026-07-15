@@ -1,7 +1,7 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-13 (post-design review)
-> **Baseline:** 954 tests passing, 1 failed (`test_sip_optimization`), 29 crates, ~66k LOC
+> **Revision:** 2026-07-15 (P26.1 complete)
+> **Baseline:** all tests pass (crate + integration), 0 failed, 29 crates, ~66k LOC
 > **For completed phases (P1-P25):** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
@@ -21,7 +21,7 @@
 | Phase | Content | Priority | SP | Target |
 |-------|---------|----------|:---:|--------|
 | **P0** | Fix `test_sip_optimization` regression | ✅ DONE | 1 | ✅ Complete |
-| **P26** | Testing, fuzzing & profiling | 🟢 P3 | 17 | Sprint 1 |
+| **P26** | Testing, fuzzing & profiling | 🟡 P3 → 🟢 (P26.1 ✅) | 17 | Sprint 1 |
 | **P27** | Performance — profiling-driven Arrow migration | 🔴 P0 | 14 | Sprint 1-2 |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | Sprint 2-3 |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | Sprint 3 |
@@ -53,8 +53,8 @@ Separate files per category under `kuzu-main/tests/`:
 | `test_nested_types.rs` | Nested types | 15+ |
 | `test_unicode.rs` | Unicode/UTF-8 | 10+ |
 
-- `[ ]` Create 7 test files (115+ tests total)
-- `[ ]` Concurrency tests use `std::thread::spawn` with shared `Database` instance
+- `[x]` Create 7 test files (115+ tests total) — **137 tests created (72 pass, 65 ignore)**
+- `[x]` Concurrency tests use `std::thread::spawn` with shared `Database` instance
 
 ### P26.2 — Fuzz Testing (4 SP)
 
@@ -179,7 +179,7 @@ All 18 functions are required for API compatibility:
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | **Pre-Sprint** | P0: Fix regression | 1 | 0 failed tests |
-| **Sprint 1** | P26: Tests + Profiling | 17 | 115+ edge case tests, fuzz targets, profiling report |
+| **Sprint 1** | P26: Tests + Profiling | 17 | 137 edge case tests (P26.1 ✅), fuzz targets, profiling report |
 | **Sprint 2** | P27 + P28.1: Performance + Migration | 18 | Arrow wrapper, HashMap tuning, migration tool |
 | **Sprint 3** | P28.3 + P29: CLI + Functions | 11 | Box mode, 18 functions |
 | **Ongoing** | P26.5: Documentation | 4 | MIGRATION.md, GH releases |
@@ -191,7 +191,7 @@ All 18 functions are required for API compatibility:
 ```mermaid
 graph TD
     P0["P0: Fix test_sip_optimization"] -.->|✅ DONE| P26["P26: Testing & Profiling"]
-    P26 --> P26_4["P26.4: Profile LDBC queries"]
+    P26 --> P26_1["P26.1: Edge Case Tests"] -.->|✅ DONE| P26_4["P26.4: Profile LDBC queries"]
     P26_4 -->|gates| P27["P27: Arrow Migration"]
     P26_4 -->|validates| P27_3["P27.3: Quick Wins"]
     P27 --> P28_1["P28.1: Migration Tool"]
