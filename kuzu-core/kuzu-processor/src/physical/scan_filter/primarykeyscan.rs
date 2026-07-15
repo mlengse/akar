@@ -48,7 +48,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                     if key_field.is_null(i) {
                         None
                     } else {
-                        key_field.get_value(i)
+                        chunk.get_value(self.key_column_idx as usize, i)
                     }
                 })
                 .collect();
@@ -68,12 +68,11 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
         }
 
         if all_row_ids.is_empty() {
-            return Ok(vec![DataChunk {
-                fields: vec![],
+            return Ok(vec![DataChunk { fields: vec![], field_types: vec![], 
                 size: 0,
                 field_names: vec![],
             sel_vector: None,
-            }]);
+             }]);
         }
 
         // Build a single contiguous output DataChunk from all matched row IDs
@@ -103,12 +102,13 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
             field_names.push(node_table.columns[col_idx].name.clone());
         }
 
-        Ok(vec![DataChunk {
-            fields: new_fields,
+        let arrow_fields = new_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = new_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        Ok(vec![DataChunk { fields: arrow_fields, field_types: arrow_field_types, 
             size: total,
             field_names,
             sel_vector: None,
-        }])
+         }])
     }
 }
 

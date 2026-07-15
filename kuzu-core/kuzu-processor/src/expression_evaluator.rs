@@ -212,7 +212,7 @@ impl ExpressionEvaluator {
         let field = chunk.fields.get(idx).ok_or_else(|| {
             format!("Variable '{}' (index {}) not found in chunk fields", name, idx)
         })?;
-        Ok(ArrowVector::from_legacy(field))
+        Ok(ArrowVector::new(field.clone(), chunk.field_types[idx]))
     }
 
     /// Evaluate a property access expression, returning ArrowVector.
@@ -229,7 +229,7 @@ impl ExpressionEvaluator {
             let field = chunk.fields.get(idx).ok_or_else(|| {
                 format!("Property '{}' not found in chunk", prop)
             })?;
-            return Ok(ArrowVector::from_legacy(field));
+            return Ok(ArrowVector::new(field.clone(), chunk.field_types[idx]));
         }
         let legacy = self.evaluate(obj, chunk)?;
         Ok(ArrowVector::from_legacy(&legacy))
@@ -538,46 +538,52 @@ impl ExpressionEvaluator {
     /// 2. Chunk field names (e.g., "title", "d.title")
     /// 3. Falls back to the first field (legacy compatibility) if no match found.
     fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
-        // Try to find the field by numeric position (the binder resolves names to positions)
         if let Ok(idx) = name.parse::<usize>() {
-            return chunk.fields.get(idx).cloned().ok_or_else(|| {
-                format!(
-                    "Variable '{}' (index {}) not found in chunk with {} fields",
-                    name,
-                    idx,
-                    chunk.fields.len()
-                )
-            });
+            let arc = chunk.fields.get(idx).cloned().ok_or_else(|| {
+                format!("Variable '{}' (index {}) not found in chunk with {} fields", name, idx, chunk.fields.len())
+            })?;
+            let phys_type = chunk.field_types[idx];
+            let mut v = ValueVector::new(phys_type, chunk.size);
+            v.resize(chunk.size);
+            let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
+            if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
+                v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+            }
+            for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
+            return Ok(v);
         }
 
-        // Try to find the field by name in the chunk's field names.
         if !chunk.field_names.is_empty() {
             if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
-                return chunk.fields.get(idx).cloned().ok_or_else(|| {
-                    format!(
-                        "Variable '{}' (field name match at index {}) not found in chunk",
-                        name, idx
-                    )
-                });
+                let arc = chunk.fields.get(idx).cloned().ok_or_else(|| {
+                    format!("Variable '{}' (field name match at index {}) not found in chunk", name, idx)
+                })?;
+                let phys_type = chunk.field_types[idx];
+                let mut v = ValueVector::new(phys_type, chunk.size);
+                v.resize(chunk.size);
+                let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
+                if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
+                    v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+                }
+                for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
+                return Ok(v);
             }
         }
 
-        // For unresolved variable names (e.g., from MATCH patterns), fall back to
-        // treating the first field as the variable's value and passing through.
         if let Some(field) = chunk.fields.first() {
-            let mut v = ValueVector::new(field.physical_type(), chunk.size);
+            let phys_type = chunk.field_types[0];
+            let mut v = ValueVector::new(phys_type, chunk.size);
             v.resize(chunk.size);
-            let type_size = kuzu_common::vector::physical_type_size(field.physical_type());
+            let type_size = kuzu_common::vector::physical_type_size(phys_type);
             let copy_size = chunk.size * type_size;
-            if copy_size <= field.data().len() && copy_size <= v.data().len() {
-                v.data_mut()[..copy_size].copy_from_slice(&field.data()[..copy_size]);
+            if copy_size <= field.to_data().buffers()[0].len() && copy_size <= v.data().len() {
+                v.data_mut()[..copy_size].copy_from_slice(&field.to_data().buffers()[0].as_slice()[..copy_size]);
             }
             for i in 0..chunk.size {
                 v.set_null(i, field.is_null(i));
             }
             Ok(v)
         } else {
-            // No fields — return an empty vector
             Ok(ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 0))
         }
     }
@@ -599,11 +605,20 @@ impl ExpressionEvaluator {
         if !chunk.field_names.is_empty()
             && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
         {
-            return chunk
+            let arc = chunk
                 .fields
                 .get(idx)
                 .cloned()
-                .ok_or_else(|| format!("Column '{}' (index {}) not found in chunk", prop, idx));
+                .ok_or_else(|| format!("Column '{}' (index {}) not found in chunk", prop, idx))?;
+            let phys_type = chunk.field_types[idx];
+            let mut v = ValueVector::new(phys_type, chunk.size);
+            v.resize(chunk.size);
+            let copy_size = chunk.size * kuzu_common::vector::physical_type_size(phys_type);
+            if copy_size <= arc.to_data().buffers()[0].len() && copy_size <= v.data().len() {
+                v.data_mut()[..copy_size].copy_from_slice(&arc.to_data().buffers()[0].as_slice()[..copy_size]);
+            }
+            for i in 0..chunk.size { v.set_null(i, arc.is_null(i)); }
+            return Ok(v);
         }
         // Fallback: evaluate the object expression (returns first column — legacy behaviour).
         self.evaluate(obj, chunk)
@@ -963,7 +978,7 @@ impl ExpressionEvaluator {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
                 store_value_in_vector(&mut elem_vec, 0, item);
-                let mini_chunk = DataChunk::new(vec![elem_vec]);
+                let mini_chunk = { let arrow_fields = vec![&elem_vec].into_iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = vec![&elem_vec].into_iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) };
 
                 let pred_vec = self.evaluate(predicate, &mini_chunk)?;
                 let pred_val = pred_vec.get_value(0).unwrap_or(Value::Null);
@@ -1027,7 +1042,7 @@ impl ExpressionEvaluator {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
                 store_value_in_vector(&mut elem_vec, 0, item);
-                let mut mini_chunk = DataChunk::new(vec![elem_vec]);
+                let mut mini_chunk = { let arrow_fields = vec![&elem_vec].into_iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = vec![&elem_vec].into_iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) };
                 mini_chunk.field_names.push(var_name.clone());
 
                 let body_vec = self.evaluate(body, &mini_chunk)?;
@@ -1075,7 +1090,7 @@ impl ExpressionEvaluator {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
                 store_value_in_vector(&mut elem_vec, 0, item);
-                let mut mini_chunk = DataChunk::new(vec![elem_vec]);
+                let mut mini_chunk = { let arrow_fields = vec![&elem_vec].into_iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = vec![&elem_vec].into_iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) };
                 mini_chunk.field_names.push(var_name.clone());
 
                 let pred_vec = self.evaluate(body, &mini_chunk)?;
@@ -1161,7 +1176,7 @@ impl ExpressionEvaluator {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
                 store_value_in_vector(&mut elem_vec, 0, item);
-                let mut mini_chunk = DataChunk::new(vec![acc_vec, elem_vec]);
+                let mut mini_chunk = { let arrow_fields = vec![&acc_vec, &elem_vec].into_iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = vec![&acc_vec, &elem_vec].into_iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) };
                 mini_chunk.field_names.push(acc_name.clone());
                 if !elem_name.is_empty() {
                     mini_chunk.field_names.push(elem_name.clone());
@@ -1433,7 +1448,7 @@ mod tests {
         for (i, val) in values.iter().enumerate() {
             v.set_i64(i, *val);
         }
-        DataChunk::new(vec![v])
+        { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array]; let arrow_field_types = vec![v.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types) }
     }
 
     #[test]
@@ -1512,7 +1527,7 @@ mod tests {
         v1.resize(2);
         store_value_in_vector(&mut v1, 0, &Value::Bool(true));
         store_value_in_vector(&mut v1, 1, &Value::Bool(true));
-        let chunk = DataChunk::new(vec![v0, v1]);
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&v0).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&v1).array]; let arrow_field_types = vec![v0.physical_type(), v1.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types) };
 
         // true AND true → true, false AND true → false
         let left = Box::new(Expression::Variable("0".into()));
@@ -1527,7 +1542,7 @@ mod tests {
     #[test]
     fn test_evaluate_function_call_string_length() {
         let eval = ExpressionEvaluator::new(make_registry());
-        let chunk = DataChunk::new(vec![]);
+        let chunk = kuzu_common::vector::DataChunk::new(vec![], vec![]);
         let expr = Expression::FunctionCall(
             "length".into(),
             vec![Expression::Constant(Constant::String("hello".into()))],
@@ -1544,7 +1559,7 @@ mod tests {
         store_value_in_vector(&mut v, 0, &Value::Bool(true));
         store_value_in_vector(&mut v, 1, &Value::Bool(false));
         store_value_in_vector(&mut v, 2, &Value::Bool(true));
-        let chunk = DataChunk::new(vec![v]);
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array]; let arrow_field_types = vec![v.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types) };
         // NOT of column 0 — true→false, false→true, true→false
         let expr = Expression::UnaryOp(UnaryOp::Not, Box::new(Expression::Variable("0".into())));
         let result = eval.evaluate(&expr, &chunk).unwrap();

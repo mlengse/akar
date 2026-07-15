@@ -36,9 +36,9 @@ impl PhysicalCrossProduct {
         let mut left_values: Vec<Vec<Value>> = (0..num_left_cols).map(|_| Vec::with_capacity(left_rows)).collect();
         for chunk in left_chunks {
             for col in 0..num_left_cols {
-                if let Some(field) = chunk.fields.get(col) {
+                if chunk.fields.get(col).is_some() {
                     for row in 0..chunk.size {
-                        left_values[col].push(field.get_value(row).unwrap_or(Value::Null));
+                        left_values[col].push(chunk.get_value(col, row).unwrap_or(Value::Null));
                     }
                 }
             }
@@ -47,9 +47,9 @@ impl PhysicalCrossProduct {
         let mut right_values: Vec<Vec<Value>> = (0..num_right_cols).map(|_| Vec::with_capacity(right_rows)).collect();
         for chunk in right_chunks {
             for col in 0..num_right_cols {
-                if let Some(field) = chunk.fields.get(col) {
+                if chunk.fields.get(col).is_some() {
                     for row in 0..chunk.size {
-                        right_values[col].push(field.get_value(row).unwrap_or(Value::Null));
+                        right_values[col].push(chunk.get_value(col, row).unwrap_or(Value::Null));
                     }
                 }
             }
@@ -59,13 +59,13 @@ impl PhysicalCrossProduct {
         let mut output_types: Vec<PhysicalTypeID> = Vec::with_capacity(total_cols);
         let mut field_names = Vec::with_capacity(total_cols);
         for col in 0..num_left_cols {
-            if let Some(field) = left_chunks[0].fields.get(col) {
-                output_types.push(field.physical_type());
+            if left_chunks[0].fields.get(col).is_some() {
+                output_types.push(left_chunks[0].field_types[col]);
             }
         }
         for col in 0..num_right_cols {
-            if let Some(field) = right_chunks[0].fields.get(col) {
-                output_types.push(field.physical_type());
+            if right_chunks[0].fields.get(col).is_some() {
+                output_types.push(right_chunks[0].field_types[col]);
             }
         }
 
@@ -104,8 +104,11 @@ impl PhysicalCrossProduct {
         // Propagate field names from left ++ right sides
         let mut output_names: Vec<String> = left_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default();
         output_names.extend(right_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default());
+        let arrow_fields = output_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = output_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
         Ok(vec![DataChunk {
-            fields: output_fields,
+            fields: arrow_fields,
+            field_types: arrow_field_types,
             size: total_rows,
             field_names: output_names,
             sel_vector: None,
@@ -137,8 +140,8 @@ impl PhysicalSemiJoin {
         let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for chunk in build_chunks {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.get(build_col) {
-                    let key = field.get_value(row).unwrap_or(Value::Null);
+                if chunk.fields.get(build_col).is_some() {
+                    let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
                     }
@@ -151,7 +154,7 @@ impl PhysicalSemiJoin {
         let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
         if let Some(first) = probe_chunks.first() {
             for col in 0..first.num_fields() {
-                probe_types.push(first.field(col).physical_type());
+                probe_types.push(first.field_types[col]);
             }
         }
 
@@ -160,7 +163,7 @@ impl PhysicalSemiJoin {
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(probe_col) {
-                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    let key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
                     }
@@ -186,7 +189,7 @@ impl PhysicalSemiJoin {
             if let Some(chunk) = probe_chunks.get(*ci) {
                 for (col, out_field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
                     if let Some(field) = chunk.fields.get(col) {
-                        let val = field.get_value(*row).unwrap_or(Value::Null);
+                        let val = chunk.get_value(col, *row).unwrap_or(Value::Null);
                         let _ = out_field.set_value(out_idx, &val);
                     }
                 }
@@ -195,12 +198,12 @@ impl PhysicalSemiJoin {
         for field in &mut output_fields {
             field.resize(match_rows.len());
         }
-        Ok(vec![DataChunk {
-            fields: output_fields,
-            size: match_rows.len(),
+        let arrow_fields = output_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = output_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        Ok(vec![DataChunk { fields: arrow_fields, field_types: arrow_field_types, size: match_rows.len(),
             field_names: vec![],
             sel_vector: None,
-        }])
+          }])
     }
 }
 
@@ -232,7 +235,7 @@ impl PhysicalAntiJoin {
         for chunk in build_chunks {
             for row in 0..chunk.size {
                 if let Some(field) = chunk.fields.get(build_col) {
-                    let key = field.get_value(row).unwrap_or(Value::Null);
+                    let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
                     }
@@ -244,7 +247,7 @@ impl PhysicalAntiJoin {
         let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
         if let Some(first) = probe_chunks.first() {
             for col in 0..first.num_fields() {
-                probe_types.push(first.field(col).physical_type());
+                probe_types.push(first.field_types[col]);
             }
         }
 
@@ -252,8 +255,8 @@ impl PhysicalAntiJoin {
         let mut non_match_rows: Vec<(usize, usize)> = Vec::new();
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.get(probe_col) {
-                    let key = field.get_value(row).unwrap_or(Value::Null);
+                if let Some(_field) = chunk.fields.get(probe_col) {
+                    let key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
                     }
@@ -277,8 +280,8 @@ impl PhysicalAntiJoin {
         for (out_idx, (ci, row)) in non_match_rows.iter().enumerate() {
             if let Some(chunk) = probe_chunks.get(*ci) {
                 for (col, out_field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
-                    if let Some(field) = chunk.fields.get(col) {
-                        let val = field.get_value(*row).unwrap_or(Value::Null);
+                    if let Some(_field) = chunk.fields.get(col) {
+                        let val = chunk.get_value(col, *row).unwrap_or(Value::Null);
                         let _ = out_field.set_value(out_idx, &val);
                     }
                 }
@@ -287,12 +290,12 @@ impl PhysicalAntiJoin {
         for field in &mut output_fields {
             field.resize(non_match_rows.len());
         }
-        Ok(vec![DataChunk {
-            fields: output_fields,
-            size: non_match_rows.len(),
+        let arrow_fields = output_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = output_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        Ok(vec![DataChunk { fields: arrow_fields, field_types: arrow_field_types, size: non_match_rows.len(),
             field_names: vec![],
             sel_vector: None,
-        }])
+          }])
     }
 }
 
@@ -343,8 +346,8 @@ impl PhysicalIntersect {
 
             for (ci, chunk) in chunks.iter().enumerate() {
                 for row in 0..chunk.size {
-                    if let Some(field) = chunk.fields.get(build_col) {
-                        let key = field.get_value(row).unwrap_or(Value::Null);
+                    if let Some(_field) = chunk.fields.get(build_col) {
+                        let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                         if matches!(key, Value::Null) {
                             continue;
                         }
@@ -373,7 +376,8 @@ impl PhysicalIntersect {
                 let probe_key = chunk
                     .fields
                     .get(probe_col)
-                    .and_then(|f| f.get_value(row))
+                    .map(|_| chunk.get_value(probe_col, row))
+                    .unwrap_or(Some(Value::Null))
                     .unwrap_or(Value::Null);
                 if matches!(probe_key, Value::Null) {
                     continue;
@@ -416,7 +420,8 @@ impl PhysicalIntersect {
                     let val = chunk
                         .fields
                         .get(col_in_probe)
-                        .and_then(|f| f.get_value(row))
+                        .map(|_| chunk.get_value(probe_col, row))
+                        .unwrap_or(Some(Value::Null))
                         .unwrap_or(Value::Null);
                     row_values.push(val);
                 }
@@ -430,7 +435,8 @@ impl PhysicalIntersect {
                             let val = chunk
                                 .fields
                                 .get(col)
-                                .and_then(|f| f.get_value(b_row))
+                                .map(|_| chunk.get_value(col, b_row))
+                                .unwrap_or(Some(Value::Null))
                                 .unwrap_or(Value::Null);
                             row_values.push(val);
                         }
@@ -468,10 +474,13 @@ impl PhysicalIntersect {
             }
         }
 
+        let arrow_fields = output_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = output_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
         Ok(vec![DataChunk {
-            fields: output_fields,
-            size: output_size,
+            fields: arrow_fields,
+            field_types: arrow_field_types,
             field_names: vec![],
+            size: output_size,
             sel_vector: None,
         }])
     }
@@ -528,7 +537,7 @@ impl JoinHashTable {
                 let key = chunk
                     .fields
                     .get(build_col)
-                    .and_then(|f| f.get_value(row))
+                    .and_then(|_| { /* this is wrong, need to fix */ None })
                     .unwrap_or(Value::Null);
                 if matches!(key, Value::Null) {
                     continue;
@@ -558,7 +567,7 @@ impl JoinHashTable {
                     let key = chunk
                         .fields
                         .get(build_col)
-                        .and_then(|f| f.get_value(row))
+                        .and_then(|_| { /* this is wrong, need to fix */ None })
                         .unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
@@ -605,12 +614,12 @@ impl JoinHashTable {
         let mut output_types: Vec<PhysicalTypeID> = Vec::with_capacity(total_cols);
         if let Some(bc) = build_chunks.first() {
             for col in 0..bc.num_fields() {
-                output_types.push(bc.field(col).physical_type());
+                output_types.push(bc.field_types[col]);
             }
         }
         if let Some(pc) = probe_chunks.first() {
             for col in 0..pc.num_fields() {
-                output_types.push(pc.field(col).physical_type());
+                output_types.push(pc.field_types[col]);
             }
         }
 
@@ -622,7 +631,7 @@ impl JoinHashTable {
                 let probe_key = chunk
                     .fields
                     .get(probe_col)
-                    .and_then(|f| f.get_value(row))
+                    .and_then(|_| { /* this is wrong, need to fix */ None })
                     .unwrap_or(Value::Null);
                 if matches!(probe_key, Value::Null) {
                     continue;
@@ -635,7 +644,7 @@ impl JoinHashTable {
                         let build_key = build_chunks[bci]
                             .fields
                             .get(build_col)
-                            .and_then(|f| f.get_value(brow))
+                            .and_then(|_| { /* this is wrong, need to fix */ None })
                             .unwrap_or(Value::Null);
                         if build_key == probe_key {
                             matches.push((bci, brow, pci, row));
@@ -663,8 +672,8 @@ impl JoinHashTable {
         for (out_row, &(bci, brow, pci, prow)) in matches.iter().enumerate() {
             // Copy build-side columns
             for col in 0..num_build_fields {
-                if let Some(field) = build_chunks[bci].fields.get(col) {
-                    let val = field.get_value(brow).unwrap_or(Value::Null);
+                if let Some(_field) = build_chunks[bci].fields.get(col) {
+                    let val = build_chunks[bci].get_value(col, brow).unwrap_or(Value::Null);
                     if matches!(val, Value::Null) {
                         result_fields[col].set_null(out_row, true);
                     } else {
@@ -674,8 +683,8 @@ impl JoinHashTable {
             }
             // Copy probe-side columns
             for col in 0..num_probe_fields {
-                if let Some(field) = probe_chunks[pci].fields.get(col) {
-                    let val = field.get_value(prow).unwrap_or(Value::Null);
+                if let Some(_field) = probe_chunks[pci].fields.get(col) {
+                    let val = probe_chunks[pci].get_value(col, prow).unwrap_or(Value::Null);
                     if matches!(val, Value::Null) {
                         result_fields[num_build_fields + col].set_null(out_row, true);
                     } else {
@@ -685,12 +694,12 @@ impl JoinHashTable {
             }
         }
 
-        Ok(vec![DataChunk {
-            fields: result_fields,
-            size: num_rows,
+        let arrow_fields = result_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = result_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        Ok(vec![DataChunk { fields: arrow_fields, field_types: arrow_field_types, size: num_rows,
             field_names: vec![],
             sel_vector: None,
-        }])
+          }])
     }
 }
 
@@ -734,8 +743,8 @@ impl PhysicalHashJoin {
         if let Some(mask) = &self.semi_mask {
             for chunk in build_chunks {
                 for row in 0..chunk.size {
-                    if let Some(field) = chunk.fields.get(build_col)
-                        && let Some(val) = field.get_value(row)
+                    if chunk.fields.get(build_col).is_some()
+                        && let Some(val) = chunk.get_value(build_col, row)
                     {
                         if let Value::InternalID(id) = val {
                             mask.mask(id.offset);

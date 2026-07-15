@@ -31,7 +31,8 @@ impl PhysicalOperatorExec for PhysicalBatchInsert {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
         }
 
         // Try node table first, then rel table
@@ -46,7 +47,8 @@ impl PhysicalOperatorExec for PhysicalBatchInsert {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, count as i64);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
         }
 
         if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
@@ -76,7 +78,8 @@ impl PhysicalOperatorExec for PhysicalBatchInsert {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, count as i64);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
         }
 
         Err(format!(

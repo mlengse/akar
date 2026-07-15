@@ -120,6 +120,7 @@ impl QueryProcessor {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
+                field_types: vec![],
                 size: 0,
                 field_names: vec![],
                 sel_vector: None,
@@ -130,7 +131,7 @@ impl QueryProcessor {
 
         for (i, op) in operators.iter().enumerate() {
             let current = intermediate_result.take().unwrap_or_else(|| {
-                let mut dummy = DataChunk::new(vec![]);
+                let mut dummy = DataChunk::new(vec![], vec![]);
                 dummy.size = 1;
                 vec![dummy]
             });
@@ -178,7 +179,7 @@ impl QueryProcessor {
             if let Some(tbl_fn) = reg.get_table(func_name) {
                 match tbl_fn {
                     TableFunction::CustomTable { execute, .. } => {
-                        let mut chunk = DataChunk::new(Vec::new());
+                        let mut chunk = DataChunk::new(Vec::new(), Vec::new());
                         (execute)(&args, &mut chunk)?;
                         Ok(vec![chunk])
                     }

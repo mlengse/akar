@@ -42,7 +42,7 @@ impl AggregateHashTable {
                 store_value_in_vector(&mut v, 0, &result);
                 fields.push(v);
             }
-            return Ok(vec![DataChunk::new(fields)]);
+            return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
         }
 
         if total_rows == 0 {
@@ -133,7 +133,7 @@ impl AggregateHashTable {
 
     fn empty_result(&self) -> OperatorResult {
         let num_cols = self.group_by_cols.len() + self.funcs.len();
-        Ok(vec![DataChunk::new(Vec::with_capacity(num_cols))])
+        Ok(vec![DataChunk::new(Vec::with_capacity(num_cols), Vec::with_capacity(num_cols))])
     }
 
     pub fn build_output(&self, groups: &hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>>) -> OperatorResult {
@@ -230,7 +230,7 @@ impl AggregateHashTable {
                 }
                 chunk_fields.push(new_v);
             }
-            chunks.push(DataChunk::new(chunk_fields));
+            chunks.push({ let arrow_fields = chunk_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = chunk_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) });
         }
 
         Ok(chunks)
@@ -246,7 +246,7 @@ pub fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Val
         chunk
             .fields
             .get(group_cols[0] as usize)
-            .and_then(|f| f.get_value(row))
+            .map(|_| chunk.get_value(group_cols[0] as usize, row)).unwrap_or(Some(Value::Null))
             .unwrap_or(Value::Null)
     } else {
         let vals: Vec<Value> = group_cols
@@ -255,7 +255,7 @@ pub fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Val
                 chunk
                     .fields
                     .get(gc as usize)
-                    .and_then(|f| f.get_value(row))
+                    .map(|_| chunk.get_value(gc as usize, row)).unwrap_or(Some(Value::Null))
                     .unwrap_or(Value::Null)
             })
             .collect();
@@ -276,7 +276,7 @@ pub fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs:
         let val = chunk
             .fields
             .get(col_idx)
-            .and_then(|f| f.get_value(row))
+            .map(|_| chunk.get_value(col_idx, row)).unwrap_or(Some(Value::Null))
             .unwrap_or(Value::Null);
         state.update(&val);
     }

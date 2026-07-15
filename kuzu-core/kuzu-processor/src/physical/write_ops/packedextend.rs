@@ -51,19 +51,17 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                 .position(|name| name == &self.bound_node_var)
                 .unwrap_or(0);
 
-            let bound_field = &chunk.fields[bound_idx];
-
             // --- Pass 1: collect neighbor lists and estimate total output size ---
             let mut per_src_neighbors: Vec<Vec<u64>> = Vec::with_capacity(chunk.size);
             let mut total_output_rows: usize = 0;
 
             for i in 0..chunk.size {
-                if bound_field.is_null(i) {
+                if chunk.fields[bound_idx].is_null(i) {
                     per_src_neighbors.push(Vec::new());
                     continue;
                 }
 
-                let src_id = match bound_field.get_value(i) {
+                let src_id = match chunk.get_value(bound_idx, i) {
                     Some(Value::Int64(id)) => id as u64,
                     Some(Value::UInt64(id)) => id,
                     _ => {
@@ -83,13 +81,14 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
 
             // --- Pass 2: build flat output vectors with pre-allocated capacity ---
             let num_input_cols = chunk.fields.len();
-            let mut out_fields: Vec<ValueVector> =
+            let mut out_fields: Vec<arrow::array::ArrayRef> =
+                Vec::with_capacity(num_input_cols + 1);
+            let mut out_field_types: Vec<kuzu_common::types::PhysicalTypeID> =
                 Vec::with_capacity(num_input_cols + 1);
 
             // Duplicate each input column for every output row
             for col_idx in 0..num_input_cols {
-                let src_field = &chunk.fields[col_idx];
-                let phys_type = src_field.physical_type();
+                let phys_type = chunk.field_types[col_idx];
                 let mut v = ValueVector::new(phys_type, total_output_rows);
                 v.resize(total_output_rows);
 
@@ -99,8 +98,8 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                         continue;
                     }
                     // Copy source row value once, then duplicate for each neighbor
-                    let is_null = src_field.is_null(src_row);
-                    let val = src_field.get_value(src_row);
+                    let is_null = chunk.fields[col_idx].is_null(src_row);
+                    let val = chunk.get_value(col_idx, src_row);
                     for _ in neighbors {
                         if is_null {
                             v.set_null(out_pos, true);
@@ -110,7 +109,8 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                         out_pos += 1;
                     }
                 }
-                out_fields.push(v);
+                out_fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                out_field_types.push(phys_type);
             }
 
             // Destination column: flat Int64 of neighbor node IDs
@@ -131,13 +131,15 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                     out_pos += 1;
                 }
             }
-            out_fields.push(dst_field);
+            out_fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&dst_field).array);
+            out_field_types.push(kuzu_common::types::PhysicalTypeID::Int64);
 
             let mut new_names = chunk.field_names.clone();
             new_names.push(self.dst_node_var.clone());
 
             output_chunks.push(DataChunk {
                 fields: out_fields,
+                field_types: out_field_types,
                 size: total_output_rows,
                 field_names: new_names,
                 sel_vector: None,
@@ -147,6 +149,7 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
         if output_chunks.is_empty() {
             Ok(vec![DataChunk {
                 fields: vec![],
+                field_types: vec![],
                 size: 0,
                 field_names: vec![],
                 sel_vector: None,

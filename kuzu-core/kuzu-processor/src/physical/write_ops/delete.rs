@@ -32,10 +32,10 @@ impl PhysicalOperatorExec for PhysicalDelete {
         // If input has data, extract row indices from it
         for chunk in &input {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.first()
-                    && let Some(val) = field.get_i64(row)
-                {
-                    rows_to_delete.push(val as u64);
+                if !chunk.fields.is_empty() {
+                    if let Some(kuzu_common::types::Value::Int64(val)) = chunk.get_value(0, row) {
+                        rows_to_delete.push(val as u64);
+                    }
                 }
             }
         }
@@ -45,7 +45,8 @@ impl PhysicalOperatorExec for PhysicalDelete {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
         }
 
         // Delete rows from the table
@@ -90,7 +91,8 @@ impl PhysicalOperatorExec for PhysicalDelete {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, deleted as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }
 

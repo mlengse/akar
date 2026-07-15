@@ -34,7 +34,8 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            vec![DataChunk::new(vec![v])]
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]
         } else {
             input
         };
@@ -63,7 +64,8 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, inserted_count as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }
 
@@ -116,11 +118,11 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
             if src_node_col_idx >= chunk.fields.len() || dst_node_col_idx >= chunk.fields.len() {
                 return Err("Src/Dst node column index out of bounds in INSERT REL".into());
             }
-            
+
             for row in 0..chunk.size {
-                let src_id = chunk.fields[src_node_col_idx].get_i64(row).unwrap_or(0) as u64;
-                let dst_id = chunk.fields[dst_node_col_idx].get_i64(row).unwrap_or(0) as u64;
-                
+                let src_id = if let Some(Value::Int64(val)) = chunk.get_value(src_node_col_idx, row) { val as u64 } else { 0 };
+                let dst_id = if let Some(Value::Int64(val)) = chunk.get_value(dst_node_col_idx, row) { val as u64 } else { 0 };
+
                 let mut props = vec![Value::Null; num_cols];
                 for (prop_name, expr) in &self.properties {
                     if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
@@ -145,6 +147,7 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, inserted_count as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }

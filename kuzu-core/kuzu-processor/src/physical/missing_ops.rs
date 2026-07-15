@@ -1,6 +1,7 @@
 use kuzu_common::types::Value;
-use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_common::vector::DataChunk;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use crate::processor::chunk_helpers::{extract_all_rows_from_chunks, rows_to_columns};
 
 /// Accumulate — materializes all input into a single contiguous chunk in memory.
 ///
@@ -18,25 +19,18 @@ impl PhysicalOperatorExec for PhysicalAccumulate {
             return Ok(input);
         }
 
-        // Concatenate all chunks into a single chunk
-        let num_fields = input[0].num_fields();
-        let merged_fields: Vec<ValueVector> = (0..num_fields)
-            .map(|i| {
-                let first_type = input[0].field(i).physical_type();
-                let total_size: usize = input.iter().map(|c| c.field(i).size()).sum();
-                let mut merged = ValueVector::new(first_type, total_size.max(1));
-                for chunk in &input {
-                    merged.append(chunk.field(i));
-                }
-                merged
-            })
-            .collect();
-
-        let size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+        let all_rows = extract_all_rows_from_chunks(&input);
+        if all_rows.is_empty() {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
+        }
+        
+        let (fields, field_types) = rows_to_columns(&all_rows);
+        let size = all_rows.len();
         let field_names = input[0].field_names.clone();
 
         Ok(vec![DataChunk {
-            fields: merged_fields,
+            fields,
+            field_types,
             size,
             field_names,
             sel_vector: None,
@@ -83,25 +77,18 @@ impl PhysicalOperatorExec for ResultCollector {
             return Ok(input);
         }
 
-        // Merge multiple chunks into one
-        let num_fields = input[0].num_fields();
-        let merged_fields: Vec<ValueVector> = (0..num_fields)
-            .map(|i| {
-                let first_type = input[0].field(i).physical_type();
-                let total_size: usize = input.iter().map(|c| c.field(i).size()).sum();
-                let mut merged = ValueVector::new(first_type, total_size.max(1));
-                for chunk in &input {
-                    merged.append(chunk.field(i));
-                }
-                merged
-            })
-            .collect();
-
-        let size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+        let all_rows = extract_all_rows_from_chunks(&input);
+        if all_rows.is_empty() {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
+        }
+        
+        let (fields, field_types) = rows_to_columns(&all_rows);
+        let size = all_rows.len();
         let field_names = input[0].field_names.clone();
 
         Ok(vec![DataChunk {
-            fields: merged_fields,
+            fields,
+            field_types,
             size,
             field_names,
             sel_vector: None,
@@ -136,7 +123,7 @@ impl PhysicalOperatorExec for DummySimpleSink {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        Ok(vec![DataChunk::new(Vec::new())])
+        Ok(vec![DataChunk::new(Vec::new(), Vec::new())])
     }
 }
 
@@ -202,23 +189,26 @@ impl Partitioner {
         let mut morsels = Vec::with_capacity(num_morsels);
         for start in (0..chunk.size).step_by(self.morsel_size) {
             let end = (start + self.morsel_size).min(chunk.size);
-            let morsel_fields: Vec<ValueVector> = chunk
+            let morsel_fields: Vec<arrow::array::ArrayRef> = chunk
                 .fields
                 .iter()
-                .map(|fv| {
-                    let mut morsel = ValueVector::new(fv.physical_type(), end - start);
+                .enumerate()
+                .map(|(col_idx, _fv)| {
+                    let phys_type = chunk.field_types[col_idx];
+                    let mut morsel = kuzu_common::vector::ValueVector::new(phys_type, end - start);
                     for i in start..end {
-                        let val = fv.get_value(i).unwrap_or(Value::Null);
+                        let val = chunk.get_value(col_idx, i).unwrap_or(Value::Null);
                         let _ = morsel.set_value(i - start, &val);
                     }
-                    morsel
+                    kuzu_common::arrow_vector::ArrowVector::from_legacy(&morsel).array
                 })
                 .collect();
             morsels.push(DataChunk {
                 fields: morsel_fields,
+                field_types: chunk.field_types.clone(),
                 size: end - start,
                 field_names: chunk.field_names.clone(),
-            sel_vector: None,
+                sel_vector: None,
             });
         }
         morsels
@@ -246,12 +236,8 @@ mod tests {
     #[test]
     fn test_partitioner_pass_through_zero_size() {
         let p = Partitioner::new(0);
-        let chunk = DataChunk {
-            fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 10)],
-            size: 10,
-            field_names: vec!["val".into()],
-            sel_vector: None,
-        };
+        let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 10);
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 10);
@@ -260,12 +246,8 @@ mod tests {
     #[test]
     fn test_partitioner_no_split_small_chunk() {
         let p = Partitioner::new(100);
-        let chunk = DataChunk {
-            fields: vec![ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5)],
-            size: 5,
-            field_names: vec!["val".into()],
-            sel_vector: None,
-        };
+        let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk.clone()]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 5);
@@ -274,17 +256,12 @@ mod tests {
     #[test]
     fn test_partitioner_splits_large_chunk() {
         let p = Partitioner::new(10);
-        let mut fv = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 25);
+        let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 25);
         fv.resize(25);
         for i in 0..25 {
             fv.set_i64(i, i as i64);
         }
-        let chunk = DataChunk {
-            fields: vec![fv],
-            size: 25,
-            field_names: vec!["val".into()],
-            sel_vector: None,
-        };
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk]).unwrap();
         // 25 rows with morsel_size 10 → 3 morsels (10 + 10 + 5)
         assert_eq!(result.len(), 3);
@@ -292,48 +269,48 @@ mod tests {
         assert_eq!(result[1].size, 10);
         assert_eq!(result[2].size, 5);
         // Verify data integrity: first morsel
-        assert_eq!(result[0].fields[0].get_i64(0), Some(0));
-        assert_eq!(result[0].fields[0].get_i64(9), Some(9));
+        assert_eq!(result[0].get_value(0, 0), Some(kuzu_common::types::Value::Int64(0)));
+        assert_eq!(result[0].get_value(0, 9), Some(kuzu_common::types::Value::Int64(9)));
         // Second morsel
-        assert_eq!(result[1].fields[0].get_i64(0), Some(10));
+        assert_eq!(result[1].get_value(0, 0), Some(kuzu_common::types::Value::Int64(10)));
         // Third morsel
-        assert_eq!(result[2].fields[0].get_i64(0), Some(20));
-        assert_eq!(result[2].fields[0].get_i64(4), Some(24));
+        assert_eq!(result[2].get_value(0, 0), Some(kuzu_common::types::Value::Int64(20)));
+        assert_eq!(result[2].get_value(0, 4), Some(kuzu_common::types::Value::Int64(24)));
     }
 
     #[test]
     fn test_partitioner_5_rows_split_into_3_2() {
         let p = Partitioner::new(3);
-        let mut fv = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        let mut fv = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
         fv.resize(5);
         for i in 0..5 { fv.set_i64(i, i as i64); }
-        let chunk = DataChunk { fields: vec![fv], size: 5, field_names: vec!["val".into()], sel_vector: None };
+        let chunk = { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array]; let arrow_field_types = vec![fv.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) };
         let result = p.execute(vec![chunk]).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].size, 3);
         assert_eq!(result[1].size, 2);
-        assert_eq!(result[0].fields[0].get_i64(2), Some(2));
-        assert_eq!(result[1].fields[0].get_i64(0), Some(3));
+        assert_eq!(result[0].get_value(0, 2), Some(kuzu_common::types::Value::Int64(2)));
+        assert_eq!(result[1].get_value(0, 0), Some(kuzu_common::types::Value::Int64(3)));
     }
 
     #[test]
     fn test_partitioner_multiple_chunks() {
         let p = Partitioner::new(3);
-        let mut fv1 = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        let mut fv1 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
         fv1.resize(5);
         for i in 0..5 { fv1.set_i64(i, i as i64); }
-        let mut fv2 = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
+        let mut fv2 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 5);
         fv2.resize(5);
         for i in 0..5 { fv2.set_i64(i, (i + 5) as i64); }
 
         let chunks = vec![
-            DataChunk { fields: vec![fv1], size: 5, field_names: vec!["val".into()], sel_vector: None },
-            DataChunk { fields: vec![fv2], size: 5, field_names: vec!["val".into()], sel_vector: None },
+            { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv1).array]; let arrow_field_types = vec![fv1.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) },
+            { let arrow_fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv2).array]; let arrow_field_types = vec![fv2.physical_type()]; DataChunk::new(arrow_fields, arrow_field_types).with_names(vec!["val".into()]) },
         ];
         let result = p.execute(chunks).unwrap();
         assert_eq!(result.len(), 4, "expected 4 morsels from 2 chunks of 5 rows each");
-        assert_eq!(result[2].fields[0].get_i64(0), Some(5));
-        assert_eq!(result[2].fields[0].get_i64(2), Some(7));
-        assert_eq!(result[3].fields[0].get_i64(0), Some(8));
+        assert_eq!(result[2].get_value(0, 0), Some(kuzu_common::types::Value::Int64(5)));
+        assert_eq!(result[2].get_value(0, 2), Some(kuzu_common::types::Value::Int64(7)));
+        assert_eq!(result[3].get_value(0, 0), Some(kuzu_common::types::Value::Int64(8)));
     }
 }

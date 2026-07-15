@@ -86,7 +86,7 @@ impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
                     fv.resize(chunk.size);
 
                     for row in 0..chunk.size {
-                        let path_val = node_ids_field.get_value(row);
+                        let path_val = chunk.get_value(self.node_ids_col_idx, row);
                         match path_val {
                             Some(Value::List(nodes)) => {
                                 // For path property probe: take the LAST node in the path
@@ -120,14 +120,17 @@ impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
 
             // Append resolved property columns to the chunk
             let mut fields = chunk.fields;
+            let mut field_types = chunk.field_types;
             let mut field_names = chunk.field_names;
             for (name, fv) in extra_fields {
                 field_names.push(name);
-                fields.push(fv);
+                fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&fv).array);
+                field_types.push(fv.physical_type());
             }
 
             output.push(DataChunk {
                 fields,
+                field_types,
                 size: chunk.size,
                 field_names,
                 sel_vector: None,

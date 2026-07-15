@@ -58,7 +58,8 @@ impl PhysicalOperatorExec for PhysicalMerge {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            vec![DataChunk::new(vec![v])]
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]
         } else {
             _input
         };
@@ -117,7 +118,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
                 if matched {
                     for set_op in &self.on_match {
-                        let single_chunk = DataChunk::new(chunk.fields.clone()); // pass the row
+                        let single_chunk = DataChunk::new(chunk.fields.clone(), chunk.field_types.clone()); // pass the row
                         let _ = set_op.execute(vec![single_chunk])?;
                     }
                 } else {
@@ -142,7 +143,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
                     }
 
                     for set_op in &self.on_create {
-                        let single_chunk = DataChunk::new(chunk.fields.clone());
+                        let single_chunk = DataChunk::new(chunk.fields.clone(), chunk.field_types.clone());
                         let _ = set_op.execute(vec![single_chunk])?;
                     }
                 }
@@ -154,6 +155,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, _merged_count as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }

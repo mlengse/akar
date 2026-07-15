@@ -123,7 +123,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             let mut offsets = Vec::with_capacity(num_rows);
             for i in 0..num_rows {
                 if !field.is_null(i) {
-                    let offset = i64::from_le_bytes(field.data()[i * 8..i * 8 + 8].try_into().unwrap());
+                    let offset = if let Some(Value::Int64(val)) = input[0].get_value(0, i) { val } else { 0 };
                     offsets.push(offset);
                 }
             }
@@ -131,7 +131,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
         };
 
         if source_offsets.is_empty() {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         // Result columns
@@ -345,7 +345,7 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
         // Build output DataChunk
         let num_results = result_src.len();
         if num_results == 0 {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         // Column 0-2: primitive Int64 vectors
@@ -403,19 +403,17 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
             }
             cost_v.resize(num_results);
 
-            Ok(vec![DataChunk {
-                fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v, cost_v],
+            Ok(vec![DataChunk { fields: vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&src_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&dst_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&len_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&path_nodes_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&path_edges_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&cost_v).array], field_types: vec![src_v.physical_type(), dst_v.physical_type(), len_v.physical_type(), path_nodes_v.physical_type(), path_edges_v.physical_type(), cost_v.physical_type()], 
                 size: num_results,
                 field_names: vec![],
                 sel_vector: None,
-            }])
+             }])
         } else {
-            Ok(vec![DataChunk {
-                fields: vec![src_v, dst_v, len_v, path_nodes_v, path_edges_v],
+            Ok(vec![DataChunk { fields: vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&src_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&dst_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&len_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&path_nodes_v).array, kuzu_common::arrow_vector::ArrowVector::from_legacy(&path_edges_v).array], field_types: vec![src_v.physical_type(), dst_v.physical_type(), len_v.physical_type(), path_nodes_v.physical_type(), path_edges_v.physical_type()], 
                 size: num_results,
                 field_names: vec![],
                 sel_vector: None,
-            }])
+             }])
         }
     }
 }
@@ -459,7 +457,8 @@ impl PhysicalCreateNode {
             }
             node_ids.resize(chunk.size);
 
-            chunk.fields.push(node_ids);
+            chunk.fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&node_ids).array);
+            chunk.field_types.push(kuzu_common::types::PhysicalTypeID::List);
             chunk.field_names.push(self.out_var_name.clone());
             output.push(chunk);
         }
@@ -521,11 +520,11 @@ impl PhysicalCreateRel {
                 }
 
                 let mut src_bytes = [0u8; 8];
-                src_bytes.copy_from_slice(&src_vec.data()[i * 8..(i + 1) * 8]);
+                src_bytes.copy_from_slice(&src_vec.to_data().buffers()[0].as_slice()[i * 8..(i + 1) * 8]);
                 let src_id = i64::from_le_bytes(src_bytes) as u64;
 
                 let mut dst_bytes = [0u8; 8];
-                dst_bytes.copy_from_slice(&dst_vec.data()[i * 8..(i + 1) * 8]);
+                dst_bytes.copy_from_slice(&dst_vec.to_data().buffers()[0].as_slice()[i * 8..(i + 1) * 8]);
                 let dst_id = i64::from_le_bytes(dst_bytes) as u64;
 
                 let mut values = vec![kuzu_common::types::Value::Null; table.columns.len()];
@@ -653,12 +652,12 @@ impl PhysicalExtend {
                     continue;
                 }
                 let offset = i * 8;
-                let src_vec_data = chunk.fields[bound_idx].data();
+                let src_vec_data = chunk.fields[bound_idx].to_data();
                 if offset + 8 > src_vec_data.len() {
                     continue;
                 }
                 let mut src_bytes = [0u8; 8];
-                src_bytes.copy_from_slice(&src_vec_data[offset..offset + 8]);
+                src_bytes.copy_from_slice(&src_vec_data.buffers()[0].as_slice()[offset..offset + 8]);
                 let src_id = i64::from_le_bytes(src_bytes) as u64;
 
                 let edges: Vec<(u64, usize)> = match self.direction {
@@ -685,7 +684,7 @@ impl PhysicalExtend {
             }
 
             if total_rows == 0 {
-                output.push(DataChunk::new(vec![]));
+                output.push(DataChunk::new(vec![], vec![]));
                 continue;
             }
 
@@ -702,7 +701,7 @@ impl PhysicalExtend {
             for &(input_row, dst_offset, edge_idx) in &row_mappings {
                 // Copy input fields
                 for col in 0..num_input_fields {
-                    let val = chunk.fields[col].get_value(input_row).unwrap_or(Value::Null);
+                    let val = chunk.get_value(col, input_row).unwrap_or(Value::Null);
                     out_data[col].push(val);
                 }
                 // Copy rel properties
@@ -737,7 +736,7 @@ impl PhysicalExtend {
 
             // Input field names (already prefixed)
             for col in 0..num_input_fields {
-                let phys_type = chunk.fields[col].physical_type();
+                let phys_type = chunk.field_types[col];
                 let mut v = ValueVector::new(phys_type, total_rows);
                 v.resize(total_rows);
                 for row in 0..total_rows {
@@ -787,8 +786,11 @@ impl PhysicalExtend {
                 field_names.push(format!("{}.{}", prefix, col_name));
             }
 
+            let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
             output.push(DataChunk {
-                fields,
+                fields: arrow_fields,
+                field_types: arrow_field_types,
                 size: total_rows,
                 field_names,
                 sel_vector: None,

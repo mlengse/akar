@@ -39,7 +39,7 @@ impl PhysicalOperatorExec for PhysicalMultiplicityReducer {
             for i in 0..chunk.size {
                 let mut row_keys = Vec::new();
                 for &col_idx in &self.key_columns {
-                    let val = chunk.field(col_idx).get_value(i).unwrap_or(kuzu_common::types::Value::Null);
+                    let val = chunk.get_value(col_idx, i).unwrap_or(kuzu_common::types::Value::Null);
                     row_keys.push(val);
                 }
                 
@@ -52,24 +52,28 @@ impl PhysicalOperatorExec for PhysicalMultiplicityReducer {
             let filtered_size = filter_mask.iter().filter(|&&b| b).count();
             if filtered_size > 0 {
                 let mut new_fields = Vec::new();
-                for field in &chunk.fields {
-                    let mut new_field = ValueVector::new(field.physical_type(), filtered_size);
+                let mut new_field_types = Vec::new();
+                for (col_idx, _field) in chunk.fields.iter().enumerate() {
+                    let phys_type = chunk.field_types[col_idx];
+                    let mut new_field = ValueVector::new(phys_type, filtered_size);
                     let mut current = 0;
                     for (i, &keep) in filter_mask.iter().enumerate() {
                         if keep {
-                            if let Some(val) = field.get_value(i) {
+                            if let Some(val) = chunk.get_value(col_idx, i) {
                                 let _ = new_field.set_value(current, &val);
                             }
                             current += 1;
                         }
                     }
-                    new_fields.push(new_field);
+                    new_fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&new_field).array);
+                    new_field_types.push(phys_type);
                 }
                 result.push(DataChunk {
                     fields: new_fields,
+                    field_types: new_field_types,
                     size: filtered_size,
                     field_names: chunk.field_names.clone(),
-            sel_vector: None,
+                    sel_vector: None,
                 });
             }
         }
@@ -105,20 +109,24 @@ impl PhysicalOperatorExec for PhysicalSkip {
             // Partially skip this chunk
             let keep_size = chunk.size - remaining_skip;
             let mut sliced_fields = Vec::new();
+            let mut sliced_types = Vec::new();
 
-            for field in &chunk.fields {
-                let mut new_field = ValueVector::new(field.physical_type(), keep_size);
+            for (col_idx, _field) in chunk.fields.iter().enumerate() {
+                let phys_type = chunk.field_types[col_idx];
+                let mut new_field = ValueVector::new(phys_type, keep_size);
                 for i in 0..keep_size {
-                    new_field.set_value(i, &field.get_value(remaining_skip + i).unwrap_or(kuzu_common::types::Value::Null)).unwrap();
+                    new_field.set_value(i, &chunk.get_value(col_idx, remaining_skip + i).unwrap_or(kuzu_common::types::Value::Null)).unwrap();
                 }
-                sliced_fields.push(new_field);
+                sliced_fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&new_field).array);
+                sliced_types.push(phys_type);
             }
 
             output.push(DataChunk {
                 fields: sliced_fields,
+                field_types: sliced_types,
                 size: keep_size,
                 field_names: chunk.field_names.clone(),
-            sel_vector: None,
+                sel_vector: None,
             });
             remaining_skip = 0;
         }
@@ -189,7 +197,8 @@ impl PhysicalOperatorExec for PhysicalInsert {
         let mut v = ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, inserted as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![kuzu_common::types::PhysicalTypeID::Int64])])
     }
 }
 
@@ -228,9 +237,11 @@ impl PhysicalOperatorExec for PhysicalExtensionClause {
         
         let mut field = ValueVector::new(kuzu_common::types::PhysicalTypeID::String, 1);
         let _ = field.set_value(0, &kuzu_common::types::Value::String(msg));
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&field).array;
         
         Ok(vec![DataChunk {
-            fields: vec![field],
+            fields: vec![arr],
+            field_types: vec![kuzu_common::types::PhysicalTypeID::String],
             size: 1,
             field_names: vec!["message".into()],
             sel_vector: None,

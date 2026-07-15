@@ -1,4 +1,4 @@
-use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_common::vector::DataChunk;
 use kuzu_common::types::Value;
 use kuzu_planner::logical_operator::LogicalOperator;
 use crate::processor::chunk_helpers::{extract_all_rows, extract_all_rows_from_chunks, rows_to_columns};
@@ -32,42 +32,32 @@ pub fn merge_union_chunks(
         }
     }
 
-    let mut merged_fields: Vec<ValueVector> = (0..num_fields)
-        .map(|i| {
-            let first_type = left[0].field(i).physical_type();
-            let total_size: usize = left
-                .iter()
-                .map(|c| c.field(i).size())
-                .chain(right.iter().map(|c| c.field(i).size()))
-                .sum();
-            let mut merged = ValueVector::new(first_type, total_size.max(1));
-            for chunk in &left {
-                merged.append(chunk.field(i));
-            }
-            for chunk in &right {
-                merged.append(chunk.field(i));
-            }
-            merged
-        })
-        .collect();
+    let mut left_rows = extract_all_rows_from_chunks(&left);
+    let right_rows = extract_all_rows_from_chunks(&right);
+    left_rows.extend(right_rows);
 
-    let total_size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
-
-    if !all && total_size > 1 {
-        let all_rows = extract_all_rows(&merged_fields);
-        let mut deduped: Vec<Vec<Value>> = Vec::with_capacity(total_size);
-        for row in &all_rows {
+    let mut deduped: Vec<Vec<Value>> = Vec::with_capacity(left_rows.len());
+    if !all {
+        for row in &left_rows {
             if !deduped.contains(row) {
                 deduped.push(row.clone());
             }
         }
-        merged_fields = rows_to_columns(&deduped);
+    } else {
+        deduped = left_rows;
     }
 
-    let final_size = merged_fields.first().map(|f| f.size()).unwrap_or(0);
+    if deduped.is_empty() {
+        return Ok(vec![DataChunk::new(vec![], vec![])]);
+    }
+
+    let (fields, field_types) = rows_to_columns(&deduped);
+    let final_size = deduped.len();
     let field_names = left.first().map(|c| c.field_names.clone()).unwrap_or_default();
+    
     Ok(vec![DataChunk {
-        fields: merged_fields,
+        fields,
+        field_types,
         size: final_size,
         field_names,
         sel_vector: None,
@@ -110,12 +100,13 @@ pub fn merge_optional_chunks(
         return Ok(vec![]);
     }
 
-    let fields = rows_to_columns(&combined);
-    let size = fields.first().map(|f| f.size()).unwrap_or(0);
+    let (fields, field_types) = rows_to_columns(&combined);
+    let size = combined.len();
     Ok(vec![DataChunk {
         fields,
+        field_types,
         size,
         field_names: vec![],
-            sel_vector: None,
+        sel_vector: None,
     }])
 }

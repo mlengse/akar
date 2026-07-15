@@ -35,7 +35,8 @@ impl PhysicalOperatorExec for PhysicalCountRelTable {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, count);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }
 
@@ -224,7 +225,8 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 &Value::String(format!("FTS index '{}' built successfully.", self.index_name)),
             )
             .unwrap();
-        let mut result = DataChunk::new(vec![result_vec]);
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&result_vec).array;
+        let mut result = DataChunk::new(vec![arr], vec![kuzu_common::types::PhysicalTypeID::String]);
         result.size = 1;
         result.field_names = vec!["result".to_string()];
         Ok(vec![result])
@@ -337,7 +339,9 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
             id_vec.set_i64(i, doc_id);
             score_vec.set_double(i, score);
         }
-        let mut chunk = DataChunk::new(vec![id_vec, score_vec]);
+        let arr1 = kuzu_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array;
+        let arr2 = kuzu_common::arrow_vector::ArrowVector::from_legacy(&score_vec).array;
+        let mut chunk = DataChunk::new(vec![arr1, arr2], vec![kuzu_common::types::PhysicalTypeID::Int64, kuzu_common::types::PhysicalTypeID::Double]);
         chunk.size = n;
         chunk.field_names = vec!["doc_id".to_string(), "score".to_string()];
         Ok(vec![chunk])

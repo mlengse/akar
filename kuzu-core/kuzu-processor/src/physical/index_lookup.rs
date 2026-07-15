@@ -45,13 +45,14 @@ impl PhysicalOperatorExec for PhysicalIndexLookup {
         );
 
         if row_ids.is_empty() {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         let row_id = row_ids[0] as usize;
         let num_cols = node_table.columns.len();
 
         let mut fields = Vec::with_capacity(num_cols);
+        let mut field_types = Vec::with_capacity(num_cols);
         let mut field_names = Vec::with_capacity(num_cols);
 
         for col_idx in 0..num_cols {
@@ -68,7 +69,8 @@ impl PhysicalOperatorExec for PhysicalIndexLookup {
             } else {
                 store_value_in_vector(&mut v, 0, &val);
             }
-            fields.push(v);
+            fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+            field_types.push(phys_type);
             field_names.push(node_table.columns[col_idx].name.clone());
         }
 
@@ -76,6 +78,7 @@ impl PhysicalOperatorExec for PhysicalIndexLookup {
 
         Ok(vec![DataChunk {
             fields,
+            field_types,
             size: 1,
             field_names,
             sel_vector: None,

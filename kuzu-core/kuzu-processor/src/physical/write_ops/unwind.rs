@@ -40,9 +40,9 @@ impl PhysicalOperatorExec for PhysicalUnwind {
         if let Some(chunk) = input.first() {
             for row in 0..chunk.size {
                 let mut chunk_fields = Vec::new();
-                for field in chunk.fields.iter() {
-                    let val = field.get_value(row).unwrap_or(Value::Null);
-                    let mut v = ValueVector::new(field.physical_type(), items.len());
+                for (col_idx, _field) in chunk.fields.iter().enumerate() {
+                    let val = chunk.get_value(col_idx, row).unwrap_or(Value::Null);
+                    let mut v = ValueVector::new(chunk.field_types[col_idx], items.len());
                     v.resize(items.len());
                     for i in 0..items.len() {
                         store_value_in_vector(&mut v, i, &val);
@@ -56,7 +56,9 @@ impl PhysicalOperatorExec for PhysicalUnwind {
                     store_value_in_vector(&mut uw_v, i, item);
                 }
                 chunk_fields.push(uw_v);
-                result_chunks.push(DataChunk::new(chunk_fields));
+                let arrow_fields = chunk_fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+                let arrow_field_types = chunk_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+                result_chunks.push(DataChunk::new(arrow_fields, arrow_field_types));
             }
         } else {
             // No input — just the unwound vector
@@ -65,7 +67,8 @@ impl PhysicalOperatorExec for PhysicalUnwind {
             for (i, item) in items.iter().enumerate() {
                 store_value_in_vector(&mut uw_v, i, item);
             }
-            result_chunks.push(DataChunk::new(vec![uw_v]));
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&uw_v).array;
+            result_chunks.push(DataChunk::new(vec![arr], vec![uw_v.physical_type()]));
         }
 
         Ok(result_chunks)

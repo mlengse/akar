@@ -141,8 +141,8 @@ impl QueryResult {
         let chunk = &self.result.chunks[self.chunk_idx];
         let obj = js_sys::Object::new();
 
-        for (col_idx, field_vec) in chunk.fields.iter().enumerate() {
-            let val_opt = field_vec.get_value(self.row_idx);
+        for col_idx in 0..chunk.fields.len() {
+            let val_opt = chunk.get_value(col_idx, self.row_idx);
             let js_val = match val_opt {
                 Some(v) => serde_wasm_bindgen::to_value(&v)
                     .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?,

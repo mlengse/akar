@@ -59,16 +59,21 @@ pub fn map_and_execute_projection(
                     let mut output = Vec::with_capacity(input.len());
                     for chunk in input {
                         let mut fields = Vec::with_capacity(p.expressions.len());
+                        let mut field_types = Vec::with_capacity(p.expressions.len());
                         for be in &p.expressions {
                             let result_vec = eval.evaluate(&be.expression, &chunk)?;
-                            fields.push(result_vec);
+                            let pt = result_vec.physical_type();
+                            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&result_vec).array;
+                            fields.push(arr);
+                            field_types.push(pt);
                         }
-                        let size = fields.first().map(|f| f.size()).unwrap_or(chunk.size);
+                        let size = fields.first().map(|f| f.len()).unwrap_or(chunk.size);
                         output.push(DataChunk {
                             fields,
+                            field_types,
                             size,
                             field_names: vec![],
-            sel_vector: None,
+                            sel_vector: None,
                         });
                     }
                     output

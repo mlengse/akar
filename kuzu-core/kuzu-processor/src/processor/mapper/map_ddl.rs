@@ -53,6 +53,7 @@ pub fn map_and_execute_ddl(
         | LogicalOperator::CreateVectorIndex(_) => {
             Ok(vec![DataChunk {
                 fields: vec![],
+                field_types: vec![],
                 size: 1,
                 field_names: vec![],
             sel_vector: None,
@@ -65,6 +66,7 @@ pub fn map_and_execute_ddl(
         | LogicalOperator::ImportDatabase(_) => {
             Ok(vec![DataChunk {
                 fields: vec![],
+                field_types: vec![],
                 size: 0,
                 field_names: vec![],
             sel_vector: None,

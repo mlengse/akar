@@ -2,7 +2,7 @@ use kuzu_main::{Connection, Database, SystemConfig};
 use std::sync::Arc;
 
 /// Create a temporary database for testing.
-pub fn setup_test_db() -> (Arc<Database>, Connection) {
+pub fn setup_db() -> (Arc<Database>, Connection) {
     let db = Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
     let conn = Connection::new(&db);
     (db, conn)
@@ -45,10 +45,10 @@ pub fn query_values(conn: &Connection, query: &str) -> String {
     let mut out = String::new();
     for chunk in &result.chunks {
         for row in chunk.iter_rows() {
-            for field in &chunk.fields {
+            for (col_idx, field) in chunk.fields.iter().enumerate() {
                 if field.is_null(row) {
                     out.push_str("null ");
-                } else if let Some(v) = field.get_value(row) {
+                } else if let Some(v) = chunk.get_value(col_idx, row) {
                     out.push_str(&format!("{:?} ", v));
                 }
             }
@@ -71,10 +71,10 @@ pub fn query_rows(conn: &Connection, query: &str) -> Vec<Vec<String>> {
     for chunk in &result.chunks {
         for row in chunk.iter_rows() {
             let mut current_row = Vec::new();
-            for field in &chunk.fields {
+            for (col_idx, field) in chunk.fields.iter().enumerate() {
                 if field.is_null(row) {
                     current_row.push("null".to_string());
-                } else if let Some(v) = field.get_value(row) {
+                } else if let Some(v) = chunk.get_value(col_idx, row) {
                     current_row.push(format!("{:?}", v));
                 } else {
                     current_row.push("null".to_string());

@@ -1,12 +1,12 @@
 mod common;
-use common::{setup_test_db, exec};
+use common::{setup_db, exec};
 use kuzu_main::Connection;
 use std::sync::Arc;
 use std::thread;
 
 #[test]
 fn test_concurrent_reads_many_threads() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (p:Person {id: 1, name: 'Alice'})");
     exec(&conn, "CREATE (p:Person {id: 2, name: 'Bob'})");
@@ -30,7 +30,7 @@ fn test_concurrent_reads_many_threads() {
 
 #[test]
 fn test_concurrent_writes() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
     
     let mut handles = vec![];
@@ -55,7 +55,7 @@ fn test_concurrent_writes() {
 
 #[test]
 fn test_concurrent_reads_and_writes() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE (p:Person {id: 0})");
     
@@ -93,7 +93,7 @@ fn test_concurrent_reads_and_writes() {
 
 #[test]
 fn test_many_connections() {
-    let (db, _conn) = setup_test_db();
+    let (db, _conn) = setup_db();
     let mut connections = vec![];
     for _ in 0..100 {
         connections.push(Connection::new(&db));
@@ -113,7 +113,7 @@ fn test_many_connections() {
 #[test]
 #[ignore = "DDL during DML might not be safely supported or locks the whole DB"]
 fn test_concurrent_ddl_and_dml() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
     
     let db_clone1 = Arc::clone(&db);
@@ -139,7 +139,7 @@ fn test_concurrent_ddl_and_dml() {
 
 #[test]
 fn test_concurrent_scans_with_different_filters() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
     for i in 0..100 {
         exec(&conn, &format!("CREATE (p:Person {{id: {}}})", i));
@@ -164,7 +164,7 @@ fn test_concurrent_scans_with_different_filters() {
 
 #[test]
 fn test_thread_safe_query_result() {
-    let (db, conn) = setup_test_db();
+    let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (p:Person {id: 1, name: 'Alice'})");
     exec(&conn, "CREATE (p:Person {id: 2, name: 'Bob'})");

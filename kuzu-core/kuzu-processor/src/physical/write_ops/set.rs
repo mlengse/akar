@@ -29,8 +29,8 @@ impl PhysicalOperatorExec for PhysicalSet {
 
         for chunk in &input {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.first()
-                    && let Some(val) = field.get_i64(row)
+                if !chunk.fields.is_empty()
+                    && let Some(kuzu_common::types::Value::Int64(val)) = chunk.get_value(0, row)
                 {
                     // Evaluate the SET value expression against the current row
                     let set_val = evaluate_expression_for_row(&self.value, chunk, row);
@@ -43,7 +43,8 @@ impl PhysicalOperatorExec for PhysicalSet {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
         }
 
         // Apply updates to the table
@@ -78,7 +79,8 @@ impl PhysicalOperatorExec for PhysicalSet {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, updated as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        let arr = kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
 }
 
@@ -98,8 +100,8 @@ pub fn evaluate_expression_for_row(
         },
         _ => {
             // Fallback: try to get value from chunk fields
-            if let Some(field) = chunk.fields.get(1) {
-                field.get_value(row).unwrap_or(kuzu_common::types::Value::Null)
+            if chunk.fields.len() > 1 {
+                chunk.get_value(1, row).unwrap_or(kuzu_common::types::Value::Null)
             } else {
                 kuzu_common::types::Value::Null
             }

@@ -79,7 +79,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
             v.resize(1);
             v.set_i64(0, 0);
-            return Ok(vec![DataChunk::new(vec![v])]);
+            return Ok(vec![DataChunk::new(vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array], vec![kuzu_common::types::PhysicalTypeID::Int64])]);
         }
 
         if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
@@ -121,7 +121,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
         v.resize(1);
         v.set_i64(0, num_rows as i64);
-        Ok(vec![DataChunk::new(vec![v])])
+        Ok(vec![DataChunk::new(vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array], vec![kuzu_common::types::PhysicalTypeID::Int64])])
     }
 }
 
@@ -173,7 +173,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         drop(node_table); // Release table ref before cloning data
 
         if row_ids.is_empty() {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         // Fetch column values for matched row IDs
@@ -210,7 +210,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
 
         let num_rows = output_columns.first().map(|c| c.len()).unwrap_or(0);
         if num_rows == 0 {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         let mut chunks = Vec::new();
@@ -280,8 +280,11 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                 fields.push(vv);
             }
 
+            let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
             chunks.push(DataChunk {
-                fields,
+                fields: arrow_fields,
+                field_types: arrow_field_types,
                 size: count,
                 field_names: col_names.clone(),
                 sel_vector: None,

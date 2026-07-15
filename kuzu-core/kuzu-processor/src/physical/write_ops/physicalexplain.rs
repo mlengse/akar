@@ -33,12 +33,11 @@ impl PhysicalOperatorExec for PhysicalExplain {
         }
         // For long strings, store the full string in the ValueVector's overflow
         // We store the original Value for the query result
-        let chunk = DataChunk {
-            fields: vec![vv],
+        let chunk = DataChunk { fields: vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&vv).array], field_types: vec![vv.physical_type()], 
             size: 1,
             field_names: vec![],
             sel_vector: None,
-        };
+         };
         Ok(vec![chunk])
     }
 }

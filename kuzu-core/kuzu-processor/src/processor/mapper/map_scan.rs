@@ -165,7 +165,7 @@ pub fn map_and_execute_scan(
             Ok(result)
         }
         LogicalOperator::ExpressionsScan(_es) => {
-            Ok(vec![DataChunk::new(vec![])])
+            Ok(vec![DataChunk::new(vec![], vec![])])
         }
         LogicalOperator::PathPropertyProbe(p) => {
             let properties = p

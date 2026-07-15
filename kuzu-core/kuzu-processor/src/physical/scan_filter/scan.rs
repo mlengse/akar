@@ -221,7 +221,7 @@ impl PhysicalOperatorExec for PhysicalScan {
         // If we have real table data, read from it
         if let Some(ref data) = self.table_data {
             if data.is_empty() || data[0].is_empty() {
-                return Ok(vec![DataChunk::new(vec![])]);
+                return Ok(vec![DataChunk::new(vec![], vec![])]);
             }
 
             let num_rows = data[0].len();
@@ -234,7 +234,7 @@ impl PhysicalOperatorExec for PhysicalScan {
                 if let Some(chunk) = fts_chunks.first() {
                     if let Some(id_vec) = chunk.fields.first() {
                         for row in 0..chunk.size {
-                            if let Some(doc_id) = id_vec.get_i64(row) {
+                            if let Some(doc_id) = chunk.get_i64(self.column_ids.first().copied().unwrap_or(0) as usize, row) {
                                 doc_ids.push(doc_id);
                             }
                         }
@@ -317,7 +317,7 @@ impl PhysicalOperatorExec for PhysicalScan {
             let mut fields = vec![None; cols_to_scan.len()];
             
             // Helper to materialize a single column
-            let materialize_col = |col_idx: usize, current_rows: &[usize]| -> ValueVector {
+            let materialize_col = |col_idx: usize, current_rows: &[usize]| -> (arrow::array::ArrayRef, PhysicalTypeID) {
                 let col_data = &data[col_idx];
                 let phys_type = if let Some(col_def) = self.table_columns.get(col_idx) {
                     Self::logical_to_physical(&col_def.logical_type)
@@ -331,19 +331,21 @@ impl PhysicalOperatorExec for PhysicalScan {
                         Self::write_value_to_vector(&mut v, write_row, val);
                     }
                 }
-                v
+                (kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array, phys_type)
             };
 
             // 1. Materialize predicate columns
             let mut pred_chunk_fields = Vec::new();
+            let mut pred_chunk_types = Vec::new();
             let mut pred_chunk_names = Vec::new();
             if self.predicate.is_some() {
                 for (i, &col_idx) in cols_to_scan.iter().enumerate() {
                     if col_idx >= data.len() { continue; }
                     if let Some(col_def) = self.table_columns.get(col_idx) {
                         if predicate_col_names.contains(&col_def.name) {
-                            let v = materialize_col(col_idx, &rows_to_emit);
-                            pred_chunk_fields.push(v);
+                            let (arr, ptype) = materialize_col(col_idx, &rows_to_emit);
+                            pred_chunk_fields.push(arr);
+                            pred_chunk_types.push(ptype);
                             pred_chunk_names.push(col_def.name.clone());
                             fields[i] = Some(true); // Mark as materialized temporarily for evaluation
                         }
@@ -354,7 +356,7 @@ impl PhysicalOperatorExec for PhysicalScan {
             // 2. Evaluate predicate and filter rows
             let mut final_fields = Vec::new();
             if let Some(ref pred) = self.predicate {
-                let pred_chunk = DataChunk::new(pred_chunk_fields).with_names(pred_chunk_names.clone());
+                let pred_chunk = DataChunk::new(pred_chunk_fields, pred_chunk_types).with_names(pred_chunk_names.clone());
                 let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap());
                 let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref()).unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
                 
@@ -371,11 +373,13 @@ impl PhysicalOperatorExec for PhysicalScan {
             }
 
             // 3. Materialize remaining columns with final rows_to_emit
+            let mut final_types = Vec::new();
             for (i, &col_idx) in cols_to_scan.iter().enumerate() {
                 if col_idx >= data.len() { continue; }
                 if fields[i].is_none() {
-                    let v = materialize_col(col_idx, &rows_to_emit);
-                    final_fields.push(v);
+                    let (arr, ptype) = materialize_col(col_idx, &rows_to_emit);
+                    final_fields.push(arr);
+                    final_types.push(ptype);
                 }
             }
 
@@ -383,12 +387,12 @@ impl PhysicalOperatorExec for PhysicalScan {
                 .iter()
                 .filter_map(|&ci| self.table_columns.get(ci).map(|c| c.name.clone()))
                 .collect();
-            let chunk = DataChunk::new(final_fields).with_names(names);
+            let chunk = DataChunk::new(final_fields, final_types).with_names(names);
             return Ok(vec![chunk]);
         }
 
         // Fallback: no data available — return empty result
-        Ok(vec![DataChunk::new(vec![])])
+        Ok(vec![DataChunk::new(vec![], vec![])])
     }
 }
 

@@ -95,7 +95,7 @@ impl PhysicalOperatorExec for PhysicalTopK {
             for row in 0..chunk.size {
                 for col in 0..num_fields {
                     if let Some(field) = chunk.fields.get(col) {
-                        let val = field.get_value(row).unwrap_or(Value::Null);
+                        let val = chunk.get_value(col, row).unwrap_or(Value::Null);
                         let is_null = field.is_null(row);
                         all_values[col].push((val, is_null));
                     }
@@ -162,7 +162,9 @@ impl PhysicalOperatorExec for PhysicalTopK {
                 }
                 fields.push(v);
             }
-            output.push(DataChunk::new(fields));
+            let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+            output.push(DataChunk::new(arrow_fields, arrow_field_types));
         }
 
         Ok(output)

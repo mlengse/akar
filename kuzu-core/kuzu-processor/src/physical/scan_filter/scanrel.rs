@@ -31,7 +31,7 @@ impl PhysicalOperatorExec for PhysicalScanRel {
             let num_cols = data.len();
             let num_rows = data.first().map(|c| c.len()).unwrap_or(0);
             if num_rows == 0 || num_cols == 0 {
-                return Ok(vec![DataChunk::new(vec![])]);
+                return Ok(vec![DataChunk::new(vec![], vec![])]);
             }
             let mut fields: Vec<ValueVector> = Vec::with_capacity(num_cols);
             for col in 0..num_cols {
@@ -61,14 +61,17 @@ impl PhysicalOperatorExec for PhysicalScanRel {
             let names: Vec<String> = (0..num_cols)
                 .filter_map(|ci| self.table_columns.get(ci).map(|c| c.name.clone()))
                 .collect();
+            let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
             Ok(vec![DataChunk {
-                fields,
+                fields: arrow_fields,
+                field_types: arrow_field_types,
                 size: num_rows,
                 field_names: names,
-            sel_vector: None,
+                sel_vector: None,
             }])
         } else {
-            Ok(vec![DataChunk::new(vec![])])
+            Ok(vec![DataChunk::new(vec![], vec![])])
         }
     }
 }

@@ -61,7 +61,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         drop(vi); // Release the DashMap reference
 
         if results.is_empty() {
-            return Ok(vec![DataChunk::new(vec![])]);
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
         // Look up rows from the node table
@@ -140,8 +140,12 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         }
         fields.push(dist_v);
 
+        let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
+        let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+
         Ok(vec![DataChunk {
-            fields,
+            fields: arrow_fields,
+            field_types: arrow_field_types,
             size: num_results,
             field_names: vec![],
             sel_vector: None,

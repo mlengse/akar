@@ -60,7 +60,7 @@ impl PhysicalOperatorExec for PhysicalSemiMasker {
         let field = &chunk.fields[self.key_column];
         for i in 0..chunk.size {
             if !field.is_null(i) {
-                let offset = u64::from_le_bytes(field.data()[i * 8..i * 8 + 8].try_into().unwrap_or([0u8; 8]));
+                let offset = u64::from_le_bytes(field.to_data().buffers()[0].as_slice()[i * 8..i * 8 + 8].try_into().unwrap_or([0u8; 8]));
                 self.mask.mask(offset);
             }
         }

@@ -1,10 +1,10 @@
 mod common;
-use common::{setup_test_db, exec, query_values};
+use common::{setup_db, exec, query_values};
 
 #[test]
 #[ignore = "Parser drops unary minus on negative literals"]
 fn test_boundary_int64_min() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Extreme(id INT64, val INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE (e:Extreme {id: 2, val: -9223372036854775808})");
     let res = query_values(&conn, "MATCH (e:Extreme) RETURN e.val");
@@ -13,7 +13,7 @@ fn test_boundary_int64_min() {
 
 #[test]
 fn test_boundary_int64_max() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Extreme(id INT64, val INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE (e:Extreme {id: 1, val: 9223372036854775807})");
     let res = query_values(&conn, "MATCH (e:Extreme) RETURN e.val");
@@ -22,7 +22,7 @@ fn test_boundary_int64_max() {
 
 #[test]
 fn test_boundary_double_large() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Extreme(id INT64, val DOUBLE, PRIMARY KEY (id))");
     exec(&conn, "CREATE (e:Extreme {id: 1, val: 1.7976931348623157e308})");
     let res = query_values(&conn, "MATCH (e:Extreme) RETURN e.val");
@@ -32,7 +32,7 @@ fn test_boundary_double_large() {
 #[test]
 #[ignore = "Parser might drop small exponents"]
 fn test_boundary_double_small() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Extreme(id INT64, val DOUBLE, PRIMARY KEY (id))");
     exec(&conn, "CREATE (e:Extreme {id: 1, val: 2.2250738585072014e-308})");
     let res = query_values(&conn, "MATCH (e:Extreme) RETURN e.val");
@@ -41,7 +41,7 @@ fn test_boundary_double_small() {
 
 #[test]
 fn test_boundary_empty_string_vs_null() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s1 STRING, s2 STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (s:StringTab {id: 1, s1: '', s2: NULL})");
     
@@ -55,7 +55,7 @@ fn test_boundary_empty_string_vs_null() {
 #[test]
 #[ignore = "String truncation or parser issue with long strings"]
 fn test_boundary_very_long_string_1k() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
     let long_str = "A".repeat(1000);
     exec(&conn, &format!("CREATE (s:StringTab {{id: 1, s: '{}'}})", long_str));
@@ -66,7 +66,7 @@ fn test_boundary_very_long_string_1k() {
 #[test]
 #[ignore = "Parser fails on very large queries (100k length limit)"]
 fn test_boundary_very_long_string_100k() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
     let long_str = "A".repeat(100000);
     exec(&conn, &format!("CREATE (s:StringTab {{id: 1, s: '{}'}})", long_str));
@@ -76,7 +76,7 @@ fn test_boundary_very_long_string_100k() {
 
 #[test]
 fn test_boundary_single_char_string() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (s:StringTab {id: 1, s: 'a'})");
     let res = query_values(&conn, "MATCH (s:StringTab) RETURN s.s");
@@ -85,7 +85,7 @@ fn test_boundary_single_char_string() {
 
 #[test]
 fn test_boundary_maximum_column_count() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     // Create a table with 100 properties
     let mut create_query = String::from("CREATE NODE TABLE WideTable(id INT64");
     for i in 1..=100 {
@@ -98,7 +98,7 @@ fn test_boundary_maximum_column_count() {
 
 #[test]
 fn test_boundary_boolean_literals() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE BoolTab(id INT64, b1 BOOL, b2 BOOL, PRIMARY KEY (id))");
     exec(&conn, "CREATE (b:BoolTab {id: 1, b1: TRUE, b2: FALSE})");
     exec(&conn, "CREATE (b:BoolTab {id: 2, b1: true, b2: false})");
@@ -112,7 +112,7 @@ fn test_boundary_boolean_literals() {
 #[test]
 #[ignore = "Might not handle unescaped special chars in string correctly"]
 fn test_boundary_string_with_quotes() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (s:StringTab {id: 1, s: 'He said \"hello\" and O\\'Connor'})");
     let res = query_values(&conn, "MATCH (s:StringTab) RETURN s.s");
@@ -122,7 +122,7 @@ fn test_boundary_string_with_quotes() {
 #[test]
 #[ignore = "Zero length tables handled elsewhere, but this is explicit single row"]
 fn test_boundary_single_row_table() {
-    let (_db, conn) = setup_test_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE SingleRow(id INT64, PRIMARY KEY(id))");
     exec(&conn, "CREATE (s:SingleRow {id: 1})");
     let res = query_values(&conn, "MATCH (s:SingleRow) RETURN COUNT(*)");
