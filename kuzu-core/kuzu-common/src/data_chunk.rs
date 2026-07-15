@@ -1,9 +1,13 @@
 use crate::selection::SelectionVector;
-use crate::vector::ValueVector;
+use crate::types::{PhysicalTypeID, Value};
+use arrow::array::{ArrayRef, AsArray};
+use arrow::compute::take;
+use arrow::datatypes::*;
 
 #[derive(Debug, Clone)]
 pub struct DataChunk {
-    pub fields: Vec<ValueVector>,
+    pub fields: Vec<ArrayRef>,
+    pub field_types: Vec<PhysicalTypeID>,
     pub size: usize,
     pub field_names: Vec<String>,
     /// Optional selection vector for zero-copy filtering.
@@ -17,15 +21,18 @@ pub struct DataChunk {
 pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
     chunk.size = new_size;
     for field in &mut chunk.fields {
-        field.resize(new_size);
+        if new_size <= field.len() {
+            *field = field.slice(0, new_size);
+        }
     }
 }
 
 impl DataChunk {
-    pub fn new(fields: Vec<ValueVector>) -> Self {
-        let size = fields.first().map(|f| f.size()).unwrap_or(0);
+    pub fn new(fields: Vec<ArrayRef>, field_types: Vec<PhysicalTypeID>) -> Self {
+        let size = fields.first().map(|f| f.len()).unwrap_or(0);
         Self {
             fields,
+            field_types,
             size,
             field_names: vec![],
             sel_vector: None,
@@ -44,12 +51,8 @@ impl DataChunk {
         self
     }
 
-    pub fn field(&self, idx: usize) -> &ValueVector {
+    pub fn field(&self, idx: usize) -> &ArrayRef {
         &self.fields[idx]
-    }
-
-    pub fn field_mut(&mut self, idx: usize) -> &mut ValueVector {
-        &mut self.fields[idx]
     }
 
     pub fn num_fields(&self) -> usize {
@@ -57,10 +60,7 @@ impl DataChunk {
     }
 
     pub fn resize(&mut self, new_size: usize) {
-        self.size = new_size;
-        for field in &mut self.fields {
-            field.resize(new_size);
-        }
+        resize_chunk(self, new_size);
     }
 
     /// Return the number of active rows, taking the selection vector into account.
@@ -90,25 +90,60 @@ impl DataChunk {
         if sel.size == self.size {
             return;
         }
+        let indices = arrow::array::UInt32Array::from_iter_values(
+            sel.indices[..sel.size].iter().copied()
+        );
+        
         for field in &mut self.fields {
-            let elem_size = crate::vector::physical_type_size(field.physical_type());
-            let old_size = field.size();
-            let old_nulls: Vec<bool> = (0..old_size).map(|i| field.is_null(i)).collect();
-            let old_data = field.data().to_vec();
-
-            field.resize(sel.size);
-            let new_data = field.data_mut();
-            for (new_idx, &src_idx) in sel.indices[..sel.size].iter().enumerate() {
-                let src_off = src_idx as usize * elem_size;
-                let dst_off = new_idx * elem_size;
-                new_data[dst_off..dst_off + elem_size]
-                    .copy_from_slice(&old_data[src_off..src_off + elem_size]);
-            }
-            for (new_idx, &src_idx) in sel.indices[..sel.size].iter().enumerate() {
-                field.set_null(new_idx, old_nulls[src_idx as usize]);
-            }
+            *field = take(field.as_ref(), &indices, None).unwrap();
         }
         self.size = sel.size;
+    }
+    
+    pub fn is_null(&self, field_idx: usize, row_idx: usize) -> bool {
+        self.fields[field_idx].is_null(row_idx)
+    }
+
+    pub fn get_i64(&self, field_idx: usize, row_idx: usize) -> Option<i64> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        let arr = self.fields[field_idx].as_primitive::<Int64Type>();
+        Some(arr.value(row_idx))
+    }
+
+    pub fn get_i32(&self, field_idx: usize, row_idx: usize) -> Option<i32> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        let arr = self.fields[field_idx].as_primitive::<Int32Type>();
+        Some(arr.value(row_idx))
+    }
+
+    pub fn get_f64(&self, field_idx: usize, row_idx: usize) -> Option<f64> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        let arr = self.fields[field_idx].as_primitive::<Float64Type>();
+        Some(arr.value(row_idx))
+    }
+
+    pub fn get_bool(&self, field_idx: usize, row_idx: usize) -> Option<bool> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        let arr = self.fields[field_idx].as_boolean();
+        Some(arr.value(row_idx))
+    }
+
+    pub fn get_string(&self, field_idx: usize, row_idx: usize) -> Option<&str> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        let arr = self.fields[field_idx].as_string::<i32>();
+        Some(arr.value(row_idx))
+    }
+
+    pub fn get_value(&self, field_idx: usize, row_idx: usize) -> Option<Value> {
+        if self.is_null(field_idx, row_idx) { return None; }
+        match self.field_types[field_idx] {
+            PhysicalTypeID::Int64 => self.get_i64(field_idx, row_idx).map(Value::Int64),
+            PhysicalTypeID::Int32 => self.get_i32(field_idx, row_idx).map(Value::Int32),
+            PhysicalTypeID::Double => self.get_f64(field_idx, row_idx).map(Value::Double),
+            PhysicalTypeID::Bool => self.get_bool(field_idx, row_idx).map(Value::Bool),
+            PhysicalTypeID::String => self.get_string(field_idx, row_idx).map(|s| Value::String(s.to_string())),
+            _ => None, // Expand as needed
+        }
     }
 }
 
