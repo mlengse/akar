@@ -161,7 +161,7 @@ fn test_concurrent_scans_with_different_filters() {
 
 #[test]
 fn test_thread_safe_query_result() {
-    let (db, conn) = setup_db();
+    let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (p:Person {id: 1, name: 'Alice'})");
     exec(&conn, "CREATE (p:Person {id: 2, name: 'Bob'})");
