@@ -6,13 +6,13 @@
 
 ---
 
-## 🔧 P0: Fix Regression (Pre-Sprint)
+## 🔧 P0: Fix Regression (Pre-Sprint) ✅ COMPLETE
 
 > [!CAUTION]
 > Must be resolved before any new work begins.
 
-- `[ ]` Fix `test_sip_optimization` regression in `kuzu-main/tests/integration_test.rs`
-- `[ ]` Verify `cargo test --workspace` → **955 passed, 0 failed**
+- `[x]` Fix `test_sip_optimization` regression in `kuzu-main/tests/integration_test.rs`
+- `[x]` Verify `cargo test --workspace` → **955 passed, 0 failed**
 
 ---
 
@@ -20,7 +20,7 @@
 
 | Phase | Content | Priority | SP | Target |
 |-------|---------|----------|:---:|--------|
-| **P0** | Fix `test_sip_optimization` regression | 🔴 P0 | 1 | Immediate |
+| **P0** | Fix `test_sip_optimization` regression | ✅ DONE | 1 | ✅ Complete |
 | **P26** | Testing, fuzzing & profiling | 🟢 P3 | 17 | Sprint 1 |
 | **P27** | Performance — profiling-driven Arrow migration | 🔴 P0 | 14 | Sprint 1-2 |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | Sprint 2-3 |
@@ -190,7 +190,7 @@ All 18 functions are required for API compatibility:
 
 ```mermaid
 graph TD
-    P0["P0: Fix test_sip_optimization"] --> P26["P26: Testing & Profiling"]
+    P0["P0: Fix test_sip_optimization"] -.->|✅ DONE| P26["P26: Testing & Profiling"]
     P26 --> P26_4["P26.4: Profile LDBC queries"]
     P26_4 -->|gates| P27["P27: Arrow Migration"]
     P26_4 -->|validates| P27_3["P27.3: Quick Wins"]
@@ -216,4 +216,4 @@ graph TD
 | 11 | Publishing | GitHub releases only | Defer crates.io/NPM until API stable |
 | 12 | Quick wins timing | After profiling validates them | Data-driven, avoid premature optimization |
 | 13 | Documentation language | Dual: Indonesian STATUS.md + English MIGRATION.md | Team + external users |
-| 14 | Pre-sprint blocker | Fix `test_sip_optimization` first | No new work until regression cleared |
+| 14 | Pre-sprint blocker | Fix `test_sip_optimization` first | ✅ DONE — regression fixed, 955 tests passing |

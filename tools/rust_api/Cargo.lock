@@ -813,6 +813,7 @@ dependencies = [
 name = "kuzu-processor"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "arrow",
  "hashbrown 0.17.1",
  "kuzu-catalog",

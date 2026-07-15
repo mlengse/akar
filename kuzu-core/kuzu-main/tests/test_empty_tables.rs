@@ -128,3 +128,27 @@ fn test_empty_drop_recreate() {
     let res = query_values(&conn, "MATCH (p:Person) RETURN p.id");
     assert_eq!(res.trim(), "");
 }
+
+#[test]
+fn test_empty_create_and_arithmetic() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN NULL + 1");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
+fn test_empty_unwind() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    let res = query_values(&conn, "UNWIND [] AS x RETURN x");
+    assert_eq!(res.trim(), "");
+}
+
+#[test]
+fn test_empty_skip_zero() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Person {id: 1})");
+    let res = query_values(&conn, "MATCH (p:Person) RETURN p.id LIMIT 1");
+    assert_eq!(res.trim(), "Int64(1)");
+}

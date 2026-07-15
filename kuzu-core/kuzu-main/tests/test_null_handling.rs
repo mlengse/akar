@@ -1,5 +1,4 @@
 mod common;
-
 use common::{setup_db, exec, query_values};
 
 #[test]
@@ -30,7 +29,7 @@ fn test_null_primary_key_rejection() {
 }
 
 #[test]
-#[ignore = "Parse error on IS NULL"]
+#[ignore = "IS NULL in WHERE clause not supported by parser"]
 fn test_null_where_is_null() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -42,7 +41,7 @@ fn test_null_where_is_null() {
 }
 
 #[test]
-#[ignore = "Parse error on IS NOT NULL"]
+#[ignore = "IS NOT NULL in WHERE clause not supported by parser"]
 fn test_null_where_is_not_null() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -115,7 +114,7 @@ fn test_null_aggregate_count_star() {
 }
 
 #[test]
-#[ignore = "COUNT(col) incorrectly counts nulls or fails"]
+#[ignore = "COUNT(col) returns 0 instead of ignoring NULLs"]
 fn test_null_aggregate_count_col() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -128,7 +127,7 @@ fn test_null_aggregate_count_col() {
 }
 
 #[test]
-#[ignore = "SUM incorrectly aggregates nulls or fails"]
+#[ignore = "SUM doesn't properly ignore NULLs"]
 fn test_null_aggregate_sum() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -154,7 +153,7 @@ fn test_null_aggregate_sum_all_nulls() {
 }
 
 #[test]
-#[ignore = "AVG incorrectly handles nulls"]
+#[ignore = "AVG doesn't properly ignore NULLs"]
 fn test_null_aggregate_avg() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -168,7 +167,7 @@ fn test_null_aggregate_avg() {
 }
 
 #[test]
-#[ignore = "MIN incorrectly handles nulls"]
+#[ignore = "MIN doesn't properly ignore NULLs"]
 fn test_null_aggregate_min() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -181,7 +180,7 @@ fn test_null_aggregate_min() {
 }
 
 #[test]
-#[ignore = "MAX incorrectly handles nulls"]
+#[ignore = "MAX doesn't properly ignore NULLs"]
 fn test_null_aggregate_max() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -194,7 +193,6 @@ fn test_null_aggregate_max() {
 }
 
 #[test]
-#[ignore = "concat not implemented yet or handles nulls differently"]
 fn test_null_string_concat() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN CONCAT(NULL, 'x')");
@@ -202,7 +200,6 @@ fn test_null_string_concat() {
 }
 
 #[test]
-#[ignore = "lower not implemented yet"]
 fn test_null_string_lower() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN LOWER(NULL)");
@@ -217,7 +214,7 @@ fn test_null_boolean_and_true() {
 }
 
 #[test]
-#[ignore = "NULL AND FALSE returns null instead of false"]
+#[ignore = "NULL AND FALSE should return false but returns null"]
 fn test_null_boolean_and_false() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL AND FALSE");
@@ -225,7 +222,7 @@ fn test_null_boolean_and_false() {
 }
 
 #[test]
-#[ignore = "NULL OR TRUE returns null instead of true"]
+#[ignore = "NULL OR TRUE should return true but returns null"]
 fn test_null_boolean_or_true() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL OR TRUE");
@@ -254,7 +251,6 @@ fn test_null_order_by() {
     exec(&conn, "CREATE (p:Person {id: 2})");
     exec(&conn, "CREATE (p:Person {id: 3, age: 10})");
     
-    // By default, Kuzu puts nulls last? Let's assume nulls last or first, we just want to ensure it works.
     let res = common::query_rows(&conn, "MATCH (p:Person) RETURN p.age ORDER BY p.age");
     assert_eq!(res.len(), 3);
 }
@@ -273,7 +269,7 @@ fn test_null_distinct() {
 }
 
 #[test]
-#[ignore = "case expressions not yet fully parsed or supported"]
+#[ignore = "CASE expressions not yet fully parsed"]
 fn test_null_case_expression() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -284,7 +280,7 @@ fn test_null_case_expression() {
 }
 
 #[test]
-#[ignore = "coalesce not implemented yet"]
+#[ignore = "coalesce function not returning correct value with columns"]
 fn test_null_coalesce() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -292,4 +288,101 @@ fn test_null_coalesce() {
     
     let res = query_values(&conn, "MATCH (p:Person) RETURN coalesce(p.age, 100)");
     assert_eq!(res.trim(), "Int64(100)");
+}
+
+#[test]
+#[ignore = "coalesce fails with multiple args"]
+fn test_null_coalesce_multiple() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN coalesce(NULL, NULL, 'default', 'ignored')");
+    assert_eq!(res.trim(), "String(\"default\")");
+}
+
+#[test]
+#[ignore = "ifnull function issue"]
+fn test_null_ifnull() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN ifnull(NULL, 42)");
+    assert_eq!(res.trim(), "Int64(42)");
+}
+
+#[test]
+#[ignore = "IS NULL expression parse error in return"]
+fn test_null_is_null_constant() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN NULL IS NULL");
+    assert_eq!(res.trim(), "Bool(true)");
+}
+
+#[test]
+#[ignore = "IS NOT NULL expression parse error in return"]
+fn test_null_is_not_null_constant() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN NULL IS NOT NULL");
+    assert_eq!(res.trim(), "Bool(false)");
+}
+
+#[test]
+#[ignore = "IS NULL expression parse error in return"]
+fn test_null_is_null_column() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Person {id: 1})");
+    exec(&conn, "CREATE (p:Person {id: 2, age: 25})");
+    
+    let res = query_values(&conn, "MATCH (p:Person) RETURN p.age IS NULL");
+    let lines: Vec<&str> = res.trim().split('\n').collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().any(|l| l.trim() == "Bool(true)"));
+    assert!(lines.iter().any(|l| l.trim() == "Bool(false)"));
+}
+
+#[test]
+fn test_null_in_where_with_coalesce() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Person {id: 1})");
+    exec(&conn, "CREATE (p:Person {id: 2, age: 30})");
+    
+    let res = query_values(&conn, "MATCH (p:Person) WHERE coalesce(p.age, 0) > 10 RETURN p.id");
+    assert_eq!(res.trim(), "Int64(2)");
+}
+
+#[test]
+#[ignore = "IN with NULL list element not supported"]
+fn test_null_not_in_list() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN 5 NOT IN [1, 2, NULL]");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
+#[ignore = "IN with NULL list element not supported"]
+fn test_null_in_list() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN 1 IN [1, 2, NULL]");
+    assert_eq!(res.trim(), "Bool(true)");
+}
+
+#[test]
+#[ignore = "BETWEEN with NULL not supported in parser"]
+fn test_null_between() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN NULL BETWEEN 1 AND 10");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
+#[ignore = "LIKE with NULL not supported"]
+fn test_null_like() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN NULL LIKE 'a%'");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
+fn test_null_regex() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN regex_matches(NULL, 'a.*')");
+    assert_eq!(res.trim(), "null");
 }

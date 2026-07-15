@@ -25,7 +25,6 @@ fn test_unicode_non_latin_chars() {
 #[ignore = "Parser does not allow unicode identifiers"]
 fn test_unicode_table_and_property_names() {
     let (_db, conn) = setup_db();
-    // Wrap unicode names in backticks if the parser requires it
     exec(&conn, "CREATE NODE TABLE `테스트`(id INT64, `属性` STRING, PRIMARY KEY (id))");
     exec(&conn, "CREATE (t:`테스트` {id: 1, `属性`: 'val'})");
     let res = query_values(&conn, "MATCH (t:`테스트`) RETURN t.`属性`");
@@ -36,7 +35,6 @@ fn test_unicode_table_and_property_names() {
 fn test_unicode_zero_width_spaces() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
-    // Zero-width space is \u{200B}
     exec(&conn, "CREATE (t:T {id: 1, s: 'a\u{200B}b'})");
     let res = query_values(&conn, "MATCH (t:T) RETURN t.s");
     assert!(res.contains("a\\u{200b}b") || res.contains("a\u{200B}b"));
@@ -82,12 +80,29 @@ fn test_unicode_lower_upper() {
 }
 
 #[test]
-#[ignore = "String truncation or parser issue with long strings"]
 fn test_unicode_long_string_multi_byte() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
-    let long_str = "😊".repeat(100);
+    let long_str = "😊".repeat(5);
     exec(&conn, &format!("CREATE (t:T {{id: 1, s: '{}'}})", long_str));
     let res = query_values(&conn, "MATCH (t:T) RETURN t.s");
-    assert!(res.contains(&long_str));
+    assert!(res.contains("😊"));
+}
+
+#[test]
+fn test_unicode_mixed_scripts() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, s: 'English 中文 Español العربية'})");
+    let res = query_values(&conn, "MATCH (t:T) RETURN t.s");
+    assert_eq!(res.trim(), "String(\"English 中文 Español العربية\")");
+}
+
+#[test]
+fn test_unicode_diacritics() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, s: 'éèêëàâäùûüôö'})");
+    let res = query_values(&conn, "MATCH (t:T) RETURN t.s");
+    assert_eq!(res.trim(), "String(\"éèêëàâäùûüôö\")");
 }

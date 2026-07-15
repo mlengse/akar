@@ -61,7 +61,6 @@ fn test_concurrent_reads_and_writes() {
     
     let mut handles = vec![];
     
-    // Writers
     for i in 1..=5 {
         let db_clone = Arc::clone(&db);
         handles.push(thread::spawn(move || {
@@ -71,12 +70,10 @@ fn test_concurrent_reads_and_writes() {
         }));
     }
     
-    // Readers
     for _ in 0..5 {
         let db_clone = Arc::clone(&db);
         handles.push(thread::spawn(move || {
             let thread_conn = Connection::new(&db_clone);
-            // Just verify query succeeds, number of rows might be anywhere from 1 to 6
             let res = thread_conn.query("MATCH (p:Person) RETURN p.id").unwrap();
             assert!(res.is_success());
             assert!(res.num_rows() >= 1);
@@ -182,5 +179,94 @@ fn test_thread_safe_query_result() {
     
     for handle in handles {
         handle.join().unwrap();
+    }
+}
+
+#[test]
+fn test_concurrent_create_and_count() {
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    
+    let mut handles = vec![];
+    for i in 0..20 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || {
+            let thread_conn = Connection::new(&db_clone);
+            let query = format!("CREATE (p:Person {{id: {}}})", i);
+            thread_conn.query(&query).unwrap();
+        }));
+    }
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    
+    let res = conn.query("MATCH (p:Person) RETURN COUNT(*)").unwrap();
+    assert!(res.is_success());
+    assert_eq!(res.num_rows(), 1);
+}
+
+#[test]
+fn test_concurrent_connections_no_deadlock() {
+    let (db, _conn) = setup_db();
+    let mut handles = vec![];
+    for _ in 0..10 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || {
+            for _ in 0..5 {
+                let conn = Connection::new(&db_clone);
+                let res = conn.query("RETURN 1 + 1").unwrap();
+                assert!(res.is_success());
+            }
+        }));
+    }
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn test_concurrent_sequential_writes_same_table() {
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, val INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Person {id: 0, val: 0})");
+
+    let mut handles = vec![];
+    for i in 1..=5 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || {
+            let thread_conn = Connection::new(&db_clone);
+            let query = format!("CREATE (p:Person {{id: {}, val: {}}})", i, i * 10);
+            thread_conn.query(&query).unwrap();
+        }));
+    }
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let res = conn.query("MATCH (p:Person) RETURN SUM(p.val)").unwrap();
+    assert_eq!(res.num_rows(), 1);
+}
+
+#[test]
+fn test_concurrent_ddl_create_table() {
+    let (db, _conn) = setup_db();
+    let mut handles = vec![];
+    for i in 0..5 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || {
+            let conn = Connection::new(&db_clone);
+            let query = format!("CREATE NODE TABLE T{}(id INT64, PRIMARY KEY (id))", i);
+            conn.query(&query).unwrap();
+        }));
+    }
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let conn = Connection::new(&db);
+    for i in 0..5 {
+        let query = format!("MATCH (t:T{}) RETURN t.id", i);
+        let res = conn.query(&query).unwrap();
+        assert!(res.is_success());
     }
 }

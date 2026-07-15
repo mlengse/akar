@@ -127,7 +127,44 @@ fn test_create_table_reserved_keyword() {
 fn test_create_rel_table_same_from_to() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
-    // This is typically valid, but testing it doesn't crash
     let res = exec(&conn, "CREATE REL TABLE Knows(FROM Person TO Person)");
     assert!(res.contains("success") || res.contains("Parse error"));
+}
+
+#[test]
+fn test_drop_nonexistent_index() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    let err = exec_err(&conn, "DROP INDEX NonExistentIdx");
+    assert!(err.contains("Parse error") || err.contains("Error"));
+}
+
+#[test]
+fn test_create_node_table_empty_pk_list() {
+    let (_db, conn) = setup_db();
+    let err = exec_err(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY ())");
+    assert!(err.contains("Parse error") || err.contains("Error"));
+}
+
+#[test]
+#[ignore = "Kuzu allows duplicate column names in CREATE TABLE"]
+fn test_create_table_duplicate_column_names() {
+    let (_db, conn) = setup_db();
+    let err = exec_err(&conn, "CREATE NODE TABLE Person(id INT64, id STRING, PRIMARY KEY (id))");
+    assert!(err.contains("duplicate") || err.contains("already exists") || err.contains("Error") || err.contains("Parse error") || err.contains("multiple"));
+}
+
+#[test]
+fn test_alter_table_add_property_syntax_error() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    let err = exec_err(&conn, "ALTER TABLE Person ADD");
+    assert!(err.contains("Parse error") || err.contains("Error"));
+}
+
+#[test]
+fn test_create_sequence_no_name() {
+    let (_db, conn) = setup_db();
+    let err = exec_err(&conn, "CREATE SEQUENCE");
+    assert!(err.contains("Parse error") || err.contains("Error"));
 }
