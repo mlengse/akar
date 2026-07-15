@@ -89,30 +89,30 @@ Separate files per category under `kuzu-main/tests/`:
 
 **Strategy:** Make [`ValueVector`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-common/src/vector.rs#L505) a thin wrapper over Arrow `ArrayRef`. Keep `DataChunk` API unchanged so all 40+ operator files compile without modification.
 
-- `[ ]` Replace `LegacyValueVector` internals with `ArrayRef` backing store
-- `[ ]` Maintain existing `get_value()`, `set_value()`, `data()` API surface
-- `[ ]` Storage outputs `ArrayRef` directly (skip byte-buffer allocation)
-- `[ ]` Eliminate `from_legacy` variable lookup in expression evaluator
+- `[x]` Replace `LegacyValueVector` internals with `ArrayRef` backing store
+- `[x]` Maintain existing `get_value()`, `set_value()`, `data()` API surface
+- `[x]` Storage outputs `ArrayRef` directly (skip byte-buffer allocation)
+- `[x]` Eliminate `from_legacy` variable lookup in expression evaluator
 
 **Fused operations (Filter + Projection in 1 pass):**
-- `[ ]` Attempt if easy; do **not** block Arrow migration on this
+- `[x]` Attempt if easy; do **not** block Arrow migration on this
 
 ### P27.2 — JoinHashTable Optimization (3 SP)
 
 **Strategy:** Tune existing `hashbrown::HashMap`, NOT `RawTable` (avoid unsafe).
 
-- `[ ]` Pre-size HashMap based on estimated build-side cardinality
-- `[ ]` Evaluate and adopt faster hasher (`ahash` or `foldhash`)
-- `[ ]` Parallel build with `par_extend` (chunked keys parallel insertion)
+- `[x]` Pre-size HashMap based on estimated build-side cardinality
+- `[x]` Evaluate and adopt faster hasher (`ahash` or `foldhash`)
+- `[x]` Parallel build with `par_extend` (chunked keys parallel insertion)
 
 ### P27.3 — Quick Wins (3 SP)
 
 > [!NOTE]
 > **Deferred until profiling (P26.4) validates impact.** Only proceed with items confirmed as bottlenecks.
 
-- `[ ]` `SmallVec<[u32; 8]>` for `SelectionVector` (stack allocation) — *if profiled*
-- `[ ]` `Arc<[Value]>` constant pools — *if profiled*
-- `[ ]` `#[inline(always)]` on hot paths — *always add, zero-cost*
+- `[x]` `SmallVec<[u32; 8]>` for `SelectionVector` (stack allocation) — *if profiled*
+- `[x]` `Arc<[Value]>` constant pools — *if profiled*
+- `[x]` `#[inline(always)]` on hot paths — *always add, zero-cost*
 
 ---
 
@@ -123,11 +123,11 @@ Separate files per category under `kuzu-main/tests/`:
 
 **Strategy:** One-time `kuzu-migrate` CLI tool that reads C++ format and writes Rust format. NOT a permanent dual-format reader.
 
-- `[ ]` C++ page layout reader (page size, header format)
-- `[ ]` C++ catalog deserialization (`catalog.h` format → Rust struct)
-- `[ ]` C++ index reader (ART/HashIndex format compatibility)
-- `[ ]` Migration CLI: `kuzu-migrate --from <cpp-db-path> --to <rust-db-path>`
-- `[ ]` Migration verification: compare row counts and sample data post-migration
+- `[x]` C++ page layout reader (page size, header format)
+- `[x]` C++ catalog deserialization (`catalog.h` format → Rust struct)
+- `[x]` C++ index reader (ART/HashIndex format compatibility)
+- `[x]` Migration CLI: `kuzu-migrate --from <cpp-db-path> --to <rust-db-path>`
+- `[x]` Migration verification: compare row counts and sample data post-migration
 
 > [!NOTE]
 > WAL reader is **not needed** for read-only migration — we read committed pages only.
@@ -141,7 +141,7 @@ All major extensions are already ported natively to Rust (15 crates). C++ ABI co
 The Rust CLI already has: rustyline, multi-line, `.import/.export`, tab completion, 5 output modes.
 
 **Remaining gap:**
-- `[ ]` Add Box output mode (box-drawing characters `┌─┐│└─┘`) — this is the C++ default
+- `[x]` Add Box output mode (box-drawing characters `┌─┐│└─┘`) — this is the C++ default
 
 **Nice-to-have (not scoped):**
 - `:max_rows` / `:max_width` truncation
