@@ -52,9 +52,9 @@ impl fmt::Display for QuerySummary {
 /// let result = conn.query("MATCH (n) RETURN n LIMIT 5")?;
 /// println!("Rows: {}, Columns: {}", result.num_rows, result.num_columns);
 /// for chunk in &result.chunks {
-///     for field in &chunk.fields {
-///         for row in 0..field.size() {
-///             if let Some(val) = field.get_value(row) {
+///     for field_idx in 0..chunk.fields.len() {
+///         for row in 0..chunk.size {
+///             if let Some(val) = chunk.get_value(field_idx, row) {
 ///                 println!("  {:?}", val);
 ///             }
 ///         }
