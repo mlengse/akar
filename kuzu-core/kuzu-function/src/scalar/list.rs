@@ -185,6 +185,68 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
             }
             Ok(Value::Int64(seen.len() as i64))
         }
+        ListOp::Count => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let val = &args[1];
+            let mut count = 0;
+            for item in list {
+                if item == val {
+                    count += 1;
+                }
+            }
+            Ok(Value::Int64(count as i64))
+        }
+        ListOp::Min => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            if list.is_empty() {
+                return Ok(Value::Null);
+            }
+            let mut min_val = list[0].clone();
+            for item in list.iter().skip(1) {
+                if let Ok(std::cmp::Ordering::Less) = compare_values_for_sort(item, &min_val) {
+                    min_val = item.clone();
+                }
+            }
+            Ok(min_val)
+        }
+        ListOp::Max => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            if list.is_empty() {
+                return Ok(Value::Null);
+            }
+            let mut max_val = list[0].clone();
+            for item in list.iter().skip(1) {
+                if let Ok(std::cmp::Ordering::Greater) = compare_values_for_sort(item, &max_val) {
+                    max_val = item.clone();
+                }
+            }
+            Ok(max_val)
+        }
+        ListOp::HasAny => {
+            let list = match &args[0] {
+                Value::List(items) => items,
+                _ => return Err("Expected list".into()),
+            };
+            let search_items = match &args[1] {
+                Value::List(items) => items,
+                _ => return Err("Expected list for second argument".into()),
+            };
+            for search_item in search_items {
+                if list.contains(search_item) {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            Ok(Value::Bool(false))
+        }
         ListOp::Sum => {
             let list = match &args[0] {
                 Value::List(items) => items,
