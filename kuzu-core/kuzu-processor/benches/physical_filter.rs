@@ -14,7 +14,7 @@ fn make_int64_chunk(num_rows: usize) -> DataChunk {
     for i in 0..num_rows {
         v.set_i64(i, i as i64);
     }
-    DataChunk::new(vec![v])
+    DataChunk::from_legacy(vec![v])
 }
 
 /// Create a DataChunk with num_rows rows and num_cols columns of Int64.
@@ -28,7 +28,7 @@ fn make_multi_col_chunk(num_rows: usize, num_cols: usize) -> DataChunk {
         }
         fields.push(v);
     }
-    DataChunk::new(fields)
+    DataChunk::from_legacy(fields)
 }
 
 /// Filter that passes all rows (constant true).
