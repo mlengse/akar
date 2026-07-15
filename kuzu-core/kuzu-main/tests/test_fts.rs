@@ -47,18 +47,18 @@ fn test_create_and_query_fts_index() -> Result<(), String> {
     // Verify scores order: document 2 has "using Rust" and "Rust Language" in context (more matches or higher density/length factors)
     // Wait, let's verify that the values returned are correct.
     println!("Returned chunk fields: {:?}", chunk.fields);
-    let title1 = match chunk.fields[1].get_value(0).unwrap() {
+    let title1 = match chunk.get_value(1, 0).unwrap() {
         Value::String(s) => s,
         _ => panic!(
             "Expected string for title1, got {:?}",
-            chunk.fields[1].get_value(0).unwrap()
+            chunk.get_value(1, 0).unwrap()
         ),
     };
-    let title2 = match chunk.fields[1].get_value(1).unwrap() {
+    let title2 = match chunk.get_value(1, 1).unwrap() {
         Value::String(s) => s,
         _ => panic!(
             "Expected string for title2, got {:?}",
-            chunk.fields[1].get_value(1).unwrap()
+            chunk.get_value(1, 1).unwrap()
         ),
     };
 
@@ -70,7 +70,7 @@ fn test_create_and_query_fts_index() -> Result<(), String> {
     let search_res_slow = conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('slow') RETURN d.id, d.title")?;
     let chunk_slow = search_res_slow.chunks.first().unwrap();
     assert_eq!(chunk_slow.size, 1, "Should return exactly 1 match for 'slow'");
-    let title_slow = match chunk_slow.fields[1].get_value(0).unwrap() {
+    let title_slow = match chunk_slow.get_value(1, 0).unwrap() {
         Value::String(s) => s,
         _ => panic!("Expected string"),
     };
