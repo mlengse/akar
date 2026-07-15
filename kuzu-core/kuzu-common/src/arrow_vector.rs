@@ -74,6 +74,29 @@ impl ArrowVector {
     pub fn from_legacy(vec: &ValueVector) -> Self {
         let phys_type = vec.physical_type();
         let size = vec.size();
+        
+        // Fast path for primitive arrays
+        let build_primitive_array = |data_type: arrow::datatypes::DataType, type_size: usize| -> ArrayRef {
+            let num_bytes = (size + 7) / 8;
+            let mut null_buffer = arrow::buffer::MutableBuffer::from_len_zeroed(num_bytes);
+            let slice = null_buffer.as_slice_mut();
+            for i in 0..size {
+                if !vec.is_null(i) {
+                    arrow::util::bit_util::set_bit(slice, i);
+                }
+            }
+            let null_buffer = null_buffer.into();
+            let data_buffer = arrow::buffer::Buffer::from_slice_ref(&vec.data()[..size * type_size]);
+            
+            let array_data = arrow::array::ArrayData::builder(data_type.clone())
+                .len(size)
+                .add_buffer(data_buffer)
+                .null_bit_buffer(Some(null_buffer))
+                .build()
+                .unwrap();
+            arrow::array::make_array(array_data)
+        };
+
         let array: ArrayRef = match phys_type {
             PhysicalTypeID::Bool => {
                 let mut builder = arrow::array::BooleanBuilder::with_capacity(size);
@@ -86,51 +109,10 @@ impl ArrowVector {
                 }
                 Arc::new(builder.finish())
             }
-            PhysicalTypeID::Int64 => {
-                let mut builder = arrow::array::Int64Builder::with_capacity(size);
-                for i in 0..size {
-                    if vec.is_null(i) {
-                        builder.append_null();
-                    } else {
-                        builder.append_value(vec.get_i64(i).unwrap_or(0));
-                    }
-                }
-                Arc::new(builder.finish())
-            }
-            PhysicalTypeID::Int32 => {
-                let mut builder = arrow::array::Int32Builder::with_capacity(size);
-                for i in 0..size {
-                    if vec.is_null(i) {
-                        builder.append_null();
-                    } else {
-                        builder.append_value(vec.get_i32(i).unwrap_or(0));
-                    }
-                }
-                Arc::new(builder.finish())
-            }
-            PhysicalTypeID::Double => {
-                let mut builder = arrow::array::Float64Builder::with_capacity(size);
-                for i in 0..size {
-                    if vec.is_null(i) {
-                        builder.append_null();
-                    } else {
-                        builder.append_value(vec.get_double(i).unwrap_or(0.0));
-                    }
-                }
-                Arc::new(builder.finish())
-            }
-            PhysicalTypeID::Float => {
-                let mut builder = arrow::array::Float32Builder::with_capacity(size);
-                for i in 0..size {
-                    if vec.is_null(i) {
-                        builder.append_null();
-                    } else {
-                        let val = vec.get_double(i).unwrap_or(0.0) as f32;
-                        builder.append_value(val);
-                    }
-                }
-                Arc::new(builder.finish())
-            }
+            PhysicalTypeID::Int64 => build_primitive_array(arrow::datatypes::DataType::Int64, 8),
+            PhysicalTypeID::Int32 => build_primitive_array(arrow::datatypes::DataType::Int32, 4),
+            PhysicalTypeID::Double => build_primitive_array(arrow::datatypes::DataType::Float64, 8),
+            PhysicalTypeID::Float => build_primitive_array(arrow::datatypes::DataType::Float32, 4),
             PhysicalTypeID::String => {
                 let mut builder = arrow::array::StringBuilder::with_capacity(size, size * 16);
                 for i in 0..size {
