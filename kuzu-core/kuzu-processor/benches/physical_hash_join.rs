@@ -14,7 +14,7 @@ fn make_i64_chunk(values: &[i64]) -> DataChunk {
     for (i, &val) in values.iter().enumerate() {
         v.set_i64(i, val);
     }
-    DataChunk::new(vec![v])
+    DataChunk::from_legacy(vec![v])
 }
 
 /// Create a DataChunk with 2 Int64 columns: col_0 = id, col_1 = payload.
@@ -28,7 +28,7 @@ fn make_two_col_chunk(ids: &[i64], payload_base: i64) -> DataChunk {
         c0.set_i64(i, id);
         c1.set_i64(i, payload_base + id);
     }
-    DataChunk::new(vec![c0, c1])
+    DataChunk::from_legacy(vec![c0, c1])
 }
 
 fn bench_join_small(c: &mut Criterion) {
