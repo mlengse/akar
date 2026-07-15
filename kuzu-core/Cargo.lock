@@ -1359,6 +1359,7 @@ dependencies = [
 name = "kuzu-algo"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
  "kuzu-catalog",
  "kuzu-common",
  "kuzu-extension",
@@ -1485,6 +1486,7 @@ dependencies = [
 name = "kuzu-httpfs"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
  "kuzu-common",
  "kuzu-extension",
  "kuzu-function",
