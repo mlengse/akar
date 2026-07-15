@@ -121,20 +121,28 @@ impl Extension for AlgoExtension {
             }
 
             let n = src_col.len();
-            output.fields = vec![
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-            ];
+            let mut v1 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+            let mut v2 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+            let mut v3 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
             for (i, val) in src_col.iter().enumerate() {
-                output.fields[0].set_value(i, val).ok();
+                v1.set_value(i, val).ok();
             }
             for (i, val) in dst_col.iter().enumerate() {
-                output.fields[1].set_value(i, val).ok();
+                v2.set_value(i, val).ok();
             }
             for (i, val) in dist_col.iter().enumerate() {
-                output.fields[2].set_value(i, val).ok();
+                v3.set_value(i, val).ok();
             }
+            output.fields = vec![
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
+            ];
+            output.field_types = vec![
+                kuzu_common::types::PhysicalTypeID::Int64,
+                kuzu_common::types::PhysicalTypeID::Int64,
+                kuzu_common::types::PhysicalTypeID::Int64,
+            ];
             output.size = n;
             Ok(())
         });
@@ -210,20 +218,28 @@ impl Extension for AlgoExtension {
             }
 
             let n = src_col.len();
-            output.fields = vec![
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n),
-                kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n),
-            ];
+            let mut v1 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+            let mut v2 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
+            let mut v3 = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n);
             for (i, val) in src_col.iter().enumerate() {
-                output.fields[0].set_value(i, val).ok();
+                v1.set_value(i, val).ok();
             }
             for (i, val) in dst_col.iter().enumerate() {
-                output.fields[1].set_value(i, val).ok();
+                v2.set_value(i, val).ok();
             }
             for (i, val) in cost_col.iter().enumerate() {
-                output.fields[2].set_value(i, val).ok();
+                v3.set_value(i, val).ok();
             }
+            output.fields = vec![
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
+                kuzu_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
+            ];
+            output.field_types = vec![
+                kuzu_common::types::PhysicalTypeID::Int64,
+                kuzu_common::types::PhysicalTypeID::Int64,
+                kuzu_common::types::PhysicalTypeID::Double,
+            ];
             output.size = n;
             Ok(())
         });
@@ -244,7 +260,8 @@ impl Extension for AlgoExtension {
             result: AlgoResult,
             score_col: &str,
         ) -> Result<(
-            Vec<kuzu_common::vector::ValueVector>,
+            Vec<arrow::array::ArrayRef>,
+            Vec<kuzu_common::types::PhysicalTypeID>,
             Vec<String>,
             usize,
         ), String> {
@@ -256,7 +273,9 @@ impl Extension for AlgoExtension {
                 id_vec.set_value(i, &Value::Int64(i as i64)).ok();
                 val_vec.set_value(i, &Value::Double(v)).ok();
             }
-            Ok((vec![id_vec, val_vec], vec!["node_id".into(), score_col.into()], n))
+            let arr1 = kuzu_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array;
+            let arr2 = kuzu_common::arrow_vector::ArrowVector::from_legacy(&val_vec).array;
+            Ok((vec![arr1, arr2], vec![PhysicalTypeID::Int64, PhysicalTypeID::Double], vec!["node_id".into(), score_col.into()], n))
         }
 
         // ── page_rank / pr ────────────────────────────────────────────────────
@@ -266,8 +285,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_page_rank(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "rank")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "rank")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -281,8 +300,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_wcc(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -296,8 +315,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_scc_tarjan(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -310,8 +329,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_scc_kosaraju(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "component_id")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -325,8 +344,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_k_core(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "core_number")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "core_number")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -340,8 +359,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_louvain(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "community_id")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "community_id")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -354,8 +373,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_spanning_forest(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "parent_id")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "parent_id")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -374,8 +393,8 @@ impl Extension for AlgoExtension {
                 };
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_lpa(&csr, max_iters);
-                let (fields, field_names, size) = pack_node_scores(result, "label")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "label")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -389,8 +408,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_betweenness_centrality(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "centrality")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "centrality")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -404,8 +423,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_closeness_centrality(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "centrality")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "centrality")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -419,8 +438,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_triangle_count(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "triangles")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "triangles")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -434,8 +453,8 @@ impl Extension for AlgoExtension {
             move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_all_sp_destinations(&csr);
-                let (fields, field_names, size) = pack_node_scores(result, "reachable")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "reachable")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -458,8 +477,8 @@ impl Extension for AlgoExtension {
                 };
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_random_walk(&csr, None, steps, walks_per_node);
-                let (fields, field_names, size) = pack_node_scores(result, "hit_count")?;
-                output.fields = fields; output.field_names = field_names; output.size = size;
+                let (fields, field_types, field_names, size) = pack_node_scores(result, "hit_count")?;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = size;
                 Ok(())
             }
         });
@@ -501,7 +520,8 @@ impl Extension for AlgoExtension {
                 let mut id_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
                 for i in 0..n { id_vec.set_value(i, &Value::Int64(i as i64)).ok(); }
 
-                let mut fields = vec![id_vec];
+                let mut fields = vec![kuzu_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array];
+                let mut field_types = vec![kuzu_common::types::PhysicalTypeID::Int64];
                 let mut field_names = vec!["node_id".to_string()];
                 for d in 0..dimensions {
                     let mut dim_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Double, n);
@@ -509,10 +529,11 @@ impl Extension for AlgoExtension {
                         let val = result.values.get(i * dimensions + d).copied().unwrap_or(0.0);
                         dim_vec.set_value(i, &Value::Double(val)).ok();
                     }
-                    fields.push(dim_vec);
+                    fields.push(kuzu_common::arrow_vector::ArrowVector::from_legacy(&dim_vec).array);
+                    field_types.push(kuzu_common::types::PhysicalTypeID::Double);
                     field_names.push(format!("dim_{d}"));
                 }
-                output.fields = fields; output.field_names = field_names; output.size = n;
+                output.fields = fields; output.field_types = field_types; output.field_names = field_names; output.size = n;
                 Ok(())
             }
         });
