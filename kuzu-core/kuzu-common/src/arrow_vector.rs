@@ -3,6 +3,7 @@ use crate::types::{PhysicalTypeID, Value};
 use crate::vector::ValueVector;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
+    ListArray, StructArray, StringArray,
 };
 use arrow::datatypes::DataType;
 use std::sync::Arc;
@@ -262,14 +263,80 @@ impl VectorAccess for ArrowVector {
                 self.get_f32(row).map(Value::Float)
             }
             PhysicalTypeID::String => {
-                let array = self.array.as_any().downcast_ref::<arrow::array::StringArray>()?;
+                let array = self.array.as_any().downcast_ref::<StringArray>()?;
                 Some(Value::String(array.value(row).to_string()))
+            }
+            PhysicalTypeID::List => {
+                convert_arrow_scalar(&self.array, row)
+            }
+            PhysicalTypeID::Struct => {
+                convert_arrow_scalar(&self.array, row)
             }
             _ => {
                 // For unsupported types, return null
                 None
             }
         }
+    }
+}
+
+pub fn convert_arrow_scalar(array: &ArrayRef, row: usize) -> Option<Value> {
+    if array.is_null(row) {
+        return None;
+    }
+    match array.data_type() {
+        DataType::Boolean => {
+            let arr = array.as_any().downcast_ref::<BooleanArray>()?;
+            Some(Value::Bool(arr.value(row)))
+        }
+        DataType::Int64 => {
+            let arr = array.as_any().downcast_ref::<Int64Array>()?;
+            Some(Value::Int64(arr.value(row)))
+        }
+        DataType::Int32 => {
+            let arr = array.as_any().downcast_ref::<Int32Array>()?;
+            Some(Value::Int32(arr.value(row)))
+        }
+        DataType::Float64 => {
+            let arr = array.as_any().downcast_ref::<Float64Array>()?;
+            Some(Value::Double(arr.value(row)))
+        }
+        DataType::Float32 => {
+            let arr = array.as_any().downcast_ref::<Float32Array>()?;
+            Some(Value::Float(arr.value(row)))
+        }
+        DataType::Utf8 | DataType::LargeUtf8 => {
+            let arr = array.as_any().downcast_ref::<StringArray>();
+            if let Some(s_arr) = arr {
+                return Some(Value::String(s_arr.value(row).to_string()));
+            }
+            // LargeUtf8 would need LargeStringArray, but ignoring for now
+            None
+        }
+        DataType::List(_) => {
+            let arr = array.as_any().downcast_ref::<ListArray>()?;
+            let list_array = arr.value(row); // This is an ArrayRef
+            let mut list_vals = Vec::new();
+            for i in 0..list_array.len() {
+                if let Some(v) = convert_arrow_scalar(&list_array, i) {
+                    list_vals.push(v);
+                } else {
+                    list_vals.push(Value::Null);
+                }
+            }
+            Some(Value::List(list_vals))
+        }
+        DataType::Struct(fields) => {
+            let arr = array.as_any().downcast_ref::<StructArray>()?;
+            let mut entries = Vec::new();
+            for (i, field) in fields.iter().enumerate() {
+                let col = arr.column(i);
+                let val = convert_arrow_scalar(col, row).unwrap_or(Value::Null);
+                entries.push((field.name().clone(), val));
+            }
+            Some(Value::Struct(entries))
+        }
+        _ => None,
     }
 }
 
