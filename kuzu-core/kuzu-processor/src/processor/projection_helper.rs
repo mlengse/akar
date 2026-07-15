@@ -15,7 +15,7 @@ pub fn resolve_projection_column_index(
             if let Some(idx) = chunk
                 .field_names
                 .iter()
-                .position(|n| n.ends_with(&format!(".{}", prop)) || n == &col_name || n == prop)
+                .position(|n| n == &col_name || n == prop)
             {
                 return Some(idx);
             }
