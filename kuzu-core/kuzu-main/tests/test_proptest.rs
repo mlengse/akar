@@ -18,8 +18,8 @@ proptest! {
         let mut out = String::new();
         for chunk in &res.chunks {
             for row in chunk.iter_rows() {
-                for field in &chunk.fields {
-                    if let Some(v) = field.get_value(row) {
+                for (col_idx, _) in chunk.fields.iter().enumerate() {
+                    if let Some(v) = chunk.get_value(col_idx, row) {
                         out.push_str(&format!("{:?}", v));
                     }
                 }
