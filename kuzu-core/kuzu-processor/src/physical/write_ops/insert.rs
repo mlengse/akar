@@ -114,6 +114,9 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.dst_node_name))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk))
                 .ok_or_else(|| format!("Destination node variable {} not found", self.dst_node_name))?;
+            
+            println!("INSERT: src_idx={}, dst_idx={}, chunk fields={:?}", src_node_col_idx, dst_node_col_idx, chunk.field_names);
+
 
             if src_node_col_idx >= chunk.fields.len() || dst_node_col_idx >= chunk.fields.len() {
                 return Err("Src/Dst node column index out of bounds in INSERT REL".into());
