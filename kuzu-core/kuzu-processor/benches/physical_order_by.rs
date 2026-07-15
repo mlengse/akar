@@ -14,7 +14,7 @@ fn make_i64_chunk(values: &[i64]) -> DataChunk {
     for (i, &val) in values.iter().enumerate() {
         v.set_i64(i, val);
     }
-    DataChunk::new(vec![v])
+    DataChunk::from_legacy(vec![v])
 }
 
 /// Create a multi-column DataChunk: col_0 = Int64 key, col_1 = String label, col_2 = Double score.
@@ -43,7 +43,7 @@ fn make_multi_col_chunk(keys: &[i64], labels: &[&str], scores: &[f64]) -> DataCh
     for (i, &s) in scores.iter().enumerate() {
         c2.set_double(i, s);
     }
-    DataChunk::new(vec![c0, c1, c2])
+    DataChunk::from_legacy(vec![c0, c1, c2])
 }
 
 /// Generate shuffled values 0..n-1 for unsorted input.
