@@ -19,19 +19,11 @@ fn test_bug() {
     conn.query("MATCH (a:A {id: 0}), (b:B {id: 0}) CREATE (a)-[:AB]->(b)").unwrap();
     conn.query("MATCH (b:B {id: 0}), (c:C {id: 0}) CREATE (b)-[:BC]->(c)").unwrap();
 
-    let res = conn.query("EXPLAIN MATCH (a:A)-[:AB]->(b:B)-[:BC]->(c:C) RETURN c.id").unwrap();
-    println!("EXPLAIN:");
-    for chunk in &res.chunks {
-        for row in chunk.iter_rows() {
-            println!("{:?}", chunk.get_value(0, row));
-        }
-    }
-
-    let res = conn.query("MATCH (a:A)-[:AB]->(b:B)-[:BC]->(c:C) RETURN c.id").unwrap();
+    let res = conn.query("MATCH (a:A)-[:AB]->(b:B)-[:BC]->(c:C) RETURN a.id, b.id, c.id").unwrap();
     println!("RESULT:");
     for chunk in &res.chunks {
         for row in chunk.iter_rows() {
-            println!("{:?}", chunk.get_value(0, row));
+            println!("{:?} {:?} {:?}", chunk.get_value(0, row), chunk.get_value(1, row), chunk.get_value(2, row));
         }
     }
 }
