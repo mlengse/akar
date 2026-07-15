@@ -316,12 +316,11 @@ impl QueryPlanner {
                         cardinality: 0,
                     });
                     let mut patterns_iter = m.patterns.into_iter().peekable();
+                    let mut skip_next_node = false;
                     while let Some(pattern) = patterns_iter.next() {
-                        // If the previous pattern consumed this dest node, skip
-                        if skip_next_node {
-                            skip_next_node = false;
-                            continue;
-                        }
+                        // If the previous pattern consumed this dest node, skip the node scan
+                        let skip_current_node_scan = skip_next_node;
+                        skip_next_node = false;
 
                         // Check if this pattern has a var-length edge → create RecursiveExtend
                         if let Some(ref edge) = pattern.edge {
@@ -341,16 +340,18 @@ impl QueryPlanner {
 
                                 // Scan source node
                                 let node_var = &pattern.node_variable;
-                                if let Some(label) = pattern.node_label {
-                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                        table_name: label,
-                                        table_id: pattern.node_table_id.unwrap_or(0),
-                                        alias: node_var.clone(),
-                                        columns: Vec::new(),
-                                        cardinality: 0,
-                                        fts_query: fts_to_assign.take(),
-                                        predicate: None,
-                                    }));
+                                if !skip_current_node_scan {
+                                    if let Some(label) = pattern.node_label {
+                                        scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                            table_name: label,
+                                            table_id: pattern.node_table_id.unwrap_or(0),
+                                            alias: node_var.clone(),
+                                            columns: Vec::new(),
+                                            cardinality: 0,
+                                            fts_query: fts_to_assign.take(),
+                                            predicate: None,
+                                        }));
+                                    }
                                 }
 
                                 // Create RecursiveExtend (consumes destination node pattern)
@@ -375,7 +376,7 @@ impl QueryPlanner {
                                     cost_output_name: None,
                                     cardinality: 0,
                                 }));
-                                // Skip the destination node pattern (consumed by RecursiveExtend)
+                                // Skip the destination node pattern scan
                                 skip_next_node = true;
                                 continue;
                             }
@@ -383,16 +384,18 @@ impl QueryPlanner {
                             // Regular (non-var-length) edge → create Extend
                             // Scan the source node (clone what we need before pattern is moved)
                             let src_node_var = pattern.node_variable.clone();
-                            if let Some(label) = &pattern.node_label {
-                                scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                    table_name: label.clone(),
-                                    table_id: pattern.node_table_id.unwrap_or(0),
-                                    alias: src_node_var.clone(),
-                                    columns: Vec::new(),
-                                    cardinality: 0,
-                                    fts_query: fts_to_assign.take(),
-                                    predicate: None,
-                                }));
+                            if !skip_current_node_scan {
+                                if let Some(label) = &pattern.node_label {
+                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                        table_name: label.clone(),
+                                        table_id: pattern.node_table_id.unwrap_or(0),
+                                        alias: src_node_var.clone(),
+                                        columns: Vec::new(),
+                                        cardinality: 0,
+                                        fts_query: fts_to_assign.take(),
+                                        predicate: None,
+                                    }));
+                                }
                             }
 
                             // Create Extend which replaces ScanRel + destination ScanNode
@@ -414,23 +417,25 @@ impl QueryPlanner {
                                     cardinality: 0,
                                 }));
 
-                                // Skip the destination node pattern (consumed by Extend)
+                                // Skip the destination node pattern scan
                                 skip_next_node = true;
                                 continue;
                             }
                         }
 
                         // Regular (non-var-length) pattern without edge: Scan node only
-                        if let Some(label) = pattern.node_label {
-                            scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                table_name: label,
-                                table_id: pattern.node_table_id.unwrap_or(0),
-                                alias: pattern.node_variable,
-                                columns: Vec::new(),
-                                cardinality: 0,
-                                fts_query: fts_to_assign.take(),
-                                predicate: None,
-                            }));
+                        if !skip_current_node_scan {
+                            if let Some(label) = pattern.node_label {
+                                scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                    table_name: label,
+                                    table_id: pattern.node_table_id.unwrap_or(0),
+                                    alias: pattern.node_variable,
+                                    columns: Vec::new(),
+                                    cardinality: 0,
+                                    fts_query: fts_to_assign.take(),
+                                    predicate: None,
+                                }));
+                            }
                         }
                     }
                 }
@@ -663,7 +668,10 @@ impl QueryPlanner {
             result.extend(flattened);
         }
 
-        // Apply filter on top of scans/joins
+        // Append extend operators (replace ScanRel in pipeline)
+        result.extend(std::mem::take(&mut extend_ops));
+
+        // Apply filter on top of scans/joins/extends
         if let Some(expr) = filter_expr {
             result.push(LogicalOperator::Filter(LogicalFilter {
                 expression: expr.expression,
@@ -671,9 +679,6 @@ impl QueryPlanner {
                 cardinality: 0,
             }));
         }
-
-        // Append extend operators (replace ScanRel in pipeline)
-        result.extend(std::mem::take(&mut extend_ops));
 
         // Project as topmost
         if let Some(proj) = projection {
