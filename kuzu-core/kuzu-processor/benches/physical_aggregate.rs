@@ -14,7 +14,7 @@ fn make_i64_chunk(values: &[i64]) -> DataChunk {
     for (i, &val) in values.iter().enumerate() {
         v.set_i64(i, val);
     }
-    DataChunk::new(vec![v])
+    DataChunk::from_legacy(vec![v])
 }
 
 /// Create a two-column DataChunk: col_0 = group key (Int64), col_1 = value (Int64).
@@ -28,7 +28,7 @@ fn make_grouped_chunk(keys: &[i64], values: &[i64]) -> DataChunk {
         c0.set_i64(i, keys[i]);
         c1.set_i64(i, values[i]);
     }
-    DataChunk::new(vec![c0, c1])
+    DataChunk::from_legacy(vec![c0, c1])
 }
 
 /// Create a three-column DataChunk for multi-key GROUP BY.
@@ -45,7 +45,7 @@ fn make_multi_key_chunk(key_a: &[i64], key_b: &[i64], values: &[i64]) -> DataChu
         c1.set_i64(i, key_b[i]);
         c2.set_i64(i, values[i]);
     }
-    DataChunk::new(vec![c0, c1, c2])
+    DataChunk::from_legacy(vec![c0, c1, c2])
 }
 
 // ==================== Scalar aggregates (no GROUP BY) ====================
@@ -189,7 +189,7 @@ fn bench_group_by_string_key(c: &mut Criterion) {
         c0.set_null(i, false);
         c1.set_i64(i, i as i64);
     }
-    let chunk = DataChunk::new(vec![c0, c1]);
+    let chunk = DataChunk::from_legacy(vec![c0, c1]);
     c.bench_function("aggregate/group_by_string_key_10k", |b| {
         b.iter(|| {
             black_box(agg.execute(black_box(vec![chunk.clone()])).unwrap());
