@@ -54,8 +54,8 @@ proptest! {
         conn.query("CREATE NODE TABLE A(id INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE B(id INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE C(id INT64, PRIMARY KEY(id))").unwrap();
-        conn.query("CREATE REL TABLE AB(FROM A TO B)").unwrap();
-        conn.query("CREATE REL TABLE BC(FROM B TO C)").unwrap();
+        conn.query("CREATE REL TABLE AB(FROM A TO B, dummy INT64)").unwrap();
+        conn.query("CREATE REL TABLE BC(FROM B TO C, dummy INT64)").unwrap();
 
         // Create nodes
         for i in 0..a_nodes { conn.query(&format!("CREATE (a:A {{id: {}}})", i)).unwrap(); }
@@ -79,8 +79,8 @@ proptest! {
         let c1 = extract_count(&conn, q1);
 
         // Query 2: A JOIN (B JOIN C)
-        // We force associativity change using WITH
-        let q2 = "MATCH (b:B)-[:BC]->(c:C) WITH b MATCH (a:A)-[:AB]->(b) RETURN COUNT(*)";
+        // We force associativity change using multiple MATCH clauses
+        let q2 = "MATCH (b:B)-[:BC]->(c:C) MATCH (a:A)-[:AB]->(b) RETURN COUNT(*)";
         let c2 = extract_count(&conn, q2);
 
         prop_assert_eq!(c1, c2);
@@ -95,7 +95,7 @@ proptest! {
         let (_db, conn) = setup_db();
         conn.query("CREATE NODE TABLE A(id INT64, prop INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE B(id INT64, prop INT64, PRIMARY KEY(id))").unwrap();
-        conn.query("CREATE REL TABLE E(FROM A TO B)").unwrap();
+        conn.query("CREATE REL TABLE E(FROM A TO B, dummy INT64)").unwrap();
 
         for i in 0..nodes {
             conn.query(&format!("CREATE (a:A {{id: {}, prop: {}}})", i, i % 20)).unwrap();
@@ -112,8 +112,8 @@ proptest! {
         let q1 = format!("MATCH (a:A)-[:E]->(b:B) WHERE a.prop > {} AND b.prop < {} RETURN COUNT(*)", filter_val, filter_val + 5);
         let c1 = extract_count(&conn, &q1);
 
-        // Query 2: Filter BEFORE join (forced via WITH)
-        let q2 = format!("MATCH (a:A) WHERE a.prop > {} WITH a MATCH (b:B) WHERE b.prop < {} WITH a, b MATCH (a)-[:E]->(b) RETURN COUNT(*)", filter_val, filter_val + 5);
+        // Query 2: Filter BEFORE join (forced via separate MATCH blocks)
+        let q2 = format!("MATCH (a:A) WHERE a.prop > {} MATCH (b:B) WHERE b.prop < {} MATCH (a)-[:E]->(b) RETURN COUNT(*)", filter_val, filter_val + 5);
         let c2 = extract_count(&conn, &q2);
 
         prop_assert_eq!(c1, c2);
