@@ -226,11 +226,9 @@ impl Connection {
                         // Write rows
                         for chunk in &result.chunks {
                             for row in 0..chunk.size {
-                                let row_values: Vec<String> = chunk
-                                    .fields
-                                    .iter()
-                                    .map(|f| {
-                                        f.get_value(row)
+                                let row_values: Vec<String> = (0..chunk.fields.len())
+                                    .map(|col_idx| {
+                                        chunk.get_value(col_idx, row)
                                             .map(|v| value_to_csv_string(&v))
                                             .unwrap_or_default()
                                     })
