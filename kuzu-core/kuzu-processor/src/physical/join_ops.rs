@@ -162,7 +162,7 @@ impl PhysicalSemiJoin {
         let mut match_rows: Vec<(usize, usize)> = Vec::new();
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.get(probe_col) {
+                if chunk.fields.get(probe_col).is_some() {
                     let key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
@@ -188,7 +188,7 @@ impl PhysicalSemiJoin {
         for (out_idx, (ci, row)) in match_rows.iter().enumerate() {
             if let Some(chunk) = probe_chunks.get(*ci) {
                 for (col, out_field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
-                    if let Some(field) = chunk.fields.get(col) {
+                    if chunk.fields.get(col).is_some() {
                         let val = chunk.get_value(col, *row).unwrap_or(Value::Null);
                         let _ = out_field.set_value(out_idx, &val);
                     }
@@ -234,7 +234,7 @@ impl PhysicalAntiJoin {
         let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for chunk in build_chunks {
             for row in 0..chunk.size {
-                if let Some(field) = chunk.fields.get(build_col) {
+                if chunk.fields.get(build_col).is_some() {
                     let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
@@ -534,11 +534,7 @@ impl JoinHashTable {
 
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                let key = chunk
-                    .fields
-                    .get(build_col)
-                    .and_then(|_| { /* this is wrong, need to fix */ None })
-                    .unwrap_or(Value::Null);
+                let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                 if matches!(key, Value::Null) {
                     continue;
                 }
@@ -564,11 +560,7 @@ impl JoinHashTable {
                 let mut local: hashbrown::HashMap<u64, Vec<(usize, usize)>> =
                     hashbrown::HashMap::with_capacity(chunk.size * 4 / 3);
                 for row in 0..chunk.size {
-                    let key = chunk
-                        .fields
-                        .get(build_col)
-                        .and_then(|_| { /* this is wrong, need to fix */ None })
-                        .unwrap_or(Value::Null);
+                    let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
                     if matches!(key, Value::Null) {
                         continue;
                     }
@@ -628,11 +620,7 @@ impl JoinHashTable {
 
         for (pci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                let probe_key = chunk
-                    .fields
-                    .get(probe_col)
-                    .and_then(|_| { /* this is wrong, need to fix */ None })
-                    .unwrap_or(Value::Null);
+                let probe_key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
                 if matches!(probe_key, Value::Null) {
                     continue;
                 }
@@ -641,11 +629,7 @@ impl JoinHashTable {
                 if let Some(locations) = hash_table.get(&probe_hash) {
                     // Verify key equality for each candidate
                     for &(bci, brow) in locations {
-                        let build_key = build_chunks[bci]
-                            .fields
-                            .get(build_col)
-                            .and_then(|_| { /* this is wrong, need to fix */ None })
-                            .unwrap_or(Value::Null);
+                        let build_key = build_chunks[bci].get_value(build_col, brow).unwrap_or(Value::Null);
                         if build_key == probe_key {
                             matches.push((bci, brow, pci, row));
                         }
