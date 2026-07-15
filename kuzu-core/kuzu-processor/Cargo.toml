@@ -20,6 +20,7 @@ kuzu-parser = { path = "../kuzu-parser" }
 kuzu-fts = { path = "../kuzu-fts" }
 tracing.workspace = true
 hashbrown.workspace = true
+ahash.workspace = true
 rayon.workspace = true
 arrow.workspace = true
 

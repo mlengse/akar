@@ -2,8 +2,8 @@
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use std::collections::HashMap;
-use crate::physical::types::{OperatorResult, HashJoinBucket, HashJoinTable, NodeSemiMask};
-use crate::physical::common::{store_value_in_vector, value_hash};
+use crate::physical::types::{OperatorResult, HashJoinTable, NodeSemiMask};
+use crate::physical::common::{store_value_in_vector, value_hash, value_hash_fast};
 // ==================== CrossProduct ====================
 
 /// Physical cross product (Cartesian product) operator.
@@ -481,6 +481,12 @@ impl PhysicalIntersect {
 // ==================== JoinHashTable ====================
 
 /// A hash table for hash join operations with parallel build support.
+///
+/// Optimized with:
+/// - `ahash` for fast integer hashing (3-5× faster than SipHash)
+/// - Flat bucket design: `HashMap<u64, Vec<(usize, usize)>>` — no Value cloning in buckets
+/// - Pre-sized hash map based on total build rows (zero reallocations)
+/// - Bulk output construction instead of per-row set_value
 pub struct JoinHashTable {
     build_columns: Vec<u32>,
     probe_columns: Vec<u32>,
@@ -494,14 +500,16 @@ impl JoinHashTable {
         }
     }
 
-    pub fn build(&self, build_chunks: &[DataChunk]) -> hashbrown::HashMap<u64, HashJoinBucket> {
+    /// Build phase: create a flat hash table mapping key hashes to (chunk_idx, row_idx) pairs.
+    /// The hash table is pre-sized and uses ahash for fast integer hashing.
+    pub fn build(&self, build_chunks: &[DataChunk]) -> hashbrown::HashMap<u64, Vec<(usize, usize)>> {
         let total_rows: usize = build_chunks.iter().map(|c| c.size).sum();
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
 
         if total_rows > 1000 {
-            self.build_parallel(build_chunks, build_col)
+            self.build_parallel(build_chunks, build_col, total_rows)
         } else {
-            self.build_sequential(build_chunks, build_col)
+            self.build_sequential(build_chunks, build_col, total_rows)
         }
     }
 
@@ -509,8 +517,12 @@ impl JoinHashTable {
         &self,
         build_chunks: &[DataChunk],
         build_col: usize,
-    ) -> hashbrown::HashMap<u64, HashJoinBucket> {
-        let mut table: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+        total_rows: usize,
+    ) -> hashbrown::HashMap<u64, Vec<(usize, usize)>> {
+        // Pre-size to ~75% load factor to avoid rehashing
+        let mut table: hashbrown::HashMap<u64, Vec<(usize, usize)>> =
+            hashbrown::HashMap::with_capacity(total_rows * 4 / 3);
+
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 let key = chunk
@@ -521,21 +533,27 @@ impl JoinHashTable {
                 if matches!(key, Value::Null) {
                     continue;
                 }
-                let hash = value_hash(&key);
-                table.entry(hash).or_default().push((key, vec![(ci, row)]));
+                let hash = value_hash_fast(&key);
+                table.entry(hash).or_insert_with(|| Vec::with_capacity(4)).push((ci, row));
             }
         }
         table
     }
 
-    fn build_parallel(&self, build_chunks: &[DataChunk], build_col: usize) -> hashbrown::HashMap<u64, HashJoinBucket> {
+    fn build_parallel(
+        &self,
+        build_chunks: &[DataChunk],
+        build_col: usize,
+        total_rows: usize,
+    ) -> hashbrown::HashMap<u64, Vec<(usize, usize)>> {
         use rayon::prelude::*;
 
-        let tables: Vec<hashbrown::HashMap<u64, HashJoinBucket>> = build_chunks
+        let tables: Vec<hashbrown::HashMap<u64, Vec<(usize, usize)>>> = build_chunks
             .par_iter()
             .enumerate()
             .map(|(ci, chunk)| {
-                let mut local: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+                let mut local: hashbrown::HashMap<u64, Vec<(usize, usize)>> =
+                    hashbrown::HashMap::with_capacity(chunk.size * 4 / 3);
                 for row in 0..chunk.size {
                     let key = chunk
                         .fields
@@ -545,35 +563,61 @@ impl JoinHashTable {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    let hash = value_hash(&key);
-                    local.entry(hash).or_default().push((key, vec![(ci, row)]));
+                    let hash = value_hash_fast(&key);
+                    local.entry(hash).or_insert_with(|| Vec::with_capacity(4)).push((ci, row));
                 }
                 local
             })
             .collect();
 
-        let mut merged: hashbrown::HashMap<u64, HashJoinBucket> = hashbrown::HashMap::new();
+        // Merge: pre-size the final table
+        let mut merged: hashbrown::HashMap<u64, Vec<(usize, usize)>> =
+            hashbrown::HashMap::with_capacity(total_rows * 4 / 3);
         for local in tables {
-            for (hash, bucket) in local {
-                merged.entry(hash).or_default().extend(bucket);
+            for (hash, locations) in local {
+                merged.entry(hash).or_insert_with(|| Vec::with_capacity(locations.len())).extend(locations);
             }
         }
         merged
     }
 
+    /// Probe phase: for each probe row, look up matching build rows by key hash,
+    /// then verify key equality. Outputs combined build+probe columns.
     pub fn probe(
         &self,
-        hash_table: &hashbrown::HashMap<u64, HashJoinBucket>,
+        hash_table: &hashbrown::HashMap<u64, Vec<(usize, usize)>>,
         build_chunks: &[DataChunk],
         probe_chunks: &[DataChunk],
     ) -> OperatorResult {
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
-        let mut output_rows: Vec<Vec<(Value, bool)>> = Vec::new();
-        let mut output_types: Vec<PhysicalTypeID> = Vec::new();
-        let mut built_cols = false;
-        let mut num_build_fields = 0usize;
+        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
 
-        for chunk in probe_chunks {
+        // Determine output schema from build + probe
+        let num_build_fields = build_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let num_probe_fields = probe_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let total_cols = num_build_fields + num_probe_fields;
+
+        if total_cols == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Collect output types
+        let mut output_types: Vec<PhysicalTypeID> = Vec::with_capacity(total_cols);
+        if let Some(bc) = build_chunks.first() {
+            for col in 0..bc.num_fields() {
+                output_types.push(bc.field(col).physical_type());
+            }
+        }
+        if let Some(pc) = probe_chunks.first() {
+            for col in 0..pc.num_fields() {
+                output_types.push(pc.field(col).physical_type());
+            }
+        }
+
+        // First pass: collect matching (build_chunk_idx, build_row, probe_chunk_idx, probe_row) tuples
+        let mut matches: Vec<(usize, usize, usize, usize)> = Vec::new();
+
+        for (pci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 let probe_key = chunk
                     .fields
@@ -583,70 +627,64 @@ impl JoinHashTable {
                 if matches!(probe_key, Value::Null) {
                     continue;
                 }
-                let probe_hash = value_hash(&probe_key);
+                let probe_hash = value_hash_fast(&probe_key);
 
-                if let Some(bucket) = hash_table.get(&probe_hash) {
-                    for (build_key, locations) in bucket {
-                        if build_key != &probe_key {
-                            continue;
-                        }
-
-                        if !built_cols {
-                            num_build_fields = build_chunks[0].num_fields();
-                            let total_cols = num_build_fields + chunk.num_fields();
-                            for col in 0..num_build_fields {
-                                if let Some(f) = build_chunks[0].fields.get(col) {
-                                    output_types.push(f.physical_type());
-                                }
-                            }
-                            for col in 0..chunk.num_fields() {
-                                if let Some(f) = chunk.fields.get(col) {
-                                    output_types.push(f.physical_type());
-                                }
-                            }
-                            output_rows = (0..total_cols).map(|_| Vec::new()).collect();
-                            built_cols = true;
-                        }
-
-                        for &(bci, brow) in locations {
-                            for col in 0..build_chunks[bci].num_fields() {
-                                if let Some(field) = build_chunks[bci].fields.get(col) {
-                                    let val = field.get_value(brow).unwrap_or(Value::Null);
-                                    output_rows[col].push((val, field.is_null(brow)));
-                                }
-                            }
-                            let offset = num_build_fields;
-                            for col in 0..chunk.num_fields() {
-                                if let Some(field) = chunk.fields.get(col) {
-                                    let val = field.get_value(row).unwrap_or(Value::Null);
-                                    output_rows[offset + col].push((val, field.is_null(row)));
-                                }
-                            }
+                if let Some(locations) = hash_table.get(&probe_hash) {
+                    // Verify key equality for each candidate
+                    for &(bci, brow) in locations {
+                        let build_key = build_chunks[bci]
+                            .fields
+                            .get(build_col)
+                            .and_then(|f| f.get_value(brow))
+                            .unwrap_or(Value::Null);
+                        if build_key == probe_key {
+                            matches.push((bci, brow, pci, row));
                         }
                     }
                 }
             }
         }
 
-        if !built_cols {
+        if matches.is_empty() {
             return Ok(Vec::new());
         }
 
-        let num_rows = output_rows[0].len();
-        let mut result_fields = Vec::with_capacity(output_rows.len());
-        for (col, row_data) in output_rows.iter().enumerate() {
-            let pt = output_types.get(col).copied().unwrap_or(PhysicalTypeID::Int64);
-            let mut v = ValueVector::new(pt, num_rows);
-            v.resize(num_rows);
-            for (row, (val, _)) in row_data.iter().enumerate() {
-                if matches!(val, Value::Null) {
-                    v.set_null(row, true);
-                } else {
-                    store_value_in_vector(&mut v, row, val);
+        // Second pass: build output DataChunk from collected matches
+        let num_rows = matches.len();
+        let mut result_fields: Vec<ValueVector> = output_types
+            .iter()
+            .map(|t| {
+                let mut v = ValueVector::new(*t, num_rows);
+                v.resize(num_rows);
+                v
+            })
+            .collect();
+
+        for (out_row, &(bci, brow, pci, prow)) in matches.iter().enumerate() {
+            // Copy build-side columns
+            for col in 0..num_build_fields {
+                if let Some(field) = build_chunks[bci].fields.get(col) {
+                    let val = field.get_value(brow).unwrap_or(Value::Null);
+                    if matches!(val, Value::Null) {
+                        result_fields[col].set_null(out_row, true);
+                    } else {
+                        store_value_in_vector(&mut result_fields[col], out_row, &val);
+                    }
                 }
             }
-            result_fields.push(v);
+            // Copy probe-side columns
+            for col in 0..num_probe_fields {
+                if let Some(field) = probe_chunks[pci].fields.get(col) {
+                    let val = field.get_value(prow).unwrap_or(Value::Null);
+                    if matches!(val, Value::Null) {
+                        result_fields[num_build_fields + col].set_null(out_row, true);
+                    } else {
+                        store_value_in_vector(&mut result_fields[num_build_fields + col], out_row, &val);
+                    }
+                }
+            }
         }
+
         Ok(vec![DataChunk {
             fields: result_fields,
             size: num_rows,

@@ -99,3 +99,46 @@ pub(crate) fn value_hash(val: &Value) -> u64 {
     }
     hasher.finish()
 }
+
+/// Fast hash using ahash — ~3-5× faster than SipHash for integer keys.
+/// Used in the hot path of JoinHashTable build/probe.
+pub(crate) fn value_hash_fast(val: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = ahash::AHasher::default();
+    match val {
+        Value::Null => 0u8.hash(&mut hasher),
+        Value::Bool(b) => b.hash(&mut hasher),
+        Value::Int64(i) => i.hash(&mut hasher),
+        Value::Int32(i) => i.hash(&mut hasher),
+        Value::Int16(i) => i.hash(&mut hasher),
+        Value::Int8(i) => i.hash(&mut hasher),
+        Value::UInt64(i) => i.hash(&mut hasher),
+        Value::Double(f) => f.to_bits().hash(&mut hasher),
+        Value::Float(f) => f.to_bits().hash(&mut hasher),
+        Value::String(s) => s.hash(&mut hasher),
+        Value::Date(d) => d.0.hash(&mut hasher),
+        Value::Timestamp(t) => t.0.hash(&mut hasher),
+        Value::InternalID(id) => id.offset.hash(&mut hasher),
+        _ => std::mem::discriminant(val).hash(&mut hasher),
+    }
+    hasher.finish()
+}
+
+/// Hash raw i64 key bytes directly — avoids Value boxing entirely.
+#[inline]
+pub(crate) fn raw_key_hash_i64(val: i64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = ahash::AHasher::default();
+    val.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Hash raw bytes for string keys.
+#[inline]
+pub(crate) fn raw_key_hash_bytes(val: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = ahash::AHasher::default();
+    val.hash(&mut hasher);
+    hasher.finish()
+}
+
