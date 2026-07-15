@@ -50,7 +50,7 @@ pub(crate) fn evaluate_array(op: ArrayOp, args: &[Value]) -> Result<Value, Strin
             let sum_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
             Ok(Value::Double(sum_sq.sqrt()))
         }
-        ArrayOp::InnerProduct => {
+        ArrayOp::InnerProduct | ArrayOp::DotProduct => {
             let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
             Ok(Value::Double(dot))
         }
@@ -68,6 +68,20 @@ pub(crate) fn evaluate_array(op: ArrayOp, args: &[Value]) -> Result<Value, Strin
         ArrayOp::SquaredDistance => {
             let sum_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
             Ok(Value::Double(sum_sq))
+        }
+        ArrayOp::Intersect => {
+            // Intersect two numeric arrays, preserving only common elements.
+            let mut set_b = std::collections::HashSet::new();
+            for item in b {
+                set_b.insert(item.to_bits());
+            }
+            let mut result = Vec::new();
+            for item in a {
+                if set_b.contains(&item.to_bits()) {
+                    result.push(Value::Double(item));
+                }
+            }
+            Ok(Value::List(result))
         }
     }
 }
