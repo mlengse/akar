@@ -1770,6 +1770,7 @@ dependencies = [
  "kuzu-common",
  "kuzu-main",
  "kuzu-storage",
+ "tempfile",
 ]
 
 [[package]]

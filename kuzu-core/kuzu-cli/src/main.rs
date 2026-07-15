@@ -67,7 +67,7 @@ impl CliState {
         let catalog = db.catalog();
         let conn = Connection::new(&db);
         Ok(Self {
-            mode: OutputMode::Table,
+            mode: OutputMode::Box,
             conn,
             catalog,
         })
