@@ -5,50 +5,14 @@ use super::{get_string};
 
 // ==================== Blob functions ====================
 
-const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+use base64::prelude::*;
 
 fn encode_base64(data: &[u8]) -> String {
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = chunk.get(1).copied().unwrap_or(0);
-        let b2 = chunk.get(2).copied().unwrap_or(0);
-        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
-        
-        result.push(BASE64_CHARS[(n >> 18) as usize & 63] as char);
-        result.push(BASE64_CHARS[(n >> 12) as usize & 63] as char);
-        result.push(if chunk.len() > 1 { BASE64_CHARS[(n >> 6) as usize & 63] as char } else { '=' });
-        result.push(if chunk.len() > 2 { BASE64_CHARS[n as usize & 63] as char } else { '=' });
-    }
-    result
+    BASE64_STANDARD.encode(data)
 }
 
 fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
-    let mut result = Vec::with_capacity(s.len() * 3 / 4);
-    let mut buffer = 0u32;
-    let mut bits = 0;
-    
-    for c in s.chars() {
-        if c == '=' { break; }
-        if c.is_whitespace() { continue; }
-        
-        let val = match c {
-            'A'..='Z' => c as u32 - 'A' as u32,
-            'a'..='z' => c as u32 - 'a' as u32 + 26,
-            '0'..='9' => c as u32 - '0' as u32 + 52,
-            '+' => 62,
-            '/' => 63,
-            _ => return Err(format!("Invalid base64 character: {}", c)),
-        };
-        
-        buffer = (buffer << 6) | val;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            result.push((buffer >> bits) as u8);
-        }
-    }
-    Ok(result)
+    BASE64_STANDARD.decode(s).map_err(|e| format!("Invalid base64: {}", e))
 }
 
 /// Evaluate a blob function.
