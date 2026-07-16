@@ -13,7 +13,11 @@
 
 use crate::column::Column;
 use crate::update_info::UpdateInfo;
-use kuzu_common::types::Value;
+use arrow::array::{
+    BooleanBuilder, Int64Builder, Int32Builder, Int16Builder, Int8Builder,
+    Float64Builder, Float32Builder, StringBuilder, ArrayRef,
+};
+use kuzu_common::types::{PhysicalTypeID, Value};
 
 /// Default number of rows per column chunk (matches C++ Kuzu default).
 pub const NODE_GROUP_SIZE: usize = 4096;
@@ -226,6 +230,118 @@ impl ColumnChunk {
     /// Capacity of this chunk.
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Convert buffered values directly into an Arrow array, skipping
+    /// intermediate `Vec<Vec<Value>>` materialization.
+    ///
+    /// This is the key optimization for the scan path: instead of cloning
+    /// every Value into a `Vec<Vec<Value>>` and then building Arrow arrays
+    /// from that, we read directly from `self.values` into Arrow builders.
+    pub fn to_arrow_array(&self, phys_type: PhysicalTypeID) -> ArrayRef {
+        let size = self.values.len();
+        match phys_type {
+            PhysicalTypeID::Bool => {
+                let mut builder = BooleanBuilder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Bool(b) => builder.append_value(*b),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int64 => {
+                let mut builder = Int64Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Int64(n) => builder.append_value(*n),
+                        Value::Int32(n) => builder.append_value(*n as i64),
+                        Value::Int16(n) => builder.append_value(*n as i64),
+                        Value::Int8(n) => builder.append_value(*n as i64),
+                        Value::UInt64(n) => builder.append_value(*n as i64),
+                        Value::UInt32(n) => builder.append_value(*n as i64),
+                        Value::UInt16(n) => builder.append_value(*n as i64),
+                        Value::UInt8(n) => builder.append_value(*n as i64),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int32 => {
+                let mut builder = Int32Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Int32(n) => builder.append_value(*n),
+                        Value::Int16(n) => builder.append_value(*n as i32),
+                        Value::Int8(n) => builder.append_value(*n as i32),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int16 => {
+                let mut builder = Int16Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Int16(n) => builder.append_value(*n),
+                        Value::Int8(n) => builder.append_value(*n as i16),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int8 => {
+                let mut builder = Int8Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Int8(n) => builder.append_value(*n),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Double => {
+                let mut builder = Float64Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Double(n) => builder.append_value(*n),
+                        Value::Float(n) => builder.append_value(*n as f64),
+                        Value::Int64(n) => builder.append_value(*n as f64),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Float => {
+                let mut builder = Float32Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::Float(n) => builder.append_value(*n),
+                        Value::Double(n) => builder.append_value(*n as f32),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::String => {
+                let mut builder = StringBuilder::with_capacity(size, size * 16);
+                for v in &self.values {
+                    match v {
+                        Value::String(s) => builder.append_value(s),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            _ => {
+                let mut builder = Int64Builder::with_capacity(size);
+                for _ in 0..size {
+                    builder.append_null();
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+        }
     }
 }
 
