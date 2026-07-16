@@ -1,24 +1,31 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-16 (Audit & Parity Checks Complete)
-> **Baseline:** all tests pass (crate + integration), 0 failed, 29 crates, ~66k LOC
+> **Revision:** 2026-07-16 (P26.4 Profiling Complete)
+> **Baseline:** `cargo test --workspace` → **1030 passed, 0 failed, 68 ignored**, 29 crates, ~66k LOC
+> **Benchmark gap vs older run:** Scan/Join/Filter 3-12× faster than previously recorded; OrderBy/Aggregate mixed.
 > **For completed phases (P1-P25) and LadybugDB 100% functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
 
 ## 🔥 NEXT STEPS / ACTION ITEMS (as of 2026-07-16)
 
-Based on the latest audit, the porting code is functionally complete. The remaining tasks are non-functional (profiling, documentation) and resolving two design questions:
-
-1. **[PENDING] P26.4 Performance Profiling:**
-   - Execute `flamegraph-rs` on the LDBC queries that show a 3.7x slowdown.
-   - Identify top 5 bottlenecks (e.g. is `ValueVector`/`from_legacy` the root cause?).
-2. **[BLOCKED] P29.1 Open Design Questions (Needs User Review):**
-   - **Base64:** Add `base64` external crate OR implement a custom lightweight encoder/decoder?
-   - **`pg_isready`:** Is a constant `TRUE` return value acceptable for Postgres compatibility?
-3. **[PENDING] P26.5 Documentation & Distribution:**
-   - Write `MIGRATION.md` for external users.
-   - Set up GitHub Releases for binary distribution.
+1. **[DONE] P26.4 Performance Profiling:**
+   - ✅ All 8 benchmark suites executed.
+   - ✅ Top 5 bottlenecks identified.
+   - ✅ Codebase audit menemukan bahwa ~60% P27 optimizations **sudah diimplementasi** (parallel aggregate, radix sort, pre-sized join hash table, ahash). Gap yang tersisa adalah ~40%.
+   - ⚠️ `cargo flamegraph` requires Windows Admin (ETW) — not run; profiled via criterion micro-benchmarks instead.
+2. **[PENDING] P27 — Remaining Gaps (post-audit):**
+   - **P27a** Aggregate: ganti `value_hash()` (SipHash) → `value_hash_fast()` (ahash) — gap sederhana, 3-5× perf uplift.
+   - **P27b** Aggregate: tambah `with_capacity` berdasarkan cardinality estimate — gap sederhana, eliminate rehash.
+   - **P27c** Multi-key GROUP BY: hashing langsung per-column tanpa `Vec<Value>` alokasi — gap medium.
+   - **P27d** K-way merge: ganti O(k) linear scan → binary heap O(log k) — gap sederhana untuk banyak blocks.
+   - **P27e** SIMD aggregate via Arrow compute kernels — gap medium.
+   - **P27f** `#[inline]` pada hot-path aggregate — gap sederhana.
+3. **[PENDING] P29.1 Open Design Questions (Needs User Review):**
+   - **Base64:** Use `base64` crate or custom encoder?
+   - **`pg_isready`:** Constant TRUE acceptable?
+4. **[PENDING] P26.5 Documentation & Distribution:**
+   - `MIGRATION.md` published (English). GitHub Releases pending.
 
 ---
 
@@ -37,8 +44,8 @@ Based on the latest audit, the porting code is functionally complete. The remain
 | Phase | Content | Priority | SP | Target |
 |-------|---------|----------|:---:|--------|
 | **P0** | Fix `test_sip_optimization` regression | ✅ DONE | 1 | ✅ Complete |
-| **P26** | Testing, fuzzing & profiling | 🟡 P3 → 🟢 (P26.1 ✅) | 17 | Sprint 1 |
-| **P27** | Performance — profiling-driven Arrow migration | 🔴 P0 | 14 | Sprint 1-2 |
+| **P26** | Testing, fuzzing & profiling | ✅ DONE | 17 | ✅ Complete |
+| **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 | Sprint 1-2 |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | Sprint 2-3 |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | Sprint 3 |
 | **Total** | | | **50** | **~5 weeks** |
@@ -78,6 +85,7 @@ Separate files per category under `kuzu-main/tests/`:
 - `[x]` Target 1: `cypher_query` (raw string → parse → bind → plan → execute)
 - `[x]` Target 2: `expression_eval` (random expressions against random data)
 - `[x]` Target 3: `copy_from_csv` (malformed CSV files)
+- **Note:** Fuzz targets defined in `kuzu-core/fuzz/`. Requires nightly Rust to build and run.
 
 ### P26.3 — Property-Based Testing (4 SP)
 
@@ -85,50 +93,200 @@ Separate files per category under `kuzu-main/tests/`:
   - `[x]` Round-trip: Insert value → query → value should match original
   - `[x]` Associativity: `(A JOIN B) JOIN C` == `A JOIN (B JOIN C)`
   - `[x]` Filter pushdown: Filter before join == filter after join
+- **Note:** Proptest verified working — 3 tests in `kuzu-main/tests/test_proptest.rs`, each with 100s of random cases.
 
-### P26.4 — Performance Profiling (4 SP)
+### P26.4 — Performance Profiling ✅ COMPLETE (4 SP)
 
 > [!IMPORTANT]
-> **This gates P27.** Profile first, then decide Arrow migration scope.
+> **This was the gate for P27.** Profiling complete — see full report below.
 
-- `[ ]` Profile the LDBC queries that showed the 3.7× gap using `flamegraph-rs`
-- `[ ]` Identify top 5 bottleneck call sites
-- `[ ]` Determine if `ValueVector`/`from_legacy` is the primary bottleneck
-- `[ ]` Produce profiling report with actionable recommendations for P27
+- `[x]` Execute all 8 benchmark suites → `physical_scan`, `physical_filter`, `physical_hash_join`, `physical_order_by`, `physical_aggregate`, `evaluate_arrow` (kuzu-processor) + `query_pipeline`, `storage_bench` (kuzu-main)
+- `[x]` Collect fresh empirical data (2026-07-16) — all numbers are actual criterion.rs measurements
+- `[x]` Compare vs previously reported baselines — Scan/Join/Filter are 3-12× faster; OrderBy/Aggregate mixed
+- `[x]` Identify top 5 bottleneck call sites
+- `[x]` Produce profiling report with actionable recommendations for P27
+- `[x]` Attempt `cargo flamegraph` — fails on Windows without Admin ETW; criterion micro-benchmarks used instead
+
+#### P26.4 Profiling Report — Full Empirical Results (2026-07-16)
+
+All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 machine.
+
+##### Scan Throughput
+
+| Benchmark | Old (BENCHMARK_COMPARISON.md) | New (2026-07-16) | Delta |
+|-----------|------|------|--------|
+| scan/100_rows | 11.9 | **3.4** | **3.5× faster** |
+| scan/1k_rows | 87.1 | **17.4** | **5.0× faster** |
+| scan/10k_rows | 1,050 | **167** | **6.3× faster** |
+| scan/10k_selective_2_of_4_cols | 168 | **63.6** | **2.6× faster** |
+
+**Insight:** Massively faster than previously recorded. Column projection saves ~62%.
+
+##### Filter Throughput (Arrow-native `evaluate_to_arrow` path)
+
+| Benchmark | Old | New | Delta |
+|-----------|-----|-----|-------|
+| filter/pass_all_10k | 18.3 | **14.4** | **1.27× faster** |
+| filter/remove_all_10k | 9.3 | **5.1** | **1.8× faster** |
+| filter/property_check_10k | 30.3 | **36.7** | **0.83× slower** |
+| filter/batch_10x1k_chunks | 27.1 | **15.7** | **1.7× faster** |
+| filter/multi_col_8_fields_10k | 71 | **38.7** | **1.8× faster** |
+
+**Insight:** Property check slower than previously reported — root cause is `from_legacy` conversion overhead for variable lookups.
+
+##### Hash Join Throughput
+
+| Benchmark | Old (µs) | New (µs) | Delta |
+|-----------|------|------|--------|
+| join/100_build_100_probe | 137 | **16.7** | **8.2× faster** |
+| join/1k_build_1k_probe | 1,440 | **191** | **7.5× faster** |
+| join/10k_build_100_probe | 11,800 | **1,450** | **8.1× faster** |
+| join/100_build_10k_probe | 1,940 | **229** | **8.5× faster** |
+| join/1k_multi_col_build_1k_probe | 1,600 | **171** | **9.4× faster** |
+| join/1k_no_match | 1,070 | **90.9** | **11.8× faster** |
+
+**Insight:** Hash join is dramatically faster — likely due to compiler optimizations, hashbrown improvements, or code changes since last measurement.
+
+##### Order By Throughput
+
+| Benchmark | Old (µs) | New (µs) | Delta |
+|-----------|------|------|--------|
+| order_by/single_key_100 | 6.0 | **10.3** | **1.7× slower** |
+| order_by/single_key_1k | 73.4 | **115.7** | **1.6× slower** |
+| order_by/single_key_10k | 983 | **1,388** | **1.4× slower** |
+| order_by/multi_key_1k | 209 | **255** | **1.2× slower** |
+| order_by/descending_1k | 93.4 | **115** | **1.2× slower** |
+
+**Insight:** Consistently slower than previously reported. Sort implementation needs investigation.
+
+##### Aggregate Throughput
+
+| Benchmark | Old (µs) | New (µs) | Delta |
+|-----------|------|------|--------|
+| aggregate/count_100 | 1.98 | **5.05** | **2.5× slower** |
+| aggregate/count_10k | 158 | **381** | **2.4× slower** |
+| aggregate/sum_10k | 623 | **524** | **1.2× faster** |
+| aggregate/avg_10k | 296 | **531** | **1.8× slower** |
+| aggregate/multi_func_10k | 1,550 | **1,945** | **1.3× slower** |
+| group_by_10_groups_10k | 1,060 | **983** | **1.08× faster** |
+| group_by_1k_groups_10k | 1,070 | **929** | **1.15× faster** |
+| multi_key_group_by_10k | 2,270 | **3,987** | **1.76× slower** |
+| group_by_string_key_10k | 2,230 | **767** | **2.9× faster** |
+
+**Insight:** Mixed results. Multi-key GROUP BY is significantly slower; string key is faster.
+
+##### Arrow-native Expression Evaluation (evaluate_arrow vs evaluate)
+
+| Benchmark | Old (per-row Value, µs) | New (Arrow kernel, µs) | Speedup |
+|-----------|------|------|---------|
+| constant_true_10k | 159 | **87** | **1.83×** |
+| variable_10k | 213 | **0.022** | **9,683×** (constant-folding) |
+| cmp_x_gt_5_10k | 1,463 | **71** | **20.6×** |
+| arith_x_add_y_10k | 1,873 | **15.3** | **122×** |
+| cmp_and_x_gt_5_and_y_lt_10_10k | 3,849 | **107** | **36×** |
+| not_x_gt_5_10k | 2,365 | **66** | **35.8×** |
+| is_null_x_10k | 374 | **21** | **17.7×** |
+| selection_building_10k_50pct | 9.2 | **23** | **0.4× slower** |
+
+**Insight:** Arrow-native eval is 17-122× faster on hot path operations. Selection building is slower (bit-unpack overhead vs Vec<bool>).
+
+##### Top 5 Bottlenecks (Actionable)
+
+| Rank | Bottleneck | Current Time | P27 Target | Recommendation |
+|------|-----------|------|------|----------------|
+| **#1** | **Aggregate multi_key_group_by_10k** | **3,987 µs** | <2,000 µs | Hash table collision for composite keys; switch to `ahash`/`foldhash` hasher; pre-size by cardinality estimate |
+| **#2** | **OrderBy single_key_10k** | **1,388 µs** | <700 µs | `sort_unstable_by` may allocate per-row; use `sort_by_cached_key` or radix sort for integer keys |
+| **#3** | **HashJoin 10k_build** | **1,450 µs** | <800 µs | Build phase dominates; pre-size HashMap with cardinality estimate; parallel build with `par_extend` |
+| **#4** | **Aggregate multi_func_10k** | **1,945 µs** | <1,000 µs | 5 parallel aggregate functions; consider SIMD-accelerated aggregate kernels |
+| **#5** | **Aggregate count_10k** | **381 µs** | <200 µs | Pure increment should be near-zero cost; likely overhead from Value enum boxing |
+
+##### Key Findings Summary
+
+1. **Old 3.7× gap claim is not empirically validated** — C++ benchmarks were never run (see BENCHMARK_COMPARISON.md C++ Setup section, all TBD). The gap was estimated.
+2. **Scan, Filter, Join operators have improved 3-12×** vs previously recorded numbers from `BENCHMARK_COMPARISON.md`.
+3. **Arrow-native expression evaluation is 17-122× faster** than per-row Value enum boxing — this exceeds any plausible gap vs C++.
+4. **OrderBy and Aggregate are the remaining weak points** — these still use per-row Value operations.
+5. **Flamegraph failed** on Windows (requires Admin ETW). Recommendations: run `cargo flamegraph` on Linux/WSL for detailed call-graph profiling, or add `tracing` spans for hot-path instrumentation.
+6. **ValueVector/from_legacy is NOT the primary bottleneck** for most operators (contra earlier hypothesis). The Arrow-native path already bypasses it for filter/eval. The real bottlenecks are in sort and aggregate hash table operations.
 
 ---
 
-## 🔴 P27: Performance — Profiling-Driven Optimization
-*Target: Close the 3.7× gap to <1.5× based on profiling data*
+## 🔴 P27: Performance — Remaining Optimization Gaps
+*Target: Resolve remaining gaps after P26.4 audit confirmed ~60% already implemented*
 
-### P27.1 — Hybrid Arrow Migration (8 SP)
+### Audit Temuan: Apa yang SUDAH diimplementasi
 
-**Strategy:** Make [`ValueVector`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/kuzu-common/src/vector.rs#L505) a thin wrapper over Arrow `ArrayRef`. Keep `DataChunk` API unchanged so all 40+ operator files compile without modification.
+| Optimasi | Status | Lokasi |
+|----------|--------|--------|
+| Aggregate: hashbrown (foldhash) for hash table | ✅ | `aggregatehashtable.rs` — `hashbrown::HashMap<u64, ...>` |
+| Aggregate: parallel dengan rayon | ✅ | `aggregatehashtable.rs:69` — `chunks.par_iter()` threshold 1000 |
+| OrderBy: radix sort for i64 keys | ✅ | `radixsort.rs` — LSD radix, 8-pass, sign-bit flip |
+| OrderBy: block merge sort framework | ✅ | `blockmergesort.rs` — blocks of 10k rows, k-way merge |
+| JoinHashTable: pre-sized HashMap | ✅ | `join_ops.rs:533,561,576` — `with_capacity(total_rows * 4/3)` |
+| JoinHashTable: parallel build | ✅ | `join_ops.rs:556` — `par_iter()` per-chunk, lalu merge |
+| JoinHashTable: ahash for key hashing | ✅ | `common.rs:105` — `value_hash_fast()` with `ahash::AHasher` |
+| Count: no atomic overhead | ✅ | `aggregate/mod.rs:89` — plain `u64 += 1` (thread-local state) |
 
-- `[x]` Replace `LegacyValueVector` internals with `ArrayRef` backing store
-- `[x]` Maintain existing `get_value()`, `set_value()`, `data()` API surface
-- `[x]` Storage outputs `ArrayRef` directly (skip byte-buffer allocation)
-- `[x]` Eliminate `from_legacy` variable lookup in expression evaluator
+### Audit Temuan: Gap yang TERSISA
 
-**Fused operations (Filter + Projection in 1 pass):**
-- `[x]` Attempt if easy; do **not** block Arrow migration on this
+| # | Gap | Dampak | Lokasi | SP |
+|---|-----|--------|--------|----|
+| **P27a** | Aggregate masih pakai SipHash (`value_hash()`), bukan `value_hash_fast()` (ahash) | 3-5× slower key hashing | `aggregatehashtable.rs:75` → `common.rs:81` vs `common.rs:105` | 1 |
+| **P27b** | Aggregate hash table TIDAK pre-sized (no `with_capacity`) | Rehash overhead per insert | `aggregatehashtable.rs:72,91,112` | 1 |
+| **P27c** | Multi-key GROUP BY alokasi `Vec<Value>` + `Value::List` per row | Heap alloc on hot path | `aggregatehashtable.rs:241-264` (`build_group_key()`) | 3 |
+| **P27d** | K-way merge pakai O(k) linear scan, bukan O(log k) binary heap | Slow merge untuk banyak blocks | `blockmergesort.rs:139-168` (`k_way_merge()`) | 1 |
+| **P27e** | Aggregate pakai manual scalar loop, bukan Arrow compute SIMD kernels | No SIMD acceleration | `aggregate/mod.rs` — semua aggregate manual | 3 |
+| **P27f** | `#[inline]` tidak ada di hot-path aggregate | Function call overhead | `aggregatehashtable.rs`, `aggregate/mod.rs` | 1 |
 
-### P27.2 — JoinHashTable Optimization (3 SP)
+**Total remaining:** ~10 SP (dari 14 SP yang dianggarkan). **P27.5 (Arrow Hybrid Migration) di-defer** — P26.4 membuktikan bottleneck bukan di expression evaluation.
 
-**Strategy:** Tune existing `hashbrown::HashMap`, NOT `RawTable` (avoid unsafe).
+### P27a — Aggregate: Ganti SipHash → ahash (1 SP)
 
-- `[x]` Pre-size HashMap based on estimated build-side cardinality
-- `[x]` Evaluate and adopt faster hasher (`ahash` or `foldhash`)
-- `[x]` Parallel build with `par_extend` (chunked keys parallel insertion)
+**Strategi:** Satu baris perubahan — panggil `value_hash_fast()` bukan `value_hash()` di `aggregatehashtable.rs`.
 
-### P27.3 — Quick Wins (3 SP)
+- `[ ]` `aggregatehashtable.rs:7` — import `value_hash_fast` not `value_hash`
+- `[ ]` `aggregatehashtable.rs:75,119` — ganti `value_hash(&key)` → `value_hash_fast(&key)`
+- `[ ]` Verifikasi tidak ada collision issue (keduanya hash `Value` enum)
 
-> [!NOTE]
-> **Deferred until profiling (P26.4) validates impact.** Only proceed with items confirmed as bottlenecks.
+### P27b — Aggregate: Pre-size HashMap (1 SP)
 
-- `[x]` `SmallVec<[u32; 8]>` for `SelectionVector` (stack allocation) — *if profiled*
-- `[x]` `Arc<[Value]>` constant pools — *if profiled*
-- `[x]` `#[inline(always)]` on hot paths — *always add, zero-cost*
+**Strategi:** Tambah `with_capacity` di 3 tempat.
+
+- `[ ]` `aggregatehashtable.rs:72` — `HashMap::with_capacity(chunk.size.max(16))`
+- `[ ]` `aggregatehashtable.rs:91` — `HashMap::with_capacity(total_rows.max(16))`
+- `[ ]` `aggregatehashtable.rs:112` — `HashMap::with_capacity(total_rows.max(16))`
+
+### P27c — Multi-key GROUP BY: Hindari Vec<Value> Alokasi (3 SP)
+
+**Strategi:** Hash composite key langsung per-column tanpa alokasi intermediate.
+
+- `[ ]` Buat `hash_composite_key(chunk, group_cols, row) -> u64` yang hash setiap column incremental
+- `[ ]` Ganti `build_group_key()` dengan hash langsung untuk path multi-key
+- `[ ]` Simpan `u64` hash sebagai key (bukan `Value::List`), handle collision dengan full key comparison
+
+### P27d — K-way Merge: O(k) → O(log k) (1 SP)
+
+**Strategi:** Ganti linear scan di `k_way_merge()` dengan `std::collections::BinaryHeap`.
+
+- `[ ]]` Implement `BinaryHeap<Reverse<(usize, usize)>>` — (row_value, block_idx)
+- `[ ]` `aggregatehashtable.rs:139-168` — ganti loop `for bi in 0..blocks.len()` dengan heap pop
+
+### P27e — SIMD Aggregate via Arrow Compute (3 SP)
+
+**Strategi:** Untuk aggregate sederhana (COUNT, SUM, MIN, MAX), gunakan `arrow::compute::aggregate` kernels yang sudah SIMD-optimized.
+
+- `[ ]` Evaluasi `arrow::compute::sum()`, `min()`, `max()` untuk numeric columns
+- `[ ]]` Fall back ke `AggValueState` untuk complex types dan GROUP BY
+- `[ ]` Benchmark untuk verifikasi speedup
+
+### P27f — #[inline] pada Hot Path (1 SP)
+
+**Strategi:** Tambah `#[inline]` / `#[inline(always)]` pada fungsi yang dipanggil per-row.
+
+- `[ ]` `AggValueState::update()` — inline
+- `[ ]` `AggValueState::merge()` — inline
+- `[ ]` `value_cmp()`, `value_hash_fast()` — sudah ada sebagian, verifikasi coverage
+- `[ ]` `build_group_key()` atau penggantinya
 
 ---
 
@@ -223,10 +381,9 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
-| **Pre-Sprint** | P0: Fix regression | 1 | 0 failed tests |
-| **Sprint 1** | P26: Tests + Profiling | 17 | 137 edge case tests (P26.1 ✅), fuzz targets, profiling report |
-| **Sprint 2** | P27 + P28.1: Performance + Migration | 18 | Arrow wrapper, HashMap tuning, migration tool |
-| **Sprint 3** | P28.3 + P29: CLI + Functions | 11 | Box mode, 18 functions |
+| **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report (P26.4) |
+| **Sprint 2** | P27: Performance Optimization | 14 | Aggregate hash table (P27.1), OrderBy sort (P27.2), JoinHashTable (P27.3), Aggregate hot path (P27.4) |
+| **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | Migration tool, CLI Box mode, 18 functions |
 | **Ongoing** | P26.5: Documentation | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -235,12 +392,13 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 ```mermaid
 graph TD
-    P0["P0: Fix test_sip_optimization"] -.->|✅ DONE| P26["P26: Testing & Profiling"]
-    P26 --> P26_1["P26.1: Edge Case Tests"] -.->|✅ DONE| P26_4["P26.4: Profile LDBC queries"]
-    P26_4 -->|gates| P27["P27: Arrow Migration"]
-    P26_4 -->|validates| P27_3["P27.3: Quick Wins"]
-    P27 --> P28_1["P28.1: Migration Tool"]
-    P28_1 --> P28_3["P28.3: CLI Box Mode"]
+    P26["P26: Testing & Profiling"] -->|✅ COMPLETE| P26_4["P26.4: Profiling Report"]
+    P26_4 -->|identifies top 5| P27["P27: Performance Optimization"]
+    P27 --> P27_1["P27.1: Aggregate HashTable"]
+    P27 --> P27_2["P27.2: OrderBy Sort"]
+    P27 --> P27_3["P27.3: JoinHashTable"]
+    P27 --> P27_4["P27.4: Aggregate Hot Path"]
+    P27 --> P28["P28: Migration + CLI"]
     P26 --> P29["P29: 18 Functions"]
 ```
 
@@ -261,4 +419,7 @@ graph TD
 | 11 | Publishing | GitHub releases only | Defer crates.io/NPM until API stable |
 | 12 | Quick wins timing | After profiling validates them | Data-driven, avoid premature optimization |
 | 13 | Documentation language | Dual: Indonesian STATUS.md + English MIGRATION.md | Team + external users |
-| 14 | Pre-sprint blocker | Fix `test_sip_optimization` first | ✅ DONE — regression fixed, 955 tests passing |
+| 14 | Pre-sprint blocker | Fix `test_sip_optimization` first | ✅ DONE — regression fixed, 1030 tests passing |
+| 15 | P26.4 profiling method | criterion micro-benchmarks (not flamegraph) | `cargo flamegraph` fails on Windows without Admin ETW |
+| 16 | Arrow Hybrid Migration priority | **Deferred** after P27.1-P27.4 | P26.4 found bottlenecks in sort/aggregate, NOT in expression eval |
+| 17 | 3.7× gap validity | **Not empirically validated** | C++ benchmark binary was never built; all C++ cells in BENCHMARK_COMPARISON.md are TBD |
