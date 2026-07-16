@@ -1,8 +1,24 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-15 (P26.1 complete)
+> **Revision:** 2026-07-16 (Audit & Parity Checks Complete)
 > **Baseline:** all tests pass (crate + integration), 0 failed, 29 crates, ~66k LOC
-> **For completed phases (P1-P25):** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
+> **For completed phases (P1-P25) and LadybugDB 100% functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
+
+---
+
+## 🔥 NEXT STEPS / ACTION ITEMS (as of 2026-07-16)
+
+Based on the latest audit, the porting code is functionally complete. The remaining tasks are non-functional (profiling, documentation) and resolving two design questions:
+
+1. **[PENDING] P26.4 Performance Profiling:**
+   - Execute `flamegraph-rs` on the LDBC queries that show a 3.7x slowdown.
+   - Identify top 5 bottlenecks (e.g. is `ValueVector`/`from_legacy` the root cause?).
+2. **[BLOCKED] P29.1 Open Design Questions (Needs User Review):**
+   - **Base64:** Add `base64` external crate OR implement a custom lightweight encoder/decoder?
+   - **`pg_isready`:** Is a constant `TRUE` return value acceptable for Postgres compatibility?
+3. **[PENDING] P26.5 Documentation & Distribution:**
+   - Write `MIGRATION.md` for external users.
+   - Set up GitHub Releases for binary distribution.
 
 ---
 
