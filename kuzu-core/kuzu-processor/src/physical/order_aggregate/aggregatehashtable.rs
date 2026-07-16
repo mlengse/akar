@@ -4,7 +4,7 @@ use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
 use crate::physical::types::OperatorResult;
-use crate::physical::common::{store_value_in_vector, value_hash};
+use crate::physical::common::{store_value_in_vector, value_hash_fast};
 
 
 // ==================== AggregateHashTable ====================
@@ -69,10 +69,10 @@ impl AggregateHashTable {
         let results: Vec<LocalTable> = chunks
             .par_iter()
             .map(|chunk| {
-                let mut local: LocalTable = hashbrown::HashMap::new();
+                let mut local: LocalTable = hashbrown::HashMap::with_capacity(chunk.size.max(16));
                 for row in chunk.iter_rows() {
                     let key = build_group_key(chunk, group_cols, row);
-                    let hash = value_hash(&key);
+                    let hash = value_hash_fast(&key);
                     let bucket = local.entry(hash).or_default();
                     let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                     if let Some((_, states)) = entry {
@@ -88,7 +88,7 @@ impl AggregateHashTable {
             .collect();
 
         // Merge all local tables
-        let mut merged: LocalTable = hashbrown::HashMap::new();
+        let mut merged: LocalTable = hashbrown::HashMap::with_capacity(total_rows.max(16));
         for local in results {
             for (hash, bucket) in local {
                 let mbucket = merged.entry(hash).or_default();
@@ -109,14 +109,15 @@ impl AggregateHashTable {
 
     /// Sequential aggregation (small inputs).
     fn aggregate_sequential(&self, chunks: &[DataChunk]) -> OperatorResult {
-        let mut groups: hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>> = hashbrown::HashMap::new();
+        let total_rows: usize = chunks.iter().map(|c| c.size).sum();
+        let mut groups: hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>> = hashbrown::HashMap::with_capacity(total_rows.max(16));
         let group_cols = &self.group_by_cols;
         let funcs = &self.funcs;
 
         for chunk in chunks {
             for row in chunk.iter_rows() {
                 let key = build_group_key(chunk, group_cols, row);
-                let hash = value_hash(&key);
+                let hash = value_hash_fast(&key);
                 let bucket = groups.entry(hash).or_default();
                 let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                 if let Some((_, states)) = entry {
