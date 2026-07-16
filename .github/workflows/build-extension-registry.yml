@@ -42,7 +42,7 @@ jobs:
           mkdir -p registry/v${EXTENSION_VERSION}/linux_amd64
           cp -R extension-artifacts/fts registry/v${EXTENSION_VERSION}/linux_amd64/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: registry-linux-amd64
           path: registry
@@ -66,7 +66,7 @@ jobs:
           mkdir -p registry/v${EXTENSION_VERSION}/linux_arm64
           cp -R extension-artifacts/fts registry/v${EXTENSION_VERSION}/linux_arm64/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: registry-linux-arm64
           path: registry
@@ -92,7 +92,7 @@ jobs:
           mkdir -p registry/v${EXTENSION_VERSION}/osx_arm64
           cp -R extension-artifacts/fts registry/v${EXTENSION_VERSION}/osx_arm64/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: registry-osx-arm64
           path: registry
@@ -118,7 +118,7 @@ jobs:
           mkdir -p registry/v${EXTENSION_VERSION}/osx_amd64
           cp -R extension-artifacts/fts registry/v${EXTENSION_VERSION}/osx_amd64/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: registry-osx-amd64
           path: registry
@@ -147,7 +147,7 @@ jobs:
           mkdir -p registry/v${EXTENSION_VERSION}/win_amd64
           cp -R extension-artifacts/fts registry/v${EXTENSION_VERSION}/win_amd64/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: registry-win-amd64
           path: registry
