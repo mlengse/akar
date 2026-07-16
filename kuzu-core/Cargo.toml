@@ -79,3 +79,9 @@ type_complexity = "allow"
 collapsible_match = "allow"
 collapsible_if = "allow"
 cloned_ref_to_slice_refs = "allow"
+
+[profile.bench]
+debug = true
+
+[profile.release]
+debug = true
