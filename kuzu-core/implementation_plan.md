@@ -58,10 +58,10 @@ Separate files per category under `kuzu-main/tests/`:
 
 ### P26.2 — Fuzz Testing (4 SP)
 
-- `[ ]` Integrate `cargo-fuzz` (libFuzzer backend, nightly-only)
-- `[ ]` Target 1: `cypher_query` (raw string → parse → bind → plan → execute)
-- `[ ]` Target 2: `expression_eval` (random expressions against random data)
-- `[ ]` Target 3: `copy_from_csv` (malformed CSV files)
+- `[x]` Integrate `cargo-fuzz` (libFuzzer backend, nightly-only)
+- `[x]` Target 1: `cypher_query` (raw string → parse → bind → plan → execute)
+- `[x]` Target 2: `expression_eval` (random expressions against random data)
+- `[x]` Target 3: `copy_from_csv` (malformed CSV files)
 
 ### P26.3 — Property-Based Testing (4 SP)
 
@@ -153,10 +153,11 @@ The Rust CLI already has: rustyline, multi-line, `.import/.export`, tab completi
 *Target: 100% API compatibility*
 
 ### P29.1 — 18 Missing Unique Functions (6 SP)
+**Status**: [x] Completed (Implemented math, string, blob, map, and pg_isready functions)
 
 All 18 functions are required for API compatibility. Upon auditing the current `kuzu-function/src/registry.rs`, we discovered that 7 of these functions were already ported in a prior sprint (`atan2`, `degrees`, `radians`, `asin`, `acos`, `atan`, `log2`, `factorial`, `sign`, `levenshtein`, `sha256`, and the `list_` functions). 
 
-**The following 11 functions remain to be implemented:**
+**The following 11 functions have been successfully implemented:**
 
 #### 1. Math Functions (`sinh`, `cosh`, `tanh`, `gcd`, `lcm`)
 - **Location:** `kuzu-function/src/scalar/arithmetic.rs`
