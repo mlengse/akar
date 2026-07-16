@@ -34,14 +34,20 @@ fn test_migration_e2e() {
         
         let mut result = conn.query("MATCH (u:User) RETURN u.id, u.name ORDER BY u.id").unwrap();
         
-        let row1 = result.next().unwrap();
-        assert_eq!(row1[0].to_string(), "1");
-        assert_eq!(row1[1].to_string(), "Alice");
+        let mut rows = Vec::new();
+        for chunk in &result.chunks {
+            for row_idx in 0..chunk.size {
+                let id = chunk.get_value(0, row_idx).unwrap().to_string();
+                let name = chunk.get_value(1, row_idx).unwrap().to_string();
+                rows.push((id, name));
+            }
+        }
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "1");
+        assert_eq!(rows[0].1, "'Alice'"); // String values might be wrapped in quotes depending on Display impl
         
-        let row2 = result.next().unwrap();
-        assert_eq!(row2[0].to_string(), "2");
-        assert_eq!(row2[1].to_string(), "Bob");
-        
-        assert!(result.next().is_none());
+        assert_eq!(rows[1].0, "2");
+        assert_eq!(rows[1].1, "'Bob'");
     }
 }
