@@ -2,6 +2,9 @@
 target/
 **/target/
 
+target-wsl/
+**/target-wsl/
+
 # IDE
 .idea/
 *.iml
