@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: quay.io/pypa/manylinux_2_28_x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: yum install -y cmake ninja-build make gcc-c++ python3
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     container: quay.io/pypa/manylinux_2_28_aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: yum install -y cmake ninja-build make gcc-c++ python3
@@ -74,7 +74,7 @@ jobs:
   build-macos-arm-registry:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: brew install cmake ninja
@@ -100,7 +100,7 @@ jobs:
   build-macos-x86-registry:
     runs-on: macos-13
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: brew install cmake ninja
@@ -128,7 +128,7 @@ jobs:
     env:
       NUM_THREADS: 4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: choco install make ninja -y --no-progress
@@ -164,7 +164,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download registry artifacts
         uses: actions/download-artifact@v4
