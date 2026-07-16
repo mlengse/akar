@@ -154,14 +154,42 @@ The Rust CLI already has: rustyline, multi-line, `.import/.export`, tab completi
 
 ### P29.1 — 18 Missing Unique Functions (6 SP)
 
-All 18 functions are required for API compatibility:
+All 18 functions are required for API compatibility. Upon auditing the current `kuzu-function/src/registry.rs`, we discovered that 7 of these functions were already ported in a prior sprint (`atan2`, `degrees`, `radians`, `asin`, `acos`, `atan`, `log2`, `factorial`, `sign`, `levenshtein`, `sha256`, and the `list_` functions). 
 
-- `[ ]` **Math**: `atan2`, `degrees`, `radians`, `sinh`, `cosh`, `tanh`, `asin`, `acos`, `atan`, `log2`, `gcd`, `lcm`, `factorial`, `sign`
-- `[ ]` **String**: `levenshtein`, `soundex`, `encode/decode_base64`, `sha256`
-- `[ ]` **List**: `list_contains_all`, `list_has_any`, `list_has_all`, `list_sort`
-- `[ ]` **Map**: `map_from_entries`, `map_values`, `map_keys`
-- `[ ]` **Blob**: `blob_from_bytes`, `to_base64`, `from_base64`
-- `[ ]` **Net**: `pg_isready`
+**The following 11 functions remain to be implemented:**
+
+#### 1. Math Functions (`sinh`, `cosh`, `tanh`, `gcd`, `lcm`)
+- **Location:** `kuzu-function/src/scalar/arithmetic.rs`
+- **Approach:** 
+  - Add `Sinh`, `Cosh`, `Tanh`, `Gcd`, `Lcm` to `ArithmeticOp` enum in `registry.rs`.
+  - Use `f64::sinh()`, `f64::cosh()`, `f64::tanh()` for hyperbolic functions.
+  - Implement Euclidean algorithm `gcd(a, b)` and `lcm(a, b) = (a * b) / gcd(a, b)` for `Int64`.
+  - Register variants in `FunctionRegistry::register_builtins()`.
+
+#### 2. String/Blob Functions (`soundex`, `to_base64`, `from_base64`, `blob_from_bytes`)
+- **Location:** `kuzu-function/src/scalar/string.rs` and `blob.rs`
+- **Approach:**
+  - `soundex`: Add to `StringOp`. Implement the standard Soundex algorithm (retain first letter, drop vowels, map consonants to digits 1-6, pad to 4 chars).
+  - `to_base64` / `from_base64`: Add a dependency on the `base64` crate (e.g. `base64::prelude::BASE64_STANDARD`) or implement a manual encoder if no external dependencies are allowed.
+  - `blob_from_bytes`: Alias for `blob` creation from a byte array (often used interchangeably with `to_base64`).
+
+#### 3. Map Functions (`map_from_entries`)
+- **Location:** `kuzu-function/src/scalar/map_struct.rs`
+- **Approach:**
+  - Add `MapFromEntries` to `MapOp`.
+  - Input: A list of structs containing `key` and `value`.
+  - Output: A Map Value. Extract the key-value pairs from the list and construct `Value::Map`.
+
+#### 4. Net / Postgres Compatibility (`pg_isready`)
+- **Location:** `kuzu-function/src/scalar/utility.rs` (or a new `net.rs`)
+- **Approach:**
+  - Add `PgIsReady` to `UtilityOp`.
+  - Since this is an embedded database, Kuzu doesn't have a network protocol in the same way Postgres does. `pg_isready` is usually implemented as a dummy function returning `TRUE` or `"ready"` for compatibility with Postgres drivers/ORMs. We will return a static `TRUE`.
+
+## User Review Required
+> [!IMPORTANT]
+> - Do we want to pull in the `base64` crate for `to_base64`/`from_base64`, or should I write a lightweight custom base64 encoder/decoder to avoid adding another dependency to the `kuzu-function` crate?
+> - For `pg_isready`, returning a constant `TRUE` is the standard approach for embedded databases masquerading as Postgres. Does this align with your expectations?
 
 ---
 
