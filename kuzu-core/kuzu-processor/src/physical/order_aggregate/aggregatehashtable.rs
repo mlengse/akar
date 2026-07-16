@@ -60,6 +60,7 @@ impl AggregateHashTable {
     /// Parallel aggregation: split chunks across threads, aggregate locally, merge.
     fn aggregate_parallel(&self, chunks: &[DataChunk]) -> OperatorResult {
         use rayon::prelude::*;
+        let total_rows: usize = chunks.iter().map(|c| c.size).sum();
         type LocalTable = hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>>;
 
         // Each thread aggregates its portion
