@@ -1,10 +1,13 @@
 //! PhysicalFilter throughput benchmarks at various selectivities.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, BenchmarkGroup, criterion_group, criterion_main, measurement::WallTime};
 use std::hint::black_box;
+use std::sync::{Arc, Mutex};
 use kuzu_common::types::PhysicalTypeID;
 use kuzu_common::vector::{DataChunk, ValueVector};
-use kuzu_parser::ast::{Constant, Expression};
+use kuzu_function::registry::FunctionRegistry;
+use kuzu_parser::ast::{BinaryOp, Constant, Expression};
+use kuzu_processor::expression_evaluator::ExpressionEvaluator;
 use kuzu_processor::physical_operator::{PhysicalFilter, PhysicalOperatorExec};
 
 /// Create a DataChunk with a single Int64 column containing values 0..num_rows.
@@ -91,6 +94,37 @@ fn bench_filter_multi_column(c: &mut Criterion) {
     });
 }
 
+/// Filter with age > 30 comparison (≈70% selectivity) using evaluator + Arrow kernels.
+fn bench_filter_age_comparison(c: &mut Criterion) {
+    let mut group: BenchmarkGroup<WallTime> = c.benchmark_group("filter");
+    group.throughput(criterion::Throughput::Elements(10_000));
+
+    let reg = Arc::new(Mutex::new(FunctionRegistry::new()));
+    let eval = Arc::new(Mutex::new(ExpressionEvaluator::new(reg)));
+
+    let expr = Expression::BinaryOp(
+        BinaryOp::GreaterThan,
+        Box::new(Expression::Variable("age".into())),
+        Box::new(Expression::Constant(Constant::Integer(30))),
+    );
+    let filter = PhysicalFilter::with_evaluator(expr, eval);
+
+    let mut v = ValueVector::new(PhysicalTypeID::Int64, 10_000);
+    v.resize(10_000);
+    for i in 0..10_000 {
+        v.set_i64(i, (i % 101) as i64);
+    }
+    let chunk = DataChunk::from_legacy(vec![v]).with_names(vec!["age".into()]);
+
+    group.bench_function("age_gt_30_10k", |b| {
+        b.iter(|| {
+            let result = filter.execute(black_box(vec![chunk.clone()]));
+            black_box(result.unwrap());
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_filter_true,
@@ -98,5 +132,6 @@ criterion_group!(
     bench_filter_property,
     bench_filter_batch,
     bench_filter_multi_column,
+    bench_filter_age_comparison,
 );
 criterion_main!(benches);
