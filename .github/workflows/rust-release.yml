@@ -36,7 +36,7 @@ jobs:
     name: cargo test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo test --workspace --no-fail-fast
         working-directory: kuzu-core
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ !inputs.dry_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Publish kuzu-main
         run: cargo publish -p kuzu-main
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ !inputs.dry_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Publish kuzu-cli
         run: cargo publish -p kuzu-cli
@@ -86,7 +86,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate changelog
         id: changelog
         run: |
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ inputs.dry_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Dry-run publish kuzu-main
         run: cargo publish --dry-run -p kuzu-main 2>&1 || true
