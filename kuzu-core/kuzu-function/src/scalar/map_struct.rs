@@ -25,6 +25,41 @@ pub(crate) fn evaluate_map(op: MapOp, args: &[Value]) -> Result<Value, String> {
             }
             Ok(Value::Struct(entries))
         }
+        MapOp::MapFromEntries => {
+            match &args[0] {
+                Value::List(items) => {
+                    let mut result_entries = Vec::new();
+                    for item in items {
+                        match item {
+                            Value::Struct(s) => {
+                                let mut k = None;
+                                let mut v = None;
+                                for (fname, fval) in s {
+                                    if fname == "key" || fname == "k" {
+                                        k = Some(fval);
+                                    } else if fname == "value" || fname == "v" {
+                                        v = Some(fval);
+                                    }
+                                }
+                                if let (Some(Value::String(k_str)), Some(val)) = (k, v) {
+                                    result_entries.push((k_str.clone(), val.clone()));
+                                } else {
+                                    // fallback: use first and second field
+                                    if s.len() >= 2 {
+                                        if let Value::String(k_str) = &s[0].1 {
+                                            result_entries.push((k_str.clone(), s[1].1.clone()));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => return Err("MapFromEntries requires a list of structs".into()),
+                        }
+                    }
+                    Ok(Value::Struct(result_entries))
+                }
+                _ => Err("MapFromEntries requires a list of structs".into()),
+            }
+        }
         MapOp::Extract => {
             let map_val = &args[0];
             let key = get_string(&args[1])?;
