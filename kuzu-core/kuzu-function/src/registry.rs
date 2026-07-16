@@ -137,6 +137,9 @@ pub enum ArithmeticOp {
     Acos,
     Atan,
     Atan2,
+    Sinh,
+    Cosh,
+    Tanh,
     Degrees,
     Radians,
     Sign,
@@ -147,6 +150,8 @@ pub enum ArithmeticOp {
     Cot,
     Log2,
     Even,
+    Gcd,
+    Lcm,
     /// Heavy math functions (C++ port)
     Factorial,
     Gamma,
@@ -200,6 +205,7 @@ pub enum StringOp {
     Rpad,
     /// String basic functions (C++ port)
     InitCap,
+    Soundex,
     ConcatWs,
     SplitPart,
     ArrayExtract,
@@ -288,6 +294,7 @@ pub enum ListOp {
 pub enum MapOp {
     Creation,
     Extract,
+    MapFromEntries,
     Keys,
     Values,
     Contains,
@@ -316,6 +323,7 @@ pub enum UtilityOp {
     NullIf,
     Size,
     Error,
+    PgIsReady,
 }
 
 /// Schema functions — access metadata about nodes, relationships, and values.
@@ -422,6 +430,9 @@ pub enum BlobOp {
     Encode,
     Decode,
     OctetLength,
+    ToBase64,
+    FromBase64,
+    BlobFromBytes,
 }
 
 /// Union functions — ported from C++ `function/union/`.
@@ -631,6 +642,12 @@ impl FunctionRegistry {
         self.register_scalar("sign", ScalarFunction::Arithmetic { op: ArithmeticOp::Sign });
         self.register_scalar("pi", ScalarFunction::Arithmetic { op: ArithmeticOp::Pi });
         self.register_scalar("rand", ScalarFunction::Arithmetic { op: ArithmeticOp::Rand });
+        
+        self.register_scalar("sinh", ScalarFunction::Arithmetic { op: ArithmeticOp::Sinh });
+        self.register_scalar("cosh", ScalarFunction::Arithmetic { op: ArithmeticOp::Cosh });
+        self.register_scalar("tanh", ScalarFunction::Arithmetic { op: ArithmeticOp::Tanh });
+        self.register_scalar("gcd", ScalarFunction::Arithmetic { op: ArithmeticOp::Gcd });
+        self.register_scalar("lcm", ScalarFunction::Arithmetic { op: ArithmeticOp::Lcm });
 
         // --- Bitwise ---
         self.register_scalar(
@@ -814,6 +831,12 @@ impl FunctionRegistry {
             "levenshtein",
             ScalarFunction::String {
                 op: StringOp::Levenshtein,
+            },
+        );
+        self.register_scalar(
+            "soundex",
+            ScalarFunction::String {
+                op: StringOp::Soundex,
             },
         );
 
@@ -1094,6 +1117,7 @@ impl FunctionRegistry {
         self.register_scalar("size", ScalarFunction::Utility { op: UtilityOp::Size });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
         self.register_scalar("error", ScalarFunction::Utility { op: UtilityOp::Error });
+        self.register_scalar("pg_isready", ScalarFunction::Utility { op: UtilityOp::PgIsReady });
 
         // --- Schema ---
         self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
@@ -1158,6 +1182,14 @@ impl FunctionRegistry {
 
         // --- UUID ---
         self.register_scalar("gen_random_uuid", ScalarFunction::Uuid);
+
+        // --- Map ---
+        self.register_scalar("map_from_entries", ScalarFunction::Map { op: MapOp::MapFromEntries });
+
+        // --- Blob ---
+        self.register_scalar("blob_from_bytes", ScalarFunction::Blob { op: BlobOp::BlobFromBytes });
+        self.register_scalar("to_base64", ScalarFunction::Blob { op: BlobOp::ToBase64 });
+        self.register_scalar("from_base64", ScalarFunction::Blob { op: BlobOp::FromBase64 });
 
         // --- Array utility aliases (delegate to list functions) ---
         self.register_scalar("array_concat", ScalarFunction::List { op: ListOp::Concat });
