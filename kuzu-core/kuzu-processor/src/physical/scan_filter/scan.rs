@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, NodeSemiMask, PhysicalOperatorExec};
 use crate::physical::write_ops::PhysicalFtsScan;
+use arrow::array::{
+    BooleanBuilder, Int64Builder, Int32Builder, Float64Builder, Float32Builder, StringBuilder,
+};
 
 // ==================== Scan ====================
 
@@ -210,6 +213,93 @@ impl PhysicalScan {
             | LogicalTypeID::InternalID => PhysicalTypeID::Int64,
         }
     }
+
+    /// Build an Arrow ArrayRef directly from Vec<Value> bypassing ValueVector.
+    fn build_arrow_array(phys_type: PhysicalTypeID, col_data: &[Value], rows: &[usize]) -> arrow::array::ArrayRef {
+        let size = rows.len();
+        match phys_type {
+            PhysicalTypeID::Bool => {
+                let mut builder = BooleanBuilder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::Bool(b)) => builder.append_value(*b),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int64 => {
+                let mut builder = Int64Builder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::Int64(v)) => builder.append_value(*v),
+                        Some(Value::Int32(v)) => builder.append_value(*v as i64),
+                        Some(Value::Int16(v)) => builder.append_value(*v as i64),
+                        Some(Value::Int8(v)) => builder.append_value(*v as i64),
+                        Some(Value::UInt64(v)) => builder.append_value(*v as i64),
+                        Some(Value::UInt32(v)) => builder.append_value(*v as i64),
+                        Some(Value::UInt16(v)) => builder.append_value(*v as i64),
+                        Some(Value::UInt8(v)) => builder.append_value(*v as i64),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Int32 => {
+                let mut builder = Int32Builder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::Int32(v)) => builder.append_value(*v),
+                        Some(Value::Int16(v)) => builder.append_value(*v as i32),
+                        Some(Value::Int8(v)) => builder.append_value(*v as i32),
+                        Some(Value::Int64(v)) => builder.append_value(*v as i32),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Double => {
+                let mut builder = Float64Builder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::Double(v)) => builder.append_value(*v),
+                        Some(Value::Float(v)) => builder.append_value(*v as f64),
+                        Some(Value::Int64(v)) => builder.append_value(*v as f64),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::Float => {
+                let mut builder = Float32Builder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::Float(v)) => builder.append_value(*v),
+                        Some(Value::Double(v)) => builder.append_value(*v as f32),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::String => {
+                let mut builder = StringBuilder::with_capacity(size, size * 16);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::String(s)) => builder.append_value(s),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            _ => {
+                let mut builder = Int64Builder::with_capacity(size);
+                for _ in 0..size {
+                    builder.append_null();
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+        }
+    }
 }
 
 impl PhysicalOperatorExec for PhysicalScan {
@@ -324,14 +414,8 @@ impl PhysicalOperatorExec for PhysicalScan {
                 } else {
                     col_data.iter().find_map(|v| if !matches!(v, Value::Null) { Some(Self::value_to_physical_type(v)) } else { None }).unwrap_or(PhysicalTypeID::Int64)
                 };
-                let mut v = ValueVector::new(phys_type, current_rows.len().max(1));
-                v.resize(current_rows.len());
-                for (write_row, &r_idx) in current_rows.iter().enumerate() {
-                    if let Some(val) = col_data.get(r_idx) {
-                        Self::write_value_to_vector(&mut v, write_row, val);
-                    }
-                }
-                (kuzu_common::arrow_vector::ArrowVector::from_legacy(&v).array, phys_type)
+                let array = Self::build_arrow_array(phys_type, col_data, current_rows);
+                (array, phys_type)
             };
 
             // 1. Materialize predicate columns
