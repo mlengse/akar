@@ -1,8 +1,8 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-16 (P26.4 Profiling Complete — full benchmark report)
-> **Hasil audit:** `cargo test --workspace` → **1030 passed, 0 failed, 68 ignored** | 29 crate, ~262 file .rs, ~66k LOC
-> **P26.4:** All 8 benchmark suites executed — lihat laporan lengkap di [`implementation_plan.md`](implementation_plan.md#p264--performance-profiling--complete)
+> **Tanggal:** 2026-07-17 (P27.5 Arrow Scan Path Complete — 4.5×→1.32× gap closed)
+> **Hasil audit:** `cargo test --workspace` → **1099 passed, 0 failed, 68 ignored** | 29 crate, ~262 file .rs, ~66k LOC
+> **P27.5:** Direct `ColumnChunk→Arrow` scan path eliminated `Vec<Vec<Value>>` intermediate — `conn.execute()` 1,787 µs → **529 µs** (3.4× improvement). Gap vs C++ reduced from **4.5× → 1.32×**. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
 
@@ -114,6 +114,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | InsertRel column index fix | ❌ Hardcoded src=0/dst=1 → corrupted edge IDs on cross-product | ✅ Dynamic lookup via `field_names` matching (`{var}._id` / `{var}` / `{var}.id`) | `[fix]` |
 | Arrow/SelectionVector Fase 1 | ❌ `ValueVector` + `Vec<u16>` sel_vector inline | ✅ `arrow-rs` dep, `SelectionVector(Vec<u32>)`, `ArrowVector(ArrayRef)`, `VectorAccess` trait, `DataChunk.sel_vector`, zero-copy `PhysicalFilter`, `evaluate_to_arrow()`, `AggregateHashTable.iter_rows()` | `[new]` |
 | Arrow/SelectionVector Fase 2 | ❌ `evaluate_to_arrow` forwarded to `evaluate` + `from_legacy` (Value enum boxing) | ✅ `evaluate_arrow` native path: Arrow Builders for constants, Arrow compute kernels for cmp/arith/boolean, type-safe kernel fallback, `build_arrow_from_values` typed Vec for function calls, `boolean_array_to_selection` bit-packed filter path | `[new]` |
+| **P27.5 — Direct ColumnChunk→Arrow Scan Path** | ❌ `resolve_scan_data()` clones 20k Values into `Vec<Vec<Value>>`, double Arrow materialization | ✅ `ColumnChunk::to_arrow_array()` reads `self.values` inline into `ArrayRef`. `resolve_scan_arrow_data()` bypasses `Vec<Vec<Value>>`. ScanNode **7.8× faster** (1.4 ms → 180 µs). `conn.execute()` **3.4× faster** (1,787 µs → 529 µs). Gap vs C++ narrowed **4.5× → 1.32×**. | `[P27.5]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -609,85 +610,53 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
-### P27 Audit: Optimization Implementation Status (2026-07-16)
+### P27 Optimization Progress (2026-07-17 Update)
+
+| Item | Status | Note |
+|------|--------|------|
+| **P27a** `value_hash`→`value_hash_fast` (ahash) di aggregate | ✅ DONE | `aggregatehashtable.rs` + `splitaggregation.rs` |
+| **P27b** `with_capacity` di aggregate table | ✅ DONE | 3 tempat: parallel local, merge, sequential |
+| **P27g** Column mapping untuk SQL aggregate | ⏳ NEW | `map_aggregate.rs` ignore expression args — architectural fix needed |
+| **P27c–f** Mikro-optimisasi | ⏸ DEFERRED | After P27g |
+| **P27.5 — Arrow Scan Path** | ✅ DONE | Direct `ColumnChunk→Arrow` path. ScanNode 7.8× faster, `conn.execute()` 3.4× faster, gap 4.5×→1.32× |
+
+### P27 Audit: Optimization Implementation Status (2026-07-17)
 
 Audit kode menemukan bahwa **~60% P27 optimasi sudah diimplementasi** — lihat tabel lengkap di [`implementation_plan.md`](implementation_plan.md#audit-temuan-apa-yang-sudah-diimplementasi).
 
-**Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count.
-**Gaps remaining (6 items):** SipHash→ahash di aggregate, pre-size aggregate table, Vec\<Value> alokasi di multi-key GROUP BY, O(k)→O(log k) merge, SIMD aggregate, #[inline] annotations.
+**Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count, **Arrow scan path (P27.5 — 7.8× scan improvement)**.
+**Gaps remaining (6 items):** SipHash→ahash di aggregate, pre-size aggregate table, Vec\<Value> alokasi di multi-key GROUP BY, O(k)→O(log k) merge, SIMD aggregate, #[inline] annotations. **Aggregate operator now dominant bottleneck** at ~66% of execute time instead of scan.
 
-### Performa: P26.4 Profiling — All Benchmark Results (2026-07-16, Criterion.rs)
+### Performa: P27.5 Arrow Scan Path — Gap Closure (2026-07-17, Criterion.rs)
 
-#### Scan Throughput
+#### SQL-Level End-to-End: C++ vs Rust
 
-| Benchmark | Old (µs) | New (µs) | Delta |
-|-----------|----------|----------|-------|
-| scan/100_rows | 11.9 | **3.4** | **3.5× faster** |
-| scan/1k_rows | 87.1 | **17.4** | **5.0× faster** |
-| scan/10k_rows | 1,050 | **167** | **6.3× faster** |
-| scan/10k_selective_2_of_4_cols | 168 | **63.6** | **2.6× faster** |
+`MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)` — 10k rows, one-time compilation excluded:
 
-#### Filter Throughput (Arrow-native)
+| Runtime | Scope | Time | Ratio vs C++ |
+|---------|-------|------|-------------|
+| C++ (`kuzu_benchmark`) | plan→optimize→execute | **400 µs** | 1× |
+| Rust (before P27.5) | plan→optimize→execute | **1,787 µs** | **4.5× slower** |
+| Rust (after P27.5) | plan→optimize→execute | **529 µs** | **1.32× slower** |
 
-| Benchmark | Old (µs) | New (µs) | Delta |
-|-----------|----------|----------|-------|
-| filter/pass_all_10k | 18.3 | **14.4** | **1.27× faster** |
-| filter/remove_all_10k | 9.3 | **5.1** | **1.8× faster** |
-| filter/property_check_10k | 30.3 | **36.7** | **0.83× slower** |
-| filter/batch_10x1k_chunks | 27.1 | **15.7** | **1.7× faster** |
-| filter/multi_col_8_fields_10k | 71 | **38.7** | **1.8× faster** |
+**Improvement: 3.4× faster** (1,787 µs → 529 µs). Gap narrowed from **4.5× → 1.32×**.
 
-#### Hash Join Throughput
+#### Operator-Level Breakdown (after P27.5)
 
-| Benchmark | Old (µs) | New (µs) | Delta |
-|-----------|----------|----------|-------|
-| join/100_build_100_probe | 137 | **16.7** | **8.2× faster** |
-| join/1k_build_1k_probe | 1,440 | **191** | **7.5× faster** |
-| join/10k_build_100_probe | 11,800 | **1,450** | **8.1× faster** |
-| join/100_build_10k_probe | 1,940 | **229** | **8.5× faster** |
-| join/1k_multi_col_build_1k_probe | 1,600 | **171** | **9.4× faster** |
-| join/1k_no_match | 1,070 | **90.9** | **11.8× faster** |
+| Operator | Before | After | Delta |
+|----------|--------|-------|-------|
+| **ScanNode** | ~1,400 µs | **~180 µs** | **7.8× faster** ✅ |
+| **Aggregate (COUNT)** | ~350 µs | ~350 µs | Unchanged — **now dominant** 🟡 |
 
-#### Order By Throughput
+#### Root Cause: Eliminated Triple Materialization
 
-| Benchmark | Old (µs) | New (µs) | Delta |
-|-----------|----------|----------|-------|
-| order_by/single_key_100 | 6.0 | **10.3** | **1.7× slower** |
-| order_by/single_key_1k | 73.4 | **115.7** | **1.6× slower** |
-| order_by/single_key_10k | 983 | **1,388** | **1.4× slower** |
-| order_by/multi_key_1k | 209 | **255** | **1.2× slower** |
+| Pass | What was happening | What changed |
+|------|-------------------|--------------|
+| 1 | `to_column_major_data()` cloned 20k Values → `Vec<Vec<Value>>` | ❌ **ELIMINATED** — `resolve_scan_arrow_data()` reads ColumnChunk→ArrayRef directly |
+| 2 | `build_arrow_array()` #1 for predicate columns | ✅ Still needed (but now single pass) |
+| 3 | `build_arrow_array()` #2 re-materializes all output columns | 🔄 Replaced with `arrow::compute::take()` — zero-copy filtered view |
 
-#### Aggregate Throughput
-
-| Benchmark | Old (µs) | New (µs) | Delta |
-|-----------|----------|----------|-------|
-| aggregate/count_10k | 158 | **381** | **2.4× slower** |
-| aggregate/sum_10k | 623 | **524** | **1.2× faster** |
-| aggregate/avg_10k | 296 | **531** | **1.8× slower** |
-| group_by_10_groups_10k | 1,060 | **983** | **1.08× faster** |
-| multi_key_group_by_10k | 2,270 | **3,987** | **1.76× slower** |
-
-#### evaluate_arrow vs evaluate (10.000 rows)
-
-| Benchmark | Old (per-row Value, µs) | New (Arrow kernel, µs) | Speedup |
-|-----------|----------|----------|---------|
-| constant_true_10k | 159 | **87** | **1.83×** |
-| variable_10k | 213 | **0.022** | **9,683×** |
-| cmp_x_gt_5_10k | 1,463 | **71** | **20.6×** |
-| arith_x_add_y_10k | 1,873 | **15.3** | **122×** |
-| cmp_and_x_gt_5_and_y_lt_10_10k | 3,849 | **107** | **36×** |
-| not_x_gt_5_10k | 2,365 | **66** | **35.8×** |
-| is_null_x_10k | 374 | **21** | **17.7×** |
-
-**Interpretasi P26.4:**
-- **Scan/Join/Filter 3–12× lebih cepat** dari angka sebelumnya — kemungkinan karena compiler optimization atau perubahan kode
-- **OrderBy 1.2–1.7× lebih lambat** — perlu optimasi sort (P27.2)
-- **Aggregate bervariasi** — multi_key_group_by 1.76× lebih lambat (P27.1, P27.4)
-- **Arrow-native eval 17–122× speedup** — hot path expression evaluation sudah sangat kompetitif
-- **3.7× gap vs C++ tidak terverifikasi secara empiris** — C++ benchmark binary belum pernah dibuild
-- **Top 5 bottleneck** sudah teridentifikasi dan action plan ada di P27
-
-Benchmark file: `kuzu-processor/benches/*.rs` (8 files + 2 di kuzu-main). Full report di [`implementation_plan.md`](implementation_plan.md#p264--performance-profiling-report--full-empirical-results-2026-07-16).
+Benchmark file: `kuzu-main/benches/query_pipeline.rs`. Full report di [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
 
