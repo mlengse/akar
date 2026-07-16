@@ -3,7 +3,7 @@
 //! Measures end-to-end throughput: parse → bind → plan → optimize → execute
 //! for representative Cypher queries.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, BenchmarkId, criterion_group, criterion_main};
 use std::hint::black_box;
 use kuzu_main::connection::Connection;
 use kuzu_main::database::{Database, SystemConfig};
@@ -102,6 +102,72 @@ fn bench_query_copy_csv(c: &mut Criterion) {
     });
 }
 
+/// Generate a Person CSV with 10k rows (matching C++ benchmark dataset).
+fn generate_10k_person_csv(dir: &tempfile::TempDir) -> String {
+    let csv_path = dir.path().join("person_10k.csv");
+    use std::io::Write;
+    let mut f = std::fs::File::create(&csv_path).unwrap();
+    writeln!(f, "ID,age,name").unwrap();
+    for i in 0..10_000u64 {
+        let age = (i * 7 + 13) % 101; // deterministic 0-100 distribution
+        writeln!(f, "{i},{age},Person_{i}").unwrap();
+    }
+    f.flush().unwrap();
+    csv_path.to_string_lossy().replace('\\', "/")
+}
+
+/// Set up database with 10k Person rows (matches C++ bench10k dataset).
+fn setup_10k_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("bench_10k");
+    let config = SystemConfig::default();
+    let database = Arc::new(Database::new(db_path, config).unwrap());
+    let conn = Connection::new(&database);
+
+    conn.query("CREATE NODE TABLE Person(ID INT64, age INT64, name STRING, PRIMARY KEY (ID))")
+        .unwrap();
+    let fp = generate_10k_person_csv(&dir);
+    conn.query(&format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+    (dir, database, conn)
+}
+
+/// Apples-to-apples comparison with C++ kuzu_benchmark.
+///
+/// C++ measures: plan → optimize → execute (after one-time parse+bind).
+/// Rust measures: `conn.execute()` after one-time `conn.prepare()`.
+///
+/// Query: `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)`
+fn bench_query_filter_count_10k_vs_cpp(c: &mut Criterion) {
+    let (_dir, _db, conn) = setup_10k_db();
+    let prepared = conn.prepare("MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)").unwrap();
+
+    let mut group = c.benchmark_group("e2e_vs_cpp");
+    group.throughput(criterion::Throughput::Elements(10_000));
+    group.bench_with_input(BenchmarkId::new("filter_count_10k", "execute_only"), &prepared, |b, p| {
+        b.iter(|| {
+            let result = conn.execute(p, vec![]);
+            black_box(result.unwrap());
+        })
+    });
+    group.finish();
+}
+
+/// End-to-end benchmark (prepare + execute) for reference.
+fn bench_query_filter_count_10k_e2e(c: &mut Criterion) {
+    let (_dir, _db, conn) = setup_10k_db();
+
+    let mut group = c.benchmark_group("e2e_vs_cpp");
+    group.throughput(criterion::Throughput::Elements(10_000));
+    group.bench_function("filter_count_10k_e2e", |b| {
+        b.iter(|| {
+            let result = conn.query(black_box("MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)"));
+            black_box(result.unwrap());
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_query_match_return,
@@ -110,5 +176,7 @@ criterion_group!(
     bench_query_match_limit,
     bench_query_create_node_table,
     bench_query_copy_csv,
+    bench_query_filter_count_10k_vs_cpp,
+    bench_query_filter_count_10k_e2e,
 );
 criterion_main!(benches);
