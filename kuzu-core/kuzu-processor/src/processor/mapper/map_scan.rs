@@ -51,13 +51,21 @@ pub fn map_and_execute_scan_node(
     let pred_ref = pred_owned
         .as_ref()
         .map(|(idx, op_str, val)| (*idx, op_str.as_str(), val));
-    let (data, columns, num_rows) = ctx.resolve_scan_data(&s.table_name, pred_ref);
+
+    // Try Arrow fast path first (avoids Vec<Vec<Value>> intermediate)
+    let (arrow_data, columns, num_rows) = ctx.resolve_scan_arrow_data(&s.table_name);
     let mut scan = PhysicalScan::new(s.table_name.clone(), s.table_id, num_rows.max(1));
     if let Some(mask) = ctx.sip_masks.get(&s.table_id) {
         scan = scan.with_semi_mask(mask.clone(), 0);
     }
-    if let Some(d) = data {
-        scan = scan.with_data(d, columns);
+    if let Some(arrays) = arrow_data {
+        scan = scan.with_arrow_data(arrays, columns.clone());
+    } else {
+        // Fallback to legacy Vec<Vec<Value>> data path
+        let (data, _columns, _num_rows) = ctx.resolve_scan_data(&s.table_name, pred_ref);
+        if let Some(d) = data {
+            scan = scan.with_data(d, columns);
+        }
     }
     if let Some(ref fq) = s.fts_query {
         scan = scan.with_fts_query(PhysicalFtsScan {
