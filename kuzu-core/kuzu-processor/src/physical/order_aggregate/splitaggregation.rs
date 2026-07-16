@@ -92,7 +92,7 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
         for chunk in &input {
             for row in 0..chunk.size {
                 let key = build_group_key(chunk, group_cols, row);
-                let hash = value_hash(&key);
+                let hash = value_hash_fast(&key);
                 let bucket = shard.entry(hash).or_default();
                 let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                 if let Some((_, states)) = entry {
