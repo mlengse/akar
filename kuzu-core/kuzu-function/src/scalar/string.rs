@@ -5,6 +5,48 @@ use super::{get_cached_regex};
 
 // ==================== String ====================
 
+fn soundex_impl(s: &str) -> String {
+    let mut chars = s.chars().filter(|c| c.is_ascii_alphabetic());
+    let first_char = match chars.next() {
+        Some(c) => c.to_ascii_uppercase(),
+        None => return "".to_string(),
+    };
+
+    let mut result = String::with_capacity(4);
+    result.push(first_char);
+
+    let get_code = |c: char| -> char {
+        match c.to_ascii_uppercase() {
+            'B' | 'F' | 'P' | 'V' => '1',
+            'C' | 'G' | 'J' | 'K' | 'Q' | 'S' | 'X' | 'Z' => '2',
+            'D' | 'T' => '3',
+            'L' => '4',
+            'M' | 'N' => '5',
+            'R' => '6',
+            _ => '0',
+        }
+    };
+
+    let mut prev_code = get_code(first_char);
+    for c in chars {
+        let code = get_code(c);
+        if code != '0' && code != prev_code {
+            result.push(code);
+            if result.len() == 4 {
+                break;
+            }
+        }
+        if c.to_ascii_uppercase() != 'H' && c.to_ascii_uppercase() != 'W' {
+            prev_code = code;
+        }
+    }
+
+    while result.len() < 4 {
+        result.push('0');
+    }
+    result
+}
+
 pub(crate) fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, String> {
     if args.is_empty() {
         return Err("String function requires arguments".into());
@@ -365,6 +407,10 @@ pub(crate) fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, Str
                 std::mem::swap(&mut prev_row, &mut curr_row);
             }
             Ok(Value::Int64(prev_row[n] as i64))
+        }
+        StringOp::Soundex => {
+            let s = get_string(&args[0])?;
+            Ok(Value::String(soundex_impl(&s)))
         }
     }
 }
