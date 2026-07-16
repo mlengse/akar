@@ -5,7 +5,7 @@ use kuzu_common::vector::DataChunk;
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::common::value_hash;
+use crate::physical::common::value_hash_fast;
 
 const NUM_SHARDS: usize = 64;
 
