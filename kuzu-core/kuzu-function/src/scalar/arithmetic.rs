@@ -5,6 +5,23 @@ use super::{rng_next, gamma_func, log_gamma, set_rng_seed};
 
 // ==================== Arithmetic ====================
 
+fn gcd_impl(mut a: i64, mut b: i64) -> i64 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a.abs()
+}
+
+fn lcm_impl(a: i64, b: i64) -> i64 {
+    if a == 0 || b == 0 {
+        0
+    } else {
+        (a / gcd_impl(a, b)).abs() * b.abs()
+    }
+}
+
 pub(crate) fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Value, String> {
     // Allow empty args for ops that take no arguments (Pi, Rand)
     let needs_args = !matches!(op, ArithmeticOp::Pi | ArithmeticOp::Rand);
@@ -66,6 +83,18 @@ pub(crate) fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Va
         ArithmeticOp::Tan => {
             let v = numeric_to_f64(&args[0])?;
             Ok(Value::Double(v.tan()))
+        }
+        ArithmeticOp::Sinh => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.sinh()))
+        }
+        ArithmeticOp::Cosh => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.cosh()))
+        }
+        ArithmeticOp::Tanh => {
+            let v = numeric_to_f64(&args[0])?;
+            Ok(Value::Double(v.tanh()))
         }
         ArithmeticOp::Asin => {
             let v = numeric_to_f64(&args[0])?;
@@ -228,6 +257,24 @@ pub(crate) fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Va
             match (&args[0], &args[1]) {
                 (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x >> y)),
                 _ => Err("Bit shift right requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::Gcd => {
+            if args.len() < 2 {
+                return Err("Gcd requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(gcd_impl(*x, *y))),
+                _ => Err("Gcd requires integer arguments".into()),
+            }
+        }
+        ArithmeticOp::Lcm => {
+            if args.len() < 2 {
+                return Err("Lcm requires 2 arguments".into());
+            }
+            match (&args[0], &args[1]) {
+                (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(lcm_impl(*x, *y))),
+                _ => Err("Lcm requires integer arguments".into()),
             }
         }
         // Binary arithmetic ops
