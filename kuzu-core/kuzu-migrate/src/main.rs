@@ -94,9 +94,9 @@ fn main() -> Result<()> {
         }
 
         let ddl = if !primary_key.is_empty() {
-            format!("CREATE NODE TABLE {} ({}, PRIMARY KEY({}));", table_name, columns.join(", "), primary_key)
+            format!("CREATE NODE TABLE {} ({}, PRIMARY KEY({}))", table_name, columns.join(", "), primary_key)
         } else {
-            format!("CREATE NODE TABLE {} ({});", table_name, columns.join(", "))
+            format!("CREATE NODE TABLE {} ({})", table_name, columns.join(", "))
         };
 
         println!("Executing: {}", ddl);
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         }
 
         let props_str = if columns.is_empty() { String::new() } else { format!(", {}", columns.join(", ")) };
-        let ddl = format!("CREATE REL TABLE {} (FROM {} TO {}{});", table_name, from_table, to_table, props_str);
+        let ddl = format!("CREATE REL TABLE {} (FROM {} TO {}{})", table_name, from_table, to_table, props_str);
 
         println!("Executing: {}", ddl);
         rust_conn.query(&ddl).map_err(|e| anyhow::anyhow!("DDL Error: {}", e.to_string()))?;

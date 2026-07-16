@@ -13,7 +13,7 @@ fn test_migration_ingestion() {
         let db = std::sync::Arc::new(Database::new(mock_cpp_dir.path(), SystemConfig::default()).unwrap());
         let conn = Connection::new(&db);
         
-        conn.query("CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY(id));").unwrap();
+        conn.query("CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY(id))").unwrap();
         conn.query("INSERT (u:User {id: 1, name: 'Alice'})").unwrap();
         conn.query("INSERT (u:User {id: 2, name: 'Bob'})").unwrap();
         
@@ -61,17 +61,17 @@ fn test_migration_ingestion() {
         let mut rows = Vec::new();
         for chunk in &result.chunks {
             for row_idx in 0..chunk.size {
-                let id = chunk.get_value(0, row_idx).unwrap().to_string();
-                let name = chunk.get_value(1, row_idx).unwrap().to_string();
+                let id = format!("{:?}", chunk.get_value(0, row_idx).unwrap());
+                let name = format!("{:?}", chunk.get_value(1, row_idx).unwrap());
                 rows.push((id, name));
             }
         }
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, "1");
-        assert_eq!(rows[0].1, "'Alice'");
+        assert_eq!(rows[0].0, "Int64(1)");
+        assert_eq!(rows[0].1, "String(\"Alice\")");
         
-        assert_eq!(rows[1].0, "2");
-        assert_eq!(rows[1].1, "'Bob'");
+        assert_eq!(rows[1].0, "Int64(2)");
+        assert_eq!(rows[1].1, "String(\"Bob\")");
     }
 }
