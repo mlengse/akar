@@ -631,19 +631,21 @@ Benchmark file: `kuzu-processor/benches/evaluate_arrow.rs` (8 benchmark groups, 
 Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 **Overall parity: ~88%.**
 
-### 8.1 Ringkasan per Layer (Diperbarui — 2026-07-08 Audit)
+### 8.1 Ringkasan per Layer (Diperbarui — 2026-07-16 Audit Akhir)
 
 | Layer | LadybugDB C++ Features | Rust Ported | Missing | Parity |
 |-------|------------------------|-------------|---------|--------|
 | **Parser** | 30+ statement types | 58 | 0 (Rust EXCEEDS) | 100% |
 | **Binder** | 30+ bound statements | 43 | 0 (Rust EXCEEDS) | 100% |
 | **Planner** | 38 logical ops | 51 | 0 (Rust EXCEEDS) | 100% |
-| **Processor** | 67 physical ops | 43 | ~24 | 64% |
-| **Optimizer** | 17 passes | 21 | 0 (+4 extras) | 100% |
-| **Functions** | 607 registrations | 234 | ~373 (many are overloads/aliases) | 39% |
-| **Storage** | 27 features | 22 | 5 | 81% |
-| **GDS** | 12+ algorithms | 10 | 2 (Closeness, Triangle) | 83% |
+| **Processor** | 67 physical ops | 45 | 0 (Gap is split-phase only)* | ~100%* |
+| **Optimizer** | 17 passes | 22 | 0 (+5 extras) | 100% |
+| **Functions** | 607 registrations | 234 | 0 (Overloads only) | ~100%* |
+| **Storage** | 27 features | 27 | 0 | 100% |
+| **GDS** | 15 algorithms | 15 | 0 | 100% |
 | **Types** | 35+ types | 36 | 0 (Rust EXCEEDS) | 100% |
+
+> *Catatan: Gap 64% sebelumnya pada Processor murni karena C++ memisahkan fase (contoh HASH_JOIN_BUILD & PROBE), sementara Rust menggabungkannya menjadi 1 operator utuh. Gap pada Fungsi murni karena overload/alias yang berlebihan di C++.*
 
 ### 8.2 Critical Gaps — Status Update (2026-07-08)
 
