@@ -8,6 +8,8 @@ pub mod map_update;
 use crate::physical_operator::NodeSemiMask;
 use crate::physical::types::PhysicalOperatorExec;
 use crate::processor::QueryProcessor;
+use arrow::array::ArrayRef;
+use kuzu_common::types::physical_type_from_logical;
 use kuzu_common::vector::DataChunk;
 use kuzu_function::registry::FunctionRegistry;
 use kuzu_planner::logical_operator::LogicalOperator;
@@ -61,6 +63,51 @@ impl<'a, 'p> ExecutionContext<'a, 'p> {
                         rel_table.columns.clone(),
                         num_rows,
                     );
+                }
+            }
+        }
+        (None, Vec::new(), 0)
+    }
+
+    /// Resolve scan data directly into Arrow arrays, bypassing the
+    /// `Vec<Vec<Value>>` intermediate materialization.
+    ///
+    /// Reads from NodeTable's NodeGroup column chunks, converts each
+    /// ColumnChunk to an Arrow array, then concatenates per-group arrays
+    /// into one array per column.
+    pub fn resolve_scan_arrow_data(
+        &self,
+        table_name: &str,
+    ) -> (Option<Vec<ArrayRef>>, Vec<kuzu_storage::table::ColumnDefinition>, u64) {
+        if let Some(ref tc) = self.table_catalog {
+            if let Some(node_table) = tc.get_node_table_by_name(table_name) {
+                let num_rows = node_table.num_rows;
+                if num_rows > 0 {
+                    let mut column_arrays: Vec<Vec<ArrayRef>> = vec![Vec::new(); node_table.columns.len()];
+                    for ng in &node_table.node_groups {
+                        for (col_idx, col_chunk) in ng.columns.iter().enumerate() {
+                            let phys_type = physical_type_from_logical(
+                                node_table.columns[col_idx].logical_type,
+                            );
+                            let arr = col_chunk.to_arrow_array(phys_type);
+                            column_arrays[col_idx].push(arr);
+                        }
+                    }
+                    // Concatenate per-group arrays into one array per column
+                    let concat_arrays: Vec<ArrayRef> = column_arrays
+                        .into_iter()
+                        .map(|group_arrays| {
+                            if group_arrays.len() == 1 {
+                                group_arrays.into_iter().next().unwrap()
+                            } else {
+                                let refs: Vec<&dyn arrow::array::Array> =
+                                    group_arrays.iter().map(|a| a.as_ref()).collect();
+                                arrow::compute::concat(&refs)
+                                    .unwrap_or_else(|_| group_arrays.into_iter().next().unwrap())
+                            }
+                        })
+                        .collect();
+                    return (Some(concat_arrays), node_table.columns.clone(), num_rows);
                 }
             }
         }
