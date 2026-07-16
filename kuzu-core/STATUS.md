@@ -97,7 +97,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | export_csv / export_parquet | ❌ TIDAK ADA | ✅ CALL wrappers around COPY TO infrastructure | `[P11.2]` |
 | ATTACH/DETACH/USE DATABASE | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→catalog→handler | `[P11.3-5]` |
 | LOAD FROM | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→handler | `[P11.6]` |
-| Path: properties/is_trail/is_acyclic | ❌ TIDAK ADA | ✅ PathOp::Properties/IsTrail/IsAcyclic | `[P12.5]` |
+| P12.5 Path: properties/is_trail/is_acyclic | ❌ TIDAK ADA | ✅ PathOp::Properties/IsTrail/IsAcyclic | `[P12.5]` |
 | P29: Feature Parity | ❌ Missing 18 functions + nested types | ✅ All 18 missing scalar functions, STRING_AGG, Arrow Struct/List type conversions | `[P29]` |
 | Schema: cost/rowid | ❌ TIDAK ADA | ✅ SchemaOp::Cost/RowId | `[P12.6]` |
 | GDS: Random Walk & Node2Vec | ❌ TIDAK ADA | ✅ `compute_random_walk`, `compute_node2vec`, CALL wiring | `[P19]` |
