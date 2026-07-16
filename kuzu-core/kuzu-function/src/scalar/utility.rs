@@ -51,5 +51,8 @@ pub(crate) fn evaluate_utility(op: UtilityOp, args: &[Value]) -> Result<Value, S
                 other => Err(format!("{:?}", other)),
             }
         }
+        UtilityOp::PgIsReady => {
+            Ok(Value::Bool(true))
+        }
     }
 }
