@@ -28,7 +28,7 @@ members = [
     "kuzu-postgres",
     "kuzu-unity-catalog",
     "kuzu-main",
-    "kuzu-cli", "kuzu-wasm", "kuzu-migrate",
+    "kuzu-cli", "kuzu-wasm", "kuzu-migrate", "kuzu-c",
 ]
 
 [workspace.package]

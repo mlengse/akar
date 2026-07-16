@@ -1,0 +1,18 @@
+[package]
+name = "kuzu-c"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FFI bindings for Kuzu Rust"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+kuzu-main = { path = "../kuzu-main" }
+kuzu-common = { path = "../kuzu-common" }
+libc = "0.2"

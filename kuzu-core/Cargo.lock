@@ -1471,6 +1471,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzu-c"
+version = "0.1.0"
+dependencies = [
+ "kuzu-common",
+ "kuzu-main",
+ "libc",
+]
+
+[[package]]
 name = "kuzu-catalog"
 version = "0.1.0"
 dependencies = [
