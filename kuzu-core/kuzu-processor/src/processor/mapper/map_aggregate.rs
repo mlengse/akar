@@ -1,6 +1,7 @@
 use super::ExecutionContext;
 use crate::physical_operator::*;
 use kuzu_common::vector::DataChunk;
+use kuzu_parser::ast::Expression;
 use kuzu_planner::logical_operator::LogicalOperator;
 
 pub fn map_and_execute_aggregate(
@@ -13,7 +14,20 @@ pub fn map_and_execute_aggregate(
             let funcs: Vec<kuzu_function::AggregateFunction> = a
                 .aggregates
                 .iter()
-                .map(|(n, _)| crate::physical::order_aggregate::parse_aggregate_function(n))
+                .map(|(n, args)| {
+                    // Detect COUNT(*) from Star arg: override name to get CountStar
+                    let effective_name = if n == "COUNT" && args.iter().any(|e| matches!(e, Expression::Star)) {
+                        "COUNT(*)"
+                    } else {
+                        n
+                    };
+                    crate::physical::order_aggregate::parse_aggregate_function(effective_name)
+                })
+                .collect();
+            let agg_expressions: Vec<Vec<Expression>> = a
+                .aggregates
+                .iter()
+                .map(|(_, args)| args.clone())
                 .collect();
             let group_by_cols = if a.group_by.is_empty() {
                 Vec::new()
@@ -22,7 +36,7 @@ pub fn map_and_execute_aggregate(
             };
 
             let shared_state = std::sync::Arc::new(
-                crate::physical::order_aggregate::SharedAggregateState::new(funcs, group_by_cols),
+                crate::physical::order_aggregate::SharedAggregateState::new(funcs, group_by_cols, agg_expressions),
             );
 
             let agg_scan = crate::physical::order_aggregate::PhysicalAggregateScan {
