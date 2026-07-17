@@ -1,6 +1,18 @@
 use crate::registry::*;
 use crate::scalar::{evaluate_scalar, numeric_to_f64};
+use arrow::array::{
+    ArrayRef, Float32Array, Float32Builder, Float64Array, Float64Builder, Int16Array,
+    Int16Builder, Int32Array, Int32Builder, Int64Array, Int64Builder, Int8Array, Int8Builder,
+    PrimitiveArray, UInt16Array, UInt16Builder, UInt32Array, UInt32Builder, UInt64Array,
+    UInt64Builder, UInt8Array, UInt8Builder,
+};
+use arrow::compute;
+use arrow::datatypes::{
+    Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, UInt16Type, UInt32Type,
+    UInt64Type, UInt8Type,
+};
 use kuzu_common::types::Value;
+use std::sync::Arc;
 
 // ==================== Aggregate ====================
 
@@ -309,9 +321,174 @@ fn add_values_for_agg(a: Value, b: Value) -> Value {
     }
 }
 
+/// Convert a slice of Values to an Arrow ArrayRef for numeric types.
+/// Returns None if values are not numeric or have mixed incompatible types.
+fn values_to_arrow_array(values: &[Value], first: &Value) -> Option<ArrayRef> {
+    match first {
+        Value::Int64(_) => {
+            let mut builder = Int64Builder::new();
+            for v in values {
+                match v {
+                    Value::Int64(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::Double(_) => {
+            let mut builder = Float64Builder::new();
+            for v in values {
+                match v {
+                    Value::Double(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::Int32(_) => {
+            let mut builder = Int32Builder::new();
+            for v in values {
+                match v {
+                    Value::Int32(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::Float(_) => {
+            let mut builder = Float32Builder::new();
+            for v in values {
+                match v {
+                    Value::Float(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::Int16(_) => {
+            let mut builder = Int16Builder::new();
+            for v in values {
+                match v {
+                    Value::Int16(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::Int8(_) => {
+            let mut builder = Int8Builder::new();
+            for v in values {
+                match v {
+                    Value::Int8(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::UInt64(_) => {
+            let mut builder = UInt64Builder::new();
+            for v in values {
+                match v {
+                    Value::UInt64(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::UInt32(_) => {
+            let mut builder = UInt32Builder::new();
+            for v in values {
+                match v {
+                    Value::UInt32(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::UInt16(_) => {
+            let mut builder = UInt16Builder::new();
+            for v in values {
+                match v {
+                    Value::UInt16(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        Value::UInt8(_) => {
+            let mut builder = UInt8Builder::new();
+            for v in values {
+                match v {
+                    Value::UInt8(n) => builder.append_value(*n),
+                    Value::Null => builder.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(Arc::new(builder.finish()))
+        }
+        _ => None,
+    }
+}
+
+/// Try to evaluate aggregate using Arrow compute SIMD kernels.
+/// Returns None if the aggregate type or column type doesn't support SIMD.
+fn try_simd_aggregate(func: &AggregateFunction, args: &[Value]) -> Option<Value> {
+    match func {
+        AggregateFunction::Sum | AggregateFunction::Min | AggregateFunction::Max => {}
+        _ => return None,
+    }
+
+    if args.is_empty() {
+        return None;
+    }
+
+    let first = args.iter().find(|v| !matches!(v, Value::Null))?;
+    let array = values_to_arrow_array(args, first)?;
+
+    macro_rules! simd_dispatch {
+        ($arr:expr, $func:expr, $ty:ty, $variant:ident) => {{
+            let typed: &PrimitiveArray<$ty> = $arr.as_any().downcast_ref()?;
+            match $func {
+                AggregateFunction::Sum => compute::sum(typed).map(Value::$variant),
+                AggregateFunction::Min => compute::min(typed).map(Value::$variant),
+                AggregateFunction::Max => compute::max(typed).map(Value::$variant),
+                _ => return None,
+            }
+        }};
+    }
+
+    match first {
+        Value::Int64(_) => simd_dispatch!(array, func, Int64Type, Int64),
+        Value::Double(_) => simd_dispatch!(array, func, Float64Type, Double),
+        Value::Int32(_) => simd_dispatch!(array, func, Int32Type, Int32),
+        Value::Float(_) => simd_dispatch!(array, func, Float32Type, Float),
+        Value::Int16(_) => simd_dispatch!(array, func, Int16Type, Int16),
+        Value::Int8(_) => simd_dispatch!(array, func, Int8Type, Int8),
+        Value::UInt64(_) => simd_dispatch!(array, func, UInt64Type, UInt64),
+        Value::UInt32(_) => simd_dispatch!(array, func, UInt32Type, UInt32),
+        Value::UInt16(_) => simd_dispatch!(array, func, UInt16Type, UInt16),
+        Value::UInt8(_) => simd_dispatch!(array, func, UInt8Type, UInt8),
+        _ => None,
+    }
+}
+
 /// Evaluate an aggregate function across a slice of Values.
 /// Returns the final aggregate value.
 pub fn evaluate_aggregate(func: &AggregateFunction, args: &[Value]) -> Result<Value, String> {
+    // Try SIMD-accelerated path for numeric aggregates (Sum, Min, Max)
+    if let Some(result) = try_simd_aggregate(func, args) {
+        return Ok(result);
+    }
+
     let mut state = AggValueState::new(func);
 
     // COUNT(*) counts all rows regardless of arguments
