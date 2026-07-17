@@ -1,8 +1,10 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-17 (P27.5+P27.6 Complete — Rust ≈ C++ parity)
+> **Tanggal:** 2026-07-17 (Audit Lengkap — Rekomendasi Sprint 4)
 > **Hasil audit:** `cargo test --workspace` → **1099 passed, 0 failed, 68 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
+> **⚠️ 68 test masih ignored** (6.2% dari total) — mayoritas di edge case suite. Lihat §9 untuk action plan.
+> **Belum ada benchmark sistematis terhadap LadybugDB C++** — parity hanya terverifikasi terhadap Vela C++.
 
 ---
 
@@ -16,7 +18,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **1030 total, 0 failed** ✅ |
+| **Tests passing** | **1099 total, 0 failed, 68 ignored** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
@@ -87,7 +89,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | TopK (fused ORDER BY + LIMIT) | ❌ Separate OrderBy+Limit | ✅ LogicalTopK + PhysicalTopK (BinaryHeap O(n log k)) | `[P12.1]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
 | Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean (fixed 3 recent warnings), `cargo audit` clean (0 vulns) | `[P9.2]` |
-| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. **Gap table fully populated with empirical C++ vs Rust numbers (E2E Rust is ~3.7x slower currently)**. | `[P9.3]` |
+| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. **Gap table fully populated with empirical C++ vs Rust numbers. Rust kini ≈ C++ (397 µs vs 400 µs).** | `[P9.3]` |
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
 | Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |
@@ -807,7 +809,7 @@ Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exce
 | **Native FTS** | Full DDL + MATCH pipeline with BM25 |
 | **CI/CD** | 8-job GitHub Actions + Dependabot |
 | **Code quality** | Clippy `-D warnings` clean, `cargo-audit` clean |
-| **Tests** | 960 tests, 0 failures |
+| **Tests** | 1099 tests, 0 failures |
 | **Types** | JSON, UINT128, DTime (Rust exceeds Vela C++) |
 | **Logical operators** | 51 vs 38+ (Rust exceeds LadybugDB) |
 
@@ -895,7 +897,7 @@ kuzu-processor/src/
 cargo check -p kuzu-processor
 cargo test -p kuzu-processor    # Harus tetap 77 passing
 cargo build --workspace          # Semua downstream crates harus compile
-cargo test --workspace           # Harus tetap 960 passing
+cargo test --workspace           # Harus tetap 1099 passing
 ```
 
 ### 9.4 Dampak ke Implementation Plan
@@ -910,4 +912,66 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 | P10.4 | EXTENSION Mgmt | 5 | — |
 | P10.5 | Missing functions | 2 | — |
 | **P10.6** | **Refactor physical_operator.rs** | **5** | ⚠️ Sebelum P11/P12 |
-| **Total P10** | | **23** (naik dari 18) | |
+| **Total P10** | | **23** (naik dari 18) |
+
+---
+
+## 10. Audit & Action Plan (2026-07-17) — Sprint 4
+
+### 10.1 Ringkasan Temuan Audit
+
+| Temuan | Detail | Severitas |
+|--------|--------|-----------|
+| **🔴 68 ignored tests** | 6.2% dari total test suite tidak jalan. Mayoritas di edge case: null_handling (23), nested_types (13), ddl_errors (10), empty_tables (7), unicode (4), boundary (4), concurrency (1). Indikasi langsung fitur belum production-ready. | 🔴 **CRITICAL** |
+| **🟡 Query kompleks belum optimal** | Multi-key GROUP BY (3,987 µs), OrderBy (1,388 µs), HashJoin build (1,450 µs) — masih 1.4-2× dari target. C++ parity baru terverifikasi untuk query sederhana (filter+count). | 🟡 HIGH |
+| **🟡 LadybugDB belum di-benchmark** | Semua klaim parity hanya terhadap Vela C++. `ladybug/` submodule punya benchmark sendiri yang belum dijalankan. | 🟡 HIGH |
+| **🟢 STANDALONE_CALL dispatch** | Masih string matching, bukan trait-based. Deferred sejak P22. | 🟡 MEDIUM |
+| **🟢 WASM tests** | 4 test (3 pass, 1 ignore) — perlu stabilisasi. | 🟢 LOW |
+| **🟢 Fuzz targets** | 3 target defined, tapi butuh nightly Rust. Belum di-run secara rutin. | 🟢 LOW |
+| **🟢 GitHub Releases** | Binary distribution belum ada. Hanya build-from-source. | 🟢 LOW |
+
+### 10.2 Sprint 4: "Stabilisasi & Benchmark Komprehensif"
+
+| Fase | Konten | Prioritas | SP | Target |
+|------|--------|-----------|:---:|--------|
+| **P30.1** | Fix 68 ignored tests (root cause → fix → un-ignore) | 🔴 P0 | 6 | **1099 ✅ pass, 0 ignore** |
+| **P30.2** | Optimasi query kompleks: P27c (multi-key GROUP BY), P27d (k-way merge O(log k)), P27f (inline annotations) | 🟡 P1 | 4 | Multi-key GROUP BY <2,000 µs, OrderBy <700 µs |
+| **P30.3** | LadybugDB benchmark suite — jalankan benchmark yang sama terhadap `ladybug/` binary | 🟡 P1 | 2 | Parity terverifikasi terhadap Vela **dan** Ladybug |
+| **P30.4** | STANDALONE_CALL refactor (string matching → trait dispatch) | 🟡 P2 | 2 | Dispatch trait-based via registry |
+| **P30.5** | WASM test stabilisasi + fuzz CI integration | 🟢 P3 | 2 | WASM 4/4 pass, fuzz di CI (nightly) |
+| **P30.6** | GitHub Releases + binary distribution script | 🟢 P3 | 2 | `cargo-dist` atau manual release script |
+| **Total** | | | **18** | |
+
+### 10.3 Detail: P30.1 — Fix 68 Ignored Tests (6 SP)
+
+Breakdown per test file, diurutkan berdasarkan impact:
+
+| Test File | Ignored | Root Cause (Estimasi) | Approach |
+|-----------|---------|-----------------------|----------|
+| `edge_nested_types` | **13** | Arrow Struct/List type conversions belum handle semua kasus nested | Investigasi `evaluate_arrow` untuk nested types; fix type coercion |
+| `edge_null_handling` | **23** | NULL propagation di expression evaluator masih ada celah | Audit `evaluate_arrow` + `from_legacy` null handling; tambah test coverage |
+| `edge_ddl_errors` | **10** | Error message mismatch atau panic path yang belum tertangani | Ubah `panic!` → `Result::Err` di DDL handler |
+| `edge_empty_tables` | **7** | Empty table scan edge cases (0 columns, 0 rows, empty predicates) | Fix `PhysicalScan` empty DataChunk handling |
+| `edge_unicode` | **4** | Unicode string comparison/collation issues | Audit `string_comparison` + regex UTF-8 handling |
+| `edge_boundary` | **4** | Boundary values (MAX/MIN int, NaN, Infinity) | Fix `Value` comparisons untuk edge numeric cases |
+| `edge_concurrency` | **1** | Race condition di multiwriter lock | Investigasi race di `lock_table` + Condvar |
+
+### 10.4 Kriteria Kelulusan Sprint 4
+
+```bash
+# Must pass before Sprint 4 is complete
+cargo test --workspace              # → 1099+ passed, 0 failed, 0 ignored
+cargo bench -p kuzu-processor       # All benchmarks within target range
+# LadybugDB parity verification
+cd ../ladybug && cmake --build && ./benchmark/...  # Same queries, comparable perf
+```
+
+### 10.5 P27 Optimization — Sisa Gap (Deferred dari Sprint 3)
+
+| Gap | Item | SP | Status Baru |
+|-----|------|:---:|-------------|
+| Multi-key GROUP BY `Vec<Value>` alloc | **P27c** | 3 | → **P30.2** |
+| K-way merge `O(k)` → `O(log k)` | **P27d** | 1 | → **P30.2** |
+| `#[inline]` annotations | **P27f** | 1 | → **P30.2** |
+| SIMD aggregate via Arrow Compute | **P27e** | 3 | ✅ **SUDAH DONE** (Sprint 2) |
+| Column mapping SQL aggregate | **P27g** | 2 | ✅ **SUDAH DONE** (Sprint 2) | |
