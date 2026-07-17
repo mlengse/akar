@@ -149,14 +149,17 @@ impl ArrowVector {
 }
 
 impl VectorAccess for ArrowVector {
+    #[inline(always)]
     fn size(&self) -> usize {
         self.array.len()
     }
 
+    #[inline(always)]
     fn physical_type(&self) -> PhysicalTypeID {
         self.physical_type
     }
 
+    #[inline(always)]
     fn is_null(&self, row: usize) -> bool {
         if row >= self.array.len() {
             return true;
@@ -164,6 +167,7 @@ impl VectorAccess for ArrowVector {
         self.array.is_null(row)
     }
 
+    #[inline]
     fn get_i64(&self, row: usize) -> Option<i64> {
         if row >= self.array.len() {
             return None;
@@ -176,6 +180,7 @@ impl VectorAccess for ArrowVector {
         }
     }
 
+    #[inline]
     fn get_i32(&self, row: usize) -> Option<i32> {
         if row >= self.array.len() {
             return None;
@@ -188,6 +193,7 @@ impl VectorAccess for ArrowVector {
         }
     }
 
+    #[inline]
     fn get_f64(&self, row: usize) -> Option<f64> {
         if row >= self.array.len() {
             return None;
@@ -200,6 +206,7 @@ impl VectorAccess for ArrowVector {
         }
     }
 
+    #[inline]
     fn get_f32(&self, row: usize) -> Option<f32> {
         if row >= self.array.len() {
             return None;
@@ -212,6 +219,7 @@ impl VectorAccess for ArrowVector {
         }
     }
 
+    #[inline]
     fn get_bool(&self, row: usize) -> Option<bool> {
         if row >= self.array.len() {
             return None;
@@ -224,6 +232,7 @@ impl VectorAccess for ArrowVector {
         }
     }
 
+    #[inline]
     fn get_value(&self, row: usize) -> Option<Value> {
         if row >= self.array.len() || self.array.is_null(row) {
             return None;
@@ -329,6 +338,7 @@ pub enum Vector {
 }
 
 impl Vector {
+    #[inline]
     pub fn as_arrow(&self) -> Option<&ArrowVector> {
         match self {
             Vector::Arrow(a) => Some(a),
@@ -336,6 +346,7 @@ impl Vector {
         }
     }
 
+    #[inline]
     pub fn as_legacy(&self) -> Option<&ValueVector> {
         match self {
             Vector::Legacy(l) => Some(l),
@@ -343,6 +354,7 @@ impl Vector {
         }
     }
 
+    #[inline]
     pub fn as_legacy_mut(&mut self) -> Option<&mut ValueVector> {
         match self {
             Vector::Legacy(l) => Some(l),
