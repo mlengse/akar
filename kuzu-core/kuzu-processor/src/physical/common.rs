@@ -3,6 +3,7 @@
 use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::ValueVector;
 
+#[inline]
 pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
     match val {
         Value::Null => { v.set_null(row, true); }
@@ -57,6 +58,7 @@ pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value
     }
 }
 
+#[inline]
 pub(crate) fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
     match (a, b) {
         (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
@@ -78,6 +80,7 @@ pub(crate) fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
     }
 }
 
+#[inline]
 pub(crate) fn value_hash(val: &Value) -> u64 {
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -86,6 +89,7 @@ pub(crate) fn value_hash(val: &Value) -> u64 {
 }
 
 /// Write a Value's hash into an arbitrary Hasher.
+#[inline]
 pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     match val {
@@ -131,6 +135,7 @@ pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) 
 
 /// Fast hash using ahash — ~3-5× faster than SipHash for integer keys.
 /// Used in the hot path of JoinHashTable build/probe.
+#[inline]
 pub(crate) fn value_hash_fast(val: &Value) -> u64 {
     use std::hash::Hasher;
     let mut hasher = ahash::AHasher::default();
