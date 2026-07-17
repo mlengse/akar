@@ -20,7 +20,6 @@ fn test_null_insert_implicit() {
 }
 
 #[test]
-#[ignore = "Parser might not support rejecting primary key nulls during CREATE"]
 fn test_null_primary_key_rejection() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
@@ -234,6 +233,34 @@ fn test_null_boolean_not() {
 }
 
 #[test]
+fn test_null_boolean_and_true_other() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN TRUE AND NULL");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
+fn test_null_boolean_and_false_other() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN FALSE AND NULL");
+    assert_eq!(res.trim(), "Bool(false)");
+}
+
+#[test]
+fn test_null_boolean_or_true_other() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN TRUE OR NULL");
+    assert_eq!(res.trim(), "Bool(true)");
+}
+
+#[test]
+fn test_null_boolean_or_false_other() {
+    let (_db, conn) = setup_db();
+    let res = query_values(&conn, "RETURN FALSE OR NULL");
+    assert_eq!(res.trim(), "null");
+}
+
+#[test]
 fn test_null_order_by() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -259,18 +286,16 @@ fn test_null_distinct() {
 }
 
 #[test]
-#[ignore = "CASE expressions not yet fully parsed"]
 fn test_null_case_expression() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE (p:Person {id: 1})");
     
     let res = query_values(&conn, "MATCH (p:Person) RETURN CASE WHEN p.age IS NULL THEN 1 ELSE 0 END");
-    assert_eq!(res.trim(), "Integer(1)");
+    assert_eq!(res.trim(), "Int64(1)");
 }
 
 #[test]
-#[ignore = "coalesce function not returning correct value with columns"]
 fn test_null_coalesce() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -281,7 +306,6 @@ fn test_null_coalesce() {
 }
 
 #[test]
-#[ignore = "coalesce fails with multiple args"]
 fn test_null_coalesce_multiple() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN coalesce(NULL, NULL, 'default', 'ignored')");
@@ -289,7 +313,6 @@ fn test_null_coalesce_multiple() {
 }
 
 #[test]
-#[ignore = "ifnull function issue"]
 fn test_null_ifnull() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN ifnull(NULL, 42)");
