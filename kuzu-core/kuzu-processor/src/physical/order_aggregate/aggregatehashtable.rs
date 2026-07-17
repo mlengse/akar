@@ -3,6 +3,7 @@ use kuzu_common::types::Value;
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
+use kuzu_parser::ast::Expression;
 use crate::physical::types::OperatorResult;
 use crate::physical::common::{store_value_in_vector, value_hash_fast};
 
@@ -18,16 +19,22 @@ pub struct AggregateHashTable {
     funcs: Vec<AggregateFunction>,
     /// Group-by key column indices.
     group_by_cols: Vec<u32>,
+    /// Aggregate function argument expressions (for resolving column indices).
+    agg_expressions: Vec<Vec<Expression>>,
 }
 
 impl AggregateHashTable {
-    pub fn new(funcs: Vec<AggregateFunction>, group_by_cols: Vec<u32>) -> Self {
-        Self { funcs, group_by_cols }
+    pub fn new(funcs: Vec<AggregateFunction>, group_by_cols: Vec<u32>, agg_expressions: Vec<Vec<Expression>>) -> Self {
+        Self { funcs, group_by_cols, agg_expressions }
     }
 
     /// Aggregate all input chunks, optionally in parallel.
     pub fn aggregate(&self, chunks: &[DataChunk]) -> OperatorResult {
         let total_rows: usize = chunks.iter().map(|c| c.size).sum();
+
+        // Resolve aggregate expression args to column indices
+        let col_indices = resolve_agg_col_indices(&self.agg_expressions,
+            chunks.first().map(|c| c.field_names.as_slice()).unwrap_or(&[]));
 
         if total_rows == 0 && self.group_by_cols.is_empty() {
             // Scalar aggregates on empty input: produce one row with default values
@@ -62,17 +69,17 @@ impl AggregateHashTable {
                                 total += chunk.active_rows() as u64;
                             }
                             AggregateFunction::Count => {
-                                let col_idx = i.min(chunk.fields.len().saturating_sub(1));
-                                if let Some(field) = chunk.fields.get(col_idx) {
-                                    if chunk.sel_vector.is_some() {
-                                        for row in chunk.iter_rows() {
-                                            if !field.is_null(row) {
-                                                total += 1;
+                                if let Some(col_idx) = col_indices[i] {
+                                    if let Some(field) = chunk.fields.get(col_idx) {
+                                        if chunk.sel_vector.is_some() {
+                                            for row in chunk.iter_rows() {
+                                                if !field.is_null(row) {
+                                                    total += 1;
+                                                }
                                             }
+                                        } else {
+                                            total += (field.len() - field.null_count()) as u64;
                                         }
-                                    } else {
-                                        // No iteration needed: use ArrayRef::len() and null_count()
-                                        total += (field.len() - field.null_count()) as u64;
                                     }
                                 }
                             }
@@ -93,14 +100,14 @@ impl AggregateHashTable {
 
         // Use rayon parallel aggregation for large inputs
         if total_rows > 1000 {
-            self.aggregate_parallel(chunks)
+            self.aggregate_parallel(chunks, &col_indices)
         } else {
-            self.aggregate_sequential(chunks)
+            self.aggregate_sequential(chunks, &col_indices)
         }
     }
 
     /// Parallel aggregation: split chunks across threads, aggregate locally, merge.
-    fn aggregate_parallel(&self, chunks: &[DataChunk]) -> OperatorResult {
+    fn aggregate_parallel(&self, chunks: &[DataChunk], col_indices: &[Option<usize>]) -> OperatorResult {
         use rayon::prelude::*;
         let total_rows: usize = chunks.iter().map(|c| c.size).sum();
         type LocalTable = hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>>;
@@ -119,10 +126,10 @@ impl AggregateHashTable {
                     let bucket = local.entry(hash).or_default();
                     let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                     if let Some((_, states)) = entry {
-                        update_states_row(states, chunk, funcs, row);
+                        update_states_row(states, chunk, funcs, col_indices, row);
                     } else {
                         let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
-                        update_states_row(&mut states, chunk, funcs, row);
+                        update_states_row(&mut states, chunk, funcs, col_indices, row);
                         bucket.push((key, states));
                     }
                 }
@@ -151,7 +158,7 @@ impl AggregateHashTable {
     }
 
     /// Sequential aggregation (small inputs).
-    fn aggregate_sequential(&self, chunks: &[DataChunk]) -> OperatorResult {
+    fn aggregate_sequential(&self, chunks: &[DataChunk], col_indices: &[Option<usize>]) -> OperatorResult {
         let total_rows: usize = chunks.iter().map(|c| c.size).sum();
         let mut groups: hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>> = hashbrown::HashMap::with_capacity(total_rows.max(16));
         let group_cols = &self.group_by_cols;
@@ -164,10 +171,10 @@ impl AggregateHashTable {
                 let bucket = groups.entry(hash).or_default();
                 let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                 if let Some((_, states)) = entry {
-                    update_states_row(states, chunk, funcs, row);
+                    update_states_row(states, chunk, funcs, col_indices, row);
                 } else {
                     let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
-                    update_states_row(&mut states, chunk, funcs, row);
+                    update_states_row(&mut states, chunk, funcs, col_indices, row);
                     bucket.push((key, states));
                 }
             }
@@ -307,8 +314,35 @@ pub fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Val
     }
 }
 
+/// Resolve aggregate function argument expressions to column indices.
+/// Returns one Option per function: None means no column needed (e.g., COUNT(*)).
+pub fn resolve_agg_col_indices(agg_expressions: &[Vec<Expression>], field_names: &[String]) -> Vec<Option<usize>> {
+    agg_expressions.iter().map(|args| {
+        for expr in args {
+            match expr {
+                Expression::Variable(name) => {
+                    // Try exact match first (e.g., "age"), then qualified (e.g., "p.age")
+                    let result = field_names.iter().position(|n| n == name)
+                        .or_else(|| field_names.iter().position(|n| n.ends_with(&format!(".{}", name))));
+                    if result.is_some() { return result; }
+                }
+                Expression::PropertyAccess(base, prop) => {
+                    if let Expression::Variable(prefix) = base.as_ref() {
+                        let qualified = format!("{}.{}", prefix, prop);
+                        let result = field_names.iter().position(|n| n == &qualified);
+                        if result.is_some() { return result; }
+                    }
+                }
+                Expression::Star => return None,
+                _ => {}
+            }
+        }
+        None
+    }).collect()
+}
+
 /// Update aggregate states for a single row.
-pub fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs: &[AggregateFunction], row: usize) {
+pub fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs: &[AggregateFunction], col_indices: &[Option<usize>], row: usize) {
     for (i, state) in states.iter_mut().enumerate() {
         if matches!(funcs[i], AggregateFunction::CountStar) {
             if let AggValueState::Count(n) = state {
@@ -316,7 +350,8 @@ pub fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs:
             }
             continue;
         }
-        let col_idx = i.min(chunk.fields.len().saturating_sub(1));
+        let col_idx = col_indices.get(i).copied().flatten()
+            .unwrap_or_else(|| i.min(chunk.fields.len().saturating_sub(1)));
         let val = chunk
             .fields
             .get(col_idx)
