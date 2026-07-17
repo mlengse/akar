@@ -1,15 +1,15 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-17 (Sprint 4 Progress 2: 20/68 fixed)
-> **Baseline:** `cargo test --workspace` → **1117 passed, 0 failed, 48 ignored**, 29 crates, ~66k LOC
+> **Revision:** 2026-07-18 (Sprint 4 Progress 3: 25/68 fixed)
+> **Baseline:** `cargo test --workspace` → **1122 passed, 0 failed, 43 ignored**, 29 crates, ~66k LOC
 > **Benchmark gap vs C++:** **Closed — Rust at parity.** `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). C++ baseline: 400 µs.
-> **Sprint 4 Progress 2: 20/68 ignored fixed** — IS NULL grammar, boolean 3VL, ddl_errors assertions, CASE/COALESCE/IFNULL expr fix, NULL PK rejection, boolean symmetry tests. **48 remain (4.1%).**
+> **Sprint 4 Progress 3: 25/68 ignored fixed** — IS NULL grammar, boolean 3VL, ddl_errors assertions, CASE/COALESCE/IFNULL expr fix, NULL PK rejection, boolean symmetry tests, DISTINCT (hash aggregate), BETWEEN/NOT IN/STARTS WITH/ENDS WITH/CONTAINS grammar (keyword atomic split), LIKE grammar, IN evaluator (Arrow list + 3VL). **43 remain (3.6%).**
 > **⚠️ LadybugDB benchmark** — belum dijalankan. Parity hanya terverifikasi terhadap Vela C++.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
 
-## 🔥 SPRINT 4: STABILISASI & BENCHMARK KOMPREHENSIF (as of 2026-07-17)
+## 🔥 SPRINT 4: STABILISASI & BENCHMARK KOMPREHENSIF (as of 2026-07-18)
 
 ### ✅ Completed in Sprint 2-3
 
@@ -25,19 +25,19 @@
 | P28 — Migration Tool + CLI Box mode | ✅ | `kuzu-migrate` CLI |
 | P29 — 18 Missing Functions | ✅ | sinh, cosh, tanh, gcd, lcm, soundex, base64, etc. |
 
-### 🔴 P30.1 — Fix 68 Ignored Tests (6+ SP, 20/68 done) ⬅️ TOP PRIORITY
+### 🔴 P30.1 — Fix 68 Ignored Tests (6+ SP, 25/68 done) ⬅️ TOP PRIORITY
 
 | Test File | Ignored | Root Cause (Estimasi) |
 |-----------|---------|-----------------------|
 | `edge_nested_types` | **13** | Arrow Struct/List type conversions untuk nested types |
-| `edge_null_handling` | **12** (dari 27) | NULL propagation di expression evaluator |
+| `edge_null_handling` | **7** (dari 27) | NULL propagation di expression evaluator |
 | `edge_ddl_errors` | **10** | `panic!` → `Result::Err` yang belum tertangani |
 | `edge_empty_tables` | **7** | Empty DataChunk / empty scan edge cases |
 | `edge_unicode` | **4** | Unicode comparison/collation |
 | `edge_boundary` | **4** | MAX/MIN int, NaN, Infinity |
 | `edge_concurrency` | **1** | Race condition di multiwriter lock |
 
-**Target:** `cargo test --workspace` → **1117 pass, 0 fail, 0 ignored**.
+**Target:** `cargo test --workspace` → **1122 pass, 0 fail, 0 ignored**.
 
 ### 🟡 P30.2 — Optimasi Query Kompleks (4 SP)
 
@@ -248,7 +248,7 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 ## 🔴 P30: Stabilisasi & Benchmark Komprehensif — Sprint 4
 *Target: Production-readiness — 0 ignored tests, LadybugDB parity verified, query performance targets met*
 
-### P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ KRITIS (PROGRESS: 20/68 ✅)
+### P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ KRITIS (PROGRESS: 25/68 ✅)
 
 **Masalah:** 68 test di-ignore (`#[ignore]`) — kode tidak di-test secara otomatis. Ini adalah indikator langsung bahwa fitur terkait belum stabil.
 
@@ -260,12 +260,19 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 - **NULL PK rejection (1):** Add null-check di `table.rs` `insert_row()` dan `insert_rows_batch()` untuk primary key column.
 - **CASE/COALESCE/IFNULL (3+1, 4 new symmetry tests):** Fix grammar (`case_when`/`coalesce`/`ifnull` atomic sub-rules) + null short-circuit exemption di expression evaluator untuk coalesce/ifnull. Add 4 boolean symmetry tests for NULL-as-second-argument verification.
 
+**Progress Sprint 4 Sesi 3 (2026-07-18): 5 more test fixed ✅**
+- **DISTINCT (1):** Planner emit `Aggregate(group_by, no agg)` instead of `MultiplicityReducer`. Root cause: `MultiplicityReducer` C++ hanya normalisasi multiplicity join — bukan dedup. Fix: hash-based GROUP BY dengan 0 aggregate functions (mirror C++ `createDistinctHashAggregate`).
+- **BETWEEN grammar (1):** `between_op` atomic `@{ }` mencegah whitespace consumption sebelum `additive_expr`. Fix: split jadi `between_kw @{ "BETWEEN" ~ ... }` + non-atomic `between_op { between_kw ~ additive_expr ~ and_kw ~ additive_expr }`.
+- **IN evaluator (1):** `ValueVector::get_value` untuk `List` type return `Vec::new()`. `ArrowVector::from_legacy` juga drop list data. Fix: `evaluate_in_op` handle `Expression::List` langsung — evaluate tiap item inline.
+- **NOT IN grammar (1):** `"NOT" ~ !(ASCII_ALPHANUMERIC | "_")` di non-atomic rule consume whitespace sebelum `!()`, sehingga `I` dari `IN` kena reject. Fix: pakai `not_kw` atomic (sudah ada). Juga split `in_op`, `starts_with_op`, `ends_with_op`, `contains_op`, `like_op` jadi atomic kw + non-atomic body.
+- **LIKE grammar (1):** Included in the keyword atomic split above.
+
 **Breakdown investigasi (updated 2026-07-17):**
 
 | Test File | Ignored | Prioritas | Root Cause (Verified) |
 |-----------|---------|:---------:|----------------------|
 | `edge_nested_types` | 13 | 🔴 | Grammar sudah OK (`INT64[]`, `MAP`, `STRUCT`, `UNION`). Tapi processor/storage tidak support list/struct column type — perlu implementasi `LogicalType` dengan child type di storage layer. |
-| `edge_null_handling` | 12 (dari 27) | 🔴 | **15 fixed:** 5 IS NULL grammar + 2 boolean 3VL + 4 new boolean symmetry tests + 3 CASE/COALESCE/IFNULL + 1 NULL PK rejection. **Sisa 12:** DISTINCT, IN, BETWEEN, LIKE — perlu investigasi expression evaluator path. |
+| `edge_null_handling` | 7 (dari 27) | 🔴 | **20 fixed:** 5 IS NULL grammar + 2 boolean 3VL + 4 new boolean symmetry tests + 3 CASE/COALESCE/IFNULL + 1 NULL PK rejection + **5 expression evaluator (DISTINCT, IN, NOT IN, BETWEEN, LIKE)**. Fix: DISTINCT → hash aggregate; BETWEEN/NOT IN grammar → atomic keyword split; IN evaluator → inline list eval + ArrowVector; LIKE grammar → atomic keyword split. **Sisa 7:** prosestable/null propagation di aggregate (COUNT, SUM, AVG, MIN, MAX, COUNT_STAR) dengan input ALL NULL — perlu investigasi aggregation 3VL. |
 | `edge_ddl_errors` | 2 (dari 10) | 🟡 | **8 fixed:** assertion string mismatch. **Sisa 2:** grammar `create_rel_table` mewajibkan `"," ~ column_definitions` — test tanpa column_def tambahan fail di parser. Deferred. |
 | `edge_empty_tables` | 7 | 🟡 | Empty table scan: `PhysicalScan` mungkin crash pada DataChunk dengan 0 rows. |
 | `edge_unicode` | 4 | 🟢 | Unicode: `string_comparison` mungkin tidak handle grapheme clusters atau collation. |
@@ -273,7 +280,7 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 | `edge_concurrency` | 1 | 🟢 | Race condition: kemungkinan Timing Window di `lock_table()` + Condvar. |
 
 **Execution plan:**
-1. Continue un-ignore → run → debug → fix cycle on remaining 48
+1. Continue un-ignore → run → debug → fix cycle on remaining 43
 2. Final: `cargo test --workspace` → **0 ignored ✅**
 
 ### P30.2 — Optimasi Query Kompleks (4 SP)
