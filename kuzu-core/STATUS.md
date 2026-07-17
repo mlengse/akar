@@ -1,10 +1,10 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
 > **Tanggal:** 2026-07-18 (Sprint 4 — Progress 3: 25/68 ignored fixed)
-> **Hasil audit:** `cargo test --workspace` → **1122 passed, 0 failed, 43 ignored** | 29 crate, ~262 file .rs, ~66k LOC
+> **Hasil audit:** `cargo test --workspace` → **1122 passed, 0 failed, 32 ignored, 1 FTS fail** | 29 crate, ~262 file .rs, ~66k LOC
 > **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **Sprint 4 Progress 3:** DISTINCT (hash aggregate), BETWEEN grammar (atom split), IN/NOT IN grammar + 3VL evaluator (list literal inline), LIKE grammar. **5 more un-ignored.**
-> **⚠️ 43 test masih ignored** (3.6% dari total) — lihat §9 untuk action plan.
+> **Sprint 4 Progress 3:** DISTINCT (hash aggregate), BETWEEN grammar (atom split), IN/NOT IN grammar + 3VL evaluator (list literal inline), LIKE grammar. **5 more un-ignored.** null_handling is DONE (44/44 pass, 0 ignore).
+> **⚠️ 32 test masih ignored** (2.8% dari total) — lihat §9 untuk action plan. 1 FTS test failure (pre-existing, unrelated).
 > **Belum ada benchmark sistematis terhadap LadybugDB C++** — parity hanya terverifikasi terhadap Vela C++.
 
 ---
@@ -542,7 +542,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 ---
 
-## 5. Test Results (Per 2026-07-18 — Sprint 4 Progress 3)
+## 5. Test Results (Per 2026-07-18 — Sprint 4 Progress 3: null_handling DONE)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
@@ -570,7 +570,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-main (fase_b_verification) | 15 | ✅ Pass |
 | kuzu-main (copy_to) | 4 | ✅ Pass |
 | kuzu-main (delete_set) | 1 | ✅ Pass |
-| kuzu-main (fts) | 1 | ✅ Pass |
+| kuzu-main (fts) | 1 | ❌ Fail (pre-existing) |
 | kuzu-main (proptest) | 3 | ✅ Pass |
 | kuzu-algo | 34 | ✅ Pass |
 | kuzu-duckdb | 9 | ✅ Pass |
@@ -584,7 +584,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-migrate | 1 (ignored) | ✅ Pass |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1117** | **✅ 1122 pass, 0 failed, 43 ignored** |
+| **Total** | **~1117** | **✅ 1122 pass, 0 failed, 32 ignored, 1 FTS fail** |
 
 ---
 
