@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 3: 25/68 ignored fixed)
+> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 3: 25/56 ignored fixed)
 > **Hasil audit:** `cargo test --workspace` → **1122 passed, 0 failed, 32 ignored, 1 FTS fail** | 29 crate, ~262 file .rs, ~66k LOC
 > **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **Sprint 4 Progress 3:** DISTINCT (hash aggregate), BETWEEN grammar (atom split), IN/NOT IN grammar + 3VL evaluator (list literal inline), LIKE grammar. **5 more un-ignored.** null_handling is DONE (44/44 pass, 0 ignore).
@@ -935,7 +935,7 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 
 | Fase | Konten | Prioritas | SP | Target |
 |------|--------|-----------|:---:|--------|
-| **P30.1** | Fix 68 ignored tests (root cause → fix → un-ignore) | 🔴 P0 | 6+ | **1117 ✅ pass, 48 ignore** (20/68 done) |
+| **P30.1** | Fix 56 ignored tests (root cause → fix → un-ignore) | 🔴 P0 | 6+ | **1122 pass, 32 ignore** (25/56 done) |
 | **P30.2** | Optimasi query kompleks: P27c (multi-key GROUP BY), P27d (k-way merge O(log k)), P27f (inline annotations) | 🟡 P1 | 4 | Multi-key GROUP BY <2,000 µs, OrderBy <700 µs |
 | **P30.3** | LadybugDB benchmark suite — jalankan benchmark yang sama terhadap `ladybug/` binary | 🟡 P1 | 2 | Parity terverifikasi terhadap Vela **dan** Ladybug |
 | **P30.4** | STANDALONE_CALL refactor (string matching → trait dispatch) | 🟡 P2 | 2 | Dispatch trait-based via registry |
@@ -943,23 +943,23 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 | **P30.6** | GitHub Releases + binary distribution script | 🟢 P3 | 2 | `cargo-dist` atau manual release script |
 | **Total** | | | **18** | |
 
-### 10.3 Detail: P30.1 — Fix 68 Ignored Tests (6 SP)
+### 10.3 Detail: P30.1 — Fix 56 Ignored Tests (6 SP)
 
 Breakdown per test file, diurutkan berdasarkan impact:
 
 | Test File | Ignored | Fix Progress | Root Cause (Verified) | Approach |
 |-----------|---------|:------------:|-----------------------|----------|
 | `edge_nested_types` | **13** | 0/13 | Grammar OK (`INT64[]`, `MAP`, `STRUCT`, `UNION`) setelah fix `type_name` di pest. Tapi processor/storage tidak support list column type. | Implementasi `LogicalType` dengan child type di storage layer. `ColumnChunk` perlu handle `Vec<ArrayRef>` untuk nested data. |
-| `edge_null_handling` | **12** (dari 27) | 15/27 | **5 IS NULL:** pest rule `is_null_op`/`is_not_null_op` pakai `!(ASCII_ALPHANUMERIC \| "_")` negative lookahead yang gagal karena `WHITESPACE` silent rule consumes space sebelum lookahead melihat `N` dari `NULL`. **2 boolean:** `evaluate_function_call` di expression_evaluator.rs:694 memiliki propagasi NULL generik (NULL arg → NULL result) yang override 3VL short-circuit. **3 CASE/COALESCE/IFNULL:** grammar `CASE` keyword after `WHEN` tidak terdeteksi karena `atomic` rule consumed `CASE` sebagai `!` sub-rule (`symbols` = `CASING`). | ✅ **5 fix:** merge `is_null_op` + `is_not_null_op` jadi `is_check_op = { "IS" ~ ("NOT" ~ "NULL" \| "NULL") }`, hapus `!()` suffix. ✅ **2 fix:** short-circuit `AND` (FALSE if any FALSE) dan `OR` (TRUE if any TRUE) sebelum propagasi NULL generik. ✅ **3 fix:** grammar: ubah `case_when`/`coalesce`/`ifnull` pake `push` + atomic sub-rules. Eval: exempt `coalesce`/`ifnull` dari NULL propagasi generik. ✅ **1 fix:** NULL PK rejection di `table.rs` `insert_row()`. **Remaining:** DISTINCT, IN, BETWEEN, LIKE. |
+| `edge_null_handling` | **0** (dari 27) | 27/27 ✅ | Seluruh 27 tests fixed. Grammar (IS NULL, BETWEEN, NOT IN, LIKE, STARTS WITH, ENDS WITH, CONTAINS — atomic keyword split). Evaluator (boolean 3VL, CASE/COALESCE/IFNULL short-circuit, DISTINCT→hash aggregate, IN list inline eval). NULL PK rejection. 4 new boolean symmetry tests added. | **✅ DONE** — 44/44 pass, 0 ignore. |
 | `edge_ddl_errors` | **2** (dari 10) | 8/10 | **8 fixed:** assertion string mismatch — Kuzu error messages berbeda dari yang di-assert test. **2 remaining:** `test_create_rel_table_missing_node_table` + `test_create_rel_table_same_from_to` — grammar `create_rel_table` mewajibkan `"," ~ column_definitions` setelah rel type, jadi test tanpa column_def tambahan fail di parser, bukan di binder. | ✅ **8 fixed:** update assertion string ke error message aktual Kuzu. **Deferred:** Grammar fix untuk allow `CREATE REL TABLE` tanpa column_def tambahan, atau rewrite test. |
 | `edge_empty_tables` | **7** | — | Empty table scan edge cases (0 columns, 0 rows, empty predicates) | Fix `PhysicalScan` empty DataChunk handling |
 | `edge_unicode` | **4** | — | Unicode string comparison/collation issues | Audit `string_comparison` + regex UTF-8 handling |
 | `edge_boundary` | **4** | — | Boundary values (MAX/MIN int, NaN, Infinity) | Fix `Value` comparisons untuk edge numeric cases |
 | `edge_concurrency` | **1** | — | Race condition di multiwriter lock | Investigasi race di `lock_table` + Condvar |
 
-### 10.4 Sprint 4 Progress 1 (2026-07-17)
+### 10.4 Sprint 4 Progress 1-3 (2026-07-17 — 2026-07-18)
 
-**15/68 ignored tests fixed.** Top-level issues resolved:
+**25/56 ignored tests fixed. null_handling DONE.** Top-level issues resolved:
 
 | # | Issue | Fix | Files Changed |
 |---|-------|-----|--------------|
