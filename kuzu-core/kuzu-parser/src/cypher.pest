@@ -407,10 +407,18 @@ list_predicate = {
 
 // CASE expression — simple: CASE x WHEN v THEN e ... [ELSE e] END
 // searched: CASE WHEN cond THEN e ... [ELSE e] END
-case_expr    = { "CASE" ~ !(ASCII_ALPHANUMERIC | "_") ~ case_subject? ~ case_when+ ~ case_else? ~ "END" ~ !(ASCII_ALPHANUMERIC | "_") }
-case_subject = { !("WHEN" ~ !(ASCII_ALPHANUMERIC | "_")) ~ expression }
-case_when    = { "WHEN" ~ !(ASCII_ALPHANUMERIC | "_") ~ expression ~ "THEN" ~ !(ASCII_ALPHANUMERIC | "_") ~ expression }
-case_else    = { "ELSE" ~ !(ASCII_ALPHANUMERIC | "_") ~ expression }
+// Each keyword prefix is an atomic sub-rule so that the negative lookahead
+// checks the character immediately after the keyword before pest auto-consumes
+// whitespace between sequence elements.
+case_expr         = { case_expr_start ~ case_subject? ~ case_when+ ~ case_else? ~ case_expr_end }
+case_expr_start   = @{ "CASE" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_expr_end     = @{ "END"   ~ !(ASCII_ALPHANUMERIC | "_") }
+case_subject      = { !case_when_start ~ expression }
+case_when         = { case_when_start ~ expression ~ case_then ~ expression }
+case_when_start   = @{ "WHEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_then         = @{ "THEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_else         = { case_else_start ~ expression }
+case_else_start   = @{ "ELSE" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 exists_subquery = { "EXISTS" ~ "{" ~ query_statement ~ "}" }
 
