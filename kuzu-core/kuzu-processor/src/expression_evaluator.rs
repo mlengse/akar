@@ -479,7 +479,10 @@ impl ExpressionEvaluator {
                 })
                 .collect();
 
-            if arg_values.iter().any(|v| matches!(v, Value::Null)) {
+            if name != "coalesce"
+                && name != "ifnull"
+                && arg_values.iter().any(|v| matches!(v, Value::Null))
+            {
                 row_results.push(Value::Null);
                 continue;
             }
@@ -716,7 +719,11 @@ impl ExpressionEvaluator {
             }
 
             // If any argument is null, the result is null (SQL NULL semantics)
-            if arg_values.iter().any(|v| matches!(v, Value::Null)) {
+            // Coalesce/ifnull are exempt — they intentionally inspect null args
+            if name != "coalesce"
+                && name != "ifnull"
+                && arg_values.iter().any(|v| matches!(v, Value::Null))
+            {
                 row_results.push(Value::Null);
                 continue;
             }
