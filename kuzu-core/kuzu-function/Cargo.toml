@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 kuzu-common = { path = "../kuzu-common" }
+arrow.workspace = true
 hashbrown.workspace = true
 regex.workspace = true
 time.workspace = true

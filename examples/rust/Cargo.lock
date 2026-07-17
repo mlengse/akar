@@ -752,6 +752,7 @@ dependencies = [
 name = "kuzu-function"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "base64",
  "hashbrown 0.17.1",
  "kuzu-common",
