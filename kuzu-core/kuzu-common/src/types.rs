@@ -135,96 +135,115 @@ pub enum Value {
 // --- From implementations for Value ---
 
 impl From<bool> for Value {
+    #[inline(always)]
     fn from(v: bool) -> Self {
         Value::Bool(v)
     }
 }
 impl From<i64> for Value {
+    #[inline(always)]
     fn from(v: i64) -> Self {
         Value::Int64(v)
     }
 }
 impl From<i32> for Value {
+    #[inline(always)]
     fn from(v: i32) -> Self {
         Value::Int32(v)
     }
 }
 impl From<i16> for Value {
+    #[inline(always)]
     fn from(v: i16) -> Self {
         Value::Int16(v)
     }
 }
 impl From<i8> for Value {
+    #[inline(always)]
     fn from(v: i8) -> Self {
         Value::Int8(v)
     }
 }
 impl From<u64> for Value {
+    #[inline(always)]
     fn from(v: u64) -> Self {
         Value::UInt64(v)
     }
 }
 impl From<u32> for Value {
+    #[inline(always)]
     fn from(v: u32) -> Self {
         Value::UInt32(v)
     }
 }
 impl From<u16> for Value {
+    #[inline(always)]
     fn from(v: u16) -> Self {
         Value::UInt16(v)
     }
 }
 impl From<u8> for Value {
+    #[inline(always)]
     fn from(v: u8) -> Self {
         Value::UInt8(v)
     }
 }
 impl From<f64> for Value {
+    #[inline(always)]
     fn from(v: f64) -> Self {
         Value::Double(v)
     }
 }
 impl From<f32> for Value {
+    #[inline(always)]
     fn from(v: f32) -> Self {
         Value::Float(v)
     }
 }
 impl From<String> for Value {
+    #[inline(always)]
     fn from(v: String) -> Self {
         Value::String(v)
     }
 }
 impl From<&str> for Value {
+    #[inline(always)]
     fn from(v: &str) -> Self {
         Value::String(v.to_string())
     }
 }
 impl From<Date> for Value {
+    #[inline(always)]
     fn from(v: Date) -> Self {
         Value::Date(v)
     }
 }
 impl From<Timestamp> for Value {
+    #[inline(always)]
     fn from(v: Timestamp) -> Self {
         Value::Timestamp(v)
     }
 }
 impl From<Interval> for Value {
+    #[inline(always)]
     fn from(v: Interval) -> Self {
         Value::Interval(v)
     }
 }
 impl From<InternalID> for Value {
+    #[inline(always)]
     fn from(v: InternalID) -> Self {
         Value::InternalID(v)
     }
 }
 impl From<u128> for Value {
+    #[inline(always)]
     fn from(v: u128) -> Self {
         Value::UInt128(v)
     }
 }
 impl From<serde_json::Value> for Value {
+    #[inline(always)]
     fn from(v: serde_json::Value) -> Self {
         Value::Json(v)
     }
@@ -268,12 +287,14 @@ impl Value {
     }
 
     /// Get the PhysicalTypeID for this Value's logical type.
+    #[inline(always)]
     pub fn physical_type(&self) -> PhysicalTypeID {
         physical_type_from_logical(self.logical_type())
     }
 }
 
 /// Map a LogicalTypeID to its corresponding PhysicalTypeID.
+#[inline]
 pub const fn physical_type_from_logical(logical: LogicalTypeID) -> PhysicalTypeID {
     match logical {
         LogicalTypeID::Any => PhysicalTypeID::Any,
@@ -307,11 +328,13 @@ pub const fn physical_type_from_logical(logical: LogicalTypeID) -> PhysicalTypeI
 
 impl Date {
     /// Create a Date from epoch days.
+    #[inline(always)]
     pub fn from_days_since_epoch(days: i32) -> Self {
         Date(days)
     }
 
     /// Get the days since epoch.
+    #[inline(always)]
     pub fn days_since_epoch(&self) -> i32 {
         self.0
     }
@@ -319,11 +342,13 @@ impl Date {
 
 impl Timestamp {
     /// Create a Timestamp from epoch microseconds.
+    #[inline(always)]
     pub fn from_micros_since_epoch(micros: i64) -> Self {
         Timestamp(micros)
     }
 
     /// Get the microseconds since epoch.
+    #[inline(always)]
     pub fn micros_since_epoch(&self) -> i64 {
         self.0
     }
