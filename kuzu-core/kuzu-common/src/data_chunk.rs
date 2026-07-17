@@ -58,19 +58,23 @@ impl DataChunk {
         self
     }
 
+    #[inline(always)]
     pub fn field(&self, idx: usize) -> &ArrayRef {
         &self.fields[idx]
     }
 
+    #[inline(always)]
     pub fn num_fields(&self) -> usize {
         self.fields.len()
     }
 
+    #[inline(always)]
     pub fn resize(&mut self, new_size: usize) {
         resize_chunk(self, new_size);
     }
 
     /// Return the number of active rows, taking the selection vector into account.
+    #[inline(always)]
     pub fn active_rows(&self) -> usize {
         self.sel_vector.as_ref().map_or(self.size, |s| s.size)
     }
@@ -107,34 +111,40 @@ impl DataChunk {
         self.size = sel.size;
     }
     
+    #[inline(always)]
     pub fn is_null(&self, field_idx: usize, row_idx: usize) -> bool {
         self.fields[field_idx].is_null(row_idx)
     }
 
+    #[inline]
     pub fn get_i64(&self, field_idx: usize, row_idx: usize) -> Option<i64> {
         if self.is_null(field_idx, row_idx) { return None; }
         let arr = self.fields[field_idx].as_primitive::<Int64Type>();
         Some(arr.value(row_idx))
     }
 
+    #[inline]
     pub fn get_i32(&self, field_idx: usize, row_idx: usize) -> Option<i32> {
         if self.is_null(field_idx, row_idx) { return None; }
         let arr = self.fields[field_idx].as_primitive::<Int32Type>();
         Some(arr.value(row_idx))
     }
 
+    #[inline]
     pub fn get_f64(&self, field_idx: usize, row_idx: usize) -> Option<f64> {
         if self.is_null(field_idx, row_idx) { return None; }
         let arr = self.fields[field_idx].as_primitive::<Float64Type>();
         Some(arr.value(row_idx))
     }
 
+    #[inline]
     pub fn get_bool(&self, field_idx: usize, row_idx: usize) -> Option<bool> {
         if self.is_null(field_idx, row_idx) { return None; }
         let arr = self.fields[field_idx].as_boolean();
         Some(arr.value(row_idx))
     }
 
+    #[inline]
     pub fn get_string(&self, field_idx: usize, row_idx: usize) -> Option<&str> {
         if self.is_null(field_idx, row_idx) { return None; }
         let arr = self.fields[field_idx].as_string::<i32>();
