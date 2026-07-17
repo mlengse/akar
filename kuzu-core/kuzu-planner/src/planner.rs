@@ -9,6 +9,7 @@
 use crate::join_order::{build_join_tree, flatten_join_plan};
 use crate::logical_operator::*;
 use kuzu_binder::bound_statement::*;
+use kuzu_parser::ast::Expression;
 
 /// The query planner transforms bound statements into logical query plans.
 pub struct QueryPlanner;
@@ -299,6 +300,7 @@ impl QueryPlanner {
         let mut scan_ops: Vec<LogicalOperator> = Vec::new();
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;
+        let mut distinct = false;
         let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
         let mut extend_ops: Vec<LogicalOperator> = Vec::new();
         // Flag to skip destination node pattern consumed by RecursiveExtend or Extend
@@ -444,6 +446,7 @@ impl QueryPlanner {
                     filter_expr = Some(w.expression);
                 }
                 BoundClause::BoundReturn(r) => {
+                    distinct = r.distinct;
                     projection = Some(LogicalProjection {
                         expressions: r.expressions,
                         children: Vec::new(),
@@ -558,6 +561,7 @@ impl QueryPlanner {
                     scan_ops = Vec::new();
                     filter_expr = None;
                     projection = None;
+                    distinct = false;
                 }
                 BoundClause::BoundDelete(d) => {
                     for item in &d.items {
@@ -682,7 +686,21 @@ impl QueryPlanner {
 
         // Project as topmost
         if let Some(proj) = projection {
+            let group_by = if distinct {
+                Some(proj.expressions.iter().map(|be| be.expression.clone()).collect::<Vec<Expression>>())
+            } else {
+                None
+            };
             result.push(LogicalOperator::Projection(proj));
+            // DISTINCT is implemented as a hash aggregate with group-by keys and no aggregate functions
+            if let Some(gb) = group_by {
+                result.push(LogicalOperator::Aggregate(LogicalAggregate {
+                    group_by: gb,
+                    aggregates: Vec::new(),
+                    children: Vec::new(),
+                    cardinality: 0,
+                }));
+            }
         }
 
         // Append DELETE operators at the end
