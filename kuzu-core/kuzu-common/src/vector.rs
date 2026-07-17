@@ -29,36 +29,44 @@ impl LegacyValueVector {
         }
     }
 
+    #[inline(always)]
     pub fn physical_type(&self) -> PhysicalTypeID {
         self.physical_type
     }
 
+    #[inline(always)]
     pub fn size(&self) -> usize {
         self.size
     }
 
+    #[inline(always)]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
+    #[inline(always)]
     pub fn is_null(&self, idx: usize) -> bool {
         !self.null_mask[idx]
     }
 
+    #[inline(always)]
     pub fn set_null(&mut self, idx: usize, is_null: bool) {
         self.null_mask[idx] = !is_null;
     }
 
+    #[inline(always)]
     pub fn resize(&mut self, new_size: usize) {
         assert!(new_size <= self.capacity);
         self.size = new_size;
     }
 
     /// Get a reference to the raw data buffer.
+    #[inline(always)]
     pub fn data(&self) -> &[u8] {
         &self.data[..self.size * physical_type_size(self.physical_type)]
     }
 
+    #[inline]
     pub fn data_mut(&mut self) -> &mut [u8] {
         let type_size = physical_type_size(self.physical_type);
         &mut self.data[..self.size * type_size]
@@ -86,6 +94,7 @@ pub const fn physical_type_size(t: PhysicalTypeID) -> usize {
 
 impl LegacyValueVector {
     /// Get an i64 value at index.
+    #[inline]
     pub fn get_i64(&self, idx: usize) -> Option<i64> {
         if self.is_null(idx) {
             return None;
@@ -98,6 +107,7 @@ impl LegacyValueVector {
     }
 
     /// Set an i64 value at index.
+    #[inline]
     pub fn set_i64(&mut self, idx: usize, val: i64) {
         let type_size = physical_type_size(self.physical_type);
         let offset = idx * type_size;
@@ -109,6 +119,7 @@ impl LegacyValueVector {
     }
 
     /// Get an i32 value at index.
+    #[inline]
     pub fn get_i32(&self, idx: usize) -> Option<i32> {
         if self.is_null(idx) {
             return None;
@@ -121,6 +132,7 @@ impl LegacyValueVector {
     }
 
     /// Set an i32 value at index.
+    #[inline]
     pub fn set_i32(&mut self, idx: usize, val: i32) {
         let type_size = physical_type_size(self.physical_type);
         let offset = idx * type_size;
@@ -132,6 +144,7 @@ impl LegacyValueVector {
     }
 
     /// Get an f64 (double) value at index.
+    #[inline]
     pub fn get_double(&self, idx: usize) -> Option<f64> {
         if self.is_null(idx) {
             return None;
@@ -144,6 +157,7 @@ impl LegacyValueVector {
     }
 
     /// Set an f64 (double) value at index.
+    #[inline]
     pub fn set_double(&mut self, idx: usize, val: f64) {
         let type_size = physical_type_size(self.physical_type);
         let offset = idx * type_size;
@@ -452,6 +466,7 @@ impl LegacyValueVector {
     }
 
     /// Push a boolean value to the end of the vector.
+    #[inline]
     pub fn push_bool(&mut self, val: bool) {
         let idx = self.size;
         let byte: u8 = if val { 1 } else { 0 };
@@ -461,6 +476,7 @@ impl LegacyValueVector {
     }
 
     /// Get a boolean value at index.
+    #[inline]
     pub fn get_bool(&self, idx: usize) -> Option<bool> {
         if self.is_null(idx) {
             return None;
@@ -469,6 +485,7 @@ impl LegacyValueVector {
     }
 
     /// Push a string value (stores as inline bytes for now).
+    #[inline]
     pub fn push_string(&mut self, val: &str) {
         let idx = self.size;
         let bytes = val.as_bytes();
