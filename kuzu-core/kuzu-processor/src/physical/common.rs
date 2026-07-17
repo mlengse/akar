@@ -79,48 +79,62 @@ pub(crate) fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 
 pub(crate) fn value_hash(val: &Value) -> u64 {
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    match val {
-        Value::Null => 0u8.hash(&mut hasher),
-        Value::Bool(b) => b.hash(&mut hasher),
-        Value::Int64(i) => i.hash(&mut hasher),
-        Value::Int32(i) => i.hash(&mut hasher),
-        Value::Int16(i) => i.hash(&mut hasher),
-        Value::Int8(i) => i.hash(&mut hasher),
-        Value::UInt64(i) => i.hash(&mut hasher),
-        Value::Double(f) => f.to_bits().hash(&mut hasher),
-        Value::Float(f) => f.to_bits().hash(&mut hasher),
-        Value::String(s) => s.hash(&mut hasher),
-        Value::Date(d) => d.0.hash(&mut hasher),
-        Value::Timestamp(t) => t.0.hash(&mut hasher),
-        Value::InternalID(id) => id.offset.hash(&mut hasher),
-        _ => std::mem::discriminant(val).hash(&mut hasher),
-    }
+    hash_value_into(val, &mut hasher);
     hasher.finish()
+}
+
+/// Write a Value's hash into an arbitrary Hasher.
+pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    match val {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(b) => b.hash(hasher),
+        Value::Int64(i) => i.hash(hasher),
+        Value::Int32(i) => i.hash(hasher),
+        Value::Int16(i) => i.hash(hasher),
+        Value::Int8(i) => i.hash(hasher),
+        Value::UInt64(i) => i.hash(hasher),
+        Value::UInt32(i) => i.hash(hasher),
+        Value::UInt16(i) => (*i as u64).hash(hasher),
+        Value::UInt8(i) => (*i as u64).hash(hasher),
+        Value::Int128(i) => i.hash(hasher),
+        Value::Double(f) => f.to_bits().hash(hasher),
+        Value::Float(f) => f.to_bits().hash(hasher),
+        Value::String(s) => s.hash(hasher),
+        Value::Blob(b) => b.hash(hasher),
+        Value::Date(d) => d.0.hash(hasher),
+        Value::Timestamp(t) => t.0.hash(hasher),
+        Value::TimestampTz(t) => t.0.hash(hasher),
+        Value::TimestampNs(t) => t.0.hash(hasher),
+        Value::TimestampMs(t) => t.0.hash(hasher),
+        Value::TimestampSec(t) => t.0.hash(hasher),
+        Value::Interval(i) => (i.months, i.days, i.micros).hash(hasher),
+        Value::InternalID(id) => id.offset.hash(hasher),
+        Value::UInt128(i) => i.hash(hasher),
+        Value::List(vals) => {
+            for v in vals {
+                hash_value_into(v, hasher);
+            }
+        }
+        Value::Map(kvs) => {
+            for (k, v) in kvs {
+                hash_value_into(k, hasher);
+                hash_value_into(v, hasher);
+            }
+        }
+        Value::Union(_, v) => hash_value_into(v, hasher),
+        _ => std::mem::discriminant(val).hash(hasher),
+    }
 }
 
 /// Fast hash using ahash — ~3-5× faster than SipHash for integer keys.
 /// Used in the hot path of JoinHashTable build/probe.
 pub(crate) fn value_hash_fast(val: &Value) -> u64 {
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
     let mut hasher = ahash::AHasher::default();
-    match val {
-        Value::Null => 0u8.hash(&mut hasher),
-        Value::Bool(b) => b.hash(&mut hasher),
-        Value::Int64(i) => i.hash(&mut hasher),
-        Value::Int32(i) => i.hash(&mut hasher),
-        Value::Int16(i) => i.hash(&mut hasher),
-        Value::Int8(i) => i.hash(&mut hasher),
-        Value::UInt64(i) => i.hash(&mut hasher),
-        Value::Double(f) => f.to_bits().hash(&mut hasher),
-        Value::Float(f) => f.to_bits().hash(&mut hasher),
-        Value::String(s) => s.hash(&mut hasher),
-        Value::Date(d) => d.0.hash(&mut hasher),
-        Value::Timestamp(t) => t.0.hash(&mut hasher),
-        Value::InternalID(id) => id.offset.hash(&mut hasher),
-        _ => std::mem::discriminant(val).hash(&mut hasher),
-    }
+    hash_value_into(val, &mut hasher);
     hasher.finish()
 }
 
