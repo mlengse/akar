@@ -114,7 +114,6 @@ fn test_null_aggregate_count_star() {
 }
 
 #[test]
-#[ignore = "COUNT(col) returns 0 instead of ignoring NULLs"]
 fn test_null_aggregate_count_col() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -127,7 +126,6 @@ fn test_null_aggregate_count_col() {
 }
 
 #[test]
-#[ignore = "SUM doesn't properly ignore NULLs"]
 fn test_null_aggregate_sum() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -141,7 +139,6 @@ fn test_null_aggregate_sum() {
 }
 
 #[test]
-#[ignore = "SUM all nulls returns wrong value"]
 fn test_null_aggregate_sum_all_nulls() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -153,7 +150,6 @@ fn test_null_aggregate_sum_all_nulls() {
 }
 
 #[test]
-#[ignore = "AVG doesn't properly ignore NULLs"]
 fn test_null_aggregate_avg() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -167,7 +163,6 @@ fn test_null_aggregate_avg() {
 }
 
 #[test]
-#[ignore = "MIN doesn't properly ignore NULLs"]
 fn test_null_aggregate_min() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -180,7 +175,6 @@ fn test_null_aggregate_min() {
 }
 
 #[test]
-#[ignore = "MAX doesn't properly ignore NULLs"]
 fn test_null_aggregate_max() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
