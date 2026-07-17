@@ -443,7 +443,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report (P26.4) |
-| **Sprint 2** | P27: Performance Optimization | 14 + P27.5 | ✅ Arrow scan path (P27.5 — complete), Aggregate hash table (P27.1), OrderBy sort (P27.2), JoinHashTable (P27.3), Aggregate hot path (P27.4) |
+| **Sprint 2** | P27: Performance Optimization | 14 + P27.5/P27.6 | ✅ Arrow scan path (P27.5), Aggregate COUNT fast path (P27.6), Aggregate hash table (P27.1), OrderBy sort (P27.2), JoinHashTable (P27.3), Aggregate hot path (P27.4) — **C++ parity achieved** |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | Migration tool, CLI Box mode, 18 functions |
 | **Ongoing** | P26.5: Documentation | 4 | MIGRATION.md, GH releases |
 
