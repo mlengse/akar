@@ -221,6 +221,7 @@ pub struct OptionalMatchClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnClause {
     pub expressions: Vec<ReturnItem>,
+    pub distinct: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -381,6 +382,8 @@ pub enum BinaryOp {
     EndsWith,
     /// x CONTAINS substr — true if string x contains substr
     Contains,
+    /// x LIKE pattern — true if string x matches the SQL LIKE pattern
+    Like,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
