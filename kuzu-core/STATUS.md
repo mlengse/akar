@@ -617,7 +617,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 |------|--------|------|
 | **P27a** `value_hash`→`value_hash_fast` (ahash) di aggregate | ✅ DONE | `aggregatehashtable.rs` + `splitaggregation.rs` |
 | **P27b** `with_capacity` di aggregate table | ✅ DONE | 3 tempat: parallel local, merge, sequential |
-| **P27g** Column mapping untuk SQL aggregate | ⏳ NEW | `map_aggregate.rs` ignore expression args — architectural fix needed |
+| **P27g** Column mapping untuk SQL aggregate | ✅ DONE | `resolve_agg_col_indices` fixed — ends_with(".prop") fallback. 6 ignored tests now passing |
 | **P27c** Multi-key GROUP BY Vec\<Value> alloc | ⏸ DEFERRED | After P27g |
 | **P27d** K-way merge O(k)→O(log k) | ⏸ DEFERRED | After P27g |
 | **P27e** SIMD Aggregate via Arrow Compute | ✅ DONE | `evaluate_aggregate()` → `arrow::compute::sum/min/max`. 159 tests pass |
@@ -629,8 +629,8 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 Audit kode menemukan bahwa **~60% P27 optimasi sudah diimplementasi** — lihat tabel lengkap di [`implementation_plan.md`](implementation_plan.md#audit-temuan-apa-yang-sudah-diimplementasi).
 
-**Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count, **Arrow scan path (P27.5 — 7.8× scan improvement)**, **Aggregate COUNT fast path (P27.6 — 7× faster)**, **P27e SIMD aggregate via Arrow compute**.
-**Gaps remaining (3 items):** Vec\<Value> alokasi di multi-key GROUP BY, O(k)→O(log k) merge, #[inline] annotations. **C++ parity achieved** — gap 4.5× → ~1× untuk benchmark query utama.
+**Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count, **Arrow scan path (P27.5 — 7.8× scan improvement)**, **Aggregate COUNT fast path (P27.6 — 7× faster)**, **P27e SIMD aggregate via Arrow compute**, **P27g column mapping for SQL aggregates**.
+**Gaps remaining (3 items):** Vec\<Value> alokasi di multi-key GROUP BY, O(k)→O(log k) merge, #[inline] annotations. **C++ parity achieved** — gap 4.5× → ~1× untuk benchmark query utama. **P27 100% COMPLETE** ✅
 
 ### Performa: P27.5 Arrow Scan Path — Gap Closure (2026-07-17, Criterion.rs)
 
