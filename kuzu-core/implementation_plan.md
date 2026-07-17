@@ -456,7 +456,8 @@ graph TD
     P26["P26: Testing & Profiling"] -->|✅ COMPLETE| P26_4["P26.4: Profiling Report"]
     P26_4 -->|identifies scan bottleneck| P27_5["P27.5: Arrow Scan Path"]
     P26_4 -->|identifies top 5| P27["P27: Performance Optimization"]
-    P27_5 -->|✅ DONE: scan 7.8× faster, gap 4.5×→1.32×| P27
+    P27_5 -->|✅ DONE: scan 7.8× faster| P27
+    P27_6["P27.6: Aggregate Fast Path"] -->|✅ DONE: C++ parity| P27
     P27 --> P27_1["P27.1: Aggregate HashTable"]
     P27 --> P27_2["P27.2: OrderBy Sort"]
     P27 --> P27_3["P27.3: JoinHashTable"]
