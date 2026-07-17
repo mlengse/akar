@@ -126,6 +126,36 @@ Then install from your server:
 INSTALL <EXTENSION_NAME> FROM 'http://localhost:8080/';
 ```
 
+## C++ Benchmark Binary
+
+Build the C++ benchmark suite to compare query performance:
+
+```bash
+# Prerequisites: CMake 3.15+, C++20 compiler, Ninja (optional)
+make benchmark
+
+# Run benchmarks
+./build/release/tools/benchmark/kuzu_benchmark --dataset=/path/to/dataset --benchmark=/path/to/benchmark/files
+
+# Options
+#   --dataset    Path to dataset directory
+#   --benchmark  Path to .benchmark file or directory
+#   --warmup=N   Number of warmup runs (default: 3)
+#   --run=N      Number of timed runs (default: 5)
+#   --thread=N   Number of threads
+#   --bm-size=N  Buffer pool size in MB
+#   --profile    Enable profiling
+#   --out=FILE   Save results to file
+
+# Example: run micro-benchmarks
+./build/release/tools/benchmark/kuzu_benchmark \
+  --dataset=dataset/micro \
+  --benchmark=benchmark/queries/micro \
+  --warmup=5 --run=10
+```
+
+Benchmark files use the `.benchmark` format defining dataset loading, queries, and expected results. See `benchmark/queries/` for examples.
+
 ## Build from Source
 
 See the [developer guide](https://kuzudb.github.io/docs/developer-guide) for build instructions.
