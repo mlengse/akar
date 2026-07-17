@@ -151,15 +151,16 @@ impl PhysicalSemiJoin {
         }
 
         // Probe: emit left rows whose key is in hash_set
-        let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
+        let num_probe_fields = probe_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let mut probe_types: Vec<PhysicalTypeID> = Vec::with_capacity(num_probe_fields);
         if let Some(first) = probe_chunks.first() {
             for col in 0..first.num_fields() {
                 probe_types.push(first.field_types[col]);
             }
         }
 
-        // Count matching rows first
-        let mut match_rows: Vec<(usize, usize)> = Vec::new();
+        let total_probe_rows: usize = probe_chunks.iter().map(|c| c.size).sum();
+        let mut match_rows: Vec<(usize, usize)> = Vec::with_capacity(total_probe_rows);
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 if chunk.fields.get(probe_col).is_some() {
@@ -244,15 +245,16 @@ impl PhysicalAntiJoin {
             }
         }
 
-        let mut probe_types: Vec<PhysicalTypeID> = Vec::new();
+        let num_probe_fields = probe_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        let mut probe_types: Vec<PhysicalTypeID> = Vec::with_capacity(num_probe_fields);
         if let Some(first) = probe_chunks.first() {
             for col in 0..first.num_fields() {
                 probe_types.push(first.field_types[col]);
             }
         }
 
-        // Probe: emit left rows whose key is NOT in hash_set
-        let mut non_match_rows: Vec<(usize, usize)> = Vec::new();
+        let total_probe_rows: usize = probe_chunks.iter().map(|c| c.size).sum();
+        let mut non_match_rows: Vec<(usize, usize)> = Vec::with_capacity(total_probe_rows);
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 if let Some(_field) = chunk.fields.get(probe_col) {
@@ -335,7 +337,7 @@ impl PhysicalIntersect {
         let probe_col = self.probe_key_col as usize;
         let chunk_group_size = (build_chunks.len() / num_builds).max(1);
 
-        let mut build_tables: Vec<HashJoinTable> = Vec::new();
+        let mut build_tables: Vec<HashJoinTable> = Vec::with_capacity(num_builds);
 
         for side in 0..num_builds {
             let start = side * chunk_group_size;
@@ -365,8 +367,19 @@ impl PhysicalIntersect {
         }
 
         // For each probe row, probe all build tables, find intersecting keys
-        let mut output_rows: Vec<Vec<Value>> = Vec::new();
+        let total_probe_rows: usize = probe_chunks.iter().map(|c| c.size).sum();
+        let mut output_rows: Vec<Vec<Value>> = Vec::with_capacity(total_probe_rows);
         let mut probe_field_count = 0usize;
+
+        // Pre-compute build side column counts for row_values allocation
+        let build_col_counts: Vec<usize> = (0..num_builds)
+            .map(|side| {
+                let start = side * chunk_group_size;
+                let end = (start + chunk_group_size).min(build_chunks.len());
+                if start < end { build_chunks[start].fields.len() } else { 0 }
+            })
+            .collect();
+        let total_build_cols: usize = build_col_counts.iter().sum();
 
         for (ci, chunk) in probe_chunks.iter().enumerate() {
             if ci == 0 {
@@ -386,11 +399,11 @@ impl PhysicalIntersect {
 
                 // Check if the probe key appears in ALL build tables
                 let mut all_match = true;
-                let mut matched_build_rows: Vec<Vec<(usize, usize)>> = Vec::new();
+                let mut matched_build_rows: Vec<Vec<(usize, usize)>> = Vec::with_capacity(num_builds);
 
                 for ht in &build_tables {
                     if let Some(bucket) = ht.get(&probe_hash) {
-                        let mut side_matches = Vec::new();
+                        let mut side_matches = Vec::with_capacity(bucket.len());
                         for (stored_key, locations) in bucket {
                             if stored_key == &probe_key {
                                 side_matches.extend(locations.iter().cloned());
@@ -411,9 +424,8 @@ impl PhysicalIntersect {
                     continue;
                 }
 
-                // The probe key matches ALL build sides — emit combined payload
-                // First, count total fields in output: probe fields + all build side fields
-                let mut row_values: Vec<Value> = Vec::new();
+                let per_row_cols = probe_field_count + total_build_cols;
+                let mut row_values: Vec<Value> = Vec::with_capacity(per_row_cols);
 
                 // Collect probe side values (all columns from probe chunk)
                 for col_in_probe in 0..probe_field_count {
@@ -453,7 +465,9 @@ impl PhysicalIntersect {
         // Build output DataChunk (one row per field group)
         // Output format: [probe_field_1, ..., probe_field_N, build_1_field_1, ..., build_N_field_M]
         let output_size = output_rows.len();
-        let mut output_fields: Vec<ValueVector> = Vec::new();
+        let mut output_fields: Vec<ValueVector> = Vec::with_capacity(
+            output_rows.first().map(|r| r.len()).unwrap_or(0),
+        );
 
         // Determine physical types from first row
         if let Some(first_row) = output_rows.first() {
@@ -615,8 +629,8 @@ impl JoinHashTable {
             }
         }
 
-        // First pass: collect matching (build_chunk_idx, build_row, probe_chunk_idx, probe_row) tuples
-        let mut matches: Vec<(usize, usize, usize, usize)> = Vec::new();
+        let total_probe_rows: usize = probe_chunks.iter().map(|c| c.size).sum();
+        let mut matches: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(total_probe_rows);
 
         for (pci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
