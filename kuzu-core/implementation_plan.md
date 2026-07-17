@@ -1,9 +1,9 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-17 (Audit Lengkap — Sprint 4: Stabilisasi)
-> **Baseline:** `cargo test --workspace` → **1099 passed, 0 failed, 68 ignored**, 29 crates, ~66k LOC
+> **Revision:** 2026-07-17 (Sprint 4 Progress 1: 15/68 fixed)
+> **Baseline:** `cargo test --workspace` → **1108 passed, 0 failed, 53 ignored**, 29 crates, ~66k LOC
 > **Benchmark gap vs C++:** **Closed — Rust at parity.** `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). C++ baseline: 400 µs.
-> **⚠️ 68 ignored tests (6.2%)** — mayoritas edge case suite. Prioritas #1 Sprint 4.
+> **Sprint 4 Progress 1: 15/68 ignored fixed** — IS NULL grammar, boolean 3VL, ddl_errors assertions. **53 remain (4.8%).**
 > **⚠️ LadybugDB benchmark** — belum dijalankan. Parity hanya terverifikasi terhadap Vela C++.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
@@ -25,7 +25,7 @@
 | P28 — Migration Tool + CLI Box mode | ✅ | `kuzu-migrate` CLI |
 | P29 — 18 Missing Functions | ✅ | sinh, cosh, tanh, gcd, lcm, soundex, base64, etc. |
 
-### 🔴 P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ TOP PRIORITY
+### 🔴 P30.1 — Fix 68 Ignored Tests (6+ SP, 15/68 done) ⬅️ TOP PRIORITY
 
 | Test File | Ignored | Root Cause (Estimasi) |
 |-----------|---------|-----------------------|
@@ -82,12 +82,12 @@
 | **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 | ✅ Complete (C++ parity) |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | ✅ Complete |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
-| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** |
-| **Total** | | | **~182** | **~8 weeks** |
+| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (15/68 ignored ✅) |
+
 
 > [!IMPORTANT]
-> **P30 adalah fase kritis** sebelum production-ready. Fokus utama:
-> - 0 ignored tests (P30.1) — prerequisite untuk klaim "stable"
+> **P30 adalah fase kritis** sebelum production-ready. **Progress: 15/68 ignored tests fixed (Sprint 4 Sesi 1).** Fokus utama:
+> - 0 ignored tests (P30.1) — 53 remain
 > - Benchmark terverifikasi terhadap Vela **dan** LadybugDB (P30.3)
 > - Query kompleks dalam target performa (P30.2)
 
@@ -248,26 +248,31 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 ## 🔴 P30: Stabilisasi & Benchmark Komprehensif — Sprint 4
 *Target: Production-readiness — 0 ignored tests, LadybugDB parity verified, query performance targets met*
 
-### P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ KRITIS
+### P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ KRITIS (PROGRESS: 15/68 ✅)
 
 **Masalah:** 68 test di-ignore (`#[ignore]`) — kode tidak di-test secara otomatis. Ini adalah indikator langsung bahwa fitur terkait belum stabil.
 
-**Breakdown investigasi:**
+**Progress Sprint 4 Sesi 1 (2026-07-17): 15 test fixed ✅**
+- **IS NULL grammar (5):** Merge `is_null_op`/`is_not_null_op` jadi `is_check_op`. Root cause: pest `WHITESPACE` silent rule consumed space sebelum `!(ASCII_ALPHANUMERIC | "_")` negative lookahead bisa melihat `N` dari `NULL`. Fix: hapus `!()` suffix setelah `"IS"` dan `"NOT"`.
+- **Boolean evaluator (2):** Short-circuit `AND` (FALSE if any FALSE) dan `OR` (TRUE if any TRUE) di `evaluate_function_call` sebelum propagasi NULL generik.
+- **ddl_errors assertions (8):** Update 8 expected error messages ke actual Kuzu error format. 2 remaining deferred (grammar `CREATE REL TABLE` mewajibkan column_def).
+- **Compound type grammar:** Fix parser + binder untuk `INT64[]`, `MAP(...)`, `STRUCT(...)`, `UNION(...)`. Grammar OK tapi storage tidak support nested types.
 
-| Test File | Ignored | Prioritas | Investigasi Awal |
-|-----------|---------|:---------:|------------------|
-| `edge_nested_types` | 13 | 🔴 | Arrow Struct/List conversions: `evaluate_arrow()` mungkin belum handle `List(Struct)` atau `Struct(List)` secara rekursif. Cek `build_arrow_from_values()` untuk tipe nested. |
-| `edge_null_handling` | 23 | 🔴 | NULL propagation: `from_legacy()` conversion mungkin beda penanganan NULL antara ValueVector dan Arrow. Cek `boolean_array_to_selection()` untuk null mask. |
-| `edge_ddl_errors` | 10 | 🟡 | Error path: banyak `panic!()` yang harusnya `Result::Err()`. Cek DDL handler untuk unwrap/expect. |
-| `edge_empty_tables` | 7 | 🟡 | Empty table scan: `PhysicalScan` mungkin crash pada DataChunk dengan 0 rows. Cek `resolve_scan_arrow_data()` untuk empty NodeGroup. |
+**Breakdown investigasi (updated 2026-07-17):**
+
+| Test File | Ignored | Prioritas | Root Cause (Verified) |
+|-----------|---------|:---------:|----------------------|
+| `edge_nested_types` | 13 | 🔴 | Grammar sudah OK (`INT64[]`, `MAP`, `STRUCT`, `UNION`). Tapi processor/storage tidak support list/struct column type — perlu implementasi `LogicalType` dengan child type di storage layer. |
+| `edge_null_handling` | 16 (dari 23) | 🔴 | **7 fixed:** 5 IS NULL grammar + 2 boolean 3VL. **Sisa 16:** CASE, COALESCE, IFNULL, DISTINCT, IN, BETWEEN, LIKE — perlu investigasi expression evaluator path. |
+| `edge_ddl_errors` | 2 (dari 10) | 🟡 | **8 fixed:** assertion string mismatch. **Sisa 2:** grammar `create_rel_table` mewajibkan `"," ~ column_definitions` — test tanpa column_def tambahan fail di parser. Deferred. |
+| `edge_empty_tables` | 7 | 🟡 | Empty table scan: `PhysicalScan` mungkin crash pada DataChunk dengan 0 rows. |
 | `edge_unicode` | 4 | 🟢 | Unicode: `string_comparison` mungkin tidak handle grapheme clusters atau collation. |
 | `edge_boundary` | 4 | 🟢 | Numeric boundary: `Value::Int64(i64::MAX)` mungkin overflow di cast. |
 | `edge_concurrency` | 1 | 🟢 | Race condition: kemungkinan Timing Window di `lock_table()` + Condvar. |
 
 **Execution plan:**
-1. Un-ignore 1 test → run test → debug failure → fix → verify all tests pass
-2. Repeat for all 68
-3. Final: `cargo test --workspace` → **0 ignored ✅**
+1. Continue un-ignore → run → debug → fix cycle on remaining 53
+2. Final: `cargo test --workspace` → **0 ignored ✅**
 
 ### P30.2 — Optimasi Query Kompleks (4 SP)
 
