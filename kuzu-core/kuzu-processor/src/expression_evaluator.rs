@@ -248,12 +248,13 @@ impl ExpressionEvaluator {
                 let legacy = self.evaluate_in_op(op, left, right, chunk)?;
                 return Ok(ArrowVector::from_legacy(&legacy));
             }
-            BinaryOp::Concat | BinaryOp::StartsWith | BinaryOp::EndsWith | BinaryOp::Contains => {
+            BinaryOp::Concat | BinaryOp::StartsWith | BinaryOp::EndsWith | BinaryOp::Contains | BinaryOp::Like => {
                 let func_name = match op {
                     BinaryOp::Concat => "concat",
                     BinaryOp::StartsWith => "starts_with",
                     BinaryOp::EndsWith => "ends_with",
                     BinaryOp::Contains => "contains",
+                    BinaryOp::Like => "like",
                     _ => unreachable!(),
                 };
                 return self.evaluate_arrow_function_call(func_name, &[left.clone(), right.clone()], chunk);
@@ -792,6 +793,9 @@ impl ExpressionEvaluator {
             BinaryOp::StartsWith => "starts_with",
             BinaryOp::EndsWith => "ends_with",
             BinaryOp::Contains => "contains",
+            BinaryOp::Like => {
+                return self.evaluate_function_call("like", &[left.clone(), right.clone()], chunk);
+            }
         };
 
         // Treat as a function call with two arguments
@@ -836,24 +840,55 @@ impl ExpressionEvaluator {
         right: &Expression,
         chunk: &DataChunk,
     ) -> Result<ValueVector, String> {
-        let left_vec = self.evaluate(left, chunk)?;
-        let right_vec = self.evaluate(right, chunk)?;
+        let left_arr = self.evaluate_arrow(left, chunk)?;
         let num_rows = chunk.size;
         let mut result = ValueVector::new(kuzu_common::types::PhysicalTypeID::Bool, num_rows);
         result.resize(num_rows);
         for row in 0..num_rows {
-            let lv = left_vec.get_value(row).unwrap_or(Value::Null);
-            let rv = right_vec.get_value(row).unwrap_or(Value::Null);
+            let lv = left_arr.get_value(row).unwrap_or(Value::Null);
             if matches!(lv, Value::Null) {
                 result.set_null(row, true);
                 continue;
             }
-            let in_list = match &rv {
-                Value::List(items) => items.contains(&lv),
-                _ => lv == rv,
+            let (in_list, has_null) = match right {
+                Expression::List(items) => {
+                    let mut matched = false;
+                    let mut has_null_item = false;
+                    for item in items {
+                        let item_vec = self.evaluate(item, chunk)?;
+                        let iv = item_vec.get_value(row).unwrap_or(Value::Null);
+                        if matches!(iv, Value::Null) {
+                            has_null_item = true;
+                        } else if iv == lv {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    (matched, has_null_item)
+                }
+                _ => {
+                    let right_arr = self.evaluate_arrow(right, chunk)?;
+                    let rv = right_arr.get_value(row).unwrap_or(Value::Null);
+                    match &rv {
+                        Value::List(ritems) => {
+                            let matched = ritems.contains(&lv);
+                            let has_null_item = if matched {
+                                false
+                            } else {
+                                ritems.iter().any(|item| matches!(item, Value::Null))
+                            };
+                            (matched, has_null_item)
+                        }
+                        _ => (lv == rv, false),
+                    }
+                }
             };
             let result_val = if *op == BinaryOp::NotIn { !in_list } else { in_list };
-            store_value_in_vector_simple(&mut result, row, &Value::Bool(result_val));
+            if !in_list && has_null {
+                result.set_null(row, true);
+            } else {
+                store_value_in_vector_simple(&mut result, row, &Value::Bool(result_val));
+            }
         }
         Ok(result)
     }
