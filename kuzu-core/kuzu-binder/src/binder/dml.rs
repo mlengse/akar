@@ -316,7 +316,7 @@ impl Binder {
                 }
             }
         }
-        Ok(BoundReturnClause { expressions })
+        Ok(BoundReturnClause { expressions, distinct: r.distinct })
     }
 
     // ==================== WHERE Binding ====================
