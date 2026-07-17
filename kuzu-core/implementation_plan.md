@@ -473,7 +473,7 @@ graph TD
     P27 --> P30["P30: Stabilisasi & Benchmark"]
     P28 --> P30
     P29 --> P30
-    P30 --> P30_1["🔴 P30.1: Fix 68 ignored tests"]
+    P30 --> P30_1["🔴 P30.1: Fix 56 ignored tests"]
     P30 --> P30_2["🟡 P30.2: Optimasi query kompleks"]
     P30 --> P30_3["🟡 P30.3: LadybugDB benchmark"]
     P30 --> P30_4["🟢 P30.4: STANDALONE_CALL refactor"]
@@ -504,7 +504,7 @@ graph TD
 | 17 | 3.7× gap validity | **Not empirically validated** | C++ benchmark binary was never built; all C++ cells in BENCHMARK_COMPARISON.md are TBD |
 | 18 | **P27.5 scan path priority** | **Highest — completed 2026-07-17** | Profiling confirmed scan was 80% of execute time; 7.8× improvement closed 4.5×→1.32× gap |
 | 19 | **Arrow scan path approach** | `ColumnChunk::to_arrow_array()` + `arrow::compute::take()` | Eliminates `Vec<Vec<Value>>` intermediate and double Arrow materialization |
-| 20 | **Sprint 4 focus** | Fix ignored tests + LadybugDB benchmark + query complexity | Pre-requisite untuk production-readiness. 68 ignored tests = risiko regression. |
+| 20 | **Sprint 4 focus** | Fix ignored tests + LadybugDB benchmark + query complexity | Pre-requisite untuk production-readiness. 56 ignored tests = risiko regression. |
 | 21 | **Prioritas fix test** | nested_types → empty_tables → unicode → boundary → ddl_errors → concurrency → migrate | Diurutkan berdasarkan jumlah ignored + impact. **null_handling ✅ DONE.** |
 | 22 | **LadybugDB comparison** | Jalankan benchmark identik terhadap `ladybug/` binary | Validasi parity terhadap 2 implementasi C++ yang independen |
 | 23 | **STANDALONE_CALL refactor timing** | Sprint 4, bukan deferred lagi | String matching = maintenance burden. Trait registry adalah pola yang sudah terbukti di optimizer. |
