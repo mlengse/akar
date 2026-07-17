@@ -19,7 +19,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **1099 total, 0 failed, 68 ignored** ✅ |
+| **Tests passing** | **1099 total, 0 failed, 32 ignored** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
 | **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
@@ -580,7 +580,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-json | 12 | ✅ Pass |
 | kuzu-llm | 9 | ✅ Pass |
 | kuzu-neo4j | 12 | ✅ Pass |
-| kuzu-wasm | 3 (+1 ignored) | ✅ Pass |
+| kuzu-wasm | 3 | ✅ Pass |
 | kuzu-migrate | 1 (ignored) | ✅ Pass |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
@@ -605,7 +605,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-16: **all test pass, 0 fail** ✅. **P24 ✅, P25 ✅, P26 ✅ (ALL COMPLETE)**.
-- **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137 total tests** (72 pass, 65 ignored).
+- **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137 total tests** (72 pass, 65 ignored). **Sprint 4 Progress 3:** null_handling DONE (44/44 pass), **32 test-file ignores remain + 1 FTS failure (pre-existing).**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
 - **P26.4 (Performance Profiling):** ✅ **ALL COMPLETE.** 8 benchmark suites executed. Laporan lengkap di [`implementation_plan.md`](implementation_plan.md#p264--performance-profiling-report--full-empirical-results-2026-07-16).
