@@ -1,10 +1,10 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-17 (Sprint 4 — Progress 2: 20/68 ignored fixed)
-> **Hasil audit:** `cargo test --workspace` → **1117 passed, 0 failed, 48 ignored** | 29 crate, ~262 file .rs, ~66k LOC
+> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 3: 25/68 ignored fixed)
+> **Hasil audit:** `cargo test --workspace` → **1122 passed, 0 failed, 43 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **Sprint 4 Progress 2:** NULL PK rejection, CASE/COALESCE/IFNULL expr fix (grammar `CASE WHEN`, null short-circuit exemption), boolean 3VL symmetry tests. **5 more un-ignored, 4 new tests added.**
-> **⚠️ 48 test masih ignored** (4.1% dari total) — lihat §9 untuk action plan.
+> **Sprint 4 Progress 3:** DISTINCT (hash aggregate), BETWEEN grammar (atom split), IN/NOT IN grammar + 3VL evaluator (list literal inline), LIKE grammar. **5 more un-ignored.**
+> **⚠️ 43 test masih ignored** (3.6% dari total) — lihat §9 untuk action plan.
 > **Belum ada benchmark sistematis terhadap LadybugDB C++** — parity hanya terverifikasi terhadap Vela C++.
 
 ---
@@ -542,7 +542,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 ---
 
-## 5. Test Results (Per 2026-07-17 — Sprint 4 Progress 2)
+## 5. Test Results (Per 2026-07-18 — Sprint 4 Progress 3)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
@@ -560,7 +560,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-transaction | 12 | ✅ Pass |
 | kuzu-main (unit + connection_test) | 55 | ✅ Pass |
 | kuzu-main (integration) | 44 | ✅ Pass |
-| kuzu-main (edge_null_handling) | 44 (39 pass, 5 ignore) | ✅ Pass |
+| kuzu-main (edge_null_handling) | 44 (44 pass, 0 ignore) | ✅ Pass |
 | kuzu-main (edge_boundary) | 20 (16 pass, 4 ignore) | ✅ Pass |
 | kuzu-main (edge_empty_tables) | 21 (10 pass, 7 ignore) | ✅ Pass |
 | kuzu-main (edge_concurrency) | 11 (10 pass, 1 ignore) | ✅ Pass |
@@ -584,7 +584,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | kuzu-migrate | 1 (ignored) | ✅ Pass |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1112** | **✅ 1117 pass, 0 failed, 48 ignored** |
+| **Total** | **~1117** | **✅ 1122 pass, 0 failed, 43 ignored** |
 
 ---
 
