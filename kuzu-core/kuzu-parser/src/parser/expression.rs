@@ -249,8 +249,14 @@ pub fn parse_comparison_suffix(pair: pest::iterators::Pair<Rule>, left: Expressi
     }
 
     match pair.as_rule() {
-        Rule::is_null_op => Ok(Expression::UnaryOp(UnaryOp::IsNull, Box::new(left))),
-        Rule::is_not_null_op => Ok(Expression::UnaryOp(UnaryOp::IsNotNull, Box::new(left))),
+        Rule::is_check_op => {
+            let text = pair.as_str();
+            if text.contains("NOT") {
+                Ok(Expression::UnaryOp(UnaryOp::IsNotNull, Box::new(left)))
+            } else {
+                Ok(Expression::UnaryOp(UnaryOp::IsNull, Box::new(left)))
+            }
+        }
         Rule::in_op => {
             let right = get_rhs(pair)?;
             Ok(Expression::BinaryOp(BinaryOp::In, Box::new(left), Box::new(right)))
