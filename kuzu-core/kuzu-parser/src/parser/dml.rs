@@ -28,13 +28,16 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                 }));
             }
             Rule::return_clause => {
+                let distinct = has_distinct_flag(&inner);
                 clauses.push(Clause::Return(ReturnClause {
                     expressions: parse_return_items(inner)?,
+                    distinct,
                 }));
             }
             Rule::with_clause => {
                 clauses.push(Clause::With(ReturnClause {
                     expressions: parse_return_items(inner)?,
+                    distinct: false,
                 }));
             }
             Rule::where_clause => {
@@ -326,6 +329,11 @@ pub(crate) fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Ve
         });
     }
     Ok(items)
+}
+
+/// Check if the return_clause pair has a DISTINCT flag.
+pub(crate) fn has_distinct_flag(pair: &pest::iterators::Pair<Rule>) -> bool {
+    pair.clone().into_inner().any(|c| c.as_rule() == Rule::distinct_flag)
 }
 
 pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<StandaloneCall, String> {
