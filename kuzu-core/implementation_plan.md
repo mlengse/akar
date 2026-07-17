@@ -254,7 +254,7 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 
 ### P30.1 — Fix 56 Ignored Tests (6 SP) ⬅️ KRITIS (PROGRESS: 25/56 ✅, null_handling DONE)
 
-**Masalah:** 68 test di-ignore (`#[ignore]`) — kode tidak di-test secara otomatis. Ini adalah indikator langsung bahwa fitur terkait belum stabil.
+**Masalah:** 56 test di-ignore (`#[ignore]`) — kode tidak di-test secara otomatis. Ini adalah indikator langsung bahwa fitur terkait belum stabil.
 
 **Progress Sprint 4 Sesi 1+2 (2026-07-17): 20 test fixed ✅**
 - **IS NULL grammar (5):** Merge `is_null_op`/`is_not_null_op` jadi `is_check_op`. Root cause: pest `WHITESPACE` silent rule consumed space sebelum `!(ASCII_ALPHANUMERIC | "_")` negative lookahead bisa melihat `N` dari `NULL`. Fix: hapus `!()` suffix setelah `"IS"` dan `"NOT"`.
