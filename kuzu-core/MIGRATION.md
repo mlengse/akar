@@ -1,76 +1,127 @@
 # Kuzu Rust Migration Guide
 
-Welcome to **Kuzu Rust**! This guide details how to transition your application from the legacy C++ implementation (Vela/LadybugDB) to the new, memory-safe, Arrow-native Rust implementation.
+Welcome to **Kuzu Rust**! This guide details how to transition your application from the legacy C++ implementation (Vela/LadybugDB) to the pure Rust port.
 
-As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version, including all 15 GDS algorithms, the full suite of 22 optimizer passes, and complex parser/binder statements. 
+As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version — all 1099+ tests pass, all 15 GDS algorithms, 22 optimizer passes, and 58 parser statement variants are implemented.
 
-## 1. Core Differences & Architecture Changes
+## 1. Quick Migration (Data)
 
-Before migrating, please note the following structural changes:
-- **Embedded Only:** Kuzu Rust remains an embedded database. However, connection pooling and thread management are now inherently safe via Rust's `Send`/`Sync` models.
-- **Operator Fusing:** In the C++ version, physical operators were highly split (e.g., `HASH_JOIN_BUILD` and `HASH_JOIN_PROBE` were separate physical nodes). In the Rust port, these are often **fused** into single, highly-optimized physical operators.
-- **Arrow-Native Execution:** The underlying storage vectors (`ValueVector`) are being transitioned to native Apache Arrow arrays (`ArrayRef`), providing massive speedups (up to 24x) for filtering and numeric expressions.
-- **Dependency Reductions:** String and Blob processing are now handled via pure-Rust crates (`base64`, `regex`, `sha2`, `md-5`) rather than massive C++ libraries.
+The `kuzu-migrate` CLI tool handles the full C++ → Rust data migration:
 
-## 2. Using the Read-Only Migration Utility
-
-If you have existing C++ database files, we provide a read-only CLI utility in `kuzu-migrate` to read your legacy data and optionally export it to CSV/Parquet for loading into the Rust version.
-
-### Step 2.1: Exporting Legacy Data
-Compile and run the migration utility against your old C++ database directory:
 ```bash
-cargo run -p kuzu-migrate -- --db-path /path/to/legacy/db --export-dir /path/to/export
-```
-This tool will iterate over all node and relationship tables and write them as Arrow IPC or Parquet files.
+# Install Python deps (required for reading C++ DB)
+pip install kuzu
 
-### Step 2.2: Importing into Kuzu Rust
-Use the native `COPY` statement in the new Rust shell to ingest the exported data:
-```cypher
-CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id));
-COPY User FROM '/path/to/export/user.parquet';
+# Run migration
+cargo run --bin kuzu-migrate -- --from /path/to/legacy/cpp-db --to /path/to/new/rust-db
 ```
 
-## 3. Application Integration (Rust API)
+This exports schema + data as Parquet, creates the Rust database, and imports everything.
 
-If you are calling Kuzu from a Rust application, update your `Cargo.toml`:
+### Skip extraction (if you already have Parquet files)
+```bash
+cargo run --bin kuzu-migrate -- --from /path/to/export-dir --to /path/to/new/rust-db --skip-extract
+```
+
+## 2. Application Integration
+
+### Rust API
+
+Update your `Cargo.toml`:
 ```toml
 [dependencies]
 kuzu = { git = "https://github.com/kuzudb/kuzu-rust", branch = "main" }
 ```
 
-### Basic Connection Example
+### Basic Connection
 ```rust
 use kuzu::{Database, Connection};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Initialize the database
     let db = Database::new("path/to/new_db")?;
-    
-    // 2. Open a connection
     let conn = Connection::new(&db)?;
-    
-    // 3. Execute a query
     let result = conn.query("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a.name, b.name")?;
-    
-    // 4. Iterate over results
     for row in result {
         println!("{} knows {}", row.get("a.name")?, row.get("b.name")?);
     }
-    
     Ok(())
 }
 ```
 
-## 4. Known Workarounds & Driver Compatibility
-
-- **Postgres Compatibility Pings:** If you are using an ORM or driver that expects a Postgres wire protocol and attempts to call `pg_isready()`, Kuzu Rust handles this gracefully by returning a static `TRUE`.
-- **Extension Loading:** The `LOAD EXTENSION` syntax is parsed, but extensions in Rust are compiled statically via Cargo features (e.g., `features = ["json-extension", "httpfs-extension"]`) rather than `.so`/`.dll` runtime loading.
-
-## 5. Performance Tuning (Profiling)
-
-If you experience latency regressions compared to C++, note that the transition to Arrow-native `ValueVector` is ongoing. To run benchmarks locally:
+### Python API
 ```bash
+pip install kuzu-rust  # or build from source with `make python`
+```
+
+### Node.js API
+```bash
+npm install @vela-engineering/kuzu
+```
+
+### CLI
+```bash
+cargo install kuzu-cli
+kuzu-cli /path/to/db
+```
+
+Or download the prebuilt binary from [GitHub Releases](https://github.com/kuzudb/kuzu/releases).
+
+## 3. Architecture Changes
+
+| Aspect | C++ (Legacy) | Rust |
+|--------|-------------|------|
+| Build | CMake + 28 vendored libs | `cargo build` |
+| Safety | Manual memory | Ownership + borrow checker |
+| Storage | ValueVector | Native Arrow arrays |
+| Operators | Split (BUILD/PROBE) | Fused single operators |
+| Extensions | `.so`/`.dll` runtime loading | Static via Cargo features |
+| Thread safety | Manual | `Send`/`Sync` guaranteed |
+| Error handling | Exceptions | `Result<T, Error>` |
+
+## 4. Feature Flags (Extensions)
+
+Enable extensions in `Cargo.toml`:
+```toml
+kuzu-main = { features = [
+    "json-extension",
+    "fts-extension",
+    "vector-extension",
+    "httpfs-extension",
+    "duckdb-extension",
+    "sqlite-extension",
+    "postgres-extension",
+    "delta-extension",
+    "iceberg-extension",
+    "azure-extension",
+    "unity-catalog-extension",
+    "neo4j-extension",
+    "llm-extension",
+    "algo-extension",
+] }
+```
+
+## 5. Performance Tuning
+
+```bash
+# Run benchmark suite
+cargo bench --workspace
+
+# Individual crate benchmarks
 cargo bench -p kuzu-processor
 cargo bench -p kuzu-main
+
+# C++ comparison (requires CMake)
+make benchmark
+./build/release/tools/benchmark/kuzu_benchmark --dataset=... --benchmark=...
 ```
-*(Note for Windows users: Low-level ETW profiling via `cargo-flamegraph` may require execution from an elevated Administrator terminal).*
+
+**Status:** Rust is at parity with C++ (397 µs vs 400 µs for filter+count).
+
+## 6. Known Issues & Workarounds
+
+| Issue | Workaround |
+|-------|-----------|
+| Postgres wire protocol `pg_isready` | Handled gracefully (returns TRUE) |
+| Runtime extension loading | Use Cargo features instead |
+| Windows ETW profiling | Run `cargo-flamegraph` as Administrator |
+| Large databases | Increase buffer pool: `SystemConfig { buffer_pool_size: 1 << 30, .. }` |
