@@ -24,6 +24,7 @@ pub(crate) fn substitute_params_in_statement(
                             .collect();
                         BoundClause::BoundReturn(BoundReturnClause {
                             expressions: new_exprs?,
+                            distinct: r.distinct,
                         })
                     }
                     BoundClause::BoundWhere(w) => {
