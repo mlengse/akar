@@ -297,6 +297,7 @@ The scan + aggregate optimizations achieve C++ parity:
 | **P27c** | Multi-key GROUP BY alokasi `Vec<Value>` + `Value::List` per row | Heap alloc on hot path | `aggregatehashtable.rs:241-264` (`build_group_key()`) | 3 |
 | **P27d** | K-way merge pakai O(k) linear scan, bukan O(log k) binary heap | Slow merge untuk banyak blocks | `blockmergesort.rs:139-168` (`k_way_merge()`) | 1 |
 | **P27e** | Aggregate pakai manual scalar loop, bukan Arrow compute SIMD kernels | No SIMD acceleration | `aggregate/mod.rs` — semua aggregate manual | 3 |
+| **P27g** | Column mapping untuk SQL aggregate — `PropertyAccess` resolver pakai Cypher var name, bukan table prefix | Aggregate non-star gagal resolve column index | `aggregatehashtable.rs:319-341` (`resolve_agg_col_indices`) | 2 |
 | **P27f** | `#[inline]` tidak ada di hot-path aggregate | Function call overhead | `aggregatehashtable.rs`, `aggregate/mod.rs` | 1 |
 
 **Total remaining:** ~10 SP (dari 14 SP yang dianggarkan). **P27.5 (Arrow Hybrid Migration) di-defer** — P26.4 membuktikan bottleneck bukan di expression evaluation.
@@ -356,6 +357,29 @@ The scan + aggregate optimizations achieve C++ parity:
 - `[ ]` `AggValueState::merge()` — inline
 - `[ ]` `value_cmp()`, `value_hash_fast()` — sudah ada sebagian, verifikasi coverage
 - `[ ]` `build_group_key()` atau penggantinya
+
+### P27g — Column Mapping untuk SQL Aggregate (2 SP)
+
+**Problem:** `resolve_agg_col_indices()` di `aggregatehashtable.rs` mencari `"p.age"` di field_names, tapi field_names berisi `"Person.age"` (table prefix, bukan Cypher variable). Akibatnya:
+- `PropertyAccess("p", "age")` → construct `"p.age"` → lookup gagal → return `None`
+- `update_states_row` fallback: pakai function index `i` sebagai column index → **baca column salah**
+- `GROUP BY` expressions hardcoded sebagai `0..n` tanpa resolve dari field_names
+
+**Root cause di `aggregatehashtable.rs:319-341`:**
+- `Expression::PropertyAccess(base, prop)` — cuma coba `"prefix.prop"` exact match
+- Tidak fallback ke `ends_with(".prop")` untuk handle table-prefixed names
+- `resolve_group_by_indices()` belum ada — group_by_cols selalu `0..n`
+
+**Fix:**
+- `[x]` Tambah `resolve_name_to_col()` — helper dengan exact, numeric, ends_with fallback
+- `[x]` Fix `resolve_agg_col_indices()` — untuk PropertyAccess, coba `"prefix.prop"` exact lalu `ends_with(".prop")`
+- `[x]` Add `resolve_group_by_indices()` — resolves GROUP BY expressions ke column indices
+- `[x]` Fix `map_aggregate.rs` — panggil `resolve_group_by_indices()` dengan field_names dari input chunk
+- `[x]` Remove `#[ignore]` dari 6 aggregate tests — semua passing ✅
+
+**Hasil:** 7 end-to-end aggregate tests passing:
+- `COUNT(*)`, `COUNT(p.age)`, `SUM(p.age)`, `AVG(p.age)`, `MIN(p.age)`, `MAX(p.age)`, `SUM(p.age)` all-nulls
+- Semua 16 processor unit tests passing
 
 ---
 
