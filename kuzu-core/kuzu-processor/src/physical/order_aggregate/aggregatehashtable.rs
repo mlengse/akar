@@ -42,11 +42,53 @@ impl AggregateHashTable {
                 store_value_in_vector(&mut v, 0, &result);
                 fields.push(v);
             }
-            return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
+            return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array.clone()).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
         }
 
         if total_rows == 0 {
             return self.empty_result();
+        }
+
+        // Fast path for scalar COUNT aggregates (no GROUP BY)
+        if self.group_by_cols.is_empty() {
+            let all_count = self.funcs.iter().all(|f| matches!(f, AggregateFunction::Count | AggregateFunction::CountStar));
+            if all_count {
+                let mut fields = Vec::new();
+                for (i, func) in self.funcs.iter().enumerate() {
+                    let mut total = 0u64;
+                    for chunk in chunks {
+                        match func {
+                            AggregateFunction::CountStar => {
+                                total += chunk.active_rows() as u64;
+                            }
+                            AggregateFunction::Count => {
+                                let col_idx = i.min(chunk.fields.len().saturating_sub(1));
+                                if let Some(field) = chunk.fields.get(col_idx) {
+                                    if chunk.sel_vector.is_some() {
+                                        for row in chunk.iter_rows() {
+                                            if !field.is_null(row) {
+                                                total += 1;
+                                            }
+                                        }
+                                    } else {
+                                        // No iteration needed: use ArrayRef::len() and null_count()
+                                        total += (field.len() - field.null_count()) as u64;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let mut state = AggValueState::Count(total);
+                    let result = state.finalize();
+                    let phys_type = result.physical_type();
+                    let mut v = ValueVector::new(phys_type, 1);
+                    v.resize(1);
+                    store_value_in_vector(&mut v, 0, &result);
+                    fields.push(v);
+                }
+                return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array.clone()).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
+            }
         }
 
         // Use rayon parallel aggregation for large inputs
