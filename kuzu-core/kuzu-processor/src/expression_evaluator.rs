@@ -690,6 +690,31 @@ impl ExpressionEvaluator {
                 })
                 .collect();
 
+            // Three-valued logic for AND/OR (short-circuit)
+            if name == "AND" || name == "OR" {
+                let l = &arg_values[0];
+                let r = &arg_values[1];
+                if name == "AND" {
+                    if matches!(l, Value::Bool(false)) || matches!(r, Value::Bool(false)) {
+                        row_results.push(Value::Bool(false));
+                        continue;
+                    }
+                    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+                        row_results.push(Value::Null);
+                        continue;
+                    }
+                } else {
+                    if matches!(l, Value::Bool(true)) || matches!(r, Value::Bool(true)) {
+                        row_results.push(Value::Bool(true));
+                        continue;
+                    }
+                    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+                        row_results.push(Value::Null);
+                        continue;
+                    }
+                }
+            }
+
             // If any argument is null, the result is null (SQL NULL semantics)
             if arg_values.iter().any(|v| matches!(v, Value::Null)) {
                 row_results.push(Value::Null);
