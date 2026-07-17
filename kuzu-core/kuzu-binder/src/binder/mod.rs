@@ -107,7 +107,23 @@ impl Binder {
 
     /// Map a string type name to LogicalTypeID.
     pub fn parse_type(type_name: &str) -> Result<LogicalTypeID, String> {
-        match type_name.to_uppercase().as_str() {
+        let upper = type_name.to_uppercase();
+
+        // Handle compound types with no child-type tracking (parse only)
+        if upper.ends_with("[]") {
+            return Ok(LogicalTypeID::List);
+        }
+        if upper.starts_with("MAP(") {
+            return Ok(LogicalTypeID::Map);
+        }
+        if upper.starts_with("STRUCT(") {
+            return Ok(LogicalTypeID::Struct);
+        }
+        if upper.starts_with("UNION(") {
+            return Ok(LogicalTypeID::Union);
+        }
+
+        match upper.as_str() {
             "BOOL" | "BOOLEAN" => Ok(LogicalTypeID::Bool),
             "INT64" => Ok(LogicalTypeID::Int64),
             "INT32" => Ok(LogicalTypeID::Int32),
