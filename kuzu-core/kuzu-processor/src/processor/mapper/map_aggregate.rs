@@ -1,4 +1,5 @@
 use super::ExecutionContext;
+use crate::physical::order_aggregate::resolve_group_by_indices;
 use crate::physical_operator::*;
 use kuzu_common::vector::DataChunk;
 use kuzu_parser::ast::Expression;
@@ -29,10 +30,15 @@ pub fn map_and_execute_aggregate(
                 .iter()
                 .map(|(_, args)| args.clone())
                 .collect();
+
+            // Resolve GROUP BY expressions to actual column indices using input field_names
+            let field_names = current_input.first()
+                .map(|c| c.field_names.as_slice())
+                .unwrap_or(&[]);
             let group_by_cols = if a.group_by.is_empty() {
                 Vec::new()
             } else {
-                (0..a.group_by.len() as u32).collect()
+                resolve_group_by_indices(&a.group_by, field_names)
             };
 
             let shared_state = std::sync::Arc::new(
