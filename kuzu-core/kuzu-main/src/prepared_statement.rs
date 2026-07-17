@@ -299,6 +299,7 @@ fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Valu
                     .collect();
                 Clause::Return(ReturnClause {
                     expressions: new_items?,
+                    distinct: r.distinct,
                 })
             }
             other => other.clone(),
