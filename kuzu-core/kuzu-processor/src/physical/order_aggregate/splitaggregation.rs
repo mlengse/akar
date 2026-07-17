@@ -84,10 +84,38 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Lock only the current thread's shard — not the global map
-        let mut shard = self.shared_state.current_shard().lock().unwrap();
         let funcs = &self.shared_state.funcs;
         let group_cols = &self.shared_state.group_by_cols;
+
+        // Fast path: scalar COUNT aggregates (no GROUP BY, all COUNT/COUNT_STAR)
+        if group_cols.is_empty() && funcs.iter().all(|f| matches!(f, AggregateFunction::Count | AggregateFunction::CountStar)) {
+            let mut counts = vec![0u64; funcs.len()];
+            for chunk in &input {
+                for (i, func) in funcs.iter().enumerate() {
+                    match func {
+                        AggregateFunction::CountStar => {
+                            counts[i] += chunk.active_rows() as u64;
+                        }
+                        AggregateFunction::Count => {
+                            if let Some(field) = chunk.fields.get(i) {
+                                counts[i] += (field.len() - field.null_count()) as u64;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Store counts into shared state
+            let mut shard = self.shared_state.current_shard().lock().unwrap();
+            let bucket = shard.entry(0).or_default();
+            bucket.clear();
+            let states: Vec<AggValueState> = counts.into_iter().map(AggValueState::Count).collect();
+            bucket.push((Value::Null, states));
+            return Ok(vec![]);
+        }
+
+        // Lock only the current thread's shard — not the global map
+        let mut shard = self.shared_state.current_shard().lock().unwrap();
 
         for chunk in &input {
             for row in 0..chunk.size {
