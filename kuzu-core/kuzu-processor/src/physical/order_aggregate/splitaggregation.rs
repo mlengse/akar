@@ -1,9 +1,10 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, update_states_row};
+use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, update_states_row, resolve_agg_col_indices};
 use kuzu_common::types::Value;
 use kuzu_common::vector::DataChunk;
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
+use kuzu_parser::ast::Expression;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::common::value_hash_fast;
 
@@ -21,11 +22,12 @@ type ShardMap = hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>>;
 pub struct SharedAggregateState {
     pub funcs: Vec<AggregateFunction>,
     pub group_by_cols: Vec<u32>,
+    pub agg_expressions: Vec<Vec<Expression>>,
     shards: Vec<std::sync::Mutex<ShardMap>>,
 }
 
 impl SharedAggregateState {
-    pub fn new(funcs: Vec<AggregateFunction>, group_by_cols: Vec<u32>) -> Self {
+    pub fn new(funcs: Vec<AggregateFunction>, group_by_cols: Vec<u32>, agg_expressions: Vec<Vec<Expression>>) -> Self {
         let mut shards = Vec::with_capacity(NUM_SHARDS);
         for _ in 0..NUM_SHARDS {
             shards.push(std::sync::Mutex::new(hashbrown::HashMap::new()));
@@ -33,6 +35,7 @@ impl SharedAggregateState {
         Self {
             funcs,
             group_by_cols,
+            agg_expressions,
             shards,
         }
     }
@@ -87,6 +90,10 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
         let funcs = &self.shared_state.funcs;
         let group_cols = &self.shared_state.group_by_cols;
 
+        // Resolve aggregate expression args to column indices from input chunks
+        let col_indices = resolve_agg_col_indices(&self.shared_state.agg_expressions,
+            input.first().map(|c| c.field_names.as_slice()).unwrap_or(&[]));
+
         // Fast path: scalar COUNT aggregates (no GROUP BY, all COUNT/COUNT_STAR)
         if group_cols.is_empty() && funcs.iter().all(|f| matches!(f, AggregateFunction::Count | AggregateFunction::CountStar)) {
             let mut counts = vec![0u64; funcs.len()];
@@ -97,8 +104,10 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
                             counts[i] += chunk.active_rows() as u64;
                         }
                         AggregateFunction::Count => {
-                            if let Some(field) = chunk.fields.get(i) {
-                                counts[i] += (field.len() - field.null_count()) as u64;
+                            if let Some(col_idx) = col_indices[i] {
+                                if let Some(field) = chunk.fields.get(col_idx) {
+                                    counts[i] += (field.len() - field.null_count()) as u64;
+                                }
                             }
                         }
                         _ => {}
@@ -124,10 +133,10 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
                 let bucket = shard.entry(hash).or_default();
                 let entry = bucket.iter_mut().find(|(k, _)| *k == key);
                 if let Some((_, states)) = entry {
-                    update_states_row(states, chunk, funcs, row);
+                    update_states_row(states, chunk, funcs, &col_indices, row);
                 } else {
                     let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
-                    update_states_row(&mut states, chunk, funcs, row);
+                    update_states_row(&mut states, chunk, funcs, &col_indices, row);
                     bucket.push((key, states));
                 }
             }
@@ -154,6 +163,7 @@ impl PhysicalOperatorExec for PhysicalAggregateFinalize {
         let table = AggregateHashTable::new(
             self.shared_state.funcs.clone(),
             self.shared_state.group_by_cols.clone(),
+            self.shared_state.agg_expressions.clone(),
         );
 
         table.build_output(&merged)
