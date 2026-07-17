@@ -206,7 +206,6 @@ fn test_null_boolean_and_true() {
 }
 
 #[test]
-#[ignore = "NULL AND FALSE should return false but returns null"]
 fn test_null_boolean_and_false() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL AND FALSE");
@@ -214,7 +213,6 @@ fn test_null_boolean_and_false() {
 }
 
 #[test]
-#[ignore = "NULL OR TRUE should return true but returns null"]
 fn test_null_boolean_or_true() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL OR TRUE");
