@@ -1,61 +1,65 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-17 (P27.5+P27.6 Complete — Rust ≈ C++ Parity)
+> **Revision:** 2026-07-17 (Audit Lengkap — Sprint 4: Stabilisasi)
 > **Baseline:** `cargo test --workspace` → **1099 passed, 0 failed, 68 ignored**, 29 crates, ~66k LOC
 > **Benchmark gap vs C++:** **Closed — Rust at parity.** `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). C++ baseline: 400 µs.
-> **For completed phases (P1-P25) and LadybugDB 100% functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
+> **⚠️ 68 ignored tests (6.2%)** — mayoritas edge case suite. Prioritas #1 Sprint 4.
+> **⚠️ LadybugDB benchmark** — belum dijalankan. Parity hanya terverifikasi terhadap Vela C++.
+> **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
 
-## 🔥 NEXT STEPS / ACTION ITEMS (as of 2026-07-17)
+## 🔥 SPRINT 4: STABILISASI & BENCHMARK KOMPREHENSIF (as of 2026-07-17)
 
-### ✅ Completed since last revision
+### ✅ Completed in Sprint 2-3
 
-1. **[DONE] P27.5 — Direct ColumnChunk→Arrow Scan Path:**
-   - **Problem**: `resolve_scan_data()` cloned 20k Values into `Vec<Vec<Value>>`, then `build_arrow_array()` materialized them twice.
-   - **Fix**: `ColumnChunk::to_arrow_array()` + `resolve_scan_arrow_data()` + `arrow::compute::take()`.
-   - **Impact**: ScanNode **7.8× faster** (1.4 ms → 180 µs).
-   - **Files**: `column_chunk.rs`, `scan.rs`, `mapper/mod.rs`, `mapper/map_scan.rs`
+| Item | Status | Detail |
+|------|--------|--------|
+| P27.5 — Arrow Scan Path | ✅ | ScanNode 7.8× faster (1.4ms → 180µs) |
+| P27.6 — Aggregate COUNT Fast Path | ✅ | Aggregate 7× faster (350µs → 50µs) |
+| P27a — SipHash → ahash | ✅ | Aggregate hash table |
+| P27b — Pre-size HashMap | ✅ | 3 locations |
+| P27e — SIMD Aggregate via Arrow Compute | ✅ | `arrow::compute::sum/min/max` |
+| P27g — Column Mapping SQL Aggregate | ✅ | 6 aggregate tests un-ignored |
+| C++ Parity (Vela) | 🏆 | **397 µs vs 400 µs** |
+| P28 — Migration Tool + CLI Box mode | ✅ | `kuzu-migrate` CLI |
+| P29 — 18 Missing Functions | ✅ | sinh, cosh, tanh, gcd, lcm, soundex, base64, etc. |
 
-2. **[DONE] P27.6 — Aggregate COUNT Fast Path:**
-   - **Problem**: `PhysicalAggregateScan::execute()` iterated per-row via `update_states_row()` even for simple scalar COUNT, dispatching `Value` enum per row.
-   - **Fix**: Added fast path in `PhysicalAggregateScan` that checks for scalar COUNT (no GROUP BY). Uses `ArrayRef::len() - null_count()` directly — O(1) per chunk, no iteration.
-   - **Impact**: Aggregate **7× faster** (~350 µs → ~50 µs). Combined with P27.5: **Rust now at parity with C++** (397 µs vs 400 µs).
-   - **Files**: `splitaggregation.rs`, `aggregatehashtable.rs`
-   - **Verification**: `cargo bench --bench query_pipeline -- "filter_count_10k/execute_only"` → **397 µs** (vs C++ 400 µs)
+### 🔴 P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ TOP PRIORITY
 
-### 🏆 Milestone: C++ Parity Achieved
+| Test File | Ignored | Root Cause (Estimasi) |
+|-----------|---------|-----------------------|
+| `edge_nested_types` | **13** | Arrow Struct/List type conversions untuk nested types |
+| `edge_null_handling` | **23** | NULL propagation di expression evaluator |
+| `edge_ddl_errors` | **10** | `panic!` → `Result::Err` yang belum tertangani |
+| `edge_empty_tables` | **7** | Empty DataChunk / empty scan edge cases |
+| `edge_unicode` | **4** | Unicode comparison/collation |
+| `edge_boundary` | **4** | MAX/MIN int, NaN, Infinity |
+| `edge_concurrency` | **1** | Race condition di multiwriter lock |
 
-The original 4.5× gap has been fully closed:
+**Target:** `cargo test --workspace` → **1099 pass, 0 fail, 0 ignored**.
 
-| Phase | Change | Time | vs C++ |
-|-------|--------|------|--------|
-| Before | `Vec<Vec<Value>>` + per-row COUNT | 1,787 µs | **4.5× slower** |
-| P27.5 | Arrow scan path | 529 µs | 1.32× slower |
-| P27.6 | Aggregate COUNT fast path | **397 µs** | **~equivalent** |
+### 🟡 P30.2 — Optimasi Query Kompleks (4 SP)
 
-Remaining work on the benchmark query is now in the noise (~160 µs of pipeline overhead). Next targets are other query patterns.
+| Gap | Target Saat Ini | Target Akhir | SP |
+|-----|----------------|-------------|:---:|
+| **P27c** Multi-key GROUP BY `Vec<Value>` alloc | 3,987 µs | <2,000 µs | 3 |
+| **P27d** K-way merge `O(k)` → `O(log k)` | ~1,388 µs | <700 µs | 1 |
+| **P27f** `#[inline]` annotations di hot-path | — | — | 1 |
 
-### 🔄 Previously active items
+### 🟡 P30.3 — LadybugDB Benchmark Suite (2 SP)
 
-2. **[DONE] P26.4 Performance Profiling:** ✅ Complete (2026-07-16)
-3. **[DONE] P27a** Aggregate: SipHash → ahash ✅
-4. **[DONE] P27b** Aggregate: `with_capacity` ✅
-5. **[NEW] P27g — Column Mapping untuk SQL aggregate (prioritas TERTINGGI):**
-   - **Masalah**: `map_and_execute_aggregate` ignore expression args (`_`), dan `update_states_row` pakai `col_idx = i` (index function, bukan index kolom sebenarnya). Ini menyebabkan `COUNT(p.age)` membaca kolom pertama (misal `id`) bukan `age`.
-   - **Dampak**: 7 aggregate NULL test gagal, kemungkinan besar juga aggregate pada column tertentu secara umum.
-   - **Fix**: Tambah `agg_col_indices: Vec<Option<u32>>` ke `SharedAggregateState`/`AggregateHashTable`, implementasi expression resolution di mapper.
-   - **SP**: 5 (sedang — architectural change, 3 files)
-6. **[DEFERRED] P27c-P27f** — deferred setelah P27g selesai.
-   - **P27c** Multi-key GROUP BY — gap medium, 3 SP
-   - **P27d** K-way merge O(log k) — gap sederhana, 1 SP
-   - **P27e** SIMD aggregate — gap medium, 3 SP
-   - **P27f** `#[inline]` — gap sederhana, 1 SP
-7. **[PENDING] P29.1 Open Design Questions (Needs User Review):**
-   - **Base64:** Use `base64` crate or custom encoder?
-   - **`pg_isready`:** Constant TRUE acceptable?
-8. **[PENDING] P26.5 Documentation & Distribution:**
-   - `MIGRATION.md` published (English). GitHub Releases pending.
+- Jalankan benchmark yang sama (`MATCH ... WHERE ... RETURN COUNT(*)`, ClickBench, LSQB) terhadap `ladybug/` C++ binary
+- Verifikasi parity terhadap **kedua** implementasi C++ (Vela + Ladybug)
+- Publikasikan hasil di `BENCHMARK_COMPARISON.md`
+
+### 🟢 P30.4-P30.6 — Housekeeping (6 SP)
+
+| Item | SP | Detail |
+|------|:---:|--------|
+| STANDALONE_CALL refactor (string → trait) | 2 | P22 deferred |
+| WASM test stabilisasi + fuzz CI | 2 | WASM 3/4 → 4/4; fuzz di nightly CI |
+| GitHub Releases + binary distribution | 2 | `cargo-dist` atau manual |
 
 ---
 
@@ -73,19 +77,19 @@ Remaining work on the benchmark query is now in the noise (~160 µs of pipeline 
 
 | Phase | Content | Priority | SP | Target |
 |-------|---------|----------|:---:|--------|
-| **P0** | Fix `test_sip_optimization` regression | ✅ DONE | 1 | ✅ Complete |
+| **P0-P25** | Foundation (parser, planner, processor, storage, GDS, extensions) | ✅ DONE | ~115 | ✅ Complete |
 | **P26** | Testing, fuzzing & profiling | ✅ DONE | 17 | ✅ Complete |
-| **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 + P27.5/P27.6 | ✅ Complete (C++ parity) |
-| **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | Sprint 2-3 |
-| **P29** | Functions & completeness | 🟡 P1 | 6 | Sprint 3 |
-| **Total** | | | **50** | **~5 weeks** |
+| **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 | ✅ Complete (C++ parity) |
+| **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | ✅ Complete |
+| **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
+| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** |
+| **Total** | | | **~182** | **~8 weeks** |
 
 > [!IMPORTANT]
-> **Freed ~16 SP** vs. original plan by:
-> - Dropping C++ Extension ABI (−8 SP)
-> - Scoping CLI to Box mode only (−3 SP)
-> - Read-only migration tool vs. dual reader (−5 SP)
-> - Deferring quick wins until after profiling
+> **P30 adalah fase kritis** sebelum production-ready. Fokus utama:
+> - 0 ignored tests (P30.1) — prerequisite untuk klaim "stable"
+> - Benchmark terverifikasi terhadap Vela **dan** LadybugDB (P30.3)
+> - Query kompleks dalam target performa (P30.2)
 
 ---
 
@@ -241,145 +245,99 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 
 ---
 
-## 🔴 P27: Performance — Remaining Optimization Gaps
-*Target: Resolve remaining gaps after P26.4 audit confirmed ~60% already implemented*
+## 🔴 P30: Stabilisasi & Benchmark Komprehensif — Sprint 4
+*Target: Production-readiness — 0 ignored tests, LadybugDB parity verified, query performance targets met*
 
-### P27.5 — Direct ColumnChunk→Arrow Scan Path ✅ DONE
+### P30.1 — Fix 68 Ignored Tests (6 SP) ⬅️ KRITIS
 
-**Impact:** Gap vs C++ closed from **4.5× → 1.32×**. `conn.execute()` 1,787 µs → **529 µs** (3.4× improvement).
+**Masalah:** 68 test di-ignore (`#[ignore]`) — kode tidak di-test secara otomatis. Ini adalah indikator langsung bahwa fitur terkait belum stabil.
 
-#### What changed
+**Breakdown investigasi:**
 
-| Before (Legacy Path) | After (Arrow Fast Path) |
-|---------------------|------------------------|
-| `resolve_scan_data()` → `to_column_major_data()` clones 20k Values | `resolve_scan_arrow_data()` → `ColumnChunk::to_arrow_array()` reads inline |
-| `build_arrow_array()` #1: predicate column materialization | Predicate evaluation on pre-built Arrow arrays |
-| `build_arrow_array()` #2: output column re-materialization | `arrow::compute::take()` — zero-copy filtered view |
-| **ScanNode: ~1.4 ms** | **ScanNode: ~180 µs (7.8× faster)** |
+| Test File | Ignored | Prioritas | Investigasi Awal |
+|-----------|---------|:---------:|------------------|
+| `edge_nested_types` | 13 | 🔴 | Arrow Struct/List conversions: `evaluate_arrow()` mungkin belum handle `List(Struct)` atau `Struct(List)` secara rekursif. Cek `build_arrow_from_values()` untuk tipe nested. |
+| `edge_null_handling` | 23 | 🔴 | NULL propagation: `from_legacy()` conversion mungkin beda penanganan NULL antara ValueVector dan Arrow. Cek `boolean_array_to_selection()` untuk null mask. |
+| `edge_ddl_errors` | 10 | 🟡 | Error path: banyak `panic!()` yang harusnya `Result::Err()`. Cek DDL handler untuk unwrap/expect. |
+| `edge_empty_tables` | 7 | 🟡 | Empty table scan: `PhysicalScan` mungkin crash pada DataChunk dengan 0 rows. Cek `resolve_scan_arrow_data()` untuk empty NodeGroup. |
+| `edge_unicode` | 4 | 🟢 | Unicode: `string_comparison` mungkin tidak handle grapheme clusters atau collation. |
+| `edge_boundary` | 4 | 🟢 | Numeric boundary: `Value::Int64(i64::MAX)` mungkin overflow di cast. |
+| `edge_concurrency` | 1 | 🟢 | Race condition: kemungkinan Timing Window di `lock_table()` + Condvar. |
 
-#### Files changed
-1. `kuzu-storage/src/column_chunk.rs` — `ColumnChunk::to_arrow_array() -> ArrayRef`
-2. `kuzu-processor/src/physical/scan_filter/scan.rs` — `table_arrow_data` field, `with_arrow_data()`, `execute_with_arrow_arrays()`, `execute_with_value_data()`
-3. `kuzu-processor/src/processor/mapper/mod.rs` — `resolve_scan_arrow_data()` reads NodeGroup→Arrow directly
-4. `kuzu-processor/src/processor/mapper/map_scan.rs` — `map_and_execute_scan_node()` tries Arrow fast path first
+**Execution plan:**
+1. Un-ignore 1 test → run test → debug failure → fix → verify all tests pass
+2. Repeat for all 68
+3. Final: `cargo test --workspace` → **0 ignored ✅**
 
-#### Updated bottleneck analysis (after P27.6 aggregate fix)
+### P30.2 — Optimasi Query Kompleks (4 SP)
 
-The scan + aggregate optimizations achieve C++ parity:
+Tiga gap yang didefer dari P27, sekarang menjadi prioritas setelah C++ parity untuk query sederhana tercapai:
 
-| Operator | Before (µs) | After (µs) | Delta |
-|----------|-------------|------------|-------|
-| ScanNode | ~1,400 | **~180** | **7.8× faster** ✅ |
-| Aggregate | ~350 | **~50** | **7× faster** ✅ |
-| Pipeline overhead | — | ~170 | Remaining noise |
-| Total execute | ~1,750 | **~400** | **4.5× faster — C++ parity** 🏆 |
+#### P27c (3 SP) — Multi-key GROUP BY: Hindari `Vec<Value>` Alokasi
 
-### Audit Temuan: Apa yang SUDAH diimplementasi
-
-| Optimasi | Status | Lokasi |
-|----------|--------|--------|
-| Aggregate: hashbrown (foldhash) for hash table | ✅ | `aggregatehashtable.rs` — `hashbrown::HashMap<u64, ...>` |
-| Aggregate: parallel dengan rayon | ✅ | `aggregatehashtable.rs:69` — `chunks.par_iter()` threshold 1000 |
-| OrderBy: radix sort for i64 keys | ✅ | `radixsort.rs` — LSD radix, 8-pass, sign-bit flip |
-| OrderBy: block merge sort framework | ✅ | `blockmergesort.rs` — blocks of 10k rows, k-way merge |
-| JoinHashTable: pre-sized HashMap | ✅ | `join_ops.rs:533,561,576` — `with_capacity(total_rows * 4/3)` |
-| JoinHashTable: parallel build | ✅ | `join_ops.rs:556` — `par_iter()` per-chunk, lalu merge |
-| JoinHashTable: ahash for key hashing | ✅ | `common.rs:105` — `value_hash_fast()` with `ahash::AHasher` |
-| Count: no atomic overhead | ✅ | `aggregate/mod.rs:89` — plain `u64 += 1` (thread-local state) |
-| **P27.5: Arrow scan path** | ✅ | `resolve_scan_arrow_data()` → direct `ColumnChunk→ArrayRef` |
-
-### Audit Temuan: Gap yang TERSISA
-
-| # | Gap | Dampak | Lokasi | SP |
-|---|-----|--------|--------|----|
-| **P27a** | Aggregate masih pakai SipHash (`value_hash()`), bukan `value_hash_fast()` (ahash) | 3-5× slower key hashing | `aggregatehashtable.rs:75` → `common.rs:81` vs `common.rs:105` | 1 |
-| **P27b** | Aggregate hash table TIDAK pre-sized (no `with_capacity`) | Rehash overhead per insert | `aggregatehashtable.rs:72,91,112` | 1 |
-| **P27c** | Multi-key GROUP BY alokasi `Vec<Value>` + `Value::List` per row | Heap alloc on hot path | `aggregatehashtable.rs:241-264` (`build_group_key()`) | 3 |
-| **P27d** | K-way merge pakai O(k) linear scan, bukan O(log k) binary heap | Slow merge untuk banyak blocks | `blockmergesort.rs:139-168` (`k_way_merge()`) | 1 |
-| **P27e** | Aggregate pakai manual scalar loop, bukan Arrow compute SIMD kernels | No SIMD acceleration | `aggregate/mod.rs` — semua aggregate manual | 3 |
-| **P27g** | Column mapping untuk SQL aggregate — `PropertyAccess` resolver pakai Cypher var name, bukan table prefix | Aggregate non-star gagal resolve column index | `aggregatehashtable.rs:319-341` (`resolve_agg_col_indices`) | 2 |
-| **P27f** | `#[inline]` tidak ada di hot-path aggregate | Function call overhead | `aggregatehashtable.rs`, `aggregate/mod.rs` | 1 |
-
-**Total remaining:** ~10 SP (dari 14 SP yang dianggarkan). **P27.5 (Arrow Hybrid Migration) di-defer** — P26.4 membuktikan bottleneck bukan di expression evaluation.
-
-### P27a — Aggregate: Ganti SipHash → ahash (1 SP)
-
-**Strategi:** Satu baris perubahan — panggil `value_hash_fast()` bukan `value_hash()` di `aggregatehashtable.rs`.
-
-- `[ ]` `aggregatehashtable.rs:7` — import `value_hash_fast` not `value_hash`
-- `[ ]` `aggregatehashtable.rs:75,119` — ganti `value_hash(&key)` → `value_hash_fast(&key)`
-- `[ ]` Verifikasi tidak ada collision issue (keduanya hash `Value` enum)
-
-### P27b — Aggregate: Pre-size HashMap (1 SP)
-
-**Strategi:** Tambah `with_capacity` di 3 tempat.
-
-- `[ ]` `aggregatehashtable.rs:72` — `HashMap::with_capacity(chunk.size.max(16))`
-- `[ ]` `aggregatehashtable.rs:91` — `HashMap::with_capacity(total_rows.max(16))`
-- `[ ]` `aggregatehashtable.rs:112` — `HashMap::with_capacity(total_rows.max(16))`
-
-### P27c — Multi-key GROUP BY: Hindari Vec<Value> Alokasi (3 SP)
-
-**Strategi:** Hash composite key langsung per-column tanpa alokasi intermediate.
-
-- `[ ]` Buat `hash_composite_key(chunk, group_cols, row) -> u64` yang hash setiap column incremental
-- `[ ]` Ganti `build_group_key()` dengan hash langsung untuk path multi-key
-- `[ ]` Simpan `u64` hash sebagai key (bukan `Value::List`), handle collision dengan full key comparison
-
-### P27d — K-way Merge: O(k) → O(log k) (1 SP)
-
-**Strategi:** Ganti linear scan di `k_way_merge()` dengan `std::collections::BinaryHeap`.
-
-- `[ ]]` Implement `BinaryHeap<Reverse<(usize, usize)>>` — (row_value, block_idx)
-- `[ ]` `aggregatehashtable.rs:139-168` — ganti loop `for bi in 0..blocks.len()` dengan heap pop
-
-### P27e — SIMD Aggregate via Arrow Compute (3 SP)
-
-**Strategi:** Untuk aggregate sederhana (COUNT, SUM, MIN, MAX), gunakan `arrow::compute::aggregate` kernels yang sudah SIMD-optimized.
-
-- `[x]` Evaluasi `arrow::compute::sum()`, `min()`, `max()` untuk numeric columns
-- `[x]` Fall back ke `AggValueState` untuk complex types dan GROUP BY
-- `[x]` Benchmark untuk verifikasi speedup
-
-**Implementasi di `kuzu-function/src/aggregate/mod.rs`:**
-- `values_to_arrow_array()` — konversi `&[Value]` → `ArrayRef` untuk 10 numeric types
-- `try_simd_aggregate()` — dispatch ke `arrow::compute::sum/min/max` via PrimitiveArray downcast
-- `evaluate_aggregate()` — try SIMD path first, fall back scalar path
-- Semua 159 existing tests pass ✅
-
-**Benchmark result:** SIMD path memotong loop per-row untuk Sum/Min/Max pada numeric columns. Speedup proporsional dengan ukuran array — signifikan untuk batch besar (`>=1024` rows). Fallback ke AggValueState untuk non-numeric, mixed-type, dan GROUP BY via hash table (where `AggValueState::update/merge` tetap digunakan).
-
-### P27f — #[inline] pada Hot Path (1 SP)
-
-**Strategi:** Tambah `#[inline]` / `#[inline(always)]` pada fungsi yang dipanggil per-row.
-
-- `[ ]` `AggValueState::update()` — inline
-- `[ ]` `AggValueState::merge()` — inline
-- `[ ]` `value_cmp()`, `value_hash_fast()` — sudah ada sebagian, verifikasi coverage
-- `[ ]` `build_group_key()` atau penggantinya
-
-### P27g — Column Mapping untuk SQL Aggregate (2 SP)
-
-**Problem:** `resolve_agg_col_indices()` di `aggregatehashtable.rs` mencari `"p.age"` di field_names, tapi field_names berisi `"Person.age"` (table prefix, bukan Cypher variable). Akibatnya:
-- `PropertyAccess("p", "age")` → construct `"p.age"` → lookup gagal → return `None`
-- `update_states_row` fallback: pakai function index `i` sebagai column index → **baca column salah**
-- `GROUP BY` expressions hardcoded sebagai `0..n` tanpa resolve dari field_names
-
-**Root cause di `aggregatehashtable.rs:319-341`:**
-- `Expression::PropertyAccess(base, prop)` — cuma coba `"prefix.prop"` exact match
-- Tidak fallback ke `ends_with(".prop")` untuk handle table-prefixed names
-- `resolve_group_by_indices()` belum ada — group_by_cols selalu `0..n`
+**Problem:** `build_group_key()` di `aggregatehashtable.rs:241-264` alokasi `Vec<Value>` + `Value::List` per row untuk composite key.
 
 **Fix:**
-- `[x]` Tambah `resolve_name_to_col()` — helper dengan exact, numeric, ends_with fallback
-- `[x]` Fix `resolve_agg_col_indices()` — untuk PropertyAccess, coba `"prefix.prop"` exact lalu `ends_with(".prop")`
-- `[x]` Add `resolve_group_by_indices()` — resolves GROUP BY expressions ke column indices
-- `[x]` Fix `map_aggregate.rs` — panggil `resolve_group_by_indices()` dengan field_names dari input chunk
-- `[x]` Remove `#[ignore]` dari 6 aggregate tests — semua passing ✅
+- `[ ]` Buat `hash_composite_key(chunk, group_cols, row) -> u64` — hash setiap column incremental
+- `[ ]` Ganti `build_group_key()` dengan hash langsung untuk multi-key path
+- `[ ]` Simpan `u64` hash sebagai key (bukan `Value::List`), handle collision dengan full key comparison
+- `[ ]` **Target:** 3,987 µs → **<2,000 µs**
 
-**Hasil:** 7 end-to-end aggregate tests passing:
-- `COUNT(*)`, `COUNT(p.age)`, `SUM(p.age)`, `AVG(p.age)`, `MIN(p.age)`, `MAX(p.age)`, `SUM(p.age)` all-nulls
-- Semua 16 processor unit tests passing
+#### P27d (1 SP) — K-way Merge: O(k) → O(log k)
+
+**Problem:** `k_way_merge()` di `blockmergesort.rs:139-168` pakai linear scan `O(k)` untuk cari block terkecil.
+
+**Fix:**
+- `[ ]` Implement `BinaryHeap<Reverse<(usize, usize)>>` — (row_value, block_idx)
+- `[ ]` Ganti loop `for bi in 0..blocks.len()` dengan heap pop
+- `[ ]` **Target:** 1,388 µs → **<700 µs**
+
+#### P27f (1 SP) — `#[inline]` pada Hot Path
+
+**Fix:**
+- `[ ]` `#[inline(always)]` pada `AggValueState::update()`, `merge()`
+- `[ ]` `#[inline]` pada `value_cmp()`, `value_hash_fast()`, `build_group_key()`
+
+### P30.3 — LadybugDB Benchmark Suite (2 SP)
+
+**Problem:** Semua klaim parity hanya terhadap Vela C++. `ladybug/` submodule punya benchmark sendiri.
+
+**Execution:**
+1. `[ ]` Build `ladybug/` C++ binary: `cd ladybug && cmake -B build/release && cmake --build build/release`
+2. `[ ]` Jalankan benchmark identik terhadap LadybugDB: `MATCH ... WHERE ... RETURN COUNT(*)` pada dataset 10k
+3. `[ ]` Jalankan ClickBench dan LSQB dataset yang sama terhadap Vela, Ladybug, dan Rust
+4. `[ ]` Publikasikan hasil di `BENCHMARK_COMPARISON.md` — tabel 3 kolom (Rust vs Vela vs Ladybug)
+
+### P30.4 — STANDALONE_CALL Refactor (2 SP)
+
+**Problem:** `STANDALONE_CALL` dispatch masih via string matching (`if name == "table_info" { ... }`) — bukan trait-based. Deferred sejak P22.
+
+**Fix:**
+- `[ ]` Buat trait `StandaloneCallFn: Fn(&[Value]) -> Result<Vec<Vec<Value>>>`
+- `[ ]` Registry: `HashMap<&'static str, Box<dyn StandaloneCallFn>>`
+- `[ ]` Register semua 14 CALL functions via registry
+- `[ ]` Hapus string matching di `standalone_call.rs`
+
+### P30.5 — WASM + Fuzz CI (2 SP)
+
+- `[ ]` WASM: Investigate 1 ignored test — `wasm-bindgen-test` mungkin butuh browser target
+- `[ ]` Fuzz: Integrasi `cargo-fuzz` ke CI (nightly-only job)
+- `[ ]` Auto-run fuzz targets untuk 10 menit di setiap PR
+
+### P30.6 — GitHub Releases (2 SP)
+
+- `[ ]` Setup `cargo-dist` atau release script manual
+- `[ ]` Binary: `kuzu-cli` untuk Windows/macOS/Linux
+- `[ ]` Release notes otomatis dari git log
+
+---
+
+## All Completed Phases (P1-P29) — Archived Reference
+
+> **P1-P26, P27.5/P27.6, P28, P29** — semua sudah complete. Detail implementasi ada di [`STATUS.md`](STATUS.md). 
+> 
+> **P27a, P27b, P27e, P27g** — sudah complete di Sprint 2-3.
+> **P27c, P27d, P27f** — didefer ke P30.2 (Sprint 4).
 
 ---
 
@@ -456,17 +414,17 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 ## User Review Required
 > [!IMPORTANT]
-> - Do we want to pull in the `base64` crate for `to_base64`/`from_base64`, or should I write a lightweight custom base64 encoder/decoder to avoid adding another dependency to the `kuzu-function` crate?
-> - For `pg_isready`, returning a constant `TRUE` is the standard approach for embedded databases masquerading as Postgres. Does this align with your expectations?
+> - ✅ **Resolved:** `base64` crate used for `to_base64`/`from_base64`.
+> - ✅ **Resolved:** `pg_isready` returns constant `TRUE`.
 
 ---
 
-## 📋 Documentation (P26.5 revised, 4 SP)
+## 📋 Documentation (P26.5 revised → P30.6, 4 SP)
 
-- `[ ]` English `MIGRATION.md` for external users
-- `[ ]` Keep Indonesian `STATUS.md` for internal team
-- `[ ]` GitHub Releases binary distribution (no crates.io, no NPM)
-- `[ ]` Build C++ benchmark binary (`kuzu_benchmark`) from CMake (deferred from P25.4)
+- `[x]` English `MIGRATION.md` for external users ✅
+- `[x]` Keep Indonesian `STATUS.md` for internal team ✅
+- `[ ]` GitHub Releases binary distribution → **P30.6** (deferred from P26.5)
+- `[x]` Build C++ benchmark binary (`kuzu_benchmark`) from CMake ✅ (built 2026-07-12)
 
 ---
 
@@ -474,10 +432,11 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
-| **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report (P26.4) |
-| **Sprint 2** | P27: Performance Optimization | 14 + P27.5/P27.6 | ✅ Arrow scan path (P27.5), Aggregate COUNT fast path (P27.6), Aggregate hash table (P27.1), OrderBy sort (P27.2), JoinHashTable (P27.3), Aggregate hot path (P27.4) — **C++ parity achieved** |
-| **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | Migration tool, CLI Box mode, 18 functions |
-| **Ongoing** | P26.5: Documentation | 4 | MIGRATION.md, GH releases |
+| **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report |
+| **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
+| **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
+| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 0 ignored tests, LadybugDB verified, query perf targets met** |
+| **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
 
@@ -490,12 +449,17 @@ graph TD
     P26_4 -->|identifies top 5| P27["P27: Performance Optimization"]
     P27_5 -->|✅ DONE: scan 7.8× faster| P27
     P27_6["P27.6: Aggregate Fast Path"] -->|✅ DONE: C++ parity| P27
-    P27 --> P27_1["P27.1: Aggregate HashTable"]
-    P27 --> P27_2["P27.2: OrderBy Sort"]
-    P27 --> P27_3["P27.3: JoinHashTable"]
-    P27 --> P27_4["P27.4: Aggregate Hot Path"]
     P27 --> P28["P28: Migration + CLI"]
     P26 --> P29["P29: 18 Functions"]
+    P27 --> P30["P30: Stabilisasi & Benchmark"]
+    P28 --> P30
+    P29 --> P30
+    P30 --> P30_1["🔴 P30.1: Fix 68 ignored tests"]
+    P30 --> P30_2["🟡 P30.2: Optimasi query kompleks"]
+    P30 --> P30_3["🟡 P30.3: LadybugDB benchmark"]
+    P30 --> P30_4["🟢 P30.4: STANDALONE_CALL refactor"]
+    P30 --> P30_5["🟢 P30.5: WASM + Fuzz CI"]
+    P30 --> P30_6["🟢 P30.6: GitHub Releases"]
 ```
 
 ## Design Decisions Log
@@ -521,3 +485,7 @@ graph TD
 | 17 | 3.7× gap validity | **Not empirically validated** | C++ benchmark binary was never built; all C++ cells in BENCHMARK_COMPARISON.md are TBD |
 | 18 | **P27.5 scan path priority** | **Highest — completed 2026-07-17** | Profiling confirmed scan was 80% of execute time; 7.8× improvement closed 4.5×→1.32× gap |
 | 19 | **Arrow scan path approach** | `ColumnChunk::to_arrow_array()` + `arrow::compute::take()` | Eliminates `Vec<Vec<Value>>` intermediate and double Arrow materialization |
+| 20 | **Sprint 4 focus** | Fix ignored tests + LadybugDB benchmark + query complexity | Pre-requisite untuk production-readiness. 68 ignored tests = risiko regression. |
+| 21 | **Prioritas fix test** | nested_types → null_handling → ddl_errors → empty_tables → unicode → boundary → concurrency | Diurutkan berdasarkan jumlah ignored + impact |
+| 22 | **LadybugDB comparison** | Jalankan benchmark identik terhadap `ladybug/` binary | Validasi parity terhadap 2 implementasi C++ yang independen |
+| 23 | **STANDALONE_CALL refactor timing** | Sprint 4, bukan deferred lagi | String matching = maintenance burden. Trait registry adalah pola yang sudah terbukti di optimizer. |
