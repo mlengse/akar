@@ -245,6 +245,13 @@ drop_table = {
 column_definitions = { column_def ~ ("," ~ column_def)* }
 column_def         = { identifier ~ type_name ~ ("COMPRESSION" ~ string)? }
 type_name          = {
+    map_type
+  | struct_type
+  | union_type
+  | primitive_type ~ ("[" ~ "]")*
+}
+
+primitive_type     = {
     "STRING"
   | "INT64"
   | "INT32"
@@ -264,6 +271,11 @@ type_name          = {
   | "INTERVAL"
   | "SERIAL"
 }
+
+map_type   = { "MAP" ~ "(" ~ type_name ~ "," ~ type_name ~ ")" }
+struct_type = { "STRUCT" ~ "(" ~ struct_field ~ ("," ~ struct_field)* ~ ")" }
+struct_field = { identifier ~ type_name }
+union_type = { "UNION" ~ "(" ~ struct_field ~ ("," ~ struct_field)* ~ ")" }
 
 primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
 
