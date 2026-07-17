@@ -42,7 +42,7 @@ impl PhysicalOperatorExec for PhysicalAggregate {
             .map(|name| parse_aggregate_function(name))
             .collect();
 
-        let table = AggregateHashTable::new(funcs, self.group_by_cols.clone());
+        let table = AggregateHashTable::new(funcs, self.group_by_cols.clone(), Vec::new());
         table.aggregate(&input)
     }
 }
