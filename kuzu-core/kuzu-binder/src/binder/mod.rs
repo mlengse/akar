@@ -479,7 +479,7 @@ impl Binder {
                 }
             }
         }
-        Ok(BoundReturnClause { expressions })
+        Ok(BoundReturnClause { expressions, distinct: r.distinct })
     }
 
     // ==================== WHERE Binding ====================
@@ -648,7 +648,8 @@ impl Binder {
                     | BinaryOp::NotIn
                     | BinaryOp::StartsWith
                     | BinaryOp::EndsWith
-                    | BinaryOp::Contains => LogicalTypeID::Bool,
+                    | BinaryOp::Contains
+                    | BinaryOp::Like => LogicalTypeID::Bool,
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Modulo => {
                         // Propagate numeric type
                         if left.resolved_type == LogicalTypeID::Double || right.resolved_type == LogicalTypeID::Double {
