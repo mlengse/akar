@@ -273,7 +273,6 @@ fn test_null_order_by() {
 }
 
 #[test]
-#[ignore = "Parse error on DISTINCT"]
 fn test_null_distinct() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -359,7 +358,6 @@ fn test_null_in_where_with_coalesce() {
 }
 
 #[test]
-#[ignore = "IN with NULL list element not supported"]
 fn test_null_not_in_list() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN 5 NOT IN [1, 2, NULL]");
@@ -367,7 +365,6 @@ fn test_null_not_in_list() {
 }
 
 #[test]
-#[ignore = "IN with NULL list element not supported"]
 fn test_null_in_list() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN 1 IN [1, 2, NULL]");
@@ -375,7 +372,6 @@ fn test_null_in_list() {
 }
 
 #[test]
-#[ignore = "BETWEEN with NULL not supported in parser"]
 fn test_null_between() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL BETWEEN 1 AND 10");
@@ -383,7 +379,6 @@ fn test_null_between() {
 }
 
 #[test]
-#[ignore = "LIKE with NULL not supported"]
 fn test_null_like() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL LIKE 'a%'");
