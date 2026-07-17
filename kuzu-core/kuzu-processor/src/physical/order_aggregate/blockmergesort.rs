@@ -125,7 +125,7 @@ impl BlockMergeSorter {
         }
     }
 
-    /// K-way merge of sorted blocks using linear scan for minimum.
+    /// K-way merge of sorted blocks using BinaryHeap for O(log k) per row.
     fn k_way_merge(
         &self,
         blocks: &[Vec<usize>],
@@ -133,61 +133,67 @@ impl BlockMergeSorter {
         num_fields: usize,
         total_rows: usize,
     ) -> Vec<usize> {
-        let mut result = Vec::with_capacity(total_rows);
-        let mut positions: Vec<usize> = vec![0usize; blocks.len()];
+        use std::collections::BinaryHeap;
 
-        for _ in 0..total_rows {
-            // Find the block with the minimum head value
-            let mut best_block: Option<usize> = None;
-            for bi in 0..blocks.len() {
-                if positions[bi] >= blocks[bi].len() {
-                    continue; // Block exhausted
-                }
-                match best_block {
-                    None => best_block = Some(bi),
-                    Some(bb) => {
-                        let cmp = self.compare_rows(
-                            blocks[bb][positions[bb]],
-                            blocks[bi][positions[bi]],
-                            all_values,
-                            num_fields,
-                        );
-                        if cmp == std::cmp::Ordering::Greater {
-                            best_block = Some(bi);
-                        }
+        struct HeapEntry {
+            block_idx: usize,
+            keys: Vec<Value>,
+        }
+
+        impl Ord for HeapEntry {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                for (a, b) in self.keys.iter().zip(other.keys.iter()) {
+                    let cmp = value_cmp(a, b);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp.reverse();
                     }
                 }
+                std::cmp::Ordering::Equal
             }
+        }
+        impl PartialOrd for HeapEntry {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Eq for HeapEntry {}
+        impl PartialEq for HeapEntry {
+            fn eq(&self, other: &Self) -> bool {
+                self.cmp(other) == std::cmp::Ordering::Equal
+            }
+        }
 
-            if let Some(bi) = best_block {
-                result.push(blocks[bi][positions[bi]]);
-                positions[bi] += 1;
-            } else {
-                break;
+        let mut result = Vec::with_capacity(total_rows);
+        let mut positions: Vec<usize> = vec![0usize; blocks.len()];
+        let mut heap: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(blocks.len());
+
+        for bi in 0..blocks.len() {
+            if !blocks[bi].is_empty() {
+                let row = blocks[bi][0];
+                let keys: Vec<Value> = self.sort_keys.iter().map(|&(k, _)| {
+                    let k = k as usize;
+                    all_values[k][row].0.clone()
+                }).collect();
+                heap.push(HeapEntry { block_idx: bi, keys });
+            }
+        }
+
+        while let Some(entry) = heap.pop() {
+            let bi = entry.block_idx;
+            let pos = &mut positions[bi];
+            result.push(blocks[bi][*pos]);
+            *pos += 1;
+            if *pos < blocks[bi].len() {
+                let row = blocks[bi][*pos];
+                let keys: Vec<Value> = self.sort_keys.iter().map(|&(k, _)| {
+                    let k = k as usize;
+                    all_values[k][row].0.clone()
+                }).collect();
+                heap.push(HeapEntry { block_idx: bi, keys });
             }
         }
 
         result
-    }
-
-    fn compare_rows(
-        &self,
-        a: usize,
-        b: usize,
-        all_values: &[Vec<(Value, bool)>],
-        num_fields: usize,
-    ) -> std::cmp::Ordering {
-        for &(k, ascending) in &self.sort_keys {
-            let k = k as usize;
-            if k >= num_fields {
-                continue;
-            }
-            let cmp = value_cmp(&all_values[k][a].0, &all_values[k][b].0);
-            if cmp != std::cmp::Ordering::Equal {
-                return if ascending { cmp } else { cmp.reverse() };
-            }
-        }
-        std::cmp::Ordering::Equal
     }
 }
 
