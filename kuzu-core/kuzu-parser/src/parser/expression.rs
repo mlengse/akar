@@ -304,6 +304,24 @@ pub fn parse_comparison_suffix(pair: pest::iterators::Pair<Rule>, left: Expressi
             let inner = Expression::BinaryOp(BinaryOp::Contains, Box::new(left), Box::new(right));
             Ok(Expression::UnaryOp(UnaryOp::Not, Box::new(inner)))
         }
+        Rule::like_op => {
+            let right = get_rhs(pair)?;
+            Ok(Expression::BinaryOp(BinaryOp::Like, Box::new(left), Box::new(right)))
+        }
+        Rule::between_op => {
+            let mut children = pair.into_inner();
+            let lower_pair = children
+                .find(|p| p.as_rule() == Rule::additive_expr)
+                .ok_or_else(|| "BETWEEN missing lower bound expression".to_string())?;
+            let upper_pair = children
+                .find(|p| p.as_rule() == Rule::additive_expr)
+                .ok_or_else(|| "BETWEEN missing upper bound expression".to_string())?;
+            let lower_expr = parse_expression(lower_pair)?;
+            let upper_expr = parse_expression(upper_pair)?;
+            let ge = Expression::BinaryOp(BinaryOp::GreaterThanOrEqual, Box::new(left.clone()), Box::new(lower_expr));
+            let le = Expression::BinaryOp(BinaryOp::LessThanOrEqual, Box::new(left), Box::new(upper_expr));
+            Ok(Expression::BinaryOp(BinaryOp::And, Box::new(ge), Box::new(le)))
+        }
         r => Err(format!("Unknown comparison suffix: {:?}", r)),
     }
 }
