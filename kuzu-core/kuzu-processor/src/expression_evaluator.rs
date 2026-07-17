@@ -1087,7 +1087,7 @@ impl ExpressionEvaluator {
                 }
             };
 
-            let mut filtered: Vec<Value> = Vec::new();
+            let mut filtered: Vec<Value> = Vec::with_capacity(items.len());
             for item in &items {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
