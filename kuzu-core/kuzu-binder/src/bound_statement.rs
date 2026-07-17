@@ -249,6 +249,7 @@ pub struct BoundExpression {
 #[derive(Debug, Clone)]
 pub struct BoundReturnClause {
     pub expressions: Vec<BoundExpression>,
+    pub distinct: bool,
 }
 
 #[derive(Debug, Clone)]
