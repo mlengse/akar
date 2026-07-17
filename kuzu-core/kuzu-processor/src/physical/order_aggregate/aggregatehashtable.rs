@@ -314,6 +314,24 @@ pub fn build_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> Val
     }
 }
 
+/// Resolve an expression name to a column index using flexible matching.
+/// Tries: exact match, numeric parse, ends_with(".name").
+fn resolve_name_to_col(name: &str, field_names: &[String]) -> Option<usize> {
+    if let Some(idx) = field_names.iter().position(|n| n == name) {
+        return Some(idx);
+    }
+    if let Ok(idx) = name.parse::<usize>() {
+        if idx < field_names.len() {
+            return Some(idx);
+        }
+    }
+    let dot_name = format!(".{}", name);
+    if let Some(idx) = field_names.iter().position(|n| n.ends_with(&dot_name)) {
+        return Some(idx);
+    }
+    None
+}
+
 /// Resolve aggregate function argument expressions to column indices.
 /// Returns one Option per function: None means no column needed (e.g., COUNT(*)).
 pub fn resolve_agg_col_indices(agg_expressions: &[Vec<Expression>], field_names: &[String]) -> Vec<Option<usize>> {
@@ -321,15 +339,22 @@ pub fn resolve_agg_col_indices(agg_expressions: &[Vec<Expression>], field_names:
         for expr in args {
             match expr {
                 Expression::Variable(name) => {
-                    let result = field_names.iter().position(|n| n == name)
-                        .or_else(|| field_names.iter().position(|n| n.ends_with(&format!(".{}", name))));
-                    if result.is_some() { return result; }
+                    if let Some(idx) = resolve_name_to_col(name, field_names) {
+                        return Some(idx);
+                    }
                 }
                 Expression::PropertyAccess(base, prop) => {
                     if let Expression::Variable(prefix) = base.as_ref() {
+                        // Try "prefix.prop" (exact match with Cypher variable name)
                         let qualified = format!("{}.{}", prefix, prop);
-                        let result = field_names.iter().position(|n| n == &qualified);
-                        if result.is_some() { return result; }
+                        if let Some(idx) = field_names.iter().position(|n| n == &qualified) {
+                            return Some(idx);
+                        }
+                        // Try ".prop" suffix match (handles table-prefixed names like "Person.age")
+                        let dot_prop = format!(".{}", prop);
+                        if let Some(idx) = field_names.iter().position(|n| n.ends_with(&dot_prop)) {
+                            return Some(idx);
+                        }
                     }
                 }
                 Expression::Star => return None,
@@ -337,6 +362,31 @@ pub fn resolve_agg_col_indices(agg_expressions: &[Vec<Expression>], field_names:
             }
         }
         None
+    }).collect()
+}
+
+/// Resolve GROUP BY expressions to actual column indices using field_names.
+pub fn resolve_group_by_indices(group_by: &[Expression], field_names: &[String]) -> Vec<u32> {
+    group_by.iter().map(|expr| {
+        match expr {
+            Expression::Variable(name) => {
+                resolve_name_to_col(name, field_names).unwrap_or(0) as u32
+            }
+            Expression::PropertyAccess(base, prop) => {
+                if let Expression::Variable(prefix) = base.as_ref() {
+                    let qualified = format!("{}.{}", prefix, prop);
+                    if let Some(idx) = field_names.iter().position(|n| n == &qualified) {
+                        return idx as u32;
+                    }
+                    let dot_prop = format!(".{}", prop);
+                    if let Some(idx) = field_names.iter().position(|n| n.ends_with(&dot_prop)) {
+                        return idx as u32;
+                    }
+                }
+                0
+            }
+            _ => 0,
+        }
     }).collect()
 }
 
