@@ -49,7 +49,7 @@ impl AggregateHashTable {
                 store_value_in_vector(&mut v, 0, &result);
                 fields.push(v);
             }
-            return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array.clone()).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
+            return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
         }
 
         if total_rows == 0 {
@@ -86,7 +86,7 @@ impl AggregateHashTable {
                             _ => {}
                         }
                     }
-                    let mut state = AggValueState::Count(total);
+                    let state = AggValueState::Count(total);
                     let result = state.finalize();
                     let phys_type = result.physical_type();
                     let mut v = ValueVector::new(phys_type, 1);
@@ -94,7 +94,7 @@ impl AggregateHashTable {
                     store_value_in_vector(&mut v, 0, &result);
                     fields.push(v);
                 }
-                return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array.clone()).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
+                return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
             }
         }
 
@@ -321,7 +321,6 @@ pub fn resolve_agg_col_indices(agg_expressions: &[Vec<Expression>], field_names:
         for expr in args {
             match expr {
                 Expression::Variable(name) => {
-                    // Try exact match first (e.g., "age"), then qualified (e.g., "p.age")
                     let result = field_names.iter().position(|n| n == name)
                         .or_else(|| field_names.iter().position(|n| n.ends_with(&format!(".{}", name))));
                     if result.is_some() { return result; }
