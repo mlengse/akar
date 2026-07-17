@@ -216,6 +216,8 @@ pub enum StringOp {
     RegexpSplitToArray,
     /// String edit distance
     Levenshtein,
+    /// LIKE pattern matching
+    Like,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -746,6 +748,7 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("ends_with", ScalarFunction::String { op: StringOp::EndsWith });
+        self.register_scalar("like", ScalarFunction::String { op: StringOp::Like });
         self.register_scalar("to_upper", ScalarFunction::String { op: StringOp::ToUpper });
         self.register_scalar("to_lower", ScalarFunction::String { op: StringOp::ToLower });
         // Standard SQL aliases
