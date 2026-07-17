@@ -83,6 +83,17 @@ impl NodeTable {
             ));
         }
 
+        // Reject NULL primary key values
+        if self.primary_key_column < self.columns.len() {
+            let pk_value = &values[self.primary_key_column];
+            if matches!(pk_value, Value::Null) {
+                return Err(format!(
+                    "NULL value not allowed for primary key column '{}' in table '{}'",
+                    self.columns[self.primary_key_column].name, self.name
+                ));
+            }
+        }
+
         // Check primary key uniqueness
         if self.primary_key_column < self.columns.len() {
             let pk_value = &values[self.primary_key_column];
@@ -140,6 +151,16 @@ impl NodeTable {
                     num_cols,
                     row.len()
                 ));
+            }
+            // Reject NULL primary key values
+            if self.primary_key_column < num_cols {
+                let pk_value = &row[self.primary_key_column];
+                if matches!(pk_value, Value::Null) {
+                    return Err(format!(
+                        "NULL value not allowed for primary key column '{}' in table '{}'",
+                        self.columns[self.primary_key_column].name, self.name
+                    ));
+                }
             }
             // Check PK uniqueness
             if self.primary_key_column < num_cols {
