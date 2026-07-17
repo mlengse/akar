@@ -35,11 +35,13 @@ impl Frame {
     }
 
     /// Pin the frame (increment reference count).
+    #[inline(always)]
     pub fn pin(&mut self) {
         self.pin_count += 1;
     }
 
     /// Unpin the frame (decrement reference count).
+    #[inline(always)]
     pub fn unpin(&mut self) {
         if self.pin_count > 0 {
             self.pin_count -= 1;
@@ -47,11 +49,13 @@ impl Frame {
     }
 
     /// Check if the frame is pinned (in use).
+    #[inline(always)]
     pub fn is_pinned(&self) -> bool {
         self.pin_count > 0
     }
 
     /// Mark frame as dirty (modified).
+    #[inline(always)]
     pub fn mark_dirty(&mut self) {
         self.is_dirty = true;
     }
@@ -92,6 +96,7 @@ impl FileHandle {
     }
 
     /// Get the file offset for a given page number.
+    #[inline(always)]
     pub fn page_offset(&self, page_num: PageNum) -> u64 {
         page_num * self.page_size as u64
     }
