@@ -330,8 +330,9 @@ where_clause = {
 with_clause = { "WITH" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit? }
 
 return_clause = {
-    "RETURN" ~ ("*" | return_item ~ ("," ~ return_item)*) ~ order_by? ~ limit?
+    "RETURN" ~ distinct_flag? ~ ("*" | return_item ~ ("," ~ return_item)*) ~ order_by? ~ limit?
 }
+distinct_flag = @{ "DISTINCT" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 return_item = {
     expression ~ ("AS" ~ identifier)?
@@ -360,19 +361,27 @@ and_expr = { not_expr ~ (and_kw ~ not_expr)* }
 not_expr = { (not_kw)? ~ comparison_expr }
 
 comparison_expr = {
-    additive_expr ~ (is_check_op | not_in_op | in_op | not_starts_with_op | starts_with_op | not_ends_with_op | ends_with_op | not_contains_op | contains_op | (comparison_op ~ additive_expr))?
+    additive_expr ~ (is_check_op | not_in_op | in_op | not_starts_with_op | starts_with_op | not_ends_with_op | ends_with_op | not_contains_op | contains_op | like_op | between_op | (comparison_op ~ additive_expr))?
 }
 comparison_op   = { "=" | "<>" | "<" | ">" | "<=" | ">=" }
 
 is_check_op = { "IS" ~ ("NOT" ~ "NULL" | "NULL") }
-in_op              = { "IN" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-not_in_op          = { "NOT" ~ !(ASCII_ALPHANUMERIC | "_") ~ "IN" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-starts_with_op     = { "STARTS" ~ !(ASCII_ALPHANUMERIC | "_") ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-not_starts_with_op = { "NOT" ~ !(ASCII_ALPHANUMERIC | "_") ~ "STARTS" ~ !(ASCII_ALPHANUMERIC | "_") ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-ends_with_op       = { "ENDS" ~ !(ASCII_ALPHANUMERIC | "_") ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-not_ends_with_op   = { "NOT" ~ !(ASCII_ALPHANUMERIC | "_") ~ "ENDS" ~ !(ASCII_ALPHANUMERIC | "_") ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-contains_op        = { "CONTAINS" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
-not_contains_op    = { "NOT" ~ !(ASCII_ALPHANUMERIC | "_") ~ "CONTAINS" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+in_kw              = @{ "IN" ~ !(ASCII_ALPHANUMERIC | "_") }
+in_op              = { in_kw ~ additive_expr }
+not_in_op          = { not_kw ~ "IN" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+starts_with_kw     = @{ "STARTS" ~ !(ASCII_ALPHANUMERIC | "_") }
+starts_with_op     = { starts_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+not_starts_with_op = { not_kw ~ starts_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+ends_with_kw       = @{ "ENDS" ~ !(ASCII_ALPHANUMERIC | "_") }
+ends_with_op       = { ends_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+not_ends_with_op   = { not_kw ~ ends_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+contains_kw        = @{ "CONTAINS" ~ !(ASCII_ALPHANUMERIC | "_") }
+contains_op        = { contains_kw ~ additive_expr }
+not_contains_op    = { not_kw ~ contains_kw ~ additive_expr }
+like_kw            = @{ "LIKE" ~ !(ASCII_ALPHANUMERIC | "_") }
+like_op            = { like_kw ~ additive_expr }
+between_kw         = @{ "BETWEEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+between_op         = { between_kw ~ additive_expr ~ and_kw ~ additive_expr }
 
 additive_expr = { multiplicative_expr ~ (add_op ~ multiplicative_expr)* }
 add_op        = { "+" | "-" }
