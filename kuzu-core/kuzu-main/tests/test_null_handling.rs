@@ -29,7 +29,6 @@ fn test_null_primary_key_rejection() {
 }
 
 #[test]
-#[ignore = "IS NULL in WHERE clause not supported by parser"]
 fn test_null_where_is_null() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -41,7 +40,6 @@ fn test_null_where_is_null() {
 }
 
 #[test]
-#[ignore = "IS NOT NULL in WHERE clause not supported by parser"]
 fn test_null_where_is_not_null() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
@@ -301,7 +299,6 @@ fn test_null_ifnull() {
 }
 
 #[test]
-#[ignore = "IS NULL expression parse error in return"]
 fn test_null_is_null_constant() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL IS NULL");
@@ -309,7 +306,6 @@ fn test_null_is_null_constant() {
 }
 
 #[test]
-#[ignore = "IS NOT NULL expression parse error in return"]
 fn test_null_is_not_null_constant() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN NULL IS NOT NULL");
@@ -317,7 +313,6 @@ fn test_null_is_not_null_constant() {
 }
 
 #[test]
-#[ignore = "IS NULL expression parse error in return"]
 fn test_null_is_null_column() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, age INT64, PRIMARY KEY (id))");
