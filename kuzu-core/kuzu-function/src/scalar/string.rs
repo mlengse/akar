@@ -79,6 +79,28 @@ pub(crate) fn evaluate_string(op: StringOp, args: &[Value]) -> Result<Value, Str
             let pat = get_string(&args[1])?;
             Ok(Value::Bool(s.ends_with(&pat)))
         }
+        StringOp::Like => {
+            let s = get_string(&args[0])?;
+            let pat = get_string(&args[1])?;
+            // Convert SQL LIKE pattern to regex pattern
+            let mut regex_str = String::with_capacity(pat.len() + 2);
+            regex_str.push('^');
+            for ch in pat.chars() {
+                match ch {
+                    '%' => regex_str.push_str(".*"),
+                    '_' => regex_str.push('.'),
+                    // Escape regex metacharacters
+                    '.' | '\\' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' => {
+                        regex_str.push('\\');
+                        regex_str.push(ch);
+                    }
+                    other => regex_str.push(other),
+                }
+            }
+            regex_str.push('$');
+            let re = get_cached_regex(&regex_str)?;
+            Ok(Value::Bool(re.is_match(&s)))
+        }
         StringOp::ToUpper => {
             let s = get_string(&args[0])?;
             Ok(Value::String(s.to_uppercase()))
