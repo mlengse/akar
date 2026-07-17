@@ -1,10 +1,8 @@
 use crate::registry::*;
 use crate::scalar::{evaluate_scalar, numeric_to_f64};
 use arrow::array::{
-    ArrayRef, Float32Array, Float32Builder, Float64Array, Float64Builder, Int16Array,
-    Int16Builder, Int32Array, Int32Builder, Int64Array, Int64Builder, Int8Array, Int8Builder,
-    PrimitiveArray, UInt16Array, UInt16Builder, UInt32Array, UInt32Builder, UInt64Array,
-    UInt64Builder, UInt8Array, UInt8Builder,
+    ArrayRef, Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
+    Int8Builder, PrimitiveArray, UInt16Builder, UInt32Builder, UInt64Builder, UInt8Builder,
 };
 use arrow::compute;
 use arrow::datatypes::{
