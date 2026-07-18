@@ -4,6 +4,7 @@
 //! they are applied to the main storage. During checkpoint, the WAL is
 //! flushed to disk and the storage pages are synchronized.
 
+use std::fmt;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -74,6 +75,80 @@ pub enum WALRecord {
     CreateSequence {
         table_id: u64,
     },
+}
+
+impl fmt::Display for WALRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WALRecord::Insert { table_id, data } => {
+                write!(f, "INSERT table={} data_len={}", table_id, data.len())
+            }
+            WALRecord::Delete { table_id, row_id } => {
+                write!(f, "DELETE table={} row={}", table_id, row_id)
+            }
+            WALRecord::Update {
+                table_id,
+                row_id,
+                column,
+                data,
+            } => {
+                write!(
+                    f,
+                    "UPDATE table={} row={} col={} data_len={}",
+                    table_id,
+                    row_id,
+                    column,
+                    data.len()
+                )
+            }
+            WALRecord::UpdateFsm { page_idx, is_free } => {
+                write!(f, "FSM page={} {}", page_idx, if *is_free { "FREE" } else { "ALLOC" })
+            }
+            WALRecord::ColumnWrite {
+                table_id,
+                col_id,
+                page_id,
+                data,
+            } => {
+                write!(
+                    f,
+                    "COLUMN_WRITE table={} col={} page={} data_len={}",
+                    table_id,
+                    col_id,
+                    page_id,
+                    data.len()
+                )
+            }
+            WALRecord::LocalWALData { data } => {
+                write!(f, "LOCAL_WAL data_len={}", data.len())
+            }
+            WALRecord::Commit { transaction_id } => {
+                write!(f, "COMMIT txn={}", transaction_id)
+            }
+            WALRecord::Rollback { transaction_id } => {
+                write!(f, "ROLLBACK txn={}", transaction_id)
+            }
+            WALRecord::Checkpoint => write!(f, "CHECKPOINT"),
+            WALRecord::CreateTable { table_id } => {
+                write!(f, "CREATE_TABLE id={}", table_id)
+            }
+            WALRecord::DropTable { table_id } => {
+                write!(f, "DROP_TABLE id={}", table_id)
+            }
+            WALRecord::AlterTable { table_id } => {
+                write!(f, "ALTER_TABLE id={}", table_id)
+            }
+            WALRecord::CreateIndex { table_id } => {
+                write!(f, "CREATE_INDEX table_id={}", table_id)
+            }
+            WALRecord::DropIndex { table_id } => {
+                write!(f, "DROP_INDEX table_id={}", table_id)
+            }
+            WALRecord::CreateSequence { table_id } => {
+                write!(f, "CREATE_SEQUENCE id={}", table_id)
+            }
+        }
+    }
 }
 
 /// Write-Ahead Log for durability.
