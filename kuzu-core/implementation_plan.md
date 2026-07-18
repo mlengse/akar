@@ -1,6 +1,6 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-18 (Sprint 4 ✅, Sprint 5 — P31.1+P31.2 DONE ✅✅, P31.3 in progress 🟡)
+> **Revision:** 2026-07-18 (Sprint 4 ✅, Sprint 5 — P31.1+P31.2+P31.3 DONE ✅✅✅)
 > **Baseline:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored** (kuzu-migrate deferred), 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P30.1 COMPLETE: 31/32 ignored tests fixed + 1 FTS test fixed.** Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, FTS arrow-path filtering. **Kuzu-migrate (1) deferred — parquet footer bug (pre-existing).**
@@ -87,12 +87,11 @@
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | ✅ Complete |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
 | **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — FULLY DONE) |
-| **P31** | **Final Parity Sprint** | **🟡 P1** | **1.5** | Address remaining audit gaps (3 CALL handlers, parquet fix) — P31.1+P31.2 DONE ✅✅ |
+| **P31** | **Final Parity Sprint** | **🟡 P1** | **3.5** | Address remaining audit gaps (3 CALL handlers, parquet fix) — P31.1+P31.2+P31.3 DONE ✅✅✅ |
 
 
 > [!IMPORTANT]
-> **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated. **Audit 2026-07-18: ~95% parity dengan C++.** P31.1+P31.2 ✅ **DONE.** Fokus utama sekarang:
-> - **P31.3: 3 CALL handlers** (projected graph mgmt — 1 SP)
+> **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated. **Audit 2026-07-18: ~95% parity dengan C++.** P31.1+P31.2+P31.3 ✅ **DONE.** Fokus utama sekarang:
 > - **P31.4: Parquet footer fix** (1 SP)
 
 ---
@@ -343,10 +342,10 @@ Tiga gap yang didefer dari P27 — semua selesai.
 
 ---
 
-## 🟡 P31: Final Parity Sprint — Address Audit Gaps (4 SP, 2.5 DONE ✅✅)
+## 🟡 P31: Final Parity Sprint — Address Audit Gaps (4 SP, 3.5 DONE ✅✅✅)
 
 **Latar belakang:** Audit komprehensif 2026-07-18 terhadap Kuzu C++ (Vela) + LadybugDB C++ vs Rust menemukan ~95% parity. **4 medium gaps** tersisa (3.5 SP) + minor deferred items. Lihat [`STATUS.md` §3.3](STATUS.md#33--medium-gaps-4-items-35-sp).
-**P31.1 ✅ P31.2 ✅ — 2.5 SP DONE.** Sisa: P31.3 (CALL handlers) + P31.4 (parquet fix).
+**P31.1 ✅ P31.2 ✅ P31.3 ✅ — 3.5 SP DONE.** Sisa: P31.4 (parquet fix).
 
 ### P31.1 — Register Lambda Functions + Missing Aliases (1 SP) ✅ COMPLETE
 
@@ -381,19 +380,21 @@ cargo check --workspace  # no regressions
 cargo test -p kuzu-function  # 171 tests pass (sebelumnya 159)
 ```
 
-### P31.3 — CALL Handlers: Projected Graph Management (1 SP)
+### P31.3 — CALL Handlers: Projected Graph Management (1 SP) ✅ COMPLETE
 
 **Problem:** LadybugDB memiliki 3 CALL function untuk manajemen projected graph yang tidak ada di Rust: `show_projected_graphs()`, `projected_graph_info(graph)`, `drop_projected_graph(graph)`. Base functionality sudah ada (`CreateGraph`/`UseGraph`/`DropGraph` di parser/binder), tapi CALL entry point tidak terdaftar.
 
-**Fix (di `kuzu-processor/src/processor/standalone_call.rs`):**
-- `[ ]` Buat `ShowProjectedGraphsHandler` — list semua projected graphs dari catalog
-- `[ ]` Buat `ProjectedGraphInfoHandler` — detail graph tertentu
-- `[ ]` Buat `DropProjectedGraphHandler` — drop projected graph via CALL
-- `[ ]` Register di `DbStandaloneCallHandler::new()`
+**Fix:**
+- `[x]` Tambah `ProjectedGraphInfo` struct + `projected_graphs: HashMap<String, ProjectedGraphInfo>` di Catalog (`kuzu-catalog/src/lib.rs`)
+- `[x]` Wire DDL `BoundCreateGraph`/`BoundDropGraph` ke catalog storage (`kuzu-main/src/connection/ddl.rs`)
+- `[x]` Buat `ShowProjectedGraphsHandler` (`kuzu-main/src/connection/standalone_call.rs`)
+- `[x]` Buat `ProjectedGraphInfoHandler`
+- `[x]` Buat `DropProjectedGraphHandler`
+- `[x]` Register di `DbStandaloneCallHandler::new()`
 
 **Verifikasi:**
 ```bash
-cargo test -p kuzu-processor -p kuzu-main
+cargo test -p kuzu-catalog -p kuzu-main  # 92 tests pass
 ```
 
 ### P31.4 — Fix kuzu-migrate Parquet Footer (1 SP)
@@ -532,7 +533,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
 | **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI, GitHub Releases automated** |
-| **Sprint 5** | **P31: Final Parity Sprint** | **4** | **🟡 P31.1+P31.2 DONE ✅✅ — remaining: P31.3 (CALL graph mgmt) + P31.4 (parquet fix).** |
+| **Sprint 5** | **P31: Final Parity Sprint** | **4** | **🟡 P31.1+P31.2+P31.3 DONE ✅✅✅ — remaining: P31.4 (parquet fix).** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -560,7 +561,7 @@ graph TD
     P30 --> P31["🟡 P31: Final Parity Sprint"]
     P31 --> P31_1["✅ P31.1: Lambda + alias reg (DONE)"]
     P31 --> P31_2["✅ P31.2: GREATEST/LEAST (DONE)"]
-    P31 --> P31_3["🟡 P31.3: CALL graph mgmt"]
+    P31 --> P31_3["✅ P31.3: CALL graph mgmt (DONE)"]
     P31 --> P31_4["🟡 P31.4: parquet fix"]
 ```
 
