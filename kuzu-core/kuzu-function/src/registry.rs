@@ -330,6 +330,10 @@ pub enum UtilityOp {
     Size,
     Error,
     PgIsReady,
+    /// Return the largest value among arguments (SQL standard, NULLs ignored).
+    Greatest,
+    /// Return the smallest value among arguments (SQL standard, NULLs ignored).
+    Least,
 }
 
 /// Schema functions — access metadata about nodes, relationships, and values.
@@ -1139,6 +1143,10 @@ impl FunctionRegistry {
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
         self.register_scalar("error", ScalarFunction::Utility { op: UtilityOp::Error });
         self.register_scalar("pg_isready", ScalarFunction::Utility { op: UtilityOp::PgIsReady });
+
+        // --- Greatest/Least (SQL extremum functions) ---
+        self.register_scalar("greatest", ScalarFunction::Utility { op: UtilityOp::Greatest });
+        self.register_scalar("least", ScalarFunction::Utility { op: UtilityOp::Least });
 
         // --- Schema ---
         self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
