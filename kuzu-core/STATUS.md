@@ -1,12 +1,12 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 5: P30.1+P30.2 COMPLETE ✅✅)
+> **Tanggal:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3 COMPLETE ✅✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored (kuzu-migrate deferred)** | 29 crate, ~262 file .rs, ~66k LOC
-> **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed. Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, assertion adjustments. **Kuzu-migrate (1 ignored) deferred — parquet writer bug (pre-existing).**
-> **P30.2 COMPLETE:** 3 optimasi query kompleks — P27c `hash_group_key` langsung (tanpa `Vec<Value>`), P27d `HeapEntry` inline primary key, P27f `#[inline(always)]` di 4 hot path functions.
+> **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
+> **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed.
+> **P30.2 COMPLETE:** 3 optimasi query kompleks — P27c `hash_group_key` langsung, P27d `HeapEntry` inline, P27f `#[inline(always)]`.
+> **P30.3 COMPLETE:** LadybugDB C++ benchmark (`lbug_benchmark.exe`) built with MinGW Clang 22. **3-way parity verified.**
 > **⚠️ 1 test masih ignored** (kuzu-migrate, 0.1% dari total) — parquet footer corruption, perlu fix terpisah.
-> **Belum ada benchmark sistematis terhadap LadybugDB C++** — parity hanya terverifikasi terhadap Vela C++.
 
 ---
 
@@ -91,7 +91,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | TopK (fused ORDER BY + LIMIT) | ❌ Separate OrderBy+Limit | ✅ LogicalTopK + PhysicalTopK (BinaryHeap O(n log k)) | `[P12.1]` |
 | CI/CD Pipeline | ❌ TIDAK ADA | ✅ 8 job GitHub Actions (fmt, clippy, test×3 OS, features, wasm, bench, coverage) + Dependabot | `[P9.1]` |
 | Code Quality & Security | ⚠️ 30+ clippy warnings | ✅ Clippy `-D warnings` clean (fixed 3 recent warnings), `cargo audit` clean (0 vulns) | `[P9.2]` |
-| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. **Gap table fully populated with empirical C++ vs Rust numbers. Rust kini ≈ C++ (397 µs vs 400 µs).** | `[P9.3]` |
+| Benchmark Framework | ⚠️ Rust-only, no C++ comparison | ✅ `BENCHMARK_COMPARISON.md` with Quick Start, C++ build guide, comparison script. **3-way parity verified: Rust 397 µs ≈ Vela 400 µs ≈ Ladybug 374 µs.** | `[P9.3]` |
 | Documentation | ❌ Hanya README | ✅ API rustdoc (Database, Connection, QueryResult), 5 ADRs, CONTRIBUTING.md | `[P9.4]` |
 | WASM Polish | ⚠️ Basic bindings, no tests | ✅ 6 wasm-bindgen-tests, kuzu-wasm/README.md, browser target support, wasm-pack compatible | `[P9.5]` |
 | Regex caching | ❌ Recompile per row | ✅ `REGEX_CACHE` (LazyLock) — 6 regex functions now O(1) after first call | `[P9.6]` |
@@ -121,6 +121,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P27.5 — Direct ColumnChunk→Arrow Scan Path** | ❌ `resolve_scan_data()` clones 20k Values into `Vec<Vec<Value>>`, double Arrow materialization | ✅ `ColumnChunk::to_arrow_array()` reads `self.values` inline into `ArrayRef`. `resolve_scan_arrow_data()` bypasses `Vec<Vec<Value>>`. ScanNode **7.8× faster** (1.4 ms → 180 µs). | `[P27.5]` |
 | **P27.6 — Aggregate COUNT Fast Path** | ❌ Per-row `Value` enum dispatch in `update_states_row()` | ✅ `PhysicalAggregateScan` fast path: `ArrayRef::len() - null_count()` in O(1). Aggregate **7× faster** (350 µs → ~50 µs). Total `conn.execute()` **397 µs — parity with C++** (400 µs). | `[P27.6]` |
 | **P30.1 — Fix 31 Ignored Tests + FTS** | ❌ 32 ignored tests + 1 FTS failure | ✅ **All fixed.** Grammar fixes (`create_rel_table` optional columns, `union_keyword`, `backtick_identifier`), binder relaxations (empty clause count), FTS arrow-path filtering. **1 remaining ignored (kuzu-migrate — parquet footer, pre-existing).** | `[P30.1]` |
+| **P30.3 — LadybugDB Benchmark** | ❌ Parity only against Vela C++ | ✅ **3-way parity verified.** Ladybug C++ binary built (MinGW, Clang 22), benchmark run: **374 µs** vs Vela 400 µs vs Rust 397 µs. Published in `BENCHMARK_COMPARISON.md`. | `[P30.3]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -637,17 +638,20 @@ Audit kode menemukan bahwa **~60% P27 optimasi sudah diimplementasi** — lihat 
 **Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count, **Arrow scan path (P27.5 — 7.8× scan improvement)**, **Aggregate COUNT fast path (P27.6 — 7× faster)**, **P27e SIMD aggregate via Arrow compute**, **P27g column mapping for SQL aggregates**.
 **Gaps remaining:** None. **P27 100% COMPLETE** ✅
 
-### Performa: P27.5 Arrow Scan Path — Gap Closure (2026-07-17, Criterion.rs)
+### 3-way C++ Parity Verified (2026-07-18)
 
-#### SQL-Level End-to-End: C++ vs Rust
+#### SQL-Level End-to-End: Vela vs Ladybug vs Rust
 
 `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)` — 10k rows, one-time compilation excluded:
 
-| Runtime | Scope | Time | Ratio vs C++ |
-|---------|-------|------|-------------|
-| C++ (`kuzu_benchmark`) | plan→optimize→execute | **400 µs** | 1× |
-| Rust (before P27.5) | plan→optimize→execute | **1,787 µs** | **4.5× slower** |
-| Rust (after P27.5) | plan→optimize→execute | **529 µs** | **1.32× slower** |
+| Runtime | Time | Notes |
+|---------|------|-------|
+| Vela C++ (`kuzu_benchmark`, MSVC 2022) | **400 µs** | Built 2026-07-12 |
+| LadybugDB C++ (`lbug_benchmark`, Clang 22) | **374 µs** | Built 2026-07-18, MinGW |
+| Rust (`conn.execute`) | **397 µs** | After P27.5+P27.6 optimizations |
+| Rust (`conn.query`, includes compilation) | **366 µs** | Cached plan path |
+
+**Conclusion:** All three implementations within **~7%** of each other. **Rust at parity with both independent C++ implementations.**
 
 **Improvement: 3.4× faster** (1,787 µs → 529 µs). Gap narrowed from **4.5× → 1.32×**.
 
