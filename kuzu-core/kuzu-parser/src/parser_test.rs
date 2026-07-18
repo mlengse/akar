@@ -230,6 +230,48 @@ mod tests {
     // ==================== COPY FROM tests ====================
 
     #[test]
+    fn test_copy_to_parquet() {
+        let sql = "COPY (MATCH (a:User) RETURN a.id, a.name) TO 'test.parquet' (FORMAT PARQUET)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyTo(c) => {
+                assert_eq!(c.file_path, "test.parquet");
+                assert!(matches!(c.format, CopyToFormat::Parquet));
+                assert!(!c.header);
+            }
+            _ => panic!("Expected CopyTo"),
+        }
+    }
+
+    #[test]
+    fn test_copy_to_csv() {
+        let sql = "COPY (MATCH (a:User) RETURN a.id, a.name) TO 'test.csv' (FORMAT CSV, HEADER true)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyTo(c) => {
+                assert_eq!(c.file_path, "test.csv");
+                assert!(matches!(c.format, CopyToFormat::Csv));
+                assert!(c.header);
+            }
+            _ => panic!("Expected CopyTo"),
+        }
+    }
+
+    #[test]
+    fn test_copy_to_default_csv() {
+        let sql = "COPY (MATCH (a:User) RETURN a.id, a.name) TO 'test.csv'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CopyTo(c) => {
+                assert_eq!(c.file_path, "test.csv");
+                assert!(matches!(c.format, CopyToFormat::Csv));
+                assert!(!c.header);
+            }
+            _ => panic!("Expected CopyTo"),
+        }
+    }
+
+    #[test]
     fn test_copy_from_basic() {
         let sql = "COPY Person FROM 'data.csv'";
         let stmt = parse(sql).unwrap();
