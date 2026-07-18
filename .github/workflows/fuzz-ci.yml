@@ -1,0 +1,54 @@
+# Fuzz CI — cargo-fuzz integration
+#
+# Runs existing fuzz targets (cypher_query, expression_eval, copy_from_csv)
+# on every PR (10-min limit) and nightly (30-min limit).
+# Requires nightly Rust toolchain.
+
+name: Fuzz CI
+
+on:
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'kuzu-core/**'
+      - '.github/workflows/fuzz-ci.yml'
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - cypher_query
+          - expression_eval
+          - copy_from_csv
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run fuzz target
+        working-directory: kuzu-core/fuzz
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            MAX_TIME=1800
+          else
+            MAX_TIME=600
+          fi
+          cargo fuzz run ${{ matrix.target }} -- -max_total_time=$MAX_TIME
