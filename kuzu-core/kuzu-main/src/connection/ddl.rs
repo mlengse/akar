@@ -174,6 +174,14 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateGraph(g) => {
+                let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+                let info = kuzu_catalog::ProjectedGraphInfo {
+                    name: g.name.clone(),
+                    entry_type: "NATIVE".into(),
+                    cypher_query: None,
+                };
+                cat.create_projected_graph(info)
+                    .map_err(|e| e.to_string())?;
                 tracing::info!("CREATE GRAPH '{}' (any={})", g.name, g.is_any);
                 Ok(Some(QueryResult::success_message(format!(
                     "Graph '{}' created",
@@ -188,6 +196,9 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundDropGraph(g) => {
+                let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+                cat.drop_projected_graph(&g.name)
+                    .map_err(|e| e.to_string())?;
                 tracing::info!("DROP GRAPH '{}'", g.name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Graph '{}' dropped",
