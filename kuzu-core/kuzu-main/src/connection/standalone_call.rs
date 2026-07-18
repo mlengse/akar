@@ -5,7 +5,10 @@ use kuzu_parser::ast::Expression;
 use kuzu_processor::processor::{StandaloneCallFn, StandaloneCallHandler, StandaloneCallRegistry};
 
 use crate::database::Database;
-use crate::connection::utils::{ast_constant_to_value, rows_to_datachunk};
+use crate::connection::utils::{ast_constant_to_value, rows_to_datachunk, value_to_csv_string};
+
+/// Callback for executing an arbitrary Cypher query string.
+pub type QueryFn = Arc<dyn Fn(&str) -> Result<crate::query_result::QueryResult, String> + Send + Sync>;
 
 pub struct DbStandaloneCallHandler {
     database: Arc<Database>,
@@ -14,6 +17,10 @@ pub struct DbStandaloneCallHandler {
 
 impl DbStandaloneCallHandler {
     pub fn new(database: Arc<Database>) -> Self {
+        Self::with_query_executor(database, None)
+    }
+
+    pub fn with_query_executor(database: Arc<Database>, query_fn: Option<QueryFn>) -> Self {
         let mut registry = StandaloneCallRegistry::new();
         registry.register(Arc::new(ShowTablesHandler { database: database.clone() }));
         registry.register(Arc::new(TableInfoHandler { database: database.clone() }));
@@ -40,6 +47,10 @@ impl DbStandaloneCallHandler {
         registry.register(Arc::new(ShowProjectedGraphsHandler { database: database.clone() }));
         registry.register(Arc::new(ProjectedGraphInfoHandler { database: database.clone() }));
         registry.register(Arc::new(DropProjectedGraphHandler { database: database.clone() }));
+        if let Some(qf) = query_fn {
+            registry.register(Arc::new(ExportCsvHandler { query_fn: qf.clone() }));
+            registry.register(Arc::new(ExportParquetHandler { query_fn: qf }));
+        }
         Self { database, registry }
     }
 }
@@ -53,14 +64,24 @@ fn eval_ast_expr_to_value(expr: &Expression) -> Value {
 
 fn extract_arg_string(args: &[Expression], idx: usize) -> Result<String, String> {
     if idx >= args.len() {
-        return Err(format!("Expected argument at index {}", idx));
+        return Err(format!(
+            "Missing argument at index {} ({} provided)",
+            idx,
+            args.len()
+        ));
     }
     match &args[idx] {
         Expression::Constant(c) => match c {
             kuzu_parser::ast::Constant::String(s) => Ok(s.clone()),
-            _ => Err("Expected string argument".into()),
+            _ => Err(format!(
+                "Argument {} expected a string literal, got {:?}",
+                idx, c
+            )),
         },
-        _ => Err("Expected string constant argument".into()),
+        other => Err(format!(
+            "Argument {} expected a constant expression, got: {:?}",
+            idx, other
+        )),
     }
 }
 
@@ -77,8 +98,27 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
 
         let args_vals: Vec<Value> = args.iter().map(eval_ast_expr_to_value).collect();
         let registry = self.database.function_registry.lock().unwrap();
-        let result_rows = registry.execute_table_function(name, &args_vals)?;
-        Self::format_result(result_rows)
+        match registry.execute_table_function(name, &args_vals) {
+            Ok(rows) => Self::format_result(rows),
+            Err(original_err) => {
+                let known_calls = ["show_tables", "table_info", "show_functions", "show_indexes",
+                    "show_sequences", "show_macros", "show_connection", "db_version",
+                    "catalog_version", "current_setting", "stats_info", "storage_info",
+                    "show_attached_databases", "bm_info", "file_info", "free_space_info",
+                    "disk_size_info", "storage_version", "show_loaded_extensions",
+                    "show_official_extensions", "clear_warnings", "show_warnings",
+                    "show_projected_graphs", "projected_graph_info", "drop_projected_graph",
+                    "export_csv", "export_parquet",
+                ];
+                let lower = name.to_lowercase();
+                let suggestion = known_calls.iter()
+                    .find(|k| k.contains(&lower) || lower.contains(**k))
+                    .map(|k| format!(" Did you mean CALL {}()?", k))
+                    .unwrap_or_default();
+                Err(format!("CALL '{}' failed: {}.{}",
+                    name, original_err, suggestion))
+            }
+        }
     }
 }
 
@@ -555,6 +595,96 @@ impl StandaloneCallFn for ShowWarningsHandler {
 
     fn aliases(&self) -> Vec<&'static str> {
         vec!["show_warnings"]
+    }
+}
+
+// ==================== Export CSV / Parquet handlers ====================
+// Wraps COPY TO as CALL functions: export_csv / export_parquet
+// Usage:  CALL export_csv('file.csv', 'MATCH (n) RETURN n');
+//         CALL export_parquet('file.parquet', 'MATCH (n) RETURN n');
+
+struct ExportCsvHandler {
+    query_fn: QueryFn,
+}
+
+impl StandaloneCallFn for ExportCsvHandler {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+        let file_path = extract_arg_string(args, 0)?;
+        let query_string = extract_arg_string(args, 1)?;
+        let result = (self.query_fn)(&query_string)?;
+
+        let path = std::path::Path::new(&file_path);
+        let mut w = csv::WriterBuilder::new()
+            .has_headers(true)
+            .from_path(path)
+            .map_err(|e| format!("Cannot create CSV file '{}': {}", file_path, e))?;
+
+        if let Some(first_chunk) = result.chunks.first() {
+            let header: Vec<String> = if first_chunk.field_names.is_empty() {
+                (0..first_chunk.num_fields()).map(|i| format!("column_{}", i)).collect()
+            } else {
+                first_chunk.field_names.clone()
+            };
+            if !header.is_empty() {
+                w.write_record(&header).map_err(|e| format!("CSV write error: {e}"))?;
+            }
+        }
+        for chunk in &result.chunks {
+            for row in 0..chunk.size {
+                let row_values: Vec<String> = (0..chunk.fields.len())
+                    .map(|col_idx| {
+                        chunk.get_value(col_idx, row)
+                            .map(|v| value_to_csv_string(&v))
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                w.write_record(&row_values).map_err(|e| format!("CSV write error: {e}"))?;
+            }
+        }
+        w.flush().map_err(|e| format!("CSV flush error: {e}"))?;
+        Ok(vec![vec![Value::String(format!(
+            "Exported {} rows to '{}'",
+            result.num_rows, file_path
+        ))]])
+    }
+
+    fn aliases(&self) -> Vec<&'static str> {
+        vec!["export_csv"]
+    }
+}
+
+struct ExportParquetHandler {
+    query_fn: QueryFn,
+}
+
+impl StandaloneCallFn for ExportParquetHandler {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+        let file_path = extract_arg_string(args, 0)?;
+        let query_string = extract_arg_string(args, 1)?;
+        let result = (self.query_fn)(&query_string)?;
+
+        #[cfg(feature = "parquet-export")]
+        {
+            crate::connection::ddl::write_parquet_to_file(&file_path, &result)
+                .map_err(|e| format!("Parquet export error: {e}"))?;
+            Ok(vec![vec![Value::String(format!(
+                "Exported {} rows to '{}'",
+                result.num_rows, file_path
+            ))]])
+        }
+        #[cfg(not(feature = "parquet-export"))]
+        {
+            let _ = file_path;
+            let _ = query_string;
+            let _ = result;
+            Err("Parquet export requires 'parquet-export' feature. \
+                 Build with: cargo build --features parquet-export"
+                .into())
+        }
+    }
+
+    fn aliases(&self) -> Vec<&'static str> {
+        vec!["export_parquet"]
     }
 }
 
