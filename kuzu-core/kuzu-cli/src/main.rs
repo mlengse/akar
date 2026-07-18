@@ -37,6 +37,8 @@ enum OutputMode {
     Line,
     Column,
     Box,
+    Html,
+    Latex,
 }
 
 impl OutputMode {
@@ -48,6 +50,8 @@ impl OutputMode {
             "line" => Some(Self::Line),
             "column" => Some(Self::Column),
             "box" => Some(Self::Box),
+            "html" => Some(Self::Html),
+            "latex" | "tex" => Some(Self::Latex),
             _ => None,
         }
     }
@@ -91,7 +95,7 @@ impl CliState {
             "exit" | "quit" => return Err("__EXIT__".into()),
             "help" => {
                 writeln!(output, "Kuzu CLI commands:").ok();
-                writeln!(output, "  .mode <mode>    Output: table|csv|json|line|column|box").ok();
+                writeln!(output, "  .mode <mode>    Output: table|csv|json|line|column|box|html|latex").ok();
                 writeln!(output, "  .tables         List tables").ok();
                 writeln!(output, "  .schema         Show schemas").ok();
                 writeln!(output, "  .import f t     CSV import: file table").ok();
@@ -127,13 +131,13 @@ impl CliState {
             }
             "mode" => {
                 if parts.len() < 2 {
-                    writeln!(output, "Usage: .mode <table|csv|json|line|column|box>").ok();
+                    writeln!(output, "Usage: .mode <table|csv|json|line|column|box|html|latex>").ok();
                     writeln!(output, "Current: {:?}", self.mode).ok();
                 } else if let Some(m) = OutputMode::from_str(parts[1]) {
                     self.mode = m;
                     writeln!(output, "Mode set to {:?}", m).ok();
                 } else {
-                    writeln!(output, "Unknown: {}. Options: table, csv, json, line, column, box", parts[1]).ok();
+                    writeln!(output, "Unknown: {}. Options: table, csv, json, line, column, box, html, latex", parts[1]).ok();
                 }
             }
             "import" => {
@@ -599,6 +603,46 @@ fn format_output(result: &kuzu_main::QueryResult, mode: OutputMode, output: &mut
                 }
             }
             writeln!(output, "({} rows)", rows.len()).ok();
+        }
+        OutputMode::Html => {
+            writeln!(output, "<table>").ok();
+            writeln!(output, "  <thead>").ok();
+            write!(output, "    <tr>").ok();
+            for h in &headers {
+                write!(output, "<th>{}</th>", h).ok();
+            }
+            writeln!(output, "</tr>").ok();
+            writeln!(output, "  </thead>").ok();
+            writeln!(output, "  <tbody>").ok();
+            for row in &rows {
+                write!(output, "    <tr>").ok();
+                for v in row {
+                    write!(output, "<td>{}</td>", v).ok();
+                }
+                writeln!(output, "</tr>").ok();
+            }
+            writeln!(output, "  </tbody>").ok();
+            writeln!(output, "</table>").ok();
+            writeln!(output, "<!-- {} rows -->", rows.len()).ok();
+        }
+        OutputMode::Latex => {
+            writeln!(output, "\\begin{{tabular}}{{{}}}", "c ".repeat(ncols).trim()).ok();
+            writeln!(
+                output,
+                "  {} \\\\",
+                headers
+                    .iter()
+                    .map(|h| format!("\\textbf{{{}}}", h))
+                    .collect::<Vec<_>>()
+                    .join(" & ")
+            )
+            .ok();
+            writeln!(output, "  \\hline").ok();
+            for row in &rows {
+                writeln!(output, "  {} \\\\", row.join(" & ")).ok();
+            }
+            writeln!(output, "\\end{{tabular}}").ok();
+            writeln!(output, "% {} rows", rows.len()).ok();
         }
         OutputMode::Column => {
             for i in 0..ncols {
