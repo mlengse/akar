@@ -1,11 +1,11 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-19 (Sprint 5 — P31 ALL DONE ✅✅✅✅)
+> **Tanggal:** 2026-07-19 (Sprint 5 — P32 ALL DONE ✅✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1125 passed, 0 failed, 0 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **P30.1-P30.5 COMPLETE:** All edge case tests fixed + WASM + Fuzz CI + Ladybug benchmark.
+> **P32 DONE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL DONE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet footer (P31.4) ✅.
-> **✅ 0 ignored tests** — all 1125+ tests pass with zero ignores.
+> **✅ 0 clippy warnings, 0 ignored tests** — `cargo clippy --workspace` clean.
 
 ---
 
@@ -98,7 +98,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | TRANSACTION via pipeline | ❌ String matching in query.rs | ✅ `Statement::Transaction` + `BoundTransaction` + parsed handler in ddl.rs | `[P10.2]` |
 | nullif / count_if | ❌ TIDAK ADA | ✅ `UtilityOp::NullIf` + `AggregateFunction::CountIf` + `AggValueState::CountIf` | `[P10.5]` |
 | size() utility function | ❌ TIDAK ADA | ✅ `UtilityOp::Size` — polymorphic length for lists/strings/maps | `[P11.1]` |
-| export_csv / export_parquet | ❌ TIDAK ADA | ✅ CALL wrappers around COPY TO infrastructure | `[P11.2]` |
+| export_csv / export_parquet | ✅ **P32 DONE** | ✅ CALL wrappers: `CALL export_csv('file.csv', 'MATCH (n) RETURN n')` | `[P32]` |
 | ATTACH/DETACH/USE DATABASE | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→catalog→handler | `[P11.3-5]` |
 | LOAD FROM | ❌ TIDAK ADA | ✅ Full pipeline: grammar→AST→parser→binder→handler | `[P11.6]` |
 | P12.5 Path: properties/is_trail/is_acyclic | ❌ TIDAK ADA | ✅ PathOp::Properties/IsTrail/IsAcyclic | `[P12.5]` |
@@ -568,7 +568,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - `kuzu-fts`: **Selesai (Native)**. Full pipeline: DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX doc_idx('query')`, BM25 scoring, 3 macro tables (`{name}_docs`, `{name}_terms`, `{name}_appears_in`), Porter stemmer, stop word filtering, tokenizer. Diuji via `kuzu-main/tests/test_fts.rs`.
 
 ### 4.3 Code Quality
-- **Clippy: 0 warnings** dengan `-D warnings` — ~15 issues fixed across 7 crates (kuzu-transaction, kuzu-httpfs, kuzu-fts, kuzu-optimizer, kuzu-processor, kuzu-main, kuzu-storage). `clippy.toml` configured.
+- **Clippy: 0 warnings** dengan `-D warnings` — **P32: 29→0 warnings** across 8 crates (kuzu-common, kuzu-function, kuzu-storage, kuzu-planner, kuzu-processor, kuzu-algo, kuzu-migrate, kuzu-c). `clippy.toml` configured.
 - **Security: `cargo audit` clean** — 0 vulnerabilities. Removed unused+unsound `fast-float`, upgraded `time` 0.3.36→0.3.47 (DoS fix). `paste` unmaintained (informational only).
 - **CI/CD pipeline implemented** — 8 job GitHub Actions + Dependabot (`.github/workflows/rust-ci.yml`, `.github/dependabot.yml`).
 - `cargo fmt --all` applied — 0 formatting diffs.
