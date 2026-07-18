@@ -1355,8 +1355,8 @@ impl FunctionRegistry {
                 Err("ShowColumns requires catalog access — handled at connection level".into())
             }
             TableFunction::Custom { name: custom_name } => Err(format!(
-                "Custom table function '{}' has no callback registered",
-                custom_name
+                "Table function '{}' requires an extension or external context to be loaded. \
+                 Use LOAD EXTENSION or CALL with the appropriate handler.", custom_name
             )),
             TableFunction::CustomTable { name: _, execute } => {
                 let mut chunk = DataChunk {
@@ -1382,7 +1382,8 @@ impl FunctionRegistry {
             | TableFunction::ScanParquet { .. }
             | TableFunction::ScanJson { .. }
             | TableFunction::CurrentSetting { .. } => Err(format!(
-                "Table function '{}' requires file/catalog context — use COPY FROM instead",
+                "Table function '{}' cannot be executed via CALL — it requires file path or catalog context. \
+                 Use COPY FROM 'file' FORMAT CSV/PARQUET/JSON or CALL current_setting('key') via the connection layer.",
                 name
             )),
         }
