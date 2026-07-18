@@ -1,6 +1,6 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4 COMPLETE ✅✅✅✅)
+> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4+P30.5 COMPLETE ✅✅✅✅✅)
 > **Baseline:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored** (kuzu-migrate deferred), 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P30.1 COMPLETE: 31/32 ignored tests fixed + 1 FTS test fixed.** Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, FTS arrow-path filtering. **Kuzu-migrate (1) deferred — parquet footer bug (pre-existing).**
@@ -62,8 +62,8 @@
 | Item | SP | Detail |
 |------|:---:|--------|
 | P30.4 — STANDALONE_CALL refactor (string → trait) | 2 | ✅ **DONE.** Trait `StandaloneCallFn` + `StandaloneCallRegistry` in `kuzu-processor`. 22 handler structs replace giant match. |
-| P30.5 — WASM test stabilisasi + fuzz CI | 2 | WASM 3/4 → 4/4; fuzz di nightly CI |
-| P30.6 — GitHub Releases + binary distribution | 2 | `cargo-dist` atau manual |
+| P30.5 — WASM test stabilisasi + fuzz CI | 2 | ✅ **DONE.** `run_in_browser` → `run_in_node`, wasm-test CI job; fuzz-ci.yml (PR 10min, nightly 30min) |
+| P30.6 — GitHub Releases + binary distribution | 2 | 🟢 **NEXT** |
 
 ---
 
@@ -90,8 +90,7 @@
 
 
 > [!IMPORTANT]
-> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.4 COMPLETE ✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored. Fokus utama sekarang:
-> - WASM + Fuzz CI (P30.5)
+> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.5 COMPLETE ✅✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests running in CI, fuzz targets integrated in CI. Fokus utama sekarang:
 > - GitHub Releases (P30.6)
 
 ---
@@ -326,11 +325,13 @@ Tiga gap yang didefer dari P27 — semua selesai.
 - `[x]` Hapus string matching di `standalone_call.rs` — ganti dengan `registry.get(name)` → fallback `function_registry`
 - `[x]` Ekstrak shared helper (`eval_ast_expr_to_value`, `extract_arg_string`, `format_result`) ke module-level functions
 
-### P30.5 — WASM + Fuzz CI (2 SP)
+### P30.5 — WASM + Fuzz CI (2 SP) ✅ COMPLETE
 
-- `[ ]` WASM: Investigate 1 ignored test — `wasm-bindgen-test` mungkin butuh browser target
-- `[ ]` Fuzz: Integrasi `cargo-fuzz` ke CI (nightly-only job)
-- `[ ]` Auto-run fuzz targets untuk 10 menit di setiap PR
+- `[x]` WASM: Fix 1 ignored test — `wasm_bindgen_test_configure!(run_in_browser)` → `run_in_node`. Semua 6 test sekarang jalan dengan `wasm-pack test --node`.
+- `[x]` WASM CI: Job `wasm-test` di `.github/workflows/rust-ci.yml` — install wasm-pack, jalankan `wasm-pack test --node kuzu-wasm`.
+- `[x]` Fuzz CI: Workflow `.github/workflows/fuzz-ci.yml` — `cargo fuzz run` 3 targets (`cypher_query`, `expression_eval`, `copy_from_csv`).
+- `[x]` PR trigger: auto-run 10 menit per target (parallel matrix, `-max_total_time=600`).
+- `[x]` Nightly schedule (`0 0 * * *`): 30 menit per target (`-max_total_time=1800`).
 
 ### P30.6 — GitHub Releases (2 SP)
 
@@ -443,7 +444,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report |
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
-| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.4 COMPLETE ✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored. Remaining: P30.5-P30.6** |
+| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.5 COMPLETE ✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI. Remaining: P30.6** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -466,7 +467,7 @@ graph TD
     P30 --> P30_2["✅ P30.2: Optimasi query kompleks (DONE)"]
     P30 --> P30_3["✅ P30.3: LadybugDB benchmark"]
     P30 --> P30_4["✅ P30.4: STANDALONE_CALL refactor (DONE)"]
-    P30 --> P30_5["🟢 P30.5: WASM + Fuzz CI"]
+    P30 --> P30_5["✅ P30.5: WASM + Fuzz CI (DONE)"]
     P30 --> P30_6["🟢 P30.6: GitHub Releases"]
 ```
 
