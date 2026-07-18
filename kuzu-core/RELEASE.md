@@ -1,6 +1,8 @@
 # Release Process — Kuzu Core Rust
 
-This document describes how to cut a release of the Kuzu Core Rust workspace (`kuzu-core/`) to crates.io.
+This document describes how to cut a release of Kuzu Core Rust (`kuzu-core/`).
+
+> **crates.io publishing is deferred** (Design Decision #11). Only GitHub Releases with prebuilt CLI binaries are produced at this stage. See [implementation_plan.md §DD11](implementation_plan.md) for rationale.
 
 ---
 
@@ -8,7 +10,7 @@ This document describes how to cut a release of the Kuzu Core Rust workspace (`k
 
 We follow [Semantic Versioning 2.0.0](https://semver.org/) with the `MAJOR.MINOR.PATCH` format:
 
-- **MAJOR**: Breaking changes to the public API (kuzu-main).
+- **MAJOR**: Breaking changes to the public API.
 - **MINOR**: New features, non-breaking additions.
 - **PATCH**: Bug fixes, performance improvements, documentation.
 
@@ -18,17 +20,15 @@ The current version is tracked in `kuzu-core/Cargo.toml` under `[workspace.packa
 
 ---
 
-## What Gets Published
+## What Gets Released
 
-| Crate | Published | Notes |
-|-------|-----------|-------|
-| `kuzu-main` | ✅ Yes | Main library crate — the public API |
-| `kuzu-cli`  | ✅ Yes | CLI binary (requires kuzu-main) |
-| All other crates | ❌ No | Internal implementation details, marked `publish = false` |
+| Asset | Platform | Source |
+|-------|----------|--------|
+| `kuzu-cli-linux-amd64` | Linux (x86_64) | `cargo build --release -p kuzu-cli` |
+| `kuzu-cli-macos-arm64` | macOS (Apple Silicon) | `cross` build via GitHub Actions |
+| `kuzu-cli-windows-amd64.exe` | Windows (x86_64) | `cargo build --release -p kuzu-cli` |
 
-> **Note:** `kuzu-main` depends on internal crates via `path = "../kuzu-*"`. Currently these are marked `publish = false`, which means `cargo publish -p kuzu-main` only works if those path dependencies are resolvable. For full crates.io publishing, you would need to either:
-> - Publish all internal crates first, then update kuzu-main's deps to use `{ version = "...", path = "..." }`, or
-> - Consolidate into a single crate.
+All assets are built and attached to the GitHub Release automatically by the `rust-release.yml` workflow.
 
 ---
 
@@ -69,20 +69,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 # Full test suite
 cargo test --workspace --no-fail-fast
-
-# WASM check (optional but recommended)
-cargo check --target wasm32-unknown-unknown --workspace
 ```
 
-### 4. Dry-run publish
-
-```bash
-# Dry-run to verify everything is publishable
-cargo publish --dry-run -p kuzu-main
-cargo publish --dry-run -p kuzu-cli
-```
-
-### 5. Commit and tag
+### 4. Commit and tag
 
 ```bash
 git add -A
@@ -92,55 +81,64 @@ git push origin release/v0.1.0
 git push origin v0.1.0
 ```
 
-### 6. Create PR
+### 5. Create PR
 
 Open a pull request from `release/v0.1.0` to `main`. The CI will run automatically.
 
-### 7. Publish
+### 6. Release
 
-Once the PR is merged and the tag is pushed, the `rust-release.yml` workflow will:
+Once the PR is merged and the tag is pushed to `main`, the `rust-release.yml` workflow will:
 
-1. Run `cargo test --workspace`
-2. Publish `kuzu-main` to crates.io
-3. Publish `kuzu-cli` to crates.io
-4. Create a GitHub Release with auto-generated changelog
+1. Run `cargo test --workspace` on Ubuntu
+2. Build CLI binaries for Linux, macOS, and Windows
+3. Create a GitHub Release with auto-generated changelog from git log
+4. Attach CLI binaries as release assets
 
-### 8. Verify
+### 7. Verify
 
 ```bash
-# Check that the published version is available
-cargo search kuzu-main
+# Download and test the binary
+curl -LO https://github.com/kuzudb/kuzu/releases/download/v0.1.0/kuzu-cli-linux-amd64
+chmod +x kuzu-cli-linux-amd64
+./kuzu-cli-linux-amd64 --version
 ```
 
 ---
 
-## Dependency Publication Order
+## Manual Dispatch (Dry Run)
 
-If you ever need to publish individual crates (after removing `publish = false`), the order is determined by the dependency graph:
+You can trigger the release workflow manually from the GitHub Actions UI without pushing a tag:
+
+1. Go to **Actions** → **Rust Release** → **Run workflow**
+2. Keep **"Dry run"** set to `true` (default)
+3. Click **"Run"**
+
+This runs tests and a release build to verify everything compiles, without creating an actual release.
+
+---
+
+## Future: crates.io Publishing
+
+When the API stabilises and we are ready to publish to crates.io, the following steps are needed:
+
+1. Remove `publish = false` from all internal crates
+2. Publish internal crates in dependency order (see graph below)
+3. Update `kuzu-main`'s path dependencies to `{ version = "...", path = "..." }`
+4. Re-enable `cargo publish -p kuzu-main` and `cargo publish -p kuzu-cli` in the release workflow
+
+### Dependency Publication Order
 
 ```
 kuzu-common
   → kuzu-storage, kuzu-transaction, kuzu-function, kuzu-parser
-    → kuzu-catalog (depends on common, parser)
-      → kuzu-binder (depends on common, catalog, parser)
-        → kuzu-planner (depends on common, binder)
-          → kuzu-optimizer (depends on planner)
-            → kuzu-processor (depends on planner, function, storage)
-              → kuzu-graph (depends on common, storage)
-                → kuzu-main (depends on everything above)
-                  → kuzu-cli (depends on main)
+    → kuzu-catalog
+      → kuzu-binder
+        → kuzu-planner
+          → kuzu-optimizer
+            → kuzu-processor
+              → kuzu-graph
+                → kuzu-main
+                  → kuzu-cli
 ```
 
 Extension crates (kuzu-json, kuzu-fts, etc.) can be published in any order after their core dependencies are available.
-
----
-
-## Manual Dispatch
-
-You can also trigger the release workflow manually from the GitHub Actions UI with `dry_run=true` to verify without publishing:
-
-1. Go to Actions → Rust Release → "Run workflow"
-2. Set "Dry run" to `true`
-3. Click "Run"
-
-This runs tests and `cargo publish --dry-run` for both publishable crates.
