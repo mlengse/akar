@@ -17,7 +17,8 @@ import_database = { "IMPORT" ~ "DATABASE" ~ string }
 
 create_dml_statement = { "CREATE" ~ pattern ~ return_clause? }
 call_statement       = { call_clause ~ return_clause? }
-union_statement      = { query_statement ~ ("UNION" ~ "ALL"?) ~ query_statement }
+union_statement      = { query_statement ~ union_keyword ~ query_statement }
+union_keyword        = { "UNION" ~ "ALL"? }
 
 // ==================== ANALYZE ====================
 
@@ -235,7 +236,7 @@ create_node_table = {
 }
 
 create_rel_table = {
-    "CREATE" ~ "REL" ~ "TABLE" ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ "," ~ column_definitions ~ ")"
+    "CREATE" ~ "REL" ~ "TABLE" ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ ("," ~ column_definitions)? ~ ")"
 }
 
 drop_table = {
@@ -460,7 +461,8 @@ map_literal  = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
 
 variable = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 
-identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+identifier = @{ backtick_identifier | (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+backtick_identifier = @{ "`" ~ (!"`" ~ ANY)* ~ "`" }
 
 // ==================== Graph Management ====================
 
