@@ -36,7 +36,7 @@ fn soundex_impl(s: &str) -> String {
                 break;
             }
         }
-        if c.to_ascii_uppercase() != 'H' && c.to_ascii_uppercase() != 'W' {
+        if !c.eq_ignore_ascii_case(&'H') && !c.eq_ignore_ascii_case(&'W') {
             prev_code = code;
         }
     }
