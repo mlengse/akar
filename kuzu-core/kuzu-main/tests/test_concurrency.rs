@@ -108,7 +108,6 @@ fn test_many_connections() {
 }
 
 #[test]
-#[ignore = "DDL during DML might not be safely supported or locks the whole DB"]
 fn test_concurrent_ddl_and_dml() {
     let (db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
