@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3 COMPLETE ✅✅✅)
+> **Tanggal:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4 COMPLETE ✅✅✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored (kuzu-migrate deferred)** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed.
@@ -122,6 +122,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P27.6 — Aggregate COUNT Fast Path** | ❌ Per-row `Value` enum dispatch in `update_states_row()` | ✅ `PhysicalAggregateScan` fast path: `ArrayRef::len() - null_count()` in O(1). Aggregate **7× faster** (350 µs → ~50 µs). Total `conn.execute()` **397 µs — parity with C++** (400 µs). | `[P27.6]` |
 | **P30.1 — Fix 31 Ignored Tests + FTS** | ❌ 32 ignored tests + 1 FTS failure | ✅ **All fixed.** Grammar fixes (`create_rel_table` optional columns, `union_keyword`, `backtick_identifier`), binder relaxations (empty clause count), FTS arrow-path filtering. **1 remaining ignored (kuzu-migrate — parquet footer, pre-existing).** | `[P30.1]` |
 | **P30.3 — LadybugDB Benchmark** | ❌ Parity only against Vela C++ | ✅ **3-way parity verified.** Ladybug C++ binary built (MinGW, Clang 22), benchmark run: **374 µs** vs Vela 400 µs vs Rust 397 µs. Published in `BENCHMARK_COMPARISON.md`. | `[P30.3]` |
+| **P30.4 — STANDALONE_CALL Refactor** | ❌ String matching dispatch (25+ arms) | ✅ Trait `StandaloneCallFn` + `StandaloneCallRegistry` in processor crate. 22 handler structs in `standalone_call.rs` replace giant match. Fallback to `function_registry` for GDS/unknown. | `[P30.4]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -535,7 +536,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | 6 | ~~**Monolith `parser.rs`** (2.183 lines)~~ | ✅ DONE | ~~`kuzu-parser/src/parser.rs`~~ → `parser/{mod,ddl,dml,expression}.rs` | P-MOD5: ✅ Complete (Phase 5) |
 | 7 | ~~**Monolith `binder.rs`** (1.667 lines)~~ | ✅ DONE | ~~`kuzu-binder/src/binder.rs`~~ → `binder/{mod,ddl,dml,helpers}.rs` + `binder_test.rs` | P-MOD6: ✅ Complete (Phase 6) |
 | 8 | ~~**TRANSACTION via string matching**~~ | ✅ DONE | ~~`kuzu-main/src/connection/query.rs`~~ → `Statement::Transaction` pipeline | P10.2 — ✅ Complete |
-| 9 | **STANDALONE_CALL dispatch via string matching** | 🟡 DEFERRED | `kuzu-main/src/connection/standalone_call.rs` | P10.3 — Pipeline exists (P22) but dispatch needs trait (P25.3) |
+| 9 | **STANDALONE_CALL dispatch via string matching** | ✅ DONE | `kuzu-main/src/connection/standalone_call.rs` | P30.4 — Trait `StandaloneCallFn` + registry + 22 handler structs |
 | 10 | **Missing physical operators** | 🟡 MEDIUM → 🟢 LOW | `kuzu-processor/` | P12 — Partitioner, IndexLookup, BatchInsert, dll (TopK ✅ done) |
 | 11 | ~~**Missing ATTACH/DETACH DATABASE**~~ | ✅ DONE | Multi-crate | P11 — ✅ Complete (P11.3-5) |
 | 12 | ~~**nullif / count_if functions**~~ | ✅ DONE | `kuzu-function/src/` | P10.5 — ✅ Complete |
@@ -613,7 +614,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
 - **P26.4 (Performance Profiling):** ✅ **ALL COMPLETE.** 8 benchmark suites executed. Laporan lengkap di [`implementation_plan.md`](implementation_plan.md#p264--performance-profiling-report--full-empirical-results-2026-07-16).
 - **P24 (Physical Operator Completeness):** ✅ **ALL COMPLETE.** `PhysicalEmptyResult`, `PhysicalMultiplicityReducer`, `PhysicalSkip`, `PhysicalInsert`, `PhysicalExtensionClause` — semua sudah diimplementasi di `physical/misc.rs`. `PrimaryKeyScan` → `scan_filter/primarykeyscan.rs`, `PackedExtend` → `write_ops/packedextend.rs`, `AggregateFinalize` → `order_aggregate/splitaggregation.rs`. Semua stub hardening sudah produksi-ready.
-- **P25 (Technical Debt Closure):** ✅ **ALL COMPLETE.** P25.1 STANDALONE_CALL pipeline → `PhysicalStandaloneCall` + trait `StandaloneCallHandler`. P25.2 processor.rs refactor → modul `mapper/` dengan 6 sub-modul (map_aggregate, map_ddl, map_join, map_projection, map_scan, map_update). P25.3 CALL dispatch → sudah trait-based via registry.
+- **P25 (Technical Debt Closure):** ✅ **ALL COMPLETE.** P25.1 STANDALONE_CALL pipeline → `PhysicalStandaloneCall` + trait `StandaloneCallHandler`. P25.2 processor.rs refactor → modul `mapper/` dengan 6 sub-modul (map_aggregate, map_ddl, map_join, map_projection, map_scan, map_update). P25.3 CALL dispatch → sudah trait-based via registry (P30.4 — `StandaloneCallFn` + 22 handler structs).
 - Compile error pada `kuzu-optimizer` dan clippy warnings terbaru telah diperbaiki.
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
 
