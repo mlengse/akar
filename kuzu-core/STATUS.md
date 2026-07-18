@@ -1,12 +1,11 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 ✅ → Sprint 5 — P31.1+P31.2+P31.3 DONE ✅✅✅)
-> **Hasil audit:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored (kuzu-migrate deferred)** | 29 crate, ~262 file .rs, ~66k LOC
+> **Tanggal:** 2026-07-19 (Sprint 5 — P31 ALL DONE ✅✅✅✅)
+> **Hasil audit:** `cargo test --workspace` → **~1125 passed, 0 failed, 0 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed.
-> **P30.2 COMPLETE:** 3 optimasi query kompleks — P27c `hash_group_key` langsung, P27d `HeapEntry` inline, P27f `#[inline(always)]`.
-> **P30.3 COMPLETE:** LadybugDB C++ benchmark (`lbug_benchmark.exe`) built with MinGW Clang 22. **3-way parity verified.**
-> **⚠️ 1 test masih ignored** (kuzu-migrate, 0.1% dari total) — parquet footer corruption, perlu fix terpisah.
+> **P30.1-P30.5 COMPLETE:** All edge case tests fixed + WASM + Fuzz CI + Ladybug benchmark.
+> **P31 ALL DONE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet footer (P31.4) ✅.
+> **✅ 0 ignored tests** — all 1125+ tests pass with zero ignores.
 
 ---
 
@@ -128,6 +127,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P31.1 — Lambda reg + 7 aliases** | ✅ 3 lambda fungsi terdaftar di FunctionRegistry + 7 C++ aliases | 🟢 **DONE** | `[P31]` |
 | **P31.2 — GREATEST/LEAST** | ✅ UtilityOp::Greatest/Least + compare_values extended | 🟢 **DONE** | `[P31]` |
 | **P31.3 — CALL graph mgmt** | ✅ 3 handlers registered + catalog storage wired | 🟢 **DONE** | `[P31]` |
+| **P31.4 — kuzu-migrate parquet** | ✅ Parser `format_option` fix + column name stripping + `parquet-export` feature + test un-ignored | 🟢 **DONE** | `[P31]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -476,7 +476,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | # | Gap | Ada di | Notes |
 |---|-----|--------|-------|
-| 5 | **`kuzu-migrate` 1 ignored test** | Rust-only | Parquet footer corruption. Pre-existing. Perlu fix parquet writer. |
+| 5 | **`kuzu-migrate` 1 ignored test** | Rust-only | ✅ **FIXED** — Root cause: `format_option` in PEG grammar `{ "FORMAT" ~ ("CSV" | "PARQUET") }` uses string literals that don't produce tokens, so parser skipped them and defaulted to CSV. Fixed by reading `opt_inner.as_str()` instead of iterating inner pairs. Also: column name stripping (`a.id` → `id`), `parquet-export` feature wiring, and `Connection::write_parquet()` bridge method added. |
 | 6 | **`StorageDriver` API** | Ladybug | Low-level storage access API. Ekuivalen fungsi sudah ada via `StorageManager` publik. |
 | 7 | **`ConfidentialStatementAnalyzer`** | Ladybug | Security feature — scan query untuk PII/sensitive data. Low priority. |
 | 8 | **Shell: HTML/LaTeX output + extended commands** | Ladybug | Alternatif format + `:schema`, `:highlight`, `:max_rows`. Output Box sudah ada. |
@@ -635,10 +635,10 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | kuzu-llm | 9 | ✅ Pass |
 | kuzu-neo4j | 12 | ✅ Pass |
 | kuzu-wasm | 3 | ✅ Pass |
-| kuzu-migrate | 1 (ignored, deferred) | ✅ Pass |
+| kuzu-migrate | 1 | ✅ Pass (FIXED — un-ignored) |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1117** | **✅ ~1123 pass, 0 failed, 1 ignored (kuzu-migrate)** |
+| **Total** | **~1125** | **✅ ~1125 pass, 0 failed, 0 ignored** |
 
 ---
 
