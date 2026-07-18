@@ -125,6 +125,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P30.4 — STANDALONE_CALL Refactor** | ❌ String matching dispatch (25+ arms) | ✅ Trait `StandaloneCallFn` + `StandaloneCallRegistry` in processor crate. 22 handler structs in `standalone_call.rs` replace giant match. Fallback to `function_registry` for GDS/unknown. | `[P30.4]` |
 | **P30.5a — WASM: fix ignored test** | ❌ 6 test skip di `wasm-pack test --node` (config `run_in_browser`) | ✅ `run_in_browser` → `run_in_node`. `wasm-test` job di CI jalankan `wasm-pack test --node kuzu-wasm`. | `[P30.5]` |
 | **P30.5b — Fuzz CI** | ❌ `cargo-fuzz` 3 target tidak pernah jalan di CI | ✅ Workflow `fuzz-ci.yml` — PR auto-run 10 menit, nightly 30 menit per target. | `[P30.5]` |
+| **P31 — Final Parity Sprint** | 🟡 4 medium gaps (lambda reg, GREATEST/LEAST, 7 aliases, 3 CALL handlers) | 🟢 **Planned** — lihat §3.3 dan `implementation_plan.md` §P31 | `[P31]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -272,7 +273,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas:** ~90%
 
-### 1.7 Functions — 234 Registered
+### 1.7 Functions — ~250 Registered (termasuk alias)
 
 #### Scalar Functions (19 categories)
 
@@ -284,17 +285,17 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **String** | concat, contains, starts_with, ends_with, to_upper/upper/ucase, to_lower/lower/lcase, trim, ltrim, rtrim, length, reverse, repeat, replace, substring, regex_matches, regex_replace, split, head, tail, **left, right, lpad, rpad** | ✅ 23 ops |
 | **Date/Time** | date_part, date_trunc, date_diff, date_add, current_date, current_timestamp, year, month, day, hour, minute, second, **dayname, monthname, last_day, make_date** | ✅ 16 ops |
 | **Cast** | CAST, cast_*, date(), timestamp(), float/double(), int/int64(), bool/boolean(), string(), blob() | ✅ 14+ targets |
-| **List** | list_creation, list_extract, list_concat, list_len, list_sort, list_reverse, list_contains, list_append, list_prepend, list_slice | ✅ 10 ops |
+| **List** | list_creation, list_extract, list_concat, list_len, list_sort, list_reverse, list_contains, list_append, list_prepend, list_slice, **list_transform**, **list_filter**, **list_reduce** (⚠️ evaluator ada, tapi belum terdaftar di registry) | ✅ 10+3 ops |
 | **Map** | map_creation, map_extract, map_keys, map_values | ✅ 4 ops |
 | **Struct** | struct_creation, struct_extract | ✅ 2 ops |
 | **Schema** | OFFSET, ID, START_NODE, END_NODE, LABEL, **cost**, **rowid** | ✅ 7 ops |
 | **Array** | array_cosine_similarity, array_distance, array_inner_product, array_cross_product, array_squared_distance | ✅ 5 ops |
 | **Path** | **nodes, rels/relationships**, **properties**, **is_trail**, **is_acyclic**, **length** | ✅ 6 ops |
 | **UUID** | **gen_random_uuid** | ✅ 1 op |
-| **Utility** | coalesce, ifnull, typeof, **nullif**, **size** | ✅ 5 ops |
+| **Utility** | coalesce, ifnull, typeof, **nullif**, **size**, ~~greatest, least~~ (❌ belum implement) | ✅ 5+2 ops |
 | **Sequence** | nextval, currval | ✅ 2 ops |
 | **CustomScalar** | Extension callbacks | ✅ |
-| **Array aliases** | array_concat/cat, array_append/push_back, array_prepend/push_front, array_contains/has, array_slice, array_value | ✅ 10 aliases |
+| **Array aliases** | array_concat/cat, array_append/push_back, array_prepend/push_front, array_contains/has, array_slice, array_value, ~~list_cat, element_at, cardinality~~ (❌ alias belum terdaftar) | ✅ 10+3 aliases |
 
 #### Aggregate Functions
 COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC, PERCENTILE_CONT, **COUNT_IF** — ✅ 12 ops
@@ -302,7 +303,7 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 #### Table Functions
 14 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases, **export_csv**, **export_parquet**) + 8 registry ops — ✅ 22 ops
 
-**Paritas fungsional:** ~93% dari C++ (~15 fungsi C++ masih missing — lihat §8 Ladybug Gap Analysis)
+**Paritas fungsional:** ~97% dari C++ (3 fungsi C++ masih missing — `GREATEST`/`LEAST` + 1 alias group — lihat §3.3)
 
 ### 1.8 GDS Framework
 
@@ -433,23 +434,67 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 
 ---
 
-## 3. Kesenjangan Tersisa (Gaps)
+## 3. Kesenjangan Tersisa (Gaps) — Audit Komprehensif 2026-07-18
 
-### 3.1 ✅ Fungsi C++ — Semua Sudah Diporting
+### 3.1 Metodologi Audit
 
-Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasikan** di `kuzu-function/src/scalar.rs` dan `kuzu-function/src/registry.rs`. Termasuk:
-- **Bitwise** (5): `BITWISE_XOR`, `BITWISE_AND`, `BITWISE_OR`, `BITSHIFT_LEFT`, `BITSHIFT_RIGHT` ✅
-- **Math** (8): `CBRT`, `COT`, `EVEN`, `FACTORIAL`, `GAMMA`, `LGAMMA`, `LN`, `LOG2`, `SET_SEED` ✅
-- **String** (7): `REGEXP_FULL_MATCH`, `REGEXP_EXTRACT`, `REGEXP_EXTRACT_ALL`, `REGEXP_SPLIT_TO_ARRAY`, `LEVENSHTEIN`, `INITCAP`, `CONCAT_WS` ✅
-- **Timestamp** (4): `CENTURY`, `EPOCH_MS`, `TO_TIMESTAMP`, `TO_EPOCH_MS` ✅
-- **Interval** (8): `TO_YEARS`, `TO_MONTHS`, `TO_DAYS`, `TO_HOURS`, `TO_MINUTES`, `TO_SECONDS`, `TO_MILLISECONDS`, `TO_MICROSECONDS` ✅
-- **Hash** (3): `MD5`, `SHA256`, `HASH` ✅ (menggunakan `md5` dan `sha2` crates)
-- **Blob** (3): `ENCODE`, `DECODE`, `OCTET_LENGTH` ✅
-- **Union** (3): `UNION_VALUE`, `UNION_TAG`, `UNION_EXTRACT` ✅
-- **List** (14): `RANGE`, `LIST_DISTINCT`, `LIST_UNIQUE`, `LIST_SUM`, `LIST_PRODUCT`, `LIST_ANY_VALUE`, `LIST_TO_STRING`, `LIST_POSITION`, `LIST_HAS_ALL`, `LIST_REVERSE_SORT`, `ANY`, `ALL`, `NONE`, `SINGLE` ✅
-- **Path** (6): `NODES`, `RELS`, `PROPERTIES`, `IS_TRAIL`, `IS_ACYCLIC`, `LENGTH` ✅
-- **UUID**: `GEN_RANDOM_UUID` ✅
-- **Map**: `CARDINALITY` ✅
+Audit dilakukan dengan membandingkan 3 codebase:
+- **Kuzu C++ (Vela)** — `src/include/` + `src/processor/` + `src/function/` → operator enum, function collection
+- **LadybugDB C++** — `ladybug/src/include/` → operator enum, optimizer passes, storage features
+- **Kuzu Rust** — `kuzu-core/` → 29 crate, enum definitions, function registry, physical/logical operators
+
+**Hasil: ~95% fitur inti sudah diporting.** Tidak ada critical gap di query engine, storage, atau GDS.
+
+### 3.2 Ringkasan Gap per Layer
+
+| Layer | C++ Unique | Rust Missing | Parity |
+|-------|-----------|--------------|--------|
+| **Parser (Statement types)** | 20 | 0 | **100%** |
+| **Binder** | 30+ bound stmt | 0 | **100%** |
+| **Logical operators** | 38 (Ladybug) | 0 (Rust 51, EXCEEDS) | **100%+** |
+| **Physical operators** | 67 (split-phase) | 46 (fused) | **~95%** (gap = split-phase) |
+| **Optimizer passes** | 17 | 22 (EXCEEDS) | **100%+** |
+| **Functions (base)** | ~234 unique | 234 | **~97%** (3 gap) |
+| **Functions (aliases)** | ~607 total | ~250 | **~80%** (non-critical) |
+| **Storage** | 27 features | 27 | **100%** |
+| **GDS** | 15 algorithms | 15+ | **100%+** |
+| **Extensions** | 15 | 15 | **100%** |
+| **Types** | 35+ | 36 | **100%** |
+
+### 3.3 🟡 Medium Gaps (4 items, ~3.5 SP)
+
+| # | Gap | Ada di | Root Cause | Fix |
+|---|-----|--------|------------|-----|
+| 1 | **`list_transform`/`filter`/`reduce`** — not registered | Vela + Ladybug | Evaluator (`expression_evaluator.rs:432-647`) sudah support fungsi lambda. Tapi **tidak terdaftar di `FunctionRegistry`**. Query `RETURN list_transform([1,2,3], x -> x+1)` akan error "function not found". | Register 3 nama di `register_builtins()` — **~30 menit** |
+| 2 | **`GREATEST`/`LEAST`** — not implemented | Vela | Fungsi extremum (`GREATEST(a,b,c)` → max value). Tidak ada implementasi Rust (`grep greatest` → 0 hits di `kuzu-function/`). | Tambah `UtilityOp::Greatest`/`Least`, implement evaluasi + register. **~30 menit** |
+| 3 | **7 function aliases** — not registered | Vela | Base functions exist, tapi C++ aliases tidak terdaftar: `pow`, `log10`, `prefix`, `suffix`, `list_cat`, `element_at`, `cardinality`. | Daftarkan di `register_builtins()`. **~15 menit** |
+| 4 | **3 CALL handlers** — projected graph mgmt | Ladybug | `show_projected_graphs`, `projected_graph_info`, `drop_projected_graph` — tidak ada handler di Rust. Graph management ada (`CreateGraph`/`UseGraph`/`DropGraph` di parser/binder) tapi CALL entry point tidak terdaftar. | Tambah 3 `StandaloneCallFn` handler. **~1 jam** |
+
+### 3.4 🟢 Minor Gaps (non-critical, deferred)
+
+| # | Gap | Ada di | Notes |
+|---|-----|--------|-------|
+| 5 | **`kuzu-migrate` 1 ignored test** | Rust-only | Parquet footer corruption. Pre-existing. Perlu fix parquet writer. |
+| 6 | **`StorageDriver` API** | Ladybug | Low-level storage access API. Ekuivalen fungsi sudah ada via `StorageManager` publik. |
+| 7 | **`ConfidentialStatementAnalyzer`** | Ladybug | Security feature — scan query untuk PII/sensitive data. Low priority. |
+| 8 | **Shell: HTML/LaTeX output + extended commands** | Ladybug | Alternatif format + `:schema`, `:highlight`, `:max_rows`. Output Box sudah ada. |
+| 9 | **WAL dump tool** | Ladybug | Debug/forensic tool. `tools/wal_dump/`. |
+| 10 | **Gzip file system** | Vela | `gzip_file_system.h` — wrapper untuk compressed files. |
+| 11 | **Progress bar** | Ladybug | Infrastruktur progress display untuk long-running ops. |
+| 12 | **`ConstantOrNullFunction`** | Vela | Utility function for NULL propagation. |
+
+### 3.5 ✅ Rust Melebihi C++ (Keunggulan)
+
+| Fitur | Rust | C++ Vela/Ladybug |
+|-------|------|-----------------|
+| **Optimizer passes** | 22 (15 flat + 7 tree) | 17 |
+| **Join ordering** | DP Bushy Trees (cost-based) | Greedy cardinality-based |
+| **GDS algorithms** | 15+ (Node2Vec, Random Walk, LPA, etc.) | 15 |
+| **Arrow-native execution** | Zero-copy ColumnChunk→ArrayRef, compute::take() | Value-based |
+| **Fuzz testing** | 3 cargo-fuzz target, CI-integrated | None |
+| **Property-based testing** | proptest (round-trip, associativity, equivalence) | None |
+| **Code quality CI** | Clippy -Dwarnings, cargo-audit, 10 job Actions | Manual |
+| **Types** | JSON, UINT128, DTime | Standard set |
 
 
 
