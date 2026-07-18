@@ -689,15 +689,12 @@ fn parse_copy_to(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String>
                     let Some(opt_inner) = item.into_inner().next() else { continue };
                     let rule = opt_inner.as_rule();
                     if rule == Rule::format_option {
-                        let mut inner_pairs = opt_inner.into_inner();
-                        inner_pairs.next(); // skip "FORMAT" keyword
-                        if let Some(fmt_pair) = inner_pairs.next() {
-                            let fmt_upper = fmt_pair.as_str().to_uppercase();
-                            if fmt_upper == "CSV" {
-                                format = CopyToFormat::Csv;
-                            } else if fmt_upper == "PARQUET" {
-                                format = CopyToFormat::Parquet;
-                            }
+                        let text = opt_inner.as_str().trim();
+                        let fmt_upper = text.to_uppercase();
+                        if fmt_upper.contains("CSV") {
+                            format = CopyToFormat::Csv;
+                        } else if fmt_upper.contains("PARQUET") {
+                            format = CopyToFormat::Parquet;
                         }
                     } else if rule == Rule::header_option {
                         for val in opt_inner.into_inner() {
