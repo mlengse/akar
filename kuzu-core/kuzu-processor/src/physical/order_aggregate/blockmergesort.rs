@@ -131,7 +131,7 @@ impl BlockMergeSorter {
         &self,
         blocks: &[Vec<usize>],
         all_values: &[Vec<(Value, bool)>],
-        num_fields: usize,
+        _num_fields: usize,
         total_rows: usize,
     ) -> Vec<usize> {
         use std::collections::BinaryHeap;
