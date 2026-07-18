@@ -984,7 +984,7 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 | **🟢 STANDALONE_CALL dispatch** | Masih string matching, bukan trait-based. Deferred sejak P22. | 🟡 MEDIUM |
 | **🟢 WASM tests** | 4 test (3 pass, 1 ignore) — perlu stabilisasi. | 🟢 LOW |
 | **🟢 Fuzz targets** | 3 target defined, tapi butuh nightly Rust. Belum di-run secara rutin. | 🟢 LOW |
-| **🟢 GitHub Releases** | Binary distribution belum ada. Hanya build-from-source. | 🟢 LOW |
+| **✅ GitHub Releases** | Binary distribution siap. `rust-release.yml` — test, build 3-platform CLI, auto-changelog, GH Release. | 🟢 LOW |
 
 ### 10.2 Sprint 4: "Stabilisasi & Benchmark Komprehensif"
 
@@ -995,7 +995,7 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 | **P30.3** | LadybugDB benchmark suite — jalankan benchmark yang sama terhadap `ladybug/` binary | 🟡 P1 | 2 | Parity terverifikasi terhadap Vela **dan** Ladybug |
 | **P30.4** | STANDALONE_CALL refactor (string matching → trait dispatch) | 🟡 P2 | 2 | Dispatch trait-based via registry |
 | **P30.5** | WASM test stabilisasi + fuzz CI integration | 🟢 P3 | 2 | WASM 4/4 pass, fuzz di CI (nightly) |
-| **P30.6** | GitHub Releases + binary distribution script | 🟢 P3 | 2 | `cargo-dist` atau manual release script |
+| **✅ P30.6** | GitHub Releases + binary distribution script | 🟢 P3 | 2 | `rust-release.yml` — test → build 3-platform CLI → GH release with auto-changelog ✅ **DONE** |
 | **Total** | | | **18** | |
 
 ### 10.3 Detail: P30.1 — Fix 56 Ignored Tests (6 SP)
