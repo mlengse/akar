@@ -109,7 +109,7 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
             let mut inner = pair.into_inner();
             let left = parse_query_pairs(inner.next().ok_or("Missing left query")?)?;
             let union_keyword = inner.next().ok_or("Missing UNION")?;
-            let all = union_keyword.as_str().eq_ignore_ascii_case("UNION ALL");
+            let all = union_keyword.as_str().to_uppercase().contains("UNION ALL");
             let right = parse_query_pairs(inner.next().ok_or("Missing right query")?)?;
             Ok(Statement::Union(UnionStatement { left, right, all }))
         }
