@@ -1,4 +1,4 @@
-# Desain Arsitektur: Komunikasi & Serialisasi untuk Kuzu Rust (Auto-Server)
+# Desain Arsitektur: Komunikasi & Serialisasi untuk Kuzu Rust (Auto-Server) 17/07/2026
 
 Karena proyek ini adalah *porting* murni ke ekosistem Rust (menggabungkan Kuzu & Ladybug), kita memiliki kebebasan penuh untuk merancang lapisan komunikasi antar-proses (IPC) yang paling efisien tanpa terikat oleh *legacy* C++.
 
