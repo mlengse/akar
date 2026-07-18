@@ -516,7 +516,7 @@ impl Extension for AlgoExtension {
                 let csr = CSRAdjacency::build(&sample_edges(), 5);
                 let result = compute_node2vec(&csr, p, q, dimensions, walks, window);
 
-                let n = if dimensions > 0 { result.values.len() / dimensions } else { 0 };
+                let n = result.values.len().checked_div(dimensions).unwrap_or(0);
                 let mut id_vec = kuzu_common::vector::ValueVector::new(kuzu_common::types::PhysicalTypeID::Int64, n);
                 for i in 0..n { id_vec.set_value(i, &Value::Int64(i as i64)).ok(); }
 
