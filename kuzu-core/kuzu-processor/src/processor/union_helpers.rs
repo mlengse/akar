@@ -1,7 +1,7 @@
 use kuzu_common::vector::DataChunk;
 use kuzu_common::types::Value;
 use kuzu_planner::logical_operator::LogicalOperator;
-use crate::processor::chunk_helpers::{extract_all_rows, extract_all_rows_from_chunks, rows_to_columns};
+use crate::processor::chunk_helpers::{extract_all_rows_from_chunks, rows_to_columns};
 
 pub fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
     match op {
