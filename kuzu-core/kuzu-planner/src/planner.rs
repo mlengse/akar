@@ -318,7 +318,7 @@ impl QueryPlanner {
                         cardinality: 0,
                     });
                     let mut patterns_iter = m.patterns.into_iter().peekable();
-                    let mut skip_next_node = false;
+        let _skip_next_node = false;
                     while let Some(pattern) = patterns_iter.next() {
                         // If the previous pattern consumed this dest node, skip the node scan
                         let skip_current_node_scan = skip_next_node;
