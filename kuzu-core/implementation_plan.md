@@ -1,11 +1,12 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-19 (Sprint 6 — P33 ALL DONE ✅✅✅✅✅)
+> **Revision:** 2026-07-19 (Sprint 7 — P34 in progress 🟢🟢🟢🟢)
 > **Baseline:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P33 COMPLETE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX ✅.
 > **P32 COMPLETE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL COMPLETE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet (P31.4) ✅.
+> **P34 IN PROGRESS:** Native readers: kuzu-azure 🟢, kuzu-iceberg 🟢, kuzu-delta 🟢, kuzu-unity-catalog 🟢.
 > **✅ 0 clippy warnings, 0 ignored tests.** `cargo clippy --workspace` clean.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
@@ -91,12 +92,13 @@
 | **P31** | **Final Parity Sprint** | **🏁 ALL DONE** | **4** | Address remaining audit gaps (3 CALL handlers, parquet fix) — **P31 ALL DONE ✅✅✅✅** |
 | **P32** | **Polish & DX** | **🏁 ALL DONE** | **2** | Clippy 29→0 ✅, export_csv/parquet CALL ✅, error messages improved ✅ |
 | **P33** | **Deferred Items** | **🏁 ALL DONE** | **4** | StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump ✅, HTML/LaTeX ✅ |
+| **P34** | **Extension Depth — Native Readers** | **🟢 IN PROGRESS** | **13** | kuzu-azure native 🟢, kuzu-iceberg native 🟢, kuzu-delta native 🟢, kuzu-unity-catalog native 🟢 |
 
 
 > [!IMPORTANT]
 > **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated.
 > **P31-P33: ALL COMPLETE ✅✅✅** — Final parity, CLI polish, deferred items.
-> **Sekarang:** Lanjut ke Endgame (API review, docs pass, semver, crates.io release).
+> **P34 IN PROGRESS 🟢** — Extension depth: native readers for Azure, Iceberg, Delta, Unity Catalog.
 
 ---
 
@@ -475,6 +477,134 @@ Semua item deferred dari Sprint 4 sekarang sudah diimplementasi:
 
 ---
 
+## 🟢 P34: Extension Depth — Native Readers (Sprint 7, 13 SP)
+
+**Latar belakang:** Empat extension crates (`kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`) saat ini menggunakan DuckDB delegation — mereka membuka in-memory DuckDB, install extension DuckDB, dan mendelegasikan query. P34 mengganti delegation ini dengan native Rust readers untuk menghilangkan ketergantungan pada DuckDB.
+
+**Status audit (2026-07-19):**
+- `kuzu-postgres`: ✅ **Already native** — uses `tokio-postgres` directly (no change needed)
+- `kuzu-duckdb`: ✅ **Already native** — embeds DuckDB via `duckdb` crate with `bundled` feature (embedding is by design)
+- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`: ❌ **Delegation** — need P34 native readers
+
+### P34.1 — kuzu-azure: Native Azure Blob Storage Reader (3 SP)
+
+**Problem:** `azure_scan` currently opens DuckDB, loads `httpfs`, creates Azure secret, and calls DuckDB's `read_parquet()`. No native Azure SDK usage.
+
+**Target:** Replace with native Azure Blob Storage reader using `azure_storage_blobs` + `azure_identity` crates.
+
+**Design:**
+- Add `native` feature gate (keep `duckdb-delegation` as fallback)
+- Dependencies: `azure_storage_blobs`, `azure_identity`, `azure_core`
+- Support two auth methods: `DefaultAzureCredential` (env vars, managed identity) and connection string
+- Implement `AzureBlobFileSystem` implementing Kuzu's `FileSystem` trait, OR implement CustomTable that reads Parquet files from Azure containers using `arrow::parquet` + Azure blob downloads
+- Support `az://` and `abfss://` URI schemes
+
+**Implementation:**
+- `[ ]` Add `azure_storage_blobs`, `azure_identity` to Cargo.toml (conditionally via `native` feature)
+- `[ ]` Create `azure_blob_fs.rs` — `AzureBlobFileSystem` struct
+- `[ ]` Implement `open_file(path)` that downloads blob to temp file or reads via chunked HTTP Range
+- `[ ]` Register VFS in the extension's `load()` method
+- `[ ]` Update `azure_scan` to use native path instead of DuckDB delegation
+- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-azure --features native
+cargo test --workspace  # no regressions
+```
+
+### P34.2 — kuzu-iceberg: Native Iceberg Reader (4 SP)
+
+**Problem:** `iceberg_scan`, `iceberg_metadata`, `iceberg_snapshots` all delegate to DuckDB's `iceberg` extension.
+
+**Target:** Replace with native Iceberg reader using [`iceberg-rust`](https://crates.io/crates/iceberg) (Apache Iceberg Rust implementation).
+
+**Design:**
+- Add `native` feature gate (keep `duckdb-delegation` as fallback)
+- Dependency: `iceberg = "0.8"` (or latest stable)
+- Native `iceberg_scan(path)`:
+  1. Load Iceberg table metadata from path (metadata JSON, manifest list, manifest files)
+  2. Resolve data files from the latest snapshot
+  3. Read data files (Parquet format) using `arrow::parquet`
+  4. Return rows via DataChunk
+- Native `iceberg_metadata(path)`:
+  1. Read Iceberg metadata JSON directly
+  2. Return schema, partition spec, sort order as rows
+- Native `iceberg_snapshots(path)`:
+  1. List all snapshots from metadata
+  2. Return snapshot ID, timestamp, manifest list path
+
+**Implementation:**
+- `[ ]` Add `iceberg` to Cargo.toml (conditionally via `native` feature)
+- `[ ]` Create `native_reader.rs` — Iceberg table scanning logic
+- `[ ]` Implement `iceberg_scan` as CustomTable: load table → get snapshot → iterate data files → read Parquet → populate DataChunk
+- `[ ]` Implement `iceberg_metadata` as CustomTable: read metadata.json → populate DataChunk
+- `[ ]` Implement `iceberg_snapshots` as CustomTable: list snapshots → populate DataChunk
+- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-iceberg --features native
+cargo test --workspace  # no regressions
+```
+
+### P34.3 — kuzu-delta: Native Delta Lake Reader (3 SP)
+
+**Problem:** `delta_scan` delegates to DuckDB's `delta` extension.
+
+**Target:** Replace with native Delta Lake reader using [`deltalake`](https://crates.io/crates/deltalake) crate (delta-rs).
+
+**Design:**
+- Add `native` feature gate (keep `duckdb-delegation` as fallback)
+- Dependency: `deltalake = "0.24"` (or latest stable)
+- Native `delta_scan(path)`:
+  1. Open Delta table with `deltalake::open_table(path)`
+  2. Read data from the latest table version
+  3. Convert Arrow record batches to Kuzu DataChunks
+  4. Support time travel with version/snapshot parameter
+
+**Implementation:**
+- `[ ]` Add `deltalake` to Cargo.toml (conditionally via `native` feature)
+- `[ ]` Create `native_reader.rs` — Delta table scanning logic
+- `[ ]` Implement `delta_scan` as CustomTable: open table → get Arrow batches → populate DataChunk
+- `[ ]` Add optional `version` parameter for time travel
+- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-delta --features native
+cargo test --workspace  # no regressions
+```
+
+### P34.4 — kuzu-unity-catalog: Native Unity Catalog Client (3 SP)
+
+**Problem:** `uc_scan` delegates to DuckDB's `uc_catalog` extension.
+
+**Target:** Replace with native REST API client for Databricks Unity Catalog.
+
+**Design:**
+- Add `native` feature gate (keep `duckdb-delegation` as fallback)
+- Dependency: `reqwest` (already available via workspace) + `serde_json`
+- Native `uc_scan(endpoint, token, table)`:
+  1. Call UC REST API `/api/2.1/unity-catalog/tables/{table}` to get table metadata
+  2. Call `/api/2.1/unity-catalog/tables/{table}/read` to get data
+  3. Parse response and populate DataChunk
+  4. Support pagination for large tables
+
+**Implementation:**
+- `[ ]` Add `reqwest` to Cargo.toml (conditionally via `native` feature, with `blocking` or `rustls-tls`)
+- `[ ]` Create `native_client.rs` — UC REST API client
+- `[ ]` Implement `uc_scan` as CustomTable: authenticate → get table schema → read data → populate DataChunk
+- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-unity-catalog --features native
+cargo test --workspace  # no regressions
+```
+
+---
+
 ## All Completed Phases (P1-P33) — Archived Reference
 
 > **P1-P26, P27.5/P27.6, P28, P29** — semua sudah complete. Detail implementasi ada di [`STATUS.md`](STATUS.md). 
@@ -581,6 +711,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI, GitHub Releases automated** |
 | **Sprint 5** | **P32: Polish & DX** | **2** | **🏁 P32 ALL DONE ✅✅✅ — Clippy 29→0, export_csv/export_parquet CALL, error messages improved.** |
 | **Sprint 6** | **P33: Deferred Items** | **4** | **🏁 P33 ALL DONE ✅✅✅✅✅ — StorageDriver API, gzip VFS, progress bar, WAL dump tool, HTML/LaTeX shell output.** |
+| **Sprint 7** | **P34: Extension Depth — Native Readers** | **13** | **🟢 IN PROGRESS — kuzu-azure native, kuzu-iceberg native, kuzu-delta native, kuzu-unity-catalog native** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -620,6 +751,11 @@ graph TD
     P33 --> P33_3["✅ Progress bar"]
     P33 --> P33_4["✅ WAL dump tool"]
     P33 --> P33_5["✅ HTML/LaTeX output"]
+    P33 --> P34["🟢 P34: Extension Depth"]
+    P34 --> P34_1["🟢 kuzu-azure native"]
+    P34 --> P34_2["🟢 kuzu-iceberg native"]
+    P34 --> P34_3["🟢 kuzu-delta native"]
+    P34 --> P34_4["🟢 kuzu-unity-catalog native"]
 ```
 
 ## Design Decisions Log
