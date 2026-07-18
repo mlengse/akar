@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     println!("2. Connecting to Rust Kuzu Database...");
     let rust_db = std::sync::Arc::new(
         kuzu_main::Database::new(&args.to, kuzu_main::SystemConfig::default())
-            .map_err(|e| anyhow::anyhow!("DB Init Error: {}", e.to_string()))?
+            .map_err(|e| anyhow::anyhow!("DB Init Error: {}", e))?
     );
     let rust_conn = kuzu_main::Connection::new(&rust_db);
 
@@ -100,15 +100,15 @@ fn main() -> Result<()> {
         };
 
         println!("Executing: {}", ddl);
-        rust_conn.query(&ddl).map_err(|e| anyhow::anyhow!("DDL Error: {}", e.to_string()))?;
+        rust_conn.query(&ddl).map_err(|e| anyhow::anyhow!("DDL Error: {}", e))?;
 
         // Load data
         let parquet_path = temp_dir.join(format!("{}.parquet", table_name));
         let parquet_path_str = parquet_path.to_str().unwrap().replace("\\", "/");
         let import_query = format!("COPY {} FROM '{}'", table_name, parquet_path_str);
-        
+
         println!("Importing data to {}...", table_name);
-        rust_conn.query(&import_query).map_err(|e| anyhow::anyhow!("COPY Error: {}", e.to_string()))?;
+        rust_conn.query(&import_query).map_err(|e| anyhow::anyhow!("COPY Error: {}", e))?;
     }
 
     // Second pass: Create all Rel Tables
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
         }
 
         let table_name = table["name"].as_str().unwrap();
-        
+
         // Find connection info
         let mut from_table = "UNKNOWN";
         let mut to_table = "UNKNOWN";
@@ -143,15 +143,15 @@ fn main() -> Result<()> {
         let ddl = format!("CREATE REL TABLE {} (FROM {} TO {}{})", table_name, from_table, to_table, props_str);
 
         println!("Executing: {}", ddl);
-        rust_conn.query(&ddl).map_err(|e| anyhow::anyhow!("DDL Error: {}", e.to_string()))?;
+        rust_conn.query(&ddl).map_err(|e| anyhow::anyhow!("DDL Error: {}", e))?;
 
         // Load data
         let parquet_path = temp_dir.join(format!("{}.parquet", table_name));
         let parquet_path_str = parquet_path.to_str().unwrap().replace("\\", "/");
         let import_query = format!("COPY {} FROM '{}'", table_name, parquet_path_str);
-        
+
         println!("Importing data to {}...", table_name);
-        rust_conn.query(&import_query).map_err(|e| anyhow::anyhow!("COPY Error: {}", e.to_string()))?;
+        rust_conn.query(&import_query).map_err(|e| anyhow::anyhow!("COPY Error: {}", e))?;
     }
 
     // Cleanup
