@@ -7,14 +7,19 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+arrow.workspace = true
+kuzu-common = { path = "../kuzu-common" }
 kuzu-function = { path = "../kuzu-function" }
 kuzu-extension = { path = "../kuzu-extension" }
 kuzu-duckdb = { path = "../kuzu-duckdb", optional = true }
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [features]
 default = []
 duckdb-delegation = ["kuzu-duckdb/bundled"]
+native = []
 
 [lints]
 workspace = true

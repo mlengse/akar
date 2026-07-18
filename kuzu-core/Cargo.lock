@@ -1739,10 +1739,14 @@ dependencies = [
 name = "kuzu-azure"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
+ "kuzu-common",
  "kuzu-duckdb",
  "kuzu-extension",
  "kuzu-function",
+ "tempfile",
  "tracing",
+ "ureq",
 ]
 
 [[package]]
@@ -1800,9 +1804,13 @@ dependencies = [
 name = "kuzu-delta"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
+ "kuzu-common",
  "kuzu-duckdb",
  "kuzu-extension",
  "kuzu-function",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -1879,9 +1887,13 @@ dependencies = [
 name = "kuzu-iceberg"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
+ "kuzu-common",
  "kuzu-duckdb",
  "kuzu-extension",
  "kuzu-function",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -2071,10 +2083,15 @@ dependencies = [
 name = "kuzu-unity-catalog"
 version = "0.1.0"
 dependencies = [
+ "arrow 59.1.0",
+ "kuzu-common",
  "kuzu-duckdb",
  "kuzu-extension",
  "kuzu-function",
+ "serde",
+ "serde_json",
  "tracing",
+ "ureq",
 ]
 
 [[package]]
