@@ -36,6 +36,12 @@ pub enum kuzu_state {
     KuzuError = 1,
 }
 
+/// Returns a default system configuration for initializing a Kuzu database.
+///
+/// # Safety
+///
+/// This function is safe to call from any context; it does not dereference
+/// any raw pointers and simply returns a struct of default configuration values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_default_system_config() -> kuzu_system_config {
     let config = SystemConfig::default();
@@ -50,6 +56,15 @@ pub unsafe extern "C" fn kuzu_default_system_config() -> kuzu_system_config {
     }
 }
 
+/// Initializes a Kuzu database at the given path with the given configuration.
+///
+/// # Safety
+///
+/// - `database_path` must be a valid null-terminated C string.
+/// - `out_database` must point to a valid, mutable `kuzu_database` struct
+///   whose `_database` field will be set to an opaque pointer. The caller
+///   must later call `kuzu_database_destroy` to free resources.
+/// - Both pointers must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_database_init(
     database_path: *const c_char,
@@ -87,6 +102,14 @@ pub unsafe extern "C" fn kuzu_database_init(
     }
 }
 
+/// Destroys a Kuzu database previously created by `kuzu_database_init`.
+///
+/// # Safety
+///
+/// - `database` must be a valid pointer to a `kuzu_database` previously
+///   initialized by `kuzu_database_init`. After this call, the inner
+///   pointer is nulled out; calling this function twice on the same
+///   database is safe (second call is a no-op).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_database_destroy(database: *mut kuzu_database) {
     if !database.is_null() {
@@ -100,6 +123,16 @@ pub unsafe extern "C" fn kuzu_database_destroy(database: *mut kuzu_database) {
     }
 }
 
+/// Creates a new connection from a Kuzu database.
+///
+/// # Safety
+///
+/// - `database` must be a valid pointer to a `kuzu_database` previously
+///   initialized by `kuzu_database_init`.
+/// - `out_connection` must point to a valid, mutable `kuzu_connection` struct
+///   whose `_connection` field will be set to an opaque pointer. The caller
+///   must later call `kuzu_connection_destroy` to free resources.
+/// - Both pointers must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_connection_init(
     database: *mut kuzu_database,
@@ -120,6 +153,14 @@ pub unsafe extern "C" fn kuzu_connection_init(
     }
 }
 
+/// Destroys a connection previously created by `kuzu_connection_init`.
+///
+/// # Safety
+///
+/// - `connection` must be a valid pointer to a `kuzu_connection` previously
+///   initialized by `kuzu_connection_init`. After this call, the inner
+///   pointer is nulled out; calling this function twice on the same
+///   connection is safe (second call is a no-op).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_connection_destroy(connection: *mut kuzu_connection) {
     if !connection.is_null() {
@@ -133,6 +174,16 @@ pub unsafe extern "C" fn kuzu_connection_destroy(connection: *mut kuzu_connectio
     }
 }
 
+/// Executes a Cypher query on the given connection.
+///
+/// # Safety
+///
+/// - `connection` must be a valid pointer to a `kuzu_connection` previously
+///   initialized by `kuzu_connection_init`.
+/// - `query` must be a valid null-terminated C string.
+/// - `out_query_result` must point to a valid, mutable `kuzu_query_result`
+///   struct that will be populated with the query result.
+/// - All pointers must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kuzu_connection_query(
     connection: *mut kuzu_connection,
