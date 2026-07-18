@@ -77,7 +77,7 @@ impl ArrowVector {
         
         // Fast path for primitive arrays
         let build_primitive_array = |data_type: arrow::datatypes::DataType, type_size: usize| -> ArrayRef {
-            let num_bytes = (size + 7) / 8;
+            let num_bytes = size.div_ceil(8);
             let mut null_buffer = arrow::buffer::MutableBuffer::from_len_zeroed(num_bytes);
             let slice = null_buffer.as_slice_mut();
             for i in 0..size {
