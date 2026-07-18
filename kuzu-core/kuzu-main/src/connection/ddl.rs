@@ -254,7 +254,7 @@ impl Connection {
                     kuzu_parser::ast::CopyToFormat::Parquet => {
                         #[cfg(feature = "parquet-export")]
                         {
-                            self.write_parquet(path, &result, c.header)
+                            self.write_parquet(&c.file_path, &result, c.header)
                                 .map_err(|e| format!("Parquet export error: {e}"))?;
                         }
                         #[cfg(not(feature = "parquet-export"))]
@@ -853,5 +853,42 @@ impl Connection {
                 ))))
             }
         }
+    }
+
+    /// Write query results to a Parquet file.
+    #[cfg(feature = "parquet-export")]
+    pub(crate) fn write_parquet(
+        &self,
+        path: &str,
+        result: &QueryResult,
+        _header: bool,
+    ) -> Result<(), String> {
+        // Extract rows from all chunks
+        let mut rows: Vec<Vec<Value>> = Vec::new();
+        for chunk in &result.chunks {
+            for row_idx in 0..chunk.size {
+                let mut row = Vec::with_capacity(chunk.fields.len());
+                for col_idx in 0..chunk.fields.len() {
+                    row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
+                }
+                rows.push(row);
+            }
+        }
+
+        // Get column names from the first chunk, stripping any variable prefix
+        // (e.g. "a.id" -> "id", "p.name" -> "name")
+        let column_names: Vec<String> = result.chunks.first()
+            .map(|chunk| {
+                if chunk.field_names.is_empty() {
+                    (0..chunk.fields.len()).map(|i| format!("column_{}", i)).collect()
+                } else {
+                    chunk.field_names.iter().map(|n| {
+                        n.rsplit_once('.').map(|(_, base)| base.to_string()).unwrap_or_else(|| n.clone())
+                    }).collect()
+                }
+            })
+            .unwrap_or_default();
+
+        kuzu_storage::parquet_writer::write_parquet(path, &rows, &column_names)
     }
 }
