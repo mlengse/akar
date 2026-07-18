@@ -10,7 +10,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-kuzu-main = { path = "../kuzu-main" }
+kuzu-main = { path = "../kuzu-main", features = ["parquet-export"] }
 kuzu-storage = { path = "../kuzu-storage" }
 kuzu-common = { path = "../kuzu-common" }
 clap = { version = "4.5", features = ["derive"] }
