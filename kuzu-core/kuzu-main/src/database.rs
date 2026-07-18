@@ -327,21 +327,21 @@ impl Database {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "delta-extension")]
+        #[cfg(any(feature = "delta-extension", feature = "delta-native"))]
         {
             let ext = Box::new(kuzu_delta::DeltaExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "iceberg-extension")]
+        #[cfg(any(feature = "iceberg-extension", feature = "iceberg-native"))]
         {
             let ext = Box::new(kuzu_iceberg::IcebergExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "azure-extension")]
+        #[cfg(any(feature = "azure-extension", feature = "azure-native"))]
         {
             let ext = Box::new(kuzu_azure::AzureExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
@@ -355,7 +355,7 @@ impl Database {
                 reg.register(ext);
             }
         }
-        #[cfg(feature = "unity-catalog-extension")]
+        #[cfg(any(feature = "unity-catalog-extension", feature = "unity-catalog-native"))]
         {
             let ext = Box::new(kuzu_unity_catalog::UnityCatalogExtension::new());
             if let Ok(mut reg) = self.extension_registry.lock() {
