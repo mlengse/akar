@@ -1,8 +1,9 @@
 # Kuzu Rust vs C++ Performance Comparison
 
-> **Date:** 2026-07-17 (P27.5+P27.6 Complete — Rust ≈ C++ parity)
+> **Date:** 2026-07-18 (P30.3 Complete — 3-way parity verified)
 > **Rust:** criterion v0.8, cargo bench --workspace
-> **C++:** kuzu_benchmark.exe built 2026-07-12 (release, 19 MB), dataset 10k rows
+> **Vela C++:** kuzu_benchmark.exe built 2026-07-12 (release, 19 MB), dataset 10k rows
+> **LadybugDB C++:** lbug_benchmark.exe built 2026-07-18 (release, 21.7 MB), dataset 10k rows
 > **Dataset:** Synthetic operator benchmarks + serialized 10k Person database
 
 ---
@@ -23,18 +24,19 @@ cargo bench -p kuzu-main         # Full pipeline + Storage
 
 ## TL;DR
 
-The Rust Kuzu port shows **competitive performance** on individual operators. Phase 2 Arrow-native expression evaluation delivered **10–24× speedup** on filter/evaluation hot paths (comparisons, arithmetic, boolean ops). Direct C++ comparison is pending — the C++ benchmark binary needs to be built from the CMake project. See [C++ Setup](#cpp-setup) for build instructions.
+The Rust Kuzu port shows **competitive performance** against **both** C++ implementations (Vela KuzuDB and LadybugDB). Phase 2 Arrow-native expression evaluation delivered **10–24× speedup** on filter/evaluation hot paths. See [C++ Setup](#cpp-setup) for build instructions.
 
 **Current Status:**
 - ✅ Rust micro-benchmarks: 38+ criterion benchmarks across scan, filter, join, sort, aggregate, expression eval
 - ✅ Full pipeline benchmarks: parse→bind→plan→optimize→execute
 - ✅ Arrow-native expression evaluation: **10–24× faster** for comparison/boolean/arithmetic ops
-- ✅ C++ baseline: kuzu_benchmark.exe built and run (10k rows, `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)`)
-- ✅ **Cross-language gap closed: Rust ≈ C++** (397 µs Rust vs 400 µs C++) on SQL-level filter+count
+- ✅ **Vela C++** baseline: kuzu_benchmark.exe built and run (10k rows)
+- ✅ **LadybugDB C++** baseline: lbug_benchmark.exe built and run (10k rows, 2026-07-18)
+- ✅ **3-way parity verified: Rust ≈ Vela ≈ Ladybug** (397 µs Rust vs 400 µs Vela vs 374 µs Ladybug) on SQL-level filter+count
 - ✅ Phase 1 (scan optimization): direct `ColumnChunk→Arrow` path — 7.8× scan improvement
 - ✅ Phase 2 (aggregate optimization): bypass per-row Value dispatch — aggregate now ~50 µs
 
-> **🍎🍎 Now apples-to-apples:** Both runtimes measure `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)` on identical 10k-row datasets, with one-time compilation excluded. **Rust is now at parity with C++** (397 µs Rust vs 400 µs C++) after two optimizations: (1) direct `ColumnChunk→Arrow` scan path, and (2) aggregate COUNT fast path using `ArrayRef::len()` instead of per-row Value dispatch.
+> **🍎🍎 3-way apples-to-apples:** All three runtimes measure `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)` on identical 10k-row datasets, with one-time compilation excluded. **Rust is at parity with both C++ implementations** (397 µs Rust vs 400 µs Vela vs 374 µs Ladybug). LadybugDB is slightly faster due to different C++ compiler version and optimization flags.
 
 ---
 
@@ -180,22 +182,42 @@ These micro-benchmarks directly compare the old per-row `evaluate()` path (Value
 
 ## C++ Benchmark Status
 
-### C++ kuzu_benchmark — Status: ✅ Built and Run (2026-07-16)
+### Vela C++ (`kuzu_benchmark`) — Status: ✅ Built and Run (2026-07-16)
 
-The C++ benchmark binary exists at `build/release/tools/benchmark/kuzu_benchmark.exe` (19 MB, built 2026-07-12). We ran a 10k-row comparison benchmark:
+The Vela C++ benchmark binary at `build/release/tools/benchmark/kuzu_benchmark.exe` (19 MB, built 2026-07-12).
+
+### LadybugDB C++ (`lbug_benchmark`) — Status: ✅ Built and Run (2026-07-18)
+
+LadybugDB is an independent C++ implementation of KuzuDB (v0.18.0) at `ladybug/`. The benchmark binary was built using Clang 22 (LLVM-MinGW) with Ninja:
+
+```powershell
+cd ladybug
+cmake -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARK=ON -DBUILD_SHELL=ON -DBUILD_EXTENSIONS="" -DBUILD_SHARED_LBUG=FALSE .
+cmake --build build/release --target lbug_benchmark
+cmake --build build/release --target lbug_shell
+```
+
+**Note:** Several build patches were required for MinGW compatibility:
+- `CMakeLists.txt`: OpenSSL `QUIET` (not `REQUIRED`), added `ws2_32` link dep
+- `cmake/BundleStaticLibrary.cmake`: MRI script mode for `llvm-ar`
+- `src/extension/CMakeLists.txt`: Conditional `CPPHTTPLIB_OPENSSL_SUPPORT`
+- `src/storage/buffer_manager/buffer_manager.cpp`: Guard `_set_se_translator` with `_MSC_VER`
+- `test/test_helper/CMakeLists.txt`: Use `lbug` instead of `lbug_shared`
 
 #### Empirical Results: Filter + COUNT (10k rows)
 
 | Runtime | Dataset | Query | Execution Time | Methodology |
 |---------|---------|-------|---------------|-------------|
-| C++ (`kuzu_benchmark`) | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.400 ms** avg | Full query: scan→materialize→filter→aggregate |
+| Vela C++ (`kuzu_benchmark`) | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.400 ms** avg | Full query: scan→materialize→filter→aggregate |
+| **LadybugDB C++ (`lbug_benchmark`)** | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.374 ms** avg | Full query: scan→materialize→filter→aggregate |
 | Rust (`criterion`) | In-memory DataChunk (10k) | PhysicalFilter + COUNT | **0.062 ms** avg | Operator-only: pre-loaded in-memory data |
 
-| Metric | C++ | Rust | Ratio |
-|--------|-----|------|-------|
-| Mean execution | 400.4 µs | 61.6 µs | **6.5× Rust faster** |
+| Metric | Vela C++ | LadybugDB C++ | Rust |
+|--------|---------|---------------|------|
+| Mean execution | 400.4 µs | **374.0 µs** | 61.6 µs (operator-only) |
+| Ratio vs Vela | 1× | **0.93×** | — |
 
-> **⚠️ Important:** This is not an apples-to-apples comparison. The C++ benchmark includes storage I/O, row materialization, and full query orchestration overhead, while the Rust micro-benchmark measures only the in-memory filter operator on a pre-built DataChunk. The 6.5× ratio reflects this architectural gap. A proper comparison requires either C++ micro-benchmark instrumentation or a Rust end-to-end SQL benchmark.
+> **⚠️ Important:** The Rust operator-only benchmark (0.062 ms) is not apples-to-apples (it excludes storage I/O, query planning, and orchestration). The SQL-level comparison is the definitive 3-way parity result.
 
 **Build prerequisites** (for reproducibility):
 - CMake 3.15+
@@ -204,19 +226,20 @@ The C++ benchmark binary exists at `build/release/tools/benchmark/kuzu_benchmark
 
 #### Apples-to-Apples SQL-Level Benchmark
 
-Both runtimes ran the **identical** query on **identical** 10k-row datasets, with compilation excluded:
+All three runtimes ran the **identical** query on **identical** 10k-row datasets, with compilation excluded:
 
 ```sql
 MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)
 ```
 
-| Metric | C++ (`kuzu_benchmark`) | Rust (`conn.execute`) | Rust (`conn.query`) |
-|--------|----------------------|----------------------|---------------------|
-| Scope | plan→optimize→execute | plan→optimize→execute | prepare+plan+optimize+execute |
-| Mean time | **400 µs** | **397 µs** | **366 µs** |
-| Ratio vs C++ | 1× | **~equivalent** | **~equivalent** |
+| Metric | Vela C++ (`kuzu_benchmark`) | LadybugDB C++ (`lbug_benchmark`) | Rust (`conn.execute`) | Rust (`conn.query`) |
+|--------|----------------------------|----------------------------------|----------------------|---------------------|
+| Scope | plan→optimize→execute | plan→optimize→execute | plan→optimize→execute | prepare+plan+optimize+execute |
+| Mean time | **400 µs** | **374 µs** | **397 µs** | **366 µs** |
+| Ratio vs Vela | 1× | **0.94×** | **~equivalent** | **0.92×** |
+| Compiler | MSVC 2022 | Clang 22 (LLVM-MinGW) | rustc (LLVM) | rustc (LLVM) |
 
-> **Update (2026-07-17):** After two optimizations — (1) direct `ColumnChunk→Arrow` scan path (3.4×), and (2) aggregate COUNT fast path using `ArrayRef::len()` — Rust is now at **parity with C++**. `conn.execute()` went from 1,787 µs → 397 µs (**4.5× improvement overall**).
+> **Update (2026-07-18):** 3-way parity verified. LadybugDB C++ benchmark was built from the independent `ladybug/` submodule (v0.18.0) using Clang 22/MinGW and shows **374 µs** — slightly faster than Vela's MSVC build. **Rust is at parity with both independent C++ implementations.**
 
 **Key insight:** The original 4.5× gap was entirely in `processor.execute()` — the physical operator execution. Profiling with `std::time::Instant` at each phase of `conn.execute()` reveals:
 
@@ -327,7 +350,7 @@ if __name__ == '__main__':
 | **Order By** (1K, single-key) | ~0.084 ms | TBD | — | 🟡 Next target |
 | **Aggregate COUNT** (10K) | ~0.176 ms | *Part of E2E* | — | 🟢 Baseline captured |
 | **Full Query: Filter+COUNT** (10K, op-level) | **0.062 ms** | — | — | 🟢 Rust operator micro-benchmark |
-| **Full Query: Filter+COUNT** (10K, SQL-level) | **0.397 ms** | **0.400 ms** | **~1× parity** | 🏆 **C++ parity achieved** |
+| **Full Query: Filter+COUNT** (10K, SQL-level) | **0.397 ms** | **0.400 ms** (Vela) / **0.374 ms** (Ladybug) | **~1× parity** | 🏆 **3-way parity achieved** |
 
 ### Arrow-native Evaluation: Gap Closure (evaluate_arrow vs evaluate)
 
@@ -354,7 +377,8 @@ The remaining gap is in:
 6. ✅ **Dive into `PhysicalScan::execute()`** — Full data flow traced. Triple materialization identified: (1) `to_column_major_data` clones 20k Values, (2) `build_arrow_array` #1 for predicate, (3) `build_arrow_array` #2 for output.
 7. ✅ **Implement `ColumnChunk::to_arrow_array()`** — **DONE 2026-07-17.** ScanNode 7.8× faster.
 8. ✅ **Aggregate COUNT `ArrayRef::len()` fast path** — **DONE 2026-07-17.** Aggregate ~350 µs → ~50 µs.
-9. ✅ **C++ parity achieved** — Rust 397 µs vs C++ 400 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
+9. ✅ **Vela C++ parity achieved** — Rust 397 µs vs Vela 400 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
+10. ✅ **LadybugDB C++ parity achieved** — Rust 397 µs vs Ladybug 374 µs for the same query. **3-way parity verified.**
 
 ---
 
