@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4 COMPLETE ✅✅✅✅)
+> **Tanggal:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4+P30.5 COMPLETE ✅✅✅✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored (kuzu-migrate deferred)** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed.
@@ -22,7 +22,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Compile errors** | **0** ✅ |
 | **Tests passing** | **1099 total, 0 failed, 32 ignored** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
-| **CI/CD** | **8 job GitHub Actions** (3 OS) ✅ |
+| **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
 | **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
@@ -123,6 +123,8 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P30.1 — Fix 31 Ignored Tests + FTS** | ❌ 32 ignored tests + 1 FTS failure | ✅ **All fixed.** Grammar fixes (`create_rel_table` optional columns, `union_keyword`, `backtick_identifier`), binder relaxations (empty clause count), FTS arrow-path filtering. **1 remaining ignored (kuzu-migrate — parquet footer, pre-existing).** | `[P30.1]` |
 | **P30.3 — LadybugDB Benchmark** | ❌ Parity only against Vela C++ | ✅ **3-way parity verified.** Ladybug C++ binary built (MinGW, Clang 22), benchmark run: **374 µs** vs Vela 400 µs vs Rust 397 µs. Published in `BENCHMARK_COMPARISON.md`. | `[P30.3]` |
 | **P30.4 — STANDALONE_CALL Refactor** | ❌ String matching dispatch (25+ arms) | ✅ Trait `StandaloneCallFn` + `StandaloneCallRegistry` in processor crate. 22 handler structs in `standalone_call.rs` replace giant match. Fallback to `function_registry` for GDS/unknown. | `[P30.4]` |
+| **P30.5a — WASM: fix ignored test** | ❌ 6 test skip di `wasm-pack test --node` (config `run_in_browser`) | ✅ `run_in_browser` → `run_in_node`. `wasm-test` job di CI jalankan `wasm-pack test --node kuzu-wasm`. | `[P30.5]` |
+| **P30.5b — Fuzz CI** | ❌ `cargo-fuzz` 3 target tidak pernah jalan di CI | ✅ Workflow `fuzz-ci.yml` — PR auto-run 10 menit, nightly 30 menit per target. | `[P30.5]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -504,10 +506,11 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 
 ## 4. Kesenjangan Tersisa (Aktual)
 
-### 4.1 Wasm Build
+### 4.1 Wasm Build & Test
 - `kuzu-wasm` telah **stabil** (Fase P6) dan berhasil di-build menggunakan `wasm-pack` (target `nodejs`).
 - Mendukung `KuzuDatabase`, `KuzuConnection`, dan `KuzuPreparedStatement` yang memungkinkan binding parameter via `js_sys::Object` dan penarikan metadata (`get_column_names`).
 - Artifak NPM sudah siap dan tersedia di `kuzu-wasm/pkg`.
+- **6 WASM integration tests** jalan di Node.js via `wasm-pack test --node` — terintegrasi di CI sebagai job `wasm-test`.
 
 ### 4.2 Extension Crates
 - `kuzu-json` & `kuzu-llm`: **Selesai**. Sudah di-wire ke native Rust API via `CustomScalar`.
@@ -610,7 +613,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-16: **all test pass, 0 fail** ✅. **P24 ✅, P25 ✅, P26 ✅ (ALL COMPLETE)**.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
-- **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`.
+- **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
 - **P26.4 (Performance Profiling):** ✅ **ALL COMPLETE.** 8 benchmark suites executed. Laporan lengkap di [`implementation_plan.md`](implementation_plan.md#p264--performance-profiling-report--full-empirical-results-2026-07-16).
 - **P24 (Physical Operator Completeness):** ✅ **ALL COMPLETE.** `PhysicalEmptyResult`, `PhysicalMultiplicityReducer`, `PhysicalSkip`, `PhysicalInsert`, `PhysicalExtensionClause` — semua sudah diimplementasi di `physical/misc.rs`. `PrimaryKeyScan` → `scan_filter/primarykeyscan.rs`, `PackedExtend` → `write_ops/packedextend.rs`, `AggregateFinalize` → `order_aggregate/splitaggregation.rs`. Semua stub hardening sudah produksi-ready.
