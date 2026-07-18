@@ -145,6 +145,7 @@ pub(crate) fn value_hash_fast(val: &Value) -> u64 {
 
 /// Hash raw i64 key bytes directly — avoids Value boxing entirely.
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn raw_key_hash_i64(val: i64) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = ahash::AHasher::default();
@@ -154,6 +155,7 @@ pub(crate) fn raw_key_hash_i64(val: i64) -> u64 {
 
 /// Hash raw bytes for string keys.
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn raw_key_hash_bytes(val: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = ahash::AHasher::default();
