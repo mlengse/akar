@@ -48,7 +48,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                     if key_field.is_null(i) {
                         None
                     } else {
-                        chunk.get_value(self.key_column_idx as usize, i)
+                        chunk.get_value(self.key_column_idx, i)
                     }
                 })
                 .collect();
