@@ -57,13 +57,13 @@
 - ✅ 3-way parity verified: **Rust 397 µs ≈ Vela 400 µs ≈ Ladybug 374 µs**
 - ✅ Published to `BENCHMARK_COMPARISON.md`
 
-### ✅ P30.4 COMPLETE — P30.5+P30.6 remaining (4 SP)
+### ✅ P30.4-P30.6 COMPLETE — All Sprint 4 done (6 SP)
 
 | Item | SP | Detail |
 |------|:---:|--------|
 | P30.4 — STANDALONE_CALL refactor (string → trait) | 2 | ✅ **DONE.** Trait `StandaloneCallFn` + `StandaloneCallRegistry` in `kuzu-processor`. 22 handler structs replace giant match. |
 | P30.5 — WASM test stabilisasi + fuzz CI | 2 | ✅ **DONE.** `run_in_browser` → `run_in_node`, wasm-test CI job; fuzz-ci.yml (PR 10min, nightly 30min) |
-| P30.6 — GitHub Releases + binary distribution | 2 | 🟢 **NEXT** |
+| P30.6 — GitHub Releases + binary distribution | 2 | ✅ **DONE.** `rust-release.yml` fixed: removed crates.io publish (deferred per DD11), 3-platform CLI binary matrix, auto-changelog from git log. `RELEASE.md` updated. |
 
 ---
 
@@ -86,13 +86,12 @@
 | **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 | ✅ Complete (C++ parity) |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | ✅ Complete |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
-| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.5 COMPLETE ✅✅✅✅✅, P30.6 remaining) |
+| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — FULLY DONE) |
 | **P31** | **Final Parity Sprint** | **🟡 P1** | **4** | Address medium audit gaps (lambda reg, GREATEST/LEAST, aliases, CALL handlers, parquet fix) |
 
 
 > [!IMPORTANT]
-> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.5 COMPLETE ✅✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests running in CI, fuzz targets integrated in CI. **Audit 2026-07-18: ~95% parity dengan C++.** Fokus utama sekarang:
-> - GitHub Releases (P30.6)
+> **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated. **Audit 2026-07-18: ~95% parity dengan C++.** Fokus utama sekarang:
 > - **P31: Final Parity Sprint** (4 medium gaps — lambda reg, GREATEST/LEAST, aliases, CALL handlers, parquet fix)
 
 ---
@@ -335,11 +334,11 @@ Tiga gap yang didefer dari P27 — semua selesai.
 - `[x]` PR trigger: auto-run 10 menit per target (parallel matrix, `-max_total_time=600`).
 - `[x]` Nightly schedule (`0 0 * * *`): 30 menit per target (`-max_total_time=1800`).
 
-### P30.6 — GitHub Releases (2 SP)
+### P30.6 — GitHub Releases (2 SP) ✅ COMPLETE
 
-- `[ ]` Setup `cargo-dist` atau release script manual
-- `[ ]` Binary: `kuzu-cli` untuk Windows/macOS/Linux
-- `[ ]` Release notes otomatis dari git log
+- `[x]` Setup `cargo-dist` atau release script manual — fixed `.github/workflows/rust-release.yml`: removed crates.io publish (deferred per DD11), fixed dependency chain so `github-release` does not depend on failing publish jobs, added `fetch-depth: 0` for accurate changelog generation
+- `[x]` Binary: `kuzu-cli` untuk Windows/macOS/Linux — 3-platform matrix in `rust-release.yml` (linux-amd64, macos-arm64, windows-amd64), uploaded as release assets via `softprops/action-gh-release`
+- `[x]` Release notes otomatis dari git log — `git log --oneline` between tags, written to `CHANGELOG.md`, passed as `body_path` to release action
 
 ---
 
@@ -516,7 +515,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 - `[x]` English `MIGRATION.md` for external users ✅
 - `[x]` Keep Indonesian `STATUS.md` for internal team ✅
-- `[ ]` GitHub Releases binary distribution → **P30.6** (deferred from P26.5)
+- `[x]` GitHub Releases binary distribution → **P30.6** (deferred from P26.5) ✅ **DONE**
 - `[x]` Build C++ benchmark binary (`kuzu_benchmark`) from CMake ✅ (built 2026-07-12)
 
 ---
@@ -528,7 +527,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report |
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
-| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.5 COMPLETE ✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI. Remaining: P30.6** |
+| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI, GitHub Releases automated** |
 | **Sprint 5** | **P31: Final Parity Sprint** | **4** | **🟡 Address 4 audit gaps — lambda reg, GREATEST/LEAST, 7 aliases, 3 CALL handlers, parquet fix.** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
@@ -553,7 +552,7 @@ graph TD
     P30 --> P30_3["✅ P30.3: LadybugDB benchmark"]
     P30 --> P30_4["✅ P30.4: STANDALONE_CALL refactor (DONE)"]
     P30 --> P30_5["✅ P30.5: WASM + Fuzz CI (DONE)"]
-    P30 --> P30_6["🟢 P30.6: GitHub Releases"]
+    P30 --> P30_6["✅ P30.6: GitHub Releases (DONE)"]
     P30 --> P31["🟡 P31: Final Parity Sprint"]
     P31 --> P31_1["🟡 P31.1: Lambda + alias reg"]
     P31 --> P31_2["🟡 P31.2: GREATEST/LEAST"]
