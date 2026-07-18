@@ -22,7 +22,6 @@ fn test_unicode_non_latin_chars() {
 }
 
 #[test]
-#[ignore = "Parser does not allow unicode identifiers"]
 fn test_unicode_table_and_property_names() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE `테스트`(id INT64, `属性` STRING, PRIMARY KEY (id))");
@@ -50,7 +49,6 @@ fn test_unicode_control_characters() {
 }
 
 #[test]
-#[ignore = "Substr might count bytes instead of characters or have a different name"]
 fn test_unicode_substring() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
@@ -60,7 +58,6 @@ fn test_unicode_substring() {
 }
 
 #[test]
-#[ignore = "Concat might have a different syntax or not be implemented"]
 fn test_unicode_concat() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, s1 STRING, s2 STRING, PRIMARY KEY (id))");
@@ -70,7 +67,6 @@ fn test_unicode_concat() {
 }
 
 #[test]
-#[ignore = "Lower/Upper might not correctly handle unicode or might not be implemented"]
 fn test_unicode_lower_upper() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY (id))");
