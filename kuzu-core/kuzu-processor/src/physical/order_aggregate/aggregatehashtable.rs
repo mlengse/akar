@@ -5,7 +5,7 @@ use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
 use kuzu_parser::ast::Expression;
 use crate::physical::types::OperatorResult;
-use crate::physical::common::{store_value_in_vector, value_hash_fast};
+use crate::physical::common::{store_value_in_vector, hash_value_into};
 
 
 // ==================== AggregateHashTable ====================
@@ -121,13 +121,13 @@ impl AggregateHashTable {
             .map(|chunk| {
                 let mut local: LocalTable = hashbrown::HashMap::with_capacity(chunk.size.max(16));
                 for row in chunk.iter_rows() {
-                    let key = build_group_key(chunk, group_cols, row);
-                    let hash = value_hash_fast(&key);
+                    let hash = hash_group_key(chunk, group_cols, row);
                     let bucket = local.entry(hash).or_default();
-                    let entry = bucket.iter_mut().find(|(k, _)| *k == key);
+                    let entry = bucket.iter_mut().find(|(k, _)| keys_equal(k, chunk, group_cols, row));
                     if let Some((_, states)) = entry {
                         update_states_row(states, chunk, funcs, col_indices, row);
                     } else {
+                        let key = build_group_key(chunk, group_cols, row);
                         let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
                         update_states_row(&mut states, chunk, funcs, col_indices, row);
                         bucket.push((key, states));
@@ -166,13 +166,13 @@ impl AggregateHashTable {
 
         for chunk in chunks {
             for row in chunk.iter_rows() {
-                let key = build_group_key(chunk, group_cols, row);
-                let hash = value_hash_fast(&key);
+                let hash = hash_group_key(chunk, group_cols, row);
                 let bucket = groups.entry(hash).or_default();
-                let entry = bucket.iter_mut().find(|(k, _)| *k == key);
+                let entry = bucket.iter_mut().find(|(k, _)| keys_equal(k, chunk, group_cols, row));
                 if let Some((_, states)) = entry {
                     update_states_row(states, chunk, funcs, col_indices, row);
                 } else {
+                    let key = build_group_key(chunk, group_cols, row);
                     let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
                     update_states_row(&mut states, chunk, funcs, col_indices, row);
                     bucket.push((key, states));
@@ -285,6 +285,47 @@ impl AggregateHashTable {
         }
 
         Ok(chunks)
+    }
+}
+
+/// Hash group key columns directly without allocating Vec<Value> or Value::List.
+/// For single column, computes hash directly from the value. For multiple columns,
+/// hashes each column value sequentially through the same hasher.
+pub fn hash_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = ahash::AHasher::default();
+    for &gc in group_cols {
+        let val = chunk
+            .fields
+            .get(gc as usize)
+            .map(|_| chunk.get_value(gc as usize, row)).unwrap_or(Some(Value::Null))
+            .unwrap_or(Value::Null);
+        hash_value_into(&val, &mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Check if a stored group key matches the current row's group column values.
+/// Avoids creating Value::List for the comparison.
+pub fn keys_equal(stored: &Value, chunk: &DataChunk, group_cols: &[u32], row: usize) -> bool {
+    if group_cols.len() == 1 {
+        let col = group_cols[0] as usize;
+        let val = chunk.fields.get(col)
+            .map(|_| chunk.get_value(col, row)).unwrap_or(Some(Value::Null))
+            .unwrap_or(Value::Null);
+        return *stored == val;
+    }
+    match stored {
+        Value::List(vals) if vals.len() == group_cols.len() => {
+            vals.iter().enumerate().all(|(i, v)| {
+                let col = group_cols[i] as usize;
+                let val = chunk.fields.get(col)
+                    .map(|_| chunk.get_value(col, row)).unwrap_or(Some(Value::Null))
+                    .unwrap_or(Value::Null);
+                *v == val
+            })
+        }
+        _ => false,
     }
 }
 
