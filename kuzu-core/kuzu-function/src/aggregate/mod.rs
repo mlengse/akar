@@ -90,6 +90,7 @@ impl AggValueState {
     }
 
     /// Update the state with a new input value.
+    #[inline(always)]
     pub fn update(&mut self, val: &Value) {
         if matches!(val, Value::Null) {
             // Most aggregates skip NULLs (except COUNT which counts them)
@@ -219,6 +220,7 @@ impl AggValueState {
     }
 
     /// Merge another AggValueState into this one (for parallel aggregation).
+    #[inline(always)]
     pub fn merge(&mut self, other: &Self) {
         match (self, other) {
             (AggValueState::Count(a), AggValueState::Count(b)) => *a += b,
