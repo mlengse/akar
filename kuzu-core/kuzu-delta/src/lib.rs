@@ -1,16 +1,17 @@
 //! Delta Lake extension for Kuzu.
 //!
-//! Provides integration with Delta Lake tables using DuckDB delegation.
-//! Opens an in-memory DuckDB, loads the `delta` extension, and delegates
-//! delta_scan() queries to DuckDB.
-//!
-//! ## DuckDB delegation approach
-//! Uses `kuzu-duckdb`'s `DuckDbAttachHelper` to create an in-memory DuckDB,
-//! install the `delta` extension, and execute queries. The native Rust
-//! `deltalake` crate API is still maturing, so DuckDB delegation is more stable.
+//! Provides integration with Delta Lake tables.
+//! - **Native mode** (feature `native`): Reads Delta transaction log and enumerates data files.
+//! - **DuckDB delegation** (feature `duckdb-delegation`): Delegates to DuckDB's delta extension.
+
+#[cfg(feature = "native")]
+mod native_reader;
 
 use kuzu_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
+
+#[cfg(any(feature = "native", feature = "duckdb-delegation"))]
+use kuzu_function::Value;
 
 /// The Delta Lake extension enables querying Delta tables from Kuzu.
 pub struct DeltaExtension;
@@ -35,11 +36,10 @@ impl Extension for DeltaExtension {
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use kuzu_function::registry::TableFunction;
 
-        #[cfg(feature = "duckdb-delegation")]
+        #[cfg(feature = "native")]
         {
-            // delta_scan(path: String) → scans a Delta table via DuckDB
             let scan_fn: Arc<dyn Fn(&[Value], &mut kuzu_function::DataChunk) -> Result<(), String> + Send + Sync> =
-                Arc::new(|args, _chunk| {
+                Arc::new(|args, chunk| {
                     if args.is_empty() {
                         return Err("delta_scan requires a path argument".into());
                     }
@@ -48,12 +48,22 @@ impl Extension for DeltaExtension {
                         _ => return Err("delta_scan expects a string path argument".into()),
                     };
 
-                    let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                    helper.install_and_load("delta")?;
+                    if chunk.size > 0 {
+                        return Ok(());
+                    }
 
-                    let sql = format!("SELECT * FROM delta_scan('{}')", path.replace('\'', "''"));
-                    helper.query_rows(&sql)?;
+                    let table_info = native_reader::load_delta_table(&path)?;
+                    let file_refs: Vec<&str> = table_info.data_files.iter().map(|s| s.as_str()).collect();
 
+                    let array = std::sync::Arc::new(arrow::array::StringArray::from(file_refs)) as arrow::array::ArrayRef;
+
+                    chunk.fields.clear();
+                    chunk.field_types.clear();
+                    chunk.field_names.clear();
+                    chunk.fields.push(array);
+                    chunk.field_types.push(kuzu_common::types::PhysicalTypeID::String);
+                    chunk.field_names.push("file_path".to_string());
+                    chunk.size = table_info.data_files.len();
                     Ok(())
                 });
 
@@ -65,19 +75,56 @@ impl Extension for DeltaExtension {
                 },
             );
 
-            tracing::info!("Delta extension loaded: 1 function registered (DuckDB delegation)");
+            tracing::info!("Delta extension loaded: 1 function registered (native reader)");
         }
 
-        #[cfg(not(feature = "duckdb-delegation"))]
+        #[cfg(not(feature = "native"))]
         {
-            context.register_table_function(
-                "delta_scan",
-                TableFunction::CustomTable {
-                    name: "delta_scan".into(),
-                    execute: Arc::new(|_, _| Err("Delta not available (feature 'duckdb-delegation' disabled)".into())),
-                },
-            );
-            tracing::info!("Delta extension loaded (placeholder)");
+            #[cfg(feature = "duckdb-delegation")]
+            {
+                let scan_fn: Arc<dyn Fn(&[Value], &mut kuzu_function::DataChunk) -> Result<(), String> + Send + Sync> =
+                    Arc::new(|args, _chunk| {
+                        if args.is_empty() {
+                            return Err("delta_scan requires a path argument".into());
+                        }
+                        let path = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            _ => return Err("delta_scan expects a string path argument".into()),
+                        };
+
+                        let helper = kuzu_duckdb::attach_helper::DuckDbAttachHelper::new()?;
+                        helper.install_and_load("delta")?;
+
+                        let sql = format!("SELECT * FROM delta_scan('{}')", path.replace('\'', "''"));
+                        helper.query_rows(&sql)?;
+
+                        Ok(())
+                    });
+
+                context.register_table_function(
+                    "delta_scan",
+                    TableFunction::CustomTable {
+                        name: "delta_scan".into(),
+                        execute: scan_fn,
+                    },
+                );
+
+                tracing::info!("Delta extension loaded: 1 function registered (DuckDB delegation)");
+            }
+
+            #[cfg(not(feature = "duckdb-delegation"))]
+            {
+                context.register_table_function(
+                    "delta_scan",
+                    TableFunction::CustomTable {
+                        name: "delta_scan".into(),
+                        execute: Arc::new(|_, _| {
+                            Err("Delta not available (enable feature 'native' or 'duckdb-delegation')".into())
+                        }),
+                    },
+                );
+                tracing::info!("Delta extension loaded (placeholder)");
+            }
         }
 
         Ok(())
