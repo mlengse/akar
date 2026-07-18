@@ -1,5 +1,5 @@
 //! Auto-extracted from physical_operator.rs
-use kuzu_common::vector::{DataChunk, ValueVector};
+use kuzu_common::vector::DataChunk;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 
 // ==================== Projection ====================
