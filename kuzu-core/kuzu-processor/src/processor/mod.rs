@@ -35,6 +35,33 @@ pub trait StandaloneCallHandler: Send + Sync {
     fn execute_call(&self, name: &str, args: &[kuzu_parser::ast::Expression]) -> Result<Vec<kuzu_common::vector::DataChunk>, String>;
 }
 
+pub trait StandaloneCallFn: Send + Sync {
+    fn execute(&self, args: &[kuzu_parser::ast::Expression]) -> Result<Vec<Vec<kuzu_common::types::Value>>, String>;
+    fn aliases(&self) -> Vec<&'static str>;
+}
+
+pub struct StandaloneCallRegistry {
+    handlers: std::collections::HashMap<String, std::sync::Arc<dyn StandaloneCallFn>>,
+}
+
+impl StandaloneCallRegistry {
+    pub fn new() -> Self {
+        Self {
+            handlers: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, handler: std::sync::Arc<dyn StandaloneCallFn>) {
+        for alias in handler.aliases() {
+            self.handlers.insert(alias.to_lowercase(), handler.clone());
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<std::sync::Arc<dyn StandaloneCallFn>> {
+        self.handlers.get(&name.to_lowercase()).cloned()
+    }
+}
+
 /// The query processor executes a physical plan and produces result chunks.
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
