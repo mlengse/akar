@@ -7,7 +7,7 @@
 use wasm_bindgen_test::*;
 use kuzu_wasm::{KuzuDatabase, KuzuConnection};
 
-wasm_bindgen_test_configure!(run_in_browser);
+wasm_bindgen_test_configure!(run_in_node);
 
 #[wasm_bindgen_test]
 fn test_create_database() {
