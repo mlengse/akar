@@ -126,6 +126,7 @@ impl BlockMergeSorter {
     }
 
     /// K-way merge of sorted blocks using BinaryHeap for O(log k) per row.
+    /// Stores the first sort key inline to avoid Vec allocation for single-key sorts.
     fn k_way_merge(
         &self,
         blocks: &[Vec<usize>],
@@ -137,18 +138,23 @@ impl BlockMergeSorter {
 
         struct HeapEntry {
             block_idx: usize,
-            keys: Vec<Value>,
+            primary: Value,
+            rest: Vec<Value>,
         }
 
         impl Ord for HeapEntry {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                for (a, b) in self.keys.iter().zip(other.keys.iter()) {
+                let cmp = value_cmp(&self.primary, &other.primary);
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp.reverse();
+                }
+                for (a, b) in self.rest.iter().zip(other.rest.iter()) {
                     let cmp = value_cmp(a, b);
                     if cmp != std::cmp::Ordering::Equal {
                         return cmp.reverse();
                     }
                 }
-                std::cmp::Ordering::Equal
+                self.block_idx.cmp(&other.block_idx).reverse()
             }
         }
         impl PartialOrd for HeapEntry {
@@ -167,14 +173,15 @@ impl BlockMergeSorter {
         let mut positions: Vec<usize> = vec![0usize; blocks.len()];
         let mut heap: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(blocks.len());
 
+        let sk = &self.sort_keys;
         for bi in 0..blocks.len() {
             if !blocks[bi].is_empty() {
                 let row = blocks[bi][0];
-                let keys: Vec<Value> = self.sort_keys.iter().map(|&(k, _)| {
-                    let k = k as usize;
-                    all_values[k][row].0.clone()
+                let primary = all_values[sk[0].0 as usize][row].0.clone();
+                let rest: Vec<Value> = sk[1..].iter().map(|&(k, _)| {
+                    all_values[k as usize][row].0.clone()
                 }).collect();
-                heap.push(HeapEntry { block_idx: bi, keys });
+                heap.push(HeapEntry { block_idx: bi, primary, rest });
             }
         }
 
@@ -185,11 +192,11 @@ impl BlockMergeSorter {
             *pos += 1;
             if *pos < blocks[bi].len() {
                 let row = blocks[bi][*pos];
-                let keys: Vec<Value> = self.sort_keys.iter().map(|&(k, _)| {
-                    let k = k as usize;
-                    all_values[k][row].0.clone()
+                let primary = all_values[sk[0].0 as usize][row].0.clone();
+                let rest: Vec<Value> = sk[1..].iter().map(|&(k, _)| {
+                    all_values[k as usize][row].0.clone()
                 }).collect();
-                heap.push(HeapEntry { block_idx: bi, keys });
+                heap.push(HeapEntry { block_idx: bi, primary, rest });
             }
         }
 
