@@ -863,32 +863,36 @@ impl Connection {
         result: &QueryResult,
         _header: bool,
     ) -> Result<(), String> {
-        // Extract rows from all chunks
-        let mut rows: Vec<Vec<Value>> = Vec::new();
-        for chunk in &result.chunks {
-            for row_idx in 0..chunk.size {
-                let mut row = Vec::with_capacity(chunk.fields.len());
-                for col_idx in 0..chunk.fields.len() {
-                    row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
-                }
-                rows.push(row);
-            }
-        }
-
-        // Get column names from the first chunk, stripping any variable prefix
-        // (e.g. "a.id" -> "id", "p.name" -> "name")
-        let column_names: Vec<String> = result.chunks.first()
-            .map(|chunk| {
-                if chunk.field_names.is_empty() {
-                    (0..chunk.fields.len()).map(|i| format!("column_{}", i)).collect()
-                } else {
-                    chunk.field_names.iter().map(|n| {
-                        n.rsplit_once('.').map(|(_, base)| base.to_string()).unwrap_or_else(|| n.clone())
-                    }).collect()
-                }
-            })
-            .unwrap_or_default();
-
-        kuzu_storage::parquet_writer::write_parquet(path, &rows, &column_names)
+        write_parquet_to_file(path, result)
     }
+}
+
+/// Standalone function to write query results to a Parquet file.
+/// Used by both `COPY TO` and `CALL export_parquet()`.
+#[cfg(feature = "parquet-export")]
+pub fn write_parquet_to_file(path: &str, result: &QueryResult) -> Result<(), String> {
+    let mut rows: Vec<Vec<Value>> = Vec::new();
+    for chunk in &result.chunks {
+        for row_idx in 0..chunk.size {
+            let mut row = Vec::with_capacity(chunk.fields.len());
+            for col_idx in 0..chunk.fields.len() {
+                row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
+            }
+            rows.push(row);
+        }
+    }
+
+    let column_names: Vec<String> = result.chunks.first()
+        .map(|chunk| {
+            if chunk.field_names.is_empty() {
+                (0..chunk.fields.len()).map(|i| format!("column_{}", i)).collect()
+            } else {
+                chunk.field_names.iter().map(|n| {
+                    n.rsplit_once('.').map(|(_, base)| base.to_string()).unwrap_or_else(|| n.clone())
+                }).collect()
+            }
+        })
+        .unwrap_or_default();
+
+    kuzu_storage::parquet_writer::write_parquet(path, &rows, &column_names)
 }
