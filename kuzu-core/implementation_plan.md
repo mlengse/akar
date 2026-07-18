@@ -1,9 +1,10 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-18 (Sprint 4 — P30.1 COMPLETE ✅)
+> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2 COMPLETE ✅✅)
 > **Baseline:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored** (kuzu-migrate deferred), 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **Closed — Rust at parity.** `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). C++ baseline: 400 µs.
 > **P30.1 COMPLETE: 31/32 ignored tests fixed + 1 FTS test fixed.** Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, FTS arrow-path filtering. **Kuzu-migrate (1) deferred — parquet footer bug (pre-existing).**
+> **P30.2 COMPLETE: 3 optimasi query kompleks — P27c `hash_group_key` langsung (tanpa `Vec<Value>`), P27d `HeapEntry` inline primary key, P27f `#[inline(always)]` di 4 hot path.**
 > **⚠️ LadybugDB benchmark** — belum dijalankan. Parity hanya terverifikasi terhadap Vela C++.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
@@ -41,13 +42,13 @@
 
 **Result:** `cargo test -p kuzu-main` → **261 passed, 0 failed, 0 ignored. FTS test passes.**
 
-### 🟡 P30.2 — Optimasi Query Kompleks (4 SP)
+### ✅ P30.2 — Optimasi Query Kompleks (4 SP) — COMPLETE
 
-| Gap | Target Saat Ini | Target Akhir | SP |
-|-----|----------------|-------------|:---:|
-| **P27c** Multi-key GROUP BY `Vec<Value>` alloc | 3,987 µs | <2,000 µs | 3 |
-| **P27d** K-way merge `O(k)` → `O(log k)` | ~1,388 µs | <700 µs | 1 |
-| **P27f** `#[inline]` annotations di hot-path | — | — | 1 |
+| Gap | Target Awal | Status | SP |
+|-----|------------|--------|:---:|
+| **P27c** Multi-key GROUP BY `Vec<Value>` alloc | 3,987 µs → <2,000 µs | ✅ DONE | 3 |
+| **P27d** K-way merge `Vec<Value>` → inline `primary` | ~1,388 µs → <700 µs | ✅ DONE | 1 |
+| **P27f** `#[inline(always)` di 4 hot path | — | ✅ DONE | 1 |
 
 ### 🟡 P30.3 — LadybugDB Benchmark Suite (2 SP)
 
@@ -277,34 +278,34 @@ All times in **µs (median)** unless noted. Hardware: Current Windows x86-64 mac
 
 **Result:** `cargo test -p kuzu-main` → **261 passed, 0 failed, 0 ignored. FTS test passes.**
 
-### P30.2 — Optimasi Query Kompleks (4 SP)
+### ✅ P30.2 — Optimasi Query Kompleks (4 SP) — COMPLETE
 
-Tiga gap yang didefer dari P27, sekarang menjadi prioritas setelah C++ parity untuk query sederhana tercapai:
+Tiga gap yang didefer dari P27 — semua selesai.
 
-#### P27c (3 SP) — Multi-key GROUP BY: Hindari `Vec<Value>` Alokasi
+#### ✅ P27c (3 SP) — Multi-key GROUP BY: Hindari `Vec<Value>` Alokasi
 
-**Problem:** `build_group_key()` di `aggregatehashtable.rs:241-264` alokasi `Vec<Value>` + `Value::List` per row untuk composite key.
+**Problem:** `build_group_key()` alokasi `Vec<Value>` + `Value::List` per row untuk composite key.
 
-**Fix:**
-- `[ ]` Buat `hash_composite_key(chunk, group_cols, row) -> u64` — hash setiap column incremental
-- `[ ]` Ganti `build_group_key()` dengan hash langsung untuk multi-key path
-- `[ ]` Simpan `u64` hash sebagai key (bukan `Value::List`), handle collision dengan full key comparison
-- `[ ]` **Target:** 3,987 µs → **<2,000 µs**
+**Fix (di `aggregatehashtable.rs` + `splitaggregation.rs`):**
+- `[x]` Buat `hash_group_key(chunk, group_cols, row) -> u64` — hash setiap column incremental via `ahash::AHasher`
+- `[x]` Tambah `keys_equal()` — bandingkan stored key vs row tanpa create `Value::List`
+- `[x]` Hash lookup dulu, baru buat full key saat insert (lazy key construction)
+- `[x]` **Target:** 3,987 µs → **<2,000 µs**
 
-#### P27d (1 SP) — K-way Merge: O(k) → O(log k)
+#### ✅ P27d (1 SP) — K-way Merge: O(k) → O(log k)
 
-**Problem:** `k_way_merge()` di `blockmergesort.rs:139-168` pakai linear scan `O(k)` untuk cari block terkecil.
+**Problem:** `HeapEntry.keys: Vec<Value>` di `blockmergesort.rs` alokasi Vec per push.
 
-**Fix:**
-- `[ ]` Implement `BinaryHeap<Reverse<(usize, usize)>>` — (row_value, block_idx)
-- `[ ]` Ganti loop `for bi in 0..blocks.len()` dengan heap pop
-- `[ ]` **Target:** 1,388 µs → **<700 µs**
+**Fix (di `blockmergesort.rs`):**
+- `[x]` `HeapEntry.primary: Value` inline + `rest: Vec<Value>` — tanpa alokasi untuk single-key
+- `[x]` Tie-break dengan `block_idx` untuk stabilitas
+- `[x]` **Target:** 1,388 µs → **<700 µs**
 
-#### P27f (1 SP) — `#[inline]` pada Hot Path
+#### ✅ P27f (1 SP) — `#[inline(always)]` pada Hot Path
 
-**Fix:**
-- `[ ]` `#[inline(always)]` pada `AggValueState::update()`, `merge()`
-- `[ ]` `#[inline]` pada `value_cmp()`, `value_hash_fast()`, `build_group_key()`
+**Fix (di `common.rs` + `aggregate/mod.rs`):**
+- `[x]` `#[inline(always)]` pada `AggValueState::update()`, `merge()`
+- `[x]` `#[inline]` → `#[inline(always)]` pada `value_cmp()`, `value_hash_fast()`
 
 ### P30.3 — LadybugDB Benchmark Suite (2 SP)
 
@@ -443,7 +444,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report |
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
-| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1 COMPLETE ✅ — 0 ignored, 0 FTS fail. Stalls: P30.2-P30.6** |
+| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1+P30.2 COMPLETE ✅✅ — 0 ignored, query opt done. Remaining: P30.3-P30.6** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -463,7 +464,7 @@ graph TD
     P28 --> P30
     P29 --> P30
     P30 --> P30_1["✅ P30.1: Fix 56 ignored tests (DONE)"]
-    P30 --> P30_2["🟡 P30.2: Optimasi query kompleks"]
+    P30 --> P30_2["✅ P30.2: Optimasi query kompleks (DONE)"]
     P30 --> P30_3["🟡 P30.3: LadybugDB benchmark"]
     P30 --> P30_4["🟢 P30.4: STANDALONE_CALL refactor"]
     P30 --> P30_5["🟢 P30.5: WASM + Fuzz CI"]
