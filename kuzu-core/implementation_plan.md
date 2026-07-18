@@ -1,6 +1,6 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4+P30.5 COMPLETE ✅✅✅✅✅)
+> **Revision:** 2026-07-18 (Sprint 4 — P30.1-P30.5 COMPLETE ✅✅✅✅✅, P31 Planned 🟡)
 > **Baseline:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored** (kuzu-migrate deferred), 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P30.1 COMPLETE: 31/32 ignored tests fixed + 1 FTS test fixed.** Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, FTS arrow-path filtering. **Kuzu-migrate (1) deferred — parquet footer bug (pre-existing).**
@@ -86,12 +86,14 @@
 | **P27** | Performance — profiling-driven optimization | 🔴 P0 | 14 | ✅ Complete (C++ parity) |
 | **P28** | Drop-in replacement — migration tool, CLI | 🔴 P0 | 12 | ✅ Complete |
 | **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
-| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.3 COMPLETE ✅✅✅, P30.4-P30.6 remaining) |
+| **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.5 COMPLETE ✅✅✅✅✅, P30.6 remaining) |
+| **P31** | **Final Parity Sprint** | **🟡 P1** | **4** | Address medium audit gaps (lambda reg, GREATEST/LEAST, aliases, CALL handlers, parquet fix) |
 
 
 > [!IMPORTANT]
-> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.5 COMPLETE ✅✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests running in CI, fuzz targets integrated in CI. Fokus utama sekarang:
+> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.5 COMPLETE ✅✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests running in CI, fuzz targets integrated in CI. **Audit 2026-07-18: ~95% parity dengan C++.** Fokus utama sekarang:
 > - GitHub Releases (P30.6)
+> - **P31: Final Parity Sprint** (4 medium gaps — lambda reg, GREATEST/LEAST, aliases, CALL handlers, parquet fix)
 
 ---
 
@@ -341,6 +343,88 @@ Tiga gap yang didefer dari P27 — semua selesai.
 
 ---
 
+## 🟡 P31: Final Parity Sprint — Address Audit Gaps (4 SP)
+
+**Latar belakang:** Audit komprehensif 2026-07-18 terhadap Kuzu C++ (Vela) + LadybugDB C++ vs Rust menemukan ~95% parity. **4 medium gaps** tersisa (3.5 SP) + minor deferred items. Lihat [`STATUS.md` §3.3](STATUS.md#33--medium-gaps-4-items-35-sp).
+
+### P31.1 — Register Lambda Functions + Missing Aliases (1 SP)
+
+**Problem:** `list_transform`, `list_filter`, `list_reduce` sudah diimplementasi di `expression_evaluator.rs:432-647` tapi **tidak terdaftar di `FunctionRegistry`**. Query yang menggunakan lambda syntax akan error "function not found". Selain itu, 7 C++ function aliases belum terdaftar.
+
+**Fix (di `kuzu-function/src/registry.rs`):**
+- `[ ]` Register `list_transform` → `ScalarFunction::List { op: ListOp::Transform }` atau via evaluator path
+- `[ ]` Register `list_filter` → similar
+- `[ ]` Register `list_reduce` → similar
+- `[ ]` Register aliases: `pow` (→ `ArithmeticOp::Power`), `log10` (→ `ArithmeticOp::Log`), `prefix` (→ `StringOp::StartsWith`), `suffix` (→ `StringOp::EndsWith`), `list_cat` (→ `ListOp::Concat`), `element_at` (→ `MapOp::Extract`), `cardinality` (→ `MapOp::Cardinality`)
+- `[ ]` Pastikan path evaluasi lambda dari function registry berfungsi — evaluator saat ini mendeteksi lambda via nama fungsi string; perlu diverifikasi bahwa `register_scalar("list_transform", ...)` akan masuk ke jalur yang benar di `evaluate_function_call`
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-function -p kuzu-processor
+cargo test --workspace  # no regressions
+```
+
+### P31.2 — Implement GREATEST / LEAST (0.5 SP)
+
+**Problem:** Fungsi `GREATEST(a, b, c, ...)` dan `LEAST(a, b, c, ...)` tidak ada di Rust. Di C++ Vela ada sebagai fungsi extremum yang mengambil nilai max/min dari N argumen.
+
+**Fix:**
+- `[ ]` Tambah `UtilityOp::Greatest` / `UtilityOp::Least` di `kuzu-function/src/registry.rs`
+- `[ ]]` Implement evaluasi: iterasi argumen, bandingkan via `value_cmp()`, return nilai extremum
+- `[ ]` Register di `register_builtins()`
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-function  # 159+ tests pass
+```
+
+### P31.3 — CALL Handlers: Projected Graph Management (1 SP)
+
+**Problem:** LadybugDB memiliki 3 CALL function untuk manajemen projected graph yang tidak ada di Rust: `show_projected_graphs()`, `projected_graph_info(graph)`, `drop_projected_graph(graph)`. Base functionality sudah ada (`CreateGraph`/`UseGraph`/`DropGraph` di parser/binder), tapi CALL entry point tidak terdaftar.
+
+**Fix (di `kuzu-processor/src/processor/standalone_call.rs`):**
+- `[ ]` Buat `ShowProjectedGraphsHandler` — list semua projected graphs dari catalog
+- `[ ]` Buat `ProjectedGraphInfoHandler` — detail graph tertentu
+- `[ ]` Buat `DropProjectedGraphHandler` — drop projected graph via CALL
+- `[ ]` Register di `DbStandaloneCallHandler::new()`
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-processor -p kuzu-main
+```
+
+### P31.4 — Fix kuzu-migrate Parquet Footer (1 SP)
+
+**Problem:** Satu test `kuzu-migrate` masih di-ignore karena parquet writer menghasilkan corrupt footer. Ini pre-existing issue yang didefer dari P30.1.
+
+**Approach:**
+- `[ ]` Investigasi `kuzu-storage/src/parquet_writer.rs` — cari root cause footer corruption
+- `[ ]` Fix footer write (mungkin masalah length/offset atau checksum)
+- `[ ]` Un-ignore test di `kuzu-migrate/tests/`
+- `[ ]` Verifikasi dengan `cargo test -p kuzu-migrate`
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-migrate  # → 1 passed, 0 failed, 0 ignored
+cargo test --workspace      # → 1124+ passed, 0 failed, 0 ignored
+```
+
+### Minor Deferred Items (diluar P31)
+
+Item berikut **tidak masuk P31** — nice-to-have, non-critical:
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| Gzip file system | 🟢 Low | Jarang digunakan |
+| Progress bar | 🟢 Low | Tidak mempengaruhi correctness |
+| ConfidentialStatementAnalyzer | 🟢 Low | Security feature for enterprise |
+| WAL dump tool | 🟢 Low | Debug tool |
+| StorageDriver API | 🟢 Low | Already accessible via StorageManager |
+| HTML/LaTeX shell output | 🟢 Low | Niche output formats |
+| Extended shell commands | 🟢 Low | `:schema`, `:highlight`, `:max_rows` |
+
+---
+
 ## All Completed Phases (P1-P29) — Archived Reference
 
 > **P1-P26, P27.5/P27.6, P28, P29** — semua sudah complete. Detail implementasi ada di [`STATUS.md`](STATUS.md). 
@@ -445,6 +529,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
 | **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.5 COMPLETE ✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI. Remaining: P30.6** |
+| **Sprint 5** | **P31: Final Parity Sprint** | **4** | **🟡 Address 4 audit gaps — lambda reg, GREATEST/LEAST, 7 aliases, 3 CALL handlers, parquet fix.** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -469,6 +554,11 @@ graph TD
     P30 --> P30_4["✅ P30.4: STANDALONE_CALL refactor (DONE)"]
     P30 --> P30_5["✅ P30.5: WASM + Fuzz CI (DONE)"]
     P30 --> P30_6["🟢 P30.6: GitHub Releases"]
+    P30 --> P31["🟡 P31: Final Parity Sprint"]
+    P31 --> P31_1["🟡 P31.1: Lambda + alias reg"]
+    P31 --> P31_2["🟡 P31.2: GREATEST/LEAST"]
+    P31 --> P31_3["🟡 P31.3: CALL graph mgmt"]
+    P31 --> P31_4["🟡 P31.4: parquet fix"]
 ```
 
 ## Design Decisions Log
