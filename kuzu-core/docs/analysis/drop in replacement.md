@@ -1,4 +1,4 @@
-**TL;DR:** Kuzu Rust **bukan** 1:1 drop-in replacement, tapi **API-equivalent** dengan performa yang sudah **sebanding** dengan C++ (parity 397µs vs 400µs). Berikut analisis lengkapnya:
+**TL;DR:** Kuzu Rust **bukan** 1:1 drop-in replacement, tapi **API-equivalent** dengan performa yang sudah **sebanding** dengan C++ (parity 397µs vs 400µs). Berikut analisis lengkapnya: 17/07/2026
 
 ---
 
