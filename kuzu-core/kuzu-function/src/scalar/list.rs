@@ -407,6 +407,10 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
             let count = list.iter().filter(|v| is_truthy(v)).count();
             Ok(Value::Bool(count == 1))
         }
+        // Lambda-based list functions — require expression evaluator path
+        ListOp::Transform => Err("list_transform requires a lambda expression — use in a query context".into()),
+        ListOp::Filter => Err("list_filter requires a lambda expression — use in a query context".into()),
+        ListOp::Reduce => Err("list_reduce requires a lambda expression — use in a query context".into()),
     }
 }
 
