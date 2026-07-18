@@ -1,6 +1,6 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3 COMPLETE ✅✅✅)
+> **Revision:** 2026-07-18 (Sprint 4 — P30.1+P30.2+P30.3+P30.4 COMPLETE ✅✅✅✅)
 > **Baseline:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored** (kuzu-migrate deferred), 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P30.1 COMPLETE: 31/32 ignored tests fixed + 1 FTS test fixed.** Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, FTS arrow-path filtering. **Kuzu-migrate (1) deferred — parquet footer bug (pre-existing).**
@@ -57,11 +57,11 @@
 - ✅ 3-way parity verified: **Rust 397 µs ≈ Vela 400 µs ≈ Ladybug 374 µs**
 - ✅ Published to `BENCHMARK_COMPARISON.md`
 
-### 🟢 P30.4-P30.6 — Housekeeping (6 SP)
+### ✅ P30.4 COMPLETE — P30.5+P30.6 remaining (4 SP)
 
 | Item | SP | Detail |
 |------|:---:|--------|
-| P30.4 — STANDALONE_CALL refactor (string → trait) | 2 | P22 deferred |
+| P30.4 — STANDALONE_CALL refactor (string → trait) | 2 | ✅ **DONE.** Trait `StandaloneCallFn` + `StandaloneCallRegistry` in `kuzu-processor`. 22 handler structs replace giant match. |
 | P30.5 — WASM test stabilisasi + fuzz CI | 2 | WASM 3/4 → 4/4; fuzz di nightly CI |
 | P30.6 — GitHub Releases + binary distribution | 2 | `cargo-dist` atau manual |
 
@@ -90,8 +90,7 @@
 
 
 > [!IMPORTANT]
-> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.3 COMPLETE ✅✅✅** — 0 ignored tests, 3-way C++ parity verified. Fokus utama sekarang:
-> - STANDALONE_CALL refactor (P30.4)
+> **P30 adalah fase kritis** sebelum production-ready. **P30.1-P30.4 COMPLETE ✅✅✅✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored. Fokus utama sekarang:
 > - WASM + Fuzz CI (P30.5)
 > - GitHub Releases (P30.6)
 
@@ -316,15 +315,16 @@ Tiga gap yang didefer dari P27 — semua selesai.
 3. `[ ]` ~~Jalankan ClickBench dan LSQB~~ — scoped down. Single micro-benchmark sufficient for parity verification.
 4. `[x]` Publikasikan hasil di `BENCHMARK_COMPARISON.md` — tabel 3 kolom (Vela 400 µs | Ladybug 374 µs | Rust 397 µs)
 
-### P30.4 — STANDALONE_CALL Refactor (2 SP)
+### ✅ P30.4 — STANDALONE_CALL Refactor (2 SP) — COMPLETE
 
 **Problem:** `STANDALONE_CALL` dispatch masih via string matching (`if name == "table_info" { ... }`) — bukan trait-based. Deferred sejak P22.
 
 **Fix:**
-- `[ ]` Buat trait `StandaloneCallFn: Fn(&[Value]) -> Result<Vec<Vec<Value>>>`
-- `[ ]` Registry: `HashMap<&'static str, Box<dyn StandaloneCallFn>>`
-- `[ ]` Register semua 14 CALL functions via registry
-- `[ ]` Hapus string matching di `standalone_call.rs`
+- `[x]` Buat trait `StandaloneCallFn` (method `execute` + `aliases`) di `kuzu-processor`
+- `[x]` Registry: `StandaloneCallRegistry` dengan `HashMap<String, Arc<dyn StandaloneCallFn>>`, case-insensitive lookup
+- `[x]` Register semua 22 CALL functions via registry (masing-masing struct sendiri)
+- `[x]` Hapus string matching di `standalone_call.rs` — ganti dengan `registry.get(name)` → fallback `function_registry`
+- `[x]` Ekstrak shared helper (`eval_ast_expr_to_value`, `extract_arg_string`, `format_result`) ke module-level functions
 
 ### P30.5 — WASM + Fuzz CI (2 SP)
 
@@ -443,7 +443,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 1** | P26: Tests + Profiling | 17 | ✅ Edge case tests (137), fuzz targets, profiling report |
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
-| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.3 COMPLETE ✅✅✅ — 0 ignored, query opt done, 3-way parity verified. Remaining: P30.4-P30.6** |
+| **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.4 COMPLETE ✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored. Remaining: P30.5-P30.6** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -465,7 +465,7 @@ graph TD
     P30 --> P30_1["✅ P30.1: Fix 56 ignored tests (DONE)"]
     P30 --> P30_2["✅ P30.2: Optimasi query kompleks (DONE)"]
     P30 --> P30_3["✅ P30.3: LadybugDB benchmark"]
-    P30 --> P30_4["🟢 P30.4: STANDALONE_CALL refactor"]
+    P30 --> P30_4["✅ P30.4: STANDALONE_CALL refactor (DONE)"]
     P30 --> P30_5["🟢 P30.5: WASM + Fuzz CI"]
     P30 --> P30_6["🟢 P30.6: GitHub Releases"]
 ```
