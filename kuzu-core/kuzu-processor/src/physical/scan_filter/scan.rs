@@ -103,6 +103,7 @@ impl PhysicalScan {
     }
 
     /// Convert a Value to bytes in a ValueVector at the given row index.
+    #[allow(dead_code)]
     fn write_value_to_vector(v: &mut ValueVector, row: usize, val: &Value) {
         match val {
             Value::Null => {
@@ -319,7 +320,7 @@ impl PhysicalScan {
     /// Execute scan using pre-built Arrow arrays (fast path).
     /// Skips the `Vec<Vec<Value>>` → Arrow conversion entirely.
     fn execute_with_arrow_arrays(&self, arrays: &[arrow::array::ArrayRef]) -> OperatorResult {
-        if arrays.is_empty() || arrays[0].len() == 0 {
+        if arrays.is_empty() || arrays[0].is_empty() {
             return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 
@@ -444,7 +445,7 @@ impl PhysicalScan {
             let fts_chunks = fts.execute(vec![])?;
             let mut doc_ids = Vec::new();
             if let Some(chunk) = fts_chunks.first() {
-                if let Some(id_vec) = chunk.fields.first() {
+                if let Some(_id_vec) = chunk.fields.first() {
                     for row in 0..chunk.size {
                         if let Some(doc_id) = chunk.get_i64(self.column_ids.first().copied().unwrap_or(0) as usize, row) {
                             doc_ids.push(doc_id);
