@@ -128,6 +128,16 @@ impl Database {
         Some(std::sync::Arc::new(kuzu_storage::Spiller::new(spill_dir, threshold)))
     }
 
+    /// Create a [`StorageDriver`] for programmatic storage-level access
+    /// (page counts, buffer stats, file sizes, table counts) without Cypher.
+    pub fn storage_driver(&self) -> crate::storage_driver::StorageDriver {
+        crate::storage_driver::StorageDriver::new(
+            self.storage_manager.clone(),
+            self.catalog.clone(),
+            self.vfs.clone(),
+        )
+    }
+
     /// Get a reference to the table catalog for programmatic data access.
     pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
         self.catalog.clone()
