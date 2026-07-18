@@ -37,6 +37,9 @@ impl DbStandaloneCallHandler {
         registry.register(Arc::new(ShowOfficialExtensionsHandler));
         registry.register(Arc::new(ClearWarningsHandler));
         registry.register(Arc::new(ShowWarningsHandler));
+        registry.register(Arc::new(ShowProjectedGraphsHandler { database: database.clone() }));
+        registry.register(Arc::new(ProjectedGraphInfoHandler { database: database.clone() }));
+        registry.register(Arc::new(DropProjectedGraphHandler { database: database.clone() }));
         Self { database, registry }
     }
 }
@@ -552,5 +555,89 @@ impl StandaloneCallFn for ShowWarningsHandler {
 
     fn aliases(&self) -> Vec<&'static str> {
         vec!["show_warnings"]
+    }
+}
+
+// ==================== Projected Graph handlers ====================
+
+struct ShowProjectedGraphsHandler {
+    database: Arc<Database>,
+}
+
+impl StandaloneCallFn for ShowProjectedGraphsHandler {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+        let cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let graphs = cat.projected_graph_entries();
+        let rows: Vec<Vec<Value>> = graphs
+            .into_iter()
+            .map(|g| {
+                vec![
+                    Value::String(g.name.clone()),
+                    Value::String(g.entry_type.clone()),
+                ]
+            })
+            .collect();
+        Ok(rows)
+    }
+
+    fn aliases(&self) -> Vec<&'static str> {
+        vec!["show_projected_graphs"]
+    }
+}
+
+struct ProjectedGraphInfoHandler {
+    database: Arc<Database>,
+}
+
+impl StandaloneCallFn for ProjectedGraphInfoHandler {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+        let graph_name = extract_arg_string(args, 0)?;
+        let cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let info = cat
+            .get_projected_graph(&graph_name)
+            .ok_or_else(|| format!("Projected graph '{}' not found", graph_name))?;
+        match info.entry_type.as_str() {
+            "NATIVE" => {
+                // NATIVE projected graph: return name, type marker
+                Ok(vec![vec![
+                    Value::String(info.name.clone()),
+                    Value::String("NATIVE".into()),
+                    Value::String("Node/rel tables defined at creation".into()),
+                ]])
+            }
+            "CYPHER" => {
+                let query = info.cypher_query.clone().unwrap_or_default();
+                Ok(vec![vec![
+                    Value::String(info.name.clone()),
+                    Value::String("CYPHER".into()),
+                    Value::String(query),
+                ]])
+            }
+            other => Err(format!("Unknown projected graph type: {other}")),
+        }
+    }
+
+    fn aliases(&self) -> Vec<&'static str> {
+        vec!["projected_graph_info"]
+    }
+}
+
+struct DropProjectedGraphHandler {
+    database: Arc<Database>,
+}
+
+impl StandaloneCallFn for DropProjectedGraphHandler {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+        let graph_name = extract_arg_string(args, 0)?;
+        let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+        cat.drop_projected_graph(&graph_name)?;
+        Ok(vec![vec![Value::String(format!(
+            "Projected graph '{}' dropped",
+            graph_name
+        ))]])
+    }
+
+    fn aliases(&self) -> Vec<&'static str> {
+        vec!["drop_projected_graph"]
     }
 }
