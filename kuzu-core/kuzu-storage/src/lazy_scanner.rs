@@ -150,12 +150,7 @@ impl<'a> Iterator for FilteredLazyScan<'a> {
         }
 
         // Scan until we find a matching row or exhaust all groups
-        for row in self.inner.by_ref() {
-            if (self.predicate)(&row) {
-                return Some(row);
-            }
-        }
-        None
+        self.inner.by_ref().find(|row| (self.predicate)(row))
     }
 }
 
