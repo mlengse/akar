@@ -51,7 +51,7 @@ impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
                 continue;
             }
 
-            let node_ids_field = &chunk.fields[self.node_ids_col_idx];
+            let _node_ids_field = &chunk.fields[self.node_ids_col_idx];
             let mut extra_fields: Vec<(String, ValueVector)> = Vec::new();
 
             for spec in &self.properties {
