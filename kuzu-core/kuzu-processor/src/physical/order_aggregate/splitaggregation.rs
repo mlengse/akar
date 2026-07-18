@@ -1,12 +1,11 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, update_states_row, resolve_agg_col_indices};
+use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, hash_group_key, keys_equal, update_states_row, resolve_agg_col_indices};
 use kuzu_common::types::Value;
 use kuzu_common::vector::DataChunk;
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
 use kuzu_parser::ast::Expression;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::common::value_hash_fast;
 
 const NUM_SHARDS: usize = 64;
 
@@ -128,13 +127,13 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
 
         for chunk in &input {
             for row in 0..chunk.size {
-                let key = build_group_key(chunk, group_cols, row);
-                let hash = value_hash_fast(&key);
+                let hash = hash_group_key(chunk, group_cols, row);
                 let bucket = shard.entry(hash).or_default();
-                let entry = bucket.iter_mut().find(|(k, _)| *k == key);
+                let entry = bucket.iter_mut().find(|(k, _)| keys_equal(k, chunk, group_cols, row));
                 if let Some((_, states)) = entry {
                     update_states_row(states, chunk, funcs, &col_indices, row);
                 } else {
+                    let key = build_group_key(chunk, group_cols, row);
                     let mut states = funcs.iter().map(AggValueState::new).collect::<Vec<_>>();
                     update_states_row(&mut states, chunk, funcs, &col_indices, row);
                     bucket.push((key, states));
