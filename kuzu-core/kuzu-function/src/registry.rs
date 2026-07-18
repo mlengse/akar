@@ -290,6 +290,10 @@ pub enum ListOp {
     Min,
     Max,
     HasAny,
+    /// Lambda-based list functions (evaluated by expression evaluator)
+    Transform,
+    Filter,
+    Reduce,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -585,6 +589,9 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("sqrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Sqrt });
+        // Standard SQL aliases
+        self.register_scalar("pow", ScalarFunction::Arithmetic { op: ArithmeticOp::Power });
+        self.register_scalar("log10", ScalarFunction::Arithmetic { op: ArithmeticOp::Log });
         // Math aliases
         self.register_scalar("cbrt", ScalarFunction::Arithmetic { op: ArithmeticOp::Cbrt });
         self.register_scalar("cot", ScalarFunction::Arithmetic { op: ArithmeticOp::Cot });
@@ -748,6 +755,9 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("ends_with", ScalarFunction::String { op: StringOp::EndsWith });
+        // C++ function aliases
+        self.register_scalar("prefix", ScalarFunction::String { op: StringOp::StartsWith });
+        self.register_scalar("suffix", ScalarFunction::String { op: StringOp::EndsWith });
         self.register_scalar("like", ScalarFunction::String { op: StringOp::Like });
         self.register_scalar("to_upper", ScalarFunction::String { op: StringOp::ToUpper });
         self.register_scalar("to_lower", ScalarFunction::String { op: StringOp::ToLower });
@@ -1041,6 +1051,7 @@ impl FunctionRegistry {
         self.register_scalar("list_creation", ScalarFunction::List { op: ListOp::Creation });
         self.register_scalar("list_extract", ScalarFunction::List { op: ListOp::Extract });
         self.register_scalar("list_concat", ScalarFunction::List { op: ListOp::Concat });
+        self.register_scalar("list_cat", ScalarFunction::List { op: ListOp::Concat });
         self.register_scalar("list_len", ScalarFunction::List { op: ListOp::Len });
         self.register_scalar("list_sort", ScalarFunction::List { op: ListOp::Sort });
         self.register_scalar("list_reverse", ScalarFunction::List { op: ListOp::Reverse });
@@ -1071,6 +1082,11 @@ impl FunctionRegistry {
             },
         );
 
+        // --- Lambda-based list functions (evaluated by expression evaluator) ---
+        self.register_scalar("list_transform", ScalarFunction::List { op: ListOp::Transform });
+        self.register_scalar("list_filter", ScalarFunction::List { op: ListOp::Filter });
+        self.register_scalar("list_reduce", ScalarFunction::List { op: ListOp::Reduce });
+
         // --- List predicate functions ---
         self.register_scalar("any", ScalarFunction::List { op: ListOp::Any });
         self.register_scalar("all", ScalarFunction::List { op: ListOp::All });
@@ -1080,6 +1096,7 @@ impl FunctionRegistry {
         // --- Map ---
         self.register_scalar("map_creation", ScalarFunction::Map { op: MapOp::Creation });
         self.register_scalar("map_extract", ScalarFunction::Map { op: MapOp::Extract });
+        self.register_scalar("element_at", ScalarFunction::Map { op: MapOp::Extract });
         self.register_scalar("map_keys", ScalarFunction::Map { op: MapOp::Keys });
         self.register_scalar("map_values", ScalarFunction::Map { op: MapOp::Values });
 
@@ -1118,6 +1135,7 @@ impl FunctionRegistry {
         self.register_scalar("ifnull", ScalarFunction::Utility { op: UtilityOp::IfNull });
         self.register_scalar("nullif", ScalarFunction::Utility { op: UtilityOp::NullIf });
         self.register_scalar("size", ScalarFunction::Utility { op: UtilityOp::Size });
+        self.register_scalar("cardinality", ScalarFunction::Utility { op: UtilityOp::Size });
         self.register_scalar("typeof", ScalarFunction::Utility { op: UtilityOp::TypeOf });
         self.register_scalar("error", ScalarFunction::Utility { op: UtilityOp::Error });
         self.register_scalar("pg_isready", ScalarFunction::Utility { op: UtilityOp::PgIsReady });
