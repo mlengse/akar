@@ -27,7 +27,6 @@ fn test_boundary_double_large() {
 }
 
 #[test]
-#[ignore = "Parser might drop small exponents"]
 fn test_boundary_double_small() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Extreme(id INT64, val DOUBLE, PRIMARY KEY (id))");
@@ -50,7 +49,6 @@ fn test_boundary_empty_string_vs_null() {
 }
 
 #[test]
-#[ignore = "Long strings may be truncated in result display"]
 fn test_boundary_very_long_string_1k() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
@@ -61,7 +59,6 @@ fn test_boundary_very_long_string_1k() {
 }
 
 #[test]
-#[ignore = "Parser fails on very large queries (100k length limit)"]
 fn test_boundary_very_long_string_100k() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
@@ -106,7 +103,6 @@ fn test_boundary_boolean_literals() {
 }
 
 #[test]
-#[ignore = "Might not handle unescaped special chars in string correctly"]
 fn test_boundary_string_with_quotes() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE StringTab(id INT64, s STRING, PRIMARY KEY (id))");
