@@ -1,12 +1,12 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-19 (Sprint 7 — P34 in progress 🟢🟢🟢🟢)
+> **Revision:** 2026-07-19 (Sprint 7 — P34 ALL DONE ✅✅✅✅)
 > **Baseline:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P33 COMPLETE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX ✅.
 > **P32 COMPLETE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL COMPLETE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet (P31.4) ✅.
-> **P34 IN PROGRESS:** Native readers: kuzu-azure 🟢, kuzu-iceberg 🟢, kuzu-delta 🟢, kuzu-unity-catalog 🟢.
+> **P34 DONE:** Native readers: kuzu-azure ✅, kuzu-iceberg ✅, kuzu-delta ✅, kuzu-unity-catalog ✅.
 > **✅ 0 clippy warnings, 0 ignored tests.** `cargo clippy --workspace` clean.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
@@ -92,13 +92,13 @@
 | **P31** | **Final Parity Sprint** | **🏁 ALL DONE** | **4** | Address remaining audit gaps (3 CALL handlers, parquet fix) — **P31 ALL DONE ✅✅✅✅** |
 | **P32** | **Polish & DX** | **🏁 ALL DONE** | **2** | Clippy 29→0 ✅, export_csv/parquet CALL ✅, error messages improved ✅ |
 | **P33** | **Deferred Items** | **🏁 ALL DONE** | **4** | StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump ✅, HTML/LaTeX ✅ |
-| **P34** | **Extension Depth — Native Readers** | **🟢 IN PROGRESS** | **13** | kuzu-azure native 🟢, kuzu-iceberg native 🟢, kuzu-delta native 🟢, kuzu-unity-catalog native 🟢 |
+| **P34** | **Extension Depth — Native Readers** | **✅ DONE** | **13** | kuzu-azure native ✅, kuzu-iceberg native ✅, kuzu-delta native ✅, kuzu-unity-catalog native ✅ |
 
 
 > [!IMPORTANT]
 > **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated.
 > **P31-P33: ALL COMPLETE ✅✅✅** — Final parity, CLI polish, deferred items.
-> **P34 IN PROGRESS 🟢** — Extension depth: native readers for Azure, Iceberg, Delta, Unity Catalog.
+> **P34 DONE ✅** — Extension depth: native readers for Azure, Iceberg, Delta, Unity Catalog.
 
 ---
 
