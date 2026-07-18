@@ -1,11 +1,11 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-19 (Sprint 7 — P34 in progress 🟢🟢🟢🟢)
+> **Tanggal:** 2026-07-19 (Sprint 7 — P34 ALL DONE ✅✅✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P33 DONE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX output ✅.
 > **P32 DONE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
-> **P34 IN PROGRESS:** Native readers: kuzu-azure native 🟢, kuzu-iceberg native 🟢, kuzu-delta native 🟢, kuzu-unity-catalog native 🟢.
+> **P34 DONE:** Native readers: kuzu-azure native ✅, kuzu-iceberg native ✅, kuzu-delta native ✅, kuzu-unity-catalog native ✅.
 > **P31 ALL DONE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet footer (P31.4) ✅.
 > **✅ 0 clippy warnings, 0 ignored tests** — `cargo clippy --workspace` clean.
 
@@ -569,11 +569,11 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ### 4.2 Extension Crates
 - `kuzu-json` & `kuzu-llm`: **Selesai**. Sudah di-wire ke native Rust API via `CustomScalar`.
 - `kuzu-postgres`, `kuzu-duckdb`: **Selesai**. Sudah fungsional mendelegasikan query atau scanning.
-- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`: **P34 — Native Readers in Progress**. Mengganti DuckDB delegation dengan native Rust readers:
-  - `kuzu-azure`: `azure_storage_blobs` + `azure_identity` untuk VFS / CustomTable
-  - `kuzu-iceberg`: `iceberg-rust` crate untuk membaca Iceberg table format
-  - `kuzu-delta`: `deltalake` crate untuk membaca Delta Lake tables
-  - `kuzu-unity-catalog`: `reqwest` untuk REST API client ke Unity Catalog
+- `kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`: **P34 — Native Readers Done ✅**. DuckDB delegation diganti dengan native Rust readers:
+  - `kuzu-azure`: Native Azure Blob reader via `ureq` HTTP REST + SAS/auth token dari env var
+  - `kuzu-iceberg`: Native metadata reader — parse `metadata.json`, enumerasi `.parquet` data files
+  - `kuzu-delta`: Native Delta log reader — parse `_delta_log/*.json`, resolve `add`/`remove` actions
+  - `kuzu-unity-catalog`: Native REST API client via `ureq` ke Databricks UC `/api/2.1/unity-catalog/tables/`
 - `kuzu-sqlite`, `kuzu-neo4j`: **Selesai (Native)**.
 - `kuzu-httpfs`: **Selesai (Native)**. HTTP/HTTPS/S3 via VFS Registry + `HttpRandomAccessReader` (HTTP Range requests).
 - `kuzu-fts`: **Selesai (Native)**. Full pipeline: DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX doc_idx('query')`, BM25 scoring, 3 macro tables (`{name}_docs`, `{name}_terms`, `{name}_appears_in`), Porter stemmer, stop word filtering, tokenizer. Diuji via `kuzu-main/tests/test_fts.rs`.
