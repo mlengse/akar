@@ -1,10 +1,4 @@
----
-sidebar_position: 10
-title: "Model Provider Plugins"
-description: "How to build a model provider (inference backend) plugin for Hermes Agent"
----
-
-# Building a Model Provider Plugin
+# Building a Model Provider Plugin 17/07/2026
 
 Model provider plugins declare an inference backend — an OpenAI-compatible endpoint, an Anthropic Messages server, a Codex-style Responses API, or a Bedrock-native surface — that Hermes can route `AIAgent` calls through. Every built-in provider (OpenRouter, Anthropic, GMI, DeepSeek, Nvidia, …) ships as one of these plugins. Third parties can add their own by dropping a directory under `$HERMES_HOME/plugins/model-providers/` with zero changes to the repo.
 
