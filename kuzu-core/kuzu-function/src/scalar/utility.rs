@@ -1,4 +1,5 @@
 use crate::registry::*;
+use crate::scalar::comparison::compare_values;
 use kuzu_common::types::Value;
 
 // ==================== Utility ====================
@@ -53,6 +54,40 @@ pub(crate) fn evaluate_utility(op: UtilityOp, args: &[Value]) -> Result<Value, S
         }
         UtilityOp::PgIsReady => {
             Ok(Value::Bool(true))
+        }
+        UtilityOp::Greatest => {
+            if args.is_empty() {
+                return Err("GREATEST requires at least one argument".into());
+            }
+            let mut result = Value::Null;
+            for arg in args {
+                if matches!(arg, Value::Null) {
+                    continue;
+                }
+                if matches!(result, Value::Null) {
+                    result = arg.clone();
+                } else if compare_values(arg, &result)?.is_gt() {
+                    result = arg.clone();
+                }
+            }
+            Ok(result)
+        }
+        UtilityOp::Least => {
+            if args.is_empty() {
+                return Err("LEAST requires at least one argument".into());
+            }
+            let mut result = Value::Null;
+            for arg in args {
+                if matches!(arg, Value::Null) {
+                    continue;
+                }
+                if matches!(result, Value::Null) {
+                    result = arg.clone();
+                } else if compare_values(arg, &result)?.is_lt() {
+                    result = arg.clone();
+                }
+            }
+            Ok(result)
         }
     }
 }
