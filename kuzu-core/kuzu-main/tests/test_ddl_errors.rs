@@ -17,7 +17,6 @@ fn test_drop_table_does_not_exist() {
 }
 
 #[test]
-#[ignore = "CREATE REL TABLE grammar requires column_definitions"]
 fn test_create_rel_table_missing_node_table() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
@@ -124,7 +123,6 @@ fn test_create_table_reserved_keyword() {
 }
 
 #[test]
-#[ignore = "CREATE REL TABLE grammar requires column_definitions"]
 fn test_create_rel_table_same_from_to() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
