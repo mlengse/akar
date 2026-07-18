@@ -609,7 +609,7 @@ impl ExpressionEvaluator {
         if !chunk.field_names.is_empty()
             && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
         {
-            let arc = chunk
+            let _arc = chunk
                 .fields
                 .get(idx)
                 .cloned()
