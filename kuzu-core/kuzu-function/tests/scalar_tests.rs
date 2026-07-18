@@ -2280,3 +2280,125 @@ fn test_list_single() {
         Value::Bool(false)
     );
 }
+
+// ==================== GREATEST / LEAST ====================
+
+#[test]
+fn test_greatest_int64() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(3), Value::Int64(7), Value::Int64(5)]).unwrap(),
+        Value::Int64(7)
+    );
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(),
+        Value::Int64(42)
+    );
+}
+
+#[test]
+fn test_least_int64() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(3), Value::Int64(7), Value::Int64(5)]).unwrap(),
+        Value::Int64(3)
+    );
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(42)]).unwrap(),
+        Value::Int64(42)
+    );
+}
+
+#[test]
+fn test_greatest_double() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(3.14)]).unwrap(),
+        Value::Double(3.14)
+    );
+}
+
+#[test]
+fn test_least_double() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(3.14)]).unwrap(),
+        Value::Double(1.5)
+    );
+}
+
+#[test]
+fn test_greatest_strings() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::String("a".into()), Value::String("z".into())]).unwrap(),
+        Value::String("z".into())
+    );
+}
+
+#[test]
+fn test_least_strings() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::String("a".into()), Value::String("z".into())]).unwrap(),
+        Value::String("a".into())
+    );
+}
+
+#[test]
+fn test_greatest_with_nulls() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    // NULLs should be ignored
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Int64(42), Value::Null]).unwrap(),
+        Value::Int64(42)
+    );
+    // All NULLs → NULL
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Null]).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
+fn test_least_with_nulls() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Int64(42), Value::Null]).unwrap(),
+        Value::Int64(42)
+    );
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Null]).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
+fn test_greatest_mixed_bools() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Bool(false), Value::Bool(true)]).unwrap(),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn test_least_mixed_bools() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Bool(false), Value::Bool(true)]).unwrap(),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn test_greatest_empty_fails() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
+    assert!(evaluate_scalar(&func, &[]).is_err());
+}
+
+#[test]
+fn test_least_empty_fails() {
+    let func = ScalarFunction::Utility { op: UtilityOp::Least };
+    assert!(evaluate_scalar(&func, &[]).is_err());
+}
