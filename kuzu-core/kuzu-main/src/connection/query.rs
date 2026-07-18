@@ -253,6 +253,47 @@ impl Connection {
             });
 
         let db = self.database.clone();
+
+        // query_fn: execute arbitrary Cypher string → QueryResult (for export_csv / export_parquet CALL)
+        let db_qf = db.clone();
+        let query_fn: crate::connection::standalone_call::QueryFn = Arc::new(
+            move |query_str: &str| -> Result<crate::query_result::QueryResult, String> {
+                let stmt = kuzu_parser::parse(query_str)
+                    .map_err(|e| format!("Parse error: {e}"))?;
+                let binder = Binder::new(db_qf.catalog.clone());
+                let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
+                let planner = QueryPlanner::new();
+                let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
+                let optimizer = Optimizer::with_stats(db_qf.stats_store.clone());
+                let optimized_plan = optimizer.optimize(logical_plan);
+
+                let processor = QueryProcessor::with_catalog(
+                    db_qf.function_registry.clone(),
+                    db_qf.storage_manager.table_catalog(),
+                    db_qf.vfs.clone(),
+                )
+                .with_standalone_call_handler(Arc::new(
+                    crate::connection::standalone_call::DbStandaloneCallHandler::new(db_qf.clone())
+                ));
+
+                let chunks = processor
+                    .execute(&optimized_plan)
+                    .map_err(|e| format!("Execute error: {e}"))?;
+
+                let num_rows: usize = chunks.iter().map(|c| c.size).sum();
+                let num_columns = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+                Ok(crate::query_result::QueryResult {
+                    chunks,
+                    num_rows,
+                    num_columns,
+                    success: true,
+                    error_message: None,
+                    message: None,
+                    summary: None,
+                })
+            },
+        );
+
         let subquery_fn: Arc<
             dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<kuzu_common::vector::DataChunk>, String> + Send + Sync,
         > = Arc::new(
@@ -288,8 +329,9 @@ impl Connection {
                     db.vfs.clone(),
                 )
                 .with_sequence_fn(seq_fn_inner)
-                .with_standalone_call_handler(Arc::new(crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone())));
-                // Note: Not attaching subquery_fn recursively to avoid complex ARC dependencies for now.
+                .with_standalone_call_handler(Arc::new(
+                    crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone())
+                ));
 
                 processor
                     .execute(&optimized_plan)
@@ -304,7 +346,12 @@ impl Connection {
         )
         .with_sequence_fn(seq_fn)
         .with_subquery_fn(subquery_fn)
-        .with_standalone_call_handler(Arc::new(crate::connection::standalone_call::DbStandaloneCallHandler::new(self.database.clone())))
+        .with_standalone_call_handler(Arc::new(
+            crate::connection::standalone_call::DbStandaloneCallHandler::with_query_executor(
+                self.database.clone(),
+                Some(query_fn),
+            )
+        ))
     }
 
     /// The checkpoint_threshold config controls this:
