@@ -1,11 +1,11 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-19 (Sprint 5 — P31 ALL DONE ✅✅✅✅)
+> **Revision:** 2026-07-19 (Sprint 5 — P32 ALL DONE ✅✅✅)
 > **Baseline:** `cargo test --workspace` → **~1125 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
-> **P30.1-P30.5 COMPLETE:** All edge case tests fixed + WASM + Fuzz CI + Ladybug benchmark.
+> **P32 COMPLETE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL COMPLETE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet (P31.4) ✅.
-> **✅ 0 ignored tests.** Zero test debt.
+> **✅ 0 clippy warnings, 0 ignored tests.** `cargo clippy --workspace` clean.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
