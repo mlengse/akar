@@ -183,3 +183,79 @@ fn append_value_to_builder(builder: &mut Box<dyn ArrayBuilder>, val: &Value) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_write_parquet_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let rows = vec![
+            vec![Value::Int64(1), Value::String("Alice".into())],
+            vec![Value::Int64(2), Value::String("Bob".into())],
+            vec![Value::Int64(3), Value::String("Charlie".into())],
+        ];
+        let column_names = vec!["id".into(), "name".into()];
+
+        write_parquet(&path_str, &rows, &column_names).unwrap();
+
+        // Read it back using parquet reader
+        let file = std::fs::File::open(&path).unwrap();
+        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        let batches: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(!batches.is_empty());
+        let batch = &batches[0];
+        assert_eq!(batch.num_rows(), 3);
+        assert_eq!(batch.num_columns(), 2);
+    }
+
+    #[test]
+    fn test_write_parquet_with_nulls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_nulls.parquet");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let rows = vec![
+            vec![Value::Null, Value::String("null_id".into())],
+            vec![Value::Int64(42), Value::Null],
+        ];
+        let column_names = vec!["id".into(), "name".into()];
+
+        write_parquet(&path_str, &rows, &column_names).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        let batches: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(!batches.is_empty());
+        assert_eq!(batches[0].num_rows(), 2);
+    }
+
+    #[test]
+    fn test_write_empty_parquet() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.parquet");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let rows: Vec<Vec<Value>> = vec![];
+        let column_names = vec!["col_a".into(), "col_b".into()];
+
+        write_parquet(&path_str, &rows, &column_names).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap();
+        assert_eq!(builder.schema().fields().len(), 2);
+        // Empty parquet may produce 0 batches (no row groups); just verify it opens
+        let _reader = builder.build().unwrap();
+    }
+}
