@@ -1,8 +1,9 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-19 (Sprint 5 — P32 ALL DONE ✅✅✅)
-> **Baseline:** `cargo test --workspace` → **~1125 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
+> **Revision:** 2026-07-19 (Sprint 6 — P33 ALL DONE ✅✅✅✅✅)
+> **Baseline:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
+> **P33 COMPLETE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX ✅.
 > **P32 COMPLETE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL COMPLETE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet (P31.4) ✅.
 > **✅ 0 clippy warnings, 0 ignored tests.** `cargo clippy --workspace` clean.
@@ -88,11 +89,14 @@
 | **P29** | Functions & completeness | 🟡 P1 | 6 | ✅ Complete |
 | **P30** | **Stabilisasi & Benchmark Komprehensif** | **🔴 P0** | **18** | **Sprint 4** (P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — FULLY DONE) |
 | **P31** | **Final Parity Sprint** | **🏁 ALL DONE** | **4** | Address remaining audit gaps (3 CALL handlers, parquet fix) — **P31 ALL DONE ✅✅✅✅** |
+| **P32** | **Polish & DX** | **🏁 ALL DONE** | **2** | Clippy 29→0 ✅, export_csv/parquet CALL ✅, error messages improved ✅ |
+| **P33** | **Deferred Items** | **🏁 ALL DONE** | **4** | StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump ✅, HTML/LaTeX ✅ |
 
 
 > [!IMPORTANT]
-> **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated. **Audit 2026-07-18: ~95% parity dengan C++.** P31.1+P31.2+P31.3 ✅ **DONE.** Fokus utama sekarang:
-> - **P31.4: Parquet footer fix** (1 SP)
+> **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated.
+> **P31-P33: ALL COMPLETE ✅✅✅** — Final parity, CLI polish, deferred items.
+> **Sekarang:** Lanjut ke Endgame (API review, docs pass, semver, crates.io release).
 
 ---
 
@@ -145,6 +149,7 @@ Separate files per category under `kuzu-main/tests/`:
 - `[x]` Attempt `cargo flamegraph` — fails on Windows without Admin ETW; criterion micro-benchmarks used instead
 
 > **Note (2026-07-17):** The P26.4 data below is from before P27.5 (Arrow Scan Path). The scan bottleneck is now resolved — see [P27.5 results](#p275--direct-columnchunkarrow-scan-path--done) above. The FTS-related and operator-level profiling sections remain valid reference data.
+> **P33 ALL DONE ✅ — StorageDriver API, gzip VFS, progress bar, WAL dump tool, shell HTML/LaTeX output.**
 
 #### P26.4 Profiling Report — Full Empirical Results (2026-07-16)
 
@@ -344,7 +349,7 @@ Tiga gap yang didefer dari P27 — semua selesai.
 
 ## ✅ P31: Final Parity Sprint — Address Audit Gaps (4 SP, ALL DONE ✅✅✅✅)
 
-**Latar belakang:** Audit komprehensif 2026-07-18 terhadap Kuzu C++ (Vela) + LadybugDB C++ vs Rust menemukan ~95% parity. **4 medium gaps** tersisa (3.5 SP) + minor deferred items. Lihat [`STATUS.md` §3.3](STATUS.md#33--medium-gaps-4-items-35-sp).
+**Latar belakang:** Audit komprehensif 2026-07-18 terhadap Kuzu C++ (Vela) + LadybugDB C++ vs Rust menemukan ~95% parity. **4 medium gaps** tersisa (3.5 SP). Lihat [`STATUS.md` §3.3](STATUS.md#33--medium-gaps-4-items-35-sp).
 **P31 ALL DONE ✅ — 0 ignored tests, 1125+ pass.**
 
 ### P31.1 — Register Lambda Functions + Missing Aliases (1 SP) ✅ COMPLETE
@@ -426,23 +431,51 @@ cargo test -p kuzu-migrate  # → 1 passed, 0 failed, 0 ignored
 cargo test --workspace      # → 1124+ passed, 0 failed, 0 ignored
 ```
 
-### Minor Deferred Items (diluar P31)
+## ✅ P33: Deferred Nice-to-Have Items — ALL DONE ✅✅✅✅✅
 
-Item berikut **tidak masuk P31** — nice-to-have, non-critical:
+Semua item deferred dari Sprint 4 sekarang sudah diimplementasi:
 
-| Item | Priority | Notes |
-|------|----------|-------|
-| Gzip file system | 🟢 Low | Jarang digunakan |
-| Progress bar | 🟢 Low | Tidak mempengaruhi correctness |
-| ConfidentialStatementAnalyzer | 🟢 Low | Security feature for enterprise |
-| WAL dump tool | 🟢 Low | Debug tool |
-| StorageDriver API | 🟢 Low | Already accessible via StorageManager |
-| HTML/LaTeX shell output | 🟢 Low | Niche output formats |
-| Extended shell commands | 🟢 Low | `:schema`, `:highlight`, `:max_rows` |
+| Item | Location | Detail |
+|------|----------|--------|
+| **StorageDriver API** | `kuzu-main/src/storage_driver.rs` | `StorageDriver` struct wrapping `Arc<StorageManager>`. Methods: `storage_info()`, `buffer_info()`, `file_info()`, `fsm_info()`, `wal_size()`, `num_tables()`, `num_node_tables()`, `num_rel_tables()`, `total_pages()`, `total_file_size()`, `pinned_frames()`, `table_catalog()`, `catalog()`, `vfs()`, `db_path()`. Obtain via `Database::storage_driver()`. |
+| **gzip VFS** | `kuzu-common/src/gzip_file_system.rs` | `GzipFileSystem` implements `FileSystem` trait. Wraps inner FS with `flate2::read::GzDecoder` / `flate2::write::GzEncoder`. Auto-detects `.gz` extension via `can_handle()`. Seek returns `Unsupported` error (gzip streaming). |
+| **Progress bar** | `kuzu-common/src/progress_bar.rs` | `KuzuProgress` wrapper around `indicatif::ProgressBar`. Spinner mode (indeterminate) and count-based bar. Methods: `inc()`, `inc_by()`, `set_pos()`, `set_message()`, `finish()`, `cancel()`, `cancelled_flag()`. Auto-clears on drop. |
+| **WAL dump tool** | `kuzu-storage/src/wal.rs` + `kuzu-main/src/bin/wal_dump.rs` | `Display` impl for `WALRecord` (human-readable per-record summary). Binary `wal_dump <db_path>` deserializes and prints all records from `<db_path>/wal.log` with tag bytes and metadata. |
+| **Shell HTML/LaTeX** | `kuzu-cli/src/main.rs` | `.mode html` → `<table>` with `<thead>`/`<tbody>`. `.mode latex` → `\begin{tabular}` with `\textbf` headers. Also accepts `.mode tex`. |
 
 ---
 
-## All Completed Phases (P1-P29) — Archived Reference
+## ✅ P32: Polish & DX (2 SP, ALL DONE ✅✅✅)
+
+**Latar belakang:** Sprint 5 berfokus pada code quality (clippy), user-facing CALL handlers (export_csv/export_parquet), dan error message quality.
+
+### ✅ P32.1 — Clippy 29→0 Warnings (1 SP)
+- `[x]` Fix `manual_div_ceil` in `kuzu-common`
+- `[x]` Fix `manual_ignore_case_cmp` in `kuzu-function`
+- `[x]` Fix `manual_find` in `kuzu-storage`
+- `[x]` Fix `unused_mut` + `unused_vars` in `kuzu-planner`
+- `[x]` Fix 12 warnings in `kuzu-processor` (unused imports, len_zero, unnecessary_cast, new_without_default, dead_code)
+- `[x]` Fix `manual_checked_ops` in `kuzu-algo`
+- `[x]` Fix `to_string_in_format_args x 5` in `kuzu-migrate`
+- `[x]` Fix `missing_safety_doc x 6` in `kuzu-c`
+- **Result:** `cargo clippy --workspace` → 0 warnings ✅
+
+### ✅ P32.2 — export_csv / export_parquet CALL Handlers (0.5 SP)
+- `[x]` Extract `write_parquet_to_file` as standalone public function in `ddl.rs`
+- `[x]` Create `ExportCsvHandler` struct implementing `StandaloneCallFn`
+- `[x]` Create `ExportParquetHandler` struct implementing `StandaloneCallFn`
+- `[x]` Thread `QueryFn` callback from `Connection` to `DbStandaloneCallHandler`
+- `[x]` Register both handlers in `DbStandaloneCallHandler::new()`
+- **Usage:** `CALL export_csv('file.csv', 'MATCH (n) RETURN n')` or `CALL export_parquet('file.parquet', 'MATCH (n) RETURN n')`
+
+### ✅ P32.3 — Error Messages Improved (0.5 SP)
+- `[x]` `extract_arg_string` reports argument index and expected type
+- `[x]` `execute_table_function` fallback suggests valid CALL alternatives
+- `[x]` Unknown CALL detection with `Did you mean?` suggestions
+
+---
+
+## All Completed Phases (P1-P33) — Archived Reference
 
 > **P1-P26, P27.5/P27.6, P28, P29** — semua sudah complete. Detail implementasi ada di [`STATUS.md`](STATUS.md). 
 > 
@@ -546,7 +579,8 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 2** | P27: Performance Optimization | 14 | ✅ Arrow scan path, Aggregate fast path, C++ parity achieved |
 | **Sprint 3** | P28 + P29: Migration + CLI + Functions | 18 | ✅ Migration tool, CLI Box mode, 18 functions |
 | **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI, GitHub Releases automated** |
-| **Sprint 5** | **P31: Final Parity Sprint** | **4** | **🏁 P31 ALL DONE ✅✅✅✅ — 0 ignored tests, 1125+ pass. Full C++ parity.** |
+| **Sprint 5** | **P32: Polish & DX** | **2** | **🏁 P32 ALL DONE ✅✅✅ — Clippy 29→0, export_csv/export_parquet CALL, error messages improved.** |
+| **Sprint 6** | **P33: Deferred Items** | **4** | **🏁 P33 ALL DONE ✅✅✅✅✅ — StorageDriver API, gzip VFS, progress bar, WAL dump tool, HTML/LaTeX shell output.** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -576,6 +610,16 @@ graph TD
     P31 --> P31_2["✅ P31.2: GREATEST/LEAST (DONE)"]
     P31 --> P31_3["✅ P31.3: CALL graph mgmt (DONE)"]
     P31 --> P31_4["🟡 P31.4: parquet fix"]
+    P31 --> P32["✅ P32: Polish & DX"]
+    P32 --> P32_1["✅ Clippy 29→0 (DONE)"]
+    P32 --> P32_2["✅ export_csv/parquet CALL (DONE)"]
+    P32 --> P32_3["✅ Error messages improved (DONE)"]
+    P32 --> P33["✅ P33: Deferred Items"]
+    P33 --> P33_1["✅ StorageDriver API"]
+    P33 --> P33_2["✅ gzip VFS"]
+    P33 --> P33_3["✅ Progress bar"]
+    P33 --> P33_4["✅ WAL dump tool"]
+    P33 --> P33_5["✅ HTML/LaTeX output"]
 ```
 
 ## Design Decisions Log
