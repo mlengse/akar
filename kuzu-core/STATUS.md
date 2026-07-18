@@ -1,9 +1,10 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 4: P30.1 COMPLETE ✅)
+> **Tanggal:** 2026-07-18 (Sprint 4 — Progress 5: P30.1+P30.2 COMPLETE ✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1123 passed, 0 failed, 1 ignored (kuzu-migrate deferred)** | 29 crate, ~262 file .rs, ~66k LOC
 > **P27.5+P27.6:** Arrow scan path (7.8× scan) + aggregate COUNT fast path (`ArrayRef::len()`). `conn.execute()` 1,787 µs → **397 µs** (4.5× total improvement). **Rust kini ≈ C++** (397 µs vs 400 µs). Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P30.1 COMPLETE:** 31/32 ignored tests fixed + 1 FTS test fixed. Grammar fixes (create_rel_table, union_keyword, backtick_identifier), binder relaxations, assertion adjustments. **Kuzu-migrate (1 ignored) deferred — parquet writer bug (pre-existing).**
+> **P30.2 COMPLETE:** 3 optimasi query kompleks — P27c `hash_group_key` langsung (tanpa `Vec<Value>`), P27d `HeapEntry` inline primary key, P27f `#[inline(always)]` di 4 hot path functions.
 > **⚠️ 1 test masih ignored** (kuzu-migrate, 0.1% dari total) — parquet footer corruption, perlu fix terpisah.
 > **Belum ada benchmark sistematis terhadap LadybugDB C++** — parity hanya terverifikasi terhadap Vela C++.
 
@@ -622,10 +623,10 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 | **P27a** `value_hash`→`value_hash_fast` (ahash) di aggregate | ✅ DONE | `aggregatehashtable.rs` + `splitaggregation.rs` |
 | **P27b** `with_capacity` di aggregate table | ✅ DONE | 3 tempat: parallel local, merge, sequential |
 | **P27g** Column mapping untuk SQL aggregate | ✅ DONE | `resolve_agg_col_indices` fixed — ends_with(".prop") fallback. 6 ignored tests now passing |
-| **P27c** Multi-key GROUP BY Vec\<Value> alloc | ⏸ DEFERRED | After P27g |
-| **P27d** K-way merge O(k)→O(log k) | ⏸ DEFERRED | After P27g |
+| **P27c** Multi-key GROUP BY Vec\<Value> alloc | ✅ DONE | P30.2 — `hash_group_key()` langsung, tanpa alokasi `Vec<Value>`/`Value::List` |
+| **P27d** K-way merge O(k)→O(log k) | ✅ DONE | P30.2 — `HeapEntry.primary` inline, tanpa `Vec<Value>` untuk single-key |
 | **P27e** SIMD Aggregate via Arrow Compute | ✅ DONE | `evaluate_aggregate()` → `arrow::compute::sum/min/max`. 159 tests pass |
-| **P27f** `#[inline]` annotations | ⏸ DEFERRED | After P27g |
+| **P27f** `#[inline(always)]` annotations | ✅ DONE | P30.2 — `value_cmp`, `value_hash_fast`, `AggValueState::update/merge` |
 | **P27.5 — Arrow Scan Path** | ✅ DONE | Direct `ColumnChunk→Arrow` path. ScanNode 7.8× faster |
 | **P27.6 — Aggregate COUNT Fast Path** | ✅ DONE | `ArrayRef::len()` di `PhysicalAggregateScan`. Aggregate 7× faster. **C++ parity achieved** |
 
@@ -634,7 +635,7 @@ Semua fungsi scalar yang sebelumnya terdaftar sebagai gap **sudah diimplementasi
 Audit kode menemukan bahwa **~60% P27 optimasi sudah diimplementasi** — lihat tabel lengkap di [`implementation_plan.md`](implementation_plan.md#audit-temuan-apa-yang-sudah-diimplementasi).
 
 **Already done:** parallel aggregate (rayon), radix sort for i64, pre-sized join hashtable + ahash, block merge sort framework, atomic-free Count, **Arrow scan path (P27.5 — 7.8× scan improvement)**, **Aggregate COUNT fast path (P27.6 — 7× faster)**, **P27e SIMD aggregate via Arrow compute**, **P27g column mapping for SQL aggregates**.
-**Gaps remaining (3 items):** Vec\<Value> alokasi di multi-key GROUP BY, O(k)→O(log k) merge, #[inline] annotations. **C++ parity achieved** — gap 4.5× → ~1× untuk benchmark query utama. **P27 100% COMPLETE** ✅
+**Gaps remaining:** None. **P27 100% COMPLETE** ✅
 
 ### Performa: P27.5 Arrow Scan Path — Gap Closure (2026-07-17, Criterion.rs)
 
