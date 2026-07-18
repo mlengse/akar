@@ -251,6 +251,20 @@ impl ScalarMacroEntry {
     }
 }
 
+/// Information about a projected graph entry in the catalog.
+///
+/// Ported from C++ `ParsedGraphEntry` / `GraphEntrySet` system.
+/// Projected graphs are either NATIVE (defined via node/rel table lists)
+/// or CYPHER (defined via a Cypher query).
+#[derive(Debug, Clone)]
+pub struct ProjectedGraphInfo {
+    pub name: String,
+    /// "NATIVE" or "CYPHER"
+    pub entry_type: String,
+    /// The Cypher query, if type is CYPHER.
+    pub cypher_query: Option<String>,
+}
+
 /// An entry in the system catalog (node table, rel table, vector index, sequence, or foreign table).
 #[derive(Debug, Clone)]
 pub enum CatalogEntry {
@@ -376,6 +390,9 @@ pub struct Catalog {
     next_id: u64,
     /// Monotonically increasing version counter, incremented on every DDL.
     version: u64,
+    /// Projected graph entries keyed by name.
+    /// Ported from C++ `GraphEntrySet::nameToEntry`.
+    projected_graphs: HashMap<String, ProjectedGraphInfo>,
 }
 
 impl Catalog {
@@ -986,6 +1003,48 @@ impl Catalog {
             }
         }
         result
+    }
+
+    // ==================== Projected graph methods ====================
+
+    /// Create a projected graph entry in the catalog.
+    ///
+    /// Ported from C++ `GraphEntrySet::addGraph()`.
+    /// Returns error if a graph with the same name already exists.
+    pub fn create_projected_graph(&mut self, info: ProjectedGraphInfo) -> Result<(), String> {
+        let name_lower = info.name.to_lowercase();
+        if self.projected_graphs.contains_key(&name_lower) {
+            return Err(format!("Projected graph '{}' already exists", info.name));
+        }
+        self.projected_graphs.insert(name_lower, info);
+        self.bump_version();
+        Ok(())
+    }
+
+    /// Drop a projected graph by name (case-insensitive).
+    pub fn drop_projected_graph(&mut self, name: &str) -> Result<(), String> {
+        let name_lower = name.to_lowercase();
+        if self.projected_graphs.remove(&name_lower).is_some() {
+            self.bump_version();
+            Ok(())
+        } else {
+            Err(format!("Projected graph '{}' not found", name))
+        }
+    }
+
+    /// Get a projected graph entry by name (case-insensitive).
+    pub fn get_projected_graph(&self, name: &str) -> Option<&ProjectedGraphInfo> {
+        self.projected_graphs.get(&name.to_lowercase())
+    }
+
+    /// List all projected graph entries.
+    pub fn projected_graph_entries(&self) -> Vec<&ProjectedGraphInfo> {
+        self.projected_graphs.values().collect()
+    }
+
+    /// List all projected graph names.
+    pub fn projected_graph_names(&self) -> Vec<String> {
+        self.projected_graphs.values().map(|g| g.name.clone()).collect()
     }
 
     /// Get connection info for a table as a vec of Values.
