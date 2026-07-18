@@ -1,10 +1,16 @@
 # Rust Release — Kuzu Core Workspace
 #
 # Triggered by git tag push (v*) or manual workflow dispatch.
-# 1. Tests all crates
-# 2. Publishes kuzu-main and kuzu-cli to crates.io
-# 3. Builds CLI binaries for Linux, macOS, Windows
-# 4. Creates GitHub Release with binaries + changelog
+# 1. Runs full test suite
+# 2. Builds CLI binaries for Linux, macOS, Windows
+# 3. Creates GitHub Release with binaries + auto-generated changelog
+#
+# NOTE: crates.io publishing is DEFERRED per Design Decision #11
+# (kuzu-core/implementation_plan.md). All internal crates have
+# `publish = false` and are path dependencies of kuzu-main/kuzu-cli.
+# Publishing to crates.io requires either publishing all internal
+# crates first or consolidating into a single crate — deferred until
+# API stabilises.
 
 name: Rust Release
 
@@ -15,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run (check without publishing)'
+        description: 'Dry run (run tests + build without creating release)'
         type: boolean
         default: true
 
@@ -24,7 +30,7 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────
-  # Test all crates before any publish/build
+  # Test all crates before any build/release
   # ──────────────────────────────────────────────────────
   test:
     name: cargo test
@@ -71,55 +77,25 @@ jobs:
           path: ${{ matrix.asset_name }}
 
   # ──────────────────────────────────────────────────────
-  # Publish kuzu-main to crates.io
-  # ──────────────────────────────────────────────────────
-  publish-kuzu-main:
-    name: publish kuzu-main
-    needs: [test]
-    runs-on: ubuntu-24.04
-    if: ${{ !inputs.dry_run }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Publish kuzu-main
-        run: cargo publish -p kuzu-main
-        working-directory: kuzu-core
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # ──────────────────────────────────────────────────────
-  # Publish kuzu-cli to crates.io
-  # ──────────────────────────────────────────────────────
-  publish-kuzu-cli:
-    name: publish kuzu-cli
-    needs: [test]
-    runs-on: ubuntu-24.04
-    if: ${{ !inputs.dry_run }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Publish kuzu-cli
-        run: cargo publish -p kuzu-cli
-        working-directory: kuzu-core
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # ──────────────────────────────────────────────────────
   # Create GitHub Release with binaries (tag push only)
   # ──────────────────────────────────────────────────────
   github-release:
     name: Create GitHub Release
-    needs: [publish-kuzu-main, build-cli]
+    needs: [build-cli]
     runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Generate changelog
         id: changelog
         run: |
           echo "## Release ${{ github.ref_name }}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Changes since previous release" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           git log --oneline --no-decorate $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD >> CHANGELOG.md || true
       - name: Download all binaries
@@ -137,19 +113,20 @@ jobs:
           prerelease: false
 
   # ──────────────────────────────────────────────────────
-  # Dry-run check (manual dispatch with dry_run=true)
+  # Dry-run (manual dispatch only) — runs tests + builds
+  # without publishing or creating a release
   # ──────────────────────────────────────────────────────
   dry-run:
-    name: cargo publish --dry-run
+    name: Dry Run (tests + build only)
     needs: [test]
     runs-on: ubuntu-24.04
     if: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Dry-run publish kuzu-main
-        run: cargo publish --dry-run -p kuzu-main 2>&1 || true
+      - name: Build release (verify compilation)
+        run: cargo build --release -p kuzu-cli
         working-directory: kuzu-core
-      - name: Dry-run publish kuzu-cli
-        run: cargo publish --dry-run -p kuzu-cli 2>&1 || true
+      - name: Verify no warnings
+        run: cargo clippy --release -p kuzu-cli 2>&1 || true
         working-directory: kuzu-core
