@@ -332,16 +332,31 @@ impl PhysicalScan {
             self.column_ids.iter().map(|&id| id as usize).collect()
         };
 
-        // FTS query — not optimized for arrow path yet, fall through
-        if self.fts_query.is_some() {
-            if let Some(ref data) = self.table_data {
-                return self.execute_with_value_data(data);
+        // FTS query — execute and filter rows by matching doc_ids
+        let mut fts_doc_ids = None;
+        if let Some(ref fts) = self.fts_query {
+            let fts_chunks = fts.execute(vec![])?;
+            let mut doc_ids = Vec::new();
+            if let Some(chunk) = fts_chunks.first() {
+                for row in 0..chunk.size {
+                    if let Some(doc_id) = chunk.get_i64(0, row) {
+                        doc_ids.push(doc_id);
+                    }
+                }
             }
-            return Ok(vec![DataChunk::new(vec![], vec![])]);
+            fts_doc_ids = Some(doc_ids);
         }
 
-        // Initial rows to emit (all rows, since semi_mask/FTS aren't active in this path)
-        let mut rows_to_emit: Vec<usize> = (0..num_rows).collect();
+        // Initial rows to emit (all rows, or FTS-filtered)
+        let mut rows_to_emit: Vec<usize> = if let Some(doc_ids) = fts_doc_ids {
+            doc_ids
+                .into_iter()
+                .filter(|&row| (row as usize) < num_rows)
+                .map(|row| row as usize)
+                .collect()
+        } else {
+            (0..num_rows).collect()
+        };
 
         // Find columns needed for the predicate
         let mut predicate_col_names = Vec::new();
