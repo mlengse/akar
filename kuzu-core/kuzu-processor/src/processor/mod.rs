@@ -40,15 +40,14 @@ pub trait StandaloneCallFn: Send + Sync {
     fn aliases(&self) -> Vec<&'static str>;
 }
 
+#[derive(Default)]
 pub struct StandaloneCallRegistry {
     handlers: std::collections::HashMap<String, std::sync::Arc<dyn StandaloneCallFn>>,
 }
 
 impl StandaloneCallRegistry {
     pub fn new() -> Self {
-        Self {
-            handlers: std::collections::HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn register(&mut self, handler: std::sync::Arc<dyn StandaloneCallFn>) {
