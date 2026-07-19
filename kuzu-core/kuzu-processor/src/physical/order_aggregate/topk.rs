@@ -139,6 +139,9 @@ impl PhysicalOperatorExec for PhysicalTopK {
             return Ok(Vec::new());
         }
 
+        // Capture field_names from input chunks for output propagation
+        let field_names = input[0].field_names.clone();
+
         // Build output chunks (up to 100 rows each)
         let chunk_size = 100usize;
         let mut output = Vec::new();
@@ -164,7 +167,7 @@ impl PhysicalOperatorExec for PhysicalTopK {
             }
             let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>();
             let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
-            output.push(DataChunk::new(arrow_fields, arrow_field_types));
+            output.push(DataChunk::new(arrow_fields, arrow_field_types).with_names(field_names.clone()));
         }
 
         Ok(output)

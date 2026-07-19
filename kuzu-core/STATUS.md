@@ -1,7 +1,7 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
 > **Tanggal:** 2026-07-19 (Post-Audit — Critical Gaps Identified)
-> **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 31 crate, ~55K LOC
+> **Hasil audit:** `cargo test --workspace` → **~1149 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ 6 of 12 FIXED (P36.3: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
 
@@ -17,7 +17,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
-| **Tests passing** | **~1137 total, 0 failed, 0 ignored** ✅ |
+| **Tests passing** | **~1149 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
 | **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
@@ -31,7 +31,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
-| **Pipeline completeness** | **~87%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4) |
+| **Pipeline completeness** | **~87%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4), Field names propagation ✅ (P36.6) |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -674,7 +674,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | kuzu-migrate | 1 | ✅ Pass (FIXED — un-ignored) |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1142** | **✅ ~1142 pass, 0 failed, 0 ignored** |
+| **Total** | **~1149** | **✅ ~1149 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -694,7 +694,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-19: **all test pass, 0 fail** ✅. **P36.1 ✅ (CSR Adjacency), P36.2 ✅ (AST ReturnClause), P36.4 ✅ (Binder Type Resolution via Catalog), P36.5 ✅ (ORDER BY/LIMIT/SKIP Propagation)** — 7 new CSR tests + 10 new binder tests added. `cargo clean` resolves stale incremental build artifacts.
+- Per 2026-07-19: **~1149 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **P36.1 ✅ (CSR Adjacency), P36.2 ✅ (AST ReturnClause), P36.4 ✅ (Binder Type Resolution via Catalog), P36.5 ✅ (ORDER BY/LIMIT/SKIP Propagation), P36.6 ✅ (Fix Ignored Tests — OrderBy/TopK field_names propagation, FTS column name fix, bind error assertion update)** — 7 new CSR tests + 10 new binder tests added. `cargo clean` resolves stale incremental build artifacts.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.

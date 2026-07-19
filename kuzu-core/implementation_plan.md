@@ -1,7 +1,7 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
 > **Revision:** 2026-07-19 (Post-Audit — Critical Gaps Identified)
-> **Baseline:** `cargo test --workspace` → **~1142 passed, 0 failed, 0 ignored**, 31 crates, ~55K LOC.
+> **Baseline:** `cargo test --workspace` → **~1149 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Benchmark gap vs C++:** **3-way parity verified (hot path only).** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **🔴 Audit findings:** ~~12 DDL operators = no-op~~ 6 of 12 FIXED (P36.3), ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. Pipeline completeness ~87%.
 > **For completed phases (P1-P35) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
@@ -749,7 +749,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 6** | **P33: Deferred Items** | **4** | **🏁 P33 ALL DONE ✅✅✅✅✅ — StorageDriver API, gzip VFS, progress bar, WAL dump tool, HTML/LaTeX shell output.** |
 | **Sprint 7** | **P34: Extension Depth — Native Readers** | **13** | **🏁 P34 ALL DONE ✅✅✅✅ — kuzu-azure native, kuzu-iceberg native, kuzu-delta native, kuzu-unity-catalog native** |
 | **Sprint 8** | **P35: Remaining Minor Gaps** | **1** | **🏁 P35 ALL DONE ✅✅ — ConstantOrNullFunction, ConfidentialStatementAnalyzer** |
-| **Sprint 9** | **P36: Critical Pipeline Gaps** | **29 (21 done)** | **P36.1 ✅ CSR Adjacency, P36.2 ✅ AST ReturnClause, P36.3 ✅ DDL Operators (6/12 done, 8 SP), P36.4 ✅ Binder Type Resolution, P36.5 ✅ ORDER BY/LIMIT/SKIP. Remaining: P36.6 Tests, P36.7 Checkpoint** |
+| **Sprint 9** | **P36: Critical Pipeline Gaps** | **29 (27 done)** | **P36.1 ✅ CSR Adjacency, P36.2 ✅ AST ReturnClause, P36.3 ✅ DDL Operators (6/12 done, 8 SP), P36.4 ✅ Binder Type Resolution, P36.5 ✅ ORDER BY/LIMIT/SKIP, P36.6 ✅ Fix Ignored Tests (OrderBy field_names, FTS column, bind error). Remaining: P36.7 Checkpoint** |
 | **Sprint 10** | **P37: Storage & Performance** | **18** | **🟡 BufferManager, Checkpoint, StringDictionary, benchmark parity** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
@@ -758,7 +758,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 ## 🔴 SPRINT 9: CRITICAL PIPELINE GAPS (P36 — 2026-07-19)
 
 > **Priority: 🔴 P0** — These gaps block production DDL usage and graph traversal correctness.
-> **Estimated effort:** 29 story points (21 DONE, 8 remaining)
+> **Estimated effort:** 29 story points (27 DONE, 2 remaining)
 > **Target:** Full DDL execution, graph traversal via CSR, ORDER BY/LIMIT/SKIP support, catalog-driven type resolution
 
 ### ✅ P36.1 — CSR Adjacency Implementation (5 SP) — COMPLETE
@@ -850,20 +850,22 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 **Result:** ORDER BY/LIMIT/SKIP fully propagated from parser → AST → binder → planner → physical operators. `LogicalOrderBy` and `LogicalLimit` inserted in pipeline after projection.
 
-### P36.6 — Fix Remaining Ignored Tests (6 SP)
+### ✅ P36.6 — Fix Remaining Ignored Tests (6 SP) — COMPLETE
 
 **Goal:** Reduce ignored tests from ~48 to < 10.
 
-| Task | Description | Files |
-|------|-------------|-------|
-| P36.6a | Fix `edge_empty_tables` tests (7) — empty table scan edge cases | `kuzu-main/tests/` |
-| P36.6b | Fix `edge_unicode` tests (4) — Unicode string comparison/collation | `kuzu-main/tests/` |
-| P36.6c | Fix `edge_boundary` tests (4) — boundary values (MAX/MIN int, NaN) | `kuzu-main/tests/` |
-| P36.6d | Fix remaining ignored tests | various |
+**Result:** **0 ignored unit/integration tests.** 5 remaining are doc-test examples (`\`\`\`ignore`) — standard Rust pattern for non-runnable code snippets in doc comments.
+
+| Fix | Root Cause | Files Changed |
+|-----|------------|---------------|
+| `test_bind_error_handling` | P36.4 changed binder to catalog-based resolution; test expected lenient behavior | `kuzu-main/tests/integration_test.rs` |
+| `PhysicalOrderBy` field_names drop | OrderBy output chunks had empty `field_names`, causing CSV headers to fallback to `column_0,column_1` | `kuzu-processor/src/physical/order_aggregate/orderby.rs` |
+| `PhysicalTopK` field_names drop | Same issue as OrderBy | `kuzu-processor/src/physical/order_aggregate/topk.rs` |
+| `test_fts` wrong column name | Test used `r.count` but FTS rel table schema has `term_freq` | `kuzu-main/tests/test_fts.rs` |
 
 **Acceptance criteria:**
-- `cargo test --workspace` → 0 ignored tests
-- No regressions in existing test suite
+- `cargo test --workspace` → 0 ignored unit/integration tests ✅
+- No regressions in existing test suite ✅ (1149 passed, 0 failed)
 
 ### P36.7 — Checkpoint Implementation (2 SP)
 
@@ -1019,7 +1021,7 @@ graph TD
     P36 --> P36_3["✅ P36.3: DDL Operators (6/12 done)"]
     P36 --> P36_4["✅ P36.4: Binder Type Resolution (DONE)"]
     P36 --> P36_5["✅ P36.5: ORDER BY/LIMIT/SKIP Propagation (DONE)"]
-    P36 --> P36_6["🔴 P36.6: Fix Ignored Tests"]
+    P36 --> P36_6["✅ P36.6: Fix Ignored Tests (DONE)"]
     P36 --> P36_7["🔴 P36.7: Checkpoint Implementation"]
     P36 --> P37["🟡 P37: Storage & Performance"]
     P37 --> P37_1["🟡 P37.1: BufferManager Enhancements"]
@@ -1062,3 +1064,4 @@ graph TD
 | 27 | **P37 BufferManager scope** | mmap + NUMA + readahead | Production workload requires memory efficiency |
 | 28 | **P37 StringDictionary** | Dictionary encoding, not compression | Most impactful for repetitive string columns |
 | 29 | **P36.4 Binder type resolution** | ✅ DONE — `Catalog::get_property_type()` replaces hardcoded `match` | Hardcoded heuristic could silently produce wrong types; catalog lookup catches errors at bind time |
+| 30 | **P36.6 Fix ignored tests** | ✅ DONE — OrderBy/TopK field_names propagation, FTS column fix, bind error update | P36.4 catalog-based resolution surfaced latent bugs in test assertions and operator metadata propagation |

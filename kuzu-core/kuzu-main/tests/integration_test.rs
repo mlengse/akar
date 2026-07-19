@@ -209,9 +209,9 @@ fn test_parse_error_handling() {
 fn test_bind_error_handling() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))");
-    // Unknown properties resolve to Any type (lenient binder) — query succeeds
-    let result = conn.query("MATCH (p:Person) RETURN p.nonexistent").unwrap();
-    assert!(result.is_success());
+    // P36.4: Catalog-based type resolution rejects unknown properties
+    let err = exec_err(&conn, "MATCH (p:Person) RETURN p.nonexistent");
+    assert!(err.contains("nonexistent"), "Expected bind error for unknown property, got: {err}");
 }
 
 #[test]

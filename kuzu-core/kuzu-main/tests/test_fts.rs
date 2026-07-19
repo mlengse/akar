@@ -33,7 +33,7 @@ fn test_create_and_query_fts_index() -> Result<(), String> {
         "FTS terms table should be populated"
     );
 
-    let appears_in_res = conn.query("MATCH ()-[r:fts_doc_idx_appears_in]->() RETURN r.count")?;
+    let appears_in_res = conn.query("MATCH ()-[r:fts_doc_idx_appears_in]->() RETURN r.term_freq")?;
     assert!(
         appears_in_res.chunks.first().unwrap().size > 0,
         "FTS appears_in table should be populated"
