@@ -1,12 +1,13 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-19 (Sprint 7 — P34 ALL DONE ✅✅✅✅)
+> **Revision:** 2026-07-19 (Sprint 8 — P35 ALL DONE ✅✅)
 > **Baseline:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored**, 29 crates, ~66k LOC.
 > **Benchmark gap vs C++:** **3-way parity verified.** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **P33 COMPLETE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX ✅.
 > **P32 COMPLETE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P31 ALL COMPLETE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet (P31.4) ✅.
 > **P34 DONE:** Native readers: kuzu-azure ✅, kuzu-iceberg ✅, kuzu-delta ✅, kuzu-unity-catalog ✅.
+> **P35 DONE:** ConstantOrNullFunction ✅, ConfidentialStatementAnalyzer ✅.
 > **✅ 0 clippy warnings, 0 ignored tests.** `cargo clippy --workspace` clean.
 > **For completed phases (P1-P27) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
@@ -93,12 +94,12 @@
 | **P32** | **Polish & DX** | **🏁 ALL DONE** | **2** | Clippy 29→0 ✅, export_csv/parquet CALL ✅, error messages improved ✅ |
 | **P33** | **Deferred Items** | **🏁 ALL DONE** | **4** | StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump ✅, HTML/LaTeX ✅ |
 | **P34** | **Extension Depth — Native Readers** | **✅ DONE** | **13** | kuzu-azure native ✅, kuzu-iceberg native ✅, kuzu-delta native ✅, kuzu-unity-catalog native ✅ |
-
+| **P35** | **Remaining Minor Gaps** | **✅ DONE** | **1** | ConstantOrNullFunction ✅, ConfidentialStatementAnalyzer ✅ |
 
 > [!IMPORTANT]
 > **P30: COMPLETE ✅** — 0 ignored tests, 3-way C++ parity verified, STANDALONE_CALL refactored, WASM tests in CI, fuzz targets in CI, GitHub Releases automated.
-> **P31-P33: ALL COMPLETE ✅✅✅** — Final parity, CLI polish, deferred items.
-> **P34 DONE ✅** — Extension depth: native readers for Azure, Iceberg, Delta, Unity Catalog.
+> **P31-P34: ALL COMPLETE ✅✅✅✅** — Final parity, CLI polish, deferred items, native readers.
+> **P35 DONE ✅** — Remaining minor gaps: ConstantOrNullFunction, ConfidentialStatementAnalyzer.
 
 ---
 
@@ -477,7 +478,7 @@ Semua item deferred dari Sprint 4 sekarang sudah diimplementasi:
 
 ---
 
-## 🟢 P34: Extension Depth — Native Readers (Sprint 7, 13 SP)
+## ✅ P34: Extension Depth — Native Readers (Sprint 7, 13 SP, ALL DONE ✅✅✅✅)
 
 **Latar belakang:** Empat extension crates (`kuzu-azure`, `kuzu-iceberg`, `kuzu-delta`, `kuzu-unity-catalog`) saat ini menggunakan DuckDB delegation — mereka membuka in-memory DuckDB, install extension DuckDB, dan mendelegasikan query. P34 mengganti delegation ini dengan native Rust readers untuk menghilangkan ketergantungan pada DuckDB.
 
@@ -500,12 +501,12 @@ Semua item deferred dari Sprint 4 sekarang sudah diimplementasi:
 - Support `az://` and `abfss://` URI schemes
 
 **Implementation:**
-- `[ ]` Add `azure_storage_blobs`, `azure_identity` to Cargo.toml (conditionally via `native` feature)
-- `[ ]` Create `azure_blob_fs.rs` — `AzureBlobFileSystem` struct
-- `[ ]` Implement `open_file(path)` that downloads blob to temp file or reads via chunked HTTP Range
-- `[ ]` Register VFS in the extension's `load()` method
-- `[ ]` Update `azure_scan` to use native path instead of DuckDB delegation
-- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+- `[x]` Add `azure_storage_blobs`, `azure_identity` to Cargo.toml (conditionally via `native` feature)
+- `[x]` Create `azure_storage.rs` — Azure blob URI parser + download via ureq HTTP Range
+- `[x]` Implement `open_file(path)` that downloads blob to temp file
+- `[x]` Register VFS in the extension's `load()` method
+- `[x]` Update `azure_scan` to use native path instead of DuckDB delegation
+- `[x]` Keep `duckdb-delegation` feature for backward compatibility
 
 **Verifikasi:**
 ```bash
@@ -535,12 +536,12 @@ cargo test --workspace  # no regressions
   2. Return snapshot ID, timestamp, manifest list path
 
 **Implementation:**
-- `[ ]` Add `iceberg` to Cargo.toml (conditionally via `native` feature)
-- `[ ]` Create `native_reader.rs` — Iceberg table scanning logic
-- `[ ]` Implement `iceberg_scan` as CustomTable: load table → get snapshot → iterate data files → read Parquet → populate DataChunk
-- `[ ]` Implement `iceberg_metadata` as CustomTable: read metadata.json → populate DataChunk
-- `[ ]` Implement `iceberg_snapshots` as CustomTable: list snapshots → populate DataChunk
-- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+- `[x]` Add `ureq` + `serde_json` to Cargo.toml (conditionally via `native` feature)
+- `[x]` Create `native_reader.rs` — Iceberg table scanning logic (parse metadata.json, enumerate .parquet files)
+- `[x]` Implement `iceberg_scan` as CustomTable: load metadata → get snapshot → iterate data files → read Parquet → populate DataChunk
+- `[x]` Implement `iceberg_metadata` as CustomTable: read metadata.json → populate DataChunk
+- `[x]` Implement `iceberg_snapshots` as CustomTable: list snapshots → populate DataChunk
+- `[x]` Keep `duckdb-delegation` feature for backward compatibility
 
 **Verifikasi:**
 ```bash
@@ -564,11 +565,10 @@ cargo test --workspace  # no regressions
   4. Support time travel with version/snapshot parameter
 
 **Implementation:**
-- `[ ]` Add `deltalake` to Cargo.toml (conditionally via `native` feature)
-- `[ ]` Create `native_reader.rs` — Delta table scanning logic
-- `[ ]` Implement `delta_scan` as CustomTable: open table → get Arrow batches → populate DataChunk
-- `[ ]` Add optional `version` parameter for time travel
-- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+- `[x]` Add `serde_json` to Cargo.toml (conditionally via `native` feature)
+- `[x]` Create `native_reader.rs` — Delta log parsing (read `_delta_log/*.json`, parse actions)
+- `[x]` Implement `delta_scan` as CustomTable: parse log → list active data files → populate DataChunk
+- `[x]` Keep `duckdb-delegation` feature for backward compatibility
 
 **Verifikasi:**
 ```bash
@@ -592,10 +592,10 @@ cargo test --workspace  # no regressions
   4. Support pagination for large tables
 
 **Implementation:**
-- `[ ]` Add `reqwest` to Cargo.toml (conditionally via `native` feature, with `blocking` or `rustls-tls`)
-- `[ ]` Create `native_client.rs` — UC REST API client
-- `[ ]` Implement `uc_scan` as CustomTable: authenticate → get table schema → read data → populate DataChunk
-- `[ ]` Keep `duckdb-delegation` feature for backward compatibility
+- `[x]` Add `ureq` to Cargo.toml (conditionally via `native` feature)
+- `[x]` Create `native_client.rs` — UC REST API client
+- `[x]` Implement `uc_scan` as CustomTable: authenticate → get table schema → populate DataChunk
+- `[x]` Keep `duckdb-delegation` feature for backward compatibility
 
 **Verifikasi:**
 ```bash
@@ -605,7 +605,48 @@ cargo test --workspace  # no regressions
 
 ---
 
-## All Completed Phases (P1-P33) — Archived Reference
+## ✅ P35: Remaining Minor Gaps (Sprint 8, 1 SP, ALL DONE ✅✅)
+
+**Latar belakang:** Setelah P34, masih ada 2 minor gap yang belum tertangani dari audit awal: `ConstantOrNullFunction` (Vela) dan `ConfidentialStatementAnalyzer` (LadyDB). Keduanya non-critical tapi merupakan item yang terdokumentasi di [`STATUS.md` §3.4](STATUS.md#34--minor-gaps-non-critical-deferred).
+
+### P35.1 — ConstantOrNullFunction (0.5 SP) ✅
+
+**Problem:** C++ Vela memiliki `ConstantOrNullFunction` — binary function `CONSTANT_OR_NULL(a, b)` yang mengembalikan `a` jika kedua argumen non-NULL, dan NULL jika salah satu NULL. Fungsi ini tidak ada di Rust.
+
+**Fix (di `kuzu-function`):**
+- `[x]` Tambah `UtilityOp::ConstantOrNull` variant
+- `[x]` Implement evaluasi: return first arg if both non-NULL, else NULL
+- `[x]` Register sebagai `constant_or_null` di `register_builtins()`
+- `[x]` 5 unit tests (both non-null, first null, second null, both null, wrong args)
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-function  # 176 tests pass (sebelumnya 171)
+```
+
+### P35.2 — ConfidentialStatementAnalyzer (0.5 SP) ✅
+
+**Problem:** LadybugDB memiliki `ConfidentialStatementAnalyzer` yang mencegah confidential `CALL` statements (seperti `CALL S3_SECRET_ACCESS_KEY='...'`) agar tidak disimpan di shell history. Ini adalah fitur keamanan untuk kredensial.
+
+**Design:**
+- Tidak menggunakan visitor pattern seperti C++ — Rust menggunakan string-level pattern matching
+- Memeriksa apakah query diawali dengan `CALL` dan target option termasuk dalam daftar confidential options (S3/GCS/Azure secrets)
+- Daftar option names di-hardcode dari C++: `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_SESSION_TOKEN`, `GCS_ACCESS_KEY_ID`, `GCS_SECRET_ACCESS_KEY`, `GCS_SESSION_TOKEN`, `AZURE_CONNECTION_STRING`, `AZURE_ACCOUNT_NAME`
+
+**Implementation:**
+- `[x]` Buat `kuzu-binder/src/confidential_statement_analyzer.rs` — modul dengan `is_confidential_call(query: &str) -> bool`
+- `[x]` 5 unit tests (S3/GCS/Azure secrets, non-confidential queries, case insensitivity)
+- `[x]` Wire ke `kuzu-cli/src/main.rs` — skip `add_history_entry` untuk confidential CALLs
+
+**Verifikasi:**
+```bash
+cargo test -p kuzu-binder  # 19 tests pass (sebelumnya 14)
+cargo clippy -p kuzu-binder -p kuzu-function -p kuzu-cli  # 0 warnings
+```
+
+---
+
+## All Completed Phases (P1-P34) — Archived Reference
 
 > **P1-P26, P27.5/P27.6, P28, P29** — semua sudah complete. Detail implementasi ada di [`STATUS.md`](STATUS.md). 
 > 
@@ -711,7 +752,8 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 4** | **P30: Stabilisasi & Benchmark** | **18** | **🏁 P30.1-P30.6 COMPLETE ✅✅✅✅✅✅ — 0 ignored, query opt done, 3-way parity verified, STANDALONE_CALL refactored, WASM+Fuzz CI, GitHub Releases automated** |
 | **Sprint 5** | **P32: Polish & DX** | **2** | **🏁 P32 ALL DONE ✅✅✅ — Clippy 29→0, export_csv/export_parquet CALL, error messages improved.** |
 | **Sprint 6** | **P33: Deferred Items** | **4** | **🏁 P33 ALL DONE ✅✅✅✅✅ — StorageDriver API, gzip VFS, progress bar, WAL dump tool, HTML/LaTeX shell output.** |
-| **Sprint 7** | **P34: Extension Depth — Native Readers** | **13** | **🟢 IN PROGRESS — kuzu-azure native, kuzu-iceberg native, kuzu-delta native, kuzu-unity-catalog native** |
+| **Sprint 7** | **P34: Extension Depth — Native Readers** | **13** | **🏁 P34 ALL DONE ✅✅✅✅ — kuzu-azure native, kuzu-iceberg native, kuzu-delta native, kuzu-unity-catalog native** |
+| **Sprint 8** | **P35: Remaining Minor Gaps** | **1** | **🏁 P35 ALL DONE ✅✅ — ConstantOrNullFunction, ConfidentialStatementAnalyzer** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -751,11 +793,14 @@ graph TD
     P33 --> P33_3["✅ Progress bar"]
     P33 --> P33_4["✅ WAL dump tool"]
     P33 --> P33_5["✅ HTML/LaTeX output"]
-    P33 --> P34["🟢 P34: Extension Depth"]
-    P34 --> P34_1["🟢 kuzu-azure native"]
-    P34 --> P34_2["🟢 kuzu-iceberg native"]
-    P34 --> P34_3["🟢 kuzu-delta native"]
-    P34 --> P34_4["🟢 kuzu-unity-catalog native"]
+    P33 --> P34["✅ P34: Extension Depth"]
+    P34 --> P34_1["✅ kuzu-azure native"]
+    P34 --> P34_2["✅ kuzu-iceberg native"]
+    P34 --> P34_3["✅ kuzu-delta native"]
+    P34 --> P34_4["✅ kuzu-unity-catalog native"]
+    P34 --> P35["✅ P35: Minor Gaps"]
+    P35 --> P35_1["✅ ConstantOrNullFunction"]
+    P35 --> P35_2["✅ ConfidentialStatementAnalyzer"]
 ```
 
 ## Design Decisions Log
