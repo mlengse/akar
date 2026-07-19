@@ -334,6 +334,9 @@ pub enum UtilityOp {
     Greatest,
     /// Return the smallest value among arguments (SQL standard, NULLs ignored).
     Least,
+    /// ConstantOrNull(a, b) — returns a if both a and b are non-NULL, else NULL.
+    /// Utility function for NULL-aware constant propagation.
+    ConstantOrNull,
 }
 
 /// Schema functions — access metadata about nodes, relationships, and values.
@@ -1147,6 +1150,7 @@ impl FunctionRegistry {
         // --- Greatest/Least (SQL extremum functions) ---
         self.register_scalar("greatest", ScalarFunction::Utility { op: UtilityOp::Greatest });
         self.register_scalar("least", ScalarFunction::Utility { op: UtilityOp::Least });
+        self.register_scalar("constant_or_null", ScalarFunction::Utility { op: UtilityOp::ConstantOrNull });
 
         // --- Schema ---
         self.register_scalar("OFFSET", ScalarFunction::Schema { op: SchemaOp::Offset });
