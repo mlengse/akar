@@ -316,7 +316,25 @@ impl Binder {
                 }
             }
         }
-        Ok(BoundReturnClause { expressions, distinct: r.distinct })
+
+        // Bind ORDER BY items
+        let order_by = r.order_by.as_ref().map(|items| {
+            items.iter().map(|item| {
+                let resolved = self.resolve_expression(&item.expression, variables)?;
+                Ok(crate::bound_statement::BoundOrderByItem {
+                    expression: resolved,
+                    ascending: item.ascending,
+                })
+            }).collect::<Result<Vec<_>, String>>()
+        }).transpose()?;
+
+        Ok(BoundReturnClause {
+            expressions,
+            distinct: r.distinct,
+            order_by,
+            limit: r.limit,
+            skip: r.skip,
+        })
     }
 
     // ==================== WHERE Binding ====================
