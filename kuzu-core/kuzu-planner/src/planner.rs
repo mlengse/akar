@@ -303,6 +303,10 @@ impl QueryPlanner {
         let mut distinct = false;
         let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
         let mut extend_ops: Vec<LogicalOperator> = Vec::new();
+        // ORDER BY / LIMIT / SKIP from RETURN clause
+        let mut order_by: Option<Vec<kuzu_binder::bound_statement::BoundOrderByItem>> = None;
+        let mut limit: Option<u64> = None;
+        let mut skip: Option<u64> = None;
         // Flag to skip destination node pattern consumed by RecursiveExtend or Extend
         let mut skip_next_node = false;
 
@@ -447,6 +451,9 @@ impl QueryPlanner {
                 }
                 BoundClause::BoundReturn(r) => {
                     distinct = r.distinct;
+                    order_by = r.order_by;
+                    limit = r.limit;
+                    skip = r.skip;
                     projection = Some(LogicalProjection {
                         expressions: r.expressions,
                         children: Vec::new(),
@@ -701,6 +708,29 @@ impl QueryPlanner {
                     cardinality: 0,
                 }));
             }
+        }
+
+        // Insert ORDER BY operator if present
+        if let Some(items) = order_by {
+            let sort_keys: Vec<(Expression, bool)> = items
+                .iter()
+                .map(|item| (item.expression.expression.clone(), item.ascending))
+                .collect();
+            result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                sort_keys,
+                children: Vec::new(),
+                cardinality: 0,
+            }));
+        }
+
+        // Insert LIMIT/SKIP operator if present
+        if limit.is_some() || skip.is_some() {
+            result.push(LogicalOperator::Limit(LogicalLimit {
+                limit: limit.unwrap_or(u64::MAX),
+                offset: skip.unwrap_or(0),
+                children: Vec::new(),
+                cardinality: 0,
+            }));
         }
 
         // Append DELETE operators at the end
