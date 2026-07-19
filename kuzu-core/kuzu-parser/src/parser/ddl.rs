@@ -262,31 +262,16 @@ fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statem
 /// Parse `CREATE [ART|HASH] INDEX [IF NOT EXISTS] name FOR (var:Label) ON (var.prop)`.
 fn parse_create_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
     let mut index_type = String::new();
-    let mut index_name = String::new();
-    let mut table_name = String::new();
-    let mut variable = String::new();
-    let mut property = String::new();
     let mut conflict_action: Option<String> = None;
+    let mut identifiers: Vec<String> = Vec::new();
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::index_type => {
                 index_type = inner.as_str().to_uppercase();
             }
-            Rule::identifier if index_name.is_empty() => {
-                index_name = inner.as_str().to_string();
-            }
-            Rule::identifier if table_name.is_empty() => {
-                // Table name inside FOR parentheses
-                table_name = inner.as_str().to_string();
-            }
-            Rule::identifier if variable.is_empty() => {
-                // Variable inside FOR parentheses
-                variable = inner.as_str().to_string();
-            }
-            Rule::identifier if property.is_empty() => {
-                // Property name after the dot
-                property = inner.as_str().to_string();
+            Rule::identifier => {
+                identifiers.push(inner.as_str().to_string());
             }
             Rule::if_not_exists => {
                 conflict_action = Some("IF_NOT_EXISTS".into());
@@ -295,20 +280,23 @@ fn parse_create_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, St
         }
     }
 
+    // Grammar: CREATE TYPE INDEX index_name FOR (variable:table_name) ON (variable.property)
+    // Identifiers in order: [index_name, variable, table_name, on_variable, property]
+    if identifiers.len() < 5 {
+        return Err(format!(
+            "Expected 5 identifiers for CREATE INDEX, got {}",
+            identifiers.len()
+        ));
+    }
+
+    let index_name = identifiers[0].clone();
+    let variable = identifiers[1].clone();
+    let table_name = identifiers[2].clone();
+    // identifiers[3] is the ON-clause variable (alias), skip it
+    let property = identifiers[4].clone();
+
     if index_type.is_empty() {
         return Err("Missing index type: use ART or HASH".into());
-    }
-    if index_name.is_empty() {
-        return Err("Missing index name for CREATE INDEX".into());
-    }
-    if table_name.is_empty() {
-        return Err("Missing table name for CREATE INDEX".into());
-    }
-    if variable.is_empty() {
-        return Err("Missing variable for CREATE INDEX".into());
-    }
-    if property.is_empty() {
-        return Err("Missing property for CREATE INDEX".into());
     }
 
     Ok(Statement::CreateIndex(CreateIndex {
