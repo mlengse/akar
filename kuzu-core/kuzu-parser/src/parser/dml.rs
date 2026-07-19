@@ -29,15 +29,25 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
             }
             Rule::return_clause => {
                 let distinct = has_distinct_flag(&inner);
+                let order_by = parse_order_by(&inner);
+                let (limit, skip) = parse_limit_skip(&inner);
                 clauses.push(Clause::Return(ReturnClause {
                     expressions: parse_return_items(inner)?,
                     distinct,
+                    order_by,
+                    limit,
+                    skip,
                 }));
             }
             Rule::with_clause => {
+                let order_by = parse_order_by(&inner);
+                let (limit, skip) = parse_limit_skip(&inner);
                 clauses.push(Clause::With(ReturnClause {
                     expressions: parse_return_items(inner)?,
                     distinct: false,
+                    order_by,
+                    limit,
+                    skip,
                 }));
             }
             Rule::where_clause => {
@@ -334,6 +344,57 @@ pub(crate) fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Ve
 /// Check if the return_clause pair has a DISTINCT flag.
 pub(crate) fn has_distinct_flag(pair: &pest::iterators::Pair<Rule>) -> bool {
     pair.clone().into_inner().any(|c| c.as_rule() == Rule::distinct_flag)
+}
+
+/// Extract ORDER BY items from a return_clause or with_clause pair.
+fn parse_order_by(pair: &pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>> {
+    let order_by_pair = pair.clone().into_inner().find(|p| p.as_rule() == Rule::order_by)?;
+    let mut items = Vec::new();
+    for part in order_by_pair.into_inner() {
+        if part.as_rule() == Rule::sort_item {
+            let sort_text = part.as_str().trim().to_uppercase();
+            let ascending = !sort_text.ends_with("DESC");
+            let mut expr = None;
+            for inner in part.into_inner() {
+                if inner.as_rule() == Rule::expression {
+                    expr = Some(parse_expression(inner).ok()?);
+                }
+            }
+            items.push(OrderByItem {
+                expression: expr?,
+                ascending,
+            });
+        }
+    }
+    if items.is_empty() { None } else { Some(items) }
+}
+
+/// Extract LIMIT and SKIP values from a return_clause or with_clause pair.
+fn parse_limit_skip(pair: &pest::iterators::Pair<Rule>) -> (Option<u64>, Option<u64>) {
+    let limit_pair = match pair.clone().into_inner().find(|p| p.as_rule() == Rule::limit) {
+        Some(p) => p,
+        None => return (None, None),
+    };
+    let mut limit_val = None;
+    let mut skip_val = None;
+    for inner in limit_pair.into_inner() {
+        match inner.as_rule() {
+            Rule::integer => {
+                if limit_val.is_none() {
+                    limit_val = inner.as_str().parse::<u64>().ok();
+                }
+            }
+            Rule::offset => {
+                for off_inner in inner.into_inner() {
+                    if off_inner.as_rule() == Rule::integer {
+                        skip_val = off_inner.as_str().parse::<u64>().ok();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (limit_val, skip_val)
 }
 
 pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<StandaloneCall, String> {
