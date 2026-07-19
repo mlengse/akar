@@ -1780,6 +1780,7 @@ name = "kuzu-cli"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "kuzu-binder",
  "kuzu-catalog",
  "kuzu-common",
  "kuzu-main",
