@@ -2,6 +2,7 @@
 
 pub mod binder;
 pub mod bound_statement;
+pub mod confidential_statement_analyzer;
 
 #[cfg(test)]
 mod binder_test;
