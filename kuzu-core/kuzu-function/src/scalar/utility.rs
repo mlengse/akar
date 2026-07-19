@@ -89,5 +89,15 @@ pub(crate) fn evaluate_utility(op: UtilityOp, args: &[Value]) -> Result<Value, S
             }
             Ok(result)
         }
+        UtilityOp::ConstantOrNull => {
+            if args.len() < 2 {
+                return Err("CONSTANT_OR_NULL requires 2 arguments".into());
+            }
+            if matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
+                Ok(Value::Null)
+            } else {
+                Ok(args[0].clone())
+            }
+        }
     }
 }
