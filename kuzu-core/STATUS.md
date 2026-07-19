@@ -1,11 +1,12 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-19 (Sprint 7 — P34 ALL DONE ✅✅✅✅)
+> **Tanggal:** 2026-07-19 (Sprint 8 — P35 ALL DONE ✅✅)
 > **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 29 crate, ~262 file .rs, ~66k LOC
 > **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P33 DONE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX output ✅.
 > **P32 DONE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
 > **P34 DONE:** Native readers: kuzu-azure native ✅, kuzu-iceberg native ✅, kuzu-delta native ✅, kuzu-unity-catalog native ✅.
+> **P35 DONE:** ConstantOrNullFunction ✅, ConfidentialStatementAnalyzer ✅.
 > **P31 ALL DONE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet footer (P31.4) ✅.
 > **✅ 0 clippy warnings, 0 ignored tests** — `cargo clippy --workspace` clean.
 
@@ -485,12 +486,12 @@ Audit dilakukan dengan membandingkan 3 codebase:
 |---|-----|--------|-------|
 | 5 | **`kuzu-migrate` 1 ignored test** | Rust-only | ✅ **FIXED** — Root cause: `format_option` in PEG grammar `{ "FORMAT" ~ ("CSV" | "PARQUET") }` uses string literals that don't produce tokens, so parser skipped them and defaulted to CSV. Fixed by reading `opt_inner.as_str()` instead of iterating inner pairs. Also: column name stripping (`a.id` → `id`), `parquet-export` feature wiring, and `Connection::write_parquet()` bridge method added. |
 | 6 | **`StorageDriver` API** | Ladybug | Low-level storage access API. Ekuivalen fungsi sudah ada via `StorageManager` publik. |
-| 7 | **`ConfidentialStatementAnalyzer`** | Ladybug | Security feature — scan query untuk PII/sensitive data. Low priority. |
-| 8 | **Shell: HTML/LaTeX output + extended commands** | Ladybug | Alternatif format + `:schema`, `:highlight`, `:max_rows`. Output Box sudah ada. |
-| 9 | **WAL dump tool** | Ladybug | Debug/forensic tool. `tools/wal_dump/`. |
-| 10 | **Gzip file system** | Vela | `gzip_file_system.h` — wrapper untuk compressed files. |
-| 11 | **Progress bar** | Ladybug | Infrastruktur progress display untuk long-running ops. |
-| 12 | **`ConstantOrNullFunction`** | Vela | Utility function for NULL propagation. |
+| 7 | **`ConfidentialStatementAnalyzer`** | Ladybug | ✅ **P35 DONE** — String-level check for CALL statements targeting confidential options (S3/Azure secrets). Prevents storage in shell history. |
+| 8 | **Shell: HTML/LaTeX output + extended commands** | Ladybug | ✅ **P33 DONE** — Alternatif format + `:schema`, `:highlight`, `:max_rows`. Output Box sudah ada. |
+| 9 | **WAL dump tool** | Ladybug | ✅ **P33 DONE** — Debug/forensic tool. `tools/wal_dump/`. |
+| 10 | **Gzip file system** | Vela | ✅ **P33 DONE** — `gzip_file_system.h` — wrapper untuk compressed files. |
+| 11 | **Progress bar** | Ladybug | ✅ **P33 DONE** — Infrastruktur progress display untuk long-running ops. |
+| 12 | **`ConstantOrNullFunction`** | Vela | ✅ **P35 DONE** — Registered as `constant_or_null(a, b)` scalar function. Returns first arg if both non-NULL, else NULL. |
 
 ### 3.5 ✅ Rust Melebihi C++ (Keunggulan)
 
@@ -578,7 +579,11 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - `kuzu-httpfs`: **Selesai (Native)**. HTTP/HTTPS/S3 via VFS Registry + `HttpRandomAccessReader` (HTTP Range requests).
 - `kuzu-fts`: **Selesai (Native)**. Full pipeline: DDL `CREATE FTS INDEX`, MATCH `USING FTS INDEX doc_idx('query')`, BM25 scoring, 3 macro tables (`{name}_docs`, `{name}_terms`, `{name}_appears_in`), Porter stemmer, stop word filtering, tokenizer. Diuji via `kuzu-main/tests/test_fts.rs`.
 
-### 4.3 Code Quality
+### 4.3 P35 — Remaining Minor Gaps (Done ✅)
+- **`ConstantOrNullFunction`** ✅ — C++ utility function `CONSTANT_OR_NULL(a,b)` → returns `a` if both non-NULL, else NULL. Implemented as `UtilityOp::ConstantOrNull` in `kuzu-function`. 5 unit tests.
+- **`ConfidentialStatementAnalyzer`** ✅ — LadyDB security feature that prevents confidential `CALL` statements (with S3/Azure secrets) from being stored in shell history. Implemented as `kuzu-binder::confidential_statement_analyzer` using string-level pattern matching. 5 unit tests. Wired into `kuzu-cli` to skip `add_history_entry` for confidential CALLs.
+
+### 4.4 Code Quality
 - **Clippy: 0 warnings** dengan `-D warnings` — **P32: 29→0 warnings** across 8 crates (kuzu-common, kuzu-function, kuzu-storage, kuzu-planner, kuzu-processor, kuzu-algo, kuzu-migrate, kuzu-c). `clippy.toml` configured.
 - **Security: `cargo audit` clean** — 0 vulnerabilities. Removed unused+unsound `fast-float`, upgraded `time` 0.3.36→0.3.47 (DoS fix). `paste` unmaintained (informational only).
 - **CI/CD pipeline implemented** — 8 job GitHub Actions + Dependabot (`.github/workflows/rust-ci.yml`, `.github/dependabot.yml`).
