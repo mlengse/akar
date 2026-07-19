@@ -1,41 +1,37 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-19 (Sprint 8 — P35 ALL DONE ✅✅)
-> **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 29 crate, ~262 file .rs, ~66k LOC
-> **3-way C++ parity verified:** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **P33 DONE:** StorageDriver API ✅, gzip VFS ✅, progress bar ✅, WAL dump tool ✅, shell HTML/LaTeX output ✅.
-> **P32 DONE:** Clippy 29→0 ✅, export_csv/export_parquet CALL ✅, error messages improved ✅.
-> **P34 DONE:** Native readers: kuzu-azure native ✅, kuzu-iceberg native ✅, kuzu-delta native ✅, kuzu-unity-catalog native ✅.
-> **P35 DONE:** ConstantOrNullFunction ✅, ConfidentialStatementAnalyzer ✅.
-> **P31 ALL DONE:** Lambda (P31.1) ✅, GREATEST/LEAST (P31.2) ✅, CALL graph mgmt (P31.3) ✅, kuzu-migrate parquet footer (P31.4) ✅.
-> **✅ 0 clippy warnings, 0 ignored tests** — `cargo clippy --workspace` clean.
+> **Tanggal:** 2026-07-19 (Post-Audit — Critical Gaps Identified)
+> **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 31 crate, ~55K LOC
+> **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
+> **🔴 Audit 2026-07-19 findings:** CSR adjacency = stub, 12 DDL operators = no-op, ORDER BY/LIMIT/SKIP = parsed but discarded, Binder type resolution = hardcoded heuristic. See Section 3 for details.
 
 ---
 
 ## 0. Ringkasan Eksekutif
 
 Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
-**29 crate**, **202+ file .rs**, **~66k LOC**.
+**31 crate**, **~55K LOC**.
 
 > **Modularization:** ALL PHASES COMPLETE — `scalar.rs` (4.578 → 18 files), `physical_operator.rs` (3.794 → 10 files), `connection.rs` (3.133 → 9 files), `passes.rs` (2.486 → 19 files), `parser.rs` (2.183 → 4 files + test), `binder.rs` (1.667 → 4 files + test).
 
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ |
-| **Tests passing** | **1099 total, 0 failed, 32 ignored** ✅ |
+| **Tests passing** | **~1130 total, 0 failed, 0 ignored** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
 | **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
 | **Logical operators** | **58** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
-| **Physical operators** | **46** variants (C++ Ladybug: 67) — parity ~90% core query engine, ~66% total (gap = split-phase C++ accounting) |
+| **Physical operators** | **46** variants (C++ Ladybug: 67) — core query engine parity ~90%, 12 DDL operators are no-op stubs |
 | **BoundStatement variants** | **43** (termasuk BoundTransaction, BoundExtension, BoundAttachDatabase, BoundDetachDatabase, BoundUseDatabase, BoundLoadFrom, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
+| **Pipeline completeness** | **~70%** — CSR adjacency stub, 12 DDL no-ops, ORDER BY/LIMIT/SKIP discarded, Binder type heuristic |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -255,24 +251,27 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 **Paritas total:** ~66% (45 vs 67 physical operators C++ — sebagian besar gap = split-phase C++ accounting seperti `HASH_JOIN_BUILD`/`PROBE` yang Rust fusi jadi 1 operator).
 
 > ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (10 files). ✅ Sudah direfactor (Phase 2A). Dispatch layer (`processor/mod.rs`) juga telah direfactor (Phase 2B) menjadi modul `mapper/` dan ukurannya mengecil dari 2,400+ baris menjadi ~299 baris.
+>
+> **🔴 Catatan Kritis (2026-07-19 Audit):** 12 DDL operators (CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE INDEX, DROP INDEX, CREATE REL TABLE, DROP REL TABLE, CREATE NODE TABLE, DROP NODE TABLE, ALTER TABLE ADD COLUMN, ALTER TABLE DROP COLUMN, ALTER TABLE RENAME COLUMN) adalah no-op stubs di `kuzu-processor/src/physical/write_ops/map_ddl.rs`. Dispatch paths exist tapi `execute()` method kosong/return empty result.
 
 ### 1.6 Storage Engine
 
 | Komponen | Status |
 |----------|--------|
-| Buffer Manager (Clock eviction) | ✅ |
+| Buffer Manager (Clock eviction) | ✅ (simplified — no mmap, NUMA, or readahead) |
 | FileHandle + Page management | ✅ (dengan FSM) |
 | Free Space Manager (buddy-system) | ✅ **terintegrasi** di `FileHandle::allocate_page()` |
-| NodeTable, RelTable | ✅ |
+| NodeTable | ✅ |
+| RelTable | ⚠️ **flat `Vec<RelData>` (CSR stub)** — `get_neighbors()` returns empty |
 | Column, ColumnChunk, NodeGroup | ✅ (dengan ColumnChunkStats) |
 | Zone Map Predicate | ✅ **terintegrasi** di `NodeTable::to_column_major_data_with_predicate()` |
 | ART Index (Node4/16/48/256) | ✅ |
 | HNSW Index (VectorIndexTable) | ✅ |
 | Hash Index (on-disk + in-memory) | ✅ |
 | WAL + Local WAL | ✅ |
-| Shadow File + Checkpointer | ✅ |
+| Shadow File + Checkpointer | ⚠️ `flush_table()` is no-op |
 | StatsStore (ColumnStats, TableStats) | ✅ |
-| Compression (Constant, Boolean) | ✅ |
+| Compression (Constant, Boolean) | ✅ (StringDictionary is pass-through) |
 | Overflow pages | ✅ (via column_chunk) |
 | LocalStorage (LocalNodeTable, LocalRelTable) | ✅ |
 | CSV/Parquet readers | ✅ |
@@ -281,7 +280,13 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | WAL Replayer (crash recovery) | ✅ **terintegrasi** di `StorageManager::recover()` |
 | WAL DDL Record Types | ✅ CreateTable, DropTable, AlterTable, CreateIndex, DropIndex, CreateSequence |
 
-**Paritas:** ~90%
+**Paritas:** ~80% (CSR adjacency dan Checkpoint masih stub)
+
+> **🔴 Catatan Kritis (2026-07-19 Audit):**
+> - **CSR adjacency** (`kuzu-storage/src/csr.rs`) — `get_neighbors()` return `Ok(vec![])`, belum ada offset/adjacency arrays. RelTable menyimpan `Vec<RelData>` flat sebagai fallback.
+> - **Checkpoint** (`kuzu-storage/src/checkpoint.rs`) — `flush_table()` adalah no-op, tidak benar-benar mem-persist data ke disk.
+> - **BufferManager** — tidak ada memory-mapped regions, NUMA placement, atau page readahead.
+> - **StringDictionary compression** — pass-through (tidak ada encoding aktual).
 
 ### 1.7 Functions — ~250 Registered (termasuk alias)
 
@@ -313,7 +318,7 @@ COUNT, COUNT(*), SUM, AVG, MIN, MAX, COLLECT, STDDEV, VARIANCE, PERCENTILE_DISC,
 #### Table Functions
 14 CALL functions (table_info, show_functions, show_indexes, show_sequences, show_macros, show_connection, db_version, catalog_version, current_setting, stats_info, storage_info, show_attached_databases, **export_csv**, **export_parquet**) + 8 registry ops — ✅ 22 ops
 
-**Paritas fungsional:** **~100%** dari C++ (semua CALL handler terdaftar)
+**Paritas fungsional:** **~90%** dari C++ (semua CALL handler terdaftar, tapi ada gap di alias/overload)
 
 ### 1.8 GDS Framework
 
@@ -453,23 +458,33 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **LadybugDB C++** — `ladybug/src/include/` → operator enum, optimizer passes, storage features
 - **Kuzu Rust** — `kuzu-core/` → 29 crate, enum definitions, function registry, physical/logical operators
 
-**Hasil: ~95% fitur inti sudah diporting.** Tidak ada critical gap di query engine, storage, atau GDS.
+**Hasil: ~70% pipeline completeness.** Query engine core (SELECT/FILTER/JOIN/AGG) berfungsi, tapi ada critical gaps di CSR adjacency, DDL execution, ORDER BY/LIMIT/SKIP propagation, dan Binder type resolution.
 
 ### 3.2 Ringkasan Gap per Layer
 
-| Layer | C++ Unique | Rust Missing | Parity |
-|-------|-----------|--------------|--------|
-| **Parser (Statement types)** | 20 | 0 | **100%** |
-| **Binder** | 30+ bound stmt | 0 | **100%** |
-| **Logical operators** | 38 (Ladybug) | 0 (Rust 51, EXCEEDS) | **100%+** |
-| **Physical operators** | 67 (split-phase) | 46 (fused) | **~95%** (gap = split-phase) |
-| **Optimizer passes** | 17 | 22 (EXCEEDS) | **100%+** |
-| **Functions (base)** | ~234 unique | 234 | **~100%** |
-| **Functions (aliases)** | ~607 total | ~250 | **~80%** (non-critical) |
-| **Storage** | 27 features | 27 | **100%** |
-| **GDS** | 15 algorithms | 15+ | **100%+** |
-| **Extensions** | 15 | 15 | **100%** |
-| **Types** | 35+ | 36 | **100%** |
+| Layer | C++ Unique | Rust Missing | Parity | Notes |
+|-------|-----------|--------------|--------|-------|
+| **Parser (Statement types)** | 20 | 0 | **~70%** | ORDER BY/LIMIT/SKIP in SELECT clause parsed but discarded from AST |
+| **Binder** | 30+ bound stmt | 0 | **~70%** | Property type resolution uses hardcoded heuristic, not catalog lookup |
+| **Logical operators** | 38 (Ladybug) | 0 (Rust 51, EXCEEDS) | **100%+** | |
+| **Physical operators** | 67 (split-phase) | 46 (fused) | **~66%** | 12 DDL operators are no-op stubs |
+| **Optimizer passes** | 17 | 22 (EXCEEDS) | **100%+** | |
+| **Functions (base)** | ~234 unique | 234 | **~100%** | |
+| **Functions (aliases)** | ~607 total | ~250 | **~80%** (non-critical) | |
+| **Storage** | 27 features | 27 | **~80%** | CSR adjacency = stub, Checkpoint = no-op |
+| **GDS** | 15 algorithms | 15+ | **100%+** | |
+| **Extensions** | 15 | 15 | **100%** | |
+| **Types** | 35+ | 36 | **100%** | |
+
+### 3.2b 🔴 Critical Gaps — 2026-07-19 Audit
+
+| # | Gap | Severity | Location | Detail |
+|---|-----|----------|----------|--------|
+| 1 | **CSR adjacency stub** | 🔴 CRITICAL | `kuzu-storage/src/csr.rs:90` | `get_neighbors()` returns `Ok(vec![])`. RelTable uses flat `Vec<RelData>` fallback. Graph traversal queries (MATCH (a)-[r]->(b)) cannot use CSR-accelerated neighbor lookup. |
+| 2 | **12 DDL operators no-op** | 🔴 CRITICAL | `kuzu-processor/src/physical/write_ops/map_ddl.rs` | CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE/DROP INDEX — all have `execute()` method that returns empty result or does nothing. |
+| 3 | **ORDER BY/LIMIT/SKIP discarded** | 🔴 HIGH | `kuzu-parser/src/ast.rs:227` | `ReturnClause` struct lacks ORDER BY/LIMIT/SKIP fields. Parser collects them but they're not propagated to AST → Binder → Planner. |
+| 4 | **Binder type resolution hardcoded** | 🟡 HIGH | `kuzu-binder/src/binder/mod.rs:200-250` | Property type lookup uses `match prop_name { "age" => INT64, ... }` heuristic instead of catalog-based schema lookup. |
+| 5 | **Checkpoint no-op** | 🟡 HIGH | `kuzu-storage/src/checkpoint.rs` | `flush_table()` is empty function — data never persists to disk beyond in-memory state. |
 
 ### 3.3 🟡 Medium Gaps (4 items, ~3.5 SP) — ALL DONE ✅✅✅✅
 
@@ -742,26 +757,26 @@ Benchmark file: `kuzu-main/benches/query_pipeline.rs`. Full report di [`BENCHMAR
 
 ---
 
-## 8. Ladybug C++ Parity Gap Analysis (2026-07-08)
+## 8. Ladybug C++ Parity Gap Analysis (2026-07-08, updated 2026-07-19)
 
 Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
-**Overall parity: ~88%.**
+**Overall parity: ~70% pipeline completeness** (hot path at parity, critical infrastructure gaps remain).
 
-### 8.1 Ringkasan per Layer (Diperbarui — 2026-07-16 Audit Akhir)
+### 8.1 Ringkasan per Layer (Diperbarui — 2026-07-19 Audit)
 
-| Layer | LadybugDB C++ Features | Rust Ported | Missing | Parity |
-|-------|------------------------|-------------|---------|--------|
-| **Parser** | 30+ statement types | 58 | 0 (Rust EXCEEDS) | 100% |
-| **Binder** | 30+ bound statements | 43 | 0 (Rust EXCEEDS) | 100% |
-| **Planner** | 38 logical ops | 51 | 0 (Rust EXCEEDS) | 100% |
-| **Processor** | 67 physical ops | 45 | 0 (Gap is split-phase only)* | ~100%* |
-| **Optimizer** | 17 passes | 22 | 0 (+5 extras) | 100% |
-| **Functions** | 607 registrations | 234 | 0 (Overloads only) | ~100%* |
-| **Storage** | 27 features | 27 | 0 | 100% |
-| **GDS** | 15 algorithms | 15 | 0 | 100% |
-| **Types** | 35+ types | 36 | 0 (Rust EXCEEDS) | 100% |
+| Layer | LadybugDB C++ Features | Rust Ported | Missing | Parity | Notes |
+|-------|------------------------|-------------|---------|--------|-------|
+| **Parser** | 30+ statement types | 58 | 0 (Rust EXCEEDS) | **~70%** | ORDER BY/LIMIT/SKIP in SELECT clause parsed but discarded |
+| **Binder** | 30+ bound statements | 43 | 0 (Rust EXCEEDS) | **~70%** | Property type resolution: hardcoded heuristic, not catalog |
+| **Planner** | 38 logical ops | 51 | 0 (Rust EXCEEDS) | **~70%** | ORDER BY/LIMIT/SKIP not propagated from AST |
+| **Processor** | 67 physical ops | 45 | 12 DDL stubs | **~66%** | 12 DDL operators are no-op stubs |
+| **Optimizer** | 17 passes | 22 | 0 (+5 extras) | **100%** | |
+| **Functions** | 607 registrations | 234 | 0 (Overloads only) | **~90%** | Core functions complete, alias/overload gap |
+| **Storage** | 27 features | 27 | CSR stub, Checkpoint no-op | **~80%** | CSR adjacency = stub, Checkpoint = no-op |
+| **GDS** | 15 algorithms | 15 | 0 | **100%** | |
+| **Types** | 35+ types | 36 | 0 (Rust EXCEEDS) | **100%** | |
 
-> *Catatan: Gap 64% sebelumnya pada Processor murni karena C++ memisahkan fase (contoh HASH_JOIN_BUILD & PROBE), sementara Rust menggabungkannya menjadi 1 operator utuh. Gap pada Fungsi murni karena overload/alias yang berlebihan di C++.*
+> *Catatan: Pipeline completeness ~70% karena critical gaps di CSR adjacency, DDL execution, ORDER BY/LIMIT/SKIP propagation, dan Binder type resolution. Hot path (SELECT/FILTER/JOIN/AGG) berfungsi dan mencapai parity dengan C++ (397 µs ≈ 400 µs ≈ 374 µs).*
 
 ### 8.2 Critical Gaps — Status Update (2026-07-08)
 
@@ -778,11 +793,13 @@ Audit komparasi penuh antara Rust `kuzu-core` dan C++ Ladybug (`ladybug/src/`).
 | 9 | **CREATE/USE/DROP GRAPH** (projected graph) | 🟢 P2 | ✅ P13.3 |
 | 10 | **GDS_CALL** (CALL with GDS functions) | 🟢 P2 | ✅ P13.4 |
 
-### 8.3 Physical Operator Status (All Implemented)
+### 8.3 Physical Operator Status
 
 All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No missing physical operators remain in the Rust processor.
 
 > **Note:** The C++ Ladybug count of 67 is ~20 higher than Rust's 45 because C++ counts split-phase variants separately (e.g. `HASH_JOIN_BUILD` + `HASH_JOIN_PROBE` = 2 ops, Rust fuses into 1 `PhysicalHashJoin`). Core query engine parity is ~90%; the gap is split-phase structural accounting, not missing functionality.
+>
+> **🔴 Critical Gap:** 12 DDL operators (CREATE TABLE, DROP TABLE, ALTER TABLE, etc.) have dispatch paths but `execute()` methods are no-op stubs. See Section 3.2b #2.
 
 ### 8.4 Missing Functions — Status Update (2026-07-08)
 
@@ -800,7 +817,7 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 
 > **Catatan:** C++ Ladybug memiliki 607 registrasi fungsi (termasuk banyak overload dan alias). Rust memiliki 234 fungsi unik. Gap ~373 sebagian besar adalah overload yang tidak diperlukan untuk porting.
 
-### 8.5 Missing Storage Features (Updated — 2026-07-09)
+### 8.5 Missing Storage Features (Updated — 2026-07-19)
 
 | Feature | Priority | Status |
 |---------|----------|--------|
@@ -810,7 +827,9 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 | Roaring bitmap | P2 | ✅ P17.4 (`kuzu-storage/src/roaring_bitmap.rs`) — Array/Bitmap containers, union/intersection/difference, 25 tests |
 | ICE disk format | P3 | ✅ P20 (`ParquetStreamReader` lazy streaming) |
 | Lazy segment scanner | P3 | ✅ P17.3 (`kuzu-storage/src/lazy_scanner.rs`) — on-demand NodeGroup loading, 6 tests |
-| Float compression (delta/offset) | P3 | ✅ (implemented in compression module)
+| Float compression (delta/offset) | P3 | ✅ (implemented in compression module) |
+| **CSR adjacency** | 🔴 P0 | **🔴 STUB** — `get_neighbors()` returns empty. Flat `Vec<RelData>` fallback. |
+| **Checkpoint persistence** | 🔴 P0 | **🔴 NO-OP** — `flush_table()` is empty function. |
 
 ### 8.6 GDS Algorithm Status
 
