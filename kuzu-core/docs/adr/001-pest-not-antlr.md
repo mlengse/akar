@@ -1,6 +1,6 @@
 # ADR 001: Mengapa pest.rs (PEG) bukan ANTLR4
 
-> **Status:** Accepted | **Date:** 2026-07-07
+> **Status:** Accepted | **Date:** 2026-07-07 | **Last Updated:** 2026-07-19
 
 ## Context
 
