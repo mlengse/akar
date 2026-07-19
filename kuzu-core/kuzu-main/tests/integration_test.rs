@@ -869,3 +869,243 @@ fn test_sip_optimization() {
     }
     assert_eq!(r.num_rows(), 1, "Expected exactly 1 row (Hello), got {}", r.num_rows());
 }
+
+// ==================== P36.3: DDL Pipeline Integration Tests ====================
+
+#[test]
+fn test_ddl_pipeline_create_insert_select_drop() {
+    let (_db, conn) = setup_db();
+
+    // CREATE TABLE
+    let msg = exec(&conn, "CREATE NODE TABLE Employee(id INT64, name STRING, salary DOUBLE, PRIMARY KEY (id))");
+    assert!(msg.contains("Employee"), "Expected Employee in: {msg}");
+    assert!(msg.contains("created"), "Expected created in: {msg}");
+
+    // INSERT data
+    exec(&conn, "CREATE (e:Employee {id: 1, name: 'Alice', salary: 90000.0})");
+    exec(&conn, "CREATE (e:Employee {id: 2, name: 'Bob', salary: 85000.0})");
+
+    // SELECT and verify
+    let result = conn.query("MATCH (e:Employee) RETURN e.name ORDER BY e.name").unwrap();
+    assert!(result.is_success(), "SELECT should succeed: {:?}", result.error_message);
+    assert_eq!(result.num_rows(), 2, "Expected 2 rows");
+
+    // DROP TABLE
+    let msg = exec(&conn, "DROP TABLE Employee");
+    assert!(msg.contains("dropped") || msg.contains("Employee"), "Drop message: {msg}");
+
+    // Verify table is gone
+    let err = exec_err(&conn, "MATCH (e:Employee) RETURN e.name");
+    assert!(err.contains("not found"), "Expected 'not found' after drop, got: {err}");
+}
+
+#[test]
+fn test_ddl_pipeline_create_rel_insert_query() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE City(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE REL TABLE Flight(FROM City TO City, cost DOUBLE)");
+    exec(&conn, "CREATE (c:City {id: 1, name: 'Jakarta'})");
+    exec(&conn, "CREATE (c:City {id: 2, name: 'Bandung'})");
+    exec(&conn, "CREATE (c:City {id: 3, name: 'Surabaya'})");
+
+    // Create edges
+    let msg = exec(&conn, "MATCH (a:City {id: 1}), (b:City {id: 2}) CREATE (a)-[:Flight {cost: 300.0}]->(b)");
+    assert!(msg.contains("rows") || msg.contains("Created"), "Edge creation: {msg}");
+
+    let msg = exec(&conn, "MATCH (a:City {id: 2}), (b:City {id: 3}) CREATE (a)-[:Flight {cost: 200.0}]->(b)");
+    assert!(msg.contains("rows"), "Edge creation: {msg}");
+
+    // Query flights
+    let result = conn.query("MATCH (a:City)-[f:Flight]->(b:City) RETURN a.name, b.name, f.cost ORDER BY a.name").unwrap();
+    assert!(result.is_success(), "Flight query should succeed: {:?}", result.error_message);
+    assert_eq!(result.num_rows(), 2, "Expected 2 flights");
+
+    // Drop rel table
+    let msg = exec(&conn, "DROP TABLE Flight");
+    assert!(msg.contains("dropped"), "Drop rel: {msg}");
+
+    // Drop node tables
+    exec(&conn, "DROP TABLE City");
+}
+
+#[test]
+fn test_ddl_pipeline_alter_table_add_column() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE Book(id INT64, title STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (b:Book {id: 1, title: 'Kuzu Guide'})");
+
+    // Add column (no COLUMN keyword per grammar)
+    let msg = exec(&conn, "ALTER TABLE Book ADD author STRING");
+    assert!(msg.contains("added") || msg.contains("author"), "Alter add: {msg}");
+
+    // Insert with new column
+    exec(&conn, "CREATE (b:Book {id: 2, title: 'Advanced Kuzu', author: 'Jane'})");
+
+    // Query: both old and new rows should work
+    let result = conn.query("MATCH (b:Book) RETURN b.title ORDER BY b.id").unwrap();
+    assert!(result.is_success(), "Query after alter should succeed: {:?}", result.error_message);
+    assert_eq!(result.num_rows(), 2, "Expected 2 books");
+
+    exec(&conn, "DROP TABLE Book");
+}
+
+#[test]
+fn test_ddl_pipeline_alter_table_drop_column() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE Item(id INT64, name STRING, tag STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (i:Item {id: 1, name: 'Widget', tag: 'A'})");
+
+    // Drop column (no COLUMN keyword per grammar)
+    let msg = exec(&conn, "ALTER TABLE Item DROP tag");
+    assert!(msg.contains("dropped") || msg.contains("tag"), "Alter drop: {msg}");
+
+    // Query should still work
+    let result = conn.query("MATCH (i:Item) RETURN i.name").unwrap();
+    assert!(result.is_success(), "Query after drop column should succeed: {:?}", result.error_message);
+    assert_eq!(result.num_rows(), 1, "Expected 1 item");
+
+    exec(&conn, "DROP TABLE Item");
+}
+
+#[test]
+fn test_ddl_pipeline_alter_table_rename_column() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE Product(id INT64, price DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Product {id: 1, price: 29.99})");
+
+    // Rename column (no COLUMN keyword per grammar)
+    let msg = exec(&conn, "ALTER TABLE Product RENAME price TO cost");
+    assert!(msg.contains("price") && msg.contains("cost"), "Alter rename: {msg}");
+
+    exec(&conn, "DROP TABLE Product");
+}
+
+#[test]
+fn test_ddl_pipeline_create_drop_index() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
+
+    // CREATE NODE TABLE auto-creates an ART index.
+    // Trying to create another should fail.
+    let err = exec_err(&conn, "CREATE ART INDEX user_idx FOR (u:User) ON (u.id)");
+    assert!(err.contains("already has"), "Expected 'already has' ART index, got: {err}");
+
+    // Insert data and verify table works with auto-created index
+    exec(&conn, "CREATE (u:User {id: 1, name: 'Alice'})");
+    let result = conn.query("MATCH (u:User) RETURN u.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 1);
+
+    exec(&conn, "DROP TABLE User");
+}
+
+#[test]
+fn test_ddl_pipeline_create_drop_rel_table_full_lifecycle() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE REL TABLE Friend(FROM Person TO Person, since INT64)");
+
+    exec(&conn, "CREATE (a:Person {id: 1, name: 'Alice'})");
+    exec(&conn, "CREATE (b:Person {id: 2, name: 'Bob'})");
+    exec(&conn, "CREATE (a:Person {id: 3, name: 'Charlie'})");
+
+    exec(&conn, "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Friend {since: 2020}]->(b)");
+    exec(&conn, "MATCH (a:Person {id: 2}), (b:Person {id: 3}) CREATE (a)-[:Friend {since: 2021}]->(b)");
+
+    // Query friends
+    let result = conn.query("MATCH (a:Person)-[:Friend]->(b:Person) RETURN a.name, b.name ORDER BY a.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 2, "Expected 2 friendships");
+
+    // Drop rel table first
+    exec(&conn, "DROP TABLE Friend");
+
+    // Node data still exists
+    let result = conn.query("MATCH (p:Person) RETURN p.name ORDER BY p.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 3, "Expected 3 persons after dropping rel table");
+
+    // Cleanup
+    exec(&conn, "DROP TABLE Person");
+}
+
+#[test]
+fn test_ddl_pipeline_multiple_alter_operations() {
+    let (_db, conn) = setup_db();
+
+    exec(&conn, "CREATE NODE TABLE Record(id INT64, PRIMARY KEY (id))");
+
+    // Add multiple columns (no COLUMN keyword per grammar)
+    exec(&conn, "ALTER TABLE Record ADD name STRING");
+    exec(&conn, "ALTER TABLE Record ADD score INT64");
+    exec(&conn, "ALTER TABLE Record ADD active BOOL");
+
+    // Insert
+    exec(&conn, "CREATE (r:Record {id: 1, name: 'Test', score: 42, active: true})");
+
+    let result = conn.query("MATCH (r:Record) RETURN r.name, r.score, r.active").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 1);
+
+    // Rename a column
+    let msg = exec(&conn, "ALTER TABLE Record RENAME score TO points");
+    assert!(msg.contains("score") && msg.contains("points"));
+
+    // Drop a column
+    let msg = exec(&conn, "ALTER TABLE Record DROP active");
+    assert!(msg.contains("dropped") || msg.contains("active"));
+
+    exec(&conn, "DROP TABLE Record");
+}
+
+#[test]
+fn test_ddl_pipeline_error_cases() {
+    let (_db, conn) = setup_db();
+
+    // Drop nonexistent table
+    let err = exec_err(&conn, "DROP TABLE NonExistent");
+    assert!(err.contains("not found"), "Expected 'not found', got: {err}");
+
+    // Create duplicate table
+    exec(&conn, "CREATE NODE TABLE Foo(id INT64, PRIMARY KEY (id))");
+    let err = exec_err(&conn, "CREATE NODE TABLE Foo(id INT64, PRIMARY KEY (id))");
+    assert!(err.contains("already exists"), "Expected 'already exists', got: {err}");
+
+    // Add column with duplicate name
+    let err = exec_err(&conn, "ALTER TABLE Foo ADD id INT64");
+    assert!(err.contains("already exists"), "Expected 'already exists' for duplicate column, got: {err}");
+
+    // Drop nonexistent column
+    let err = exec_err(&conn, "ALTER TABLE Foo DROP nonexistent");
+    assert!(err.contains("not found"), "Expected 'not found' for missing column, got: {err}");
+
+    exec(&conn, "DROP TABLE Foo");
+}
+
+#[test]
+fn test_ddl_pipeline_create_index_and_query() {
+    let (_db, conn) = setup_db();
+
+    // Create a table with PK (auto-creates ART index) and verify it works end-to-end
+    exec(&conn, "CREATE NODE TABLE Item(id INT64, name STRING, PRIMARY KEY (id))");
+
+    exec(&conn, "CREATE (i:Item {id: 1, name: 'Alpha'})");
+    exec(&conn, "CREATE (i:Item {id: 2, name: 'Beta'})");
+
+    let result = conn.query("MATCH (i:Item) RETURN i.name ORDER BY i.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 2);
+
+    // Verify primary key lookup works (uses the auto-created ART index)
+    let result = conn.query("MATCH (i:Item {id: 1}) RETURN i.name").unwrap();
+    assert!(result.is_success());
+    assert_eq!(result.num_rows(), 1);
+
+    exec(&conn, "DROP TABLE Item");
+}
