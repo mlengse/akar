@@ -381,8 +381,12 @@ fn run_repl_rustyline(output: &mut dyn Write) {
                     }
                 }
 
-                rl.add_history_entry(full_query.as_str());
                 let clean = full_query.trim_end_matches(';').trim();
+                // Skip history for confidential CALL statements (e.g. S3/Azure secrets)
+                let is_conf = kuzu_binder::confidential_statement_analyzer::is_confidential_call(clean);
+                if !is_conf {
+                    rl.add_history_entry(full_query.as_str());
+                }
                 execute_query(clean, output);
             }
             Err(ReadlineError::Interrupted) => {
