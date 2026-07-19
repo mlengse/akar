@@ -1,6 +1,6 @@
 # ADR 002: Pure Rust, bukan FFI/cxx
 
-> **Status:** Accepted | **Date:** 2026-07-07
+> **Status:** Accepted | **Date:** 2026-07-07 | **Last Updated:** 2026-07-19
 
 ## Context
 
@@ -25,7 +25,7 @@ Kùzu C++ memiliki ~200K LOC. Porting bisa dilakukan via:
 
 ## Consequences
 
-- ~27.000 LOC Rust ditulis dari nol (setara ~200K LOC C++)
-- 28 crate, 954 test, 21 optimizer passes
+- ~55.000 LOC Rust ditulis dari nol (setara ~200K LOC C++)
+- 31 crate, 1485+ test (per 2026-07-19), 22 optimizer passes
 - Tidak ada ketergantungan pada C++ compiler
 - WASM target didukung penuh (kecuali crate native: duckdb, postgres, dll)
