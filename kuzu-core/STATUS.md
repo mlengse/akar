@@ -3,7 +3,7 @@
 > **Tanggal:** 2026-07-19 (Post-Audit — Critical Gaps Identified)
 > **Hasil audit:** `cargo test --workspace` → **~1130 passed, 0 failed, 0 ignored** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ 6 of 12 FIXED (P36.3: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). Binder type resolution = hardcoded heuristic. ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
+> **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ 6 of 12 FIXED (P36.3: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
 
 ---
 
@@ -16,7 +16,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 | Metrik | Nilai |
 |--------|-------|
-| **Compile errors** | **0** ✅ |
+| **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
 | **Tests passing** | **~1137 total, 0 failed, 0 ignored** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
@@ -31,7 +31,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
-| **Pipeline completeness** | **~85%** — 6 DDL no-ops remaining, Binder type heuristic |
+| **Pipeline completeness** | **~87%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4) |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -135,6 +135,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P36.1 — CSR Adjacency** | ❌ `get_neighbors()` returned empty vec | ✅ Full CSR with `fwd_offsets`/`fwd_adjacency` + `rev_offsets`/`rev_adjacency`, `build()`, `get_neighbors()`, `num_nodes()`, `num_edges()` | `[P36.1]` |
 | **P36.2 — AST ReturnClause fields** | ❌ ORDER BY/LIMIT/SKIP parsed but discarded | ✅ `OrderByItem` struct, `order_by`/`limit`/`skip` fields in `ReturnClause` + `BoundReturnClause`, PEG parser helpers | `[P36.2]` |
 | **P36.5 — ORDER BY/LIMIT/SKIP Propagation** | ❌ Parsed but not wired to planner | ✅ Planner inserts `LogicalOrderBy` + `LogicalLimit` operators from `BoundReturnClause` | `[P36.5]` |
+| **P36.4 — Binder Type Resolution via Catalog** | ❌ Hardcoded `match prop { "age" => Int64 }` | ✅ `Catalog::get_property_type()` + binder resolves from schema. Error on unknown property. 10 new binder tests. | `[P36.4]` |
 
 ## 1. Arsitektur Pipeline — Status per Layer
 
@@ -151,6 +152,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 ### 1.2 Binder
 - Symbol resolution via `Arc<Mutex<Catalog>>`
 - 43 BoundStatement variants
+- **P36.4:** Property type resolution via `Catalog::get_property_type()` — catalog-driven, not hardcoded
 - **Paritas:** ~90%
 
 ### 1.3 Planner
@@ -461,14 +463,14 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **LadybugDB C++** — `ladybug/src/include/` → operator enum, optimizer passes, storage features
 - **Kuzu Rust** — `kuzu-core/` → 29 crate, enum definitions, function registry, physical/logical operators
 
-**Hasil: ~85% pipeline completeness.** Query engine core (SELECT/FILTER/JOIN/AGG) berfungsi, CSR adjacency ✅ DONE, ORDER BY/LIMIT/SKIP ✅ DONE, 6/12 DDL operators ✅ DONE (P36.3). Tersisa critical gaps: 6 DDL operators (CreateVectorIndex placeholder), Binder type resolution hardcoded.
+**Hasil: ~87% pipeline completeness.** Query engine core (SELECT/FILTER/JOIN/AGG) berfungsi, CSR adjacency ✅ DONE, ORDER BY/LIMIT/SKIP ✅ DONE, 6/12 DDL operators ✅ DONE (P36.3), Binder type resolution ✅ DONE (P36.4). Tersisa critical gaps: 6 DDL operators (CreateVectorIndex placeholder), Checkpoint no-op.
 
 ### 3.2 Ringkasan Gap per Layer
 
 | Layer | C++ Unique | Rust Missing | Parity | Notes |
 |-------|-----------|--------------|--------|-------|
 | **Parser (Statement types)** | 20 | 0 | **~80%** | ORDER BY/LIMIT/SKIP now propagated to AST ✅ |
-| **Binder** | 30+ bound stmt | 0 | **~80%** | Property type resolution uses hardcoded heuristic, not catalog lookup. ORDER BY/LIMIT/SKIP now bound ✅ |
+| **Binder** | 30+ bound stmt | 0 | **~80%** | Property type resolution uses catalog lookup (P36.4 ✅). ORDER BY/LIMIT/SKIP now bound ✅ |
 | **Logical operators** | 38 (Ladybug) | 0 (Rust 51, EXCEEDS) | **100%+** | |
 | **Physical operators** | 67 (split-phase) | 46 (fused) | **~66%** | 6 DDL operators implemented (P36.3), 6 remaining (CreateVectorIndex placeholder) |
 | **Optimizer passes** | 17 | 22 (EXCEEDS) | **100%+** | |
@@ -486,7 +488,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | 1 | ~~**CSR adjacency stub**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-storage/src/csr.rs:90`~~ | ~~`get_neighbors()` returns `Ok(vec![])`. RelTable uses flat `Vec<RelData>` fallback.~~ ✅ **FIXED — P36.1**: Full CSR with fwd/rev offsets + adjacency arrays. |
 | 2 | ~~**12 DDL operators no-op**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-processor/src/physical/write_ops/map_ddl.rs`~~ | ~~CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE/DROP INDEX — all have `execute()` method that returns empty result or does nothing.~~ ✅ **6 FIXED — P36.3**: CreateNodeTable, CreateRelTable, DropTable, AlterTable (Add/Drop/Rename), CreateIndex, DropIndex. Remaining: CreateVectorIndex (placeholder), CreateNodeTable/RelTable pk index wiring. |
 | 3 | ~~**ORDER BY/LIMIT/SKIP discarded**~~ | ~~🔴 HIGH~~ | ~~`kuzu-parser/src/ast.rs:227`~~ | ~~`ReturnClause` struct lacks ORDER BY/LIMIT/SKIP fields.~~ ✅ **FIXED — P36.2 + P36.5**: AST fields + planner propagation + PhysicalOrderBy/Limit already existed. |
-| 4 | **Binder type resolution hardcoded** | 🟡 HIGH | `kuzu-binder/src/binder/mod.rs:200-250` | Property type lookup uses `match prop_name { "age" => INT64, ... }` heuristic instead of catalog-based schema lookup. |
+| 4 | ~~**Binder type resolution hardcoded**~~ | ~~🟡 HIGH~~ | ~~`kuzu-binder/src/binder/mod.rs:200-250`~~ | ~~Property type lookup uses `match prop_name { "age" => INT64, ... }` heuristic instead of catalog-based schema lookup.~~ ✅ **FIXED — P36.4**: `Catalog::get_property_type()` method + binder now resolves via catalog. Unknown properties return error. |
 | 5 | **Checkpoint no-op** | 🟡 HIGH | `kuzu-storage/src/checkpoint.rs` | `flush_table()` is empty function — data never persists to disk beyond in-memory state. |
 
 ### 3.3 🟡 Medium Gaps (4 items, ~3.5 SP) — ALL DONE ✅✅✅✅
@@ -636,7 +638,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 |-------|-------|--------|
 | kuzu-common | 21 | ✅ Pass |
 | kuzu-parser | 63 | ✅ Pass |
-| kuzu-binder | 14 | ✅ Pass |
+| kuzu-binder | 24 | ✅ Pass |
 | kuzu-planner | 16 | ✅ Pass |
 | kuzu-optimizer | 52 | ✅ Pass |
 | kuzu-processor | 16 | ✅ Pass |
@@ -672,7 +674,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | kuzu-migrate | 1 | ✅ Pass (FIXED — un-ignored) |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1132** | **✅ ~1132 pass, 0 failed, 0 ignored** |
+| **Total** | **~1142** | **✅ ~1142 pass, 0 failed, 0 ignored** |
 
 ---
 
@@ -692,7 +694,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-19: **all test pass, 0 fail** ✅. **P36.1 ✅ (CSR Adjacency), P36.2 ✅ (AST ReturnClause), P36.5 ✅ (ORDER BY/LIMIT/SKIP Propagation)** — 7 new CSR tests added.
+- Per 2026-07-19: **all test pass, 0 fail** ✅. **P36.1 ✅ (CSR Adjacency), P36.2 ✅ (AST ReturnClause), P36.4 ✅ (Binder Type Resolution via Catalog), P36.5 ✅ (ORDER BY/LIMIT/SKIP Propagation)** — 7 new CSR tests + 10 new binder tests added. `cargo clean` resolves stale incremental build artifacts.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
