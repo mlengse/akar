@@ -507,6 +507,20 @@ impl Catalog {
         self.entries.get_mut(&id)
     }
 
+    /// Look up the logical type of a property (column) on a table.
+    ///
+    /// Returns `Some(LogicalTypeID)` if the table exists and has a column with
+    /// the given name, or `None` otherwise.  This replaces the old hardcoded
+    /// property-name → type mapping in the binder.
+    pub fn get_property_type(&self, table_name: &str, prop_name: &str) -> Option<LogicalTypeID> {
+        let entry = self.get_entry_by_name(table_name)?;
+        entry
+            .columns()
+            .iter()
+            .find(|c| c.name == prop_name)
+            .map(|c| c.logical_type)
+    }
+
     /// Add a column to a table in the catalog.
     pub fn add_column(&mut self, table_name: &str, column: CatalogColumn) -> Result<(), String> {
         let entry = self
