@@ -222,12 +222,27 @@ pub struct OptionalMatchClause {
 pub struct ReturnClause {
     pub expressions: Vec<ReturnItem>,
     pub distinct: bool,
+    /// Optional ORDER BY clause: list of sort items.
+    pub order_by: Option<Vec<OrderByItem>>,
+    /// Optional LIMIT — maximum number of rows to return.
+    pub limit: Option<u64>,
+    /// Optional SKIP — number of rows to skip before returning.
+    pub skip: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnItem {
     pub expression: Expression,
     pub alias: Option<String>,
+}
+
+/// A single sort item in an ORDER BY clause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderByItem {
+    /// The expression to sort by.
+    pub expression: Expression,
+    /// Sort direction: `true` for ascending (default), `false` for descending.
+    pub ascending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
