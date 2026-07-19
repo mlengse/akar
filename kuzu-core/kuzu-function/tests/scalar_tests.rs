@@ -2402,3 +2402,62 @@ fn test_least_empty_fails() {
     let func = ScalarFunction::Utility { op: UtilityOp::Least };
     assert!(evaluate_scalar(&func, &[]).is_err());
 }
+
+// ==================== ConstantOrNull tests ====================
+
+#[test]
+fn test_constant_or_null_both_non_null() {
+    let func = ScalarFunction::Utility {
+        op: UtilityOp::ConstantOrNull,
+    };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(42), Value::Int64(100)]).unwrap(),
+        Value::Int64(42)
+    );
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::String("hello".into()), Value::String("world".into())]).unwrap(),
+        Value::String("hello".into())
+    );
+}
+
+#[test]
+fn test_constant_or_null_first_null() {
+    let func = ScalarFunction::Utility {
+        op: UtilityOp::ConstantOrNull,
+    };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Int64(42)]).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
+fn test_constant_or_null_second_null() {
+    let func = ScalarFunction::Utility {
+        op: UtilityOp::ConstantOrNull,
+    };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(42), Value::Null]).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
+fn test_constant_or_null_both_null() {
+    let func = ScalarFunction::Utility {
+        op: UtilityOp::ConstantOrNull,
+    };
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Null, Value::Null]).unwrap(),
+        Value::Null
+    );
+}
+
+#[test]
+fn test_constant_or_null_wrong_args() {
+    let func = ScalarFunction::Utility {
+        op: UtilityOp::ConstantOrNull,
+    };
+    assert!(evaluate_scalar(&func, &[]).is_err());
+    assert!(evaluate_scalar(&func, &[Value::Int64(1)]).is_err());
+}
