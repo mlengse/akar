@@ -300,6 +300,9 @@ fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Valu
                 Clause::Return(ReturnClause {
                     expressions: new_items?,
                     distinct: r.distinct,
+                    order_by: r.order_by.clone(),
+                    limit: r.limit,
+                    skip: r.skip,
                 })
             }
             other => other.clone(),
