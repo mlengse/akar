@@ -607,15 +607,36 @@ impl Binder {
                 })
             }
             Expression::PropertyAccess(obj, prop) => {
-                let _bound_obj = self.resolve_expression(obj, variables)?;
-                // For now, resolve property types to common defaults
-                let prop_type = match prop.as_str() {
-                    "name" | "title" | "label" => LogicalTypeID::String,
-                    "age" | "count" | "length" | "size" | "id" => LogicalTypeID::Int64,
-                    "score" | "price" | "rating" => LogicalTypeID::Double,
-                    "active" | "is_active" | "deleted" => LogicalTypeID::Bool,
-                    "date" | "created_at" | "updated_at" => LogicalTypeID::Date,
-                    _ => LogicalTypeID::Any, // Unknown properties default to Any
+                let bound_obj = self.resolve_expression(obj, variables)?;
+                // Resolve property type via catalog lookup instead of hardcoded mapping.
+                let prop_type = match obj.as_ref() {
+                    Expression::Variable(var_name) => {
+                        // Find the variable in scope to get its table label
+                        if let Some(variable) = variables.iter().find(|v| v.name == *var_name) {
+                            if let Some(ref table_label) = variable.label {
+                                let catalog = self.catalog.lock().unwrap();
+                                match catalog.get_property_type(table_label, prop) {
+                                    Some(type_id) => type_id,
+                                    None => {
+                                        return Err(format!(
+                                            "Property '{}' not found on table '{}'",
+                                            prop, table_label
+                                        ));
+                                    }
+                                }
+                            } else {
+                                // Variable has no label (e.g., UNWIND result) — cannot resolve
+                                LogicalTypeID::Any
+                            }
+                        } else {
+                            // Variable not in scope — should have failed in resolve_expression
+                            bound_obj.resolved_type
+                        }
+                    }
+                    _ => {
+                        // Non-variable accessor (e.g., function result) — cannot resolve from catalog
+                        LogicalTypeID::Any
+                    }
                 };
                 Ok(BoundExpression {
                     expression: expr.clone(),
