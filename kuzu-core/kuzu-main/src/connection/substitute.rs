@@ -22,9 +22,20 @@ pub(crate) fn substitute_params_in_statement(
                             .iter()
                             .map(|e| substitute_in_bound_expr(e, params))
                             .collect();
+                        let new_order_by = r.order_by.as_ref().map(|items| {
+                            items.iter().map(|item| {
+                                Ok(kuzu_binder::bound_statement::BoundOrderByItem {
+                                    expression: substitute_in_bound_expr(&item.expression, params)?,
+                                    ascending: item.ascending,
+                                })
+                            }).collect::<Result<Vec<_>, String>>()
+                        }).transpose()?;
                         BoundClause::BoundReturn(BoundReturnClause {
                             expressions: new_exprs?,
                             distinct: r.distinct,
+                            order_by: new_order_by,
+                            limit: r.limit,
+                            skip: r.skip,
                         })
                     }
                     BoundClause::BoundWhere(w) => {
