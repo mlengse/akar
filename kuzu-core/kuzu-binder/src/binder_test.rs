@@ -214,7 +214,99 @@ mod tests {
         let sql = "MATCH (a:Person) WHERE a.score > 4.5 RETURN a.name";
         let bound = binder.bind(parse(sql).unwrap()).unwrap();
         match bound {
-            BoundStatement::BoundQuery(_) => {} // Just check it binds successfully
+            BoundStatement::BoundQuery(q) => {
+                // WHERE clause: a.score should resolve to Double via catalog
+                match &q.clauses[1] {
+                    BoundClause::BoundWhere(w) => {
+                        // The comparison `a.score > 4.5` produces Bool, but
+                        // internally `a.score` was resolved to Double via catalog.
+                        assert_eq!(w.expression.resolved_type, LogicalTypeID::Bool);
+                    }
+                    _ => panic!("Expected BoundWhere at index 1"),
+                }
+                // RETURN clause: a.name should resolve to String via catalog
+                match &q.clauses[2] {
+                    BoundClause::BoundReturn(r) => {
+                        assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::String);
+                    }
+                    _ => panic!("Expected BoundReturn at index 2"),
+                }
+            }
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_property_catalog_int64() {
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person) RETURN a.age";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => match &q.clauses[1] {
+                BoundClause::BoundReturn(r) => {
+                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Int64);
+                }
+                _ => panic!("Expected BoundReturn"),
+            },
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_property_catalog_double() {
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person) RETURN a.score";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => match &q.clauses[1] {
+                BoundClause::BoundReturn(r) => {
+                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::Double);
+                }
+                _ => panic!("Expected BoundReturn"),
+            },
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_property_catalog_string() {
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person) RETURN a.name";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => match &q.clauses[1] {
+                BoundClause::BoundReturn(r) => {
+                    assert_eq!(r.expressions[0].resolved_type, LogicalTypeID::String);
+                }
+                _ => panic!("Expected BoundReturn"),
+            },
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_property_not_found_errors() {
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person) RETURN a.nonexistent";
+        let result = binder.bind(parse(sql).unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Property 'nonexistent' not found on table 'Person'"));
+    }
+
+    #[test]
+    fn test_bind_rel_property_catalog() {
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person)-[e:Knows]->(b:Person) RETURN e.since";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => {
+                // Find the RETURN clause
+                let return_clause = q.clauses.iter().find_map(|c| {
+                    if let BoundClause::BoundReturn(r) = c { Some(r) } else { None }
+                }).expect("Expected RETURN clause");
+                assert_eq!(return_clause.expressions[0].resolved_type, LogicalTypeID::Int64);
+            }
             _ => panic!("Expected BoundQuery"),
         }
     }
