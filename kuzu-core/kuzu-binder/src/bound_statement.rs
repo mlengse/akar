@@ -250,6 +250,19 @@ pub struct BoundExpression {
 pub struct BoundReturnClause {
     pub expressions: Vec<BoundExpression>,
     pub distinct: bool,
+    /// Bound ORDER BY items.
+    pub order_by: Option<Vec<BoundOrderByItem>>,
+    /// Bound LIMIT.
+    pub limit: Option<u64>,
+    /// Bound SKIP.
+    pub skip: Option<u64>,
+}
+
+/// A bound sort item for ORDER BY.
+#[derive(Debug, Clone)]
+pub struct BoundOrderByItem {
+    pub expression: BoundExpression,
+    pub ascending: bool,
 }
 
 #[derive(Debug, Clone)]
