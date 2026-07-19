@@ -1,6 +1,6 @@
 # ADR 004: Storage Engine: Column-Major + Buffer Manager
 
-> **Status:** Accepted | **Date:** 2026-07-07
+> **Status:** Accepted | **Date:** 2026-07-07 | **Last Updated:** 2026-07-19
 
 ## Context
 
@@ -24,7 +24,7 @@ Graph database storage perlu mendukung:
 | `WALReplayer` | `kuzu-storage/src/wal_replayer.rs` | Crash recovery, 6 DDL variants |
 | `FileHandle` | `kuzu-storage/src/page.rs` | I/O page + FSM integration |
 | `NodeTable` | `kuzu-storage/src/table.rs` | Tabel node: column chunks + node groups |
-| `RelTable` | `kuzu-storage/src/table.rs` | Tabel rel: CSR adjacency |
+| `RelTable` | `kuzu-storage/src/table.rs` | Tabel rel: flat Vec<RelData> (CSR **stub** — `get_neighbors()` return empty) |
 
 ### Data Layout
 
@@ -35,6 +35,14 @@ NodeTable: [ColumnChunk₀] [ColumnChunk₁] ... [ColumnChunkₙ]
               ↓
          [page₀] [page₁] ... [pageₙ]  ← BufferManager
 ```
+
+### Catatan: Status Implementasi
+
+Beberapa komponen masih berupa stub/simplifikasi (per 2026-07-19):
+- **CSR adjacency** (`kuzu-storage/src/csr.rs`) — `get_neighbors()` return `Ok(vec![])`, belum ada offset/adjacency arrays. RelTable menyimpan `Vec<RelData>` flat sebagai fallback.
+- **Checkpoint** (`kuzu-storage/src/checkpoint.rs`) — `flush_table()` adalah no-op, tidak benar-benar mem-persist data ke disk.
+- **BufferManager** — tidak ada memory-mapped regions, NUMA placement, atau page readahead.
+- **StringDictionary compression** — pass-through (tidak ada encoding aktual).
 
 ## Rationale
 
