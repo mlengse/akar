@@ -65,7 +65,7 @@ rust_decimal = "1"
 md-5 = "0.11.0"
 sha2 = "0.11.0"
 base64 = "0.22"
-indicatif = "0.17"
+indicatif = "0.18"
 
 [workspace.lints.clippy]
 needless_range_loop = "allow"
