@@ -267,12 +267,100 @@ impl Column {
         Ok(())
     }
 
+    /// Save column metadata to a `.meta` sidecar file so it can be
+    /// reconstructed after a crash or restart without scanning every page.
+    ///
+    /// Layout (all little-endian):
+    ///   magic: 4 bytes b"CMET"
+    ///   version: u32
+    ///   logical_type: u32
+    ///   table_id: u64
+    ///   col_idx: u32
+    ///   num_values: u64
+    ///   num_pages: u64
+    ///   page_row_offsets: [u64; num_pages]
+    pub fn save_metadata(&self) -> std::io::Result<()> {
+        let meta_path = self.file_handle.path.with_extension("meta");
+        let mut buf = Vec::with_capacity(64 + self.num_pages as usize * 8);
+
+        buf.extend_from_slice(b"CMET");
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&(self.logical_type as u32).to_le_bytes());
+        buf.extend_from_slice(&self.table_id.to_le_bytes());
+        buf.extend_from_slice(&self.col_idx.to_le_bytes());
+        buf.extend_from_slice(&self.num_values.to_le_bytes());
+        buf.extend_from_slice(&self.num_pages.to_le_bytes());
+        for offset in &self.page_row_offsets {
+            buf.extend_from_slice(&offset.to_le_bytes());
+        }
+
+        std::fs::write(&meta_path, &buf)?;
+        Ok(())
+    }
+
+    /// Load column metadata from a `.meta` sidecar file.
+    ///
+    /// Returns `Ok(true)` if metadata was loaded successfully,
+    /// `Ok(false)` if no metadata file exists (fresh column).
+    pub fn load_metadata(&mut self) -> std::io::Result<bool> {
+        let meta_path = self.file_handle.path.with_extension("meta");
+        if !meta_path.exists() {
+            return Ok(false);
+        }
+
+        let data = std::fs::read(&meta_path)?;
+        if data.len() < 36 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "column metadata file too small",
+            ));
+        }
+
+        if &data[0..4] != b"CMET" {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid column metadata magic bytes",
+            ));
+        }
+
+        let mut pos = 4;
+        let _version = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        pos += 4;
+        let _logical_type = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        pos += 4;
+        let _table_id = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        pos += 8;
+        let _col_idx = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        pos += 4;
+        self.num_values = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        pos += 8;
+        self.num_pages = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        pos += 8;
+
+        let num_pages = self.num_pages as usize;
+        if data.len() < pos + num_pages * 8 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "column metadata file truncated (page_row_offsets)",
+            ));
+        }
+
+        self.page_row_offsets = Vec::with_capacity(num_pages);
+        for _ in 0..num_pages {
+            self.page_row_offsets
+                .push(u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap()));
+            pos += 8;
+        }
+
+        Ok(true)
+    }
+
     // ------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------
 
     /// Serialise `value` into a compact byte sequence.
-    fn serialize_value(value: &Value) -> Vec<u8> {
+    pub(crate) fn serialize_value(value: &Value) -> Vec<u8> {
         let mut buf = Vec::with_capacity(16);
         Self::serialize_into(&mut buf, value);
         buf

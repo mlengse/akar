@@ -274,7 +274,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | HNSW Index (VectorIndexTable) | ✅ |
 | Hash Index (on-disk + in-memory) | ✅ |
 | WAL + Local WAL | ✅ |
-| Shadow File + Checkpointer | ⚠️ `flush_table()` is no-op |
+| Shadow File + Checkpointer | ✅ `flush_table()` implemented, Column metadata persistence, 5 new tests |
 | StatsStore (ColumnStats, TableStats) | ✅ |
 | Compression (Constant, Boolean) | ✅ (StringDictionary is pass-through) |
 | Overflow pages | ✅ (via column_chunk) |
@@ -285,11 +285,11 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | WAL Replayer (crash recovery) | ✅ **terintegrasi** di `StorageManager::recover()` |
 | WAL DDL Record Types | ✅ CreateTable, DropTable, AlterTable, CreateIndex, DropIndex, CreateSequence |
 
-**Paritas:** ~85% (CSR adjacency ✅ DONE, Checkpoint masih stub)
+**Paritas:** ~87% (CSR adjacency ✅ DONE, Checkpoint ✅ DONE)
 
 > **🔴 Catatan Kritis (2026-07-19 Audit):**
 > - ~~**CSR adjacency** (`kuzu-storage/src/csr.rs`) — `get_neighbors()` return `Ok(vec![])`, belum ada offset/adjacency arrays. RelTable menyimpan `Vec<RelData>` flat sebagai fallback.~~ ✅ **FIXED — P36.1**
-> - **Checkpoint** (`kuzu-storage/src/checkpoint.rs`) — `flush_table()` adalah no-op, tidak benar-benar mem-persist data ke disk.
+> - ~~**Checkpoint** (`kuzu-storage/src/checkpoint.rs`) — `flush_table()` adalah no-op, tidak benar-benar mem-persist data ke disk.~~ ✅ **FIXED — P36.7**: `flush_table()` now flushes per-file dirty pages, Column metadata persisted via `.meta` sidecar files, 5 new tests verifying full round-trip persistence.
 > - **BufferManager** — tidak ada memory-mapped regions, NUMA placement, atau page readahead.
 > - **StringDictionary compression** — pass-through (tidak ada encoding aktual).
 
@@ -489,7 +489,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | 2 | ~~**12 DDL operators no-op**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-processor/src/physical/write_ops/map_ddl.rs`~~ | ~~CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE/DROP INDEX — all have `execute()` method that returns empty result or does nothing.~~ ✅ **6 FIXED — P36.3**: CreateNodeTable, CreateRelTable, DropTable, AlterTable (Add/Drop/Rename), CreateIndex, DropIndex. Remaining: CreateVectorIndex (placeholder), CreateNodeTable/RelTable pk index wiring. |
 | 3 | ~~**ORDER BY/LIMIT/SKIP discarded**~~ | ~~🔴 HIGH~~ | ~~`kuzu-parser/src/ast.rs:227`~~ | ~~`ReturnClause` struct lacks ORDER BY/LIMIT/SKIP fields.~~ ✅ **FIXED — P36.2 + P36.5**: AST fields + planner propagation + PhysicalOrderBy/Limit already existed. |
 | 4 | ~~**Binder type resolution hardcoded**~~ | ~~🟡 HIGH~~ | ~~`kuzu-binder/src/binder/mod.rs:200-250`~~ | ~~Property type lookup uses `match prop_name { "age" => INT64, ... }` heuristic instead of catalog-based schema lookup.~~ ✅ **FIXED — P36.4**: `Catalog::get_property_type()` method + binder now resolves via catalog. Unknown properties return error. |
-| 5 | **Checkpoint no-op** | 🟡 HIGH | `kuzu-storage/src/checkpoint.rs` | `flush_table()` is empty function — data never persists to disk beyond in-memory state. |
+| 5 | ~~**Checkpoint no-op**~~ | ~~🟡 HIGH~~ | ~~`kuzu-storage/src/checkpoint.rs`~~ | ~~`flush_table()` is empty function — data never persists to disk beyond in-memory state.~~ ✅ **FIXED — P36.7**: `flush_table()` flushes per-file dirty pages, Column metadata persisted via `.meta` sidecar, 5 tests. |
 
 ### 3.3 🟡 Medium Gaps (4 items, ~3.5 SP) — ALL DONE ✅✅✅✅
 
@@ -834,7 +834,7 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 | Lazy segment scanner | P3 | ✅ P17.3 (`kuzu-storage/src/lazy_scanner.rs`) — on-demand NodeGroup loading, 6 tests |
 | Float compression (delta/offset) | P3 | ✅ (implemented in compression module) |
 | **CSR adjacency** | 🔴 P0 | **🔴 STUB** — `get_neighbors()` returns empty. Flat `Vec<RelData>` fallback. |
-| **Checkpoint persistence** | 🔴 P0 | **🔴 NO-OP** — `flush_table()` is empty function. |
+| **Checkpoint persistence** | 🔴 P0 | ✅ **DONE (P36.7)** — `flush_table()` flushes per-file dirty pages, Column metadata via `.meta` sidecar files. |
 
 ### 8.6 GDS Algorithm Status
 

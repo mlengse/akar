@@ -209,6 +209,15 @@ impl BufferManager {
         Ok(())
     }
 
+    /// Return all dirty page numbers belonging to a specific file.
+    pub fn dirty_page_nums_for_file(&self, file_name: &str) -> Vec<PageNum> {
+        self.frames
+            .iter()
+            .filter(|(k, f)| k.0 == file_name && f.is_dirty)
+            .map(|(k, _)| k.1)
+            .collect()
+    }
+
     // --- Clock eviction ---
 
     fn evict(&mut self) -> std::io::Result<()> {
