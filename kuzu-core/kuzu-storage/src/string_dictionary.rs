@@ -132,7 +132,7 @@ impl StringDictionary {
         }
         total += self.lookup.capacity()
             * (std::mem::size_of::<String>() + std::mem::size_of::<u32>());
-        for (k, _) in &self.lookup {
+        for k in self.lookup.keys() {
             total += k.capacity();
         }
         total
