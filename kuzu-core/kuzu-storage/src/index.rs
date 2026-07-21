@@ -570,6 +570,7 @@ mod tests {
         let config = BufferManagerConfig {
             max_memory: 256 * 1024,
             page_size: DEFAULT_PAGE_SIZE,
+            ..Default::default()
         };
         let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
         let idx_path = dir.path().join("test_index.idx");
