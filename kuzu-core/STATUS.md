@@ -1,7 +1,7 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-19 (Post-Audit — Critical Gaps Identified)
-> **Hasil audit:** `cargo test --workspace` → **~1149 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
+> **Tanggal:** 2026-07-21 (Sprint 10 Complete — P37.1-P37.4 All Done)
+> **Hasil audit:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ 6 of 12 FIXED (P36.3: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
 
@@ -17,10 +17,10 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
-| **Tests passing** | **~1149 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
+| **Tests passing** | **~1175 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
 | **Integration tests** | **44 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
-| **Optimizer passes** | **22** (15 flat + 7 tree) — melebihi C++ (17) |
+| **Optimizer passes** | **25** (18 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
 | **Logical operators** | **58** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
@@ -31,7 +31,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
-| **Pipeline completeness** | **~87%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4), Field names propagation ✅ (P36.6) |
+| **Pipeline completeness** | **~90%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4), Field names propagation ✅ (P36.6), BufferManager mmap/NUMA ✅ (P37.1), StringDictionary encoding ✅ (P37.2), Query optimization passes ✅ (P37.4) |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -185,7 +185,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 **Paritas:** ~90%
 
-### 1.4 Optimizer — 22 Passes (15 flat + 7 tree)
+### 1.4 Optimizer — 25 Passes (18 flat + 7 tree)
 
 #### Flat Passes
 | # | Pass | Status |
@@ -205,6 +205,9 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | 13 | **OrderByPushDown** | ✅ Push ORDER BY below UNION ALL (Ladybug port) |
 | 14 | **UnwindDedup** | ✅ Dedup consecutive UNWIND operators (Ladybug port) |
 | 15 | **CountRelTable** | ✅ Replace ScanRel+COUNT with CSR metadata (Ladybug port) |
+| 16 | **AggregateFusion** | ✅ Merge consecutive Aggregates into single operator (P37.4) |
+| 17 | **SortElision** | ✅ Eliminate redundant Sorts (P37.4) |
+| 18 | **ExpressionInline** | ✅ Inline variable-reference Projections (P37.4) |
 
 #### Tree Passes
 | # | Pass | Status |
@@ -217,7 +220,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | 6 | AggKeyDependency | ✅ |
 | 7 | CardinalityEstimation (static + StatsStore) | ✅ |
 
-**Total: 22 passes (15 flat + 7 tree) — melebihi C++ (17)**
+**Total: 25 passes (18 flat + 7 tree) — melebihi C++ (17)**
 
 **Paritas:** ~95%
 
@@ -264,7 +267,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 | Komponen | Status |
 |----------|--------|
-| Buffer Manager (Clock eviction) | ✅ (simplified — no mmap, NUMA, or readahead) |
+| Buffer Manager (Clock eviction + mmap + NUMA + readahead) | ✅ (P37.1: mmap via `memmap2`, NUMA detection, sequential readahead) |
 | FileHandle + Page management | ✅ (dengan FSM) |
 | Free Space Manager (buddy-system) | ✅ **terintegrasi** di `FileHandle::allocate_page()` |
 | NodeTable | ✅ |
@@ -277,7 +280,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | WAL + Local WAL | ✅ |
 | Shadow File + Checkpointer | ✅ `flush_table()` implemented, Column metadata persistence, 5 new tests |
 | StatsStore (ColumnStats, TableStats) | ✅ |
-| Compression (Constant, Boolean) | ✅ (StringDictionary is pass-through) |
+| Compression (Constant, Boolean, StringDictionary) | ✅ (StringDictionary with `encode`/`intern`/`lookup`/`serialize`/`deserialize` — P37.2) |
 | Overflow pages | ✅ (via column_chunk) |
 | LocalStorage (LocalNodeTable, LocalRelTable) | ✅ |
 | CSV/Parquet readers | ✅ |
@@ -286,13 +289,13 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | WAL Replayer (crash recovery) | ✅ **terintegrasi** di `StorageManager::recover()` |
 | WAL DDL Record Types | ✅ CreateTable, DropTable, AlterTable, CreateIndex, DropIndex, CreateSequence |
 
-**Paritas:** ~87% (CSR adjacency ✅ DONE, Checkpoint ✅ DONE, Production Readiness ✅ P37.5 in LadybugDB C++)
+**Paritas:** ~90% (CSR adjacency ✅ DONE, Checkpoint ✅ DONE, Production Readiness ✅ P37.5 in LadybugDB C++, BufferManager mmap/NUMA ✅ P37.1, StringDictionary encoding ✅ P37.2)
 
 > **🔴 Catatan Kritis (2026-07-19 Audit):**
 > - ~~**CSR adjacency** (`kuzu-storage/src/csr.rs`) — `get_neighbors()` return `Ok(vec![])`, belum ada offset/adjacency arrays. RelTable menyimpan `Vec<RelData>` flat sebagai fallback.~~ ✅ **FIXED — P36.1**
 > - ~~**Checkpoint** (`kuzu-storage/src/checkpoint.rs`) — `flush_table()` adalah no-op, tidak benar-benar mem-persist data ke disk.~~ ✅ **FIXED — P36.7**: `flush_table()` now flushes per-file dirty pages, Column metadata persisted via `.meta` sidecar files, 5 new tests verifying full round-trip persistence.
-> - **BufferManager** — tidak ada memory-mapped regions, NUMA placement, atau page readahead.
-> - **StringDictionary compression** — pass-through (tidak ada encoding aktual).
+> - ~~**BufferManager** — tidak ada memory-mapped regions, NUMA placement, atau page readahead.~~ ✅ **FIXED — P37.1**: mmap via `memmap2`, NUMA detection via `NumaInfo::detect()`, sequential readahead via `ReadaheadPolicy`.
+> - ~~**StringDictionary compression** — pass-through (tidak ada encoding aktual).~~ ✅ **FIXED — P37.2**: Full dictionary encoding with `encode`/`intern`/`lookup`/`serialize`/`deserialize` + integrated with compression module.
 
 ### 1.7 Functions — ~250 Registered (termasuk alias)
 
@@ -518,7 +521,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Fitur | Rust | C++ Vela/Ladybug |
 |-------|------|-----------------|
-| **Optimizer passes** | 22 (15 flat + 7 tree) | 17 |
+| **Optimizer passes** | 25 (18 flat + 7 tree) | 17 |
 | **Join ordering** | DP Bushy Trees (cost-based) | Greedy cardinality-based |
 | **GDS algorithms** | 15+ (Node2Vec, Random Walk, LPA, etc.) | 15 |
 | **Arrow-native execution** | Zero-copy ColumnChunk→ArrayRef, compute::take() | Value-based |
@@ -633,7 +636,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 ---
 
-## 5. Test Results (Per 2026-07-18 — Sprint 4 Complete: P30.1 ALL GREEN ✅)
+## 5. Test Results (Per 2026-07-21 — Sprint 10 Complete: P37.1-P37.4 ALL DONE ✅)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
@@ -641,9 +644,9 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | kuzu-parser | 63 | ✅ Pass |
 | kuzu-binder | 24 | ✅ Pass |
 | kuzu-planner | 16 | ✅ Pass |
-| kuzu-optimizer | 52 | ✅ Pass |
+| kuzu-optimizer | 61 | ✅ Pass |
 | kuzu-processor | 16 | ✅ Pass |
-| kuzu-storage | 284 | ✅ Pass |
+| kuzu-storage | 289 | ✅ Pass |
 | kuzu-function | 159 | ✅ Pass |
 | kuzu-catalog | 37 | ✅ Pass |
 | kuzu-graph | 34 | ✅ Pass |
@@ -675,7 +678,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | kuzu-migrate | 1 | ✅ Pass (FIXED — un-ignored) |
 | Extension crates (others) | 1+1+1+1 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **~1149** | **✅ ~1149 pass, 0 failed, 5 ignored (doc-tests only)** |
+| **Total** | **~1175** | **✅ ~1175 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -683,6 +686,11 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[P37.1]` | BufferManager enhancements: mmap (memmap2), NUMA awareness (NumaInfo::detect()), sequential readahead (ReadaheadPolicy), 5 new tests |
+| `[P37.2]` | StringDictionary encoding: encode/intern/lookup/serialize/deserialize, integrated with compression module, 12 new tests |
+| `[P37.3]` | LadybugDB benchmark suite: 20 criterion benchmarks (8 categories), `ladybug` CLI binary runner |
+| `[P37.4]` | Query optimization passes: AggregateFusion, SortElision, ExpressionInline (Pass 16-18), 9 new tests, 25 total optimizer passes |
+| `[P37.5]` | Production Readiness (LadybugDB C++): Logger, MetricsRegistry, system_health(), ops docs, linker fix |
 | `[P-MOD3]` | Phase 3 modularization: Split `connection.rs` (3,133 lines) → 8 modules + `connection_test.rs` |
 | `ed94a16` | Port missing functions: Path, UUID, Left/Right/Lpad/Rpad, DayName/MonthName/LastDay/MakeDate |
 | `08e6117` | Prioritas 0 follow-up: Intersect execute_binary + weighted RecursiveExtend + SIP tests + clippy fixes |
@@ -695,7 +703,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-21: **~1149 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests. All new files compile cleanly. Pre-existing linker error (`getNextQueryResult() was replaced`) blocks test execution but is unrelated to our changes. **P36.1 ✅ (CSR Adjacency), P36.2 ✅ (AST ReturnClause), P36.4 ✅ (Binder Type Resolution via Catalog), P36.5 ✅ (ORDER BY/LIMIT/SKIP Propagation), P36.6 ✅ (Fix Ignored Tests).**
+- Per 2026-07-21: **~1175 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **Sprint 10 COMPLETE — P37.1-P37.4 ALL DONE ✅✅✅✅:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, LadybugDB benchmark suite, Query optimization passes (25 total). **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
@@ -837,6 +845,8 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 | **CSR adjacency** | 🔴 P0 | ✅ **DONE (P36.1)** — Full CSR with fwd/rev offsets + adjacency arrays |
 | **Checkpoint persistence** | 🔴 P0 | ✅ **DONE (P36.7)** — `flush_table()` flushes per-file dirty pages, Column metadata via `.meta` sidecar files. |
 | **Production Readiness (LadybugDB)** | 🟡 P1 | ✅ **DONE (P37.5)** — Logger, MetricsRegistry, system_health(), ops docs in `ladybug/` C++ |
+| **BufferManager mmap/NUMA/readahead** | 🟡 P1 | ✅ **DONE (P37.1)** — mmap via memmap2, NUMA detection, sequential readahead |
+| **StringDictionary encoding** | 🟡 P1 | ✅ **DONE (P37.2)** — Dictionary encoding with encode/intern/lookup/serialize/deserialize |
 
 ### 8.6 GDS Algorithm Status
 
@@ -870,7 +880,7 @@ All `LogicalOperator` → `PhysicalOperator` dispatch paths are implemented. No 
 
 ### 8.8 Optimizer Passes — All Implemented ✅
 
-Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exceeds by 5: VectorSimilarityDetection, ArtRangeScanDetection, PredicatePushDown, CSE, OrderByPushDown, UnwindDedup, CountRelTable)
+Rust: **25 passes (18 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exceeds by 8: VectorSimilarityDetection, ArtRangeScanDetection, PredicatePushDown, CSE, OrderByPushDown, UnwindDedup, CountRelTable, AggregateFusion, SortElision, ExpressionInline)
 
 | Rust Pass | C++ Equivalent | Status |
 |-----------|----------------|--------|
@@ -889,6 +899,9 @@ Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exce
 | OrderByPushDown | — Rust-specific (Ladybug port) | ✅ |
 | UnwindDedup | — Rust-specific (Ladybug port) | ✅ |
 | CountRelTable | — Rust-specific (Ladybug port) | ✅ |
+| AggregateFusion | — Rust-specific (P37.4) | ✅ |
+| SortElision | — Rust-specific (P37.4) | ✅ |
+| ExpressionInline | — Rust-specific (P37.4) | ✅ |
 | FactorizationRewriting | `remove_factorization` | ✅ |
 | ForeignJoinPushDown | `foreign_join_pushdown` | ✅ |
 | AccHashJoinOptimization | `acc_hash_join` | ✅ |
@@ -901,7 +914,7 @@ Rust: **22 passes (15 flat + 7 tree)** — C++ Ladybug: **17 passes** (Rust exce
 
 | Area | Rust Advantage |
 |------|---------------|
-| **Optimizer passes** | 22 vs 17 (extra: `PredicatePushDown`, `VectorSimilarityDetection`, `ArtRangeScanDetection`, `CSE`, `OrderByPushDown`, `UnwindDedup`, `CountRelTable`) |
+| **Optimizer passes** | 25 vs 17 (extra: `PredicatePushDown`, `VectorSimilarityDetection`, `ArtRangeScanDetection`, `CSE`, `OrderByPushDown`, `UnwindDedup`, `CountRelTable`, `AggregateFusion`, `SortElision`, `ExpressionInline`) |
 | **Join order** | DP Bushy Trees (cost-based) vs C++ greedy |
 | **Multiwriter** | `AtomicBool` + `Condvar` concurrent writes |
 | **ADBC** | Native Arrow Flight SQL interface |
@@ -1029,6 +1042,7 @@ Refactor ini ditambahkan sebagai **P10.6** (dikerjakan paralel dengan P10.2–P1
 | **🟢 WASM tests** | 4 test (3 pass, 1 ignore) — perlu stabilisasi. | 🟢 LOW |
 | **🟢 Fuzz targets** | 3 target defined, tapi butuh nightly Rust. Belum di-run secara rutin. | 🟢 LOW |
 | **✅ GitHub Releases** | Binary distribution siap. `rust-release.yml` — test, build 3-platform CLI, auto-changelog, GH Release. | 🟢 LOW |
+| **✅ Sprint 10 (P37.1-P37.4)** | BufferManager mmap/NUMA ✅, StringDictionary encoding ✅, Benchmark suite ✅, 3 new optimizer passes (25 total) ✅ — ALL DONE | 🟢 COMPLETE |
 
 ### 10.2 Sprint 4: "Stabilisasi & Benchmark Komprehensif"
 
