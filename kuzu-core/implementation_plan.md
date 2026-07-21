@@ -1,9 +1,9 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-21 (Sprint 10 Complete — P37.1-P37.4 All Done)
+> **Revision:** 2026-07-21 (Sprint 11 — P38.1 Complete)
 > **Baseline:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Benchmark gap vs C++:** **3-way parity verified (hot path only).** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
-> **🔴 Audit findings:** ~~12 DDL operators = no-op~~ 6 of 12 FIXED (P36.3), ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. Pipeline completeness ~90%.
+> **🔴 Audit findings:** ~~12 DDL operators = no-op~~ ✅ ALL 12 FIXED (P36.3 + P38.1). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. Pipeline completeness ~95%.
 > **For completed phases (P1-P37) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 
 ---
@@ -752,6 +752,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 8** | **P35: Remaining Minor Gaps** | **1** | **🏁 P35 ALL DONE ✅✅ — ConstantOrNullFunction, ConfidentialStatementAnalyzer** |
 | **Sprint 9** | **P36: Critical Pipeline Gaps** | **29 (29 done)** | **🏁 P36 ALL DONE ✅✅✅✅✅✅✅ — P36.1 CSR Adjacency, P36.2 AST ReturnClause, P36.3 DDL Operators, P36.4 Binder Type Resolution, P36.5 ORDER BY/LIMIT/SKIP, P36.6 Fix Ignored Tests, P36.7 Checkpoint Implementation** |
 | **Sprint 10** | **P37: Storage & Performance** | **18** | **🏁 P37 ALL DONE ✅✅✅✅✅ — P37.1 BufferManager (mmap/NUMA/readahead), P37.2 StringDictionary encoding, P37.3 Benchmark suite, P37.4 Query optimization (25 passes), P37.5 Production Readiness (LadybugDB C++)** |
+| **Sprint 11** | **P38: DDL Completeness & Docs** | **11** | **P38.1 DDL operators (all 12) ✅ COMPLETE, P38.2 Benchmark verify, P38.3 Documentation** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -792,7 +793,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 
 ### ✅ P36.3 — DDL Operator Implementations (8 SP) — COMPLETE
 
-**Goal:** Implement the 12 DDL operators that are currently no-op stubs. ✅ 6 of 12 implemented (CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex).
+**Goal:** Implement the 12 DDL operators that are currently no-op stubs. ✅ ALL 12 implemented (P36.3: 6 operators + P38.1: 6 operators).
 
 | Task | Description | Files |
 |------|-------------|-------|
@@ -887,6 +888,57 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 - `flush_table()` now iterates dirty pages for a specific file via `BufferManager::dirty_page_nums_for_file()`
 - `Column::save_metadata()` / `load_metadata()` persist num_values, num_pages, page_row_offsets to `.meta` sidecar files
 - `Column::serialize_value()` made `pub(crate)` for test access
+
+---
+
+## 🔴 SPRINT 11: DDL COMPLETENESS & DOCUMENTATION (P38 — 2026-07-21)
+
+> **Priority: 🟡 P1** — Complete remaining DDL operators for production parity.
+> **Estimated effort:** 11 story points
+> **Target:** Full DDL pipeline execution, benchmark verification, documentation polish
+
+### P38.1 — Complete 6 Remaining DDL Operators (8 SP) — ✅ COMPLETE
+
+**Goal:** Wire 6 DDL operator stubs in `map_ddl.rs` to actual catalog/storage implementations. ✅ ALL DONE.
+
+| Task | Description | Files | SP | Status |
+|------|-------------|-------|:---:|--------|
+| P38.1a | **CreateVectorIndex** — wire to `tc.create_vector_index()` + auto-populate | `map_ddl.rs:173-178` | 2 | ✅ |
+| P38.1b | **CreateSequence** — wire to `schema_ddl_fn` → `catalog.create_sequence()` | `map_ddl.rs:179-180` | 1 | ✅ |
+| P38.1c | **DropSequence** — wire to `schema_ddl_fn` → `catalog.drop_sequence()` with IF EXISTS | `map_ddl.rs:179-180` | 1 | ✅ |
+| P38.1d | **CreateDml** — wire to table insert logic (resolve PK, insert row) | `map_ddl.rs:181` | 2 | ✅ |
+| P38.1e | **ExportDatabase** — wire to `schema_ddl_fn` → export logic (schema + data to CSV/Parquet) | `map_ddl.rs:182` | 1 | ✅ |
+| P38.1f | **ImportDatabase** — wire to `schema_ddl_fn` → import logic | `map_ddl.rs:183` | 1 | ✅ |
+| P38.1g | **Pk index auto-creation** — `CreateNodeTable` in pipeline calls `tc.create_art_index()` | `map_ddl.rs` | — | ✅ |
+
+**Implementation notes:**
+- `SchemaDdlFn` callback pattern: new `SchemaDdlOp` enum + `SchemaDdlFn` type alias on `QueryProcessor`, passed through `ExecutionContext`.
+- `ast_constant_to_value` helper duplicated in `map_ddl.rs` (can't import from `kuzu-main` due to dependency direction).
+- `kuzu-vector` added as dependency to `kuzu-processor` for `DistanceMetric` enum.
+- `CreateVectorIndex` auto-populates via `insert_row` loop over data source table.
+
+**Acceptance criteria:** ✅ ALL MET
+- `CREATE VECTOR INDEX` through pipeline creates actual vector index ✅
+- `CREATE SEQUENCE` / `DROP SEQUENCE` through pipeline updates catalog ✅
+- `CREATE DML` (node creation) through pipeline inserts rows ✅
+- `EXPORT DATABASE` / `IMPORT DATABASE` through pipeline exports/imports data ✅
+- Pk index auto-creation in pipeline `CreateNodeTable` ✅
+- All existing tests continue to pass ✅ (~1175, 0 fail)
+
+### P38.2 — Run & Verify P37 Benchmarks (1 SP)
+
+| Task | Description |
+|------|-------------|
+| P38.2a | Run `cargo bench --bench ladybug_suite` — collect fresh numbers |
+| P38.2b | Compare P37.4 optimizer pass impact on complex queries |
+| P38.2c | Update `BENCHMARK_COMPARISON.md` with latest results |
+
+### P38.3 — Documentation Polish (2 SP)
+
+| Task | Description | SP |
+|------|-------------|:---:|
+| P38.3a | Create/update `MIGRATION.md` — English guide for C++ → Rust migration | 1 |
+| P38.3b | Add rustdoc to public API types (Database, Connection, QueryResult, StorageDriver) | 1 |
 
 ---
 
@@ -1069,6 +1121,10 @@ graph TD
     P37 --> P37_3["✅ P37.3: LadybugDB Benchmark Suite (DONE)"]
     P37 --> P37_4["✅ P37.4: Query Complexity Optimization (DONE)"]
     P37 --> P37_5["✅ P37.5: Production Readiness (LadybugDB C++)"]
+    P37 --> P38["🟡 P38: DDL Completeness & Docs"]
+    P38 --> P38_1["P38.1: 6 Remaining DDL Operators"]
+    P38 --> P38_2["P38.2: Benchmark Verify"]
+    P38 --> P38_3["P38.3: Documentation Polish"]
 ```
 
 ## Design Decisions Log
@@ -1106,3 +1162,4 @@ graph TD
 | 29 | **P36.4 Binder type resolution** | ✅ DONE — `Catalog::get_property_type()` replaces hardcoded `match` | Hardcoded heuristic could silently produce wrong types; catalog lookup catches errors at bind time |
 | 30 | **P36.6 Fix ignored tests** | ✅ DONE — OrderBy/TopK field_names propagation, FTS column fix, bind error update | P36.4 catalog-based resolution surfaced latent bugs in test assertions and operator metadata propagation |
 | 31 | **P37.5 Production Readiness scope** | ✅ DONE — Implemented in LadybugDB C++ (Logger, MetricsRegistry, system_health, ops docs) | C++ production features complement Rust parity; spdlog logging + atomic metrics + table function for monitoring |
+| 32 | **P38.1 DDL operator strategy** | Wire pipeline stubs to existing catalog/storage implementations — NOT re-implement | Two execution paths exist: connection DDL (fully implemented) and pipeline (stubs). Pipeline path needs same side-effects. Reference implementations exist in `connection/ddl.rs`. |

@@ -1,9 +1,9 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-21 (Sprint 10 Complete — P37.1-P37.4 All Done)
+> **Tanggal:** 2026-07-21 (Sprint 11 — P38.1 Complete, P38.2-38.3 In Progress)
 > **Hasil audit:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ 6 of 12 FIXED (P36.3: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
+> **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ ALL 12 FIXED (P36.3 + P38.1: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex + CreateVectorIndex, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
 
 ---
 
@@ -24,14 +24,14 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
 | **Functions** | **234** registered (scalar + aggregate + table) |
 | **Logical operators** | **58** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
-| **Physical operators** | **46** variants (C++ Ladybug: 67) — core query engine parity ~90%, 6 DDL operators implemented (P36.3), 6 remaining |
+| **Physical operators** | **46** variants (C++ Ladybug: 67) — core query engine parity ~90%, all 12 DDL operators implemented (P36.3 + P38.1) |
 | **BoundStatement variants** | **43** (termasuk BoundTransaction, BoundExtension, BoundAttachDatabase, BoundDetachDatabase, BoundUseDatabase, BoundLoadFrom, BoundCall, BoundAnalyze, BoundCreateFtsIndex, BoundCopyTo) |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
-| **Pipeline completeness** | **~90%** — 6 DDL no-ops remaining, Binder type resolution ✅ via catalog (P36.4), Field names propagation ✅ (P36.6), BufferManager mmap/NUMA ✅ (P37.1), StringDictionary encoding ✅ (P37.2), Query optimization passes ✅ (P37.4) |
+| **Pipeline completeness** | **~95%** — all 12 DDL operators wired ✅, Binder type resolution ✅ via catalog (P36.4), Field names propagation ✅ (P36.6), BufferManager mmap/NUMA ✅ (P37.1), StringDictionary encoding ✅ (P37.2), Query optimization passes ✅ (P37.4) |
 
 ### Perubahan Besar Sejak 2026-07-01
 
@@ -261,7 +261,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 
 > ⚠️ **Catatan arsitektur:** Semua operator saat ini dalam file modular di `physical/` (10 files). ✅ Sudah direfactor (Phase 2A). Dispatch layer (`processor/mod.rs`) juga telah direfactor (Phase 2B) menjadi modul `mapper/` dan ukurannya mengecil dari 2,400+ baris menjadi ~299 baris.
 >
-> **🔴 Catatan Kritis (2026-07-19 Audit):** ~~12 DDL operators~~ ✅ 6 FIXED by P36.3 (CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex). Remaining 6: CreateVectorIndex (placeholder, needs kuzu_vector dep), CreateNodeTable pk index wiring. Dispatch paths exist tapi beberapa `execute()` method masih no-op.
+> **🔴 Catatan Kritis (2026-07-19 Audit):** ~~12 DDL operators~~ ✅ ALL 12 FIXED by P36.3 + P38.1 (CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex, CreateVectorIndex, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase). Pk index auto-creation for pipeline path also wired.
 
 ### 1.6 Storage Engine
 
@@ -467,7 +467,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **LadybugDB C++** — `ladybug/src/include/` → operator enum, optimizer passes, storage features
 - **Kuzu Rust** — `kuzu-core/` → 29 crate, enum definitions, function registry, physical/logical operators
 
-**Hasil: ~88% pipeline completeness.** Query engine core (SELECT/FILTER/JOIN/AGG) berfungsi, CSR adjacency ✅ DONE, ORDER BY/LIMIT/SKIP ✅ DONE, 6/12 DDL operators ✅ DONE (P36.3), Binder type resolution ✅ DONE (P36.4). Production Readiness ✅ DONE (P37.5: Logger, Metrics, system_health in LadybugDB C++). Tersisa critical gaps: 6 DDL operators (CreateVectorIndex placeholder).
+**Hasil: ~95% pipeline completeness.** Query engine core (SELECT/FILTER/JOIN/AGG) berfungsi, CSR adjacency ✅ DONE, ORDER BY/LIMIT/SKIP ✅ DONE, 12/12 DDL operators ✅ DONE (P36.3 + P38.1), Binder type resolution ✅ DONE (P36.4), Pk index auto-creation ✅ DONE (P38.1). Production Readiness ✅ DONE (P37.5: Logger, Metrics, system_health in LadybugDB C++).
 
 ### 3.2 Ringkasan Gap per Layer
 
@@ -476,7 +476,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | **Parser (Statement types)** | 20 | 0 | **~80%** | ORDER BY/LIMIT/SKIP now propagated to AST ✅ |
 | **Binder** | 30+ bound stmt | 0 | **~80%** | Property type resolution uses catalog lookup (P36.4 ✅). ORDER BY/LIMIT/SKIP now bound ✅ |
 | **Logical operators** | 38 (Ladybug) | 0 (Rust 51, EXCEEDS) | **100%+** | |
-| **Physical operators** | 67 (split-phase) | 46 (fused) | **~66%** | 6 DDL operators implemented (P36.3), 6 remaining (CreateVectorIndex placeholder) |
+| **Physical operators** | 67 (split-phase) | 46 (fused) | **~66%** | 12 DDL operators implemented (P36.3 + P38.1), all wired with pk index auto-creation |
 | **Optimizer passes** | 17 | 22 (EXCEEDS) | **100%+** | |
 | **Functions (base)** | ~234 unique | 234 | **~100%** | |
 | **Functions (aliases)** | ~607 total | ~250 | **~80%** (non-critical) | |
@@ -490,10 +490,11 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | # | Gap | Severity | Location | Detail |
 |---|-----|----------|----------|--------|
 | 1 | ~~**CSR adjacency stub**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-storage/src/csr.rs:90`~~ | ~~`get_neighbors()` returns `Ok(vec![])`. RelTable uses flat `Vec<RelData>` fallback.~~ ✅ **FIXED — P36.1**: Full CSR with fwd/rev offsets + adjacency arrays. |
-| 2 | ~~**12 DDL operators no-op**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-processor/src/physical/write_ops/map_ddl.rs`~~ | ~~CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE/DROP INDEX — all have `execute()` method that returns empty result or does nothing.~~ ✅ **6 FIXED — P36.3**: CreateNodeTable, CreateRelTable, DropTable, AlterTable (Add/Drop/Rename), CreateIndex, DropIndex. Remaining: CreateVectorIndex (placeholder), CreateNodeTable/RelTable pk index wiring. |
+| 2 | ~~**12 DDL operators no-op**~~ | ~~🔴 CRITICAL~~ | ~~`kuzu-processor/src/physical/write_ops/map_ddl.rs`~~ | ~~CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE/DROP INDEX — all have `execute()` method that returns empty result or does nothing.~~ ✅ **ALL FIXED — P36.3 + P38.1**: All 12 DDL operators now fully wired. P38.1: CreateVectorIndex (kuzu-vector integration), CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase via SchemaDdlFn callback. Pk index auto-creation added. |
 | 3 | ~~**ORDER BY/LIMIT/SKIP discarded**~~ | ~~🔴 HIGH~~ | ~~`kuzu-parser/src/ast.rs:227`~~ | ~~`ReturnClause` struct lacks ORDER BY/LIMIT/SKIP fields.~~ ✅ **FIXED — P36.2 + P36.5**: AST fields + planner propagation + PhysicalOrderBy/Limit already existed. |
 | 4 | ~~**Binder type resolution hardcoded**~~ | ~~🟡 HIGH~~ | ~~`kuzu-binder/src/binder/mod.rs:200-250`~~ | ~~Property type lookup uses `match prop_name { "age" => INT64, ... }` heuristic instead of catalog-based schema lookup.~~ ✅ **FIXED — P36.4**: `Catalog::get_property_type()` method + binder now resolves via catalog. Unknown properties return error. |
 | 5 | ~~**Checkpoint no-op**~~ | ~~🟡 HIGH~~ | ~~`kuzu-storage/src/checkpoint.rs`~~ | ~~`flush_table()` is empty function — data never persists to disk beyond in-memory state.~~ ✅ **FIXED — P36.7**: `flush_table()` flushes per-file dirty pages, Column metadata persisted via `.meta` sidecar, 5 tests. |
+| 6 | ~~**Pk index wiring (pipeline path)**~~ | ~~🟡 MEDIUM~~ | ~~`kuzu-processor/src/processor/mapper/map_ddl.rs:47-61`~~ | ~~`CreateNodeTable` in pipeline path doesn't auto-create ART index for PK column.~~ ✅ **FIXED — P38.1**: Pk index auto-creation added to `CreateNodeTable` pipeline operator. |
 
 ### 3.3 🟡 Medium Gaps (4 items, ~3.5 SP) — ALL DONE ✅✅✅✅
 
@@ -686,6 +687,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[P38.1]` | DDL operator completions: CreateVectorIndex pipeline wiring, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase, pk index auto-creation |
 | `[P37.1]` | BufferManager enhancements: mmap (memmap2), NUMA awareness (NumaInfo::detect()), sequential readahead (ReadaheadPolicy), 5 new tests |
 | `[P37.2]` | StringDictionary encoding: encode/intern/lookup/serialize/deserialize, integrated with compression module, 12 new tests |
 | `[P37.3]` | LadybugDB benchmark suite: 20 criterion benchmarks (8 categories), `ladybug` CLI binary runner |
@@ -703,7 +705,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-21: **~1175 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **Sprint 10 COMPLETE — P37.1-P37.4 ALL DONE ✅✅✅✅:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, LadybugDB benchmark suite, Query optimization passes (25 total). **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests.
+- Per 2026-07-21: **~1175 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **Sprint 10 COMPLETE — P37.1-P37.4 ALL DONE ✅✅✅✅:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, LadybugDB benchmark suite, Query optimization passes (25 total). **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests. **Sprint 11 — P38.1 ✅ COMPLETE:** All 6 remaining DDL operators wired (CreateVectorIndex, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase). SchemaDdlFn callback pattern added for schema-level DDL. Pk index auto-creation added to pipeline CreateNodeTable. All 1175 tests passing. **P38.2 IN PROGRESS:** Benchmark verification. **P38.3 IN PROGRESS:** Documentation polish.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.
