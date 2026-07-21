@@ -2037,6 +2037,7 @@ dependencies = [
  "kuzu-parser",
  "kuzu-planner",
  "kuzu-storage",
+ "kuzu-vector",
  "rayon",
  "tracing",
 ]

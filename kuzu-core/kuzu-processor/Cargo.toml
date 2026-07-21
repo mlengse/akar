@@ -18,6 +18,7 @@ kuzu-function = { path = "../kuzu-function" }
 kuzu-storage = { path = "../kuzu-storage" }
 kuzu-parser = { path = "../kuzu-parser" }
 kuzu-fts = { path = "../kuzu-fts" }
+kuzu-vector = { path = "../kuzu-vector" }
 tracing.workspace = true
 hashbrown.workspace = true
 ahash.workspace = true
