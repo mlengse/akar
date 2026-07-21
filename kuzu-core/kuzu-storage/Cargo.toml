@@ -25,6 +25,7 @@ arrow = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
 flate2 = { workspace = true }
 dashmap = "6"
+memmap2 = "0.9"
 
 [dev-dependencies]
 tempfile = "3"
