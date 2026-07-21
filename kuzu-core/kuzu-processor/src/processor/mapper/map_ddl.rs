@@ -1,6 +1,7 @@
 use super::ExecutionContext;
 use crate::physical_operator::*;
 use crate::processor::plan_serializer::serialize_plan_tree;
+use crate::processor::SchemaDdlOp;
 use kuzu_common::vector::DataChunk;
 use kuzu_planner::logical_operator::LogicalOperator;
 
@@ -56,6 +57,15 @@ pub fn map_and_execute_ddl(
                 }
             }).collect();
             tc.create_node_table(c.name.clone(), columns);
+
+            // Auto-create ART index for primary key (matches connection/ddl.rs behavior)
+            if c.columns.iter().any(|col| col.is_primary_key) {
+                let index_name = format!("{}_pk_idx", c.name);
+                if let Err(e) = tc.create_art_index(&c.name, &index_name) {
+                    tracing::warn!("Failed to auto-create ART index for table '{}': {}", c.name, e);
+                }
+            }
+
             tracing::info!("Pipeline: Created node table '{}'", c.name);
             Ok(ddl_success_chunk(&format!("Node table '{}' created", c.name)))
         }
@@ -171,23 +181,120 @@ pub fn map_and_execute_ddl(
             Ok(ddl_success_chunk(&format!("Index '{}' dropped from table '{}'", idx.index_name, idx.table_name)))
         }
         LogicalOperator::CreateVectorIndex(vi) => {
+            let tc = ctx.table_catalog.as_ref()
+                .ok_or("CREATE VECTOR INDEX requires a table catalog")?;
+
+            // Map string metric to typed enum
+            let metric = match vi.metric.to_lowercase().as_str() {
+                "cosine" => kuzu_vector::hnsw::DistanceMetric::Cosine,
+                "euclidean" | "l2" => kuzu_vector::hnsw::DistanceMetric::L2Squared,
+                "dot" => kuzu_vector::hnsw::DistanceMetric::DotProduct,
+                other => return Err(format!("Unknown vector metric '{other}'")),
+            };
+
+            // Create the vector index in storage
+            tc.create_vector_index(
+                vi.index_name.clone(),
+                vi.table_name.clone(),
+                vi.column_name.clone(),
+                metric,
+                vi.dimensions as u32,
+            );
+
+            // Auto-populate from existing table data
+            if let Some(table) = tc.get_node_table_by_name(&vi.table_name) {
+                let col_idx = table.columns.iter().position(|c| c.name == vi.column_name);
+                if let Some(col_idx) = col_idx {
+                    for row_id in 0..table.num_rows as usize {
+                        if let Some(val) = table.get_value(row_id, col_idx) {
+                            if let Ok(vec) = kuzu_storage::extract_f64_list_from_value(val) {
+                                if let Some(mut vib) = tc.get_vector_index_by_name_mut(&vi.index_name) {
+                                    vib.hnsw_mut().insert(vec, row_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            tracing::info!("Pipeline: Created vector index '{}' on '{}.{}'",
+                vi.index_name, vi.table_name, vi.column_name);
             Ok(ddl_success_chunk(&format!(
-                "Vector index '{}' on '{}' will be created at connection level",
-                vi.index_name, vi.table_name
+                "Vector index '{}' created on '{}.{}'",
+                vi.index_name, vi.table_name, vi.column_name
             )))
         }
-        LogicalOperator::CreateSequence(_)
-        | LogicalOperator::DropSequence(_)
-        | LogicalOperator::CreateDml(_)
-        | LogicalOperator::ExportDatabase(_)
-        | LogicalOperator::ImportDatabase(_) => {
-            Ok(vec![DataChunk {
-                fields: vec![],
-                field_types: vec![],
-                size: 0,
-                field_names: vec![],
-            sel_vector: None,
-            }])
+        LogicalOperator::CreateSequence(s) => {
+            if let Some(ref ddl_fn) = ctx.schema_ddl_fn {
+                let result = ddl_fn(SchemaDdlOp::CreateSequence {
+                    name: s.name.clone(),
+                    if_not_exists: s.if_not_exists,
+                    start_value: s.start_with,
+                    increment: s.increment,
+                    min_value: s.min_value,
+                    max_value: s.max_value,
+                    cycle: s.cycle,
+                })?;
+                Ok(ddl_success_chunk(&result))
+            } else {
+                Err("CREATE SEQUENCE requires schema catalog access".into())
+            }
+        }
+        LogicalOperator::DropSequence(s) => {
+            if let Some(ref ddl_fn) = ctx.schema_ddl_fn {
+                let result = ddl_fn(SchemaDdlOp::DropSequence {
+                    name: s.name.clone(),
+                    if_exists: s.if_exists,
+                })?;
+                Ok(ddl_success_chunk(&result))
+            } else {
+                Err("DROP SEQUENCE requires schema catalog access".into())
+            }
+        }
+        LogicalOperator::CreateDml(c) => {
+            let tc = ctx.table_catalog.as_ref()
+                .ok_or("CREATE DML requires a table catalog")?;
+            let mut table = tc
+                .get_node_table_by_name_mut(&c.table_name)
+                .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;
+
+            // Build values from pattern properties, defaulting to Null
+            let mut values: Vec<kuzu_common::types::Value> = table.columns.iter().map(|_| kuzu_common::types::Value::Null).collect();
+            for (prop_name, expr) in &c.properties {
+                if let Some(col_idx) = table.columns.iter().position(|col| col.name == *prop_name) {
+                    if let kuzu_parser::ast::Expression::Constant(con) = expr {
+                        values[col_idx] = ast_constant_to_value(con);
+                    }
+                }
+            }
+
+            table.insert_row(values)?;
+            tracing::info!("Pipeline: Created node in '{}'", c.table_name);
+            Ok(ddl_success_chunk(&format!("Created node in '{}'", c.table_name)))
+        }
+        LogicalOperator::ExportDatabase(e) => {
+            if let Some(ref ddl_fn) = ctx.schema_ddl_fn {
+                let result = ddl_fn(SchemaDdlOp::ExportDatabase {
+                    file_path: e.file_path.clone(),
+                    file_type: e.file_type.clone(),
+                    schema_only: e.schema_only,
+                })?;
+                Ok(ddl_success_chunk(&result))
+            } else {
+                Err("EXPORT DATABASE requires schema catalog access".into())
+            }
+        }
+        LogicalOperator::ImportDatabase(i) => {
+            if let Some(ref ddl_fn) = ctx.schema_ddl_fn {
+                let result = ddl_fn(SchemaDdlOp::ImportDatabase {
+                    file_path: i.file_path.clone(),
+                    query: i.query.clone(),
+                    index_query: i.index_query.clone(),
+                })?;
+                Ok(ddl_success_chunk(&result))
+            } else {
+                Err("IMPORT DATABASE requires schema catalog access".into())
+            }
         }
         LogicalOperator::CreateFtsIndex(c) => {
             if let Some(ref tc) = ctx.table_catalog {
@@ -275,6 +382,19 @@ fn ddl_success_chunk(message: &str) -> Vec<DataChunk> {
     chunk.size = 1;
     chunk.field_names = vec!["result".to_string()];
     vec![chunk]
+}
+
+/// Convert an AST constant to a Value.
+fn ast_constant_to_value(c: &kuzu_parser::ast::Constant) -> kuzu_common::types::Value {
+    use kuzu_common::types::Value;
+    use kuzu_parser::ast::Constant;
+    match c {
+        Constant::Null => Value::Null,
+        Constant::Bool(b) => Value::Bool(*b),
+        Constant::Integer(i) => Value::Int64(*i),
+        Constant::Float(f) => Value::Double(*f),
+        Constant::String(s) => Value::String(s.clone()),
+    }
 }
 
 /// Minimal type parser for ALTER TABLE ADD COLUMN (avoids kuzu-binder dependency).
