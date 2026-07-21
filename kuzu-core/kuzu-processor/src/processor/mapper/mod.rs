@@ -17,7 +17,7 @@ use kuzu_storage::table::TableCatalog;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{SequenceFn, StandaloneCallHandler, SubqueryFn};
+use super::{SchemaDdlFn, SequenceFn, StandaloneCallHandler, SubqueryFn};
 
 /// Shared state threaded through the mapper functions
 pub struct ExecutionContext<'a, 'p> {
@@ -29,6 +29,7 @@ pub struct ExecutionContext<'a, 'p> {
     pub standalone_call_handler: Option<Arc<dyn StandaloneCallHandler>>,
     pub sequence_fn: Option<SequenceFn>,
     pub subquery_fn: Option<SubqueryFn>,
+    pub schema_ddl_fn: Option<SchemaDdlFn>,
 }
 
 impl<'a, 'p> ExecutionContext<'a, 'p> {
