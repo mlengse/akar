@@ -31,6 +31,37 @@ use std::sync::{Arc, Mutex};
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
 pub type SubqueryFn = Arc<dyn Fn(&kuzu_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
 
+/// DDL operations that require the schema-level Catalog (from kuzu-catalog).
+/// These are dispatched via callback because the processor layer doesn't
+/// directly own the schema catalog.
+#[derive(Debug, Clone)]
+pub enum SchemaDdlOp {
+    CreateSequence {
+        name: String,
+        if_not_exists: bool,
+        start_value: i64,
+        increment: i64,
+        min_value: i64,
+        max_value: i64,
+        cycle: bool,
+    },
+    DropSequence {
+        name: String,
+        if_exists: bool,
+    },
+    ExportDatabase {
+        file_path: String,
+        file_type: String,
+        schema_only: bool,
+    },
+    ImportDatabase {
+        file_path: String,
+        query: String,
+        index_query: String,
+    },
+}
+pub type SchemaDdlFn = Arc<dyn Fn(SchemaDdlOp) -> Result<String, String> + Send + Sync>;
+
 pub trait StandaloneCallHandler: Send + Sync {
     fn execute_call(&self, name: &str, args: &[kuzu_parser::ast::Expression]) -> Result<Vec<kuzu_common::vector::DataChunk>, String>;
 }
@@ -72,6 +103,8 @@ pub struct QueryProcessor {
     sequence_fn: Option<SequenceFn>,
     /// Callback for executing subqueries.
     subquery_fn: Option<SubqueryFn>,
+    /// Callback for schema-level DDL operations (CREATE/DROP SEQUENCE, EXPORT/IMPORT DATABASE).
+    schema_ddl_fn: Option<SchemaDdlFn>,
 }
 
 impl QueryProcessor {
@@ -83,6 +116,7 @@ impl QueryProcessor {
             standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
+            schema_ddl_fn: None,
         }
     }
 
@@ -95,6 +129,7 @@ impl QueryProcessor {
             standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
+            schema_ddl_fn: None,
         }
     }
 
@@ -111,6 +146,7 @@ impl QueryProcessor {
             standalone_call_handler: None,
             sequence_fn: None,
             subquery_fn: None,
+            schema_ddl_fn: None,
         }
     }
 
@@ -129,6 +165,12 @@ impl QueryProcessor {
     /// Set the subquery operation callback.
     pub fn with_subquery_fn(mut self, f: SubqueryFn) -> Self {
         self.subquery_fn = Some(f);
+        self
+    }
+
+    /// Set the schema DDL callback (for CREATE/DROP SEQUENCE, EXPORT/IMPORT DATABASE).
+    pub fn with_schema_ddl_fn(mut self, f: SchemaDdlFn) -> Self {
+        self.schema_ddl_fn = Some(f);
         self
     }
 
@@ -172,6 +214,7 @@ impl QueryProcessor {
                 standalone_call_handler: self.standalone_call_handler.clone(),
                 sequence_fn: self.sequence_fn.clone(),
                 subquery_fn: self.subquery_fn.clone(),
+                schema_ddl_fn: self.schema_ddl_fn.clone(),
             };
             
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, &mut ctx)?;
