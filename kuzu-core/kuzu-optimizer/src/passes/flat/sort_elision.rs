@@ -1,6 +1,5 @@
 use crate::passes::OptimizationPass;
 use kuzu_planner::logical_operator::*;
-use kuzu_parser::ast::Expression;
 
 pub struct SortElision;
 
@@ -46,6 +45,7 @@ impl OptimizationPass for SortElision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzu_parser::ast::Expression;
 
     fn make_sort(keys: Vec<(Expression, bool)>) -> LogicalOperator {
         LogicalOperator::OrderBy(LogicalOrderBy {
