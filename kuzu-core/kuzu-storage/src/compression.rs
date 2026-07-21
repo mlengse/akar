@@ -3,6 +3,7 @@
 //! Supports constant, one-value, boolean, integer bitpacking,
 //! string dictionary, float, and list delta compression.
 
+use crate::StringDictionary;
 use kuzu_common::enums::CompressionType;
 
 /// A compressed column chunk.
@@ -32,11 +33,9 @@ pub fn compress(compression: CompressionType, data: &[u8], num_values: usize) ->
             data: data.to_vec(),
             num_values,
         },
-        CompressionType::StringDictionary => CompressedChunk {
-            compression,
-            data: data.to_vec(),
-            num_values,
-        },
+        CompressionType::StringDictionary => {
+            compress_string_dictionary(data, num_values)
+        }
     }
 }
 
@@ -47,8 +46,31 @@ pub fn decompress(chunk: &CompressedChunk, expected_size: usize) -> Vec<u8> {
         CompressionType::Boolean => decompress_boolean(&chunk.data, expected_size),
         CompressionType::IntegerBitpacking => decompress_integer_bitpacking(&chunk.data, expected_size),
         CompressionType::Float => decompress_float(&chunk.data, expected_size),
+        CompressionType::StringDictionary => decompress_string_dictionary(&chunk.data, expected_size),
         _ => chunk.data.clone(),
     }
+}
+
+// =====================================================================
+// String Dictionary — deduplicate strings via ID encoding
+// =====================================================================
+
+fn compress_string_dictionary(data: &[u8], num_values: usize) -> CompressedChunk {
+    let dict = StringDictionary::deserialize(data).unwrap_or_default();
+    let dict_bytes = dict.serialize();
+    CompressedChunk {
+        compression: CompressionType::StringDictionary,
+        data: dict_bytes,
+        num_values,
+    }
+}
+
+fn decompress_string_dictionary(data: &[u8], _expected_size: usize) -> Vec<u8> {
+    let dict = match StringDictionary::deserialize(data) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    dict.serialize()
 }
 
 // =====================================================================
@@ -712,7 +734,6 @@ mod tests {
 
     #[test]
     fn test_compression_metadata() {
-        use kuzu_common::enums::CompressionType;
         // Verify Constant compression shrinks data
         let data = vec![42u8; 100];
         let chunk = compress(CompressionType::Constant, &data, 100);
