@@ -50,6 +50,12 @@ impl Optimizer {
             Box::new(UnwindDedup),
             // Pass 15: Replace ScanRel+COUNT with CSR metadata (Ladybug)
             Box::new(CountRelTable),
+            // Pass 16: Merge consecutive Aggregates with matching GROUP BY
+            Box::new(AggregateFusion),
+            // Pass 17: Eliminate redundant Sort operators
+            Box::new(SortElision),
+            // Pass 18: Inline simple variable-reference Projections
+            Box::new(ExpressionInline),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             // Tree pass 1: Insert flatten operators for factorization
@@ -88,6 +94,9 @@ impl Optimizer {
             Box::new(OrderByPushDown),
             Box::new(UnwindDedup),
             Box::new(CountRelTable),
+            Box::new(AggregateFusion),
+            Box::new(SortElision),
+            Box::new(ExpressionInline),
         ];
         let tree_passes: Vec<Box<dyn TreeOptimizationPass>> = vec![
             Box::new(FactorizationRewriting),
@@ -170,7 +179,10 @@ mod tests {
         assert!(names.contains(&"unwind_dedup"));
         assert!(names.contains(&"count_rel_table"));
         assert!(names.contains(&"predicate_push_down"));
-        assert_eq!(names.len(), 22);
+        assert!(names.contains(&"aggregate_fusion"));
+        assert!(names.contains(&"sort_elision"));
+        assert!(names.contains(&"expression_inline"));
+        assert_eq!(names.len(), 25);
     }
 
     #[test]
