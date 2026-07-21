@@ -21,6 +21,8 @@ pub struct Frame {
     pub clock_ref: bool,
     /// The actual page data.
     pub data: Vec<u8>,
+    /// NUMA node this frame resides on (0 = unknown / single-node).
+    pub numa_node: u32,
 }
 
 impl Frame {
@@ -31,6 +33,7 @@ impl Frame {
             is_dirty: false,
             clock_ref: true,
             data,
+            numa_node: 0,
         }
     }
 
