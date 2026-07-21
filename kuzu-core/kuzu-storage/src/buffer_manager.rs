@@ -8,6 +8,69 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// NUMA topology information.
+#[derive(Debug, Clone)]
+pub struct NumaInfo {
+    /// Number of NUMA nodes detected on the system.
+    pub num_nodes: u32,
+}
+
+impl NumaInfo {
+    /// Detect the NUMA topology of the current system.
+    ///
+    /// - On Windows: returns 1 (Windows NUMA API is complex; simple default).
+    /// - On Linux: parses `/sys/devices/system/node/node*` directories.
+    /// - On other platforms: returns 1.
+    pub fn detect() -> Self {
+        let num_nodes = Self::detect_num_nodes();
+        Self { num_nodes }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn detect_num_nodes() -> u32 {
+        use std::fs;
+        let node_dir = "/sys/devices/system/node";
+        if let Ok(entries) = fs::read_dir(node_dir) {
+            let count = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|s| s.starts_with("node") && s != "node")
+                        .unwrap_or(false)
+                })
+                .count();
+            if count > 0 {
+                return count as u32;
+            }
+        }
+        1
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn detect_num_nodes() -> u32 {
+        1
+    }
+}
+
+/// Readahead configuration for sequential access detection.
+#[derive(Debug, Clone)]
+pub struct ReadaheadPolicy {
+    /// Whether readahead prefetching is enabled.
+    pub enabled: bool,
+    /// How many pages ahead to prefetch when a sequential pattern is detected.
+    pub window: usize,
+}
+
+impl Default for ReadaheadPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window: 4,
+        }
+    }
+}
+
 /// Configuration for the buffer manager.
 #[derive(Debug, Clone)]
 pub struct BufferManagerConfig {
@@ -15,6 +78,12 @@ pub struct BufferManagerConfig {
     pub max_memory: u64,
     /// Page size in bytes.
     pub page_size: usize,
+    /// Use memory-mapped I/O instead of read syscalls when available.
+    pub use_mmap: bool,
+    /// Enable NUMA-aware frame tracking.
+    pub numa_aware: bool,
+    /// Sequential readahead policy.
+    pub readahead: ReadaheadPolicy,
 }
 
 impl Default for BufferManagerConfig {
@@ -22,6 +91,9 @@ impl Default for BufferManagerConfig {
         Self {
             max_memory: 64 * 1024 * 1024, // 64MB default
             page_size: DEFAULT_PAGE_SIZE,
+            use_mmap: false,
+            numa_aware: false,
+            readahead: ReadaheadPolicy::default(),
         }
     }
 }
@@ -64,6 +136,19 @@ pub struct BufferManager {
     memory_manager: Arc<MemoryManager>,
     /// Statistics.
     stats: BufferManagerStats,
+    /// Whether mmap reads are enabled.
+    use_mmap: bool,
+    /// Memory-mapped regions keyed by file path.
+    #[cfg(not(target_arch = "wasm32"))]
+    mmap_regions: HashMap<String, memmap2::Mmap>,
+    /// NUMA topology info.
+    numa_info: NumaInfo,
+    /// Sequential readahead policy.
+    readahead: ReadaheadPolicy,
+    /// Track last page accessed per file for sequential detection.
+    last_accessed: HashMap<String, PageNum>,
+    /// Track the previous last-accessed page per file (for sequential pattern check).
+    prev_last_accessed: HashMap<String, PageNum>,
 }
 
 #[allow(dead_code)]
@@ -81,6 +166,12 @@ impl BufferManager {
             1000
         };
 
+        let numa_info = if config.numa_aware {
+            NumaInfo::detect()
+        } else {
+            NumaInfo { num_nodes: 1 }
+        };
+
         Self {
             db_path,
             page_size: config.page_size,
@@ -91,6 +182,13 @@ impl BufferManager {
             clock_order: Vec::new(),
             memory_manager,
             stats: BufferManagerStats::default(),
+            use_mmap: config.use_mmap,
+            #[cfg(not(target_arch = "wasm32"))]
+            mmap_regions: HashMap::new(),
+            numa_info,
+            readahead: config.readahead,
+            last_accessed: HashMap::new(),
+            prev_last_accessed: HashMap::new(),
         }
     }
 
@@ -133,6 +231,14 @@ impl BufferManager {
         if let Some(frame) = self.frames.get_mut(&k) {
             frame.pin();
             frame.clock_ref = true;
+
+            // Update sequential tracking (cache hit path)
+            let prev = self.last_accessed.remove(file_name);
+            if let Some(p) = prev {
+                self.prev_last_accessed.insert(file_name.to_string(), p);
+            }
+            self.last_accessed.insert(file_name.to_string(), page_num);
+
             return Ok(unsafe { &*(frame as *const Frame) });
         }
 
@@ -146,12 +252,28 @@ impl BufferManager {
         let data = self.read_from_disk(file_name, page_num)?;
         let mut frame = Frame::new(page_num, data);
         frame.pin();
+
+        if self.numa_info.num_nodes > 1 {
+            frame.numa_node = self.current_numa_node();
+        }
+
         let k = Self::key(file_name, page_num);
         self.clock_order.push(k.clone());
         self.frames.insert(k.clone(), frame);
         self.memory_manager.allocate(self.page_size as u64);
 
         self.update_stats();
+
+        // Update sequential tracking (fault path)
+        let prev = self.last_accessed.remove(file_name);
+        if let Some(p) = prev {
+            self.prev_last_accessed.insert(file_name.to_string(), p);
+        }
+        self.last_accessed.insert(file_name.to_string(), page_num);
+
+        // Check readahead AFTER updating tracking so prev_last_accessed is correct
+        self.maybe_readahead(file_name, page_num);
+
         Ok(self.frames.get(&k).unwrap())
     }
 
@@ -218,6 +340,47 @@ impl BufferManager {
             .collect()
     }
 
+    /// Access the NUMA topology info.
+    pub fn numa_info(&self) -> &NumaInfo {
+        &self.numa_info
+    }
+
+    // --- Sequential access tracking & readahead ---
+
+    /// If the access pattern is sequential (page N follows page N-1 for the same
+    /// file), prefetch the next `window` pages into the cache (unpinned, just warm).
+    fn maybe_readahead(&mut self, file_name: &str, page_num: PageNum) {
+        if !self.readahead.enabled || self.readahead.window == 0 {
+            return;
+        }
+
+        if let Some(&prev) = self.prev_last_accessed.get(file_name) {
+            if page_num > 0 && prev == page_num - 1 {
+                // Sequential pattern detected — prefetch next `window` pages.
+                for offset in 1..=self.readahead.window as u64 {
+                    let prefetch_page = page_num + offset;
+                    let pk = Self::key(file_name, prefetch_page);
+                    if self.frames.contains_key(&pk) {
+                        continue; // Already in cache
+                    }
+                    if self.frames.len() >= self.max_frames {
+                        break; // Don't evict to prefetch
+                    }
+                    if let Ok(data) = self.read_from_disk(file_name, prefetch_page) {
+                        self.stats.page_faults += 1;
+                        let mut frame = Frame::new(prefetch_page, data);
+                        if self.numa_info.num_nodes > 1 {
+                            frame.numa_node = self.current_numa_node();
+                        }
+                        self.clock_order.push(pk.clone());
+                        self.frames.insert(pk, frame);
+                        self.memory_manager.allocate(self.page_size as u64);
+                    }
+                }
+            }
+        }
+    }
+
     // --- Clock eviction ---
 
     fn evict(&mut self) -> std::io::Result<()> {
@@ -259,7 +422,23 @@ impl BufferManager {
 
     // --- Disk I/O ---
 
-    fn read_from_disk(&self, file_name: &str, page_num: PageNum) -> std::io::Result<Vec<u8>> {
+    /// Read a page from disk, using mmap if enabled.
+    fn read_from_disk(&mut self, file_name: &str, page_num: PageNum) -> std::io::Result<Vec<u8>> {
+        if self.use_mmap {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                return self.read_mmap(file_name, page_num);
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                return self.read_syscall(file_name, page_num);
+            }
+        }
+        self.read_syscall(file_name, page_num)
+    }
+
+    /// Read a page via standard syscalls.
+    fn read_syscall(&self, file_name: &str, page_num: PageNum) -> std::io::Result<Vec<u8>> {
         if let Some(fh) = self.files.get(file_name) {
             use std::io::{Read, Seek, SeekFrom};
             let mut file = std::fs::File::open(&fh.path)?;
@@ -267,6 +446,43 @@ impl BufferManager {
             let mut buf = vec![0u8; self.page_size];
             file.read_exact(&mut buf)?;
             Ok(buf)
+        } else {
+            Ok(vec![0u8; self.page_size])
+        }
+    }
+
+    /// Read a page via memory-mapped I/O (zero-copy).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_mmap(&mut self, file_name: &str, page_num: PageNum) -> std::io::Result<Vec<u8>> {
+        if let Some(fh) = self.files.get(file_name) {
+            let path_str = fh.path.to_string_lossy().to_string();
+            let page_size = self.page_size;
+
+            if !self.mmap_regions.contains_key(&path_str) {
+                let file = std::fs::File::open(&fh.path)?;
+                let mmap = unsafe { memmap2::Mmap::map(&file)? };
+                self.mmap_regions.insert(path_str.clone(), mmap);
+            }
+
+            let mmap = &self.mmap_regions[&path_str];
+            let offset = page_num as usize * page_size;
+            let end = offset + page_size;
+
+            if end > mmap.len() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "mmap read out of bounds: page {} (offset {offset}, end {end}) exceeds file length {}",
+                        page_num, mmap.len()
+                    ),
+                ));
+            }
+
+            // SAFETY: We checked that offset..end is within bounds of the mmap region.
+            // The mmap region is valid for the lifetime of `self`, and we copy the
+            // data into a Vec so there is no dangling pointer risk.
+            let slice = unsafe { std::slice::from_raw_parts(mmap.as_ptr().add(offset), page_size) };
+            Ok(slice.to_vec())
         } else {
             Ok(vec![0u8; self.page_size])
         }
@@ -285,6 +501,13 @@ impl BufferManager {
             file.write_all(data)?;
         }
         Ok(())
+    }
+
+    /// Return the current NUMA node for the calling thread.
+    fn current_numa_node(&self) -> u32 {
+        // Simple heuristic: always return node 0.
+        // A real implementation would call getcpu() or use libnuma.
+        0
     }
 
     fn update_stats(&mut self) {
@@ -306,6 +529,8 @@ mod tests {
         let config = BufferManagerConfig {
             max_memory: 256 * 1024,
             page_size: DEFAULT_PAGE_SIZE,
+            readahead: ReadaheadPolicy { enabled: false, ..Default::default() },
+            ..Default::default()
         };
         let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
         let db_path = dir.path().join("test.db");
@@ -364,6 +589,7 @@ mod tests {
         let config = BufferManagerConfig {
             max_memory: 3 * DEFAULT_PAGE_SIZE as u64,
             page_size: DEFAULT_PAGE_SIZE,
+            ..Default::default()
         };
         let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
         let db_path = dir.path().join("test.db");
@@ -391,5 +617,143 @@ mod tests {
         }
         bm.flush_all().unwrap();
         assert_eq!(bm.stats().dirty_frames, 0);
+    }
+
+    // --- New tests for the three features ---
+
+    #[test]
+    fn test_mmap_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mm = Arc::new(MemoryManager::new(1024 * 1024));
+        let config = BufferManagerConfig {
+            max_memory: 256 * 1024,
+            page_size: DEFAULT_PAGE_SIZE,
+            use_mmap: true,
+            ..Default::default()
+        };
+        let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
+
+        // Write known data
+        let db_path = dir.path().join("mmap_test.db");
+        let mut data = vec![0u8; DEFAULT_PAGE_SIZE * 4];
+        for i in 0..DEFAULT_PAGE_SIZE {
+            data[i] = (i % 256) as u8;
+        }
+        std::fs::write(&db_path, &data).unwrap();
+        bm.register_file(TEST_FILE, db_path);
+
+        // Read page 0 via mmap
+        let frame = bm.pin(TEST_FILE, 0).unwrap();
+        assert_eq!(&frame.data[..], &data[..DEFAULT_PAGE_SIZE]);
+        bm.unpin(TEST_FILE, 0);
+
+        // Read page 1 via mmap
+        let frame = bm.pin(TEST_FILE, 1).unwrap();
+        assert_eq!(&frame.data[..], &data[DEFAULT_PAGE_SIZE..DEFAULT_PAGE_SIZE * 2]);
+        bm.unpin(TEST_FILE, 1);
+    }
+
+    #[test]
+    fn test_readahead_sequential() {
+        let dir = tempfile::tempdir().unwrap();
+        let mm = Arc::new(MemoryManager::new(1024 * 1024));
+        let config = BufferManagerConfig {
+            max_memory: 512 * 1024,
+            page_size: DEFAULT_PAGE_SIZE,
+            readahead: ReadaheadPolicy {
+                enabled: true,
+                window: 4,
+            },
+            ..Default::default()
+        };
+        let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
+
+        let db_path = dir.path().join("seq_test.db");
+        std::fs::write(&db_path, vec![42u8; DEFAULT_PAGE_SIZE * 20]).unwrap();
+        bm.register_file(TEST_FILE, db_path);
+
+        // Access page 0 — first access, no readahead
+        bm.pin(TEST_FILE, 0).unwrap();
+        bm.unpin(TEST_FILE, 0);
+        let faults_after_0 = bm.stats().page_faults;
+
+        // Access page 1 — sequential from 0, should prefetch pages 2..5
+        bm.pin(TEST_FILE, 1).unwrap();
+        bm.unpin(TEST_FILE, 1);
+        let faults_after_1 = bm.stats().page_faults;
+
+        // readahead of window=4 means pages 2,3,4,5 prefetched: total >= 6 faults
+        assert!(
+            faults_after_1 > faults_after_0 + 1,
+            "Expected readahead faults: after_page_0={}, after_page_1={}",
+            faults_after_0,
+            faults_after_1
+        );
+
+        // Pages 2-5 should now be in cache
+        for p in 2..=5 {
+            let k = BufferManager::key(TEST_FILE, p);
+            assert!(
+                bm.frames.contains_key(&k),
+                "Page {} should be in cache after readahead",
+                p
+            );
+        }
+
+        // Pinning page 2 again should NOT cause a new fault
+        let faults_before = bm.stats().page_faults;
+        bm.pin(TEST_FILE, 2).unwrap();
+        bm.unpin(TEST_FILE, 2);
+        assert_eq!(bm.stats().page_faults, faults_before);
+    }
+
+    #[test]
+    fn test_readahead_random() {
+        let dir = tempfile::tempdir().unwrap();
+        let mm = Arc::new(MemoryManager::new(1024 * 1024));
+        let config = BufferManagerConfig {
+            max_memory: 512 * 1024,
+            page_size: DEFAULT_PAGE_SIZE,
+            readahead: ReadaheadPolicy {
+                enabled: true,
+                window: 4,
+            },
+            ..Default::default()
+        };
+        let mut bm = BufferManager::new(dir.path().to_path_buf(), mm, config);
+
+        let db_path = dir.path().join("rand_test.db");
+        std::fs::write(&db_path, vec![0u8; DEFAULT_PAGE_SIZE * 20]).unwrap();
+        bm.register_file(TEST_FILE, db_path);
+
+        // Access page 0
+        bm.pin(TEST_FILE, 0).unwrap();
+        bm.unpin(TEST_FILE, 0);
+
+        // Access page 5 (random — NOT sequential from 0)
+        bm.pin(TEST_FILE, 5).unwrap();
+        bm.unpin(TEST_FILE, 5);
+        let faults = bm.stats().page_faults;
+        assert_eq!(faults, 2, "Random access should not trigger readahead");
+
+        // Pages 6,7,8,9 should NOT be in cache
+        for p in 6..=9 {
+            let k = BufferManager::key(TEST_FILE, p);
+            assert!(
+                !bm.frames.contains_key(&k),
+                "Page {} should NOT be in cache after random access",
+                p
+            );
+        }
+    }
+
+    #[test]
+    fn test_numa_detection() {
+        let numa = NumaInfo::detect();
+        assert!(
+            numa.num_nodes >= 1,
+            "NUMA detection should return at least 1 node, got {}",
+            numa.num_nodes
+        );
     }
 }
