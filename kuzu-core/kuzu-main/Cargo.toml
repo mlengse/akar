@@ -74,5 +74,9 @@ harness = false
 name = "storage_bench"
 harness = false
 
+[[bench]]
+name = "ladybug_suite"
+harness = false
+
 [lints]
 workspace = true
