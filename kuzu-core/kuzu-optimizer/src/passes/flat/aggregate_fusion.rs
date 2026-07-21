@@ -98,7 +98,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         if let LogicalOperator::Aggregate(agg) = &result[0] {
             assert_eq!(agg.aggregates.len(), 2);
-            assert_eq!(agg.children, inner.children);
+            assert!(agg.children.is_empty());
         } else {
             panic!("Expected Aggregate");
         }
