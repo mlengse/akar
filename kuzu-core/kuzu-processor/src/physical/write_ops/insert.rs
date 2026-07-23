@@ -97,27 +97,30 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
         for chunk in &input {
             let src_name_id = format!("{}.{}", self.src_node_name, "_id");
             let src_name_pk = format!("{}.{}", self.src_node_name, "id");
+            let src_name_pk_upper = format!("{}.{}", self.src_node_name, "ID");
             let src_node_col_idx = chunk
                 .field_names
                 .iter()
                 .position(|name| name == &src_name_id)
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.src_node_name))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &src_name_pk))
-                .ok_or_else(|| format!("Source node variable {} not found", self.src_node_name))?;
+                .or_else(|| chunk.field_names.iter().position(|name| name == &src_name_pk_upper))
+                .or_else(|| chunk.field_names.iter().position(|name| name.eq_ignore_ascii_case(&src_name_pk)))
+                .ok_or_else(|| format!("Source node variable {} not found (fields: {:?})", self.src_node_name, chunk.field_names))?;
 
             let dst_name_id = format!("{}.{}", self.dst_node_name, "_id");
             let dst_name_pk = format!("{}.{}", self.dst_node_name, "id");
+            let dst_name_pk_upper = format!("{}.{}", self.dst_node_name, "ID");
             let dst_node_col_idx = chunk
                 .field_names
                 .iter()
                 .position(|name| name == &dst_name_id)
                 .or_else(|| chunk.field_names.iter().position(|name| name == &self.dst_node_name))
                 .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk))
-                .ok_or_else(|| format!("Destination node variable {} not found", self.dst_node_name))?;
+                .or_else(|| chunk.field_names.iter().position(|name| name == &dst_name_pk_upper))
+                .or_else(|| chunk.field_names.iter().position(|name| name.eq_ignore_ascii_case(&dst_name_pk)))
+                .ok_or_else(|| format!("Destination node variable {} not found (fields: {:?})", self.dst_node_name, chunk.field_names))?;
             
-            println!("INSERT: src_idx={}, dst_idx={}, chunk fields={:?}", src_node_col_idx, dst_node_col_idx, chunk.field_names);
-
-
             if src_node_col_idx >= chunk.fields.len() || dst_node_col_idx >= chunk.fields.len() {
                 return Err("Src/Dst node column index out of bounds in INSERT REL".into());
             }

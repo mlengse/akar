@@ -1,5 +1,7 @@
 //! Auto-extracted from physical_operator.rs
-use kuzu_common::types::Value;
+use arrow::compute;
+use arrow::datatypes::{Float64Type, Int32Type, Int64Type};
+use kuzu_common::types::{PhysicalTypeID, Value};
 use kuzu_common::vector::{DataChunk, ValueVector};
 use kuzu_function::AggregateFunction;
 use kuzu_function::aggregate::AggValueState;
@@ -95,6 +97,36 @@ impl AggregateHashTable {
                     fields.push(v);
                 }
                 return Ok(vec![{ let arrow_fields = fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect::<Vec<_>>(); let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>(); DataChunk::new(arrow_fields, arrow_field_types) }]);
+            }
+        }
+
+        // Fast path for scalar Sum/Min/Max/Avg aggregates (no GROUP BY).
+        // Uses Arrow compute kernels directly on ArrayRef — avoids per-row Value dispatch.
+        if self.group_by_cols.is_empty() && chunks.iter().all(|c| c.sel_vector.is_none()) {
+            let all_scalar_agg = self.funcs.iter().all(|f| matches!(
+                f, AggregateFunction::Sum | AggregateFunction::Min | AggregateFunction::Max | AggregateFunction::Avg
+            ));
+            if all_scalar_agg {
+                let mut fields = Vec::new();
+                for (i, func) in self.funcs.iter().enumerate() {
+                    if let Some(col_idx) = col_indices[i] {
+                        let result_val = arrow_scalar_agg(func, chunks, col_idx);
+                        let phys_type = result_val.physical_type();
+                        let mut v = ValueVector::new(phys_type, 1);
+                        v.resize(1);
+                        store_value_in_vector(&mut v, 0, &result_val);
+                        fields.push(v);
+                    } else {
+                        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+                        v.resize(1);
+                        v.set_null(0, true);
+                        fields.push(v);
+                    }
+                }
+                return Ok(vec![DataChunk::new(
+                    fields.iter().map(|v| kuzu_common::arrow_vector::ArrowVector::from_legacy(v).array).collect(),
+                    fields.iter().map(|v| v.physical_type()).collect(),
+                )]);
             }
         }
 
@@ -449,5 +481,148 @@ pub fn update_states_row(states: &mut [AggValueState], chunk: &DataChunk, funcs:
             .unwrap_or(Value::Null);
         state.update(&val);
     }
+}
+
+/// Compute a scalar aggregate (Sum/Min/Max/Avg) over chunks using Arrow compute kernels.
+/// Avoids per-row Value dispatch entirely.
+fn arrow_scalar_agg(func: &AggregateFunction, chunks: &[DataChunk], col_idx: usize) -> Value {
+    // Collect non-null numeric values from all chunks into a single Arrow array
+    let all_values: Vec<Value> = chunks.iter().flat_map(|c| {
+        if col_idx >= c.fields.len() { return Vec::new(); }
+        let field = &c.fields[col_idx];
+        let rows = if c.sel_vector.is_some() {
+            c.iter_rows().collect::<Vec<_>>()
+        } else {
+            (0..c.size).collect::<Vec<_>>()
+        };
+        rows.into_iter().filter_map(|row| {
+            if field.is_null(row) { None }
+            else { c.get_value(col_idx, row) }
+        }).collect::<Vec<_>>()
+    }).collect();
+
+    if all_values.is_empty() {
+        return match func {
+            AggregateFunction::Sum | AggregateFunction::Avg => Value::Null,
+            AggregateFunction::Min | AggregateFunction::Max => Value::Null,
+            _ => Value::Null,
+        };
+    }
+
+    // Try to use Arrow compute kernels on primitive arrays
+    if let Some(arr) = values_to_prim_array(&all_values) {
+        return match func {
+            AggregateFunction::Sum => compute_sum(&arr),
+            AggregateFunction::Min => compute_min(&arr),
+            AggregateFunction::Max => compute_max(&arr),
+            AggregateFunction::Avg => {
+                let sum_val = compute_sum_f64(&arr);
+                let count = non_null_count(chunks, col_idx);
+                if count == 0 { Value::Null }
+                else { Value::Double(sum_val / count as f64) }
+            }
+            _ => Value::Null,
+        };
+    }
+
+    // Fallback: per-row Value dispatch (for non-numeric types)
+    let mut state = AggValueState::new(func);
+    for val in &all_values {
+        state.update(val);
+    }
+    state.finalize()
+}
+
+enum PrimArray {
+    I64(arrow::array::PrimitiveArray<Int64Type>),
+    I32(arrow::array::PrimitiveArray<Int32Type>),
+    F64(arrow::array::PrimitiveArray<Float64Type>),
+}
+
+fn values_to_prim_array(vals: &[Value]) -> Option<PrimArray> {
+    match &vals[0] {
+        Value::Int64(_) => {
+            let mut b = arrow::array::Int64Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Int64(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(PrimArray::I64(b.finish()))
+        }
+        Value::Int32(_) => {
+            let mut b = arrow::array::Int32Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Int32(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(PrimArray::I32(b.finish()))
+        }
+        Value::Double(_) => {
+            let mut b = arrow::array::Float64Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Double(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(PrimArray::F64(b.finish()))
+        }
+        _ => None,
+    }
+}
+
+fn compute_sum(arr: &PrimArray) -> Value {
+    match arr {
+        PrimArray::I64(a) => compute::sum(a).map(Value::Int64).unwrap_or(Value::Null),
+        PrimArray::I32(a) => compute::sum(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        PrimArray::F64(a) => compute::sum(a).map(Value::Double).unwrap_or(Value::Null),
+    }
+}
+
+fn compute_sum_f64(arr: &PrimArray) -> f64 {
+    match arr {
+        PrimArray::I64(a) => compute::sum::<Int64Type>(a).unwrap_or(0) as f64,
+        PrimArray::I32(a) => compute::sum::<Int32Type>(a).unwrap_or(0) as f64,
+        PrimArray::F64(a) => compute::sum::<Float64Type>(a).unwrap_or(0.0),
+    }
+}
+
+fn compute_min(arr: &PrimArray) -> Value {
+    match arr {
+        PrimArray::I64(a) => compute::min(a).map(Value::Int64).unwrap_or(Value::Null),
+        PrimArray::I32(a) => compute::min(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        PrimArray::F64(a) => compute::min(a).map(Value::Double).unwrap_or(Value::Null),
+    }
+}
+
+fn compute_max(arr: &PrimArray) -> Value {
+    match arr {
+        PrimArray::I64(a) => compute::max(a).map(Value::Int64).unwrap_or(Value::Null),
+        PrimArray::I32(a) => compute::max(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        PrimArray::F64(a) => compute::max(a).map(Value::Double).unwrap_or(Value::Null),
+    }
+}
+
+fn non_null_count(chunks: &[DataChunk], col_idx: usize) -> u64 {
+    let mut count = 0u64;
+    for c in chunks {
+        if col_idx >= c.fields.len() { continue; }
+        let field = &c.fields[col_idx];
+        if c.sel_vector.is_some() {
+            for row in c.iter_rows() {
+                if !field.is_null(row) { count += 1; }
+            }
+        } else {
+            count += (field.len() - field.null_count()) as u64;
+        }
+    }
+    count
 }
 

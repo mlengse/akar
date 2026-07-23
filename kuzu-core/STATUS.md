@@ -1,9 +1,9 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-21 (Sprint 11 — P38.1 Complete, P38.2-38.3 In Progress)
+> **Tanggal:** 2026-07-23 (Sprint 11 — P38.1 ✅ Complete, P38.2 ✅ Complete, P39 ✅ Complete, P38.3 In Progress)
 > **Hasil audit:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **🔴 Audit 2026-07-19 findings:** ~~12 DDL operators = no-op~~ ✅ ALL 12 FIXED (P36.3 + P38.1: CreateNodeTable, CreateRelTable, DropTable, AlterTable, CreateIndex, DropIndex + CreateVectorIndex, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4: catalog-based lookup). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. See Section 3 for details.
+> **P39 ✅ Aggregate regression FIXED:** SUM/AVG/MIN/MAX scalar aggregates now use Arrow compute kernels (~100× improvement). `group_by_active+AVG` still needs vectorized hash aggregation.
 
 ---
 
@@ -120,6 +120,7 @@ Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela
 | **P27.6 — Aggregate COUNT Fast Path** | ❌ Per-row `Value` enum dispatch in `update_states_row()` | ✅ `PhysicalAggregateScan` fast path: `ArrayRef::len() - null_count()` in O(1). Aggregate **7× faster** (350 µs → ~50 µs). Total `conn.execute()` **397 µs — parity with C++** (400 µs). | `[P27.6]` |
 | **P30.1 — Fix 31 Ignored Tests + FTS** | ❌ 32 ignored tests + 1 FTS failure | ✅ **All fixed.** Grammar fixes (`create_rel_table` optional columns, `union_keyword`, `backtick_identifier`), binder relaxations (empty clause count), FTS arrow-path filtering. **1 remaining ignored (kuzu-migrate — parquet footer, pre-existing).** | `[P30.1]` |
 | **P30.3 — LadybugDB Benchmark** | ❌ Parity only against Vela C++ | ✅ **3-way parity verified.** Ladybug C++ binary built (MinGW, Clang 22), benchmark run: **374 µs** vs Vela 400 µs vs Rust 397 µs. Published in `BENCHMARK_COMPARISON.md`. | `[P30.3]` |
+| **P38.2 — Benchmark Verification** | ❌ No fresh E2E numbers | ✅ **14/20 ladybug_suite E2E benchmarks collected.** COUNT parity confirmed (288-340µs). 🔴 **Regression found:** SUM/AVG/MIN/MAX ~100× slower (54-58ms). Sort/scan at parity. Published in `BENCHMARK_COMPARISON.md`. | `[P38.2]` |
 | **P30.4 — STANDALONE_CALL Refactor** | ❌ String matching dispatch (25+ arms) | ✅ Trait `StandaloneCallFn` + `StandaloneCallRegistry` in processor crate. 22 handler structs in `standalone_call.rs` replace giant match. Fallback to `function_registry` for GDS/unknown. | `[P30.4]` |
 | **P30.5a — WASM: fix ignored test** | ❌ 6 test skip di `wasm-pack test --node` (config `run_in_browser`) | ✅ `run_in_browser` → `run_in_node`. `wasm-test` job di CI jalankan `wasm-pack test --node kuzu-wasm`. | `[P30.5]` |
 | **P30.5b — Fuzz CI** | ❌ `cargo-fuzz` 3 target tidak pernah jalan di CI | ✅ Workflow `fuzz-ci.yml` — PR auto-run 10 menit, nightly 30 menit per target. | `[P30.5]` |

@@ -2,12 +2,47 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use kuzu_main::connection::Connection;
 use kuzu_main::database::{Database, SystemConfig};
 use std::hint::black_box;
-use std::sync::Arc;
-use tempfile::tempdir;
+use std::sync::{Arc, OnceLock};
+use tempfile::TempDir;
 
-fn setup_db_with_10k() -> (tempfile::TempDir, Arc<Database>, Connection) {
-    let dir = tempdir().unwrap();
-    let db_path = dir.path().join("ladybug_bench");
+static BENCH_DIR: OnceLock<TempDir> = OnceLock::new();
+static BENCH_DB_NODES: OnceLock<Arc<Database>> = OnceLock::new();
+static BENCH_DB_FULL: OnceLock<Arc<Database>> = OnceLock::new();
+
+fn setup_nodes_db(dir: &TempDir) -> Arc<Database> {
+    let db_path = dir.path().join("nodes_only");
+    let config = SystemConfig::default();
+    let database = Arc::new(Database::new(db_path, config).unwrap());
+    let conn = Connection::new(&database);
+
+    conn.query("CREATE NODE TABLE Person(ID INT64, name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (ID))").unwrap();
+    conn.query("CREATE NODE TABLE City(name STRING, population INT64, country STRING, PRIMARY KEY (name))").unwrap();
+
+    let csv_path = dir.path().join("person_10k.csv");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "ID,name,age,score,active").unwrap();
+        for i in 0..10_000u64 {
+            let age = (i * 7 + 13) % 101;
+            let score = (i as f64) * 0.01 + 50.0;
+            let active = i % 3 != 0;
+            writeln!(f, "{i},P{i},{age},{score},{active}").unwrap();
+        }
+    }
+    let fp = csv_path.to_string_lossy().replace('\\', "/");
+    conn.query(&format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+    let cities = ["New York", "London", "Tokyo", "Paris", "Berlin", "Sydney", "Toronto", "Mumbai", "Sao Paulo", "Cairo"];
+    for (i, city) in cities.iter().enumerate() {
+        let pop = 1_000_000 + (i as i64) * 500_000;
+        conn.query(&format!("CREATE (c:City {{name: '{city}', population: {pop}, country: 'X'}})")).unwrap();
+    }
+    database
+}
+
+fn setup_full_db(dir: &TempDir) -> Arc<Database> {
+    let db_path = dir.path().join("full_bench");
     let config = SystemConfig::default();
     let database = Arc::new(Database::new(db_path, config).unwrap());
     let conn = Connection::new(&database);
@@ -48,11 +83,23 @@ fn setup_db_with_10k() -> (tempfile::TempDir, Arc<Database>, Connection) {
         conn.query(&format!("MATCH (p:Person {{ID: {i}}}), (c:City {{name: '{city}'}}) CREATE (p)-[:LivesIn {{since: 2015}}]->(c)")).unwrap();
     }
 
-    (dir, database, conn)
+    database
+}
+
+fn get_nodes_db() -> Connection {
+    let dir = BENCH_DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    let db = BENCH_DB_NODES.get_or_init(|| setup_nodes_db(dir));
+    Connection::new(db)
+}
+
+fn get_full_db() -> Connection {
+    let dir = BENCH_DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    let db = BENCH_DB_FULL.get_or_init(|| setup_full_db(dir));
+    Connection::new(db)
 }
 
 fn bench_simple_scan(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/simple");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("scan_all", |b| {
@@ -65,7 +112,7 @@ fn bench_simple_scan(c: &mut Criterion) {
 }
 
 fn bench_filter(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/filter");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("filter_age_gt_50", |b| {
@@ -84,7 +131,7 @@ fn bench_filter(c: &mut Criterion) {
 }
 
 fn bench_aggregate(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/aggregate");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("count_all", |b| {
@@ -121,7 +168,7 @@ fn bench_aggregate(c: &mut Criterion) {
 }
 
 fn bench_group_by(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/group_by");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("group_by_age", |b| {
@@ -140,7 +187,7 @@ fn bench_group_by(c: &mut Criterion) {
 }
 
 fn bench_sort(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/sort");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("sort_single_key", |b| {
@@ -165,7 +212,7 @@ fn bench_sort(c: &mut Criterion) {
 }
 
 fn bench_join(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_full_db();
     let mut group = c.benchmark_group("ladybug/join");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("knows_join", |b| {
@@ -192,7 +239,7 @@ fn bench_join(c: &mut Criterion) {
 }
 
 fn bench_complex(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/complex");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("filter_sort_limit", |b| {
@@ -220,7 +267,7 @@ fn bench_complex(c: &mut Criterion) {
 }
 
 fn bench_buffer_manager(c: &mut Criterion) {
-    let (_dir, _db, conn) = setup_db_with_10k();
+    let conn = get_nodes_db();
     let mut group = c.benchmark_group("ladybug/storage");
     group.throughput(criterion::Throughput::Elements(10_000));
     group.bench_function("primary_key_lookup", |b| {

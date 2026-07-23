@@ -1,5 +1,7 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, hash_group_key, keys_equal, update_states_row, resolve_agg_col_indices};
+use arrow::compute;
+use arrow::datatypes::{Float64Type, Int32Type, Int64Type};
 use kuzu_common::types::Value;
 use kuzu_common::vector::DataChunk;
 use kuzu_function::AggregateFunction;
@@ -122,6 +124,32 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
             return Ok(vec![]);
         }
 
+        // Fast path for scalar Sum/Min/Max/Avg aggregates (no GROUP BY, no selection vector).
+        // Uses Arrow compute kernels directly on ArrayRef — avoids per-row Value dispatch.
+        let total_rows: usize = input.iter().map(|c| c.size).sum();
+        if total_rows > 0
+            && group_cols.is_empty()
+            && input.iter().all(|c| c.sel_vector.is_none())
+            && funcs.iter().all(|f| matches!(
+                f, AggregateFunction::Sum | AggregateFunction::Min | AggregateFunction::Max | AggregateFunction::Avg
+            ))
+        {
+            let mut result_states: Vec<AggValueState> = Vec::with_capacity(funcs.len());
+            for (i, func) in funcs.iter().enumerate() {
+                if let Some(col_idx) = col_indices[i] {
+                    let agg_val = arrow_scalar_agg_scan(&input, col_idx, func);
+                    result_states.push(agg_val_to_state(func, &agg_val));
+                } else {
+                    result_states.push(AggValueState::new(func));
+                }
+            }
+            let mut shard = self.shared_state.current_shard().lock().unwrap();
+            let bucket = shard.entry(0).or_default();
+            bucket.clear();
+            bucket.push((Value::Null, result_states));
+            return Ok(vec![]);
+        }
+
         // Lock only the current thread's shard — not the global map
         let mut shard = self.shared_state.current_shard().lock().unwrap();
 
@@ -166,5 +194,135 @@ impl PhysicalOperatorExec for PhysicalAggregateFinalize {
         );
 
         table.build_output(&merged)
+    }
+}
+
+/// Arrow compute fast path for scalar aggregates in PhysicalAggregateScan.
+/// Collects values from chunks, converts to typed Arrow arrays, and uses compute kernels.
+fn arrow_scalar_agg_scan(chunks: &[DataChunk], col_idx: usize, func: &AggregateFunction) -> Value {
+    let all_values: Vec<Value> = chunks.iter().flat_map(|c| {
+        if col_idx >= c.fields.len() { return Vec::new(); }
+        (0..c.size).filter_map(|row| c.get_value(col_idx, row)).collect::<Vec<_>>()
+    }).collect();
+
+    if all_values.is_empty() {
+        return Value::Null;
+    }
+
+    if let Some(arr) = scan_values_to_prim_array(&all_values) {
+        return match func {
+            AggregateFunction::Sum => scan_compute_sum(&arr),
+            AggregateFunction::Min => scan_compute_min(&arr),
+            AggregateFunction::Max => scan_compute_max(&arr),
+            AggregateFunction::Avg => {
+                let sum_val = scan_compute_sum_f64(&arr);
+                let count = chunks.iter().map(|c| {
+                    if col_idx >= c.fields.len() { 0u64 }
+                    else { (c.fields[col_idx].len() - c.fields[col_idx].null_count()) as u64 }
+                }).sum::<u64>();
+                if count == 0 { Value::Null }
+                else { Value::Double(sum_val / count as f64) }
+            }
+            _ => Value::Null,
+        };
+    }
+
+    let mut state = AggValueState::new(func);
+    for val in &all_values {
+        state.update(val);
+    }
+    state.finalize()
+}
+
+fn agg_val_to_state(func: &AggregateFunction, val: &Value) -> AggValueState {
+    match func {
+        AggregateFunction::Sum => AggValueState::Sum(val.clone()),
+        AggregateFunction::Min => AggValueState::Min(val.clone()),
+        AggregateFunction::Max => AggValueState::Max(val.clone()),
+        AggregateFunction::Avg => {
+            match val {
+                Value::Double(s) => AggValueState::Avg { sum: Value::Double(*s), count: 1 },
+                Value::Int64(s) => AggValueState::Avg { sum: Value::Int64(*s), count: 1 },
+                _ => AggValueState::Avg { sum: Value::Null, count: 0 },
+            }
+        }
+        _ => AggValueState::new(func),
+    }
+}
+
+enum ScanPrimArray {
+    I64(arrow::array::PrimitiveArray<Int64Type>),
+    I32(arrow::array::PrimitiveArray<Int32Type>),
+    F64(arrow::array::PrimitiveArray<Float64Type>),
+}
+
+fn scan_values_to_prim_array(vals: &[Value]) -> Option<ScanPrimArray> {
+    match &vals[0] {
+        Value::Int64(_) => {
+            let mut b = arrow::array::Int64Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Int64(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(ScanPrimArray::I64(b.finish()))
+        }
+        Value::Int32(_) => {
+            let mut b = arrow::array::Int32Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Int32(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(ScanPrimArray::I32(b.finish()))
+        }
+        Value::Double(_) => {
+            let mut b = arrow::array::Float64Builder::with_capacity(vals.len());
+            for v in vals {
+                match v {
+                    Value::Double(n) => b.append_value(*n),
+                    Value::Null => b.append_null(),
+                    _ => return None,
+                }
+            }
+            Some(ScanPrimArray::F64(b.finish()))
+        }
+        _ => None,
+    }
+}
+
+fn scan_compute_sum(arr: &ScanPrimArray) -> Value {
+    match arr {
+        ScanPrimArray::I64(a) => compute::sum(a).map(Value::Int64).unwrap_or(Value::Null),
+        ScanPrimArray::I32(a) => compute::sum(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        ScanPrimArray::F64(a) => compute::sum(a).map(Value::Double).unwrap_or(Value::Null),
+    }
+}
+
+fn scan_compute_sum_f64(arr: &ScanPrimArray) -> f64 {
+    match arr {
+        ScanPrimArray::I64(a) => compute::sum::<Int64Type>(a).unwrap_or(0) as f64,
+        ScanPrimArray::I32(a) => compute::sum::<Int32Type>(a).unwrap_or(0) as f64,
+        ScanPrimArray::F64(a) => compute::sum::<Float64Type>(a).unwrap_or(0.0),
+    }
+}
+
+fn scan_compute_min(arr: &ScanPrimArray) -> Value {
+    match arr {
+        ScanPrimArray::I64(a) => compute::min(a).map(Value::Int64).unwrap_or(Value::Null),
+        ScanPrimArray::I32(a) => compute::min(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        ScanPrimArray::F64(a) => compute::min(a).map(Value::Double).unwrap_or(Value::Null),
+    }
+}
+
+fn scan_compute_max(arr: &ScanPrimArray) -> Value {
+    match arr {
+        ScanPrimArray::I64(a) => compute::max(a).map(Value::Int64).unwrap_or(Value::Null),
+        ScanPrimArray::I32(a) => compute::max(a).map(|v| Value::Int64(v as i64)).unwrap_or(Value::Null),
+        ScanPrimArray::F64(a) => compute::max(a).map(Value::Double).unwrap_or(Value::Null),
     }
 }
