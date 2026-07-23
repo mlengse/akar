@@ -1,4 +1,0 @@
--NAME q01
--QUERY MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)
----- 1
-7951

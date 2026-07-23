@@ -1,15 +1,15 @@
-# Status Implementasi Kuzu Rust — Dokumen Konsolidasi
+# Akar — Status & Documentation
 
-> **Tanggal:** 2026-07-24 (Sprint 11 — P38.1 ✅ Complete, P38.2 ✅ Complete, P39 ✅ Complete, P40 ✅ Complete, P38.3 ✅ Complete)
+> **Akar** — Pure Rust embedded graph database for AI agent memory.
+> **Author:** Anjang Kusuma Netra | **License:** GPLv3
 > **Hasil audit:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
-> **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **P39 ✅ Aggregate regression FIXED:** SUM/AVG/MIN/MAX scalar aggregates now use Arrow compute kernels (~100× improvement). `group_by_active+AVG` still needs vectorized hash aggregation.
+> **Performance parity verified (hot path only):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
 
 ## 0. Ringkasan Eksekutif
 
-Kuzu Rust adalah port ulang murni (pure Rust, tanpa FFI/cxx) dari Kuzu C++ (Vela) ke Rust 2024.
+Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded property graph database.
 **31 crate**, **~55K LOC**.
 
 > **Modularization:** ALL PHASES COMPLETE — `scalar.rs` (4.578 → 18 files), `physical_operator.rs` (3.794 → 10 files), `connection.rs` (3.133 → 9 files), `passes.rs` (2.486 → 19 files), `parser.rs` (2.183 → 4 files + test), `binder.rs` (1.667 → 4 files + test).

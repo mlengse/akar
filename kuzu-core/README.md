@@ -1,8 +1,8 @@
-# Kuzu Core — Pure Rust Port
+# Akar Core — Pure Rust Graph Database
 
-[![Rust CI](https://github.com/kuzudb/kuzu/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/kuzudb/kuzu/actions/workflows/rust-ci.yml)
+[![Rust CI](https://github.com/anjangkusumanetra/akar/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/anjangkusumanetra/akar/actions/workflows/rust-ci.yml)
 
-A from-scratch Rust port of [Kuzu](https://github.com/kuzudb/kuzu), an embedded property graph database management system (GDBMS) with openCypher query support.
+Akar is a from-scratch pure Rust implementation of an embedded property graph database management system (GDBMS) with openCypher query support.
 
 ## Architecture
 
@@ -336,4 +336,6 @@ cargo bench --workspace
 
 ## License
 
-MIT — see [LICENSE](../LICENSE).
+GPLv3 — see [LICENSE](../LICENSE).
+
+Copyright (c) 2026 Anjang Kusuma Netra

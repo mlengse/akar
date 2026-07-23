@@ -1,6 +1,6 @@
-# Contributing to Kuzu Core
+# Contributing to Akar
 
-Thanks for your interest in contributing to the Kuzu Rust port!
+Thanks for your interest in contributing to Akar!
 
 ## Getting Started
 
@@ -13,8 +13,8 @@ Thanks for your interest in contributing to the Kuzu Rust port!
 ### Setup
 
 ```bash
-git clone https://github.com/kuzudb/kuzu.git
-cd kuzu/kuzu-core
+git clone https://github.com/anjangkusumanetra/akar.git
+cd akar/kuzu-core
 cargo build --workspace
 cargo test --workspace
 ```

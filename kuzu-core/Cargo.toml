@@ -34,12 +34,12 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
-repository = "https://github.com/kuzudb/kuzu"
-description = "Kùzu graph database — pure Rust embedded graph database"
-keywords = ["graph", "database", "embedded", "cypher", "graph-database"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/anjangkusumanetra/akar"
+description = "Akar — pure Rust embedded graph database for AI agent memory"
+keywords = ["graph", "database", "embedded", "cypher", "ai-agent"]
 categories = ["database", "database-implementations"]
-authors = ["Kuzu Contributors"]
+authors = ["Anjang Kusuma Netra"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

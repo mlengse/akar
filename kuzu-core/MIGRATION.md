@@ -1,6 +1,6 @@
-# Kuzu Rust Migration Guide
+# Akar Migration Guide
 
-Welcome to **Kuzu Rust**! This guide details how to transition your application from the legacy C++ implementation (Vela/LadybugDB) to the pure Rust port.
+Welcome to **Akar**! This guide details how to transition your application from the legacy C++ implementation (KuzuDB Vela/LadybugDB) to the pure Rust Akar database.
 
 As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version — all **1175 tests pass**, all 15 GDS algorithms, **25 optimizer passes**, and 58 parser statement variants are implemented.
 
