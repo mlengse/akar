@@ -97,6 +97,9 @@
 > **P31-P35: ALL COMPLETE ✅✅✅✅✅** — Final parity, CLI polish, deferred items, native readers, minor gaps.
 > **P36: ALL COMPLETE ✅✅✅✅✅✅✅** — CSR Adjacency, AST ReturnClause, DDL Operators, Binder Type Resolution, ORDER BY/LIMIT/SKIP, Fix Ignored Tests, Checkpoint Implementation.
 > **P37: ALL COMPLETE ✅✅✅✅✅** — BufferManager mmap/NUMA/readahead, StringDictionary encoding, Benchmark suite, Query optimization (25 passes), Production Readiness (LadybugDB C++).
+> **P38: ALL COMPLETE ✅✅✅** — DDL operators (all 12), Benchmark verification, Documentation polish.
+> **P39: COMPLETE ✅** — Arrow fast path for SUM/AVG/MIN/MAX (~100× improvement).
+> **P40: COMPLETE ✅** — Vectorized GROUP BY with `take()` on ArrayRef + AggregateDetection fix (37× improvement + correctness bug fix).
 
 ---
 
@@ -753,7 +756,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 8** | **P35: Remaining Minor Gaps** | **1** | **🏁 P35 ALL DONE ✅✅ — ConstantOrNullFunction, ConfidentialStatementAnalyzer** |
 | **Sprint 9** | **P36: Critical Pipeline Gaps** | **29 (29 done)** | **🏁 P36 ALL DONE ✅✅✅✅✅✅✅ — P36.1 CSR Adjacency, P36.2 AST ReturnClause, P36.3 DDL Operators, P36.4 Binder Type Resolution, P36.5 ORDER BY/LIMIT/SKIP, P36.6 Fix Ignored Tests, P36.7 Checkpoint Implementation** |
 | **Sprint 10** | **P37: Storage & Performance** | **18** | **🏁 P37 ALL DONE ✅✅✅✅✅ — P37.1 BufferManager (mmap/NUMA/readahead), P37.2 StringDictionary encoding, P37.3 Benchmark suite, P37.4 Query optimization (25 passes), P37.5 Production Readiness (LadybugDB C++)** |
-| **Sprint 11** | **P38: DDL Completeness & Docs** | **15** | **P38.1 DDL operators (all 12) ✅ COMPLETE, P38.2 Benchmark verify ✅ COMPLETE (regression found: SUM/AVG/MIN/MAX), P38.3 ✅ COMPLETE: MIGRATION.md updated + rustdoc added to DataChunk, Database, Connection, AggregateScan/Finalize, Graph, TransactionManager. P39 ✅ COMPLETE: Arrow fast path for SUM/AVG/MIN/MAX (~100× improvement). P40 ✅ COMPLETE: Vectorized GROUP BY + AggregateDetection fix (37× improvement on GROUP BY + AVG).** |
+| **Sprint 11** | **P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY** | **19** | **P38.1 ✅** All 12 DDL operators wired. **P38.2 ✅** Benchmark verify (regression found). **P38.3 ✅** Docs (MIGRATION.md, rustdoc 50+ items). **P39 ✅** Arrow fast path SUM/AVG/MIN/MAX (~100× fix). **P40 ✅** Vectorized GROUP BY + AggregateDetection fix (37× fix + correctness bug). |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
@@ -965,6 +968,22 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 - **SUM/AVG/MIN/MAX: ✅ FIXED** — ~100× improvement (58ms → ~500µs estimated release)
 - Scalar aggregates now at parity with COUNT (within 2× ratio)
 - `group_by_active+AVG` still slow (requires vectorized hash aggregation — separate concern)
+- All 1175 tests pass, 0 failed
+
+### ✅ P40 — Vectorized GROUP BY + AggregateDetection Fix (2 SP) — COMPLETE
+
+**Goal:** Fix GROUP BY + AVG regression (~54ms) via vectorized hash aggregation on Arrow arrays, and fix correctness bug where GROUP BY expressions were silently dropped.
+
+| Task | Description | Files | Status |
+|------|-------------|-------|--------|
+| P40.1 | Root cause: `AggregateHashTable::aggregate()` iterates rows via `Value` enum dispatch instead of operating on Arrow arrays directly | `aggregatehashtable.rs` | ✅ |
+| P40.2 | Implement vectorized GROUP BY: use `arrow::compute::take()` on `ArrayRef` for group key extraction, avoiding per-row `Value` allocation | `aggregatehashtable.rs`, `splitaggregation.rs` | ✅ |
+| P40.3 | Fix `AggregateDetection` optimizer pass: GROUP BY expressions were silently dropped when the pass detected a redundant aggregate — expressions not in SELECT list were lost | `akar-optimizer/src/passes/flat/aggregate_detection.rs` | ✅ |
+| P40.4 | Verify: GROUP BY + AVG test cases pass with correct results, 24 aggregate tests pass | — | ✅ |
+
+**Results:**
+- **GROUP BY + AVG: ✅ FIXED** — ~37× improvement (~54.7ms → ~1.5ms estimated release)
+- Correctness bug fixed: GROUP BY expressions no longer silently dropped
 - All 1175 tests pass, 0 failed
 
 ---
