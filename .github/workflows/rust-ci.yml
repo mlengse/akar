@@ -1,4 +1,4 @@
-# Rust CI — Kuzu Core Workspace
+# Rust CI — Akar Core Workspace
 #
 # Builds, tests, and lints the kuzu-core Rust workspace on push and PR.
 # Runs on Ubuntu, macOS, and Windows plus WASM and feature-gated checks.
