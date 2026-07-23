@@ -2313,8 +2313,8 @@ fn test_least_int64() {
 fn test_greatest_double() {
     let func = ScalarFunction::Utility { op: UtilityOp::Greatest };
     assert_eq!(
-        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(3.14)]).unwrap(),
-        Value::Double(3.14)
+        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(2.7)]).unwrap(),
+        Value::Double(2.7)
     );
 }
 
@@ -2322,7 +2322,7 @@ fn test_greatest_double() {
 fn test_least_double() {
     let func = ScalarFunction::Utility { op: UtilityOp::Least };
     assert_eq!(
-        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(3.14)]).unwrap(),
+        evaluate_scalar(&func, &[Value::Double(1.5), Value::Double(2.7)]).unwrap(),
         Value::Double(1.5)
     );
 }

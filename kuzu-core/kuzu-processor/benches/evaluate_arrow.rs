@@ -111,7 +111,7 @@ fn bench_constant_true(c: &mut Criterion) {
         b.iter(|| {
             let av = eval.evaluate_to_arrow(black_box(&expr), black_box(&chunk)).unwrap();
             let bool_arr = av.array.as_any().downcast_ref::<arrow::array::BooleanArray>().unwrap();
-            let sel = boolean_array_to_selection(black_box(&bool_arr));
+            let sel = boolean_array_to_selection(black_box(bool_arr));
             black_box(sel);
         })
     });
@@ -172,7 +172,7 @@ fn bench_cmp_gt(c: &mut Criterion) {
         b.iter(|| {
             let av = eval.evaluate_to_arrow(black_box(&expr), black_box(&chunk)).unwrap();
             let bool_arr = av.array.as_any().downcast_ref::<arrow::array::BooleanArray>().unwrap();
-            let sel = boolean_array_to_selection(black_box(&bool_arr));
+            let sel = boolean_array_to_selection(black_box(bool_arr));
             black_box(sel);
         })
     });
@@ -243,7 +243,7 @@ fn bench_cmp_and(c: &mut Criterion) {
         b.iter(|| {
             let av = eval.evaluate_to_arrow(black_box(&expr), black_box(&chunk)).unwrap();
             let bool_arr = av.array.as_any().downcast_ref::<arrow::array::BooleanArray>().unwrap();
-            let sel = boolean_array_to_selection(black_box(&bool_arr));
+            let sel = boolean_array_to_selection(black_box(bool_arr));
             black_box(sel);
         })
     });
@@ -279,7 +279,7 @@ fn bench_not(c: &mut Criterion) {
         b.iter(|| {
             let av = eval.evaluate_to_arrow(black_box(&expr), black_box(&chunk)).unwrap();
             let bool_arr = av.array.as_any().downcast_ref::<arrow::array::BooleanArray>().unwrap();
-            let sel = boolean_array_to_selection(black_box(&bool_arr));
+            let sel = boolean_array_to_selection(black_box(bool_arr));
             black_box(sel);
         })
     });
@@ -319,7 +319,7 @@ fn bench_is_null(c: &mut Criterion) {
         b.iter(|| {
             let av = eval.evaluate_to_arrow(black_box(&expr), black_box(&chunk)).unwrap();
             let bool_arr = av.array.as_any().downcast_ref::<arrow::array::BooleanArray>().unwrap();
-            let sel = boolean_array_to_selection(black_box(&bool_arr));
+            let sel = boolean_array_to_selection(black_box(bool_arr));
             black_box(sel);
         })
     });

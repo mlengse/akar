@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         if let LogicalOperator::OrderBy(ob) = &result[0] {
             assert_eq!(ob.sort_keys.len(), 1);
-            assert_eq!(ob.sort_keys[0].1, true);
+            assert!(ob.sort_keys[0].1);
         } else {
             panic!("Expected OrderBy");
         }

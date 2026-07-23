@@ -20,6 +20,7 @@ pub fn exec(conn: &Connection, query: &str) -> String {
 }
 
 /// Execute a query and assert it returns an error. Returns the error message.
+#[allow(dead_code)]
 pub fn exec_err(conn: &Connection, query: &str) -> String {
     let result = conn.query(query);
     match result {
@@ -35,6 +36,7 @@ pub fn exec_err(conn: &Connection, query: &str) -> String {
 
 /// Execute a query and return actual values as a single formatted string.
 /// Useful for checking actual data.
+#[allow(dead_code)]
 pub fn query_values(conn: &Connection, query: &str) -> String {
     let result = conn.query(query).unwrap();
     assert!(
@@ -60,6 +62,7 @@ pub fn query_values(conn: &Connection, query: &str) -> String {
 
 /// Execute a query and return actual values as a vector of vectors of strings.
 /// Useful for exact assertions on rows.
+#[allow(dead_code)]
 pub fn query_rows(conn: &Connection, query: &str) -> Vec<Vec<String>> {
     let result = conn.query(query).unwrap();
     assert!(

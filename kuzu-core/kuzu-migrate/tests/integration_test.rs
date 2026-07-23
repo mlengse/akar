@@ -59,7 +59,7 @@ fn test_migration_ingestion() {
 
     // 2. Run kuzu-migrate --skip-extract into the same directory (reusing existing schema + parquet)
     let status = Command::new("cargo")
-        .args(&[
+        .args([
             "run", "-p", "kuzu-migrate", "--", 
             "--from", mock_cpp_dir.path().to_str().unwrap().replace("\\", "/").as_str(), 
             "--to", mock_cpp_dir.path().to_str().unwrap().replace("\\", "/").as_str(),

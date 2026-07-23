@@ -32,6 +32,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "akar"
+version = "0.1.0"
+dependencies = [
+ "kuzu-common",
+ "kuzu-main",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -725,14 +733,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kuzu"
-version = "0.12.0"
-dependencies = [
- "kuzu-common",
- "kuzu-main",
-]
-
-[[package]]
 name = "kuzu-binder"
 version = "0.1.0"
 dependencies = [
@@ -868,7 +868,7 @@ dependencies = [
 name = "kuzu-rust-example"
 version = "0.1.0"
 dependencies = [
- "kuzu",
+ "akar",
 ]
 
 [[package]]

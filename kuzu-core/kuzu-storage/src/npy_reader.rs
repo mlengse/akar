@@ -312,6 +312,7 @@ mod tests {
     fn test_parse_simple_header() {
         let header_str = "{'descr': '<f8', 'fortran_order': False, 'shape': (3,), }";
         let mut header_bytes = header_str.as_bytes().to_vec();
+        #[allow(clippy::manual_is_multiple_of)]
         while (10 + header_bytes.len()) % 16 != 0 {
             header_bytes.push(b' ');
         }
@@ -344,6 +345,7 @@ mod tests {
     fn test_npy_int32() {
         let header_str = "{'descr': '<i4', 'fortran_order': False, 'shape': (2,), }";
         let mut header_bytes = header_str.as_bytes().to_vec();
+        #[allow(clippy::manual_is_multiple_of)]
         while (10 + header_bytes.len()) % 16 != 0 {
             header_bytes.push(b' ');
         }

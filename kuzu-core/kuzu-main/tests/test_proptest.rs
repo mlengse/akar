@@ -80,11 +80,11 @@ proptest! {
 
         let mut expected_count = 0;
         for i in 0..ab_edges {
-            let ab_from = (i * 7) % a_nodes;
+            let _ab_from = (i * 7) % a_nodes;
             let ab_to = (i * 11) % b_nodes;
             for j in 0..bc_edges {
                 let bc_from = (j * 13) % b_nodes;
-                let bc_to = (j * 17) % c_nodes;
+                let _bc_to = (j * 17) % c_nodes;
                 if ab_to == bc_from {
                     expected_count += 1;
                 }

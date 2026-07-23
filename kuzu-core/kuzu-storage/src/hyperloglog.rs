@@ -126,7 +126,7 @@ mod tests {
         let mut hll = HyperLogLog::new();
         hll.insert(&42i64);
         let count = hll.count();
-        assert!(count >= 1 && count <= 5, "Expected ~1, got {}", count);
+        assert!((1..=5).contains(&count), "Expected ~1, got {}", count);
     }
 
     #[test]
