@@ -1,10 +1,11 @@
 [package]
-name = "kuzu"
-version = "0.12.0"
-description = "An in-process property graph database management system built for query speed and scalability"
-keywords = ["database", "graph"]
-license = "MIT"
-categories = ["database"]
+name = "akar"
+version = "0.1.0"
+description = "Akar — pure Rust embedded graph database for AI agent memory"
+keywords = ["graph", "database", "embedded", "cypher", "ai-agent"]
+license = "GPL-3.0-or-later"
+categories = ["database", "database-implementations"]
+authors = ["Anjang Kusuma Netra"]
 
 rust-version = "1.81"
 edition = "2021"

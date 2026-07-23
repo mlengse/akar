@@ -32,6 +32,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "akar"
+version = "0.1.0"
+dependencies = [
+ "kuzu-common",
+ "kuzu-main",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -722,14 +730,6 @@ checksum = "0c0b063578492ceec17683ef2f8c5e89121fbd0b172cbc280635ab7567db2738"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "kuzu"
-version = "0.12.0"
-dependencies = [
- "kuzu-common",
- "kuzu-main",
 ]
 
 [[package]]
