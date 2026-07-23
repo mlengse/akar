@@ -104,7 +104,7 @@ jobs:
           path: binaries
           merge-multiple: true
       - name: Create Release with assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           body_path: CHANGELOG.md
