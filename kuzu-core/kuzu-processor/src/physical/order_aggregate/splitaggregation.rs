@@ -79,6 +79,16 @@ impl SharedAggregateState {
     }
 }
 
+/// Phase-1 aggregate sink: accumulates rows into thread-local sharded state.
+///
+/// This operator receives input rows and groups them by key (if any) using a
+/// sharded `hashbrown::HashMap`. For scalar aggregates without GROUP BY, an
+/// Arrow compute fast path is used (sum/min/max/count directly on `ArrayRef`).
+/// For GROUP BY queries, a batch partition + `take()` fast path avoids per-row
+/// `Value` boxing. Falls back to per-row `update_states_row` for unsupported types.
+///
+/// Returns empty chunks (this is a sink operator). Results are produced by
+/// the paired `PhysicalAggregateFinalize`.
 pub struct PhysicalAggregateScan {
     pub shared_state: std::sync::Arc<SharedAggregateState>,
 }
@@ -352,6 +362,12 @@ impl PhysicalAggregateScan {
     }
 }
 
+/// Phase-2 aggregate finalize: merges shards and produces output chunks.
+///
+/// Called after `PhysicalAggregateScan` has accumulated all rows. Merges
+/// the thread-local shard maps, resolves aggregate states, and builds
+/// the final output `DataChunk` with one row per group (or one row if
+/// no GROUP BY).
 pub struct PhysicalAggregateFinalize {
     pub shared_state: std::sync::Arc<SharedAggregateState>,
 }

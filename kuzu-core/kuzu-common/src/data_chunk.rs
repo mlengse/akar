@@ -4,6 +4,24 @@ use arrow::array::{ArrayRef, AsArray};
 use arrow::compute::take;
 use arrow::datatypes::*;
 
+/// A contiguous batch of columnar data — the fundamental unit of data exchange
+/// between physical operators.
+///
+/// Each `DataChunk` holds zero or more Arrow `ArrayRef` columns of equal length.
+/// Operators consume input chunks and produce output chunks, forming a pipeline.
+///
+/// # Selection vectors
+/// When `sel_vector` is set, only the rows indicated by the selection are "active".
+/// Call `active_rows()` or `iter_rows()` to respect the selection; do not iterate
+/// `0..size` directly.
+///
+/// # Example
+/// ```text
+/// let chunk = DataChunk::new(fields, field_types).with_names(names);
+/// for row in chunk.iter_rows() {
+///     let val = chunk.get_value(0, row); // column 0, current row
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct DataChunk {
     pub fields: Vec<ArrayRef>,
@@ -28,6 +46,10 @@ pub fn resize_chunk(chunk: &mut DataChunk, new_size: usize) {
 }
 
 impl DataChunk {
+    /// Create a new `DataChunk` from Arrow arrays and their physical types.
+    ///
+    /// The chunk `size` is set to the length of the first field. All fields
+    /// must have the same length.
     pub fn new(fields: Vec<ArrayRef>, field_types: Vec<PhysicalTypeID>) -> Self {
         let size = fields.first().map(|f| f.len()).unwrap_or(0);
         Self {
@@ -58,16 +80,19 @@ impl DataChunk {
         self
     }
 
+    /// Return a reference to the Arrow array at the given column index.
     #[inline(always)]
     pub fn field(&self, idx: usize) -> &ArrayRef {
         &self.fields[idx]
     }
 
+    /// Return the number of columns in this chunk.
     #[inline(always)]
     pub fn num_fields(&self) -> usize {
         self.fields.len()
     }
 
+    /// Resize the chunk (and all its fields) to the given number of rows.
     #[inline(always)]
     pub fn resize(&mut self, new_size: usize) {
         resize_chunk(self, new_size);
@@ -111,11 +136,13 @@ impl DataChunk {
         self.size = sel.size;
     }
     
+    /// Return `true` if the value at `(field_idx, row_idx)` is null.
     #[inline(always)]
     pub fn is_null(&self, field_idx: usize, row_idx: usize) -> bool {
         self.fields[field_idx].is_null(row_idx)
     }
 
+    /// Read an `i64` value from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_i64(&self, field_idx: usize, row_idx: usize) -> Option<i64> {
         if self.is_null(field_idx, row_idx) { return None; }
@@ -123,6 +150,7 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read an `i32` value from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_i32(&self, field_idx: usize, row_idx: usize) -> Option<i32> {
         if self.is_null(field_idx, row_idx) { return None; }
@@ -130,6 +158,7 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read an `f64` value from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_f64(&self, field_idx: usize, row_idx: usize) -> Option<f64> {
         if self.is_null(field_idx, row_idx) { return None; }
@@ -137,6 +166,7 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read a `bool` value from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_bool(&self, field_idx: usize, row_idx: usize) -> Option<bool> {
         if self.is_null(field_idx, row_idx) { return None; }
@@ -144,6 +174,7 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read a string slice from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_string(&self, field_idx: usize, row_idx: usize) -> Option<&str> {
         if self.is_null(field_idx, row_idx) { return None; }
@@ -151,6 +182,10 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read a value from column `field_idx` at `row_idx`, returning a boxed `Value`.
+    ///
+    /// Returns `None` if the cell is null. The physical type of the column
+    /// determines which `Value` variant is produced.
     pub fn get_value(&self, field_idx: usize, row_idx: usize) -> Option<Value> {
         if self.is_null(field_idx, row_idx) { return None; }
         match self.field_types[field_idx] {
@@ -164,6 +199,10 @@ impl DataChunk {
     }
 }
 
+/// Iterator over active row indices of a `DataChunk`.
+///
+/// When a selection vector is present, yields the selected indices.
+/// Otherwise yields `0..size`.
 pub struct RowIter<'a> {
     sel: Option<&'a SelectionVector>,
     size: usize,

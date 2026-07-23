@@ -70,6 +70,11 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Create a new connection to the given database.
+    ///
+    /// A connection owns a statement cache and transaction context.
+    /// Multiple connections can coexist on the same `Database` — they
+    /// share the buffer pool and catalog but hold independent transactions.
     pub fn new(database: &Arc<Database>) -> Self {
         Self {
             database: database.clone(),

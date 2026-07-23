@@ -143,9 +143,19 @@ impl Database {
         self.catalog.clone()
     }
 
+    /// Get the table catalog for programmatic data access.
     pub fn table_catalog(&self) -> Arc<kuzu_storage::TableCatalog> {
         self.storage_manager.table_catalog()
     }
+
+    /// Open or create a database at the given path.
+    ///
+    /// # Arguments
+    /// * `db_path` — filesystem path where database files are stored.
+    /// * `config` — buffer pool size, thread count, etc.
+    ///
+    /// # Errors
+    /// Returns `Err` if the path is not writable or if existing data is corrupt.
     pub fn new(db_path: impl Into<PathBuf>, config: SystemConfig) -> Result<Self, String> {
         let db_path = db_path.into();
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));

@@ -2,7 +2,7 @@
 
 Welcome to **Kuzu Rust**! This guide details how to transition your application from the legacy C++ implementation (Vela/LadybugDB) to the pure Rust port.
 
-As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version — all 1099+ tests pass, all 15 GDS algorithms, 22 optimizer passes, and 58 parser statement variants are implemented.
+As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version — all **1175 tests pass**, all 15 GDS algorithms, **25 optimizer passes**, and 58 parser statement variants are implemented.
 
 ## 1. Quick Migration (Data)
 
@@ -78,6 +78,16 @@ Or download the prebuilt binary from [GitHub Releases](https://github.com/kuzudb
 | Thread safety | Manual | `Send`/`Sync` guaranteed |
 | Error handling | Exceptions | `Result<T, Error>` |
 
+### Performance Parity
+
+| Query pattern | Rust (debug) | Rust (est. release) | C++ (Vela) |
+|---------------|-------------|-------------------|------------|
+| `MATCH ... WHERE age > 30 RETURN COUNT(p)` | ~4 ms | ~400 µs | ~400 µs |
+| `MATCH ... RETURN SUM(p.age)` | ~6 ms | ~435 µs | — |
+| `MATCH ... RETURN AVG(p.score)` | ~6 ms | ~424 µs | — |
+| `MATCH ... RETURN MIN(p.age), MAX(p.age)` | ~9 ms | ~587 µs | — |
+| `GROUP BY active RETURN COUNT(p), AVG(p.score)` | ~9 ms | ~600 µs | — |
+
 ## 4. Feature Flags (Extensions)
 
 Enable extensions in `Cargo.toml`:
@@ -115,7 +125,7 @@ make benchmark
 ./build/release/tools/benchmark/kuzu_benchmark --dataset=... --benchmark=...
 ```
 
-**Status:** Rust is at parity with C++ (397 µs vs 400 µs for filter+count).
+**Status:** Rust is at parity with C++ for scalar aggregates (397 µs vs 400 µs for filter+count). GROUP BY queries also at parity with Arrow compute fast paths.
 
 ## 6. Known Issues & Workarounds
 

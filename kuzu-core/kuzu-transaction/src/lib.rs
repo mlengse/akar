@@ -52,6 +52,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    /// Create a new active transaction with the given ID and type.
     pub fn new(transaction_id: u64, transaction_type: TransactionType) -> Self {
         Self {
             transaction_id,
@@ -306,10 +307,12 @@ pub struct TransactionManager {
 }
 
 impl TransactionManager {
+    /// Create a transaction manager with default configuration.
     pub fn new() -> Self {
         Self::new_with_config(TransactionManagerConfig::default())
     }
 
+    /// Create a transaction manager with the given configuration.
     pub fn new_with_config(config: TransactionManagerConfig) -> Self {
         Self {
             next_id: AtomicU64::new(1),
@@ -342,6 +345,8 @@ impl TransactionManager {
         self.concurrent_writes.store(enabled, Ordering::Release);
     }
 
+    /// Begin a new read-only transaction. Multiple read transactions can
+    /// run concurrently with each other (but not with a concurrent write).
     pub fn begin_read(&self) -> Transaction {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(id, TransactionType::ReadOnly);
@@ -352,6 +357,9 @@ impl TransactionManager {
         tx
     }
 
+    /// Begin a new write transaction. In single-writer mode (default),
+    /// this blocks until any active write transaction finishes.
+    /// Returns `Err` if the manager is shutting down.
     pub fn begin_write(&self) -> Result<Transaction, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(id, TransactionType::Write);
@@ -390,6 +398,9 @@ impl TransactionManager {
         Ok(())
     }
 
+    /// Commit a transaction. For read-only transactions, this is immediate.
+    /// For write transactions, returns the undo records and commit timestamp
+    /// so the caller can flush to storage.
     pub fn commit(&self, transaction: &mut Transaction) -> CommitResult {
         if transaction.transaction_type == TransactionType::ReadOnly {
             transaction.status = TransactionStatus::Committed;
@@ -415,6 +426,7 @@ impl TransactionManager {
         CommitResult::Committed { commit_ts }
     }
 
+    /// Roll back a transaction, returning any undo records that need to be applied.
     pub fn rollback(&self, transaction: &mut Transaction) -> Vec<UndoRecord> {
         transaction.status = TransactionStatus::RolledBack;
         let records = transaction.undo_records.clone();

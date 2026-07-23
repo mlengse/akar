@@ -123,14 +123,17 @@ pub struct Graph {
 }
 
 impl Graph {
+    /// Create an empty graph (no nodes or edges).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add a labeled graph entry (node table or edge table) to the graph.
     pub fn add_entry(&mut self, entry: GraphEntry) {
         self.entries.push(entry);
     }
 
+    /// Return all graph entries (node/edge tables) registered in this graph.
     pub fn entries(&self) -> &[GraphEntry] {
         &self.entries
     }
@@ -147,6 +150,8 @@ impl Graph {
         self.csr = Some(CSRAdjacency::build(edges, num_nodes));
     }
 
+    /// Return the neighbors of `node_offset` as `(edge_weight, target_internal_id)` pairs.
+    /// Returns `None` if CSR is not built or `node_offset` is out of range.
     pub fn get_neighbors(&self, node_offset: u64) -> Option<&[(u64, InternalID)]> {
         self.csr.as_ref().and_then(|csr| {
             let pos = node_offset as usize;
@@ -158,14 +163,17 @@ impl Graph {
         })
     }
 
+    /// Return the number of nodes in the graph.
     pub fn num_nodes(&self) -> u64 {
         self.num_nodes
     }
 
+    /// Return the number of edges in the graph.
     pub fn num_edges(&self) -> usize {
         self.csr.as_ref().map(|c| c.num_edges()).unwrap_or(0)
     }
 
+    /// Return `true` if the CSR adjacency index has been built.
     pub fn has_csr(&self) -> bool {
         self.csr.is_some()
     }
