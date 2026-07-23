@@ -1,8 +1,9 @@
-# Kuzu Rust — Revised Forward Implementation Plan
+# Akar — Revised Forward Implementation Plan
 
 > **Revision:** 2026-07-24 (Sprint 11 — P38.3 Complete)
+> **Author:** Anjang Kusuma Netra | **License:** GPLv3
 > **Baseline:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
-> **Benchmark gap vs C++:** **3-way parity verified (hot path only).** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
+> **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **🔴 Audit findings:** ~~12 DDL operators = no-op~~ ✅ ALL 12 FIXED (P36.3 + P38.1). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. Pipeline completeness ~95%.
 > **For completed phases (P1-P37) and LadybugDB functional parity:** see [`STATUS.md`](file:///c:/Users/anjan/dev/memory/kuzu/kuzu-core/STATUS.md)
 

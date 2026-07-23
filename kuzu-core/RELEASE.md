@@ -1,6 +1,6 @@
-# Release Process — Kuzu Core Rust
+# Release Process — Akar
 
-This document describes how to cut a release of Kuzu Core Rust (`kuzu-core/`).
+This document describes how to cut a release of Akar (`kuzu-core/`).
 
 > **crates.io publishing is deferred** (Design Decision #11). Only GitHub Releases with prebuilt CLI binaries are produced at this stage. See [implementation_plan.md §DD11](implementation_plan.md) for rationale.
 
@@ -24,9 +24,9 @@ The current version is tracked in `kuzu-core/Cargo.toml` under `[workspace.packa
 
 | Asset | Platform | Source |
 |-------|----------|--------|
-| `kuzu-cli-linux-amd64` | Linux (x86_64) | `cargo build --release -p kuzu-cli` |
-| `kuzu-cli-macos-arm64` | macOS (Apple Silicon) | `cross` build via GitHub Actions |
-| `kuzu-cli-windows-amd64.exe` | Windows (x86_64) | `cargo build --release -p kuzu-cli` |
+| `akar-cli-linux-amd64` | Linux (x86_64) | `cargo build --release -p akar-cli` |
+| `akar-cli-macos-arm64` | macOS (Apple Silicon) | `cross` build via GitHub Actions |
+| `akar-cli-windows-amd64.exe` | Windows (x86_64) | `cargo build --release -p akar-cli` |
 
 All assets are built and attached to the GitHub Release automatically by the `rust-release.yml` workflow.
 
@@ -98,9 +98,9 @@ Once the PR is merged and the tag is pushed to `main`, the `rust-release.yml` wo
 
 ```bash
 # Download and test the binary
-curl -LO https://github.com/kuzudb/kuzu/releases/download/v0.1.0/kuzu-cli-linux-amd64
-chmod +x kuzu-cli-linux-amd64
-./kuzu-cli-linux-amd64 --version
+curl -LO https://github.com/anjangkusumanetra/akar/releases/download/v0.1.0/akar-cli-linux-amd64
+chmod +x akar-cli-linux-amd64
+./akar-cli-linux-amd64 --version
 ```
 
 ---
