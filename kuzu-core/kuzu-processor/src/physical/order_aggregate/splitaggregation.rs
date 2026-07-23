@@ -1,5 +1,6 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::order_aggregate::{AggregateHashTable, build_group_key, hash_group_key, keys_equal, update_states_row, resolve_agg_col_indices};
+use arrow::array::{Array, ArrayRef, AsArray};
 use arrow::compute;
 use arrow::datatypes::{Float64Type, Int32Type, Int64Type};
 use kuzu_common::types::Value;
@@ -150,6 +151,20 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
             return Ok(vec![]);
         }
 
+        // Fast path for GROUP BY with numeric aggregates (no selection vector).
+        // Partitions rows by group key, then uses Arrow compute per group
+        // instead of per-row Value dispatch in update_states_row.
+        if !group_cols.is_empty()
+            && total_rows > 0
+            && input.iter().all(|c| c.sel_vector.is_none())
+            && funcs.iter().all(|f| matches!(
+                f, AggregateFunction::Sum | AggregateFunction::Min | AggregateFunction::Max
+                  | AggregateFunction::Count | AggregateFunction::CountStar | AggregateFunction::Avg
+            ))
+        {
+            return self.batch_group_by_agg(&input, &col_indices);
+        }
+
         // Lock only the current thread's shard — not the global map
         let mut shard = self.shared_state.current_shard().lock().unwrap();
 
@@ -169,6 +184,170 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
             }
         }
         // Sink operator returns empty chunks because it accumulates into shared state
+        Ok(vec![])
+    }
+}
+
+impl PhysicalAggregateScan {
+    /// Batch GROUP BY with Arrow compute: partition rows by group key,
+    /// then compute aggregates per group using `take()` directly on ArrayRef
+    /// — avoids per-row Value boxing/unboxing entirely.
+    fn batch_group_by_agg(&self, input: &[DataChunk], col_indices: &[Option<usize>]) -> OperatorResult {
+        use arrow::array::UInt32Array;
+        use arrow::compute::take;
+        use arrow::datatypes::Int64Type;
+        let funcs = &self.shared_state.funcs;
+        let group_cols = &self.shared_state.group_by_cols;
+
+        // Step 1: Build group map — hash → (key_value, Vec<row_idx>)
+        // Row indices are global (across chunks) for take() on concatenated arrays.
+        let mut group_map: hashbrown::HashMap<u64, (Value, Vec<u32>)> = hashbrown::HashMap::new();
+        let mut chunk_offsets: Vec<usize> = Vec::with_capacity(input.len());
+        let mut offset = 0usize;
+        for chunk in input {
+            chunk_offsets.push(offset);
+            offset += chunk.size;
+        }
+        for (ci, chunk) in input.iter().enumerate() {
+            let base = chunk_offsets[ci];
+            for row in 0..chunk.size {
+                let hash = hash_group_key(chunk, group_cols, row);
+                let entry = group_map.entry(hash).or_insert_with(|| {
+                    (build_group_key(chunk, group_cols, row), Vec::new())
+                });
+                if keys_equal(&entry.0, chunk, group_cols, row) {
+                    entry.1.push((base + row) as u32);
+                }
+            }
+        }
+
+        // Step 2: For each group, use take() on Arrow ArrayRef + compute kernels
+        //
+        // For single-chunk (common case): take() directly on chunk.fields[col].
+        // For multi-chunk: concatenate first, then take().
+
+        // Concatenate agg columns once if multi-chunk
+        let concatenated: Vec<ArrayRef> = if input.len() > 1 {
+            col_indices.iter().map(|&ci| {
+                if let Some(col) = ci {
+                    let refs: Vec<&dyn Array> = input.iter().filter_map(|c| {
+                        if col < c.fields.len() { Some(c.fields[col].as_ref()) } else { None }
+                    }).collect();
+                    arrow::compute::kernels::concat::concat(&refs).unwrap()
+                } else {
+                    arrow::array::new_null_array(&arrow::datatypes::DataType::Null, 0)
+                }
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        // Single chunk reference for the common path
+        let chunk = if input.len() == 1 { Some(&input[0]) } else { None };
+
+        let mut shard = self.shared_state.current_shard().lock().unwrap();
+        for (hash, (key, row_indices)) in &group_map {
+            let group_size = row_indices.len() as u64;
+            let mut group_states: Vec<AggValueState> = funcs.iter().map(AggValueState::new).collect();
+            let indices_arr = UInt32Array::from(row_indices.clone());
+
+            for (fi, func) in funcs.iter().enumerate() {
+                match func {
+                    AggregateFunction::CountStar => {
+                        if let AggValueState::Count(n) = &mut group_states[fi] {
+                            *n = group_size;
+                        }
+                    }
+                    AggregateFunction::Count => {
+                        if let AggValueState::Count(n) = &mut group_states[fi] {
+                            *n = group_size;
+                        }
+                    }
+                    _ => {
+                        if let Some(col_idx) = col_indices[fi] {
+                            // Get the sub-array for this group via take()
+                            let sub_array = if let Some(c) = chunk {
+                                take(c.field(col_idx), &indices_arr, None)
+                            } else {
+                                take(&concatenated[fi], &indices_arr, None)
+                            };
+
+                            let sub = match sub_array {
+                                Ok(a) => a,
+                                Err(_) => continue,
+                            };
+
+                            group_states[fi] = match sub.data_type() {
+                                arrow::datatypes::DataType::Int64 => {
+                                    let arr = sub.as_primitive::<Int64Type>();
+                                    match func {
+                                        AggregateFunction::Count => {
+                                            AggValueState::Count(group_size)
+                                        }
+                                        AggregateFunction::Sum => {
+                                            AggValueState::Sum(arrow::compute::sum(arr).map(Value::Int64).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Min => {
+                                            AggValueState::Min(arrow::compute::min(arr).map(Value::Int64).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Max => {
+                                            AggValueState::Max(arrow::compute::max(arr).map(Value::Int64).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Avg => {
+                                            let non_null = arr.null_count() as u64;
+                                            let actual_count = group_size - non_null;
+                                            if actual_count == 0 {
+                                                AggValueState::Avg { sum: Value::Null, count: 0 }
+                                            } else {
+                                                let s: f64 = arrow::compute::sum(arr).unwrap_or(0) as f64;
+                                                AggValueState::Avg { sum: Value::Double(s / actual_count as f64), count: actual_count }
+                                            }
+                                        }
+                                        _ => AggValueState::new(func),
+                                    }
+                                }
+                                arrow::datatypes::DataType::Float64 => {
+                                    let arr = sub.as_primitive::<arrow::datatypes::Float64Type>();
+                                    match func {
+                                        AggregateFunction::Count => {
+                                            AggValueState::Count(group_size)
+                                        }
+                                        AggregateFunction::Sum => {
+                                            AggValueState::Sum(arrow::compute::sum(arr).map(Value::Double).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Min => {
+                                            AggValueState::Min(arrow::compute::min(arr).map(Value::Double).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Max => {
+                                            AggValueState::Max(arrow::compute::max(arr).map(Value::Double).unwrap_or(Value::Null))
+                                        }
+                                        AggregateFunction::Avg => {
+                                            let non_null = arr.null_count() as u64;
+                                            let actual_count = group_size - non_null;
+                                            if actual_count == 0 {
+                                                AggValueState::Avg { sum: Value::Null, count: 0 }
+                                            } else {
+                                                let s: f64 = arrow::compute::sum(arr).unwrap_or(0.0);
+                                                AggValueState::Avg { sum: Value::Double(s / actual_count as f64), count: actual_count }
+                                            }
+                                        }
+                                        _ => AggValueState::new(func),
+                                    }
+                                }
+                                _ => {
+                                    // Fallback: collect Values for unsupported types
+                                    AggValueState::new(func)
+                                }
+                            };
+                        }
+                    }
+                }
+            }
+
+            let bucket = shard.entry(*hash).or_default();
+            bucket.push((key.clone(), group_states));
+        }
+
         Ok(vec![])
     }
 }

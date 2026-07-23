@@ -34,10 +34,15 @@ impl OptimizationPass for AggregateDetection {
                         // No aggregates — keep as projection
                         result.push(op.clone());
                     } else {
-                        // Replace with Aggregate operator
-                        // Non-aggregate expressions that are GROUP BY keys
-                        // For simple RETURN COUNT(*) there are no GROUP BY keys
-                        let group_by: Vec<Expression> = Vec::new();
+                        // Non-aggregate expressions become GROUP BY keys.
+                        // e.g. RETURN p.active, COUNT(p), AVG(p.score)
+                        //   → group_by=[p.active], aggregates=[COUNT(p), AVG(p.score)]
+                        let group_by: Vec<Expression> = proj
+                            .expressions
+                            .iter()
+                            .filter(|be| extract_aggregate_function(&be.expression).is_none())
+                            .map(|be| be.expression.clone())
+                            .collect();
 
                         result.push(LogicalOperator::Aggregate(LogicalAggregate {
                             group_by,

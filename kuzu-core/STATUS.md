@@ -1,6 +1,6 @@
 # Status Implementasi Kuzu Rust — Dokumen Konsolidasi
 
-> **Tanggal:** 2026-07-23 (Sprint 11 — P38.1 ✅ Complete, P38.2 ✅ Complete, P39 ✅ Complete, P38.3 In Progress)
+> **Tanggal:** 2026-07-24 (Sprint 11 — P38.1 ✅ Complete, P38.2 ✅ Complete, P39 ✅ Complete, P40 ✅ Complete, P38.3 In Progress)
 > **Hasil audit:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **3-way C++ parity verified (hot path only):** Rust 397 µs ≈ Vela 400 µs ≈ LadybugDB 374 µs untuk `MATCH ... WHERE age > 30 RETURN COUNT(p)` pada 10k rows. Lihat [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **P39 ✅ Aggregate regression FIXED:** SUM/AVG/MIN/MAX scalar aggregates now use Arrow compute kernels (~100× improvement). `group_by_active+AVG` still needs vectorized hash aggregation.
@@ -706,7 +706,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-21: **~1175 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **Sprint 10 COMPLETE — P37.1-P37.4 ALL DONE ✅✅✅✅:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, LadybugDB benchmark suite, Query optimization passes (25 total). **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests. **Sprint 11 — P38.1 ✅ COMPLETE:** All 6 remaining DDL operators wired (CreateVectorIndex, CreateSequence, DropSequence, CreateDml, ExportDatabase, ImportDatabase). SchemaDdlFn callback pattern added for schema-level DDL. Pk index auto-creation added to pipeline CreateNodeTable. All 1175 tests passing. **P38.2 IN PROGRESS:** Benchmark verification. **P38.3 IN PROGRESS:** Documentation polish.
+- Per 2026-07-24: **~1175 test pass, 0 fail, 5 ignored (doc-tests)** ✅. **Sprint 10 COMPLETE — P37.1-P37.4 ALL DONE ✅✅✅✅:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, LadybugDB benchmark suite, Query optimization passes (25 total). **P37.5 ✅ (Production Readiness — LadybugDB C++):** Logger, MetricsRegistry, system_health() table function, ops documentation, 10 production tests. **Sprint 11 — P38.1 ✅ COMPLETE:** All 6 remaining DDL operators wired. SchemaDdlFn callback pattern added. Pk index auto-creation added. **P38.2 ✅ COMPLETE:** Benchmark verification. **P39 ✅ COMPLETE:** Arrow fast path for SUM/AVG/MIN/MAX (~100× improvement). **P40 ✅ COMPLETE:** Vectorized GROUP BY with `take()` on ArrayRef + AggregateDetection fix (37× improvement on GROUP BY + AVG; also fixed correctness bug where GROUP BY expressions were silently dropped). **P38.3 IN PROGRESS:** Documentation polish.
 - **P26.1 (Edge Case Test Suite):** ✅ **ALL COMPLETE.** 7 test files, **137+ total tests**. **P30.1 COMPLETE: all edge case tests un-ignored and passing (137+ tests, 0 ignore, 0 fail). FTS also fixed.**
 - **P26.2 (Fuzz Testing):** ✅ **ALL COMPLETE.** 3 cargo-fuzz targets: `cypher_query`, `expression_eval`, `copy_from_csv`. **CI terintegrasi (P30.5b)** — PR auto-run 10 menit, nightly 30 menit per target via `.github/workflows/fuzz-ci.yml`.
 - **P26.3 (Property-Based Testing):** ✅ **ALL COMPLETE.** 3 proptest properties: round-trip, join associativity, filter pushdown equivalence.

@@ -1,6 +1,6 @@
 # Kuzu Rust — Revised Forward Implementation Plan
 
-> **Revision:** 2026-07-21 (Sprint 11 — P38.1 Complete)
+> **Revision:** 2026-07-24 (Sprint 11 — P40 Complete)
 > **Baseline:** `cargo test --workspace` → **~1175 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Benchmark gap vs C++:** **3-way parity verified (hot path only).** Rust 397 µs vs Vela 400 µs vs LadybugDB 374 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows.
 > **🔴 Audit findings:** ~~12 DDL operators = no-op~~ ✅ ALL 12 FIXED (P36.3 + P38.1). ~~Binder type resolution = hardcoded heuristic~~ ✅ FIXED (P36.4). ~~CSR adjacency = stub~~ ✅ FIXED, ~~ORDER BY/LIMIT/SKIP = parsed but discarded~~ ✅ FIXED. Pipeline completeness ~95%.
@@ -752,7 +752,7 @@ All 18 functions are required for API compatibility. Upon auditing the current `
 | **Sprint 8** | **P35: Remaining Minor Gaps** | **1** | **🏁 P35 ALL DONE ✅✅ — ConstantOrNullFunction, ConfidentialStatementAnalyzer** |
 | **Sprint 9** | **P36: Critical Pipeline Gaps** | **29 (29 done)** | **🏁 P36 ALL DONE ✅✅✅✅✅✅✅ — P36.1 CSR Adjacency, P36.2 AST ReturnClause, P36.3 DDL Operators, P36.4 Binder Type Resolution, P36.5 ORDER BY/LIMIT/SKIP, P36.6 Fix Ignored Tests, P36.7 Checkpoint Implementation** |
 | **Sprint 10** | **P37: Storage & Performance** | **18** | **🏁 P37 ALL DONE ✅✅✅✅✅ — P37.1 BufferManager (mmap/NUMA/readahead), P37.2 StringDictionary encoding, P37.3 Benchmark suite, P37.4 Query optimization (25 passes), P37.5 Production Readiness (LadybugDB C++)** |
-| **Sprint 11** | **P38: DDL Completeness & Docs** | **13** | **P38.1 DDL operators (all 12) ✅ COMPLETE, P38.2 Benchmark verify ✅ COMPLETE (regression found: SUM/AVG/MIN/MAX), P38.3 Documentation. P39 ✅ COMPLETE: Arrow fast path for SUM/AVG/MIN/MAX (~100× improvement).** |
+| **Sprint 11** | **P38: DDL Completeness & Docs** | **15** | **P38.1 DDL operators (all 12) ✅ COMPLETE, P38.2 Benchmark verify ✅ COMPLETE (regression found: SUM/AVG/MIN/MAX), P38.3 Documentation. P39 ✅ COMPLETE: Arrow fast path for SUM/AVG/MIN/MAX (~100× improvement). P40 ✅ COMPLETE: Vectorized GROUP BY + AggregateDetection fix (37× improvement on GROUP BY + AVG).** |
 | **Ongoing** | Docs + Releases | 4 | MIGRATION.md, GH releases |
 
 ---
