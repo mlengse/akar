@@ -1,0 +1,15 @@
+[package]
+name = "akar-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-storage = { path = "../akar-storage" }
+hashbrown.workspace = true
+
+[lints]
+workspace = true

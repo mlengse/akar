@@ -1,0 +1,21 @@
+[package]
+name = "akar-extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = []
+arrow = ["dep:arrow"]
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-function = { path = "../akar-function" }
+akar-catalog = { path = "../akar-catalog" }
+tracing.workspace = true
+arrow = { workspace = true, optional = true }
+
+[lints]
+workspace = true

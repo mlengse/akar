@@ -1,22 +1,22 @@
-//! Native Rust backend for Kuzu (using kuzu-core).
+//! Native Rust backend for Akar (using akar-core).
 //!
 //! This module provides the same public API as the C++ FFI backend,
-//! but implemented entirely in Rust via `kuzu-main` and `kuzu-common`.
+//! but implemented entirely in Rust via `akar-main` and `akar-common`.
 
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Re-export core types from kuzu-core.
-pub use kuzu_main::{
+/// Re-export core types from akar-core.
+pub use akar_main::{
     Connection as RawConnection, Database as RawDatabase, PreparedStatement, QueryResult,
 };
-pub use kuzu_main::SystemConfig;
+pub use akar_main::SystemConfig;
 
 /// Re-export common value types.
-pub use kuzu_common::types::{InternalID, LogicalTypeID, Value};
+pub use akar_common::types::{InternalID, LogicalTypeID, Value};
 
-/// The version of the Kuzu library.
+/// The version of the Akar library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Get the storage version number.
@@ -26,7 +26,7 @@ pub fn get_storage_version() -> u64 {
 
 // ==================== Backward-compatible Error type ====================
 
-/// Error type for Kuzu operations.
+/// Error type for Akar operations.
 ///
 /// Wraps a string message for backward compatibility with the C++ FFI API
 /// where operations returned `Result<_, Error>` instead of `Result<_, String>`.
@@ -57,7 +57,7 @@ impl From<&str> for Error {
 
 /// The main database instance.
 ///
-/// Wraps [`kuzu_main::Database`] for backward-compatible API.
+/// Wraps [`akar_main::Database`] for backward-compatible API.
 pub struct Database {
     pub(crate) inner: Arc<RawDatabase>,
 }
@@ -80,10 +80,10 @@ impl Database {
 
 /// A connection to the database for executing queries.
 ///
-/// Wraps [`kuzu_main::Connection`] for backward-compatible API
+/// Wraps [`akar_main::Connection`] for backward-compatible API
 /// (returns `Result<Self, Error>` instead of `Self`).
 pub struct Connection {
-    inner: kuzu_main::Connection,
+    inner: akar_main::Connection,
 }
 
 impl Connection {
@@ -93,7 +93,7 @@ impl Connection {
     /// * `database` - A reference to the database instance.
     pub fn new(database: &Database) -> Result<Self, Error> {
         Ok(Connection {
-            inner: kuzu_main::Connection::new(&database.inner),
+            inner: akar_main::Connection::new(&database.inner),
         })
     }
 

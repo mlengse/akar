@@ -6,8 +6,8 @@
 # 3. Creates GitHub Release with binaries + auto-generated changelog
 #
 # NOTE: crates.io publishing is DEFERRED per Design Decision #11
-# (kuzu-core/implementation_plan.md). All internal crates have
-# `publish = false` and are path dependencies of kuzu-main/kuzu-cli.
+# (akar-core/implementation_plan.md). All internal crates have
+# `publish = false` and are path dependencies of akar-main/akar-cli.
 # Publishing to crates.io requires either publishing all internal
 # crates first or consolidating into a single crate — deferred until
 # API stabilises.
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo test --workspace --no-fail-fast
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ──────────────────────────────────────────────────────
   # Build CLI binaries for distribution
@@ -66,11 +66,11 @@ jobs:
       - run: rustup target add ${{ matrix.target }}
         if: matrix.target != 'x86_64-unknown-linux-gnu'
       - name: Build release binary
-        working-directory: kuzu-core
-        run: cargo build --release --target ${{ matrix.target }} -p kuzu-cli
+        working-directory: akar-core
+        run: cargo build --release --target ${{ matrix.target }} -p akar-cli
       - name: Prepare asset
         run: |
-          cp kuzu-core/target/${{ matrix.target }}/release/kuzu-cli${{ runner.os == 'Windows' && '.exe' || '' }} ${{ matrix.asset_name }}
+          cp akar-core/target/${{ matrix.target }}/release/akar-cli${{ runner.os == 'Windows' && '.exe' || '' }} ${{ matrix.asset_name }}
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset_name }}
@@ -125,8 +125,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Build release (verify compilation)
-        run: cargo build --release -p kuzu-cli
-        working-directory: kuzu-core
+        run: cargo build --release -p akar-cli
+        working-directory: akar-core
       - name: Verify no warnings
-        run: cargo clippy --release -p kuzu-cli 2>&1 || true
-        working-directory: kuzu-core
+        run: cargo clippy --release -p akar-cli 2>&1 || true
+        working-directory: akar-core

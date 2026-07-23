@@ -1,6 +1,6 @@
 # Copilot Instructions — Kùzu Graph Database
 
-This repository contains the Kùzu embedded graph database. The Rust workspace lives in `kuzu-core/`; the C++ source is in `src/`.
+This repository contains the Kùzu embedded graph database. The Rust workspace lives in `akar-core/`; the C++ source is in `src/`.
 
 ## Cargo & diagnostics — strategy
 
@@ -19,10 +19,10 @@ This project uses two sets of tools for Rust development:
 | `rust_analyzer_hover` | Type info and docs |
 | `rust_analyzer_code_actions` | Available code actions |
 | `rust_analyzer_completion` | Code completion suggestions |
-| `rust_analyzer_set_workspace` | Set workspace root to `kuzu-core/` |
+| `rust_analyzer_set_workspace` | Set workspace root to `akar-core/` |
 
 **Workflow after every edit:**
-1. `rust_analyzer_set_workspace` → `kuzu-core/`
+1. `rust_analyzer_set_workspace` → `akar-core/`
 2. `rust_analyzer_diagnostics` on each edited file
 3. Fix any errors before moving on
 
@@ -37,4 +37,4 @@ This project uses two sets of tools for Rust development:
 | `cargo clippy --workspace -- -D warnings` | Final gate before marking work complete |
 | `cargo fmt --all -- --check` | Format verification |
 
-Always `cd kuzu-core` before running terminal cargo commands.
+Always `cd akar-core` before running terminal cargo commands.

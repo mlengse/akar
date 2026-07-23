@@ -1,0 +1,18 @@
+[package]
+name = "akar-c"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FFI bindings for Kuzu Rust"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+akar-main = { path = "../akar-main" }
+akar-common = { path = "../akar-common" }
+libc = "0.2"

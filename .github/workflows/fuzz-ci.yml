@@ -10,7 +10,7 @@ on:
   pull_request:
     branches: [master, main]
     paths:
-      - 'kuzu-core/**'
+      - 'akar-core/**'
       - '.github/workflows/fuzz-ci.yml'
   schedule:
     - cron: '0 0 * * *'
@@ -44,7 +44,7 @@ jobs:
         run: cargo install cargo-fuzz
 
       - name: Run fuzz target
-        working-directory: kuzu-core/fuzz
+        working-directory: akar-core/fuzz
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             MAX_TIME=1800

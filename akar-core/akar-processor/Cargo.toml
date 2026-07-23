@@ -1,0 +1,58 @@
+[package]
+name = "akar-processor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["parquet"]
+parquet = ["akar-storage/parquet"]
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-catalog = { path = "../akar-catalog" }
+akar-planner = { path = "../akar-planner" }
+akar-function = { path = "../akar-function" }
+akar-storage = { path = "../akar-storage" }
+akar-parser = { path = "../akar-parser" }
+akar-fts = { path = "../akar-fts" }
+akar-vector = { path = "../akar-vector" }
+tracing.workspace = true
+hashbrown.workspace = true
+ahash.workspace = true
+rayon.workspace = true
+arrow.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "physical_scan"
+harness = false
+
+[[bench]]
+name = "physical_filter"
+harness = false
+
+[[bench]]
+name = "physical_hash_join"
+harness = false
+
+[[bench]]
+name = "physical_order_by"
+harness = false
+
+[[bench]]
+name = "physical_aggregate"
+harness = false
+
+[[bench]]
+name = "evaluate_arrow"
+harness = false
+
+[lints]
+workspace = true
+
+# Trigger reload

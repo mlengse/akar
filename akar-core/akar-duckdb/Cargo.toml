@@ -1,0 +1,21 @@
+[package]
+name = "akar-duckdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+tracing.workspace = true
+duckdb = { version = "1.1", features = ["bundled"], optional = true }
+
+[features]
+default = []
+bundled = ["duckdb/bundled"]
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+# Akar Core Cargo configuration
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+# WASM target — allows checking wasm32-unknown-unknown compatibility.
+# Sets cfg flag `akar_wasm` so code can conditionally compile.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "akar_wasm"]

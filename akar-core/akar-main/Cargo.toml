@@ -1,0 +1,82 @@
+[package]
+name = "akar-main"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+adbc = ["dep:arrow"]
+parquet-export = ["dep:arrow", "dep:parquet"]
+json-extension = ["dep:akar-json"]
+fts-extension = ["dep:akar-fts"]
+vector-extension = ["dep:akar-vector"]
+httpfs-extension = ["dep:akar-httpfs"]
+duckdb-extension = ["dep:akar-duckdb"]
+algo-extension = ["dep:akar-algo"]
+neo4j-extension = ["dep:akar-neo4j"]
+llm-extension = ["dep:akar-llm"]
+sqlite-extension = ["dep:akar-sqlite"]
+delta-extension = ["dep:akar-delta"]
+delta-native = ["dep:akar-delta", "akar-delta/native"]
+iceberg-extension = ["dep:akar-iceberg"]
+iceberg-native = ["dep:akar-iceberg", "akar-iceberg/native"]
+azure-extension = ["dep:akar-azure"]
+azure-native = ["dep:akar-azure", "akar-azure/native"]
+postgres-extension = ["dep:akar-postgres"]
+unity-catalog-extension = ["dep:akar-unity-catalog"]
+unity-catalog-native = ["dep:akar-unity-catalog", "akar-unity-catalog/native"]
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-storage = { path = "../akar-storage" }
+akar-transaction = { path = "../akar-transaction" }
+akar-catalog = { path = "../akar-catalog" }
+akar-parser = { path = "../akar-parser" }
+akar-binder = { path = "../akar-binder" }
+akar-planner = { path = "../akar-planner" }
+akar-optimizer = { path = "../akar-optimizer" }
+akar-processor = { path = "../akar-processor" }
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+akar-json = { path = "../akar-json", optional = true }
+akar-fts = { path = "../akar-fts", optional = true }
+akar-vector = { path = "../akar-vector", optional = true }
+akar-httpfs = { path = "../akar-httpfs", optional = true }
+akar-duckdb = { path = "../akar-duckdb", optional = true }
+akar-algo = { path = "../akar-algo", optional = true }
+akar-neo4j = { path = "../akar-neo4j", optional = true }
+akar-llm = { path = "../akar-llm", optional = true }
+akar-sqlite = { path = "../akar-sqlite", optional = true }
+akar-delta = { path = "../akar-delta", optional = true }
+akar-iceberg = { path = "../akar-iceberg", optional = true }
+akar-azure = { path = "../akar-azure", optional = true }
+akar-postgres = { path = "../akar-postgres", optional = true }
+akar-unity-catalog = { path = "../akar-unity-catalog", optional = true }
+tracing.workspace = true
+arrow = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
+csv.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+parquet = "59.1.0"
+proptest = "1.6"
+arrow = { workspace = true }
+criterion.workspace = true
+
+[[bench]]
+name = "query_pipeline"
+harness = false
+
+[[bench]]
+name = "storage_bench"
+harness = false
+
+[[bench]]
+name = "ladybug_suite"
+harness = false
+
+[lints]
+workspace = true

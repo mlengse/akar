@@ -1,0 +1,19 @@
+# Clippy configuration — Kuzu Core Workspace
+#
+# Relaxed pedantic settings for a large workspace port.
+# Individual crates may further restrict via #![warn(...)] attributes.
+
+# Allow cognitive complexity up to 50 (default 25 is too strict for a DB engine)
+cognitive-complexity-threshold = 50
+
+# Allow type complexity in certain operators (e.g., join hash tables)
+type-complexity-threshold = 500
+
+# Disallow specific lints project-wide
+disallowed-methods = []
+
+# Max suggested "too many arguments" before warning
+too-many-arguments-threshold = 12
+
+# Allow longer functions in storage/processor code
+# (individual exemptions via #[allow] are preferred)

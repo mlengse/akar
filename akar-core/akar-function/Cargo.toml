@@ -1,0 +1,20 @@
+[package]
+name = "akar-function"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+arrow.workspace = true
+hashbrown.workspace = true
+regex.workspace = true
+time.workspace = true
+md-5.workspace = true
+sha2.workspace = true
+base64.workspace = true
+
+[lints]
+workspace = true

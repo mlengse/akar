@@ -1,0 +1,21 @@
+[package]
+name = "akar-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"], optional = true }
+tracing.workspace = true
+
+[features]
+default = []
+native = ["tokio", "tokio-postgres"]
+
+[lints]
+workspace = true

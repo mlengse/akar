@@ -1,0 +1,18 @@
+[package]
+name = "akar-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+serde_json.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

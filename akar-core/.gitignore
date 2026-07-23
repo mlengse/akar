@@ -1,0 +1,18 @@
+# Rust build artifacts
+target/
+**/target/
+
+target-wsl/
+**/target-wsl/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.log

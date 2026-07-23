@@ -1,0 +1,21 @@
+[package]
+name = "akar-algo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+arrow.workspace = true
+akar-common = { path = "../akar-common" }
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+akar-graph = { path = "../akar-graph" }
+tracing.workspace = true
+
+[dev-dependencies]
+akar-catalog = { path = "../akar-catalog" }
+
+[lints]
+workspace = true

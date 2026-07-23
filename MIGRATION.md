@@ -1,6 +1,6 @@
 # Migrating to Kuzu Rust (v1.0.0)
 
-This guide covers migration from the legacy C++ Kuzu API to the pure Rust `kuzu-core`.
+This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-core`.
 
 ## Why Migrate?
 
@@ -22,7 +22,7 @@ pip install kuzu  # or ladybug (C++ fork)
 
 ### Step 1: Export legacy C++ database
 ```bash
-cargo run --bin kuzu-migrate -- --from /path/to/legacy/cpp-db --to /path/to/new/rust-db
+cargo run --bin akar-migrate -- --from /path/to/legacy/cpp-db --to /path/to/new/rust-db
 ```
 
 This tool:
@@ -34,14 +34,14 @@ This tool:
 
 ### Step 2: Verify migration
 ```bash
-cargo run --bin kuzu-cli -- /path/to/new/rust-db
+cargo run --bin akar-cli -- /path/to/new/rust-db
 ```
 Then run sample queries to verify data integrity.
 
 ### Manual export (skip Python extraction)
 If you already have exported Parquet files and `schema.json`:
 ```bash
-cargo run --bin kuzu-migrate -- --from /path/to/schema-dir --to /path/to/new/rust-db --skip-extract
+cargo run --bin akar-migrate -- --from /path/to/schema-dir --to /path/to/new/rust-db --skip-extract
 ```
 
 ## API Migration
@@ -55,7 +55,7 @@ auto db = std::make_unique<kuzu::main::Database>("path/to/db", systemConfig);
 
 **Rust:**
 ```rust
-use kuzu_main::{Database, SystemConfig};
+use akar_main::{Database, SystemConfig};
 let config = SystemConfig::default();
 let db = Database::new("path/to/db", config)?;
 ```
@@ -68,7 +68,7 @@ auto conn = std::make_unique<kuzu::main::Connection>(db.get());
 
 **Rust:**
 ```rust
-use kuzu_main::Connection;
+use akar_main::Connection;
 let conn = Connection::new(&db);
 ```
 
@@ -108,7 +108,7 @@ let result = conn.execute(&stmt, vec![("name", "Alice".into())])?;
 ```
 
 ### 5. Error Handling
-Rust uses `Result<T, kuzu_common::Error>` instead of exceptions. Use `?` or `match`:
+Rust uses `Result<T, akar_common::Error>` instead of exceptions. Use `?` or `match`:
 ```rust
 conn.query("...").map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
 ```
@@ -118,7 +118,7 @@ conn.query("...").map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
 Extensions in Rust are compiled statically via Cargo features:
 ```toml
 [dependencies]
-kuzu-main = { git = "...", features = ["json-extension", "httpfs-extension"] }
+akar-main = { git = "...", features = ["json-extension", "httpfs-extension"] }
 ```
 
 This replaces the C++ `LOAD 'extensions/JSON'` runtime loading model.
@@ -141,7 +141,7 @@ Current status: **Rust at parity with C++** (397 µs Rust vs 400 µs C++ for fil
 
 | Issue | Solution |
 |-------|----------|
-| `kuzu-migrate` Python step fails | Install `pip install kuzu`, verify Python 3.8+ |
+| `akar-migrate` Python step fails | Install `pip install kuzu`, verify Python 3.8+ |
 | Missing extensions | Enable feature flag in Cargo.toml |
 | Slow queries | `cargo build --release`, verify Arrow-native execution |
 | Windows ETW profiling | Run `cargo-flamegraph` as Administrator |
