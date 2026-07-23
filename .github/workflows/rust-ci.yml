@@ -1,6 +1,6 @@
 # Rust CI — Akar Core Workspace
 #
-# Builds, tests, and lints the kuzu-core Rust workspace on push and PR.
+# Builds, tests, and lints the akar-core Rust workspace on push and PR.
 # Runs on Ubuntu, macOS, and Windows plus WASM and feature-gated checks.
 
 name: Rust CI
@@ -9,12 +9,12 @@ on:
   push:
     branches: [master, main]
     paths:
-      - 'kuzu-core/**'
+      - 'akar-core/**'
       - '.github/workflows/rust-ci.yml'
   pull_request:
     branches: [master, main]
     paths:
-      - 'kuzu-core/**'
+      - 'akar-core/**'
       - '.github/workflows/rust-ci.yml'
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Clippy lint check
@@ -49,7 +49,7 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Build & Test — Ubuntu
@@ -61,9 +61,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo build --workspace
-        working-directory: kuzu-core
+        working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Build & Test — macOS
@@ -75,9 +75,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo build --workspace
-        working-directory: kuzu-core
+        working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Build & Test — Windows (MSVC)
@@ -89,9 +89,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo build --workspace
-        working-directory: kuzu-core
+        working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Feature-gated build — all extensions enabled
@@ -104,18 +104,18 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Build with all extension features
         run: |
-          cargo build -p kuzu-main \
+          cargo build -p akar-main \
             --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,adbc
-          cargo build -p kuzu-cli
-        working-directory: kuzu-core
+          cargo build -p akar-cli
+        working-directory: akar-core
       - name: Test with all features
         run: |
-          cargo test -p kuzu-main \
+          cargo test -p akar-main \
             --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,adbc \
             --no-fail-fast
-          cargo test -p kuzu-json -p kuzu-fts -p kuzu-vector -p kuzu-algo \
+          cargo test -p akar-json -p akar-fts -p akar-vector -p akar-algo \
             --no-fail-fast
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # WASM target check (no runtime tests — wasm32 target)
@@ -131,18 +131,18 @@ jobs:
       - name: Check WASM target
         run: |
           cargo check --workspace --target wasm32-unknown-unknown \
-            --exclude kuzu-httpfs \
-            --exclude kuzu-duckdb \
-            --exclude kuzu-sqlite \
-            --exclude kuzu-postgres \
-            --exclude kuzu-neo4j \
-            --exclude kuzu-delta \
-            --exclude kuzu-iceberg \
-            --exclude kuzu-azure \
-            --exclude kuzu-unity-catalog \
-            --exclude kuzu-wasm
-          cargo check -p kuzu-wasm --target wasm32-unknown-unknown
-        working-directory: kuzu-core
+            --exclude akar-httpfs \
+            --exclude akar-duckdb \
+            --exclude akar-sqlite \
+            --exclude akar-postgres \
+            --exclude akar-neo4j \
+            --exclude akar-delta \
+            --exclude akar-iceberg \
+            --exclude akar-azure \
+            --exclude akar-unity-catalog \
+            --exclude akar-wasm
+          cargo check -p akar-wasm --target wasm32-unknown-unknown
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Benchmark compilation check (does not run benchmarks)
@@ -154,7 +154,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo bench --workspace --no-run
-        working-directory: kuzu-core
+        working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
   # Code coverage (cargo-tarpaulin)
@@ -175,11 +175,11 @@ jobs:
             --output-dir target/coverage \
             --exclude-files 'tests/*' \
             --exclude-files 'benches/*'
-        working-directory: kuzu-core
+        working-directory: akar-core
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
-          files: kuzu-core/target/coverage/cobertura.xml
+          files: akar-core/target/coverage/cobertura.xml
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
@@ -198,8 +198,8 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack
       - name: Run WASM tests in Node.js
-        run: wasm-pack test --node kuzu-wasm
-        working-directory: kuzu-core
+        run: wasm-pack test --node akar-wasm
+        working-directory: akar-core
 
   # ──────────────────────────────────────────────────────
   # tools/rust_api native build
@@ -210,6 +210,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build native kuzu crate
+      - name: Build native akar crate
         run: cargo check
         working-directory: tools/rust_api

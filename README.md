@@ -61,22 +61,22 @@ No server. No Docker. Just `cargo add akar` and query.
 
 ## Architecture
 
-Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`kuzu-core/`) contains 31 crates and ~55K lines of pure Rust code:
+Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`) contains 31 crates and ~55K lines of pure Rust code:
 
 | Crate | Purpose |
 |-------|---------|
-| `kuzu-parser` | Cypher query parser (pest-based) |
-| `kuzu-binder` | Semantic analysis and type resolution |
-| `kuzu-optimizer` | 25+ query optimization passes |
-| `kuzu-processor` | Physical operators (scan, filter, join, aggregate, sort) |
-| `kuzu-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
-| `kuzu-function` | 58+ SQL/Cypher functions |
-| `kuzu-algo` | 15 graph algorithms (BFS, DFS, PageRank, SCC, etc.) |
-| `kuzu-fts` | Full-text search (BM25) |
-| `kuzu-vector` | Vector similarity search |
-| `kuzu-c` | C FFI API (`extern "C"`) |
-| `kuzu-cli` | Interactive CLI shell |
-| `kuzu-wasm` | WebAssembly bindings |
+| `akar-parser` | Cypher query parser (pest-based) |
+| `akar-binder` | Semantic analysis and type resolution |
+| `akar-optimizer` | 25+ query optimization passes |
+| `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
+| `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
+| `akar-function` | 58+ SQL/Cypher functions |
+| `akar-algo` | 15 graph algorithms (BFS, DFS, PageRank, SCC, etc.) |
+| `akar-fts` | Full-text search (BM25) |
+| `akar-vector` | Vector similarity search |
+| `akar-c` | C FFI API (`extern "C"`) |
+| `akar-cli` | Interactive CLI shell |
+| `akar-wasm` | WebAssembly bindings |
 
 ## Benchmarks
 
@@ -90,7 +90,7 @@ Performance parity with the original C++ implementation has been verified:
 Run benchmarks locally:
 
 ```bash
-cargo bench -p kuzu-main
+cargo bench -p akar-main
 ```
 
 ## Extensions

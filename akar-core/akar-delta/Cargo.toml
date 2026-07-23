@@ -1,0 +1,25 @@
+[package]
+name = "akar-delta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+arrow.workspace = true
+akar-common = { path = "../akar-common" }
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+akar-duckdb = { path = "../akar-duckdb", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+duckdb-delegation = ["akar-duckdb/bundled"]
+native = []
+
+[lints]
+workspace = true

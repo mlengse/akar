@@ -11,8 +11,8 @@ rust-version = "1.81"
 edition = "2021"
 
 [dependencies]
-kuzu-main = { path = "../../kuzu-core/kuzu-main" }
-kuzu-common = { path = "../../kuzu-core/kuzu-common" }
+akar-main = { path = "../../akar-core/akar-main" }
+akar-common = { path = "../../akar-core/akar-common" }
 
 [dev-dependencies]
 

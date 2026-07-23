@@ -1,0 +1,21 @@
+[package]
+name = "akar-optimizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-common = { path = "../akar-common" }
+akar-planner = { path = "../akar-planner" }
+akar-storage = { path = "../akar-storage" }
+akar-binder = { path = "../akar-binder" }
+akar-parser = { path = "../akar-parser" }
+tracing.workspace = true
+
+[dev-dependencies]
+akar-parser = { path = "../akar-parser" }
+
+[lints]
+workspace = true

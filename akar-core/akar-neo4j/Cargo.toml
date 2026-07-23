@@ -1,0 +1,15 @@
+[package]
+name = "akar-neo4j"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+tracing.workspace = true
+
+[lints]
+workspace = true

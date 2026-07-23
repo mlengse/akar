@@ -1,0 +1,477 @@
+// Cypher PEG Grammar for pest.rs
+// Supports: DDL (CREATE NODE/REL TABLE, DROP TABLE) and DML (MATCH, RETURN, WHERE, CREATE)
+
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
+
+// ==================== Top Level ====================
+
+akar_query = { statement ~ EOI }
+
+statement = { export_database | import_database | call_statement | union_statement | ddl_statement | create_dml_statement | query_statement | analyze_statement | transaction_statement | extension_statement | multi_db_statement | graph_statement }
+
+export_database = { "EXPORT" ~ "DATABASE" ~ string ~ export_options? }
+export_options  = { "(" ~ export_option ~ ("," ~ export_option)* ~ ")" }
+export_option   = { identifier ~ "=" ~ literal }
+import_database = { "IMPORT" ~ "DATABASE" ~ string }
+
+create_dml_statement = { "CREATE" ~ pattern ~ return_clause? }
+call_statement       = { call_clause ~ return_clause? }
+union_statement      = { query_statement ~ union_keyword ~ query_statement }
+union_keyword        = { "UNION" ~ "ALL"? }
+
+// ==================== ANALYZE ====================
+
+analyze_statement = { "ANALYZE" ~ ("TABLE" ~ identifier | identifier | "*") }
+
+// ==================== TRANSACTION ====================
+
+transaction_statement = {
+    "BEGIN" ~ ("TRANSACTION" | "WORK")?
+  | "COMMIT" ~ ("TRANSACTION" | "WORK")?
+  | "ROLLBACK" ~ ("TRANSACTION" | "WORK")?
+  | "CHECKPOINT"
+}
+
+// ==================== EXTENSION ====================
+
+extension_statement = {
+    "INSTALL" ~ "EXTENSION"? ~ identifier
+  | "LOAD" ~ "EXTENSION"? ~ identifier
+  | "UNINSTALL" ~ "EXTENSION"? ~ identifier
+}
+
+// ==================== Multi-DB ====================
+
+multi_db_statement = {
+    attach_database
+  | detach_database
+  | use_database
+  | load_from
+}
+
+attach_database = { "ATTACH" ~ "DATABASE"? ~ string ~ "AS" ~ identifier ~ attach_options? }
+attach_options  = { "(" ~ attach_option ~ ("," ~ attach_option)* ~ ")" }
+attach_option   = { identifier ~ "=" ~ literal }
+
+detach_database = { "DETACH" ~ "DATABASE"? ~ identifier }
+
+use_database    = { "USE" ~ "DATABASE"? ~ identifier }
+
+load_from       = { "LOAD" ~ "FROM" ~ string ~ load_options? }
+load_options    = { "(" ~ load_option ~ ("," ~ load_option)* ~ ")" }
+load_option     = { identifier ~ "=" ~ literal }
+
+// ==================== DDL ====================
+
+alter_table   = { "ALTER" ~ "TABLE" ~ identifier ~ alter_action }
+alter_action  = {
+    add_column
+  | drop_column
+  | rename_column
+  | rename_table
+}
+add_column    = { "ADD" ~ identifier ~ type_name }
+drop_column   = { "DROP" ~ identifier }
+rename_column = { "RENAME" ~ identifier ~ "TO" ~ identifier }
+rename_table  = { "RENAME" ~ "TO" ~ identifier }
+
+ddl_statement = {
+    create_node_table
+  | create_rel_table
+  | drop_table
+  | copy_from
+  | copy_to
+  | alter_table
+  | create_vector_index
+  | create_fts_index
+  | create_index
+  | drop_index
+  | create_sequence
+  | drop_sequence
+  | create_macro
+  | create_type
+  | comment_on_table
+}
+
+// ==================== CREATE TYPE ====================
+
+create_type = { "CREATE" ~ "TYPE" ~ identifier ~ "AS" ~ type_name }
+
+// ==================== COMMENT ON TABLE ====================
+
+comment_on_table = { "COMMENT" ~ "ON" ~ "TABLE" ~ identifier ~ "IS" ~ string }
+
+// ==================== CREATE MACRO ====================
+
+create_macro = {
+    "CREATE" ~ "MACRO" ~ identifier ~ "(" ~ macro_params? ~ ")" ~ "AS" ~ expression
+}
+
+// ==================== CREATE FTS INDEX ====================
+
+create_fts_index = {
+    "CREATE" ~ "FTS" ~ "INDEX" ~ if_not_exists? ~ identifier ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+}
+
+// ==================== USING FTS (query modifier) ====================
+
+using_fts_clause = {
+    "USING" ~ "FTS" ~ "INDEX" ~ identifier ~ "(" ~ string ~ ")"
+}
+
+macro_params = { macro_param ~ ("," ~ macro_param)* }
+macro_param  = { identifier ~ ("=" ~ literal)? }
+
+// ==================== CREATE / DROP SEQUENCE ====================
+
+create_sequence = {
+    "CREATE" ~ or_replace? ~ "SEQUENCE" ~ if_not_exists? ~ identifier ~ (sequence_start_with | sequence_increment_by | sequence_minvalue | sequence_maxvalue | sequence_cycle)*
+}
+
+or_replace = { "OR" ~ "REPLACE" }
+
+sequence_start_with   = { "START" ~ "WITH"? ~ minus? ~ integer }
+sequence_increment_by = { "INCREMENT" ~ "BY"? ~ minus? ~ integer }
+sequence_minvalue     = { ("NO" ~ "MINVALUE") | ("MINVALUE" ~ minus? ~ integer) }
+sequence_maxvalue     = { ("NO" ~ "MAXVALUE") | ("MAXVALUE" ~ minus? ~ integer) }
+sequence_cycle        = { ("NO" ~ "CYCLE") | "CYCLE" }
+minus                 = { "-" }
+
+drop_sequence = { "DROP" ~ "SEQUENCE" ~ if_exists? ~ identifier }
+
+create_index = {
+    "CREATE" ~ index_type ~ "INDEX" ~ if_not_exists? ~ identifier ~ "FOR" ~ "(" ~ identifier ~ ":" ~ identifier ~ ")" ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+}
+
+index_type    = { "ART" | "HASH" }
+if_not_exists = { "IF" ~ "NOT" ~ "EXISTS" }
+if_exists     = { "IF" ~ "EXISTS" }
+drop_index    = { "DROP" ~ "INDEX" ~ identifier ~ "ON" ~ identifier }
+
+// ==================== COPY TO ====================
+
+copy_to = { "COPY" ~ "(" ~ query_statement ~ ")" ~ "TO" ~ string ~ copy_to_options? }
+
+copy_to_options = { "(" ~ copy_to_option ~ ("," ~ copy_to_option)* ~ ")" }
+
+copy_to_option = {
+    format_option
+  | header_option
+}
+
+format_option = { "FORMAT" ~ ("CSV" | "PARQUET") }
+
+// ==================== COPY FROM ====================
+
+copy_from = { "COPY" ~ identifier ~ "FROM" ~ string ~ copy_options? }
+
+copy_options = { "(" ~ copy_option ~ ("," ~ copy_option)* ~ ")" }
+
+copy_option = {
+    header_option
+  | delim_option
+  | escape_option
+  | quote_option
+}
+
+header_option = { "HEADER" ~ (boolean_literal | integer) }
+delim_option  = { "DELIM" ~ string }
+escape_option = { "ESCAPE" ~ string }
+quote_option  = { "QUOTE" ~ string }
+
+set_clause = { "SET" ~ set_item ~ ("," ~ set_item)* }
+set_item   = { postfix_expr ~ "=" ~ expression }
+
+merge_clause = { "MERGE" ~ pattern ~ on_create_set? ~ on_match_set? }
+
+call_clause   = { "CALL" ~ function_name ~ "(" ~ call_args? ~ ")" }
+call_args     = { expression ~ ("," ~ expression)* }
+function_name = { identifier ~ ("." ~ identifier)* }
+on_create_set = { "ON" ~ "CREATE" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
+on_match_set  = { "ON" ~ "MATCH" ~ "SET" ~ set_item ~ ("," ~ set_item)* }
+
+delete_clause = { "DETACH"? ~ "DELETE" ~ expression ~ ("," ~ expression)* }
+
+unwind_clause = { "UNWIND" ~ expression ~ "AS" ~ variable }
+
+foreach_clause = { "FOREACH" ~ "(" ~ variable ~ "IN" ~ expression ~ "|" ~ foreach_body ~ ")" }
+foreach_body   = { create_clause_inline | set_clause | delete_clause }
+
+// Inline CREATE for FOREACH body (CREATE pattern without being wrapped in a full clause)
+create_clause_inline = { "CREATE" ~ pattern }
+
+query_statement = {
+    match_clause ~ optional_match_clause ~ where_clause ~ return_clause
+  | match_clause ~ optional_match_clause ~ return_clause
+  | match_clause ~ optional_match_clause
+  | match_clause ~ where_clause ~ with_clause ~ return_clause
+  | match_clause ~ with_clause ~ return_clause
+  | match_clause ~ with_clause
+  | match_clause ~ where_clause ~ foreach_clause ~ return_clause?
+  | match_clause ~ foreach_clause ~ return_clause?
+  | match_clause ~ foreach_clause ~ set_clause
+  | match_clause ~ foreach_clause ~ delete_clause
+  | match_clause ~ where_clause ~ set_clause
+  | match_clause ~ set_clause
+  | match_clause ~ where_clause ~ delete_clause
+  | match_clause ~ delete_clause
+  | match_clause ~ where_clause ~ create_clause_inline
+  | match_clause ~ create_clause_inline
+  | match_clause ~ where_clause ~ return_clause
+  | match_clause ~ return_clause
+  | match_clause ~ where_clause
+  | match_clause
+  | merge_clause ~ on_create_set? ~ on_match_set? ~ return_clause?
+  | unwind_clause ~ return_clause
+  | unwind_clause
+  | foreach_clause
+  | return_clause
+}
+
+// ==================== DDL ====================
+
+create_node_table = {
+    "CREATE" ~ "NODE" ~ "TABLE" ~ identifier ~ "(" ~ column_definitions ~ "," ~ primary_key ~ ")"
+}
+
+create_rel_table = {
+    "CREATE" ~ "REL" ~ "TABLE" ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ ("," ~ column_definitions)? ~ ")"
+}
+
+drop_table = {
+    "DROP" ~ "TABLE" ~ identifier
+}
+
+column_definitions = { column_def ~ ("," ~ column_def)* }
+column_def         = { identifier ~ type_name ~ ("COMPRESSION" ~ string)? }
+type_name          = {
+    map_type
+  | struct_type
+  | union_type
+  | primitive_type ~ ("[" ~ "]")*
+}
+
+primitive_type     = {
+    "STRING"
+  | "INT64"
+  | "INT32"
+  | "INT16"
+  | "INT8"
+  | "UINT64"
+  | "UINT32"
+  | "UINT16"
+  | "UINT8"
+  | "BOOL"
+  | "BOOLEAN"
+  | "DOUBLE"
+  | "FLOAT"
+  | "BLOB"
+  | "DATE"
+  | "TIMESTAMP"
+  | "INTERVAL"
+  | "SERIAL"
+}
+
+map_type   = { "MAP" ~ "(" ~ type_name ~ "," ~ type_name ~ ")" }
+struct_type = { "STRUCT" ~ "(" ~ struct_field ~ ("," ~ struct_field)* ~ ")" }
+struct_field = { identifier ~ type_name }
+union_type = { "UNION" ~ "(" ~ struct_field ~ ("," ~ struct_field)* ~ ")" }
+
+primary_key = { "PRIMARY" ~ "KEY" ~ "(" ~ identifier ~ ")" }
+
+create_vector_index = {
+    "CREATE" ~ "VECTOR" ~ "INDEX" ~ identifier ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")" ~ "WITH" ~ "(" ~ vector_index_options ~ ")"
+}
+
+vector_index_options = { vector_index_option ~ ("," ~ vector_index_option)* }
+vector_index_option  = {
+    metric_option
+  | dimensions_option
+}
+metric_option        = { "metric" ~ "=" ~ ("cosine" | "euclidean" | "l2" | "dot") }
+dimensions_option    = { "dims" ~ "=" ~ integer }
+
+// ==================== DML Clauses ====================
+
+optional_match_clause = { "OPTIONAL" ~ "MATCH" ~ pattern ~ where_clause? }
+match_clause = {
+    "MATCH" ~ pattern ~ ("," ~ pattern)* ~ using_fts_clause?
+}
+
+pattern = {
+    node_pattern ~ (edge_pattern ~ node_pattern)*
+}
+
+node_pattern = {
+    "(" ~ variable? ~ label? ~ property_map? ~ ")"
+}
+
+edge_pattern = {
+    ("-" ~ "[" ~ variable? ~ label? ~ var_length? ~ property_map? ~ "]" ~ "-" ~ ">")
+  | ("<" ~ "-" ~ "[" ~ variable? ~ label? ~ var_length? ~ property_map? ~ "]" ~ "-")
+  | ("-" ~ "[" ~ variable? ~ label? ~ var_length? ~ property_map? ~ "]" ~ "-")
+  | ("-" ~ ">")
+  | ("<" ~ "-")
+  | ("-" ~ "-")
+}
+
+var_length = {
+    "*" ~ (integer ~ ".." ~ integer)?
+}
+
+label              = { ":" ~ identifier }
+property_map       = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
+property_key_value = { identifier ~ ":" ~ expression }
+
+where_clause = {
+    "WHERE" ~ expression
+}
+
+with_clause = { "WITH" ~ return_item ~ ("," ~ return_item)* ~ order_by? ~ limit? }
+
+return_clause = {
+    "RETURN" ~ distinct_flag? ~ ("*" | return_item ~ ("," ~ return_item)*) ~ order_by? ~ limit?
+}
+distinct_flag = @{ "DISTINCT" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+return_item = {
+    expression ~ ("AS" ~ identifier)?
+}
+
+order_by  = {
+    "ORDER" ~ "BY" ~ sort_item ~ ("," ~ sort_item)*
+}
+sort_item = { expression ~ ("ASC" | "DESC")? }
+
+limit  = { "LIMIT" ~ integer ~ offset? }
+offset = { "SKIP" ~ integer }
+
+// ==================== Expressions ====================
+
+expression = { or_expr }
+
+or_kw  = @{ ^"OR" ~ !(ASCII_ALPHANUMERIC | "_") }
+and_kw = @{ ^"AND" ~ !(ASCII_ALPHANUMERIC | "_") }
+not_kw = @{ ^"NOT" ~ !(ASCII_ALPHANUMERIC | "_") }
+xor_kw = @{ ^"XOR" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+or_expr  = { xor_expr ~ (or_kw ~ xor_expr)* }
+xor_expr = { and_expr ~ (xor_kw ~ and_expr)* }
+and_expr = { not_expr ~ (and_kw ~ not_expr)* }
+not_expr = { (not_kw)? ~ comparison_expr }
+
+comparison_expr = {
+    additive_expr ~ (is_check_op | not_in_op | in_op | not_starts_with_op | starts_with_op | not_ends_with_op | ends_with_op | not_contains_op | contains_op | like_op | between_op | (comparison_op ~ additive_expr))?
+}
+comparison_op   = { "=" | "<>" | "<" | ">" | "<=" | ">=" }
+
+is_check_op = { "IS" ~ ("NOT" ~ "NULL" | "NULL") }
+in_kw              = @{ "IN" ~ !(ASCII_ALPHANUMERIC | "_") }
+in_op              = { in_kw ~ additive_expr }
+not_in_op          = { not_kw ~ "IN" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+starts_with_kw     = @{ "STARTS" ~ !(ASCII_ALPHANUMERIC | "_") }
+starts_with_op     = { starts_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+not_starts_with_op = { not_kw ~ starts_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+ends_with_kw       = @{ "ENDS" ~ !(ASCII_ALPHANUMERIC | "_") }
+ends_with_op       = { ends_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+not_ends_with_op   = { not_kw ~ ends_with_kw ~ "WITH" ~ !(ASCII_ALPHANUMERIC | "_") ~ additive_expr }
+contains_kw        = @{ "CONTAINS" ~ !(ASCII_ALPHANUMERIC | "_") }
+contains_op        = { contains_kw ~ additive_expr }
+not_contains_op    = { not_kw ~ contains_kw ~ additive_expr }
+like_kw            = @{ "LIKE" ~ !(ASCII_ALPHANUMERIC | "_") }
+like_op            = { like_kw ~ additive_expr }
+between_kw         = @{ "BETWEEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+between_op         = { between_kw ~ additive_expr ~ and_kw ~ additive_expr }
+
+additive_expr = { multiplicative_expr ~ (add_op ~ multiplicative_expr)* }
+add_op        = { "+" | "-" }
+
+multiplicative_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
+mul_op              = { "*" | "/" | "%" }
+
+unary_expr = { ("-" | "+")? ~ postfix_expr }
+
+postfix_expr = { primary ~ (property_access | "[" ~ expression ~ "]")* }
+
+property_access = { "." ~ identifier }
+
+primary = {
+    list_predicate
+  | case_expr
+  | literal
+  | exists_subquery
+  | lambda_expr
+  | variable ~ function_args?
+  | parameter
+  | list_literal
+  | map_literal
+  | "(" ~ expression ~ ")"
+}
+
+lambda_expr = { variable ~ "->" ~ expression }
+
+list_predicate = {
+    ("ANY" | "ALL" | "NONE" | "SINGLE") ~ "(" ~ variable ~ "IN" ~ expression ~ "WHERE" ~ expression ~ ")"
+}
+
+// CASE expression — simple: CASE x WHEN v THEN e ... [ELSE e] END
+// searched: CASE WHEN cond THEN e ... [ELSE e] END
+// Each keyword prefix is an atomic sub-rule so that the negative lookahead
+// checks the character immediately after the keyword before pest auto-consumes
+// whitespace between sequence elements.
+case_expr         = { case_expr_start ~ case_subject? ~ case_when+ ~ case_else? ~ case_expr_end }
+case_expr_start   = @{ "CASE" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_expr_end     = @{ "END"   ~ !(ASCII_ALPHANUMERIC | "_") }
+case_subject      = { !case_when_start ~ expression }
+case_when         = { case_when_start ~ expression ~ case_then ~ expression }
+case_when_start   = @{ "WHEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_then         = @{ "THEN" ~ !(ASCII_ALPHANUMERIC | "_") }
+case_else         = { case_else_start ~ expression }
+case_else_start   = @{ "ELSE" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+exists_subquery = { "EXISTS" ~ "{" ~ query_statement ~ "}" }
+
+parameter = { "$" ~ identifier }
+
+function_args = { "(" ~ ("*" | expression ~ ("," ~ expression)*)? ~ ")" }
+
+// ==================== Literals ====================
+
+literal = {
+    string
+  | float
+  | integer
+  | boolean_literal
+  | null_literal
+}
+
+string      = @{ "\"" ~ (escape_char | (!"\"" ~ ANY))* ~ "\"" | "'" ~ (escape_char | (!"'" ~ ANY))* ~ "'" }
+escape_char = @{ "\\" ~ ANY }
+
+integer         = @{ "-"? ~ ASCII_DIGIT+ }
+float           = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* ~ (^"e" ~ "-"? ~ ASCII_DIGIT+)? }
+boolean_literal =  { ^"TRUE" | ^"FALSE" }
+null_literal    =  { "NULL" }
+
+list_literal = { "[" ~ (expression ~ ("," ~ expression)*)? ~ "]" }
+map_literal  = { "{" ~ property_key_value ~ ("," ~ property_key_value)* ~ "}" }
+
+// ==================== Identifiers & Variables ====================
+
+variable = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+identifier = @{ backtick_identifier | (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+backtick_identifier = @{ "`" ~ (!"`" ~ ANY)* ~ "`" }
+
+// ==================== Graph Management ====================
+
+graph_statement = {
+    create_graph
+  | use_graph
+  | drop_graph
+}
+
+create_graph = { "CREATE" ~ "GRAPH" ~ identifier ~ ("ANY")? }
+use_graph    = { "USE" ~ "GRAPH" ~ identifier }
+drop_graph   = { "DROP" ~ "GRAPH" ~ identifier }

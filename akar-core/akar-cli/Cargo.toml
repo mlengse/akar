@@ -1,0 +1,19 @@
+[package]
+name = "akar-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+akar-main = { path = "../akar-main" }
+akar-common = { path = "../akar-common" }
+akar-binder = { path = "../akar-binder" }
+akar-catalog = { path = "../akar-catalog" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rustyline = "18.0.1"
+dirs = "6.0.0"
+
+[lints]
+workspace = true

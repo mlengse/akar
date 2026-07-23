@@ -1,0 +1,20 @@
+[package]
+name = "akar-sqlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+akar-function = { path = "../akar-function" }
+akar-extension = { path = "../akar-extension" }
+rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
+tracing.workspace = true
+
+[features]
+default = []
+bundled = ["rusqlite/bundled"]
+
+[lints]
+workspace = true
