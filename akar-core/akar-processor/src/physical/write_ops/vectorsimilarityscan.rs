@@ -45,7 +45,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
                     }
                 }
                 if found_name.is_empty() {
-                    return Err(format!("No vector index found on table '{}'", self.table_name));
+                    return Err(format!("No vector index found on table '{}'", self.table_name).into());
                 }
                 found_name
             };

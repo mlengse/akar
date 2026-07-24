@@ -1,5 +1,6 @@
 use super::ExecutionContext;
 use crate::physical_operator::*;
+use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_planner::logical_operator::LogicalOperator;
 
@@ -10,7 +11,7 @@ pub fn map_and_execute_join(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::HashJoin(h) => {
             let left_ops = flatten_union_child(&h.build_side);
@@ -108,6 +109,6 @@ pub fn map_and_execute_join(
             let result = scan.execute(current_input)?;
             Ok(result)
         }
-        _ => Err(format!("Not a join operator: {:?}", op)),
+        _ => Err(format!("Not a join operator: {:?}", op).into()),
     }
 }

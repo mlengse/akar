@@ -44,7 +44,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 return Err(format!(
                     "FOREACH requires a list expression, got: {:?}",
                     self.expression
-                ));
+                ).into());
             }
         };
 

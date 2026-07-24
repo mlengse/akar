@@ -21,6 +21,7 @@ pub use projection_helper::*;
 pub use union_helpers::*;
 
 use crate::physical_operator::*;
+use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, TableFunction};
@@ -28,8 +29,8 @@ use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
 use std::sync::{Arc, Mutex};
 
-pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
-pub type SubqueryFn = Arc<dyn Fn(&akar_parser::ast::Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
+pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync>;
+pub type SubqueryFn = Arc<dyn Fn(&akar_parser::ast::Query) -> Result<Vec<DataChunk>, ProcessorError> + Send + Sync>;
 
 /// DDL operations that require the schema-level Catalog (from Akar-catalog).
 /// These are dispatched via callback because the processor layer doesn't
@@ -60,18 +61,18 @@ pub enum SchemaDdlOp {
         index_query: String,
     },
 }
-pub type SchemaDdlFn = Arc<dyn Fn(SchemaDdlOp) -> Result<String, String> + Send + Sync>;
+pub type SchemaDdlFn = Arc<dyn Fn(SchemaDdlOp) -> Result<String, ProcessorError> + Send + Sync>;
 
 pub trait StandaloneCallHandler: Send + Sync {
     fn execute_call(
         &self,
         name: &str,
         args: &[akar_parser::ast::Expression],
-    ) -> Result<Vec<akar_common::vector::DataChunk>, String>;
+    ) -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError>;
 }
 
 pub trait StandaloneCallFn: Send + Sync {
-    fn execute(&self, args: &[akar_parser::ast::Expression]) -> Result<Vec<Vec<akar_common::types::Value>>, String>;
+    fn execute(&self, args: &[akar_parser::ast::Expression]) -> Result<Vec<Vec<akar_common::types::Value>>, ProcessorError>;
     fn aliases(&self) -> Vec<&'static str>;
 }
 
@@ -179,7 +180,7 @@ impl QueryProcessor {
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
-    pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, String> {
+    pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
         let mut sip_masks = std::collections::HashMap::new();
         self.execute_internal(operators, &mut sip_masks)
     }
@@ -188,7 +189,7 @@ impl QueryProcessor {
         &self,
         operators: &[LogicalOperator],
         sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>,
-    ) -> Result<Vec<DataChunk>, String> {
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
@@ -242,7 +243,7 @@ impl QueryProcessor {
     fn execute_table_function(
         &self,
         tf: &akar_planner::logical_operator::LogicalTableFunctionCall,
-    ) -> Result<Vec<DataChunk>, String> {
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
         let func_name = &tf.function_name;
         let args: Vec<Value> = Vec::new(); // args would be evaluated from expressions
 
@@ -294,7 +295,7 @@ impl QueryProcessor {
     fn execute_vector_similarity_scan(
         &self,
         tf: &akar_planner::logical_operator::LogicalTableFunctionCall,
-    ) -> Result<Vec<DataChunk>, String> {
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
         // Evaluate arguments from expressions (they should be constants or simple vars)
         if tf.args.len() < 4 {
             return Err(
@@ -387,7 +388,7 @@ impl QueryProcessor {
     pub fn evaluate_expression(
         _expr: &akar_parser::ast::Expression,
         _chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         // Placeholder: return a dummy Int64 vector
         let size = _chunk.size;
         let mut v = ValueVector::new(PhysicalTypeID::Int64, size);

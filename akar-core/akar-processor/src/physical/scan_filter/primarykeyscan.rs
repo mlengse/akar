@@ -37,7 +37,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                 continue;
             }
             if self.key_column_idx >= chunk.fields.len() {
-                return Err("PrimaryKeyScan key column index out of bounds".to_string());
+                return Err("PrimaryKeyScan key column index out of bounds".into());
             }
 
             let key_field = &chunk.fields[self.key_column_idx];

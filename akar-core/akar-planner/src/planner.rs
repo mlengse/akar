@@ -9,6 +9,7 @@
 use crate::join_order::{build_join_tree, flatten_join_plan};
 use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
+use akar_common::error::PlannerError;
 use akar_parser::ast::Expression;
 
 /// The query planner transforms bound statements into logical query plans.
@@ -19,7 +20,7 @@ impl QueryPlanner {
         Self
     }
 
-    pub fn plan(&self, statement: BoundStatement) -> Result<Vec<LogicalOperator>, String> {
+    pub fn plan(&self, statement: BoundStatement) -> Result<Vec<LogicalOperator>, PlannerError> {
         match statement {
             BoundStatement::BoundQuery(query) => self.plan_query(query),
             BoundStatement::BoundCopyFrom(c) => self.plan_copy_from(c),
@@ -59,7 +60,7 @@ impl QueryPlanner {
     ///
     /// Plans the inner statement first, then wraps the result in a
     /// LogicalExplain operator that will serialize the plan tree to text.
-    fn plan_explain(&self, e: BoundExplain) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_explain(&self, e: BoundExplain) -> Result<Vec<LogicalOperator>, PlannerError> {
         let inner_plan = self.plan(*e.inner)?;
         // Take the last operator of the inner plan as the tree root to explain
         let inner_op = if inner_plan.is_empty() {
@@ -82,7 +83,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_copy_from(&self, c: BoundCopyFrom) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_copy_from(&self, c: BoundCopyFrom) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CopyFrom(LogicalCopyFrom {
             table_name: c.table_name,
             table_id: c.table_id,
@@ -95,7 +96,7 @@ impl QueryPlanner {
     fn plan_standalone_call(
         &self,
         c: akar_binder::bound_statement::BoundStandaloneCall,
-    ) -> Result<Vec<LogicalOperator>, String> {
+    ) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::StandaloneCall(LogicalStandaloneCall {
             function_name: c.function_name,
             args: c.args,
@@ -105,7 +106,7 @@ impl QueryPlanner {
 
     // ==================== DDL Planning ====================
 
-    fn plan_create_node_table(&self, t: BoundCreateNodeTable) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_node_table(&self, t: BoundCreateNodeTable) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateNodeTable(LogicalCreateNodeTable {
             name: t.name,
             columns: t.columns,
@@ -114,7 +115,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_create_rel_table(&self, t: BoundCreateRelTable) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_rel_table(&self, t: BoundCreateRelTable) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateRelTable(LogicalCreateRelTable {
             name: t.name,
             from: t.from,
@@ -124,14 +125,14 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_drop_table(&self, t: BoundDropTable) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_drop_table(&self, t: BoundDropTable) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::DropTable(LogicalDropTable {
             name: t.name,
             cardinality: 1,
         })])
     }
 
-    fn plan_alter_table(&self, a: BoundAlterTable) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_alter_table(&self, a: BoundAlterTable) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::AlterTable(LogicalAlterTable {
             table_name: a.table_name,
             action: a.action,
@@ -139,7 +140,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_create_index(&self, idx: BoundCreateIndex) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_index(&self, idx: BoundCreateIndex) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateIndex(LogicalCreateIndex {
             index_type: idx.index_type,
             index_name: idx.index_name,
@@ -149,7 +150,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_drop_index(&self, idx: BoundDropIndex) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_drop_index(&self, idx: BoundDropIndex) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::DropIndex(LogicalDropIndex {
             index_name: idx.index_name,
             table_name: idx.table_name,
@@ -157,7 +158,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_create_vector_index(&self, idx: BoundCreateVectorIndex) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_vector_index(&self, idx: BoundCreateVectorIndex) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateVectorIndex(LogicalCreateVectorIndex {
             index_name: idx.index_name,
             table_name: idx.table_name,
@@ -168,7 +169,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_create_sequence(&self, s: BoundCreateSequence) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_sequence(&self, s: BoundCreateSequence) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateSequence(LogicalCreateSequence {
             name: s.name,
             if_not_exists: s.if_not_exists,
@@ -182,7 +183,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_drop_sequence(&self, s: BoundDropSequence) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_drop_sequence(&self, s: BoundDropSequence) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::DropSequence(LogicalDropSequence {
             name: s.name,
             if_exists: s.if_exists,
@@ -190,7 +191,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_create_dml(&self, c: BoundCreateDml) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_create_dml(&self, c: BoundCreateDml) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::CreateDml(LogicalCreateDml {
             table_name: c.table_name,
             table_id: c.table_id,
@@ -199,7 +200,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_export_database(&self, e: BoundExportDatabase) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_export_database(&self, e: BoundExportDatabase) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::ExportDatabase(LogicalExportDatabase {
             file_path: e.file_path,
             file_type: e.file_type,
@@ -209,7 +210,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_import_database(&self, i: BoundImportDatabase) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_import_database(&self, i: BoundImportDatabase) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::ImportDatabase(LogicalImportDatabase {
             file_path: i.file_path,
             query: i.query,
@@ -222,7 +223,7 @@ impl QueryPlanner {
     ///
     /// Converts the bound merge into a `LogicalMerge` operator with
     /// ON MATCH SET and ON CREATE SET as `LogicalSet` sub-operators.
-    fn plan_merge(&self, m: BoundMerge) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_merge(&self, m: BoundMerge) -> Result<Vec<LogicalOperator>, PlannerError> {
         let on_match: Vec<LogicalSet> = m
             .on_match
             .iter()
@@ -266,7 +267,7 @@ impl QueryPlanner {
     /// Plans left and right sub-queries independently, then wraps each
     /// side's pipeline (potentially multiple operators) into a synthetic
     /// projection root so that `LogicalUnion` can store them as tree children.
-    fn plan_union(&self, u: BoundUnion) -> Result<Vec<LogicalOperator>, String> {
+    fn plan_union(&self, u: BoundUnion) -> Result<Vec<LogicalOperator>, PlannerError> {
         let left_plan = self.plan_query(*u.left)?;
         let right_plan = self.plan_query(*u.right)?;
 
@@ -299,7 +300,7 @@ impl QueryPlanner {
         })])
     }
 
-    pub fn plan_query(&self, query: BoundQuery) -> Result<Vec<LogicalOperator>, String> {
+    pub fn plan_query(&self, query: BoundQuery) -> Result<Vec<LogicalOperator>, PlannerError> {
         let mut scan_ops: Vec<LogicalOperator> = Vec::new();
         let mut filter_expr: Option<BoundExpression> = None;
         let mut projection: Option<LogicalProjection> = None;

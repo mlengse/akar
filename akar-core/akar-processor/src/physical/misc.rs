@@ -210,7 +210,7 @@ impl PhysicalOperatorExec for PhysicalInsert {
                 }
             }
         } else {
-            return Err(format!("Table '{}' not found for INSERT", self.table_name));
+            return Err(format!("Table '{}' not found for INSERT", self.table_name).into());
         }
 
         let mut v = ValueVector::new(akar_common::types::PhysicalTypeID::Int64, 1);

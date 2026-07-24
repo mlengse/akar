@@ -8,6 +8,7 @@ pub mod map_update;
 use crate::physical::types::PhysicalOperatorExec;
 use crate::physical_operator::NodeSemiMask;
 use crate::processor::QueryProcessor;
+use akar_common::error::ProcessorError;
 use akar_common::types::physical_type_from_logical;
 use akar_common::vector::DataChunk;
 use akar_function::registry::FunctionRegistry;
@@ -33,7 +34,7 @@ pub struct ExecutionContext<'a, 'p> {
 }
 
 impl<'a, 'p> ExecutionContext<'a, 'p> {
-    pub fn execute_children(&mut self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, String> {
+    pub fn execute_children(&mut self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
         self.processor.execute_internal(operators, self.sip_masks)
     }
 
@@ -126,7 +127,7 @@ impl PlanMapper {
         next_op: Option<&LogicalOperator>,
         current_input: Vec<DataChunk>,
         ctx: &mut ExecutionContext,
-    ) -> Result<Vec<DataChunk>, String> {
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
         match op {
             // Scans
             LogicalOperator::ScanNode(s) => map_scan::map_and_execute_scan_node(s, next_op, current_input, ctx),

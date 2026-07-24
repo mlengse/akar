@@ -69,7 +69,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             _ => {
                 return Err(format!(
                     "Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)"
-                ));
+                ).into());
             }
         };
 
@@ -117,7 +117,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 self.table_name
             );
         } else {
-            return Err(format!("Table '{}' not found in storage catalog", self.table_name));
+            return Err(format!("Table '{}' not found in storage catalog", self.table_name).into());
         }
 
         // Return success chunk with row count
@@ -165,7 +165,7 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
 
         // Verify ART index exists
         if node_table.art_index.is_none() {
-            return Err(format!("Table '{}' does not have an ART index", self.table_name));
+            return Err(format!("Table '{}' does not have an ART index", self.table_name).into());
         }
 
         // Execute range scan on the ART index

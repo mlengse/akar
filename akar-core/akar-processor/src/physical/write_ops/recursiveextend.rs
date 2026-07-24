@@ -2,6 +2,7 @@ use crate::physical::common::store_value_in_vector;
 use crate::physical::scan_filter::PhysicalScan;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::evaluate_expression_for_row;
+use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
@@ -461,7 +462,7 @@ pub struct PhysicalCreateNode {
 }
 
 impl PhysicalCreateNode {
-    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
         if input.is_empty() {
             return Ok(input);
         }
@@ -513,7 +514,7 @@ pub struct PhysicalCreateRel {
 }
 
 impl PhysicalCreateRel {
-    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
         if input.is_empty() {
             return Ok(input);
         }
@@ -613,7 +614,7 @@ pub struct PhysicalExtend {
 }
 
 impl PhysicalExtend {
-    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+    pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
         if input.is_empty() || input.iter().all(|c| c.size == 0) {
             return Ok(input);
         }

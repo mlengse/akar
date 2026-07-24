@@ -1,6 +1,7 @@
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::arrow_vector::VectorAccess;
+use akar_common::error::ProcessorError;
 use akar_common::selection::SelectionVector;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
@@ -47,7 +48,7 @@ impl PhysicalFilter {
         expr: &Expression,
         chunk: &DataChunk,
         evaluator: Option<&ExpressionEvaluator>,
-    ) -> Result<Vec<bool>, String> {
+    ) -> Result<Vec<bool>, ProcessorError> {
         if let Some(eval) = evaluator {
             let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
             let size = arrow_result.size();
@@ -93,7 +94,7 @@ impl PhysicalFilter {
         expr: &Expression,
         chunk: &DataChunk,
         evaluator: Option<&ExpressionEvaluator>,
-    ) -> Result<SelectionVector, String> {
+    ) -> Result<SelectionVector, ProcessorError> {
         if let Some(eval) = evaluator {
             let arrow_result = eval.evaluate_to_arrow(expr, chunk)?;
             if arrow_result.physical_type == akar_common::types::PhysicalTypeID::Bool {
@@ -109,7 +110,7 @@ impl PhysicalFilter {
         Ok(Self::mask_to_selection(&mask))
     }
 
-    fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, String> {
+    fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, ProcessorError> {
         match expr {
             Expression::BinaryOp(op, left, right) => {
                 let left_vals = Self::evaluate_expression_legacy(left, chunk)?;
@@ -184,7 +185,7 @@ impl PhysicalOperatorExec for PhysicalFilter {
     }
 }
 
-fn evaluate_binary_op_legacy(op: &BinaryOp, left: &[bool], right: &[bool], size: usize) -> Result<Vec<bool>, String> {
+fn evaluate_binary_op_legacy(op: &BinaryOp, left: &[bool], right: &[bool], size: usize) -> Result<Vec<bool>, ProcessorError> {
     let len = left.len().min(right.len()).min(size);
     let result: Vec<bool> = (0..len)
         .map(|i| match op {

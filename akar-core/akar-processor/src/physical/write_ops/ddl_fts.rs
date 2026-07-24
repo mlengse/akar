@@ -63,7 +63,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
         // Locate source table
         let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
             Some(t) => t,
-            None => return Err(format!("Table '{}' not found", self.table_name)),
+            None => return Err(format!("Table '{}' not found", self.table_name).into()),
         };
         let col_idx = source_table
             .columns
@@ -265,7 +265,7 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 return Err(format!(
                     "FTS terms table '{}' not found. Has the index been created?",
                     self.terms_table
-                ));
+                ).into());
             }
         };
 

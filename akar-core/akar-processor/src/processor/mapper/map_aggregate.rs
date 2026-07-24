@@ -1,6 +1,7 @@
 use super::ExecutionContext;
 use crate::physical::order_aggregate::resolve_group_by_indices;
 use crate::physical_operator::*;
+use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
@@ -9,7 +10,7 @@ pub fn map_and_execute_aggregate(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Aggregate(a) => {
             let funcs: Vec<akar_function::AggregateFunction> = a
@@ -63,6 +64,6 @@ pub fn map_and_execute_aggregate(
             let result = physical.execute(vec![])?;
             Ok(result)
         }
-        _ => Err(format!("Not an aggregate operator: {:?}", op)),
+        _ => Err(format!("Not an aggregate operator: {:?}", op).into()),
     }
 }

@@ -57,7 +57,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     return Err(format!(
                         "Cannot delete node {} because it has incident edges (use DETACH DELETE)",
                         row_idx
-                    ));
+                    ).into());
                 }
             }
             if self.detach {
@@ -72,7 +72,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     }
                 }
             } else {
-                return Err(format!("Node table '{}' not found for DELETE", self.table_name));
+                return Err(format!("Node table '{}' not found for DELETE", self.table_name).into());
             }
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
@@ -82,7 +82,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     }
                 }
             } else {
-                return Err(format!("Rel table '{}' not found for DELETE", self.table_name));
+                return Err(format!("Rel table '{}' not found for DELETE", self.table_name).into());
             }
         }
 

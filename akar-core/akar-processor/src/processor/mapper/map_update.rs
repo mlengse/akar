@@ -1,5 +1,6 @@
 use super::ExecutionContext;
 use crate::physical_operator::*;
+use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_planner::logical_operator::LogicalOperator;
 
@@ -7,7 +8,7 @@ pub fn map_and_execute_update(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Set(sl) => {
             let table_catalog = ctx
@@ -152,7 +153,7 @@ pub fn map_and_execute_update(
             } else if let Some(rel_table) = table_catalog.get_rel_table_by_name(&cf.table_name) {
                 rel_table.columns.clone()
             } else {
-                return Err(format!("Table '{}' not found in storage catalog", cf.table_name));
+                return Err(format!("Table '{}' not found in storage catalog", cf.table_name).into());
             };
 
             let copy_op = PhysicalCopyFrom {
@@ -193,6 +194,6 @@ pub fn map_and_execute_update(
             let result = exec.execute(current_input)?;
             Ok(result)
         }
-        _ => Err(format!("Not an update operator: {:?}", op)),
+        _ => Err(format!("Not an update operator: {:?}", op).into()),
     }
 }

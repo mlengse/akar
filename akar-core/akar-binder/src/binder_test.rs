@@ -295,7 +295,7 @@ mod tests {
         let result = binder.bind(parse(sql).unwrap());
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("Property 'nonexistent' not found on table 'Person'"));
+        assert!(err.to_string().contains("Property 'nonexistent' not found on table 'Person'"));
     }
 
     #[test]

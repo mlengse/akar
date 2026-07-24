@@ -57,7 +57,7 @@ impl PhysicalOperatorExec for PhysicalSet {
                     }
                 }
             } else {
-                return Err(format!("Node table '{}' not found for SET", self.table_name));
+                return Err(format!("Node table '{}' not found for SET", self.table_name).into());
             }
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
@@ -70,7 +70,7 @@ impl PhysicalOperatorExec for PhysicalSet {
                     }
                 }
             } else {
-                return Err(format!("Rel table '{}' not found for SET", self.table_name));
+                return Err(format!("Rel table '{}' not found for SET", self.table_name).into());
             }
         }
 

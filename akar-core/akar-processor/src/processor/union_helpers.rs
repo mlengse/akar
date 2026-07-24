@@ -1,4 +1,5 @@
 use crate::processor::chunk_helpers::{extract_all_rows_from_chunks, rows_to_columns};
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use akar_planner::logical_operator::LogicalOperator;
@@ -10,7 +11,7 @@ pub fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
     }
 }
 
-pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool) -> Result<Vec<DataChunk>, String> {
+pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool) -> Result<Vec<DataChunk>, ProcessorError> {
     if left.is_empty() {
         return Ok(right);
     }
@@ -60,7 +61,7 @@ pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool
     }])
 }
 
-pub fn merge_optional_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>) -> Result<Vec<DataChunk>, String> {
+pub fn merge_optional_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
     if left.is_empty() {
         return Ok(left);
     }

@@ -2,6 +2,7 @@ use super::ExecutionContext;
 use crate::physical_operator::*;
 use crate::processor::SchemaDdlOp;
 use crate::processor::plan_serializer::serialize_plan_tree;
+use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_planner::logical_operator::LogicalOperator;
 
@@ -9,7 +10,7 @@ pub fn map_and_execute_ddl(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Explain(ex) => {
             // Serialize the inner plan tree to a string
@@ -26,7 +27,7 @@ pub fn map_and_execute_ddl(
                 Err(format!(
                     "No standalone call handler available to execute '{}'",
                     c.function_name
-                ))
+                ).into())
             }
         }
         LogicalOperator::TableFunctionCall(tf) => {
@@ -110,7 +111,7 @@ pub fn map_and_execute_ddl(
                 tracing::info!("Pipeline: Dropped table '{}'", d.name);
                 Ok(ddl_success_chunk(&format!("Table '{}' dropped", d.name)))
             } else {
-                Err(format!("Table '{}' not found", d.name))
+                Err(format!("Table '{}' not found", d.name).into())
             }
         }
         LogicalOperator::AlterTable(a) => {
@@ -125,7 +126,7 @@ pub fn map_and_execute_ddl(
                         .get_node_table_by_name_mut(&a.table_name)
                         .ok_or_else(|| format!("Table '{}' not found", a.table_name))?;
                     if table.columns.iter().any(|c| c.name.eq_ignore_ascii_case(name)) {
-                        return Err(format!("Column '{}' already exists in '{}'", name, a.table_name));
+                        return Err(format!("Column '{}' already exists in '{}'", name, a.table_name).into());
                     }
                     table.columns.push(akar_storage::table::ColumnDefinition {
                         name: name.clone(),
@@ -457,7 +458,7 @@ fn ast_constant_to_value(c: &akar_parser::ast::Constant) -> akar_common::types::
 }
 
 /// Minimal type parser for ALTER TABLE ADD COLUMN (avoids Akar-binder dependency).
-fn parse_type_simple(type_name: &str) -> Result<akar_common::types::LogicalTypeID, String> {
+fn parse_type_simple(type_name: &str) -> Result<akar_common::types::LogicalTypeID, ProcessorError> {
     let upper = type_name.trim().to_uppercase();
     match upper.as_str() {
         "BOOL" | "BOOLEAN" => Ok(akar_common::types::LogicalTypeID::Bool),

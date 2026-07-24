@@ -9,9 +9,9 @@
 //! ├── Storage(StorageError)
 //! ├── Transaction(TransactionError)
 //! ├── Catalog(CatalogError)
-//! ├── Binder(String)
-//! ├── Planner(String)
-//! ├── Processor(String)
+//! ├── Binder(BinderError)
+//! ├── Planner(PlannerError)
+//! ├── Processor(ProcessorError)
 //! ├── Parser(String)
 //! ├── Io(std::io::Error)
 //! └── Internal(String)
@@ -33,11 +33,11 @@ pub enum AkarError {
     /// Catalog operation failure
     Catalog(CatalogError),
     /// Binder (semantic analysis) failure
-    Binder(String),
+    Binder(BinderError),
     /// Logical planner failure
-    Planner(String),
+    Planner(PlannerError),
     /// Query processor / execution failure
-    Processor(String),
+    Processor(ProcessorError),
     /// Parser failure
     Parser(String),
     /// I/O error
@@ -52,9 +52,9 @@ impl fmt::Display for AkarError {
             Self::Storage(e) => write!(f, "storage: {e}"),
             Self::Transaction(e) => write!(f, "transaction: {e}"),
             Self::Catalog(e) => write!(f, "catalog: {e}"),
-            Self::Binder(s) => write!(f, "binder: {s}"),
-            Self::Planner(s) => write!(f, "planner: {s}"),
-            Self::Processor(s) => write!(f, "processor: {s}"),
+            Self::Binder(e) => write!(f, "binder: {e}"),
+            Self::Planner(e) => write!(f, "planner: {e}"),
+            Self::Processor(e) => write!(f, "processor: {e}"),
             Self::Parser(s) => write!(f, "parser: {s}"),
             Self::Io(e) => write!(f, "io: {e}"),
             Self::Internal(s) => write!(f, "internal: {s}"),
@@ -68,6 +68,9 @@ impl std::error::Error for AkarError {
             Self::Storage(e) => Some(e),
             Self::Transaction(e) => Some(e),
             Self::Catalog(e) => Some(e),
+            Self::Binder(e) => Some(e),
+            Self::Planner(e) => Some(e),
+            Self::Processor(e) => Some(e),
             Self::Io(e) => Some(e),
             _ => None,
         }
@@ -95,6 +98,24 @@ impl From<TransactionError> for AkarError {
 impl From<CatalogError> for AkarError {
     fn from(e: CatalogError) -> Self {
         Self::Catalog(e)
+    }
+}
+
+impl From<BinderError> for AkarError {
+    fn from(e: BinderError) -> Self {
+        Self::Binder(e)
+    }
+}
+
+impl From<PlannerError> for AkarError {
+    fn from(e: PlannerError) -> Self {
+        Self::Planner(e)
+    }
+}
+
+impl From<ProcessorError> for AkarError {
+    fn from(e: ProcessorError) -> Self {
+        Self::Processor(e)
     }
 }
 
@@ -247,6 +268,179 @@ impl std::error::Error for CatalogError {}
 impl From<CatalogError> for String {
     fn from(e: CatalogError) -> String {
         format!("catalog: {e}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Binder errors
+// ---------------------------------------------------------------------------
+
+/// Errors originating from the binder (semantic analysis).
+#[derive(Debug)]
+pub enum BinderError {
+    /// Table not found in catalog
+    TableNotFound(String),
+    /// Column not found in table
+    ColumnNotFound { table: String, column: String },
+    /// Variable not in scope
+    VariableNotInScope(String),
+    /// Type not recognized
+    UnknownType(String),
+    /// Validation error (general)
+    Validation(String),
+    /// I/O error during import
+    Io(String),
+}
+
+impl fmt::Display for BinderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TableNotFound(s) => write!(f, "table not found: {s}"),
+            Self::ColumnNotFound { table, column } => {
+                write!(f, "column '{column}' not found in table '{table}'")
+            }
+            Self::VariableNotInScope(s) => write!(f, "variable not in scope: {s}"),
+            Self::UnknownType(s) => write!(f, "unknown type: {s}"),
+            Self::Validation(s) => write!(f, "{s}"),
+            Self::Io(s) => write!(f, "I/O error: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for BinderError {}
+
+/// Allow `?` in functions still returning `Result<T, String>`.
+impl From<BinderError> for String {
+    fn from(e: BinderError) -> String {
+        format!("binder: {e}")
+    }
+}
+
+/// Allow `Err("message".into())` patterns during incremental migration.
+impl From<String> for BinderError {
+    fn from(s: String) -> Self {
+        BinderError::Validation(s)
+    }
+}
+
+/// Allow `Err("literal".into())` patterns.
+impl From<&str> for BinderError {
+    fn from(s: &str) -> Self {
+        BinderError::Validation(s.to_string())
+    }
+}
+
+/// Allow catalog errors to propagate through the binder.
+impl From<CatalogError> for BinderError {
+    fn from(e: CatalogError) -> Self {
+        match e {
+            CatalogError::AlreadyExists(s) => BinderError::Validation(format!("already exists: {s}")),
+            CatalogError::NotFound(s) => BinderError::TableNotFound(s),
+            CatalogError::ColumnAlreadyExists { table, column } => {
+                BinderError::Validation(format!("column '{column}' already exists on table '{table}'"))
+            }
+            CatalogError::ColumnNotFound { table, column } => {
+                BinderError::ColumnNotFound { table, column }
+            }
+            CatalogError::InvalidOperation(s) => BinderError::Validation(s),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Planner errors
+// ---------------------------------------------------------------------------
+
+/// Errors originating from the logical planner.
+#[derive(Debug)]
+pub enum PlannerError {
+    /// Planning failure (general)
+    Planning(String),
+}
+
+impl fmt::Display for PlannerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Planning(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl std::error::Error for PlannerError {}
+
+/// Allow `?` in functions still returning `Result<T, String>`.
+impl From<PlannerError> for String {
+    fn from(e: PlannerError) -> String {
+        format!("planner: {e}")
+    }
+}
+
+/// Allow `Err("message".into())` patterns during incremental migration.
+impl From<String> for PlannerError {
+    fn from(s: String) -> Self {
+        PlannerError::Planning(s)
+    }
+}
+
+/// Allow `Err("literal".into())` patterns.
+impl From<&str> for PlannerError {
+    fn from(s: &str) -> Self {
+        PlannerError::Planning(s.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Processor errors
+// ---------------------------------------------------------------------------
+
+/// Errors originating from the query processor / execution engine.
+#[derive(Debug)]
+pub enum ProcessorError {
+    /// Expression evaluation failure
+    Expression(String),
+    /// Execution failure (general)
+    Execution(String),
+    /// I/O error during execution
+    Io(String),
+}
+
+impl fmt::Display for ProcessorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Expression(s) => write!(f, "expression: {s}"),
+            Self::Execution(s) => write!(f, "{s}"),
+            Self::Io(s) => write!(f, "I/O error: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for ProcessorError {}
+
+/// Allow `?` in functions still returning `Result<T, String>`.
+impl From<ProcessorError> for String {
+    fn from(e: ProcessorError) -> String {
+        format!("processor: {e}")
+    }
+}
+
+/// Allow `Err("message".into())` patterns during incremental migration.
+impl From<String> for ProcessorError {
+    fn from(s: String) -> Self {
+        ProcessorError::Execution(s)
+    }
+}
+
+/// Allow `Err("literal".into())` patterns.
+impl From<&str> for ProcessorError {
+    fn from(s: &str) -> Self {
+        ProcessorError::Execution(s.to_string())
+    }
+}
+
+/// Allow `?` on StorageError in functions returning `Result<T, ProcessorError>`.
+impl From<StorageError> for ProcessorError {
+    fn from(e: StorageError) -> Self {
+        ProcessorError::Execution(format!("storage: {e}"))
     }
 }
 
