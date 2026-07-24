@@ -16,6 +16,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use akar_common::error::TransactionError;
+
 /// Type of transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionType {
@@ -182,9 +184,9 @@ impl TransactionContext {
 
     /// Begin a write transaction (explicit, for MANUAL mode).
     /// Returns error if a transaction is already active.
-    pub fn begin_manual(&mut self) -> Result<&Transaction, String> {
+    pub fn begin_manual(&mut self) -> Result<&Transaction, TransactionError> {
         if self.active_txn.is_some() {
-            return Err("A transaction is already active. COMMIT or ROLLBACK first.".into());
+            return Err(TransactionError::NoActiveTransaction);
         }
         let txn = self.manager.begin_write()?;
         self.active_txn = Some(txn);
@@ -193,7 +195,7 @@ impl TransactionContext {
 
     /// Begin a write transaction (implicit, for AUTO mode DDL/DML).
     /// If already active, returns the existing transaction.
-    pub fn begin_implicit(&mut self) -> Result<&Transaction, String> {
+    pub fn begin_implicit(&mut self) -> Result<&Transaction, TransactionError> {
         if let Some(ref txn) = self.active_txn {
             return Ok(txn);
         }
@@ -204,8 +206,8 @@ impl TransactionContext {
 
     /// Commit the active transaction.
     /// Returns the undo records and commit timestamp.
-    pub fn commit(&mut self) -> Result<(Vec<UndoRecord>, u64), String> {
-        let mut txn = self.active_txn.take().ok_or("No active transaction to commit")?;
+    pub fn commit(&mut self) -> Result<(Vec<UndoRecord>, u64), TransactionError> {
+        let mut txn = self.active_txn.take().ok_or(TransactionError::NoActiveTransaction)?;
         let result = self.manager.commit(&mut txn);
         match result {
             CommitResult::Committed { commit_ts } => Ok((txn.undo_records, commit_ts)),
@@ -214,16 +216,16 @@ impl TransactionContext {
 
     /// Rollback the active transaction.
     /// Returns undo records for rollback application.
-    pub fn rollback(&mut self) -> Result<Vec<UndoRecord>, String> {
-        let mut txn = self.active_txn.take().ok_or("No active transaction to rollback")?;
+    pub fn rollback(&mut self) -> Result<Vec<UndoRecord>, TransactionError> {
+        let mut txn = self.active_txn.take().ok_or(TransactionError::NoActiveTransaction)?;
         Ok(self.manager.rollback(&mut txn))
     }
 
     /// Auto-commit: begin (if not active), execute, commit.
     /// Used in AUTO mode for DDL/DML statements.
-    pub fn auto_commit<F, T>(&mut self, exec_fn: F) -> Result<T, String>
+    pub fn auto_commit<F, T>(&mut self, exec_fn: F) -> Result<T, TransactionError>
     where
-        F: FnOnce(&Transaction) -> Result<T, String>,
+        F: FnOnce(&Transaction) -> Result<T, TransactionError>,
     {
         let _txn = self.begin_implicit()?;
         let _txn_id = self.active_txn_id().unwrap();
@@ -233,18 +235,18 @@ impl TransactionContext {
     }
 
     /// Record an undo operation on the active transaction.
-    pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Result<(), String> {
+    pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Result<(), TransactionError> {
         if let Some(ref mut txn) = self.active_txn {
             txn.record_undo(table_id, row_id, column, old_data);
             Ok(())
         } else {
-            Err("No active transaction to record undo".into())
+            Err(TransactionError::NoActiveTransaction)
         }
     }
 
     /// Lock a table on the active transaction.
-    pub fn lock_table(&self, table_id: u64) -> Result<(), String> {
-        let txn_id = self.active_txn_id().ok_or("No active transaction to lock table")?;
+    pub fn lock_table(&self, table_id: u64) -> Result<(), TransactionError> {
+        let txn_id = self.active_txn_id().ok_or(TransactionError::NoActiveTransaction)?;
         self.manager.lock_table(txn_id, table_id)
     }
 }
@@ -360,7 +362,7 @@ impl TransactionManager {
     /// Begin a new write transaction. In single-writer mode (default),
     /// this blocks until any active write transaction finishes.
     /// Returns `Err` if the manager is shutting down.
-    pub fn begin_write(&self) -> Result<Transaction, String> {
+    pub fn begin_write(&self) -> Result<Transaction, TransactionError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let tx = Transaction::new(id, TransactionType::Write);
 
@@ -387,11 +389,11 @@ impl TransactionManager {
     /// Lock a table for writing (called by the user after begin_write).
     /// Returns an error if another write transaction already holds the lock.
     #[allow(clippy::collapsible_if)]
-    pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), String> {
+    pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
         let mut locks = self.table_locks.lock().unwrap();
         if let Some(&owner) = locks.get(&table_id) {
             if owner != txn_id {
-                return Err(format!("Table {} already locked by txn#{}", table_id, owner));
+                return Err(TransactionError::TableLocked { table_id, owner_txn: owner });
             }
         }
         locks.insert(table_id, txn_id);
@@ -455,11 +457,11 @@ impl TransactionManager {
     /// Get a snapshot of all active transactions (cloned).
     /// Returns `Ok(map)` on success where the map is `HashMap<u64, Transaction>`.
     /// Used by Connection for COMMIT/ROLLBACK resolution.
-    pub fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, String> {
+    pub fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, TransactionError> {
         self.active_transactions
             .lock()
             .map(|a| a.clone())
-            .map_err(|e| format!("Failed to lock active transactions: {e}"))
+            .map_err(|e| TransactionError::LockPoisoned(e.to_string()))
     }
 
     fn release_locks(&self, txn_id: u64) {

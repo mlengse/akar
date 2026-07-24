@@ -13,6 +13,7 @@ rayon.workspace = true
 arrow.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 

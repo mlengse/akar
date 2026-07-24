@@ -986,10 +986,7 @@ impl Binder {
         }
 
         let mut catalog = self.catalog.lock().unwrap();
-        match catalog.drop_index(&v.table_name, &v.index_name) {
-            Ok(()) => {}
-            Err(e) => return Err(e),
-        }
+        catalog.drop_index(&v.table_name, &v.index_name)?;
 
         Ok(BoundStatement::BoundDropIndex(BoundDropIndex {
             index_name: v.index_name,

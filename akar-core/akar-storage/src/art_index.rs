@@ -10,6 +10,7 @@
 use crate::art_key::ArtKey;
 use crate::art_node::{ArtNode, NodeBlock};
 use crate::buffer_manager::BufferManager;
+use akar_common::error::StorageError;
 
 /// Default number of pages allocated for the ART index file.
 const INITIAL_PAGE_COUNT: u64 = 4;
@@ -572,15 +573,15 @@ impl ArtPrimaryKeyIndex {
     /// Page layout:
     /// - Page 0: Header (magic, num_entries, num_pages, tree_byte_size)
     /// - Pages 1..N: Serialized tree data
-    pub fn save(&mut self, bm: &mut BufferManager) -> Result<(), String> {
+    pub fn save(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !self.dirty {
             return Ok(());
         }
         if !bm.is_file_registered(&self.file_name) {
-            return Err(format!(
+            return Err(StorageError::Index(format!(
                 "ART index file '{}' not registered with BufferManager",
                 self.file_name
-            ));
+            )));
         }
 
         let tree_bytes = self.serialize_tree();
@@ -608,7 +609,7 @@ impl ArtPrimaryKeyIndex {
 
         let frame = bm
             .pin_mut(&self.file_name, 0)
-            .map_err(|e| format!("Failed to pin ART header page: {e}"))?;
+            .map_err(|e| StorageError::Index(format!("Failed to pin ART header page: {e}")))?;
         let copy_len = header.len().min(frame.data.len());
         frame.data[..copy_len].copy_from_slice(&header[..copy_len]);
         frame.is_dirty = true;
@@ -624,7 +625,7 @@ impl ArtPrimaryKeyIndex {
 
                 let frame = bm
                     .pin_mut(&self.file_name, page_idx + 1)
-                    .map_err(|e| format!("Failed to pin ART data page {}: {e}", page_idx + 1))?;
+                    .map_err(|e| StorageError::Index(format!("Failed to pin ART data page {}: {e}", page_idx + 1)))?;
                 frame.data[..chunk.len()].copy_from_slice(chunk);
                 if chunk.len() < frame.data.len() {
                     frame.data[chunk.len()..].fill(0);
@@ -635,29 +636,29 @@ impl ArtPrimaryKeyIndex {
         }
 
         self.dirty = false;
-        bm.flush_all().map_err(|e| format!("Failed to flush ART index: {e}"))
+        bm.flush_all().map_err(|e| StorageError::Index(format!("Failed to flush ART index: {e}")))
     }
 
     /// Load the ART index from BufferManager-backed pages.
     ///
     /// Returns a new `ArtPrimaryKeyIndex` with the loaded data.
-    pub fn load(bm: &mut BufferManager, file_name: &str) -> Result<Self, String> {
+    pub fn load(bm: &mut BufferManager, file_name: &str) -> Result<Self, StorageError> {
         if !bm.is_file_registered(file_name) {
-            return Err(format!(
+            return Err(StorageError::Index(format!(
                 "ART index file '{file_name}' not registered with BufferManager"
-            ));
+            )));
         }
 
         // Read header page
         let frame = bm
             .pin(file_name, 0)
-            .map_err(|e| format!("Failed to pin ART header page: {e}"))?;
+            .map_err(|e| StorageError::Index(format!("Failed to pin ART header page: {e}")))?;
         let data = &frame.data;
 
         let magic = u64::from_le_bytes(data[0..8].try_into().unwrap());
         if magic != ART_HEADER_MAGIC {
             bm.unpin(file_name, 0);
-            return Err("Invalid ART index magic number".into());
+            return Err(StorageError::Index("Invalid ART index magic number".into()));
         }
 
         let num_entries = u64::from_le_bytes(data[8..16].try_into().unwrap());
@@ -682,7 +683,7 @@ impl ArtPrimaryKeyIndex {
 
                 let frame = bm
                     .pin(file_name, page_num)
-                    .map_err(|e| format!("Failed to pin ART data page {page_num}: {e}"))?;
+                    .map_err(|e| StorageError::Index(format!("Failed to pin ART data page {page_num}: {e}")))?;
                 let chunk_len = end - offset;
                 tree_bytes[offset..end].copy_from_slice(&frame.data[..chunk_len]);
                 bm.unpin(file_name, page_num);

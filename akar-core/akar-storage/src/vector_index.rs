@@ -9,6 +9,7 @@
 //! - Pages 1..=data_page_count: Node data (serialized vectors + connections)
 
 use crate::buffer_manager::BufferManager;
+use akar_common::error::StorageError;
 use akar_common::types::Value;
 use akar_vector::hnsw::{DistanceMetric, HnswIndex};
 
@@ -137,12 +138,12 @@ impl VectorIndexTable {
     /// Save the in-memory HNSW index to BufferManager-backed pages.
     ///
     /// Writes the header page (page 0) and all data pages.
-    pub fn save(&mut self, bm: &mut BufferManager) -> Result<(), String> {
+    pub fn save(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !bm.is_file_registered(&self.file_name) {
-            return Err(format!(
+            return Err(StorageError::Index(format!(
                 "Vector index file '{}' not registered with BufferManager",
                 self.file_name
-            ));
+            )));
         }
 
         let num_vectors = self.hnsw.len() as u64;
@@ -161,7 +162,7 @@ impl VectorIndexTable {
         // Write header page
         let frame = bm
             .pin_mut(&self.file_name, 0)
-            .map_err(|e| format!("Failed to pin header page: {e}"))?;
+            .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
         let data = &mut frame.data;
         let write_len = header.len().min(data.len());
         data[..write_len].copy_from_slice(&header[..write_len]);
@@ -177,7 +178,7 @@ impl VectorIndexTable {
         while offset < num_vectors {
             let frame = bm
                 .pin_mut(&self.file_name, page_idx)
-                .map_err(|e| format!("Failed to pin data page {page_idx}: {e}"))?;
+                .map_err(|e| StorageError::Index(format!("Failed to pin data page {page_idx}: {e}")))?;
             let page_data = &mut frame.data;
             let capacity = page_data.len();
             page_data.fill(0u8);
@@ -224,21 +225,21 @@ impl VectorIndexTable {
     ///
     /// Reads the header page and all data pages, rebuilding the in-memory index.
     /// After loading, the index is fully searchable.
-    pub fn load(&mut self, bm: &mut BufferManager) -> Result<(), String> {
+    pub fn load(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !bm.is_file_registered(&self.file_name) {
-            return Err(format!(
+            return Err(StorageError::Index(format!(
                 "Vector index file '{}' not registered with BufferManager",
                 self.file_name
-            ));
+            )));
         }
 
         // Read header page
         let frame = bm
             .pin(&self.file_name, 0)
-            .map_err(|e| format!("Failed to pin header page: {e}"))?;
+            .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
         let header_data = &frame.data;
         let (_num_vectors, _entry_point, _max_level, dimensions, metric) =
-            deserialize_header(header_data).ok_or("Invalid vector index header")?;
+            deserialize_header(header_data).ok_or(StorageError::Index("Invalid vector index header".into()))?;
         self.dimensions = dimensions;
         bm.unpin(&self.file_name, 0);
 
@@ -304,11 +305,11 @@ impl VectorIndexTable {
     }
 
     /// Flush dirty pages to disk via the BufferManager.
-    pub fn flush(&mut self, bm: &mut BufferManager) -> Result<(), String> {
+    pub fn flush(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if self.dirty {
             self.save(bm)?;
         }
-        bm.flush_all().map_err(|e| format!("Failed to flush vector index: {e}"))
+        bm.flush_all().map_err(|e| StorageError::Index(format!("Failed to flush vector index: {e}")))
     }
 
     /// Register the vector index file with the BufferManager.
@@ -324,7 +325,7 @@ impl VectorIndexTable {
 }
 
 /// Helper: extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
-pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, String> {
+pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, StorageError> {
     match val {
         Value::List(items) => {
             let mut result = Vec::with_capacity(items.len());
@@ -335,12 +336,18 @@ pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, String> {
                     Value::Int32(i) => result.push(*i as f64),
                     Value::Float(f) => result.push(*f as f64),
                     other => {
-                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
+                        return Err(StorageError::TypeMismatch {
+                            expected: "numeric value".into(),
+                            actual: format!("{:?}", other),
+                        });
                     }
                 }
             }
             Ok(result)
         }
-        other => Err(format!("Expected List value for vector, got {:?}", other)),
+        other => Err(StorageError::TypeMismatch {
+            expected: "List value for vector".into(),
+            actual: format!("{:?}", other),
+        }),
     }
 }

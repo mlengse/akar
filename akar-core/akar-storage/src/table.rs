@@ -6,6 +6,7 @@ use crate::csr::CsrIndex;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use crate::vector_index::VectorIndexTable;
+use akar_common::error::StorageError;
 use akar_common::types::{LogicalTypeID, Value};
 use akar_vector::hnsw::DistanceMetric;
 use dashmap::DashMap;
@@ -74,23 +75,23 @@ impl NodeTable {
     ///
     /// Returns an error if the number of values doesn't match the number of columns,
     /// or if a duplicate primary key value is detected.
-    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, String> {
+    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, StorageError> {
         if values.len() != self.columns.len() {
-            return Err(format!(
+            return Err(StorageError::Page(format!(
                 "Column count mismatch: expected {} values, got {}",
                 self.columns.len(),
                 values.len()
-            ));
+            )));
         }
 
         // Reject NULL primary key values
         if self.primary_key_column < self.columns.len() {
             let pk_value = &values[self.primary_key_column];
             if matches!(pk_value, Value::Null) {
-                return Err(format!(
+                return Err(StorageError::Page(format!(
                     "NULL value not allowed for primary key column '{}' in table '{}'",
                     self.columns[self.primary_key_column].name, self.name
-                ));
+                )));
             }
         }
 
@@ -99,10 +100,10 @@ impl NodeTable {
             let pk_value = &values[self.primary_key_column];
             let pk_key = pk_value_to_string(pk_value);
             if self.hash_index.lookup(&pk_key).is_some() {
-                return Err(format!(
+                return Err(StorageError::Index(format!(
                     "Duplicate primary key value: '{pk_key}' in table '{}'",
                     self.name
-                ));
+                )));
             }
         }
 
@@ -136,7 +137,7 @@ impl NodeTable {
 
     /// Batch insert multiple rows efficiently.
     /// Validates PK uniqueness, pre-allocates node groups, and bulk-appends.
-    pub fn insert_rows_batch(&mut self, rows: &[Vec<Value>]) -> Result<u64, String> {
+    pub fn insert_rows_batch(&mut self, rows: &[Vec<Value>]) -> Result<u64, StorageError> {
         if rows.is_empty() {
             return Ok(0);
         }
@@ -145,31 +146,31 @@ impl NodeTable {
         // Validate all rows first
         for (i, row) in rows.iter().enumerate() {
             if row.len() != num_cols {
-                return Err(format!(
+                return Err(StorageError::Page(format!(
                     "Row {} column count mismatch: expected {} values, got {}",
                     i,
                     num_cols,
                     row.len()
-                ));
+                )));
             }
             // Reject NULL primary key values
             if self.primary_key_column < num_cols {
                 let pk_value = &row[self.primary_key_column];
                 if matches!(pk_value, Value::Null) {
-                    return Err(format!(
+                    return Err(StorageError::Page(format!(
                         "NULL value not allowed for primary key column '{}' in table '{}'",
                         self.columns[self.primary_key_column].name, self.name
-                    ));
+                    )));
                 }
             }
             // Check PK uniqueness
             if self.primary_key_column < num_cols {
                 let pk_key = pk_value_to_string(&row[self.primary_key_column]);
                 if self.hash_index.lookup(&pk_key).is_some() {
-                    return Err(format!(
+                    return Err(StorageError::Index(format!(
                         "Duplicate primary key value: '{pk_key}' in table '{}'",
                         self.name
-                    ));
+                    )));
                 }
             }
         }
@@ -329,12 +330,12 @@ impl NodeTable {
     }
 
     /// Update a single cell (row, column) with a new value.
-    pub fn update_cell(&mut self, row_idx: u64, col_idx: usize, value: Value) -> Result<(), String> {
+    pub fn update_cell(&mut self, row_idx: u64, col_idx: usize, value: Value) -> Result<(), StorageError> {
         if col_idx >= self.columns.len() {
-            return Err(format!("Column index {col_idx} out of range"));
+            return Err(StorageError::Page(format!("Column index {col_idx} out of range")));
         }
         if row_idx >= self.num_rows {
-            return Err(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows));
+            return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
         }
 
         let mut offset = 0u64;
@@ -348,14 +349,14 @@ impl NodeTable {
             }
             offset += group.num_nodes;
         }
-        Err(format!("Row index {row_idx} not found in any node group"))
+        Err(StorageError::Page(format!("Row index {row_idx} not found in any node group")))
     }
 
     /// Delete a row by its index. Marks the row as null by setting all its column
     /// values to `Value::Null`. This is a soft delete — the row slot remains.
-    pub fn delete_row(&mut self, row_idx: u64) -> Result<(), String> {
+    pub fn delete_row(&mut self, row_idx: u64) -> Result<(), StorageError> {
         if row_idx >= self.num_rows {
-            return Err(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows));
+            return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
         }
 
         // Locate the node group containing this row
@@ -371,7 +372,7 @@ impl NodeTable {
             }
             offset += group.num_nodes;
         }
-        Err(format!("Row index {row_idx} not found in any node group"))
+        Err(StorageError::Page(format!("Row index {row_idx} not found in any node group")))
     }
 
     /// Get a single value at (row, col) by locating the correct `NodeGroup`
@@ -535,13 +536,13 @@ impl RelTable {
     ///
     /// Returns an error if the number of values doesn't match the number
     /// of property columns.
-    pub fn insert_rel(&mut self, from: u64, to: u64, values: Vec<Value>) -> Result<(), String> {
+    pub fn insert_rel(&mut self, from: u64, to: u64, values: Vec<Value>) -> Result<(), StorageError> {
         if values.len() != self.columns.len() {
-            return Err(format!(
+            return Err(StorageError::Page(format!(
                 "Column count mismatch: expected {} values, got {}",
                 self.columns.len(),
                 values.len()
-            ));
+            )));
         }
 
         let edge_idx = self.edges.len();
@@ -562,7 +563,7 @@ impl RelTable {
 
     /// Batch insert multiple relations efficiently.
     /// Each tuple is (from_offset, to_offset, property_values).
-    pub fn insert_rels_batch(&mut self, rels: &[(u64, u64, Vec<Value>)]) -> Result<u64, String> {
+    pub fn insert_rels_batch(&mut self, rels: &[(u64, u64, Vec<Value>)]) -> Result<u64, StorageError> {
         if rels.is_empty() {
             return Ok(0);
         }
@@ -572,12 +573,12 @@ impl RelTable {
         // Validate all rows
         for (i, (_, _, vals)) in rels.iter().enumerate() {
             if vals.len() != num_cols {
-                return Err(format!(
+                return Err(StorageError::Page(format!(
                     "Rel {} column count mismatch: expected {} values, got {}",
                     i,
                     num_cols,
                     vals.len()
-                ));
+                )));
             }
         }
 
@@ -606,9 +607,9 @@ impl RelTable {
 
     /// Delete an edge by its index. Marks the edge as deleted by removing it from adjacency lists
     /// and setting its properties to Null.
-    pub fn delete_edge(&mut self, edge_idx: usize) -> Result<(), String> {
+    pub fn delete_edge(&mut self, edge_idx: usize) -> Result<(), StorageError> {
         if edge_idx >= self.edges.len() {
-            return Err(format!("Edge index {edge_idx} out of range"));
+            return Err(StorageError::Page(format!("Edge index {edge_idx} out of range")));
         }
 
         let (src, dst) = self.edges[edge_idx];
@@ -641,12 +642,12 @@ impl RelTable {
     }
 
     /// Update a single cell (edge property) with a new value.
-    pub fn update_cell(&mut self, edge_idx: usize, col_idx: usize, value: Value) -> Result<(), String> {
+    pub fn update_cell(&mut self, edge_idx: usize, col_idx: usize, value: Value) -> Result<(), StorageError> {
         if col_idx >= self.columns.len() {
-            return Err(format!("Column index {col_idx} out of range"));
+            return Err(StorageError::Page(format!("Column index {col_idx} out of range")));
         }
         if edge_idx >= self.properties[col_idx].len() {
-            return Err(format!("Edge index {edge_idx} out of range"));
+            return Err(StorageError::Page(format!("Edge index {edge_idx} out of range")));
         }
 
         self.properties[col_idx][edge_idx] = value;
@@ -656,17 +657,17 @@ impl RelTable {
     /// Insert a row of values (legacy alias that treats all columns as properties).
     /// Only the first two values are treated as (from, to) if the table has
     /// at least 2 columns; otherwise they are stored as pure properties.
-    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, String> {
+    pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, StorageError> {
         // If there are at least 2 "structural" columns (src_id, dst_id) plus
         // property columns, we assume the first two values are the node offsets.
         // This preserves backward compatibility with the old flat API.
         let num_prop_cols = self.columns.len();
         if values.len() != num_prop_cols {
-            return Err(format!(
+            return Err(StorageError::Page(format!(
                 "Column count mismatch: expected {} values, got {}",
                 num_prop_cols,
                 values.len()
-            ));
+            )));
         }
 
         // We treat the values as plain properties and use sequential edge IDs
@@ -961,13 +962,13 @@ impl TableCatalog {
     /// and attaches it to the `NodeTable`.
     ///
     /// The `index_name` is used as the BufferManager file name for persistence.
-    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
+    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), StorageError> {
         let mut table = self
             .get_node_table_by_name_mut(table_name)
-            .ok_or_else(|| format!("Node table '{table_name}' not found"))?;
+            .ok_or_else(|| StorageError::TableNotFound(format!("Node table '{table_name}' not found")))?;
 
         if table.art_index.is_some() {
-            return Err(format!("Table '{table_name}' already has an ART index"));
+            return Err(StorageError::Index(format!("Table '{table_name}' already has an ART index")));
         }
 
         let mut art_idx = ArtPrimaryKeyIndex::new(index_name);
@@ -991,10 +992,10 @@ impl TableCatalog {
     }
 
     /// Drop the ART index from a node table.
-    pub fn drop_art_index(&self, table_name: &str) -> Result<(), String> {
+    pub fn drop_art_index(&self, table_name: &str) -> Result<(), StorageError> {
         let mut table = self
             .get_node_table_by_name_mut(table_name)
-            .ok_or_else(|| format!("Node table '{table_name}' not found"))?;
+            .ok_or_else(|| StorageError::TableNotFound(format!("Node table '{table_name}' not found")))?;
 
         table.art_index = None;
         Ok(())

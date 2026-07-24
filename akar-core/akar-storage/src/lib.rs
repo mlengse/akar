@@ -41,6 +41,7 @@ pub mod version_info;
 pub mod wal;
 pub mod wal_replayer;
 
+use akar_common::error::StorageError;
 use akar_common::memory::MemoryManager;
 use akar_common::types::Value;
 use akar_vector::hnsw::DistanceMetric;
@@ -220,7 +221,7 @@ impl StorageManager {
 
     /// Create an ART (Adaptive Radix Tree) index on a node table.
     /// Delegates to TableCatalog and registers the index file with BufferManager.
-    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
+    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), StorageError> {
         self.table_catalog.create_art_index(table_name, index_name)?;
 
         // Register the index file with the BufferManager for persistence
@@ -236,8 +237,8 @@ impl StorageManager {
     }
 
     /// Drop an ART index from a node table.
-    pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), String> {
-        self.table_catalog.drop_art_index(table_name)
+    pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), StorageError> {
+        Ok(self.table_catalog.drop_art_index(table_name)?)
     }
 
     /// Get the ART index for a node table (cloned copy for read-only access).
@@ -419,24 +420,23 @@ impl StorageManager {
         checkpoint_threshold: i64,
         txn_id: u64,
         drain_fn: Option<&dyn Fn(std::time::Duration) -> bool>,
-    ) -> Result<(), String> {
+    ) -> Result<(), StorageError> {
         // Step 1: Write-ahead log the commit
         {
             let mut wal = self.wal.lock().unwrap();
             wal.append(crate::wal::WALRecord::Commit { transaction_id: txn_id });
             wal.flush_to_disk()
-                .map_err(|e| format!("WAL flush failed during commit: {e}"))?;
+                .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
         }
 
         // Step 2: Flush local storage buffers to the actual tables
         local_storage
-            .flush_to_tables(&self.table_catalog)
-            .map_err(|e| format!("LocalStorage flush failed during commit: {e}"))?;
+            .flush_to_tables(&self.table_catalog)?;
 
         // Step 3: Apply shadow pages to the BufferManager
         shadow_file
             .apply(&self.buffer_manager)
-            .map_err(|e| format!("ShadowFile apply failed during commit: {e}"))?;
+            .map_err(|e| StorageError::ShadowFile(format!("ShadowFile apply failed during commit: {e}")))?;
 
         // Step 4: Auto-checkpoint if needed
         if let Err(e) = self.maybe_checkpoint(checkpoint_threshold, drain_fn) {
@@ -464,7 +464,7 @@ impl StorageManager {
         shadow_file: &mut crate::shadow_file::ShadowFile,
         txn_id: u64,
         undo_records: &[akar_transaction::UndoRecord],
-    ) -> Result<(), String> {
+    ) -> Result<(), StorageError> {
         // Log the rollback to WAL
         {
             let mut wal = self.wal.lock().unwrap();
@@ -479,7 +479,7 @@ impl StorageManager {
                 if let Some(val) = values.into_iter().next() {
                     table
                         .update_cell(record.row_id, record.column as usize, val)
-                        .map_err(|e| format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id))?;
+                        .map_err(|e| StorageError::Undo(format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id)))?;
                 }
             }
         }

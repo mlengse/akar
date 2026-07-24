@@ -10,6 +10,7 @@
 
 pub mod arrow_vector;
 pub mod data_chunk;
+pub mod error;
 pub mod enums;
 pub mod file_system;
 pub mod gzip_file_system;

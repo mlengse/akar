@@ -6,6 +6,7 @@
 //!
 //! Ported from C++ `src/storage/undo_buffer.cpp`.
 
+use akar_common::error::StorageError;
 use akar_transaction::UndoRecord;
 
 /// Accumulates undo records for a single write transaction.
@@ -57,9 +58,9 @@ impl UndoBuffer {
     /// write `old_data` back to the appropriate table/row/column.
     /// Records are applied in **reverse** order (LIFO) so that the
     /// last write is undone first — preserving intermediate states.
-    pub fn rollback<F>(&mut self, mut apply_fn: F) -> Result<(), String>
+    pub fn rollback<F>(&mut self, mut apply_fn: F) -> Result<(), StorageError>
     where
-        F: FnMut(&UndoRecord) -> Result<(), String>,
+        F: FnMut(&UndoRecord) -> Result<(), StorageError>,
     {
         for record in self.records.iter().rev() {
             apply_fn(record)?;
