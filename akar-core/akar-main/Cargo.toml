@@ -58,6 +58,7 @@ tracing.workspace = true
 arrow = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
 csv.workspace = true
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"

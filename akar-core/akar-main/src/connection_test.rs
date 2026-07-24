@@ -15,7 +15,7 @@ mod integration_tests {
 
     #[test]
     fn test_sequence_nextval_currval_query_e2e() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE SEQUENCE my_seq START 10 INCREMENT 2").unwrap();
 
@@ -38,7 +38,7 @@ mod integration_tests {
 
     #[test]
     fn test_sequence_missing_error_query_e2e() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let err = conn.query("RETURN nextval('does_not_exist')").unwrap_err();
         assert!(
             err.contains("Sequence 'does_not_exist' not found"),
@@ -48,7 +48,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_with_header() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
         let db_path = dir.path().join("test_db");
         let _ = &db_path; // keep db path alive
 
@@ -84,7 +84,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_no_header() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -105,7 +105,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_custom_delimiter() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -126,7 +126,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_file_not_found() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
         let _ = &dir;
 
         exec_ok(&conn, "CREATE NODE TABLE T(name STRING, PRIMARY KEY (name))").unwrap();
@@ -139,7 +139,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_type_mismatch() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
 
@@ -158,7 +158,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_column_count_mismatch() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(name STRING, age INT64, PRIMARY KEY (name))").unwrap();
 
@@ -183,7 +183,7 @@ mod integration_tests {
         use arrow::datatypes::{DataType, Field, Schema};
         use std::sync::Arc;
 
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -225,7 +225,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_csv_tab_delimiter() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(a STRING, b INT64, PRIMARY KEY (a))").unwrap();
 
@@ -244,7 +244,7 @@ mod integration_tests {
 
     #[test]
     fn test_copy_empty_csv() {
-        let (dir, _db, conn) = setup_db();
+        let (dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(name STRING, PRIMARY KEY (name))").unwrap();
 
@@ -263,7 +263,7 @@ mod integration_tests {
     #[test]
     fn test_empty_table_scan() {
         // Scan an empty table (no data) — should return empty result, not error
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -279,7 +279,7 @@ mod integration_tests {
     #[test]
     fn test_empty_match_return() {
         // Query with a WHERE clause that matches nothing
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
 
@@ -296,7 +296,7 @@ mod integration_tests {
     #[test]
     fn test_return_star_basic() {
         // RETURN * with MATCH should expand to all variables in scope
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
 
@@ -315,28 +315,28 @@ mod integration_tests {
     #[test]
     fn test_return_star_no_variables() {
         // RETURN * with no MATCH should fail with clear error
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = conn.query("RETURN *");
         assert!(result.is_err(), "RETURN * without variables should error");
     }
 
     #[test]
     fn test_lower_function_alias() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = conn.query("RETURN lower('HELLO') AS v");
         assert!(result.is_ok(), "lower() should work: {:?}", result);
     }
 
     #[test]
     fn test_upper_function_alias() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = conn.query("RETURN upper('hello') AS v");
         assert!(result.is_ok(), "upper() should work: {:?}", result);
     }
 
     #[test]
     fn test_ceiling_function_alias() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         // Test standard function calls
         let str_result = conn.query("RETURN lower('HELLO') AS v");
         assert!(str_result.is_ok(), "lower('HELLO') should work: {:?}", str_result);
@@ -362,7 +362,7 @@ mod integration_tests {
     fn test_alter_add_column_with_data() {
         // ALTER TABLE ADD on a table that already has data
         // NOTE: grammar uses ADD <name> <type> (no COLUMN keyword)
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -392,7 +392,7 @@ mod integration_tests {
     #[test]
     fn test_alter_rename_column_with_data() {
         // NOTE: grammar uses RENAME <name> TO <newname> (no COLUMN keyword)
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
 
@@ -413,7 +413,7 @@ mod integration_tests {
     #[test]
     fn test_alter_drop_column_with_data() {
         // NOTE: grammar uses DROP <name> (no COLUMN keyword)
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -434,7 +434,7 @@ mod integration_tests {
     #[test]
     fn test_large_dataset_stability() {
         // Insert 100 rows to test dataset stability
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -463,7 +463,7 @@ mod integration_tests {
     #[test]
     fn test_delete_with_empty_match() {
         // DELETE with no matching rows should succeed (not error)
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
 
@@ -484,7 +484,7 @@ mod integration_tests {
     #[test]
     fn test_set_valid_value() {
         // SET property to a valid value should work
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, label STRING, PRIMARY KEY (id))").unwrap();
 
@@ -501,7 +501,7 @@ mod integration_tests {
     #[test]
     fn test_unwind_basic() {
         // UNWIND with a non-empty list works (grammar requires at least one element)
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = conn.query("UNWIND [1, 2, 3] AS x RETURN x");
         assert!(result.is_ok(), "UNWIND should succeed: {:?}", result);
         if let Ok(r) = result {
@@ -512,7 +512,7 @@ mod integration_tests {
     #[test]
     fn test_optional_match_no_match() {
         // OPTIONAL MATCH that finds nothing should produce NULL row
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))").unwrap();
 
@@ -615,7 +615,7 @@ mod merge_tests {
 
     #[test]
     fn test_merge_creates_new_node() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -633,7 +633,7 @@ mod merge_tests {
 
     #[test]
     fn test_merge_matches_existing_node() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -655,7 +655,7 @@ mod merge_tests {
 
     #[test]
     fn test_merge_on_create_sets_properties() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -675,7 +675,7 @@ mod merge_tests {
 
     #[test]
     fn test_merge_parse_error_on_bad_syntax() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -689,7 +689,7 @@ mod merge_tests {
 
     #[test]
     fn test_merge_into_nonexistent_table() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         let result = exec_ok(&conn, "MERGE (n:NoSuchTable {name: 'x'})");
         assert!(result.is_err(), "MERGE into non-existent table should fail");
@@ -706,7 +706,7 @@ mod call_tests {
 
     #[test]
     fn test_call_show_tables_empty() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = query_result(&conn, "CALL show_tables()");
         assert!(result.is_ok(), "CALL show_tables() should succeed: {:?}", result);
         let qr = result.unwrap();
@@ -715,7 +715,7 @@ mod call_tests {
 
     #[test]
     fn test_call_show_tables_with_tables() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         exec_ok(
             &conn,
             "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
@@ -750,14 +750,14 @@ mod call_tests {
 
     #[test]
     fn test_call_nonexistent_function() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = query_result(&conn, "CALL nonexistent_function()");
         assert!(result.is_err(), "Calling non-existent function should fail");
     }
 
     #[test]
     fn test_call_syntax_no_args() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         let result = query_result(&conn, "CALL tables()");
         assert!(result.is_ok(), "CALL tables() should succeed: {:?}", result);
     }
@@ -773,7 +773,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_basic() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -791,7 +791,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_multiple_nodes() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -812,7 +812,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_nonexistent_table() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         let result = exec_ok(&conn, "CREATE (n:NoSuchTable {name: 'x'})");
         assert!(result.is_err(), "CREATE into non-existent table should fail");
@@ -820,7 +820,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_without_variable() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))").unwrap();
 
@@ -834,7 +834,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_verify_via_match() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -853,7 +853,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_empty_properties() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -870,7 +870,7 @@ mod create_dml_tests {
 
     #[test]
     fn test_create_dml_duplicate_pk_fails() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -895,7 +895,7 @@ mod foreach_tests {
 
     #[test]
     fn test_foreach_parse_only() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE Num(val INT64, PRIMARY KEY (val))").unwrap();
 
@@ -908,7 +908,7 @@ mod foreach_tests {
 
     #[test]
     fn test_foreach_in_match_context() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(
             &conn,
@@ -931,7 +931,7 @@ mod var_length_path_tests {
 
     #[test]
     fn test_var_length_path_parse() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))").unwrap();
         exec_ok(&conn, "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)").unwrap();
@@ -942,7 +942,7 @@ mod var_length_path_tests {
 
     #[test]
     fn test_var_length_path_with_bounds_parse() {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
 
         exec_ok(&conn, "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))").unwrap();
         exec_ok(&conn, "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)").unwrap();
@@ -958,7 +958,5 @@ mod var_length_path_tests {
 
 #[cfg(test)]
 mod subquery_tests {
-    use crate::test_helpers::*;
-
     // Additional subquery tests would go here
 }

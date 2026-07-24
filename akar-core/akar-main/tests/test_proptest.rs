@@ -18,7 +18,7 @@ fn extract_count(conn: &Connection, query: &str) -> i64 {
 proptest! {
     #[test]
     fn test_roundtrip_i64(val in 0..i64::MAX) {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         conn.query("CREATE NODE TABLE T(id INT64, val INT64, PRIMARY KEY(id))").unwrap();
         conn.query(&format!("CREATE (t:T {{id: 1, val: {}}})", val)).unwrap();
 
@@ -43,7 +43,7 @@ proptest! {
         b_nodes in 1..20i64,
         c_nodes in 1..20i64
     ) {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         conn.query("CREATE NODE TABLE A(id INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE B(id INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE C(id INT64, PRIMARY KEY(id))").unwrap();
@@ -93,7 +93,7 @@ proptest! {
         nodes in 5..30i64,
         filter_val in 2..15i64
     ) {
-        let (_dir, _db, conn) = setup_db();
+        let (_dir, _db, conn) = setup_db_on_disk();
         conn.query("CREATE NODE TABLE A(id INT64, prop INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE NODE TABLE B(id INT64, prop INT64, PRIMARY KEY(id))").unwrap();
         conn.query("CREATE REL TABLE E(FROM A TO B, dummy INT64)").unwrap();
