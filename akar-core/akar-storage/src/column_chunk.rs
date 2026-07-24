@@ -13,6 +13,7 @@
 
 use crate::column::Column;
 use crate::update_info::UpdateInfo;
+use akar_common::error::StorageError;
 use akar_common::types::{PhysicalTypeID, Value};
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int8Builder, Int16Builder, Int32Builder, Int64Builder,
@@ -96,12 +97,12 @@ impl ColumnChunk {
     /// If this chunk has `update_info` enabled, the old value is preserved
     /// in the version chain before overwriting.
     /// Returns an error if the index is out of bounds.
-    pub fn set_value(&mut self, idx: usize, value: Value) -> Result<(), String> {
+    pub fn set_value(&mut self, idx: usize, value: Value) -> Result<(), StorageError> {
         if idx >= self.values.len() {
-            return Err(format!(
+            return Err(StorageError::Page(format!(
                 "ColumnChunk index {idx} out of bounds (len={})",
                 self.values.len()
-            ));
+            )));
         }
         // Preserve old value in update info if MVCC tracking is enabled
         if let Some(ref ui) = self.update_info {

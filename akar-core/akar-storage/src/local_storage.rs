@@ -6,6 +6,7 @@
 //! On rollback, `clear()` discards all buffers.
 
 use crate::table::{NodeTable, RelTable, TableCatalog};
+use akar_common::error::StorageError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ impl LocalTableData {
     ///
     /// Deserialises each buffered row from binary format and calls
     /// `node_table.insert_row()`.
-    pub fn flush_to_node_table(&self, node_table: &mut NodeTable) -> Result<(), String> {
+    pub fn flush_to_node_table(&self, node_table: &mut NodeTable) -> Result<(), StorageError> {
         for row_bytes in &self.inserted_rows {
             let values = crate::deserialize_values_from_bytes(row_bytes, node_table.columns.len());
             node_table.insert_row(values)?;
@@ -83,7 +84,7 @@ impl LocalTableData {
     }
 
     /// Flush this table's buffered data to a `RelTable`.
-    pub fn flush_to_rel_table(&self, rel_table: &mut RelTable) -> Result<(), String> {
+    pub fn flush_to_rel_table(&self, rel_table: &mut RelTable) -> Result<(), StorageError> {
         for row_bytes in &self.inserted_rows {
             let values = crate::deserialize_values_from_bytes(row_bytes, rel_table.columns.len());
             rel_table.insert_row(values)?;
@@ -130,7 +131,7 @@ impl LocalStorage {
     ///
     /// Called on commit. After a successful flush, the transaction's writes
     /// are visible to subsequent transactions.
-    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>) -> Result<(), String> {
+    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>) -> Result<(), StorageError> {
         for (&table_id, table_data) in &self.tables {
             if table_data.is_empty() {
                 continue;

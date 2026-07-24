@@ -2,6 +2,7 @@
 //!
 //! Converts Akar `Value` rows to Arrow `RecordBatch` and writes to `.parquet` files.
 
+use akar_common::error::StorageError;
 use akar_common::types::Value;
 use arrow::array::*;
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
@@ -12,7 +13,7 @@ use std::sync::Arc;
 ///
 /// Column names are inferred from the first row's length and named `col_0`, `col_1`, etc.
 /// Types are inferred from the first non-null value in each column.
-pub fn write_parquet(path: &str, rows: &[Vec<Value>], column_names: &[String]) -> Result<(), String> {
+pub fn write_parquet(path: &str, rows: &[Vec<Value>], column_names: &[String]) -> Result<(), StorageError> {
     if rows.is_empty() {
         return write_empty_parquet(path, column_names);
     }
@@ -46,12 +47,12 @@ pub fn write_parquet(path: &str, rows: &[Vec<Value>], column_names: &[String]) -
 
     let arrays: Vec<Arc<dyn Array>> = arrow_cols.into_iter().map(|mut b| b.finish()).collect();
 
-    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| format!("Failed to create RecordBatch: {e}"))?;
+    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| StorageError::Reader(format!("Failed to create RecordBatch: {e}")))?;
 
     write_batch(path, &batch)
 }
 
-fn write_empty_parquet(path: &str, column_names: &[String]) -> Result<(), String> {
+fn write_empty_parquet(path: &str, column_names: &[String]) -> Result<(), StorageError> {
     let fields: Vec<Field> = column_names
         .iter()
         .map(|n| Field::new(n, ArrowDataType::Utf8, true))
@@ -63,29 +64,29 @@ fn write_empty_parquet(path: &str, column_names: &[String]) -> Result<(), String
         .map(|_| Arc::new(StringArray::from(Vec::<&str>::new())) as Arc<dyn Array>)
         .collect();
 
-    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| format!("Failed to create empty RecordBatch: {e}"))?;
+    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| StorageError::Reader(format!("Failed to create empty RecordBatch: {e}")))?;
 
     write_batch(path, &batch)
 }
 
-fn write_batch(path: &str, batch: &RecordBatch) -> Result<(), String> {
+fn write_batch(path: &str, batch: &RecordBatch) -> Result<(), StorageError> {
     use parquet::arrow::ArrowWriter;
     use parquet::basic::Compression;
     use parquet::file::properties::WriterProperties;
     use std::fs::File;
 
-    let file = File::create(path).map_err(|e| format!("Cannot create file '{}': {}", path, e))?;
+    let file = File::create(path).map_err(|e| StorageError::Reader(format!("Cannot create file '{}': {}", path, e)))?;
 
     let props = WriterProperties::builder().set_compression(Compression::SNAPPY).build();
 
     let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))
-        .map_err(|e| format!("Failed to create Parquet writer: {e}"))?;
+        .map_err(|e| StorageError::Reader(format!("Failed to create Parquet writer: {e}")))?;
 
-    writer.write(batch).map_err(|e| format!("Failed to write batch: {e}"))?;
+    writer.write(batch).map_err(|e| StorageError::Reader(format!("Failed to write batch: {e}")))?;
 
     writer
         .close()
-        .map_err(|e| format!("Failed to close Parquet writer: {e}"))?;
+        .map_err(|e| StorageError::Reader(format!("Failed to close Parquet writer: {e}")))?;
 
     Ok(())
 }

@@ -119,6 +119,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -400,6 +401,7 @@ dependencies = [
 name = "akar-transaction"
 version = "0.1.0"
 dependencies = [
+ "akar-common",
  "tracing",
 ]
 

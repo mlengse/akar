@@ -876,5 +876,5 @@ pub fn write_parquet_to_file(path: &str, result: &QueryResult) -> Result<(), Str
         })
         .unwrap_or_default();
 
-    akar_storage::parquet_writer::write_parquet(path, &rows, &column_names)
+    Ok(akar_storage::parquet_writer::write_parquet(path, &rows, &column_names)?)
 }

@@ -143,7 +143,7 @@ No integrity checking on WAL records. A bit-flip corrupts data silently.
 Replace `Result<T, String>` with structured errors.
 
 ### 3.1 Define unified error type in `akar-common`
-**Issue #9**
+**Issue #9** ✅ DONE
 
 Create `akar_common::error::AkarError` with variants for each subsystem:
 
@@ -199,17 +199,17 @@ pub enum TransactionError {
 **Files:** `akar-common/src/error.rs` (new), `akar-common/src/lib.rs`
 
 ### 3.2 Migrate crates to use `AkarError` incrementally
-**Issue #9**
+**Issue #9** ✅ IN PROGRESS (leaf crates done)
 
 Order of migration (leaf → root):
-1. `akar-transaction` → `TransactionError`
-2. `akar-storage` → `StorageError` (convert existing `ParquetReaderError` etc.)
-3. `akar-catalog` → `CatalogError`
-4. `akar-binder` → `BinderError`
-5. `akar-planner` → `PlannerError`
-6. `akar-optimizer` → reuse `PlannerError`
-7. `akar-processor` → `ProcessorError`
-8. `akar-main` → `AkarError` (top-level)
+1. ✅ `akar-transaction` → `TransactionError` (11 functions)
+2. ✅ `akar-storage` → `StorageError` (36 functions)
+3. ✅ `akar-catalog` → `CatalogError` (9 functions)
+4. `akar-binder` → `BinderError` (uses `From<CatalogError> for String` bridge for now)
+5. `akar-planner` → `PlannerError` (uses String bridge)
+6. `akar-optimizer` → reuse `PlannerError` (uses String bridge)
+7. `akar-processor` → `ProcessorError` (uses String bridge)
+8. `akar-main` → `AkarError` (uses String bridge)
 9. `akar-c` → convert back to `String` at FFI boundary
 
 **Estimated effort:** 2-3 days
@@ -358,18 +358,20 @@ Remove: `bitflags`, `uuid`, `rust_decimal`.
 
 ## Phase 6: Test Quality (Week 5-6)
 
-### 6.1 Consolidate test helpers
+### 6.1 Consolidate test helpers ✅ DONE
 **Issue #17**
 
-`setup_db()` defined 12 times with 3 signatures. `exec()` defined 3 times.
+**Fix (implemented):**
+- Created `akar-main/src/test_helpers.rs` — single source of truth for all test utilities
+- `setup_db()` uses temp dir (not `:memory:`) to avoid WAL flush failures
+- `setup_db_on_disk()`, `setup_db_with_checkpoint()` for explicit filesystem-backed tests
+- `exec()`, `exec_ok()`, `exec_err()`, `query()`, `query_result()`, `query_column()`, `query_values()`
+- `tests/common/mod.rs` re-exports via `pub use akar_main::test_helpers::*`
+- All test files (`connection_test.rs`, `integration_test.rs`, `fase_b_verification.rs`, `test_proptest.rs`, etc.) migrated
+- Fixed pre-existing `commit_transaction` signature mismatch in `akar-storage` tests
+- Added `tempfile` as regular dependency in `akar-main/Cargo.toml`
 
-**Fix:** Create `akar-main/tests/common/mod.rs` as the single source of truth. Provide:
-- `setup_db_in_memory() -> (Arc<Database>, Connection)`
-- `setup_db_on_disk() -> (TempDir, Arc<Database>, Connection)`
-- `exec(conn, query)` and `exec_err(conn, query, expected)`
-
-**Estimated effort:** 3-4 hours
-**Files:** `akar-main/tests/common/mod.rs`, all integration test files
+**Files changed:** `akar-main/src/test_helpers.rs`, `akar-main/src/lib.rs`, `akar-main/src/connection_test.rs`, `akar-main/tests/common/mod.rs`, `akar-main/tests/integration_test.rs`, `akar-main/tests/fase_b_verification.rs`, `akar-main/tests/test_proptest.rs`, `akar-main/Cargo.toml`, `akar-storage/src/lib.rs`
 
 ### 6.2 Fix fragile float assertions
 **Issue #25** | 22 `assert_eq!` on `f64`

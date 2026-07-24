@@ -5,6 +5,7 @@
 //! The CSR format is optimized for fast neighborhood lookups.
 
 use crate::page::FileHandle;
+use akar_common::error::StorageError;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -121,7 +122,7 @@ impl CsrIndex {
     ///
     /// Returns the destination node IDs for forward traversal, or source node IDs
     /// for reverse traversal. Returns an empty vec if the node is out of range.
-    pub fn get_neighbors(&self, node_id: u64, is_fwd: bool) -> Result<Vec<u64>, String> {
+    pub fn get_neighbors(&self, node_id: u64, is_fwd: bool) -> Result<Vec<u64>, StorageError> {
         let pos = node_id as usize;
         if pos >= self.num_nodes {
             return Ok(Vec::new());
@@ -156,10 +157,10 @@ impl CsrIndex {
     ///
     /// Note: True CSR is immutable after build, so this rebuilds the entire index
     /// with the new edge appended. For bulk loads, prefer `build()` directly.
-    pub fn add_edge(&mut self, _src_id: u64, _dst_id: u64) -> Result<(), String> {
+    pub fn add_edge(&mut self, _src_id: u64, _dst_id: u64) -> Result<(), StorageError> {
         // CSR is immutable after build — use build() for bulk loading.
         // This is a no-op placeholder for API compatibility.
-        Err("CsrIndex is immutable after build(); use build() to construct from edges".into())
+        Err(StorageError::Index("CsrIndex is immutable after build(); use build() to construct from edges".into()))
     }
 }
 

@@ -786,7 +786,7 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 
 ## 9. Codebase Audit Fixes (2026-07-24 — Sprint 12.5)
 
-A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). Implementation plan: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md). **19 of 31 issues resolved (61%).**
+A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). Implementation plan: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md). **22 of 31 issues resolved (71%).**
 
 ### 9.1 Quick Wins — All Completed ✅
 
@@ -816,8 +816,21 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | # | Issue | Fix |
 |---|-------|-----|
 | 14 | `.expect()` in production code | Replaced with `ok_or_else(\|\| ...)?` in `map_update.rs`, `map_scan.rs` |
+| 15 | `.set_value().ok()` silent errors | 12 call sites → `?` in `akar-algo/src/lib.rs` (10) and `recursiveextend.rs` (2); fixed pre-existing `wal.rs` compile error |
 | 16 | Sequence callback duplicated 3× | `make_sequence_callback()` + `register_sequence_scalars()` in `connection/utils.rs` (all 3/3 sites deduplicated) |
+| 17 | Test helpers duplicated (12 `setup_db()` + 3 `exec()`) | Created `src/test_helpers.rs` as single source of truth; all test files migrated; `tests/common/mod.rs` re-exports; `tempfile` added as regular dep |
 | 25 | Fragile float assertions | 22 `assert_eq!` on `f64` → epsilon comparisons across `akar-algo`, `akar-graph`, `akar-fts` |
+
+### 9.3 Unified Error Type (Issue #9) — In Progress
+
+| Crate | Error Type | Functions Migrated |
+|-------|-----------|-------------------|
+| `akar-common` | `AkarError`, `StorageError`, `TransactionError`, `CatalogError` | Defined with `From` impls + `lock_or_poisoned()` |
+| `akar-transaction` | `TransactionError` | 11 functions (`begin_write`, `lock_table`, `active_snapshot`, `commit`, `rollback`, `auto_commit`, etc.) |
+| `akar-storage` | `StorageError` | 36 functions (table CRUD, spiller, ART index, vector index, CSR, parquet, undo buffer, commit/rollback) |
+| `akar-catalog` | `CatalogError` | 9 functions (`add_column`, `drop_column`, `create_index`, `rename_column`, `rename_table`, etc.) |
+
+Remaining crates (binder, planner, optimizer, processor, main) use `From<ErrorType> for String` bridge.
 
 ### 9.4 Deferred Items
 
@@ -826,11 +839,10 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | 1 | MVCC snapshot isolation | Most complex change (2-3 days), requires storage layer redesign |
 | 7 | Row-level MVCC conflict detection | Depends on #1 |
 | 8 | Dual catalog system | Large refactor, 2-3 days |
-| 9 | Unified error type | Large surface area, 3-4 days |
+| 9 | Unified error type | Leaf crates done (transaction, storage, catalog); remaining 6 crates use `From<Error> for String` bridge |
 | 12 | `Mutex<BM>` → `RwLock` | Medium effort, mechanical |
 | 13 | `TransactionManager` god-object | Medium effort, structural |
-| 15 | `set_value().ok()` calls | ~~100+ locations, needs phased approach~~ ✅ FIXED — 12 sites → `?`, wal.rs `Read` import fix |
-| 17-31 | Remaining items | Various effort levels |
+| 18-31 | Remaining items | Various effort levels |
 
 ---
 

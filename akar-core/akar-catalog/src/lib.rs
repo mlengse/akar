@@ -1,5 +1,6 @@
 //! System catalog — manages schemas, tables, and type definitions.
 
+use akar_common::error::CatalogError;
 use akar_common::types::LogicalTypeID;
 use hashbrown::HashMap;
 
@@ -522,44 +523,45 @@ impl Catalog {
     }
 
     /// Add a column to a table in the catalog.
-    pub fn add_column(&mut self, table_name: &str, column: CatalogColumn) -> Result<(), String> {
+    pub fn add_column(&mut self, table_name: &str, column: CatalogColumn) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
-            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
+        let col_name = column.name.clone();
         match entry {
             CatalogEntry::NodeTable(t) => {
-                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
-                    return Err(format!("Column '{}' already exists", column.name));
+                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
+                    return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: col_name });
                 }
                 t.columns.push(column);
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
-                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
-                    return Err(format!("Column '{}' already exists", column.name));
+                if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
+                    return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: col_name });
                 }
                 t.columns.push(column);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err("Cannot add column to a vector index".into()),
-            CatalogEntry::Sequence(_) => Err("Cannot add column to a sequence".into()),
-            CatalogEntry::Foreign(_) => Err("Cannot add column to a foreign table".into()),
-            CatalogEntry::Macro(_) => Err("Cannot add column to a macro".into()),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot add column to a vector index".into())),
+            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot add column to a sequence".into())),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot add column to a foreign table".into())),
+            CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot add column to a macro".into())),
         }
     }
 
     /// Drop a column from a table in the catalog.
-    pub fn drop_column(&mut self, table_name: &str, column_name: &str) -> Result<(), String> {
+    pub fn drop_column(&mut self, table_name: &str, column_name: &str) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
-            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
                 let pos = t
                     .columns
                     .iter()
                     .position(|c| c.name == column_name)
-                    .ok_or_else(|| format!("Column '{column_name}' not found"))?;
+                    .ok_or_else(|| CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() })?;
                 t.columns.remove(pos);
                 Ok(())
             }
@@ -568,14 +570,14 @@ impl Catalog {
                     .columns
                     .iter()
                     .position(|c| c.name == column_name)
-                    .ok_or_else(|| format!("Column '{column_name}' not found"))?;
+                    .ok_or_else(|| CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() })?;
                 t.columns.remove(pos);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err("Cannot drop column from a vector index".into()),
-            CatalogEntry::Sequence(_) => Err("Cannot drop column from a sequence".into()),
-            CatalogEntry::Foreign(_) => Err("Cannot drop column from a foreign table".into()),
-            CatalogEntry::Macro(_) => Err("Cannot drop column from a macro".into()),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a vector index".into())),
+            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a sequence".into())),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a foreign table".into())),
+            CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a macro".into())),
         }
     }
 
@@ -586,28 +588,26 @@ impl Catalog {
         index_name: String,
         index_type: IndexType,
         column_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
-            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
-                // Validate column exists
                 if !t.columns.iter().any(|c| c.name == column_name) {
-                    return Err(format!("Column '{column_name}' not found in table '{table_name}'"));
+                    return Err(CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() });
                 }
-                // Validate column is the primary key
                 let pk_col = t.primary_key_column();
                 if pk_col.map(|c| c.name.as_str()) != Some(column_name) {
-                    return Err(format!(
+                    return Err(CatalogError::InvalidOperation(format!(
                         "Cannot create index on non-PK column '{column_name}'. Only PK columns are supported."
-                    ));
+                    )));
                 }
                 t.index_type = Some(index_type);
                 t.index_name = Some(index_name);
                 Ok(())
             }
-            _ => Err(format!("Table '{table_name}' is not a node table")),
+            _ => Err(CatalogError::InvalidOperation(format!("Table '{table_name}' is not a node table"))),
         }
     }
 
@@ -830,20 +830,20 @@ impl Catalog {
     }
 
     /// Drop an index from a table.
-    pub fn drop_index(&mut self, table_name: &str, index_name: &str) -> Result<(), String> {
+    pub fn drop_index(&mut self, table_name: &str, index_name: &str) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
-            .ok_or_else(|| format!("Table '{table_name}' not found"))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
                 if t.index_name.as_deref() != Some(index_name) {
-                    return Err(format!("Index '{index_name}' not found on table '{table_name}'"));
+                    return Err(CatalogError::NotFound(format!("Index '{index_name}' not found on table '{table_name}'")));
                 }
                 t.index_type = None;
                 t.index_name = None;
                 Ok(())
             }
-            _ => Err(format!("Table '{table_name}' is not a node table")),
+            _ => Err(CatalogError::InvalidOperation(format!("Table '{table_name}' is not a node table"))),
         }
     }
 
@@ -865,18 +865,17 @@ impl Catalog {
     }
 
     /// Rename a column in a table in the catalog.
-    pub fn rename_column(&mut self, table_name: &str, old_name: &str, new_name: &str) -> Result<(), String> {
-        // Check for duplicates before the mutable borrow
+    pub fn rename_column(&mut self, table_name: &str, old_name: &str, new_name: &str) -> Result<(), CatalogError> {
         let cols = self
             .get_entry_by_name(table_name)
-            .ok_or_else(|| format!("Table '{table_name}' not found"))?
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?
             .columns()
             .to_vec();
         if !cols.iter().any(|c| c.name == old_name) {
-            return Err(format!("Column '{old_name}' not found"));
+            return Err(CatalogError::ColumnNotFound { table: table_name.to_string(), column: old_name.to_string() });
         }
         if cols.iter().any(|c| c.name == new_name) {
-            return Err(format!("Column '{new_name}' already exists"));
+            return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: new_name.to_string() });
         }
         drop(cols);
 
@@ -892,34 +891,33 @@ impl Catalog {
                 col.name = new_name.to_string();
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err("Cannot rename column on a vector index".into()),
-            CatalogEntry::Sequence(_) => Err("Cannot rename column on a sequence".into()),
-            CatalogEntry::Foreign(_) => Err("Cannot rename column on a foreign table".into()),
-            CatalogEntry::Macro(_) => Err("Cannot rename column on a macro".into()),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a vector index".into())),
+            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a sequence".into())),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a foreign table".into())),
+            CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a macro".into())),
         }
     }
 
     /// Rename a table in the catalog.
-    pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+    pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), CatalogError> {
         let id = self
             .name_to_id
             .get(old_name)
             .copied()
-            .ok_or_else(|| format!("Table '{old_name}' not found"))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Table '{old_name}' not found")))?;
         if self.name_to_id.contains_key(new_name) {
-            return Err(format!("Table '{new_name}' already exists"));
+            return Err(CatalogError::AlreadyExists(format!("Table '{new_name}' already exists")));
         }
         match self.entries.get_mut(&id) {
             Some(CatalogEntry::NodeTable(t)) => t.name = new_name.to_string(),
             Some(CatalogEntry::RelTable(t)) => t.name = new_name.to_string(),
             Some(CatalogEntry::VectorIndex(_)) => {
-                // Vector index rename uses the `rename` method
-                return Err("Use rename method for vector indexes".into());
+                return Err(CatalogError::InvalidOperation("Use rename method for vector indexes".into()));
             }
             Some(CatalogEntry::Sequence(s)) => s.name = new_name.to_string(),
             Some(CatalogEntry::Foreign(f)) => f.name = new_name.to_string(),
             Some(CatalogEntry::Macro(m)) => m.name = new_name.to_string(),
-            None => return Err("Table not found".into()),
+            None => return Err(CatalogError::NotFound("Table not found".into())),
         }
         self.name_to_id.remove(old_name);
         self.name_to_id.insert(new_name.to_string(), id);
@@ -961,14 +959,14 @@ impl Catalog {
     }
 
     /// Remove a foreign table entry (from DETACH DATABASE).
-    pub fn remove_foreign_entry(&mut self, alias: &str) -> Result<(), String> {
+    pub fn remove_foreign_entry(&mut self, alias: &str) -> Result<(), CatalogError> {
         let id = self
             .name_to_id
             .remove(alias)
-            .ok_or_else(|| format!("Attached database '{}' not found", alias))?;
+            .ok_or_else(|| CatalogError::NotFound(format!("Attached database '{}' not found", alias)))?;
         if !matches!(self.entries.get(&id), Some(CatalogEntry::Foreign(_))) {
             self.name_to_id.insert(alias.to_string(), id);
-            return Err(format!("'{}' is not an attached database", alias));
+            return Err(CatalogError::InvalidOperation(format!("'{}' is not an attached database", alias)));
         }
         self.entries.remove(&id);
         Ok(())
@@ -1027,10 +1025,10 @@ impl Catalog {
     ///
     /// Ported from C++ `GraphEntrySet::addGraph()`.
     /// Returns error if a graph with the same name already exists.
-    pub fn create_projected_graph(&mut self, info: ProjectedGraphInfo) -> Result<(), String> {
+    pub fn create_projected_graph(&mut self, info: ProjectedGraphInfo) -> Result<(), CatalogError> {
         let name_lower = info.name.to_lowercase();
         if self.projected_graphs.contains_key(&name_lower) {
-            return Err(format!("Projected graph '{}' already exists", info.name));
+            return Err(CatalogError::AlreadyExists(format!("Projected graph '{}' already exists", info.name)));
         }
         self.projected_graphs.insert(name_lower, info);
         self.bump_version();
@@ -1038,13 +1036,13 @@ impl Catalog {
     }
 
     /// Drop a projected graph by name (case-insensitive).
-    pub fn drop_projected_graph(&mut self, name: &str) -> Result<(), String> {
+    pub fn drop_projected_graph(&mut self, name: &str) -> Result<(), CatalogError> {
         let name_lower = name.to_lowercase();
         if self.projected_graphs.remove(&name_lower).is_some() {
             self.bump_version();
             Ok(())
         } else {
-            Err(format!("Projected graph '{}' not found", name))
+            Err(CatalogError::NotFound(format!("Projected graph '{}' not found", name)))
         }
     }
 
@@ -1560,7 +1558,7 @@ mod tests {
             },
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("foreign table"));
+        assert!(result.unwrap_err().to_string().contains("foreign table"));
     }
 
     #[test]
@@ -1579,7 +1577,7 @@ mod tests {
         );
         let result = cat.drop_column("ext", "col1");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("foreign table"));
+        assert!(result.unwrap_err().to_string().contains("foreign table"));
     }
 
     #[test]

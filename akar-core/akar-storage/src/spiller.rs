@@ -24,6 +24,7 @@
 //! let restored = spiller.restore(&spill_file)?;
 //! ```
 
+use akar_common::error::StorageError;
 use crate::column_chunk::ColumnChunk;
 use akar_common::types::Value;
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,7 @@ impl Spiller {
     /// Returns the `SpillFile` metadata on success.
     ///
     /// If the chunk is empty, returns `None`.
-    pub fn spill(&self, chunk: &mut ColumnChunk) -> Result<Option<SpillFile>, String> {
+    pub fn spill(&self, chunk: &mut ColumnChunk) -> Result<Option<SpillFile>, StorageError> {
         if chunk.is_empty() {
             return Ok(None);
         }
@@ -107,11 +108,11 @@ impl Spiller {
         // For a single-column chunk, each line is just one value.
         // Multi-column chunks are handled by the caller (NodeGroup) which spills
         // all columns together in a coordinated way.
-        let mut file = fs::File::create(&path).map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
+        let mut file = fs::File::create(&path).map_err(|e| StorageError::Spiller(format!("Failed to create spill file {:?}: {e}", path)))?;
 
         for value in &values {
-            let line = serde_json::to_string(value).map_err(|e| format!("Failed to serialize value: {e}"))?;
-            writeln!(file, "{line}").map_err(|e| format!("Failed to write spill file: {e}"))?;
+            let line = serde_json::to_string(value).map_err(|e| StorageError::Spiller(format!("Failed to serialize value: {e}")))?;
+            writeln!(file, "{line}").map_err(|e| StorageError::Spiller(format!("Failed to write spill file: {e}")))?;
         }
 
         // Re-allocate the chunk's buffer
@@ -128,7 +129,7 @@ impl Spiller {
     ///
     /// Each row is serialized as a JSON array `[col0, col1, ..., colN]`.
     /// This is used by `NodeGroup` to spill multi-column data.
-    pub fn spill_columns(&self, chunks: &mut [ColumnChunk]) -> Result<Option<SpillFile>, String> {
+    pub fn spill_columns(&self, chunks: &mut [ColumnChunk]) -> Result<Option<SpillFile>, StorageError> {
         if chunks.is_empty() || chunks[0].is_empty() {
             return Ok(None);
         }
@@ -140,7 +141,7 @@ impl Spiller {
         // Drain all columns
         let mut drained: Vec<Vec<Value>> = chunks.iter_mut().map(|c| c.drain()).collect();
 
-        let mut file = fs::File::create(&path).map_err(|e| format!("Failed to create spill file {:?}: {e}", path))?;
+        let mut file = fs::File::create(&path).map_err(|e| StorageError::Spiller(format!("Failed to create spill file {:?}: {e}", path)))?;
 
         for row in 0..num_rows {
             let mut row_values = Vec::with_capacity(num_cols);
@@ -152,8 +153,8 @@ impl Spiller {
                 };
                 row_values.push(val);
             }
-            let line = serde_json::to_string(&row_values).map_err(|e| format!("Failed to serialize row: {e}"))?;
-            writeln!(file, "{line}").map_err(|e| format!("Failed to write spill file: {e}"))?;
+            let line = serde_json::to_string(&row_values).map_err(|e| StorageError::Spiller(format!("Failed to serialize row: {e}")))?;
+            writeln!(file, "{line}").map_err(|e| StorageError::Spiller(format!("Failed to write spill file: {e}")))?;
         }
 
         Ok(Some(SpillFile {
@@ -167,20 +168,20 @@ impl Spiller {
     ///
     /// Each line of the JSON-lines file is deserialized as a single `Value`.
     /// Returns a new `ColumnChunk` with the restored values.
-    pub fn restore(&self, spill: &SpillFile) -> Result<ColumnChunk, String> {
+    pub fn restore(&self, spill: &SpillFile) -> Result<ColumnChunk, StorageError> {
         let file =
-            fs::File::open(&spill.path).map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
+            fs::File::open(&spill.path).map_err(|e| StorageError::Spiller(format!("Failed to open spill file {:?}: {e}", spill.path)))?;
         let reader = BufReader::new(file);
         let mut values = Vec::with_capacity(spill.row_count);
 
         for line in reader.lines() {
-            let line = line.map_err(|e| format!("Failed to read spill file: {e}"))?;
+            let line = line.map_err(|e| StorageError::Spiller(format!("Failed to read spill file: {e}")))?;
             let line = line.trim().to_string();
             if line.is_empty() {
                 continue;
             }
             let value: Value =
-                serde_json::from_str(&line).map_err(|e| format!("Failed to deserialize value from spill file: {e}"))?;
+                serde_json::from_str(&line).map_err(|e| StorageError::Spiller(format!("Failed to deserialize value from spill file: {e}")))?;
             values.push(value);
         }
 
@@ -191,21 +192,21 @@ impl Spiller {
     /// Restore a multi-column result from a spill file containing JSON arrays.
     ///
     /// Returns one `ColumnChunk` per column.
-    pub fn restore_columns(&self, spill: &SpillFile, num_cols: usize) -> Result<Vec<ColumnChunk>, String> {
+    pub fn restore_columns(&self, spill: &SpillFile, num_cols: usize) -> Result<Vec<ColumnChunk>, StorageError> {
         let file =
-            fs::File::open(&spill.path).map_err(|e| format!("Failed to open spill file {:?}: {e}", spill.path))?;
+            fs::File::open(&spill.path).map_err(|e| StorageError::Spiller(format!("Failed to open spill file {:?}: {e}", spill.path)))?;
         let reader = BufReader::new(file);
 
         let mut columns: Vec<Vec<Value>> = (0..num_cols).map(|_| Vec::new()).collect();
 
         for line in reader.lines() {
-            let line = line.map_err(|e| format!("Failed to read spill file: {e}"))?;
+            let line = line.map_err(|e| StorageError::Spiller(format!("Failed to read spill file: {e}")))?;
             let line = line.trim().to_string();
             if line.is_empty() {
                 continue;
             }
             let row: Vec<Value> =
-                serde_json::from_str(&line).map_err(|e| format!("Failed to deserialize row from spill file: {e}"))?;
+                serde_json::from_str(&line).map_err(|e| StorageError::Spiller(format!("Failed to deserialize row from spill file: {e}")))?;
             for (col, value) in row.into_iter().enumerate() {
                 if col < num_cols {
                     columns[col].push(value);
@@ -217,15 +218,15 @@ impl Spiller {
     }
 
     /// Remove a spill file from disk.
-    pub fn cleanup(&self, spill: &SpillFile) -> Result<(), String> {
-        fs::remove_file(&spill.path).map_err(|e| format!("Failed to remove spill file {:?}: {e}", spill.path))
+    pub fn cleanup(&self, spill: &SpillFile) -> Result<(), StorageError> {
+        fs::remove_file(&spill.path).map_err(|e| StorageError::Spiller(format!("Failed to remove spill file {:?}: {e}", spill.path)))
     }
 
     /// Remove all spill files in the temp directory.
-    pub fn cleanup_all(&self) -> Result<(), String> {
+    pub fn cleanup_all(&self) -> Result<(), StorageError> {
         if self.tmp_dir.exists() {
             fs::remove_dir_all(&self.tmp_dir)
-                .map_err(|e| format!("Failed to remove spill dir {:?}: {e}", self.tmp_dir))?;
+                .map_err(|e| StorageError::Spiller(format!("Failed to remove spill dir {:?}: {e}", self.tmp_dir)))?;
         }
         Ok(())
     }
@@ -263,8 +264,8 @@ struct MergeCursor {
 }
 
 impl MergeCursor {
-    fn new(path: &Path, sort_key_col: usize) -> Result<Self, String> {
-        let file = fs::File::open(path).map_err(|e| format!("Failed to open merge source {:?}: {e}", path))?;
+    fn new(path: &Path, sort_key_col: usize) -> Result<Self, StorageError> {
+        let file = fs::File::open(path).map_err(|e| StorageError::Spiller(format!("Failed to open merge source {:?}: {e}", path)))?;
         let mut reader = BufReader::new(file);
         let current = Self::read_next_row(&mut reader);
         Ok(Self {
@@ -367,7 +368,7 @@ impl MultiWayStreamMerge {
         in_memory: Option<Vec<Vec<Value>>>,
         sort_key_col: usize,
         dedup: bool,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, StorageError> {
         let mut cursors = Vec::new();
         for sf in spill_files {
             if sf.row_count > 0 {

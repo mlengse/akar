@@ -14,6 +14,7 @@ use crate::column::Column;
 use crate::column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 use crate::spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 use crate::version_info::VersionInfo;
+use akar_common::error::StorageError;
 use akar_common::types::Value;
 use std::sync::Arc;
 
@@ -116,7 +117,7 @@ impl NodeGroup {
     ///
     /// If `txn_id` is `Some(...)`, the insert is recorded in the version
     /// info for MVCC visibility tracking.
-    pub fn append_row(&mut self, row: Vec<Value>) -> Result<(), String> {
+    pub fn append_row(&mut self, row: Vec<Value>) -> Result<(), StorageError> {
         self.append_row_with_txn(row, None)
     }
 
@@ -126,16 +127,16 @@ impl NodeGroup {
     /// memory threshold, the current buffer is automatically spilled to disk
     /// before appending the new row. This keeps memory usage bounded during
     /// large batch operations like `COPY FROM`.
-    pub fn append_row_with_txn(&mut self, row: Vec<Value>, txn_id: Option<u64>) -> Result<(), String> {
+    pub fn append_row_with_txn(&mut self, row: Vec<Value>, txn_id: Option<u64>) -> Result<(), StorageError> {
         if row.len() != self.columns.len() {
-            return Err(format!(
+            return Err(StorageError::Page(format!(
                 "column count mismatch: expected {} values, got {}",
                 self.columns.len(),
                 row.len()
-            ));
+            )));
         }
         if self.is_full() {
-            return Err("node group is already full".to_string());
+            return Err(StorageError::Page("node group is already full".to_string()));
         }
 
         // Auto-spill if the memory threshold is exceeded
@@ -163,11 +164,11 @@ impl NodeGroup {
     ///
     /// The spill file is tracked so that `flush_with_spiller()` can later
     /// merge all spilled data back into the persistent columns.
-    pub fn spill_and_clear(&mut self) -> Result<(), String> {
+    pub fn spill_and_clear(&mut self) -> Result<(), StorageError> {
         let spiller = self
             .spiller
             .as_ref()
-            .ok_or_else(|| "No spiller attached to NodeGroup".to_string())?;
+            .ok_or_else(|| StorageError::Spiller("No spiller attached to NodeGroup".to_string()))?;
 
         if self.is_empty() {
             return Ok(());
@@ -460,7 +461,7 @@ mod tests {
         let mut group = NodeGroup::new(2, 0);
         let result = group.append_row(vec![Value::Int64(1)]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("column count mismatch"));
+        assert!(result.unwrap_err().to_string().contains("column count mismatch"));
     }
 
     #[test]
