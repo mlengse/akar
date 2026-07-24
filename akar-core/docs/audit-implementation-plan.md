@@ -199,18 +199,18 @@ pub enum TransactionError {
 **Files:** `akar-common/src/error.rs` (new), `akar-common/src/lib.rs`
 
 ### 3.2 Migrate crates to use `AkarError` incrementally
-**Issue #9** ✅ IN PROGRESS (leaf crates done)
+**Issue #9** ✅ DONE
 
 Order of migration (leaf → root):
 1. ✅ `akar-transaction` → `TransactionError` (11 functions)
 2. ✅ `akar-storage` → `StorageError` (36 functions)
 3. ✅ `akar-catalog` → `CatalogError` (9 functions)
-4. `akar-binder` → `BinderError` (uses `From<CatalogError> for String` bridge for now)
-5. `akar-planner` → `PlannerError` (uses String bridge)
-6. `akar-optimizer` → reuse `PlannerError` (uses String bridge)
-7. `akar-processor` → `ProcessorError` (uses String bridge)
-8. `akar-main` → `AkarError` (uses String bridge)
-9. `akar-c` → convert back to `String` at FFI boundary
+4. ✅ `akar-binder` → `BinderError` (48 functions)
+5. ✅ `akar-planner` → `PlannerError` (19 functions)
+6. ✅ `akar-optimizer` — no functions to migrate (already clean)
+7. ✅ `akar-processor` → `ProcessorError` (54+ functions + type aliases)
+8. ✅ `akar-main` — cascade fixes (standalone_call.rs, query.rs, utils.rs)
+9. `akar-c` — FFI boundary (converts back to `String` for C callers)
 
 **Estimated effort:** 2-3 days
 **Files:** Every crate's `lib.rs` and public API

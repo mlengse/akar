@@ -1,3 +1,4 @@
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
@@ -117,7 +118,7 @@ fn extract_arg_string(args: &[Expression], idx: usize) -> Result<String, String>
 }
 
 impl StandaloneCallHandler for DbStandaloneCallHandler {
-    fn execute_call(&self, name: &str, args: &[Expression]) -> Result<Vec<DataChunk>, String> {
+    fn execute_call(&self, name: &str, args: &[Expression]) -> Result<Vec<DataChunk>, ProcessorError> {
         if let Some(handler) = self.registry.get(name) {
             let result_rows = handler.execute(args)?;
             return Self::format_result(result_rows);
@@ -163,14 +164,14 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
                     .find(|k| k.contains(&lower) || lower.contains(**k))
                     .map(|k| format!(" Did you mean CALL {}()?", k))
                     .unwrap_or_default();
-                Err(format!("CALL '{}' failed: {}.{}", name, original_err, suggestion))
+                Err(ProcessorError::Execution(format!("CALL '{}' failed: {}.{}", name, original_err, suggestion)))
             }
         }
     }
 }
 
 impl DbStandaloneCallHandler {
-    fn format_result(result_rows: Vec<Vec<Value>>) -> Result<Vec<DataChunk>, String> {
+    fn format_result(result_rows: Vec<Vec<Value>>) -> Result<Vec<DataChunk>, ProcessorError> {
         if result_rows.is_empty() {
             Ok(vec![])
         } else {
@@ -187,7 +188,7 @@ struct ShowTablesHandler {
 }
 
 impl StandaloneCallFn for ShowTablesHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let catalog = self.database.catalog.lock().unwrap();
         let entries: Vec<Vec<Value>> = catalog
             .all_entries()
@@ -216,7 +217,7 @@ struct TableInfoHandler {
 }
 
 impl StandaloneCallFn for TableInfoHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
         let cat = self.database.catalog.lock().unwrap();
         let entry = cat
@@ -247,7 +248,7 @@ struct ShowFunctionsHandler {
 }
 
 impl StandaloneCallFn for ShowFunctionsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let registry = self.database.function_registry.lock().unwrap();
         let funcs = registry.list_all();
         Ok(funcs
@@ -266,7 +267,7 @@ struct ShowIndexesHandler {
 }
 
 impl StandaloneCallFn for ShowIndexesHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let cat = self.database.catalog.lock().unwrap();
         let indexes = cat.indexes();
         Ok(indexes
@@ -292,7 +293,7 @@ struct ShowSequencesHandler {
 }
 
 impl StandaloneCallFn for ShowSequencesHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let cat = self.database.catalog.lock().unwrap();
         let seqs = cat.sequences();
         Ok(seqs
@@ -311,7 +312,7 @@ struct ShowMacrosHandler {
 }
 
 impl StandaloneCallFn for ShowMacrosHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let cat = self.database.catalog.lock().unwrap();
         let macros = cat.macros();
         Ok(macros
@@ -341,7 +342,7 @@ struct ShowConnectionHandler {
 }
 
 impl StandaloneCallFn for ShowConnectionHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
         let cat = self.database.catalog.lock().unwrap();
         let info = cat
@@ -358,7 +359,7 @@ impl StandaloneCallFn for ShowConnectionHandler {
 struct DbVersionHandler;
 
 impl StandaloneCallFn for DbVersionHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let version = env!("CARGO_PKG_VERSION");
         Ok(vec![vec![Value::String(version.to_string())]])
     }
@@ -373,7 +374,7 @@ struct CatalogVersionHandler {
 }
 
 impl StandaloneCallFn for CatalogVersionHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let cat = self.database.catalog.lock().unwrap();
         let ver = cat.version();
         Ok(vec![vec![Value::Int64(ver as i64)]])
@@ -389,7 +390,7 @@ struct CurrentSettingHandler {
 }
 
 impl StandaloneCallFn for CurrentSettingHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let key = extract_arg_string(args, 0).unwrap_or_else(|_| String::new());
         let (k, v) = match key.to_lowercase().as_str() {
             "spill_threshold" => ("spill_threshold", self.database.effective_spill_threshold().to_string()),
@@ -416,7 +417,7 @@ struct StatsInfoHandler {
 }
 
 impl StandaloneCallFn for StatsInfoHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
         let (row_count, storage_size) = {
             let cat = self.database.catalog.lock().unwrap();
@@ -443,7 +444,7 @@ struct StorageInfoHandler {
 }
 
 impl StandaloneCallFn for StorageInfoHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let sm = &self.database.storage_manager;
         let info = sm.storage_info();
         Ok(vec![vec![
@@ -462,7 +463,7 @@ impl StandaloneCallFn for StorageInfoHandler {
 struct ShowAttachedDatabasesHandler;
 
 impl StandaloneCallFn for ShowAttachedDatabasesHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         Ok(vec![vec![
             Value::String("main".to_string()),
             Value::String("local".to_string()),
@@ -479,7 +480,7 @@ struct BmInfoHandler {
 }
 
 impl StandaloneCallFn for BmInfoHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let bm = &self.database.storage_manager;
         let info = bm.buffer_info();
         Ok(vec![vec![
@@ -500,7 +501,7 @@ struct FileInfoHandler {
 }
 
 impl StandaloneCallFn for FileInfoHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let sm = &self.database.storage_manager;
         let info = sm.file_info();
         Ok(vec![vec![
@@ -520,7 +521,7 @@ struct FreeSpaceInfoHandler {
 }
 
 impl StandaloneCallFn for FreeSpaceInfoHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let sm = &self.database.storage_manager;
         let info = sm.fsm_info();
         Ok(vec![vec![
@@ -539,7 +540,7 @@ struct DiskSizeInfoHandler {
 }
 
 impl StandaloneCallFn for DiskSizeInfoHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let sm = &self.database.storage_manager;
         let info = sm.file_info();
         Ok(vec![vec![
@@ -557,7 +558,7 @@ impl StandaloneCallFn for DiskSizeInfoHandler {
 struct StorageVersionHandler;
 
 impl StandaloneCallFn for StorageVersionHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         Ok(vec![vec![Value::String(
             akar_storage::version_info::STORAGE_VERSION.to_string(),
         )]])
@@ -573,7 +574,7 @@ struct ShowLoadedExtensionsHandler {
 }
 
 impl StandaloneCallFn for ShowLoadedExtensionsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let reg = self.database.extension_registry.lock().unwrap();
         let names: Vec<Vec<Value>> = reg.names().iter().map(|n| vec![Value::String(n.clone())]).collect();
         Ok(names)
@@ -587,7 +588,7 @@ impl StandaloneCallFn for ShowLoadedExtensionsHandler {
 struct ShowOfficialExtensionsHandler;
 
 impl StandaloneCallFn for ShowOfficialExtensionsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         Ok(vec![
             vec![Value::String("json".into()), Value::String("JSON functions".into())],
             vec![Value::String("fts".into()), Value::String("Full-Text Search".into())],
@@ -641,7 +642,7 @@ impl StandaloneCallFn for ShowOfficialExtensionsHandler {
 struct ClearWarningsHandler;
 
 impl StandaloneCallFn for ClearWarningsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         Ok(vec![vec![Value::String("Warnings cleared".into())]])
     }
 
@@ -653,7 +654,7 @@ impl StandaloneCallFn for ClearWarningsHandler {
 struct ShowWarningsHandler;
 
 impl StandaloneCallFn for ShowWarningsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         Ok(vec![])
     }
 
@@ -672,7 +673,7 @@ struct ExportCsvHandler {
 }
 
 impl StandaloneCallFn for ExportCsvHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let file_path = extract_arg_string(args, 0)?;
         let query_string = extract_arg_string(args, 1)?;
         let result = (self.query_fn)(&query_string)?;
@@ -724,7 +725,7 @@ struct ExportParquetHandler {
 }
 
 impl StandaloneCallFn for ExportParquetHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let file_path = extract_arg_string(args, 0)?;
         let query_string = extract_arg_string(args, 1)?;
         let result = (self.query_fn)(&query_string)?;
@@ -761,7 +762,7 @@ struct ShowProjectedGraphsHandler {
 }
 
 impl StandaloneCallFn for ShowProjectedGraphsHandler {
-    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
         let graphs = cat.projected_graph_entries();
         let rows: Vec<Vec<Value>> = graphs
@@ -781,7 +782,7 @@ struct ProjectedGraphInfoHandler {
 }
 
 impl StandaloneCallFn for ProjectedGraphInfoHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let graph_name = extract_arg_string(args, 0)?;
         let cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
         let info = cat
@@ -804,7 +805,7 @@ impl StandaloneCallFn for ProjectedGraphInfoHandler {
                     Value::String(query),
                 ]])
             }
-            other => Err(format!("Unknown projected graph type: {other}")),
+            other => Err(ProcessorError::Execution(format!("Unknown projected graph type: {other}"))),
         }
     }
 
@@ -818,10 +819,10 @@ struct DropProjectedGraphHandler {
 }
 
 impl StandaloneCallFn for DropProjectedGraphHandler {
-    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, String> {
+    fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let graph_name = extract_arg_string(args, 0)?;
         let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
-        cat.drop_projected_graph(&graph_name)?;
+        cat.drop_projected_graph(&graph_name).map_err(|e| ProcessorError::Execution(format!("{e}")))?;
         Ok(vec![vec![Value::String(format!(
             "Projected graph '{}' dropped",
             graph_name

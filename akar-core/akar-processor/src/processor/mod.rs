@@ -265,7 +265,7 @@ impl QueryProcessor {
                     | TableFunction::CurrentSetting { .. } => Err(format!(
                         "Table function '{}' cannot be executed dynamically (no callback)",
                         func_name
-                    )),
+                    ).into()),
                     TableFunction::Custom { name } if name == "vector_similarity_scan" => {
                         // Evaluate args: [table_name, column_name, query_vector, top_k]
                         // For CALL statement, args are parsed as expressions. We need to evaluate them.
@@ -274,17 +274,17 @@ impl QueryProcessor {
                         self.execute_vector_similarity_scan(tf)
                     }
                     TableFunction::Custom { name } => {
-                        Err(format!("Custom table function '{}' has no registered handler", name))
+                        Err(format!("Custom table function '{}' has no registered handler", name).into())
                     }
                 }
             } else {
-                Err(format!("Table function '{}' not found", func_name))
+                Err(format!("Table function '{}' not found", func_name).into())
             }
         } else {
             Err(format!(
                 "Cannot execute table function '{}': no function registry available",
                 func_name
-            ))
+            ).into())
         }
     }
 

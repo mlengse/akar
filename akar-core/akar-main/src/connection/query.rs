@@ -3,6 +3,7 @@ use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
 use akar_binder::Binder;
 use akar_binder::bound_statement::BoundStatement;
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_optimizer::Optimizer;
 use akar_parser::parse;
@@ -245,7 +246,7 @@ impl Connection {
         // schema_ddl_fn: created before query_fn/subquery_fn so they can capture it
         let db_sddl = db.clone();
         let schema_ddl_fn: akar_processor::processor::SchemaDdlFn = Arc::new(
-            move |op: akar_processor::processor::SchemaDdlOp| -> Result<String, String> {
+            move |op: akar_processor::processor::SchemaDdlOp| -> Result<String, ProcessorError> {
                 match op {
                     akar_processor::processor::SchemaDdlOp::CreateSequence {
                         name,
@@ -264,10 +265,10 @@ impl Connection {
                                 if if_not_exists {
                                     Ok(format!("Sequence '{}' already exists", name))
                                 } else {
-                                    Err(format!("Sequence '{}' already exists", name))
+                                    Err(ProcessorError::Execution(format!("Sequence '{}' already exists", name)))
                                 }
                             }
-                            other => Err(format!("Failed to create sequence: {:?}", other)),
+                            other => Err(ProcessorError::Execution(format!("Failed to create sequence: {:?}", other))),
                         }
                     }
                     akar_processor::processor::SchemaDdlOp::DropSequence { name, if_exists } => {
@@ -278,10 +279,10 @@ impl Connection {
                                 if if_exists {
                                     Ok(format!("Sequence '{}' not found", name))
                                 } else {
-                                    Err(format!("Sequence '{}' not found", name))
+                                    Err(ProcessorError::Execution(format!("Sequence '{}' not found", name)))
                                 }
                             }
-                            other => Err(format!("Failed to drop sequence: {:?}", other)),
+                            other => Err(ProcessorError::Execution(format!("Failed to drop sequence: {:?}", other))),
                         }
                     }
                     akar_processor::processor::SchemaDdlOp::ExportDatabase {
@@ -411,10 +412,10 @@ impl Connection {
         });
 
         let subquery_fn: Arc<
-            dyn Fn(&akar_parser::ast::Query) -> Result<Vec<akar_common::vector::DataChunk>, String> + Send + Sync,
+            dyn Fn(&akar_parser::ast::Query) -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> + Send + Sync,
         > = Arc::new({
             let schema_ddl_sq = schema_ddl_fn.clone();
-            move |query: &akar_parser::ast::Query| -> Result<Vec<akar_common::vector::DataChunk>, String> {
+            move |query: &akar_parser::ast::Query| -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> {
                 let stmt = akar_parser::ast::Statement::Query(query.clone());
                 let binder = Binder::new(db.catalog.clone());
                 let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
@@ -439,7 +440,7 @@ impl Connection {
 
                 processor
                     .execute(&optimized_plan)
-                    .map_err(|e| format!("Execute error: {e}"))
+                    .map_err(|e| ProcessorError::Execution(format!("Execute error: {e}")))
             }
         });
 

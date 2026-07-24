@@ -1,4 +1,5 @@
 use akar_catalog::Catalog;
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use std::sync::{Arc, Mutex};
 
@@ -8,18 +9,18 @@ use std::sync::{Arc, Mutex};
 /// looking up the named sequence in the catalog.
 pub(crate) fn make_sequence_callback(
     catalog: Arc<Mutex<Catalog>>,
-) -> Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> {
-    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
-        let mut cat = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+) -> Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync> {
+    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, ProcessorError> {
+        let mut cat = catalog.lock().map_err(|e| ProcessorError::Execution(format!("Catalog lock error: {e}")))?;
         if is_nextval {
             match cat.get_sequence_mut(seq_name) {
                 Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
-                None => Err(format!("Sequence '{}' not found", seq_name)),
+                None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
             }
         } else {
             match cat.get_sequence(seq_name) {
                 Some(entry) => Ok(Value::Int64(entry.curr_val())),
-                None => Err(format!("Sequence '{}' not found", seq_name)),
+                None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
             }
         }
     })
