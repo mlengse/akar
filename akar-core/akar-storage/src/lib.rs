@@ -1450,7 +1450,7 @@ mod integration_tests {
 
         // Commit via StorageManager
         let shadow = crate::shadow_file::ShadowFile::new();
-        sm.commit_transaction(&local_storage, &shadow, -1 /* checkpoint */, 1 /* txn_id */)
+        sm.commit_transaction(&local_storage, &shadow, -1 /* checkpoint */, 1 /* txn_id */, None)
             .unwrap();
 
         // Verify data was flushed to the table
@@ -1544,7 +1544,7 @@ mod integration_tests {
         }
 
         let shadow = crate::shadow_file::ShadowFile::new();
-        sm.commit_transaction(&local, &shadow, 0 /* no checkpoint */, 2 /* txn_id */)
+        sm.commit_transaction(&local, &shadow, 0 /* no checkpoint */, 2 /* txn_id */, None)
             .unwrap();
 
         // Verify both rows

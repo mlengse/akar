@@ -12,7 +12,8 @@ pub mod adbc;
 #[cfg(test)]
 mod connection_test;
 
-#[cfg(test)]
+/// Test helpers — shared setup/teardown utilities for all Akar tests.
+/// Always compiled (not cfg(test)-gated) so integration tests in `tests/` can use them.
 pub mod test_helpers;
 
 pub use connection::Connection;
