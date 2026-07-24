@@ -3,39 +3,8 @@
 //! Tests the end-to-end flow: parse → bind → plan → optimize → execute
 //! through the public Database + Connection API.
 
-use akar_main::{Connection, Database, SystemConfig};
-
-/// Create a temporary database for testing.
-fn setup_db() -> (std::sync::Arc<Database>, Connection) {
-    let db = std::sync::Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
-    let conn = Connection::new(&db);
-    (db, conn)
-}
-
-/// Helper: execute a query and assert success.
-fn exec(conn: &Connection, query: &str) -> String {
-    let result = conn.query(query).unwrap();
-    assert!(
-        result.is_success(),
-        "Query failed: {query} → {:?}",
-        result.error_message
-    );
-    result.result_summary()
-}
-
-/// Helper: execute a query and assert it returns an error.
-fn exec_err(conn: &Connection, query: &str) -> String {
-    let result = conn.query(query);
-    match result {
-        Err(e) => e,
-        Ok(r) => {
-            if r.success {
-                panic!("Expected error for query: {query}, got success: {}", r.result_summary());
-            }
-            r.error_message.unwrap_or_else(|| "Unknown error".into())
-        }
-    }
-}
+mod common;
+use common::*;
 
 // ==================== DDL Tests ====================
 

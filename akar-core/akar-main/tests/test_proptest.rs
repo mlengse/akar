@@ -1,12 +1,6 @@
-use akar_main::{Connection, Database, SystemConfig};
+mod common;
+use common::*;
 use proptest::prelude::*;
-
-fn setup_db() -> (tempfile::TempDir, std::sync::Arc<Database>, Connection) {
-    let dir = tempfile::tempdir().unwrap();
-    let db = std::sync::Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).unwrap());
-    let conn = Connection::new(&db);
-    (dir, db, conn)
-}
 
 fn extract_count(conn: &Connection, query: &str) -> i64 {
     let res = conn.query(query).unwrap();

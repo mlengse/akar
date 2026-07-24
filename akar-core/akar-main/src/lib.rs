@@ -12,6 +12,9 @@ pub mod adbc;
 #[cfg(test)]
 mod connection_test;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 pub use connection::Connection;
 pub use database::{Database, SystemConfig};
 pub use prepared_statement::PreparedStatement;

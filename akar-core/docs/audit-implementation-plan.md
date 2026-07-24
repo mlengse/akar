@@ -126,18 +126,15 @@ No integrity checking on WAL records. A bit-flip corrupts data silently.
 
 **Files changed:** `akar-storage/src/wal.rs`, `akar-storage/Cargo.toml`
 
-### 2.3 Handle silent `.set_value().ok()` errors
-**Issue #15** | 100+ locations across processor/storage
+### 2.3 Handle silent `.set_value().ok()` errors ✅ DONE
+**Issue #15** | 12 locations across akar-algo + akar-processor
 
-`set_value` errors are silently discarded. Type mismatches or OOB writes go undetected.
+**Fix (implemented):**
+- All12 `.set_value(...).ok()` calls replaced with `?` (inside closures that return `Result<(), String>`)
+- Pre-existing `wal.rs` compile error fixed: added `use std::io::Read`
+- Removed unused `Deserialize` import and `mut` variable in wal.rs tests
 
-**Fix approach:**
-- Phase A: Audit all `.set_value(...).ok()` call sites (grep shows ~100+)
-- Phase B: For critical paths (write_ops, join, projection), replace `.ok()` with `?`
-- Phase C: For algorithm paths (akar-algo), keep `.ok()` but add debug_assert! in debug builds
-
-**Estimated effort:** 1-2 days
-**Files:** 15+ files across `akar-processor/`, `akar-storage/`, `akar-algo/`
+**Files changed:** `akar-algo/src/lib.rs`, `akar-processor/src/physical/write_ops/recursiveextend.rs`, `akar-storage/src/wal.rs`
 
 ---
 

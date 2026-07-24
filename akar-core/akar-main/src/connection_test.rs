@@ -11,35 +11,7 @@
 
 #[cfg(test)]
 mod integration_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use akar_common::types::Value;
-    use std::sync::Arc;
-
-    /// Create a temporary Database and Connection for testing.
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    /// Helper: execute a query and return whether it succeeded.
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
-
-    /// Helper: extract all values from the first column of a query result.
-    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
-        let result = conn.query(sql).unwrap();
-        result
-            .chunks
-            .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
-            .collect()
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_sequence_nextval_currval_query_e2e() {
@@ -558,19 +530,6 @@ mod integration_tests {
 
     // ==================== Auto-Checkpoint Tests ====================
 
-    /// Create a Database with a specific checkpoint_threshold.
-    fn setup_db_with_checkpoint(threshold: i64) -> (Arc<Database>, Connection, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig {
-            checkpoint_threshold: threshold,
-            ..SystemConfig::default()
-        };
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (database, conn, dir)
-    }
-
     #[test]
     fn test_auto_checkpoint_default_triggers_after_write() {
         let (db, conn, _dir) = setup_db_with_checkpoint(-1);
@@ -652,32 +611,7 @@ mod integration_tests {
 
 #[cfg(test)]
 mod merge_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use akar_common::types::Value;
-    use std::sync::Arc;
-
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
-
-    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
-        let result = conn.query(sql).unwrap();
-        result
-            .chunks
-            .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
-            .collect()
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_merge_creates_new_node() {
@@ -768,26 +702,7 @@ mod merge_tests {
 
 #[cfg(test)]
 mod call_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use std::sync::Arc;
-
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
-
-    fn query_result(conn: &Connection, sql: &str) -> Result<crate::query_result::QueryResult, String> {
-        conn.query(sql)
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_call_show_tables_empty() {
@@ -854,32 +769,7 @@ mod call_tests {
 
 #[cfg(test)]
 mod create_dml_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use akar_common::types::Value;
-    use std::sync::Arc;
-
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
-
-    fn query_column(conn: &Connection, sql: &str) -> Vec<Value> {
-        let result = conn.query(sql).unwrap();
-        result
-            .chunks
-            .iter()
-            .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
-            .collect()
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_create_dml_basic() {
@@ -1001,22 +891,7 @@ mod create_dml_tests {
 
 #[cfg(test)]
 mod foreach_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use std::sync::Arc;
-
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_foreach_parse_only() {
@@ -1052,22 +927,7 @@ mod foreach_tests {
 
 #[cfg(test)]
 mod var_length_path_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use std::sync::Arc;
-
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
+    use crate::test_helpers::*;
 
     #[test]
     fn test_var_length_path_parse() {
@@ -1098,24 +958,7 @@ mod var_length_path_tests {
 
 #[cfg(test)]
 mod subquery_tests {
-    use crate::connection::Connection;
-    use crate::database::{Database, SystemConfig};
-    use std::sync::Arc;
-
-    #[allow(dead_code)]
-    fn setup_db() -> (tempfile::TempDir, Arc<Database>, Connection) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_db");
-        let config = SystemConfig::default();
-        let database = Arc::new(Database::new(db_path, config).unwrap());
-        let conn = Connection::new(&database);
-        (dir, database, conn)
-    }
-
-    #[allow(dead_code)]
-    fn exec_ok(conn: &Connection, sql: &str) -> Result<String, String> {
-        conn.query(sql).map(|r| r.to_string())
-    }
+    use crate::test_helpers::*;
 
     // Additional subquery tests would go here
 }

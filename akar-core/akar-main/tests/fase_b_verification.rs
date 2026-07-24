@@ -7,40 +7,8 @@
 //! 4. FOREACH (x IN [1,2,3] | CREATE (n:Num {val: x}))
 //! 5. MATCH (a:Person)-[*1..3]->(b:Person) RETURN a.name, b.name
 
-use akar_main::{Connection, Database, SystemConfig};
-
-/// Create a temporary database for testing.
-fn setup_db() -> (std::sync::Arc<Database>, Connection) {
-    let db = std::sync::Arc::new(Database::new(":memory:", SystemConfig::default()).unwrap());
-    let conn = Connection::new(&db);
-    (db, conn)
-}
-
-/// Helper: execute a query and assert success. Returns the result for inspection.
-fn exec(conn: &Connection, query: &str) -> String {
-    let result = conn.query(query).unwrap();
-    assert!(
-        result.is_success(),
-        "Query failed: {query} → {:?}",
-        result.error_message
-    );
-    result.result_summary()
-}
-
-/// Helper: execute a query and return the raw QueryResult.
-fn query(conn: &Connection, sql: &str) -> akar_main::QueryResult {
-    conn.query(sql).unwrap()
-}
-
-/// Helper: extract values from the first column of a query result.
-fn query_column(conn: &Connection, sql: &str) -> Vec<akar_common::types::Value> {
-    let result = conn.query(sql).unwrap();
-    result
-        .chunks
-        .iter()
-        .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(0, i)))
-        .collect()
-}
+mod common;
+use common::*;
 
 // ============================================================================
 // Verification 1: MERGE
