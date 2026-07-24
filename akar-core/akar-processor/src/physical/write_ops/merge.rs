@@ -129,7 +129,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
                         if let Some((_, expr)) = self.properties.iter().find(|(n, _)| n == col_name) {
                             new_values.push(eval_const(expr, Some(chunk), row));
                         } else if table_info.columns[col_idx].is_primary_key {
-                            return Err(format!("MERGE CREATE requires primary key '{}'", col_name));
+                            return Err(format!("MERGE CREATE requires primary key '{}'", col_name).into());
                         } else {
                             new_values.push(Value::Null);
                         }

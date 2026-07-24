@@ -1,12 +1,13 @@
 //! Core types and traits for physical operators.
 
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// Result of executing a physical operator.
-pub type OperatorResult = Result<Vec<DataChunk>, String>;
+pub type OperatorResult = Result<Vec<DataChunk>, ProcessorError>;
 
 pub type HashJoinBucket = Vec<(Value, Vec<(usize, usize)>)>;
 pub type HashJoinTable = HashMap<u64, HashJoinBucket>;
@@ -70,7 +71,7 @@ impl PhysicalOperatorExec for PhysicalSemiMasker {
                 "SemiMasker: key_column {} out of bounds ({} fields)",
                 self.key_column,
                 chunk.fields.len()
-            ));
+            ).into());
         }
         let field = &chunk.fields[self.key_column];
         for i in 0..chunk.size {

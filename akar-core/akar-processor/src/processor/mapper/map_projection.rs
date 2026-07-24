@@ -2,6 +2,7 @@ use super::ExecutionContext;
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use crate::processor::projection_helper::resolve_projection_column_index;
+use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
@@ -26,7 +27,7 @@ pub fn map_and_execute_projection(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Projection(p) => {
             let input = if p.children.is_empty() {
@@ -190,6 +191,6 @@ pub fn map_and_execute_projection(
             }
             Ok(results)
         }
-        _ => Err(format!("Not a projection/filter operator: {:?}", op)),
+        _ => Err(format!("Not a projection/filter operator: {:?}", op).into()),
     }
 }

@@ -12,6 +12,7 @@
 //! - List/Map:        evaluated via list_creation/map_creation scalar functions
 
 use akar_common::arrow_vector::{ArrowVector, VectorAccess};
+use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, ScalarFunction};
@@ -20,8 +21,8 @@ use akar_parser::ast::{BinaryOp, Constant, Expression, Query, UnaryOp};
 use arrow::array::ArrayRef;
 use std::sync::{Arc, Mutex};
 
-pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, String> + Send + Sync>;
-pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync>;
+pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, ProcessorError> + Send + Sync>;
+pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync>;
 
 /// Evaluates expressions against DataChunks using the function registry.
 impl std::fmt::Debug for ExpressionEvaluator {
@@ -62,7 +63,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a subquery by calling the stored callback.
-    fn evaluate_subquery(&self, query: &Query) -> Result<Vec<DataChunk>, String> {
+    fn evaluate_subquery(&self, query: &Query) -> Result<Vec<DataChunk>, ProcessorError> {
         if let Some(ref f) = self.subquery_fn {
             f(query)
         } else {
@@ -73,12 +74,12 @@ impl ExpressionEvaluator {
     /// Evaluate an expression for every row in the chunk, returning an ArrowVector
     /// directly. Delegates to evaluate_arrow which uses Arrow compute kernels for
     /// the hot path (comparisons, arithmetic, boolean ops).
-    pub fn evaluate_to_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
+    pub fn evaluate_to_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, ProcessorError> {
         self.evaluate_arrow(expr, chunk)
     }
 
     /// Evaluate an expression for every row in the chunk, returning a ValueVector.
-    pub fn evaluate(&self, expr: &Expression, chunk: &DataChunk) -> Result<ValueVector, String> {
+    pub fn evaluate(&self, expr: &Expression, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         match expr {
             Expression::Constant(c) => self.evaluate_constant(c, chunk.size),
             Expression::Variable(name) => self.evaluate_variable(name, chunk),
@@ -132,7 +133,7 @@ impl ExpressionEvaluator {
     /// Evaluate an expression returning an ArrowVector directly.
     /// For operations supported by Arrow compute kernels (comparisons,
     /// arithmetic, boolean), this is vectorized and avoids Value enum boxing.
-    pub fn evaluate_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, String> {
+    pub fn evaluate_arrow(&self, expr: &Expression, chunk: &DataChunk) -> Result<ArrowVector, ProcessorError> {
         match expr {
             Expression::Constant(c) => self.evaluate_arrow_constant(c, chunk.size),
             Expression::Variable(name) => self.evaluate_arrow_variable(name, chunk),
@@ -149,7 +150,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a constant directly as ArrowVector using typed Arrow builders.
-    fn evaluate_arrow_constant(&self, c: &Constant, size: usize) -> Result<ArrowVector, String> {
+    fn evaluate_arrow_constant(&self, c: &Constant, size: usize) -> Result<ArrowVector, ProcessorError> {
         match c {
             Constant::Null => {
                 let mut builder = arrow::array::Int64Builder::with_capacity(size);
@@ -190,17 +191,17 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a variable expression, converting the ValueVector to ArrowVector.
-    fn evaluate_arrow_variable(&self, name: &str, chunk: &DataChunk) -> Result<ArrowVector, String> {
+    fn evaluate_arrow_variable(&self, name: &str, chunk: &DataChunk) -> Result<ArrowVector, ProcessorError> {
         let idx = if let Ok(idx) = name.parse::<usize>() {
             idx
         } else if !chunk.field_names.is_empty() {
             if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
                 idx
             } else {
-                return Err(format!("Variable '{}' not found in field_names", name));
+                return Err(format!("Variable '{}' not found in field_names", name).into());
             }
         } else {
-            return Err(format!("Variable '{}' not found (chunk has no field_names)", name));
+            return Err(format!("Variable '{}' not found (chunk has no field_names)", name).into());
         };
 
         let field = chunk
@@ -216,7 +217,7 @@ impl ExpressionEvaluator {
         obj: &Expression,
         prop: &str,
         chunk: &DataChunk,
-    ) -> Result<ArrowVector, String> {
+    ) -> Result<ArrowVector, ProcessorError> {
         let qualified_prop = if let Expression::Variable(var_name) = obj {
             format!("{}.{}", var_name, prop)
         } else {
@@ -243,7 +244,7 @@ impl ExpressionEvaluator {
         left: &Expression,
         right: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ArrowVector, String> {
+    ) -> Result<ArrowVector, ProcessorError> {
         match op {
             BinaryOp::In | BinaryOp::NotIn => {
                 let legacy = self.evaluate_in_op(op, left, right, chunk)?;
@@ -278,7 +279,7 @@ impl ExpressionEvaluator {
             BinaryOp::And => "and",
             BinaryOp::Or => "or",
             BinaryOp::Xor => "xor",
-            _ => return Err(format!("Unsupported binary op: {:?}", op)),
+            _ => return Err(format!("Unsupported binary op: {:?}", op).into()),
         };
 
         let left_arrow = self.evaluate_arrow(left, chunk)?;
@@ -300,7 +301,7 @@ impl ExpressionEvaluator {
         op: &UnaryOp,
         inner: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ArrowVector, String> {
+    ) -> Result<ArrowVector, ProcessorError> {
         match op {
             UnaryOp::Not => {
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
@@ -330,7 +331,7 @@ impl ExpressionEvaluator {
     }
 
     /// Apply an Arrow binary compute kernel.
-    fn apply_arrow_kernel(&self, name: &str, left: &ArrowVector, right: &ArrowVector) -> Result<ArrowVector, String> {
+    fn apply_arrow_kernel(&self, name: &str, left: &ArrowVector, right: &ArrowVector) -> Result<ArrowVector, ProcessorError> {
         use arrow::compute::kernels::boolean::{and_kleene, or_kleene};
         use arrow::compute::kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
         use arrow::compute::kernels::numeric::{add, div, mul, rem, sub};
@@ -397,7 +398,7 @@ impl ExpressionEvaluator {
                 let not_l_and_r = and_kleene(&not_l, r).map_err(|e| format!("Arrow xor/and failed: {e}"))?;
                 Arc::new(or_kleene(&l_and_not_r, &not_l_and_r).map_err(|e| format!("Arrow xor/or failed: {e}"))?)
             }
-            _ => return Err(format!("Unknown binary kernel: {name}")),
+            _ => return Err(format!("Unknown binary kernel: {name}").into()),
         };
 
         let phys_type = match name {
@@ -409,7 +410,7 @@ impl ExpressionEvaluator {
     }
 
     /// Apply an Arrow unary compute kernel.
-    fn apply_arrow_unary_kernel(&self, name: &str, arr: &ArrowVector) -> Result<ArrowVector, String> {
+    fn apply_arrow_unary_kernel(&self, name: &str, arr: &ArrowVector) -> Result<ArrowVector, ProcessorError> {
         use arrow::compute::kernels::boolean::{is_not_null, is_null, not};
         use arrow::compute::kernels::numeric::neg;
 
@@ -425,7 +426,7 @@ impl ExpressionEvaluator {
             "negate" => Arc::new(neg(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
             "is_null" => Arc::new(is_null(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
             "is_not_null" => Arc::new(is_not_null(&*arr.array).map_err(|e| format!("Arrow {name} failed: {e}"))?),
-            _ => return Err(format!("Unknown unary kernel: {name}")),
+            _ => return Err(format!("Unknown unary kernel: {name}").into()),
         };
 
         let phys_type = if matches!(name, "is_null" | "is_not_null" | "not") {
@@ -445,7 +446,7 @@ impl ExpressionEvaluator {
         name: &str,
         args: &[Expression],
         chunk: &DataChunk,
-    ) -> Result<ArrowVector, String> {
+    ) -> Result<ArrowVector, ProcessorError> {
         // Lambda-based functions use complex control flow — stick with evaluate
         if let Some(_lambda) = self.extract_lambda_arg(args) {
             match name {
@@ -464,7 +465,7 @@ impl ExpressionEvaluator {
             .collect::<Result<Vec<_>, _>>()?;
 
         if arg_arrows.is_empty() {
-            return Err(format!("Function '{}' requires at least one argument", name));
+            return Err(format!("Function '{}' requires at least one argument", name).into());
         }
 
         let num_rows = arg_arrows[0].size();
@@ -476,7 +477,7 @@ impl ExpressionEvaluator {
         };
         let func = match func {
             Some(f) => f,
-            None => return Err(format!("Unknown function: '{}'", name)),
+            None => return Err(format!("Unknown function: '{}'", name).into()),
         };
 
         // SequenceOp needs the callback — delegate to evaluate
@@ -528,14 +529,14 @@ impl ExpressionEvaluator {
         if row_results.iter().all(|v| matches!(v, Value::Null))
             && let Some(e) = first_error
         {
-            return Err(e);
+            return Err(e.into());
         }
 
         Ok(arrow_result)
     }
 
     /// Evaluate a constant expression — returns a vector filled with the constant value.
-    fn evaluate_constant(&self, c: &Constant, size: usize) -> Result<ValueVector, String> {
+    fn evaluate_constant(&self, c: &Constant, size: usize) -> Result<ValueVector, ProcessorError> {
         let val: Value = match c {
             Constant::Null => Value::Null,
             Constant::Bool(b) => Value::Bool(*b),
@@ -558,7 +559,7 @@ impl ExpressionEvaluator {
     /// 1. Numeric index (binder resolves names to positions, e.g., "0", "1")
     /// 2. Chunk field names (e.g., "title", "d.title")
     /// 3. Falls back to the first field (legacy compatibility) if no match found.
-    fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_variable(&self, name: &str, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         if let Ok(idx) = name.parse::<usize>() {
             if idx >= chunk.fields.len() {
                 return Err(format!(
@@ -566,7 +567,7 @@ impl ExpressionEvaluator {
                     name,
                     idx,
                     chunk.fields.len()
-                ));
+                ).into());
             }
             let phys_type = chunk.field_types[idx];
             let mut v = ValueVector::new(phys_type, chunk.size);
@@ -619,7 +620,7 @@ impl ExpressionEvaluator {
     ///
     /// Falls back to evaluating the object expression (legacy behaviour) if no
     /// `field_names` are available on the chunk.
-    fn evaluate_property_access(&self, obj: &Expression, prop: &str, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_property_access(&self, obj: &Expression, prop: &str, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         // Build the qualified property name (e.g., "t.name")
         let qualified_prop = if let Expression::Variable(var_name) = obj {
             format!("{}.{}", var_name, prop)
@@ -658,7 +659,7 @@ impl ExpressionEvaluator {
         name: &str,
         args: &[Expression],
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         // Handle lambda-based list functions at expression level.
         // These cannot go through the normal scalar function pipeline because
         // lambda expressions are not Values and must be evaluated per-element.
@@ -678,7 +679,7 @@ impl ExpressionEvaluator {
             .collect::<Result<Vec<_>, _>>()?;
 
         if arg_vectors.is_empty() {
-            return Err(format!("Function '{}' requires at least one argument", name));
+            return Err(format!("Function '{}' requires at least one argument", name).into());
         }
 
         let num_rows = arg_vectors[0].size();
@@ -691,7 +692,7 @@ impl ExpressionEvaluator {
 
         let func = match func {
             Some(f) => f,
-            None => return Err(format!("Unknown function: '{}'", name)),
+            None => return Err(format!("Unknown function: '{}'", name).into()),
         };
 
         // Handle SequenceOp (nextval/currval) via callback with catalog access
@@ -774,7 +775,7 @@ impl ExpressionEvaluator {
         if row_results.iter().all(|v| matches!(v, Value::Null))
             && let Some(e) = first_error
         {
-            return Err(e);
+            return Err(e.into());
         }
 
         Ok(result_vec)
@@ -787,7 +788,7 @@ impl ExpressionEvaluator {
         left: &Expression,
         right: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         // Map AST BinaryOp to a scalar function name
         let func_name = match op {
             BinaryOp::Add => "+",
@@ -822,7 +823,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a unary operation.
-    fn evaluate_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         match op {
             UnaryOp::Not => self.evaluate_function_call("NOT", std::slice::from_ref(inner), chunk),
             UnaryOp::Negate => self.evaluate_function_call("-", std::slice::from_ref(inner), chunk),
@@ -858,7 +859,7 @@ impl ExpressionEvaluator {
         left: &Expression,
         right: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         let left_arr = self.evaluate_arrow(left, chunk)?;
         let num_rows = chunk.size;
         let mut result = ValueVector::new(akar_common::types::PhysicalTypeID::Bool, num_rows);
@@ -913,7 +914,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a `CASE [subject] WHEN ... THEN ... [ELSE ...] END` expression.
-    fn evaluate_case(&self, case_expr: &akar_parser::ast::CaseExpr, chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_case(&self, case_expr: &akar_parser::ast::CaseExpr, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         let num_rows = chunk.size;
         // Evaluate subject (if any)
         let subject_vec = if let Some(subj) = &case_expr.subject {
@@ -974,7 +975,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a list literal expression.
-    fn evaluate_list_literal(&self, items: &[Expression], chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_list_literal(&self, items: &[Expression], chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         if items.is_empty() {
             let mut v = ValueVector::new(akar_common::types::PhysicalTypeID::List, chunk.size);
             v.resize(chunk.size);
@@ -1008,7 +1009,7 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a map literal expression.
-    fn evaluate_map_literal(&self, items: &[(String, Expression)], chunk: &DataChunk) -> Result<ValueVector, String> {
+    fn evaluate_map_literal(&self, items: &[(String, Expression)], chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         let num_rows = chunk.size;
         let mut result_vec = ValueVector::new(akar_common::types::PhysicalTypeID::Struct, num_rows);
         result_vec.resize(num_rows);
@@ -1040,7 +1041,7 @@ impl ExpressionEvaluator {
         _var_name: &str,
         predicate: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         // Evaluate the list expression to get a ValueVector
         let list_vec = self.evaluate(list, chunk)?;
         let num_rows = chunk.size;
@@ -1111,7 +1112,7 @@ impl ExpressionEvaluator {
         args: &[Expression],
         lambda: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         let list_expr = args
             .iter()
             .find(|a| !matches!(a, Expression::Lambda { .. }))
@@ -1171,7 +1172,7 @@ impl ExpressionEvaluator {
         args: &[Expression],
         lambda: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         let list_expr = args
             .iter()
             .find(|a| !matches!(a, Expression::Lambda { .. }))
@@ -1238,7 +1239,7 @@ impl ExpressionEvaluator {
         args: &[Expression],
         lambda: &Expression,
         chunk: &DataChunk,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         let list_expr = args
             .iter()
             .find(|a| !matches!(a, Expression::Lambda { .. }))
@@ -1448,7 +1449,7 @@ fn build_arrow_from_values(
     values: &[Value],
     phys_type: PhysicalTypeID,
     num_rows: usize,
-) -> Result<ArrowVector, String> {
+) -> Result<ArrowVector, ProcessorError> {
     match phys_type {
         PhysicalTypeID::Bool => {
             let mut builder = arrow::array::BooleanBuilder::with_capacity(num_rows);
@@ -1535,10 +1536,10 @@ impl ExpressionEvaluator {
         func: &ScalarFunction,
         arg_vectors: &[ValueVector],
         num_rows: usize,
-    ) -> Result<ValueVector, String> {
+    ) -> Result<ValueVector, ProcessorError> {
         let is_nextval = match func {
             ScalarFunction::SequenceOp { is_nextval } => *is_nextval,
-            _ => return Err(format!("Internal error: expected SequenceOp for '{}'", name)),
+            _ => return Err(format!("Internal error: expected SequenceOp for '{}'", name).into()),
         };
 
         let seq_fn = self
@@ -1737,7 +1738,7 @@ mod tests {
         state.lock().unwrap().insert("my_seq".to_string(), 10_i64);
 
         let state_for_fn = state.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync> =
             Arc::new(move |seq_name: &str, is_nextval: bool| {
                 let mut map = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
                 let current = map
@@ -1781,19 +1782,19 @@ mod tests {
         );
         let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
         assert!(
-            err.contains("No sequence callback configured"),
+            err.to_string().contains("No sequence callback configured"),
             "Unexpected error: {err}"
         );
     }
 
     #[test]
     fn test_sequence_requires_string_arg() {
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync> =
             Arc::new(|_seq_name: &str, _is_nextval: bool| Ok(Value::Int64(1)));
         let eval = ExpressionEvaluator::new(make_registry()).with_sequence_fn(seq_fn);
 
         let expr = Expression::FunctionCall("nextval".into(), vec![Expression::Constant(Constant::Integer(42))]);
         let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
-        assert!(err.contains("requires a string argument"), "Unexpected error: {err}");
+        assert!(err.to_string().contains("requires a string argument"), "Unexpected error: {err}");
     }
 }

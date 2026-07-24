@@ -191,7 +191,7 @@ mod tests {
         let state = Arc::new(Mutex::new(HashMap::new()));
         state.lock().unwrap().insert("s".to_string(), 1_i64);
         let state_for_fn = state.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
+        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, akar_common::error::ProcessorError> + Send + Sync> =
             Arc::new(move |seq_name: &str, is_nextval: bool| {
                 let mut m = state_for_fn.lock().map_err(|e| format!("Lock error: {e}"))?;
                 let v = m
@@ -251,7 +251,7 @@ mod tests {
 
         let err = proc.execute(&plan).unwrap_err();
         assert!(
-            err.contains("No sequence callback configured"),
+            err.to_string().contains("No sequence callback configured"),
             "Unexpected error: {err}"
         );
     }
@@ -449,7 +449,7 @@ mod tests {
         let build_chunk = DataChunk::new(vec![build]);
         let probe_chunk = DataChunk::new(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
-        assert!(result.is_empty()); // Empty build GåÆ no matches
+        assert!(result.is_empty()); // Empty build Gï¿½ï¿½ no matches
     }
 
     // ==================== Edge Case Tests ====================
@@ -477,14 +477,14 @@ mod tests {
         let build_chunk = DataChunk::new(vec![build]);
         let probe_chunk = DataChunk::new(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
-        // Should match 1GåÆ1 (1 row) and 3GåÆ3 (1 row)
+        // Should match 1Gï¿½ï¿½1 (1 row) and 3Gï¿½ï¿½3 (1 row)
         // NULLs should NOT match each other
         assert!(!result.is_empty(), "Expected at least one matching row");
     }
 
     #[test]
     fn test_hash_join_all_null_keys() {
-        // When both sides have all NULL keys GåÆ no matches
+        // When both sides have all NULL keys Gï¿½ï¿½ no matches
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
@@ -591,7 +591,7 @@ mod tests {
     fn test_semi_mask_uninitialized_passes_all() {
         // An uninitialized mask should pass all rows (initialized = false)
         let mask = NodeSemiMask::new(0);
-        // Don't call finalize GÇö mask is not initialized
+        // Don't call finalize Gï¿½ï¿½ mask is not initialized
 
         assert!(mask.is_masked(999), "Uninitialized mask should pass all offsets");
     }
@@ -624,7 +624,7 @@ mod tests {
         let probe_chunk = DataChunk::new(vec![probe_v]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
 
-        // Should match 5GåÆ5 and 15GåÆ15 (2 rows). 35 has no build match.
+        // Should match 5Gï¿½ï¿½5 and 15Gï¿½ï¿½15 (2 rows). 35 has no build match.
         assert!(!result.is_empty(), "Expected 2 matching rows");
 
         // Verify mask collected build-side keys via underlying shared set
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn test_limit_offset_exceeds_total() {
-        // OFFSET larger than total rows GåÆ empty result
+        // OFFSET larger than total rows Gï¿½ï¿½ empty result
         let limit = PhysicalLimit { limit: 5, offset: 100 };
         let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
         for i in 0..5 {
@@ -868,7 +868,7 @@ mod tests {
         let right = vec![DataChunk::new(vec![rv])];
         let result = merge_union_chunks(left, right, false).unwrap();
         assert_eq!(result.len(), 1);
-        // Distinct values: {1, 2, 3, 4} GåÆ 4 rows
+        // Distinct values: {1, 2, 3, 4} Gï¿½ï¿½ 4 rows
         assert_eq!(result[0].size, 4);
     }
 
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn test_union_distinct_all_duplicates() {
-        // All rows identical GåÆ single row after dedup
+        // All rows identical Gï¿½ï¿½ single row after dedup
         let mut lv = ValueVector::new(PhysicalTypeID::Int64, 2);
         lv.set_i64(0, 1);
         lv.set_i64(1, 1);
@@ -981,7 +981,7 @@ mod tests {
         let right = vec![make_i64_chunk(&[4, 5])];
         let result = cross.execute_binary(&left, &right).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].size, 6); // 3 +ù 2 = 6
+        assert_eq!(result[0].size, 6); // 3 +ï¿½ 2 = 6
         assert_eq!(result[0].field(0).get_i64(0), Some(1));
         assert_eq!(result[0].field(0).get_i64(1), Some(1));
         assert_eq!(result[0].field(0).get_i64(2), Some(2));
@@ -1011,14 +1011,14 @@ mod tests {
 
         let result = cross.execute_binary(&[left], &[right]).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].size, 4); // 2 +ù 2 = 4
-        // Row 0: left(1,"a") +ù right(10) GåÆ [1, "a", 10]
+        assert_eq!(result[0].size, 4); // 2 +ï¿½ 2 = 4
+        // Row 0: left(1,"a") +ï¿½ right(10) Gï¿½ï¿½ [1, "a", 10]
         assert_eq!(result[0].field(0).get_i64(0), Some(1));
-        // Row 1: left(1,"a") +ù right(20) GåÆ [1, "a", 20]
+        // Row 1: left(1,"a") +ï¿½ right(20) Gï¿½ï¿½ [1, "a", 20]
         assert_eq!(result[0].field(0).get_i64(1), Some(1));
-        // Row 2: left(2,"b") +ù right(10) GåÆ [2, "b", 10]
+        // Row 2: left(2,"b") +ï¿½ right(10) Gï¿½ï¿½ [2, "b", 10]
         assert_eq!(result[0].field(0).get_i64(2), Some(2));
-        // Row 3: left(2,"b") +ù right(20) GåÆ [2, "b", 20]
+        // Row 3: left(2,"b") +ï¿½ right(20) Gï¿½ï¿½ [2, "b", 20]
         assert_eq!(result[0].field(0).get_i64(3), Some(2));
         // Column 2 should have right-side values: [10, 20, 10, 20]
         assert_eq!(result[0].field(2).get_i64(0), Some(10));
@@ -1053,7 +1053,7 @@ mod tests {
         // Right: one chunk [4,5]
         let right = vec![make_i64_chunk(&[4, 5])];
         let result = cross.execute_binary(&left, &right).unwrap();
-        assert_eq!(result[0].size, 6); // 3 +ù 2 = 6
+        assert_eq!(result[0].size, 6); // 3 +ï¿½ 2 = 6
     }
 
     // ==================== SemiJoin / AntiJoin Tests ====================
@@ -1139,7 +1139,7 @@ mod tests {
         let build_chunks = vec![build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // Keys 2 and 3 exist in both build sides GåÆ both should produce output
+        // Keys 2 and 3 exist in both build sides Gï¿½ï¿½ both should produce output
         assert!(!result.is_empty(), "Expected non-empty result");
         assert!(result[0].size > 0, "Expected at least one output row");
     }
@@ -1158,7 +1158,7 @@ mod tests {
         let build_chunks = vec![build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // No key appears in ALL build sides GåÆ empty
+        // No key appears in ALL build sides Gï¿½ï¿½ empty
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -1172,11 +1172,11 @@ mod tests {
         // Build sides share key 3, but probe doesn't probe for 3
         let build1 = make_i64_chunk(&[1, 3]);
         let build2 = make_i64_chunk(&[3, 5]);
-        let probe = make_i64_chunk(&[1, 5]); // probes for 1 and 5 GÇö only 1 is in build1, only 5 is in build2
+        let probe = make_i64_chunk(&[1, 5]); // probes for 1 and 5 Gï¿½ï¿½ only 1 is in build1, only 5 is in build2
         let build_chunks = vec![build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // No key appears in ALL build sides GåÆ empty (1 not in build2, 5 not in build1)
+        // No key appears in ALL build sides Gï¿½ï¿½ empty (1 not in build2, 5 not in build1)
         assert!(result.is_empty() || result[0].size == 0);
     }
 
@@ -1187,7 +1187,7 @@ mod tests {
             probe_key_col: 0,
             build_key_col: 0,
         };
-        // Single build side GÇö acts like semi-join
+        // Single build side Gï¿½ï¿½ acts like semi-join
         let build = make_i64_chunk(&[2, 3]);
         let probe = make_i64_chunk(&[1, 2, 3, 4]);
         let build_chunks = vec![build];
@@ -1210,7 +1210,7 @@ mod tests {
         let build_chunks = vec![build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // Empty build side GåÆ empty result
+        // Empty build side Gï¿½ï¿½ empty result
         assert!(result.is_empty() || result[0].size == 0);
     }
 

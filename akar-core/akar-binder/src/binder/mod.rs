@@ -4,12 +4,13 @@
 
 use crate::bound_statement::*;
 use akar_catalog::{Catalog, CatalogColumn, CatalogResult, IndexType};
+use akar_common::error::BinderError;
 use akar_common::types::LogicalTypeID;
 use akar_parser::ast::{Clause, Expression, Statement, *};
 use std::sync::{Arc, Mutex};
 
 /// Resolve SET clause items against the catalog to find column info.
-fn resolve_set_items(catalog: &Catalog, items: &[SetItem]) -> Result<Vec<BoundSetItem>, String> {
+fn resolve_set_items(catalog: &Catalog, items: &[SetItem]) -> Result<Vec<BoundSetItem>, BinderError> {
     let mut result = Vec::new();
     for item in items {
         // Expect property expression like `n.property_name = value`
@@ -18,7 +19,7 @@ fn resolve_set_items(catalog: &Catalog, items: &[SetItem]) -> Result<Vec<BoundSe
                 // Find the variable name by looking at the object
                 let _var_name = match obj.as_ref() {
                     Expression::Variable(v) => v.clone(),
-                    other => return Err(format!("Unsupported SET target: {:?}", other)),
+                    other => return Err(format!("Unsupported SET target: {:?}", other).into()),
                 };
                 // Look up the column in the table schema
                 // We need to find which table this variable belongs to.
@@ -46,11 +47,11 @@ fn resolve_set_items(catalog: &Catalog, items: &[SetItem]) -> Result<Vec<BoundSe
                         });
                     }
                     None => {
-                        return Err(format!("Property '{}' not found in any table", prop_name));
+                        return Err(format!("Property '{}' not found in any table", prop_name).into());
                     }
                 }
             }
-            _ => return Err(format!("Expected property assignment in SET, got: {:?}", item.property)),
+            _ => return Err(format!("Expected property assignment in SET, got: {:?}", item.property).into()),
         }
     }
     Ok(result)
@@ -67,7 +68,7 @@ impl Binder {
         Self { catalog }
     }
 
-    pub fn bind(&self, statement: Statement) -> Result<BoundStatement, String> {
+    pub fn bind(&self, statement: Statement) -> Result<BoundStatement, BinderError> {
         match statement {
             Statement::Query(query) => self.bind_query(query),
             Statement::CreateNodeTable(t) => self.bind_create_node_table(t),
@@ -106,7 +107,7 @@ impl Binder {
     }
 
     /// Map a string type name to LogicalTypeID.
-    pub fn parse_type(type_name: &str) -> Result<LogicalTypeID, String> {
+    pub fn parse_type(type_name: &str) -> Result<LogicalTypeID, BinderError> {
         let upper = type_name.to_uppercase();
 
         // Handle compound types with no child-type tracking (parse only)
@@ -147,12 +148,12 @@ impl Binder {
             "UINT128" => Ok(LogicalTypeID::UInt128),
             "JSON" => Ok(LogicalTypeID::Json),
             "TIME" | "DTIME" => Ok(LogicalTypeID::Time),
-            _ => Err(format!("Unknown type: {type_name}")),
+            _ => Err(format!("Unknown type: {type_name}").into()),
         }
     }
 
     /// Parse compression option.
-    pub fn parse_compression(comp: Option<&str>) -> Result<akar_common::enums::CompressionType, String> {
+    pub fn parse_compression(comp: Option<&str>) -> Result<akar_common::enums::CompressionType, BinderError> {
         use akar_common::enums::CompressionType;
         match comp {
             None => Ok(CompressionType::Uncompressed), // Or default based on type
@@ -165,14 +166,14 @@ impl Binder {
                 "STRING_DICTIONARY" => Ok(CompressionType::StringDictionary),
                 "FLOAT" => Ok(CompressionType::Float),
                 "LIST_DELTA" => Ok(CompressionType::ListDelta),
-                _ => Err(format!("Unknown compression type: {s}")),
+                _ => Err(format!("Unknown compression type: {s}").into()),
             },
         }
     }
 
     // ==================== Query Binding ====================
 
-    fn bind_query(&self, query: Query) -> Result<BoundStatement, String> {
+    fn bind_query(&self, query: Query) -> Result<BoundStatement, BinderError> {
         let mut clauses = Vec::new();
         let mut variables: Vec<BoundVariable> = Vec::new();
 
@@ -297,7 +298,7 @@ impl Binder {
         &self,
         m: &MatchClause,
         existing_vars: &[BoundVariable],
-    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), String> {
+    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), BinderError> {
         let mut patterns = Vec::new();
         let mut new_vars = Vec::new();
 
@@ -332,7 +333,7 @@ impl Binder {
         pattern: &Pattern,
         existing_vars: &[BoundVariable],
         allow_existing: bool,
-    ) -> Result<(BoundPattern, Vec<BoundVariable>), String> {
+    ) -> Result<(BoundPattern, Vec<BoundVariable>), BinderError> {
         let mut new_vars = Vec::new();
         let mut node_table_id = None;
         let mut bound_edge = None;
@@ -350,10 +351,10 @@ impl Binder {
                         node_table_id = Some(entry.table_id());
                     }
                     Some(_entry) => {
-                        return Err(format!("'{}' is not a node table", lbl));
+                        return Err(format!("'{}' is not a node table", lbl).into());
                     }
                     None => {
-                        return Err(format!("Table '{}' not found", lbl));
+                        return Err(format!("Table '{}' not found", lbl).into());
                     }
                 }
             }
@@ -369,7 +370,7 @@ impl Binder {
                         }
                         // Don't add to new_vars ΓÇö it's a reference, not a new binding
                     } else {
-                        return Err(format!("Variable '{}' already defined", v));
+                        return Err(format!("Variable '{}' already defined", v).into());
                     }
                 } else {
                     new_vars.push(BoundVariable {
@@ -406,17 +407,17 @@ impl Binder {
                         rel_table_id = Some(entry.table_id());
                     }
                     Some(_) => {
-                        return Err(format!("'{}' is not a rel table", lbl));
+                        return Err(format!("'{}' is not a rel table", lbl).into());
                     }
                     None => {
-                        return Err(format!("Rel table '{}' not found", lbl));
+                        return Err(format!("Rel table '{}' not found", lbl).into());
                     }
                 }
             }
 
             if let Some(ref v) = edge_var {
                 if existing_vars.iter().any(|bv| bv.name == *v) || new_vars.iter().any(|bv| bv.name == *v) {
-                    return Err(format!("Variable '{}' already defined", v));
+                    return Err(format!("Variable '{}' already defined", v).into());
                 }
             }
 
@@ -452,14 +453,14 @@ impl Binder {
 
     // ==================== RETURN Binding ====================
 
-    fn bind_return(&self, r: &ReturnClause, variables: &[BoundVariable]) -> Result<BoundReturnClause, String> {
+    fn bind_return(&self, r: &ReturnClause, variables: &[BoundVariable]) -> Result<BoundReturnClause, BinderError> {
         let mut expressions = Vec::new();
         for item in &r.expressions {
             match &item.expression {
                 Expression::Star => {
                     // Expand * to all variables in scope
                     if variables.is_empty() {
-                        return Err("RETURN or WITH * is not allowed when there are no variables in scope.".to_string());
+                        return Err("RETURN or WITH * is not allowed when there are no variables in scope.".into());
                     }
                     for var in variables {
                         expressions.push(BoundExpression {
@@ -493,7 +494,7 @@ impl Binder {
                             ascending: item.ascending,
                         })
                     })
-                    .collect::<Result<Vec<_>, String>>()
+                    .collect::<Result<Vec<_>, BinderError>>()
             })
             .transpose()?;
         Ok(BoundReturnClause {
@@ -507,14 +508,14 @@ impl Binder {
 
     // ==================== WHERE Binding ====================
 
-    fn bind_where(&self, w: &WhereClause, variables: &[BoundVariable]) -> Result<BoundWhereClause, String> {
+    fn bind_where(&self, w: &WhereClause, variables: &[BoundVariable]) -> Result<BoundWhereClause, BinderError> {
         let resolved = self.resolve_expression(&w.expression, variables)?;
         // WHERE expressions must be boolean
         if resolved.resolved_type != LogicalTypeID::Bool && resolved.resolved_type != LogicalTypeID::Any {
             return Err(format!(
                 "WHERE clause must be boolean, got {:?}",
                 resolved.resolved_type
-            ));
+            ).into());
         }
         Ok(BoundWhereClause { expression: resolved })
     }
@@ -525,7 +526,7 @@ impl Binder {
         &self,
         c: &CreateClause,
         existing_vars: &[BoundVariable],
-    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), String> {
+    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), BinderError> {
         // CREATE patterns follow the same structure as MATCH patterns
         let mut patterns = Vec::new();
         let mut new_vars = Vec::new();
@@ -549,7 +550,7 @@ impl Binder {
 
     // ==================== Expression Resolution ====================
 
-    fn resolve_expression(&self, expr: &Expression, variables: &[BoundVariable]) -> Result<BoundExpression, String> {
+    fn resolve_expression(&self, expr: &Expression, variables: &[BoundVariable]) -> Result<BoundExpression, BinderError> {
         match expr {
             Expression::Constant(c) => {
                 let typ = match c {
@@ -600,7 +601,7 @@ impl Binder {
                             is_constant: false,
                         })
                     } else {
-                        Err(format!("Variable '{}' not in scope", name))
+                        Err(format!("Variable '{}' not in scope", name).into())
                     }
                 }
             }
@@ -628,7 +629,7 @@ impl Binder {
                                         return Err(format!(
                                             "Property '{}' not found on table '{}'",
                                             prop, table_label
-                                        ));
+                                        ).into());
                                     }
                                 }
                             } else {
@@ -652,7 +653,7 @@ impl Binder {
                 })
             }
             Expression::FunctionCall(name, args) => {
-                let resolved_args: Result<Vec<BoundExpression>, String> =
+                let resolved_args: Result<Vec<BoundExpression>, BinderError> =
                     args.iter().map(|a| self.resolve_expression(a, variables)).collect();
                 let _args = resolved_args?;
                 let return_type = match name.to_uppercase().as_str() {
@@ -723,7 +724,7 @@ impl Binder {
                 })
             }
             Expression::List(items) => {
-                let resolved: Result<Vec<BoundExpression>, String> =
+                let resolved: Result<Vec<BoundExpression>, BinderError> =
                     items.iter().map(|i| self.resolve_expression(i, variables)).collect();
                 resolved?;
                 Ok(BoundExpression {
@@ -827,7 +828,7 @@ impl Binder {
 
     // ==================== DDL Binding ====================
 
-    fn bind_create_node_table(&self, t: CreateNodeTable) -> Result<BoundStatement, String> {
+    fn bind_create_node_table(&self, t: CreateNodeTable) -> Result<BoundStatement, BinderError> {
         if t.name.is_empty() {
             return Err("Table name cannot be empty".into());
         }
@@ -851,7 +852,7 @@ impl Binder {
 
         // Verify primary key exists
         if !columns.iter().any(|c| c.is_primary_key) {
-            return Err(format!("Primary key column '{}' not found in columns", t.primary_key));
+            return Err(format!("Primary key column '{}' not found in columns", t.primary_key).into());
         }
 
         // Register with catalog
@@ -859,7 +860,7 @@ impl Binder {
         match catalog.create_node_table(t.name.clone(), columns.clone()) {
             CatalogResult::Created { .. } => {}
             CatalogResult::AlreadyExists => {
-                return Err(format!("Table '{}' already exists", t.name));
+                return Err(format!("Table '{}' already exists", t.name).into());
             }
             _ => return Err("Failed to create table".into()),
         }
@@ -871,7 +872,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_vector_index(&self, v: akar_parser::ast::CreateVectorIndex) -> Result<BoundStatement, String> {
+    fn bind_create_vector_index(&self, v: akar_parser::ast::CreateVectorIndex) -> Result<BoundStatement, BinderError> {
         if v.index_name.is_empty() {
             return Err("Index name cannot be empty".into());
         }
@@ -894,7 +895,7 @@ impl Binder {
             return Err(format!(
                 "Column '{}' not found in table '{}'",
                 v.column_name, v.table_name
-            ));
+            ).into());
         }
 
         // Validate metric value
@@ -903,7 +904,7 @@ impl Binder {
             other => {
                 return Err(format!(
                     "Unknown metric '{other}'. Supported: cosine, euclidean, l2, dot"
-                ));
+                ).into());
             }
         }
 
@@ -918,10 +919,10 @@ impl Binder {
         ) {
             CatalogResult::Created { .. } => {}
             CatalogResult::AlreadyExists => {
-                return Err(format!("Vector index '{}' already exists", v.index_name));
+                return Err(format!("Vector index '{}' already exists", v.index_name).into());
             }
             CatalogResult::NotFound => {
-                return Err(format!("Table '{}' not found", v.table_name));
+                return Err(format!("Table '{}' not found", v.table_name).into());
             }
             CatalogResult::Dropped { .. } => {
                 return Err("Unexpected: Dropped result from create_vector_index".into());
@@ -937,7 +938,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_index(&self, v: akar_parser::ast::CreateIndex) -> Result<BoundStatement, String> {
+    fn bind_create_index(&self, v: akar_parser::ast::CreateIndex) -> Result<BoundStatement, BinderError> {
         if v.index_name.is_empty() {
             return Err("Index name cannot be empty".into());
         }
@@ -956,7 +957,7 @@ impl Binder {
             // Validate column exists and is PK
             let col_exists = entry.columns().iter().any(|c| c.name == v.property);
             if !col_exists {
-                return Err(format!("Column '{}' not found in table '{}'", v.property, v.table_name));
+                return Err(format!("Column '{}' not found in table '{}'", v.property, v.table_name).into());
             }
 
             let pk_col = entry.columns().iter().find(|c| c.is_primary_key);
@@ -964,7 +965,7 @@ impl Binder {
                 return Err(format!(
                     "Cannot create index on non-PK column '{}'. Only PK columns are supported.",
                     v.property
-                ));
+                ).into());
             }
         }
 
@@ -980,7 +981,7 @@ impl Binder {
         }))
     }
 
-    fn bind_drop_index(&self, v: akar_parser::ast::DropIndex) -> Result<BoundStatement, String> {
+    fn bind_drop_index(&self, v: akar_parser::ast::DropIndex) -> Result<BoundStatement, BinderError> {
         if v.index_name.is_empty() {
             return Err("Index name cannot be empty".into());
         }
@@ -994,7 +995,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_rel_table(&self, t: CreateRelTable) -> Result<BoundStatement, String> {
+    fn bind_create_rel_table(&self, t: CreateRelTable) -> Result<BoundStatement, BinderError> {
         if t.name.is_empty() {
             return Err("Table name cannot be empty".into());
         }
@@ -1027,7 +1028,7 @@ impl Binder {
         match catalog.create_rel_table(t.name.clone(), src_id, dst_id, columns.clone()) {
             CatalogResult::Created { .. } => {}
             CatalogResult::AlreadyExists => {
-                return Err(format!("Rel table '{}' already exists", t.name));
+                return Err(format!("Rel table '{}' already exists", t.name).into());
             }
             _ => return Err("Failed to create rel table".into()),
         }
@@ -1040,21 +1041,21 @@ impl Binder {
         }))
     }
 
-    fn bind_drop_table(&self, t: DropTable) -> Result<BoundStatement, String> {
+    fn bind_drop_table(&self, t: DropTable) -> Result<BoundStatement, BinderError> {
         let mut catalog = self.catalog.lock().unwrap();
         match catalog.drop_table(&t.name) {
             CatalogResult::Dropped { .. } => Ok(BoundStatement::BoundDropTable(BoundDropTable { name: t.name })),
-            CatalogResult::NotFound => Err(format!("Table '{}' not found", t.name)),
+            CatalogResult::NotFound => Err(format!("Table '{}' not found", t.name).into()),
             _ => Err("Failed to drop table".into()),
         }
     }
 
-    fn bind_unwind(&self, u: &akar_parser::ast::UnwindClause) -> Result<BoundUnwindClause, String> {
+    fn bind_unwind(&self, u: &akar_parser::ast::UnwindClause) -> Result<BoundUnwindClause, BinderError> {
         // Validate the expression is a list literal or variable reference to a list
         match &u.expression {
             akar_parser::ast::Expression::List(_) => {}
             akar_parser::ast::Expression::Variable(_) => {}
-            _ => return Err(format!("UNWIND requires a list expression, got: {:?}", u.expression)),
+            _ => return Err(format!("UNWIND requires a list expression, got: {:?}", u.expression).into()),
         }
         if u.variable.is_empty() {
             return Err("UNWIND requires a variable name".into());
@@ -1069,11 +1070,11 @@ impl Binder {
         &self,
         f: &akar_parser::ast::ForeachClause,
         variables: &[BoundVariable],
-    ) -> Result<BoundForeachClause, String> {
+    ) -> Result<BoundForeachClause, BinderError> {
         // Validate the expression is a list
         match &f.expression {
             akar_parser::ast::Expression::List(_) | akar_parser::ast::Expression::Variable(_) => {}
-            _ => return Err(format!("FOREACH requires a list expression, got: {:?}", f.expression)),
+            _ => return Err(format!("FOREACH requires a list expression, got: {:?}", f.expression).into()),
         }
         if f.variable.is_empty() {
             return Err("FOREACH requires a variable name".into());
@@ -1113,7 +1114,7 @@ impl Binder {
                     }));
                 }
                 _ => {
-                    return Err(format!("Unsupported FOREACH sub-clause: {:?}", clause));
+                    return Err(format!("Unsupported FOREACH sub-clause: {:?}", clause).into());
                 }
             }
         }
@@ -1128,7 +1129,7 @@ impl Binder {
         &self,
         m: &akar_parser::ast::OptionalMatchClause,
         existing_vars: &[BoundVariable],
-    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), String> {
+    ) -> Result<(BoundMatchClause, Vec<BoundVariable>), BinderError> {
         let mut patterns = Vec::new();
         let mut new_vars = Vec::new();
 
@@ -1149,7 +1150,7 @@ impl Binder {
         ))
     }
 
-    fn bind_set(&self, s: &akar_parser::ast::SetClause, variables: &[BoundVariable]) -> Result<BoundSetClause, String> {
+    fn bind_set(&self, s: &akar_parser::ast::SetClause, variables: &[BoundVariable]) -> Result<BoundSetClause, BinderError> {
         let mut items = Vec::new();
         for item in &s.items {
             // Property must be of form `variable.property`
@@ -1180,7 +1181,7 @@ impl Binder {
         Ok(BoundSetClause { items })
     }
 
-    fn bind_union(&self, u: akar_parser::ast::UnionStatement) -> Result<BoundStatement, String> {
+    fn bind_union(&self, u: akar_parser::ast::UnionStatement) -> Result<BoundStatement, BinderError> {
         let left = self.bind_query(u.left)?;
         let right = self.bind_query(u.right)?;
         Ok(BoundStatement::BoundUnion(BoundUnion {
@@ -1196,7 +1197,7 @@ impl Binder {
         }))
     }
 
-    fn bind_merge(&self, m: akar_parser::ast::MergeStatement) -> Result<BoundStatement, String> {
+    fn bind_merge(&self, m: akar_parser::ast::MergeStatement) -> Result<BoundStatement, BinderError> {
         // Use the first pattern from the patterns vector
         let pattern = m.patterns.first().ok_or("MERGE requires at least one pattern")?;
         let node = pattern.node.as_ref().ok_or("MERGE requires a node pattern")?;
@@ -1231,7 +1232,7 @@ impl Binder {
         &self,
         c: akar_parser::ast::CreateClause,
         _variables: &[BoundVariable],
-    ) -> Result<BoundStatement, String> {
+    ) -> Result<BoundStatement, BinderError> {
         let node = c
             .patterns
             .first()
@@ -1254,7 +1255,7 @@ impl Binder {
         }))
     }
 
-    fn bind_standalone_call(&self, c: akar_parser::ast::StandaloneCall) -> Result<BoundStatement, String> {
+    fn bind_standalone_call(&self, c: akar_parser::ast::StandaloneCall) -> Result<BoundStatement, BinderError> {
         // Note: CALL create_fts_index is superseded by the DDL `CREATE FTS INDEX` statement.
         // CALL is a table function invocation ΓÇö validate the function exists
         // in the function registry. At binding time we just pass through;
@@ -1265,7 +1266,7 @@ impl Binder {
         }))
     }
 
-    fn bind_explain(&self, e: akar_parser::ast::ExplainStatement) -> Result<BoundStatement, String> {
+    fn bind_explain(&self, e: akar_parser::ast::ExplainStatement) -> Result<BoundStatement, BinderError> {
         // Bind the inner statement recursively
         let inner = self.bind(*e.statement)?;
         Ok(BoundStatement::BoundExplain(BoundExplain {
@@ -1274,7 +1275,7 @@ impl Binder {
         }))
     }
 
-    fn bind_create_sequence(&self, s: akar_parser::ast::CreateSequence) -> Result<BoundStatement, String> {
+    fn bind_create_sequence(&self, s: akar_parser::ast::CreateSequence) -> Result<BoundStatement, BinderError> {
         // Compute defaults matching C++ behavior:
         // - START WITH: 1 for increment > 0, max_value for increment < 0
         // - INCREMENT: 1 (default)
@@ -1295,13 +1296,13 @@ impl Binder {
             return Err(format!(
                 "MINVALUE ({}) cannot be greater than MAXVALUE ({})",
                 min_value, max_value
-            ));
+            ).into());
         }
         if start_with < min_value || start_with > max_value {
             return Err(format!(
                 "START WITH ({}) must be between MINVALUE ({}) and MAXVALUE ({})",
                 start_with, min_value, max_value
-            ));
+            ).into());
         }
 
         Ok(BoundStatement::BoundCreateSequence(BoundCreateSequence {
@@ -1316,14 +1317,14 @@ impl Binder {
         }))
     }
 
-    fn bind_drop_sequence(&self, s: akar_parser::ast::DropSequence) -> Result<BoundStatement, String> {
+    fn bind_drop_sequence(&self, s: akar_parser::ast::DropSequence) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundDropSequence(BoundDropSequence {
             name: s.name,
             if_exists: s.if_exists,
         }))
     }
 
-    fn bind_create_macro(&self, m: akar_parser::ast::CreateMacro) -> Result<BoundStatement, String> {
+    fn bind_create_macro(&self, m: akar_parser::ast::CreateMacro) -> Result<BoundStatement, BinderError> {
         // Convert default args to strings
         let default_args: Vec<(String, String)> = m
             .default_args
@@ -1339,7 +1340,7 @@ impl Binder {
         }))
     }
 
-    fn bind_export_database(&self, e: akar_parser::ast::ExportDatabase) -> Result<BoundStatement, String> {
+    fn bind_export_database(&self, e: akar_parser::ast::ExportDatabase) -> Result<BoundStatement, BinderError> {
         let file_type = e
             .options
             .get("FORMAT")
@@ -1348,7 +1349,7 @@ impl Binder {
         if file_type != "csv" && file_type != "parquet" {
             return Err(format!(
                 "Unsupported export format '{file_type}'. Supported: csv, parquet"
-            ));
+            ).into());
         }
         let schema_only = e.options.get("SCHEMA_ONLY").map(|s| s == "true").unwrap_or(false);
         Ok(BoundStatement::BoundExportDatabase(BoundExportDatabase {
@@ -1359,14 +1360,14 @@ impl Binder {
         }))
     }
 
-    fn bind_import_database(&self, i: akar_parser::ast::ImportDatabase) -> Result<BoundStatement, String> {
+    fn bind_import_database(&self, i: akar_parser::ast::ImportDatabase) -> Result<BoundStatement, BinderError> {
         // Validate the import directory exists and read the schema/cypher files
         let path = std::path::Path::new(&i.file_path);
         if !path.exists() {
-            return Err(format!("Import directory '{}' not found", i.file_path));
+            return Err(format!("Import directory '{}' not found", i.file_path).into());
         }
         if !path.is_dir() {
-            return Err(format!("'{}' is not a directory", i.file_path));
+            return Err(format!("'{}' is not a directory", i.file_path).into());
         }
 
         let schema_path = path.join("schema.cypher");
@@ -1374,7 +1375,7 @@ impl Binder {
         let index_path = path.join("index.cypher");
 
         if !schema_path.exists() {
-            return Err(format!("schema.cypher not found in '{}'", i.file_path));
+            return Err(format!("schema.cypher not found in '{}'", i.file_path).into());
         }
 
         let query = if copy_path.exists() {
@@ -1400,7 +1401,7 @@ impl Binder {
     }
 
     /// Bind ANALYZE statement ΓÇö resolve table names to table IDs.
-    fn bind_analyze(&self, a: AnalyzeStatement) -> Result<BoundStatement, String> {
+    fn bind_analyze(&self, a: AnalyzeStatement) -> Result<BoundStatement, BinderError> {
         let cat = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
         let table_ids = if let Some(ref table_name) = a.table_name {
             let id = cat
@@ -1421,19 +1422,19 @@ impl Binder {
     }
 
     /// Bind TRANSACTION statement — trivial (no catalog resolution needed).
-    fn bind_transaction(&self, t: TransactionStatement) -> Result<BoundStatement, String> {
+    fn bind_transaction(&self, t: TransactionStatement) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundTransaction(BoundTransaction { action: t.action }))
     }
 
     /// Bind EXTENSION statement — trivial (validated at execution time).
-    fn bind_extension(&self, e: ExtensionStatement) -> Result<BoundStatement, String> {
+    fn bind_extension(&self, e: ExtensionStatement) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundExtension(BoundExtension {
             action: e.action,
             name: e.name,
         }))
     }
 
-    fn bind_attach_database(&self, a: AttachDatabase) -> Result<BoundStatement, String> {
+    fn bind_attach_database(&self, a: AttachDatabase) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundAttachDatabase(BoundAttachDatabase {
             path: a.path,
             alias: a.alias,
@@ -1441,24 +1442,24 @@ impl Binder {
         }))
     }
 
-    fn bind_detach_database(&self, d: DetachDatabase) -> Result<BoundStatement, String> {
+    fn bind_detach_database(&self, d: DetachDatabase) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundDetachDatabase(BoundDetachDatabase {
             alias: d.alias,
         }))
     }
 
-    fn bind_use_database(&self, u: UseDatabase) -> Result<BoundStatement, String> {
+    fn bind_use_database(&self, u: UseDatabase) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundUseDatabase(BoundUseDatabase { alias: u.alias }))
     }
 
-    fn bind_load_from(&self, l: LoadFrom) -> Result<BoundStatement, String> {
+    fn bind_load_from(&self, l: LoadFrom) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundLoadFrom(BoundLoadFrom {
             path: l.path,
             options: l.options,
         }))
     }
 
-    fn bind_create_type(&self, t: CreateType) -> Result<BoundStatement, String> {
+    fn bind_create_type(&self, t: CreateType) -> Result<BoundStatement, BinderError> {
         // Validate the type name is a known type
         Self::parse_type(&t.type_name)?;
         Ok(BoundStatement::BoundCreateType(BoundCreateType {
@@ -1467,7 +1468,7 @@ impl Binder {
         }))
     }
 
-    fn bind_comment_on_table(&self, c: CommentOnTable) -> Result<BoundStatement, String> {
+    fn bind_comment_on_table(&self, c: CommentOnTable) -> Result<BoundStatement, BinderError> {
         // Validate table exists
         {
             let catalog = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -1481,22 +1482,22 @@ impl Binder {
         }))
     }
 
-    fn bind_create_graph(&self, g: CreateGraph) -> Result<BoundStatement, String> {
+    fn bind_create_graph(&self, g: CreateGraph) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundCreateGraph(BoundCreateGraph {
             name: g.name,
             is_any: g.is_any,
         }))
     }
 
-    fn bind_use_graph(&self, g: UseGraph) -> Result<BoundStatement, String> {
+    fn bind_use_graph(&self, g: UseGraph) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundUseGraph(BoundUseGraph { name: g.name }))
     }
 
-    fn bind_drop_graph(&self, g: DropGraph) -> Result<BoundStatement, String> {
+    fn bind_drop_graph(&self, g: DropGraph) -> Result<BoundStatement, BinderError> {
         Ok(BoundStatement::BoundDropGraph(BoundDropGraph { name: g.name }))
     }
 
-    fn bind_create_fts_index(&self, f: CreateFtsIndex) -> Result<BoundStatement, String> {
+    fn bind_create_fts_index(&self, f: CreateFtsIndex) -> Result<BoundStatement, BinderError> {
         // Validate table and column exist
         {
             let catalog = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -1508,7 +1509,7 @@ impl Binder {
                 return Err(format!(
                     "Column '{}' not found in table '{}'",
                     f.column_name, f.table_name
-                ));
+                ).into());
             }
         }
         let index_name = f.index_name.clone();
@@ -1539,7 +1540,7 @@ impl Binder {
             let docs_id = match catalog.create_node_table(docs_table.clone(), docs_cols) {
                 akar_catalog::CatalogResult::Created { table_id } => table_id,
                 akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", docs_table));
+                    return Err(format!("Table '{}' already exists", docs_table).into());
                 }
                 _ => return Err("Failed to create docs table".into()),
             };
@@ -1570,7 +1571,7 @@ impl Binder {
             let terms_id = match catalog.create_node_table(terms_table.clone(), terms_cols) {
                 akar_catalog::CatalogResult::Created { table_id } => table_id,
                 akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", terms_table));
+                    return Err(format!("Table '{}' already exists", terms_table).into());
                 }
                 _ => return Err("Failed to create terms table".into()),
             };
@@ -1585,7 +1586,7 @@ impl Binder {
             match catalog.create_rel_table(posting_table.clone(), terms_id, docs_id, posting_cols) {
                 akar_catalog::CatalogResult::Created { .. } => {}
                 akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", posting_table));
+                    return Err(format!("Table '{}' already exists", posting_table).into());
                 }
                 _ => return Err("Failed to create posting table".into()),
             }
@@ -1602,7 +1603,7 @@ impl Binder {
         }))
     }
 
-    fn bind_alter_table(&self, a: akar_parser::ast::AlterTable) -> Result<BoundStatement, String> {
+    fn bind_alter_table(&self, a: akar_parser::ast::AlterTable) -> Result<BoundStatement, BinderError> {
         // Validate table exists and extract column info
         let col_names: Vec<String> = {
             let catalog = self.catalog.lock().unwrap();
@@ -1623,18 +1624,18 @@ impl Binder {
             }
             akar_parser::ast::AlterAction::DropColumn { name } => {
                 if !has_name(&col_names, name) {
-                    return Err(format!("Column '{name}' not found in table '{}'", a.table_name));
+                    return Err(format!("Column '{name}' not found in table '{}'", a.table_name).into());
                 }
             }
             akar_parser::ast::AlterAction::RenameColumn { old_name, new_name } => {
                 if !has_name(&col_names, old_name) {
-                    return Err(format!("Column '{old_name}' not found in table '{}'", a.table_name));
+                    return Err(format!("Column '{old_name}' not found in table '{}'", a.table_name).into());
                 }
                 if has_name(&col_names, new_name) {
                     return Err(format!(
                         "Column '{new_name}' already exists in table '{}'",
                         a.table_name
-                    ));
+                    ).into());
                 }
             }
             akar_parser::ast::AlterAction::RenameTable { new_name: _ } => {
@@ -1652,7 +1653,7 @@ impl Binder {
         &self,
         d: &akar_parser::ast::DeleteClause,
         variables: &[BoundVariable],
-    ) -> Result<BoundDeleteClause, String> {
+    ) -> Result<BoundDeleteClause, BinderError> {
         if d.expressions.is_empty() {
             return Err("DELETE requires at least one expression".into());
         }
@@ -1673,7 +1674,7 @@ impl Binder {
                         is_node: var.is_node,
                     });
                 }
-                _ => return Err(format!("DELETE only supports variable references, got: {:?}", expr)),
+                _ => return Err(format!("DELETE only supports variable references, got: {:?}", expr).into()),
             }
         }
 
@@ -1683,7 +1684,7 @@ impl Binder {
         })
     }
 
-    fn bind_copy_from(&self, c: akar_parser::ast::CopyFrom) -> Result<BoundStatement, String> {
+    fn bind_copy_from(&self, c: akar_parser::ast::CopyFrom) -> Result<BoundStatement, BinderError> {
         // 1. Look up table in catalog and resolve column schema
         let catalog = self.catalog.lock().unwrap();
         let entry = catalog
@@ -1696,10 +1697,10 @@ impl Binder {
         // 2. Validate file path exists and is accessible
         let path = std::path::Path::new(&c.file_path);
         if !path.exists() {
-            return Err(format!("File '{}' not found", c.file_path));
+            return Err(format!("File '{}' not found", c.file_path).into());
         }
         if !path.is_file() {
-            return Err(format!("'{}' is not a file", c.file_path));
+            return Err(format!("'{}' is not a file", c.file_path).into());
         }
 
         // 3. If HEADER=true and delimiter is known, peek at first CSV line to
@@ -1722,7 +1723,7 @@ impl Binder {
 
                 let trimmed = first_line.trim();
                 if trimmed.is_empty() {
-                    return Err(format!("File '{}' is empty, cannot validate header", c.file_path));
+                    return Err(format!("File '{}' is empty, cannot validate header", c.file_path).into());
                 }
 
                 let csv_col_count = trimmed.split(delimiter).count();
@@ -1732,7 +1733,7 @@ impl Binder {
                          but table '{}' has {} columns",
                         c.table_name,
                         columns.len()
-                    ));
+                    ).into());
                 }
             }
         }
@@ -1747,7 +1748,7 @@ impl Binder {
     }
 
     /// Bind COPY TO ΓÇö export query results to a file.
-    fn bind_copy_to(&self, c: akar_parser::ast::CopyTo) -> Result<BoundStatement, String> {
+    fn bind_copy_to(&self, c: akar_parser::ast::CopyTo) -> Result<BoundStatement, BinderError> {
         // Bind the inner query
         let bound_query = match self.bind(Statement::Query(c.query))? {
             BoundStatement::BoundQuery(q) => q,

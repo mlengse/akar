@@ -1,6 +1,7 @@
 use super::ExecutionContext;
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
@@ -42,7 +43,7 @@ pub fn map_and_execute_scan_node(
     next_op: Option<&LogicalOperator>,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     let mut pred_owned = None;
     if let Some(LogicalOperator::Filter(f)) = next_op {
         pred_owned = extract_zone_map_predicate(&f.expression, &s.columns);
@@ -96,7 +97,7 @@ pub fn map_and_execute_scan(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
     ctx: &mut ExecutionContext,
-) -> Result<Vec<DataChunk>, String> {
+) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::ScanRel(s) => {
             let (data, columns, _num_rows) = ctx.resolve_scan_data(&s.table_name, None);
@@ -188,6 +189,6 @@ pub fn map_and_execute_scan(
             let result = probe.execute(input)?;
             Ok(result)
         }
-        _ => Err(format!("Not a scan operator: {:?}", op)),
+        _ => Err(format!("Not a scan operator: {:?}", op).into()),
     }
 }
