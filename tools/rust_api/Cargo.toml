@@ -7,8 +7,8 @@ license = "GPL-3.0-or-later"
 categories = ["database", "database-implementations"]
 authors = ["Anjang Kusuma Netra"]
 
-rust-version = "1.81"
-edition = "2021"
+rust-version = "1.85"
+edition = "2024"
 
 [dependencies]
 akar-main = { path = "../../akar-core/akar-main" }

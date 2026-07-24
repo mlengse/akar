@@ -226,7 +226,7 @@ impl BufferManager {
     }
 
     /// Pin a page: bring it into the buffer pool if not already present.
-    pub fn pin(&mut self, file_name: &str, page_num: PageNum) -> std::io::Result<&Frame> {
+    pub fn pin(&mut self, file_name: &str, page_num: PageNum) -> std::io::Result<Frame> {
         let k = Self::key(file_name, page_num);
         if let Some(frame) = self.frames.get_mut(&k) {
             frame.pin();
@@ -239,7 +239,7 @@ impl BufferManager {
             }
             self.last_accessed.insert(file_name.to_string(), page_num);
 
-            return Ok(unsafe { &*(frame as *const Frame) });
+            return Ok(frame.clone());
         }
 
         // Page fault
@@ -259,7 +259,7 @@ impl BufferManager {
 
         let k = Self::key(file_name, page_num);
         self.clock_order.push(k.clone());
-        self.frames.insert(k.clone(), frame);
+        self.frames.insert(k.clone(), frame.clone());
         self.memory_manager.allocate(self.page_size as u64);
 
         self.update_stats();
@@ -274,14 +274,15 @@ impl BufferManager {
         // Check readahead AFTER updating tracking so prev_last_accessed is correct
         self.maybe_readahead(file_name, page_num);
 
-        Ok(self.frames.get(&k).unwrap())
+        Ok(frame)
     }
 
     /// Pin a page and get mutable access.
     pub fn pin_mut(&mut self, file_name: &str, page_num: PageNum) -> std::io::Result<&mut Frame> {
         let k = Self::key(file_name, page_num);
         if !self.frames.contains_key(&k) {
-            self.pin(file_name, page_num)?;
+            // Pin to bring it into the pool (we ignore the returned Frame)
+            let _ = self.pin(file_name, page_num)?;
         }
         if let Some(frame) = self.frames.get_mut(&k) {
             frame.pin();

@@ -125,13 +125,13 @@ impl Extension for AlgoExtension {
             let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
             let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
             for (i, val) in src_col.iter().enumerate() {
-                v1.set_value(i, val).ok();
+                v1.set_value(i, val)?;
             }
             for (i, val) in dst_col.iter().enumerate() {
-                v2.set_value(i, val).ok();
+                v2.set_value(i, val)?;
             }
             for (i, val) in dist_col.iter().enumerate() {
-                v3.set_value(i, val).ok();
+                v3.set_value(i, val)?;
             }
             output.fields = vec![
                 akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
@@ -222,13 +222,13 @@ impl Extension for AlgoExtension {
             let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
             let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Double, n);
             for (i, val) in src_col.iter().enumerate() {
-                v1.set_value(i, val).ok();
+                v1.set_value(i, val)?;
             }
             for (i, val) in dst_col.iter().enumerate() {
-                v2.set_value(i, val).ok();
+                v2.set_value(i, val)?;
             }
             for (i, val) in cost_col.iter().enumerate() {
-                v3.set_value(i, val).ok();
+                v3.set_value(i, val)?;
             }
             output.fields = vec![
                 akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
@@ -303,8 +303,8 @@ impl Extension for AlgoExtension {
             let mut id_vec = ValueVector::new(PhysicalTypeID::Int64, n);
             let mut val_vec = ValueVector::new(PhysicalTypeID::Double, n);
             for (i, &v) in result.values.iter().enumerate() {
-                id_vec.set_value(i, &Value::Int64(i as i64)).ok();
-                val_vec.set_value(i, &Value::Double(v)).ok();
+                id_vec.set_value(i, &Value::Int64(i as i64))?;
+                val_vec.set_value(i, &Value::Double(v))?;
             }
             let arr1 = akar_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array;
             let arr2 = akar_common::arrow_vector::ArrowVector::from_legacy(&val_vec).array;
@@ -740,7 +740,7 @@ impl Extension for AlgoExtension {
                 let n = result.values.len().checked_div(dimensions).unwrap_or(0);
                 let mut id_vec = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
                 for i in 0..n {
-                    id_vec.set_value(i, &Value::Int64(i as i64)).ok();
+                    id_vec.set_value(i, &Value::Int64(i as i64))?;
                 }
 
                 let mut fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array];
@@ -751,7 +751,7 @@ impl Extension for AlgoExtension {
                         akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Double, n);
                     for i in 0..n {
                         let val = result.values.get(i * dimensions + d).copied().unwrap_or(0.0);
-                        dim_vec.set_value(i, &Value::Double(val)).ok();
+                        dim_vec.set_value(i, &Value::Double(val))?;
                     }
                     fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&dim_vec).array);
                     field_types.push(akar_common::types::PhysicalTypeID::Double);
@@ -1857,13 +1857,13 @@ mod tests {
         let result = compute_triangle_count(&csr);
         assert_eq!(result.values.len(), 4);
         // Nodes 0,1,2 should each have 1 triangle, node 3 should have 0
-        assert_eq!(result.values[0], 1.0, "Node 0 should have 1 triangle");
-        assert_eq!(result.values[1], 1.0, "Node 1 should have 1 triangle");
-        assert_eq!(result.values[2], 1.0, "Node 2 should have 1 triangle");
-        assert_eq!(result.values[3], 0.0, "Node 3 should have 0 triangles");
+        assert!((result.values[0] - 1.0).abs() < 1e-10, "Node 0 should have 1 triangle");
+        assert!((result.values[1] - 1.0).abs() < 1e-10, "Node 1 should have 1 triangle");
+        assert!((result.values[2] - 1.0).abs() < 1e-10, "Node 2 should have 1 triangle");
+        assert!((result.values[3] - 0.0).abs() < 1e-10, "Node 3 should have 0 triangles");
         // Total triangles = sum/3 = 3/3 = 1
         let total: f64 = result.values.iter().sum();
-        assert_eq!(total, 3.0, "Total triangle weight should be 3");
+        assert!((total - 3.0).abs() < 1e-10, "Total triangle weight should be 3");
     }
 
     #[test]
@@ -1873,7 +1873,7 @@ mod tests {
         assert_eq!(result.values.len(), 7);
         // The small CSR (0-1-2-3 and 0-4-5-6) should have no triangles
         for &v in &result.values {
-            assert_eq!(v, 0.0, "No triangles in small CSR, got {v} for node");
+            assert!((v - 0.0).abs() < 1e-10, "No triangles in small CSR, got {v} for node");
         }
     }
 
@@ -1921,9 +1921,9 @@ mod tests {
     fn test_compute_shortest_path() {
         let csr = small_csr();
         let result = compute_shortest_path(&csr, 0);
-        assert_eq!(result.values[0], 0.0);
-        assert_eq!(result.values[3], 3.0);
-        assert_eq!(result.values[6], 3.0);
+        assert!((result.values[0] - 0.0).abs() < 1e-10);
+        assert!((result.values[3] - 3.0).abs() < 1e-10);
+        assert!((result.values[6] - 3.0).abs() < 1e-10);
         assert_eq!(result.name, "shortest_path");
     }
 
@@ -1931,9 +1931,9 @@ mod tests {
     fn test_weighted_shortest_path_unit_weights() {
         let csr = small_csr();
         let (dist, _parent) = weighted_shortest_path(&csr, 0, |_from, _to| 1.0);
-        assert_eq!(dist[0], Some(0.0));
-        assert_eq!(dist[3], Some(3.0));
-        assert_eq!(dist[6], Some(3.0));
+        assert!(dist[0].is_some() && (dist[0].unwrap() - 0.0).abs() < 1e-10);
+        assert!(dist[3].is_some() && (dist[3].unwrap() - 3.0).abs() < 1e-10);
+        assert!(dist[6].is_some() && (dist[6].unwrap() - 3.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1941,16 +1941,16 @@ mod tests {
         let csr = small_csr();
         // Assign weight = 10 to all edges, so distances are scaled
         let (dist, _parent) = weighted_shortest_path(&csr, 0, |_from, _to| 10.0);
-        assert_eq!(dist[0], Some(0.0));
-        assert_eq!(dist[3], Some(30.0)); // 3 hops × 10
+        assert!(dist[0].is_some() && (dist[0].unwrap() - 0.0).abs() < 1e-10);
+        assert!(dist[3].is_some() && (dist[3].unwrap() - 30.0).abs() < 1e-10); // 3 hops × 10
     }
 
     #[test]
     fn test_compute_weighted_shortest_path() {
         let csr = small_csr();
         let result = compute_weighted_shortest_path(&csr, 0);
-        assert_eq!(result.values[0], 0.0);
-        assert_eq!(result.values[3], 3.0);
+        assert!((result.values[0] - 0.0).abs() < 1e-10);
+        assert!((result.values[3] - 3.0).abs() < 1e-10);
         assert_eq!(result.name, "weighted_shortest_path");
     }
 
@@ -1960,7 +1960,7 @@ mod tests {
         let result = compute_all_sp_destinations(&csr);
         // Each node can reach 6 others (all 7 nodes minus itself)
         for &v in &result.values {
-            assert_eq!(v, 6.0);
+            assert!((v - 6.0).abs() < 1e-10);
         }
     }
 
@@ -1969,11 +1969,11 @@ mod tests {
         let csr = disconnected_csr();
         let result = compute_all_sp_destinations(&csr);
         // Nodes 0 and 1 can reach each other (1 destination each)
-        assert_eq!(result.values[0], 1.0);
-        assert_eq!(result.values[1], 1.0);
+        assert!((result.values[0] - 1.0).abs() < 1e-10);
+        assert!((result.values[1] - 1.0).abs() < 1e-10);
         // Nodes 2 and 3 can reach each other (1 destination each)
-        assert_eq!(result.values[2], 1.0);
-        assert_eq!(result.values[3], 1.0);
+        assert!((result.values[2] - 1.0).abs() < 1e-10);
+        assert!((result.values[3] - 1.0).abs() < 1e-10);
     }
 
     #[test]

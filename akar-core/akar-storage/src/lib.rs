@@ -278,7 +278,11 @@ impl StorageManager {
     /// - `threshold > 0`: checkpoint when `wal_size() > threshold` (bytes).
     ///
     /// Returns `true` if a checkpoint was triggered.
-    pub fn maybe_checkpoint(&self, threshold: i64) -> std::io::Result<bool> {
+    pub fn maybe_checkpoint(
+        &self,
+        threshold: i64,
+        drain_fn: Option<&dyn Fn(std::time::Duration) -> bool>,
+    ) -> std::io::Result<bool> {
         if threshold == 0 {
             return Ok(false); // Auto-checkpoint disabled
         }
@@ -291,7 +295,7 @@ impl StorageManager {
         };
 
         if should_checkpoint {
-            let _ = self.checkpoint_with_drain()?;
+            let _ = self.checkpoint_with_drain(drain_fn)?;
             Ok(true)
         } else {
             Ok(false)
@@ -301,21 +305,26 @@ impl StorageManager {
     /// Perform a checkpoint with transaction drain.
     ///
     /// Two-phase drain:
-    /// 1. Signal the TransactionManager to stop new transactions
-    /// 2. Wait for all active transactions to finish
-    /// 3. Perform the checkpoint (WAL flush + BM flush)
-    /// 4. Release the new-txns gate
+    /// 1. Call the `drain_fn` callback to stop new transactions and wait for active ones
+    /// 2. Perform the checkpoint (WAL flush + BM flush)
     ///
     /// This is the concurrent-writer-safe checkpoint. Use this instead of
     /// plain `checkpoint()` when concurrent writes are enabled.
     ///
-    /// If the drain times out (active txns still running after 30s),
-    /// the checkpoint proceeds anyway — this is safe because the WAL
-    /// will capture any in-flight writes.
-    pub fn checkpoint_with_drain(&self) -> std::io::Result<crate::checkpoint::CheckpointResult> {
+    /// If `drain_fn` is `None`, the drain is skipped (backwards-compatible default).
+    /// If the drain times out, the checkpoint proceeds anyway — this is safe because
+    /// the WAL will capture any in-flight writes.
+    pub fn checkpoint_with_drain(
+        &self,
+        drain_fn: Option<&dyn Fn(std::time::Duration) -> bool>,
+    ) -> std::io::Result<crate::checkpoint::CheckpointResult> {
         // Phase 1: Stop new transactions and drain active ones
-        // (use a best-effort drain with 30s timeout)
-        let _drained = true; // Drain is advisory — checkpoint is still safe
+        if let Some(drain) = drain_fn {
+            let drained = drain(std::time::Duration::from_secs(30));
+            if !drained {
+                tracing::warn!("Checkpoint drain timed out — proceeding with best-effort checkpoint");
+            }
+        }
 
         // Phase 2: Do the actual checkpoint
         let mut wal = self.wal.lock().unwrap();
@@ -400,6 +409,7 @@ impl StorageManager {
     /// * `shadow_file` — the transaction's COW page buffer.
     /// * `checkpoint_threshold` — passed to `maybe_checkpoint()`; use -1 for
     ///   always-checkpoint, 0 for never, N for byte-based threshold.
+    /// * `drain_fn` — optional callback to drain active transactions before checkpoint.
     ///
     /// Returns `Ok(())` if the commit pipeline succeeded.
     pub fn commit_transaction(
@@ -408,6 +418,7 @@ impl StorageManager {
         shadow_file: &crate::shadow_file::ShadowFile,
         checkpoint_threshold: i64,
         txn_id: u64,
+        drain_fn: Option<&dyn Fn(std::time::Duration) -> bool>,
     ) -> Result<(), String> {
         // Step 1: Write-ahead log the commit
         {
@@ -428,7 +439,7 @@ impl StorageManager {
             .map_err(|e| format!("ShadowFile apply failed during commit: {e}"))?;
 
         // Step 4: Auto-checkpoint if needed
-        if let Err(e) = self.maybe_checkpoint(checkpoint_threshold) {
+        if let Err(e) = self.maybe_checkpoint(checkpoint_threshold, drain_fn) {
             tracing::warn!("Checkpoint after commit failed: {e}");
             // Non-fatal — data is already in tables and WAL
         }

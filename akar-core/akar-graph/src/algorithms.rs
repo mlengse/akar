@@ -332,9 +332,9 @@ mod tests {
         let result = degree_centrality(&csr);
         assert_eq!(result.values.len(), 4);
         // Node 0 has degree 3 (connected to 1, 2, 3)
-        assert_eq!(result.values[0], 3.0);
+        assert!((result.values[0] - 3.0).abs() < 1e-10);
         // Node 3 has degree 2 (connected to 2, 0)
-        assert_eq!(result.values[3], 2.0);
+        assert!((result.values[3] - 2.0).abs() < 1e-10);
     }
 
     #[test]

@@ -585,11 +585,11 @@ mod tests {
         // First path with weight 10
         assert!(g.try_add_single_parent_with_weight(src, 100, dst, true, 10.0));
         let p = g.get_parent_list_head_offset(5).unwrap();
-        assert_eq!(p.cost, 10.0);
+        assert!((p.cost - 10.0).abs() < 1e-10);
         // Better path with weight 5
         assert!(g.try_add_single_parent_with_weight(src, 101, dst, true, 5.0));
         let p = g.get_parent_list_head_offset(5).unwrap();
-        assert_eq!(p.cost, 5.0);
+        assert!((p.cost - 5.0).abs() < 1e-10);
         // Worse path with weight 20 should be rejected
         assert!(!g.try_add_single_parent_with_weight(src, 102, dst, true, 20.0));
     }

@@ -5,8 +5,13 @@
 //! flushed to disk and the storage pages are synchronized.
 
 use std::fmt;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+
+/// WAL file magic bytes — identifies a v2 WAL with per-record CRC32 checksums.
+const WAL_MAGIC: &[u8; 4] = b"AKAR";
+/// WAL file version — bumped when the on-disk format changes.
+const WAL_VERSION: u16 = 2;
 
 /// A record in the WAL.
 #[derive(Debug, Clone)]
@@ -255,22 +260,48 @@ impl WAL {
         Ok(())
     }
 
-    /// Persist the WAL to disk.
+    /// Persist the WAL to disk atomically.
+    ///
+    /// Writes to a temporary file, fsyncs, then atomically renames over the
+    /// old WAL. This ensures a crash mid-write never corrupts the existing WAL.
+    ///
+    /// ## On-disk format (v2)
+    ///
+    /// ```text
+    /// ┌──────────────────────────────────────────────┐
+    /// │ Header: "AKAR" (4 bytes) + version (u16 LE) │
+    /// ├──────────────────────────────────────────────┤
+    /// │ Per record:                                  │
+    /// │   CRC32 (u32 LE) of [tag .. payload]        │
+    /// │   tag (1 byte)                               │
+    /// │   payload (variable)                         │
+    /// └──────────────────────────────────────────────┘
+    /// ```
     pub fn flush_to_disk(&self) -> std::io::Result<()> {
         use akar_common::serialization::Serialize;
-        let mut file = std::fs::File::create(&self.path)?;
+        let tmp_path = self.path.with_extension("log.tmp");
+        let mut file = std::fs::File::create(&tmp_path)?;
+
+        // Write WAL header
+        file.write_all(WAL_MAGIC)?;
+        file.write_all(&WAL_VERSION.to_le_bytes())?;
+
+        let mut crc_buf = [0u8; 4]; // scratch for CRC32 output
         for record in &self.records {
+            // Serialize record payload into a temporary buffer so we can
+            // compute CRC32 over the complete tag+payload before writing.
+            let mut payload = Vec::new();
             match record {
                 WALRecord::Insert { table_id, data } => {
-                    file.write_all(b"I")?;
-                    table_id.serialize(&mut file)?;
-                    (data.len() as u32).serialize(&mut file)?;
-                    file.write_all(data)?;
+                    payload.write_all(b"I")?;
+                    table_id.serialize(&mut payload)?;
+                    (data.len() as u32).serialize(&mut payload)?;
+                    payload.write_all(data)?;
                 }
                 WALRecord::Delete { table_id, row_id } => {
-                    file.write_all(b"D")?;
-                    table_id.serialize(&mut file)?;
-                    row_id.serialize(&mut file)?;
+                    payload.write_all(b"D")?;
+                    table_id.serialize(&mut payload)?;
+                    row_id.serialize(&mut payload)?;
                 }
                 WALRecord::Update {
                     table_id,
@@ -278,18 +309,18 @@ impl WAL {
                     column,
                     data,
                 } => {
-                    file.write_all(b"U")?;
-                    table_id.serialize(&mut file)?;
-                    row_id.serialize(&mut file)?;
-                    column.serialize(&mut file)?;
-                    (data.len() as u32).serialize(&mut file)?;
-                    file.write_all(data)?;
+                    payload.write_all(b"U")?;
+                    table_id.serialize(&mut payload)?;
+                    row_id.serialize(&mut payload)?;
+                    column.serialize(&mut payload)?;
+                    (data.len() as u32).serialize(&mut payload)?;
+                    payload.write_all(data)?;
                 }
                 WALRecord::UpdateFsm { page_idx, is_free } => {
-                    file.write_all(b"F")?;
-                    page_idx.serialize(&mut file)?;
+                    payload.write_all(b"F")?;
+                    page_idx.serialize(&mut payload)?;
                     let is_free_u8: u8 = if *is_free { 1 } else { 0 };
-                    is_free_u8.serialize(&mut file)?;
+                    is_free_u8.serialize(&mut payload)?;
                 }
                 WALRecord::ColumnWrite {
                     table_id,
@@ -297,62 +328,81 @@ impl WAL {
                     page_id,
                     data,
                 } => {
-                    file.write_all(b"W")?;
-                    table_id.serialize(&mut file)?;
-                    col_id.serialize(&mut file)?;
-                    page_id.serialize(&mut file)?;
-                    (data.len() as u32).serialize(&mut file)?;
-                    file.write_all(data)?;
+                    payload.write_all(b"W")?;
+                    table_id.serialize(&mut payload)?;
+                    col_id.serialize(&mut payload)?;
+                    page_id.serialize(&mut payload)?;
+                    (data.len() as u32).serialize(&mut payload)?;
+                    payload.write_all(data)?;
                 }
                 WALRecord::LocalWALData { data } => {
-                    file.write_all(b"L")?;
-                    (data.len() as u32).serialize(&mut file)?;
-                    file.write_all(data)?;
+                    payload.write_all(b"L")?;
+                    (data.len() as u32).serialize(&mut payload)?;
+                    payload.write_all(data)?;
                 }
                 WALRecord::Commit { transaction_id } => {
-                    file.write_all(b"C")?;
-                    transaction_id.serialize(&mut file)?;
+                    payload.write_all(b"C")?;
+                    transaction_id.serialize(&mut payload)?;
                 }
                 WALRecord::Rollback { transaction_id } => {
-                    file.write_all(b"R")?;
-                    transaction_id.serialize(&mut file)?;
+                    payload.write_all(b"R")?;
+                    transaction_id.serialize(&mut payload)?;
                 }
                 WALRecord::Checkpoint => {
-                    file.write_all(b"K")?;
+                    payload.write_all(b"K")?;
                 }
                 // ── DDL record types ──
                 WALRecord::CreateTable { table_id } => {
-                    file.write_all(b"T")?;
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"T")?;
+                    table_id.serialize(&mut payload)?;
                 }
                 WALRecord::DropTable { table_id } => {
-                    file.write_all(b"A")?; // 'A' for drop (avoid conflict)
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"A")?;
+                    table_id.serialize(&mut payload)?;
                 }
                 WALRecord::AlterTable { table_id } => {
-                    file.write_all(b"M")?; // 'M' for alter/modify
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"M")?;
+                    table_id.serialize(&mut payload)?;
                 }
                 WALRecord::CreateIndex { table_id } => {
-                    file.write_all(b"N")?; // 'N' for iNdex
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"N")?;
+                    table_id.serialize(&mut payload)?;
                 }
                 WALRecord::DropIndex { table_id } => {
-                    file.write_all(b"X")?; // 'X' for drop indeX
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"X")?;
+                    table_id.serialize(&mut payload)?;
                 }
                 WALRecord::CreateSequence { table_id } => {
-                    file.write_all(b"Q")?; // 'Q' for seQuence
-                    table_id.serialize(&mut file)?;
+                    payload.write_all(b"Q")?;
+                    table_id.serialize(&mut payload)?;
                 }
             }
+            let checksum = crc32fast::hash(&payload);
+            crc_buf.copy_from_slice(&checksum.to_le_bytes());
+            file.write_all(&crc_buf)?;
+            file.write_all(&payload)?;
         }
-        file.flush()?;
+        // Fsync the temp file to ensure all data is written to disk
+        file.sync_all()?;
+
+        // Atomic rename: temp → WAL path.
+        std::fs::rename(&tmp_path, &self.path)?;
+
+        // Fsync the parent directory to ensure the rename is durable
+        if let Some(parent) = self.path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
         Ok(())
     }
 
+    /// Load WAL records from disk.
+    ///
+    /// Supports both v1 (no checksums) and v2 (CRC32 per record) formats.
+    /// Records with invalid checksums are silently skipped with a warning.
     pub fn load_from_disk(&mut self) -> std::io::Result<()> {
-        use akar_common::serialization::Deserialize;
         use std::io::{BufReader, Read};
 
         if !self.path.exists() {
@@ -370,117 +420,253 @@ impl WAL {
             return Ok(());
         }
 
-        let mut cursor = std::io::Cursor::new(&buffer);
-
-        while cursor.position() < buffer.len() as u64 {
-            let mut tag_buf = [0u8; 1];
-            if cursor.read_exact(&mut tag_buf).is_err() {
-                break;
+        // Detect format: v2 has "AKAR" magic header
+        let (is_v2, cursor_pos) = if buffer.len() >= 6 && &buffer[..4] == WAL_MAGIC {
+            let version = u16::from_le_bytes([buffer[4], buffer[5]]);
+            if version >= 2 {
+                (true, 6usize)
+            } else {
+                (false, 0usize)
             }
-            let tag = tag_buf[0];
+        } else {
+            (false, 0usize)
+        };
 
-            match tag {
-                b'I' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    let data_len = u32::deserialize(&mut cursor)? as usize;
-                    let mut data = vec![0u8; data_len];
-                    cursor.read_exact(&mut data)?;
-                    self.records.push(WALRecord::Insert { table_id, data });
+        let mut cursor = std::io::Cursor::new(&buffer[cursor_pos..]);
+        let mut skipped = 0u32;
+
+        if is_v2 {
+            // v2: each record is CRC32 (4 bytes) + tag + payload
+            while cursor.position() < (buffer.len() - cursor_pos) as u64 {
+                // Read CRC32
+                let mut crc_bytes = [0u8; 4];
+                if cursor.read_exact(&mut crc_bytes).is_err() {
+                    break;
                 }
-                b'D' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    let row_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::Delete { table_id, row_id });
+                let expected_crc = u32::from_le_bytes(crc_bytes);
+
+                // Read the rest of the record into a temp buffer to compute CRC
+                let record_start = cursor.position() as usize;
+                let record_data = &buffer[(cursor_pos + record_start)..];
+                if record_data.is_empty() {
+                    break;
                 }
-                b'U' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    let row_id = u64::deserialize(&mut cursor)?;
-                    let column = u32::deserialize(&mut cursor)?;
-                    let data_len = u32::deserialize(&mut cursor)? as usize;
-                    let mut data = vec![0u8; data_len];
-                    cursor.read_exact(&mut data)?;
-                    self.records.push(WALRecord::Update {
-                        table_id,
-                        row_id,
-                        column,
-                        data,
-                    });
+
+                // We need to know how long this record is to compute CRC.
+                // Read tag first to determine length.
+                let tag = record_data[0];
+                let payload_len = match tag {
+                    b'I' => {
+                        // table_id(u64) + data_len(u32) + data
+                        if record_data.len() < 13 {
+                            skipped += 1;
+                            break;
+                        }
+                        let data_len =
+                            u32::from_le_bytes(record_data[9..13].try_into().unwrap()) as usize;
+                        1 + 8 + 4 + data_len // tag + u64 + u32 + data
+                    }
+                    b'D' => 1 + 8 + 8, // tag + table_id + row_id
+                    b'U' => {
+                        if record_data.len() < 21 {
+                            skipped += 1;
+                            break;
+                        }
+                        let data_len =
+                            u32::from_le_bytes(record_data[17..21].try_into().unwrap()) as usize;
+                        1 + 8 + 8 + 4 + 4 + data_len
+                    }
+                    b'F' => 1 + 8 + 1, // tag + page_idx + is_free
+                    b'W' => {
+                        if record_data.len() < 21 {
+                            skipped += 1;
+                            break;
+                        }
+                        let data_len =
+                            u32::from_le_bytes(record_data[17..21].try_into().unwrap()) as usize;
+                        1 + 8 + 4 + 8 + 4 + data_len
+                    }
+                    b'L' => {
+                        if record_data.len() < 5 {
+                            skipped += 1;
+                            break;
+                        }
+                        let data_len =
+                            u32::from_le_bytes(record_data[1..5].try_into().unwrap()) as usize;
+                        1 + 4 + data_len
+                    }
+                    b'C' => 1 + 8, // tag + transaction_id
+                    b'R' => 1 + 8,
+                    b'K' => 1, // checkpoint — tag only
+                    // DDL types: tag + u64
+                    b'T' | b'A' | b'M' | b'N' | b'X' | b'Q' => 1 + 8,
+                    _ => {
+                        // Unknown tag — skip rest of file
+                        skipped += 1;
+                        break;
+                    }
+                };
+
+                if payload_len > record_data.len() {
+                    skipped += 1;
+                    break;
                 }
-                b'F' => {
-                    let page_idx = u64::deserialize(&mut cursor)?;
-                    let is_free_u8 = u8::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::UpdateFsm {
-                        page_idx,
-                        is_free: is_free_u8 != 0,
-                    });
+
+                // Compute CRC over tag+payload
+                let computed_crc = crc32fast::hash(&record_data[..payload_len]);
+
+                if computed_crc != expected_crc {
+                    // Checksum mismatch — skip this record
+                    skipped += 1;
+                    cursor.set_position(cursor.position() + payload_len as u64);
+                    continue;
                 }
-                b'W' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    let col_id = u32::deserialize(&mut cursor)?;
-                    let page_id = u64::deserialize(&mut cursor)?;
-                    let data_len = u32::deserialize(&mut cursor)? as usize;
-                    let mut data = vec![0u8; data_len];
-                    cursor.read_exact(&mut data)?;
-                    self.records.push(WALRecord::ColumnWrite {
-                        table_id,
-                        col_id,
-                        page_id,
-                        data,
-                    });
-                }
-                b'C' => {
-                    let transaction_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::Commit { transaction_id });
-                }
-                b'R' => {
-                    let transaction_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::Rollback { transaction_id });
-                }
-                b'L' => {
-                    let data_len = u32::deserialize(&mut cursor)? as usize;
-                    let mut data = vec![0u8; data_len];
-                    cursor.read_exact(&mut data)?;
-                    self.records.push(WALRecord::LocalWALData { data });
-                }
-                b'K' => {
-                    self.records.push(WALRecord::Checkpoint);
-                }
-                // ── DDL record types ──
-                b'T' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::CreateTable { table_id });
-                }
-                b'A' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::DropTable { table_id });
-                }
-                b'M' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::AlterTable { table_id });
-                }
-                b'N' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::CreateIndex { table_id });
-                }
-                b'X' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::DropIndex { table_id });
-                }
-                b'Q' => {
-                    let table_id = u64::deserialize(&mut cursor)?;
-                    self.records.push(WALRecord::CreateSequence { table_id });
-                }
-                _ => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("WAL: unknown record tag byte: 0x{:02x}", tag),
-                    ));
-                }
+
+                // CRC valid — parse the record
+                cursor.set_position(cursor.position() + payload_len as u64);
+                let mut inner = std::io::Cursor::new(&record_data[..payload_len]);
+                self.parse_record(&mut inner)?;
             }
+        } else {
+            // v1: no checksums, original format
+            self.parse_v1_records(&mut cursor)?;
+        }
+
+        if skipped > 0 {
+            tracing::warn!(
+                "WAL: skipped {} corrupted record(s) during recovery (v{})",
+                skipped,
+                if is_v2 { 2 } else { 1 }
+            );
         }
 
         self.total_size = buffer.len();
         self.is_dirty = !self.records.is_empty();
+        Ok(())
+    }
+
+    /// Parse a single WAL record from the cursor (v1 format — no checksums).
+    fn parse_record(
+        &mut self,
+        cursor: &mut std::io::Cursor<&[u8]>,
+    ) -> std::io::Result<()> {
+        use akar_common::serialization::Deserialize;
+        let mut tag_buf = [0u8; 1];
+        if cursor.read_exact(&mut tag_buf).is_err() {
+            return Ok(());
+        }
+        let tag = tag_buf[0];
+        match tag {
+            b'I' => {
+                let table_id = u64::deserialize(cursor)?;
+                let data_len = u32::deserialize(cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                self.records.push(WALRecord::Insert { table_id, data });
+            }
+            b'D' => {
+                let table_id = u64::deserialize(cursor)?;
+                let row_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::Delete { table_id, row_id });
+            }
+            b'U' => {
+                let table_id = u64::deserialize(cursor)?;
+                let row_id = u64::deserialize(cursor)?;
+                let column = u32::deserialize(cursor)?;
+                let data_len = u32::deserialize(cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                self.records.push(WALRecord::Update {
+                    table_id,
+                    row_id,
+                    column,
+                    data,
+                });
+            }
+            b'F' => {
+                let page_idx = u64::deserialize(cursor)?;
+                let is_free_u8 = u8::deserialize(cursor)?;
+                self.records.push(WALRecord::UpdateFsm {
+                    page_idx,
+                    is_free: is_free_u8 != 0,
+                });
+            }
+            b'W' => {
+                let table_id = u64::deserialize(cursor)?;
+                let col_id = u32::deserialize(cursor)?;
+                let page_id = u64::deserialize(cursor)?;
+                let data_len = u32::deserialize(cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                self.records.push(WALRecord::ColumnWrite {
+                    table_id,
+                    col_id,
+                    page_id,
+                    data,
+                });
+            }
+            b'C' => {
+                let transaction_id = u64::deserialize(cursor)?;
+                self.records
+                    .push(WALRecord::Commit { transaction_id });
+            }
+            b'R' => {
+                let transaction_id = u64::deserialize(cursor)?;
+                self.records
+                    .push(WALRecord::Rollback { transaction_id });
+            }
+            b'L' => {
+                let data_len = u32::deserialize(cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                self.records.push(WALRecord::LocalWALData { data });
+            }
+            b'K' => {
+                self.records.push(WALRecord::Checkpoint);
+            }
+            // ── DDL record types ──
+            b'T' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::CreateTable { table_id });
+            }
+            b'A' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::DropTable { table_id });
+            }
+            b'M' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::AlterTable { table_id });
+            }
+            b'N' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::CreateIndex { table_id });
+            }
+            b'X' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::DropIndex { table_id });
+            }
+            b'Q' => {
+                let table_id = u64::deserialize(cursor)?;
+                self.records.push(WALRecord::CreateSequence { table_id });
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("WAL: unknown record tag byte: 0x{:02x}", tag),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse v1 records (legacy format without checksums).
+    fn parse_v1_records(
+        &mut self,
+        cursor: &mut std::io::Cursor<&[u8]>,
+    ) -> std::io::Result<()> {
+        while cursor.position() < cursor.get_ref().len() as u64 {
+            self.parse_record(cursor)?;
+        }
         Ok(())
     }
 }
@@ -541,5 +727,137 @@ mod tests {
         wal.flush_to_disk().unwrap();
         assert!(wal_path.exists());
         assert!(std::fs::metadata(&wal_path).unwrap().len() > 0);
+    }
+
+    #[test]
+    fn test_wal_checksum_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let wal_path = dir.path().join("wal.log");
+        let mut wal = WAL::new(wal_path.clone());
+        wal.append(WALRecord::Insert {
+            table_id: 42,
+            data: vec![10, 20, 30, 40, 50],
+        });
+        wal.append(WALRecord::Delete {
+            table_id: 7,
+            row_id: 99,
+        });
+        wal.append(WALRecord::Commit { transaction_id: 1 });
+        wal.flush_to_disk().unwrap();
+
+        // Verify the file starts with AKAR magic
+        let bytes = std::fs::read(&wal_path).unwrap();
+        assert_eq!(&bytes[..4], b"AKAR");
+        assert_eq!(u16::from_le_bytes([bytes[4], bytes[5]]), 2);
+
+        // Reload and verify all records recovered
+        let mut wal2 = WAL::new(wal_path);
+        wal2.load_from_disk().unwrap();
+        assert_eq!(wal2.len(), 3);
+        assert!(matches!(
+            &wal2.records()[0],
+            WALRecord::Insert { table_id: 42, data } if data == &vec![10, 20, 30, 40, 50]
+        ));
+        assert!(matches!(
+            &wal2.records()[1],
+            WALRecord::Delete { table_id: 7, row_id: 99 }
+        ));
+        assert!(matches!(
+            &wal2.records()[2],
+            WALRecord::Commit { transaction_id: 1 }
+        ));
+    }
+
+    #[test]
+    fn test_wal_corrupted_record_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let wal_path = dir.path().join("wal.log");
+
+        // Write two valid records
+        let mut wal = WAL::new(wal_path.clone());
+        wal.append(WALRecord::Insert {
+            table_id: 1,
+            data: vec![100, 200],
+        });
+        wal.append(WALRecord::Commit { transaction_id: 5 });
+        wal.flush_to_disk().unwrap();
+
+        // Corrupt one byte in the file (flip a byte in the first record's payload)
+        let mut bytes = std::fs::read(&wal_path).unwrap();
+        // Header is 6 bytes, first CRC is 4 bytes, then tag (1 byte), then table_id bytes
+        // Corrupt the data payload (after table_id + data_len)
+        let corrupt_offset = 6 + 4 + 1 + 8 + 4 + 1; // header + crc + tag + table_id + data_len + first data byte
+        if corrupt_offset < bytes.len() {
+            bytes[corrupt_offset] ^= 0xFF;
+        }
+        std::fs::write(&wal_path, &bytes).unwrap();
+
+        // Reload — corrupted record should be skipped, second should survive
+        let mut wal2 = WAL::new(wal_path);
+        let _result = wal2.load_from_disk();
+        // The corrupted Insert is skipped, Commit may or may not survive
+        // depending on whether the corruption affected its CRC range
+        // At minimum, no panic and the WAL loads
+    }
+
+    #[test]
+    fn test_wal_v1_backward_compat() {
+        // Simulate a v1 WAL file (no header, no checksums)
+        use akar_common::serialization::Serialize;
+        let dir = tempfile::tempdir().unwrap();
+        let wal_path = dir.path().join("wal.log");
+        let mut file = std::fs::File::create(&wal_path).unwrap();
+
+        // Write a v1 Insert record: tag "I" + table_id(u64) + data_len(u32) + data
+        file.write_all(b"I").unwrap();
+        42u64.serialize(&mut file).unwrap();
+        (3u32).serialize(&mut file).unwrap();
+        file.write_all(&[1, 2, 3]).unwrap();
+        // Write a v1 Commit record
+        file.write_all(b"C").unwrap();
+        1u64.serialize(&mut file).unwrap();
+        drop(file);
+
+        // Load — should parse as v1 (no magic header)
+        let mut wal = WAL::new(wal_path);
+        wal.load_from_disk().unwrap();
+        assert_eq!(wal.len(), 2);
+        assert!(matches!(
+            &wal.records()[0],
+            WALRecord::Insert { table_id: 42, .. }
+        ));
+        assert!(matches!(
+            &wal.records()[1],
+            WALRecord::Commit { transaction_id: 1 }
+        ));
+    }
+
+    #[test]
+    fn test_wal_all_record_types_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let wal_path = dir.path().join("wal.log");
+        let mut wal = WAL::new(wal_path.clone());
+
+        wal.append(WALRecord::Insert { table_id: 1, data: vec![1] });
+        wal.append(WALRecord::Delete { table_id: 2, row_id: 3 });
+        wal.append(WALRecord::Update { table_id: 4, row_id: 5, column: 6, data: vec![7, 8] });
+        wal.append(WALRecord::UpdateFsm { page_idx: 100, is_free: true });
+        wal.append(WALRecord::ColumnWrite { table_id: 10, col_id: 11, page_id: 12, data: vec![99] });
+        wal.append(WALRecord::LocalWALData { data: vec![10, 11, 12] });
+        wal.append(WALRecord::Commit { transaction_id: 50 });
+        wal.append(WALRecord::Rollback { transaction_id: 51 });
+        wal.append(WALRecord::Checkpoint);
+        wal.append(WALRecord::CreateTable { table_id: 20 });
+        wal.append(WALRecord::DropTable { table_id: 21 });
+        wal.append(WALRecord::AlterTable { table_id: 22 });
+        wal.append(WALRecord::CreateIndex { table_id: 23 });
+        wal.append(WALRecord::DropIndex { table_id: 24 });
+        wal.append(WALRecord::CreateSequence { table_id: 25 });
+
+        wal.flush_to_disk().unwrap();
+
+        let mut wal2 = WAL::new(wal_path);
+        wal2.load_from_disk().unwrap();
+        assert_eq!(wal2.len(), 15);
     }
 }

@@ -295,9 +295,9 @@ pub struct TransactionManager {
     /// Number of currently active transactions (across all types).
     active_txn_count: AtomicU32,
     /// Signal flag: set to true when an auto-checkpoint is requested.
-    checkpoint_requested: AtomicBool,
+    checkpoint_requested: Arc<AtomicBool>,
     /// Signal flag: set to true when the background worker should shut down.
-    shutdown_requested: AtomicBool,
+    shutdown_requested: Arc<AtomicBool>,
     /// Handle to the background auto-checkpoint worker thread.
     #[allow(dead_code)]
     worker_handle: Option<JoinHandle<()>>,
@@ -327,8 +327,8 @@ impl TransactionManager {
             mtx_for_checkpoint: Mutex::new(()),
             cv_active_txns_changed: Condvar::new(),
             active_txn_count: AtomicU32::new(0),
-            checkpoint_requested: AtomicBool::new(false),
-            shutdown_requested: AtomicBool::new(false),
+            checkpoint_requested: Arc::new(AtomicBool::new(false)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             worker_handle: None,
             config,
         }
@@ -562,9 +562,8 @@ impl TransactionManager {
     where
         F: Fn() -> std::io::Result<()> + Send + 'static,
     {
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = shutdown.clone();
-        let checkpoint_requested = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&self.shutdown_requested);
+        let checkpoint_clone = Arc::clone(&self.checkpoint_requested);
 
         let handle = thread::Builder::new()
             .name("akar-auto-checkpoint".into())
@@ -578,7 +577,8 @@ impl TransactionManager {
                     }
 
                     // Check for checkpoint signal
-                    if checkpoint_requested.load(Ordering::Acquire) {
+                    if checkpoint_clone.load(Ordering::Acquire) {
+                        checkpoint_clone.store(false, Ordering::Release);
                         match checkpoint_fn() {
                             Ok(()) => {
                                 tracing::debug!("Auto-checkpoint completed");

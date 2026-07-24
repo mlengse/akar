@@ -82,8 +82,14 @@ impl Connection {
             }
             (true, Err(e)) => {
                 if let Some(ref mut txn) = txn_opt {
-                    let _records = self.rollback_write_txn(txn);
-                    tracing::warn!("Transaction rolled back due to error: {e}");
+                    match self.rollback_write_txn(txn) {
+                        Ok(_records) => {
+                            tracing::warn!("Transaction rolled back due to error: {e}");
+                        }
+                        Err(rollback_err) => {
+                            tracing::error!("Transaction rollback ALSO failed: {rollback_err} (original error: {e})");
+                        }
+                    }
                 }
             }
             _ => {}
@@ -232,25 +238,7 @@ impl Connection {
 
     /// Create a QueryProcessor configured with the sequence callback.
     pub(crate) fn create_processor(&self) -> QueryProcessor {
-        let catalog = self.database.catalog.clone();
-        let seq_fn: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
-            Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
-                let mut catalog = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
-                if is_nextval {
-                    match catalog.get_sequence_mut(seq_name) {
-                        Some(entry) => {
-                            let val = entry.next_k_val(1);
-                            Ok(Value::Int64(val))
-                        }
-                        None => Err(format!("Sequence '{}' not found", seq_name)),
-                    }
-                } else {
-                    match catalog.get_sequence(seq_name) {
-                        Some(entry) => Ok(Value::Int64(entry.curr_val())),
-                        None => Err(format!("Sequence '{}' not found", seq_name)),
-                    }
-                }
-            });
+        let seq_fn = super::utils::make_sequence_callback(self.database.catalog.clone());
 
         let db = self.database.clone();
 
@@ -436,21 +424,7 @@ impl Connection {
                 let optimized_plan = optimizer.optimize(logical_plan);
 
                 let catalog_inner = db.catalog.clone();
-                let seq_fn_inner: Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> =
-                    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
-                        let mut cat = catalog_inner.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
-                        if is_nextval {
-                            match cat.get_sequence_mut(seq_name) {
-                                Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
-                                None => Err(format!("Sequence '{}' not found", seq_name)),
-                            }
-                        } else {
-                            match cat.get_sequence(seq_name) {
-                                Some(entry) => Ok(Value::Int64(entry.curr_val())),
-                                None => Err(format!("Sequence '{}' not found", seq_name)),
-                            }
-                        }
-                    });
+                let seq_fn_inner = super::utils::make_sequence_callback(catalog_inner);
 
                 let processor = QueryProcessor::with_catalog(
                     db.function_registry.clone(),
@@ -512,9 +486,13 @@ impl Connection {
 
     /// Wait for checkpoint to finish (for CHECKPOINT command).
     pub(crate) fn do_sync_checkpoint(&self) -> Result<(), String> {
+        let tm = &self.database.transaction_manager;
+        let drain_fn = |timeout: std::time::Duration| -> bool {
+            tm.stop_new_txns_and_wait_until_all_leave(timeout)
+        };
         self.database
             .storage_manager
-            .checkpoint_with_drain()
+            .checkpoint_with_drain(Some(&drain_fn))
             .map_err(|e| format!("Checkpoint failed: {e}"))?;
         tracing::debug!("Sync checkpoint completed");
         Ok(())

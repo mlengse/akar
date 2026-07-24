@@ -382,6 +382,7 @@ dependencies = [
  "akar-vector",
  "arrow 59.1.0",
  "bytes",
+ "crc32fast",
  "criterion",
  "csv",
  "dashmap",
