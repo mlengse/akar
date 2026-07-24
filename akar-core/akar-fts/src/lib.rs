@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn test_tf_idf_all_docs() {
         let score = tf_idf(1.0, 100, 100);
-        assert_eq!(score, 0.0); // ln(100/100) = 0
+        assert!((score - 0.0).abs() < 1e-10); // ln(100/100) = 0
     }
 
     #[test]

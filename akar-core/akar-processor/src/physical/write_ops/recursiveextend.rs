@@ -389,10 +389,10 @@ impl PhysicalOperatorExec for PhysicalRecursiveExtend {
         let mut path_edges_v = ValueVector::new(akar_common::types::PhysicalTypeID::List, num_results);
 
         for (i, val) in path_nodes_col.iter().enumerate() {
-            path_nodes_v.set_value(i, val).ok();
+            path_nodes_v.set_value(i, val)?;
         }
         for (i, val) in path_edges_col.iter().enumerate() {
-            path_edges_v.set_value(i, val).ok();
+            path_edges_v.set_value(i, val)?;
         }
 
         // When weighted, include cost column
@@ -573,7 +573,7 @@ impl PhysicalCreateRel {
                 table.insert_rel(src_id, dst_id, values)?;
                 inserted += 1;
             }
-            println!(
+            tracing::debug!(
                 "PhysicalCreateRel inserted {} relationships from chunk of size {}",
                 inserted, chunk.size
             );

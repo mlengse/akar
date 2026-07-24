@@ -64,7 +64,7 @@ impl Connection {
                     if let Ok(mut active) = tm.active_snapshot() {
                         for txn_id in &txn_ids {
                             if let Some(mut txn) = active.remove(txn_id) {
-                                self.rollback_write_txn(&mut txn);
+                                self.rollback_write_txn(&mut txn)?;
                                 return Ok(Some(QueryResult::success_message("Transaction rolled back".into())));
                             }
                         }

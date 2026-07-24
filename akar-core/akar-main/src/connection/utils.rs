@@ -1,4 +1,85 @@
+use akar_catalog::Catalog;
 use akar_common::types::Value;
+use std::sync::{Arc, Mutex};
+
+/// Create a sequence resolution callback for use with the query processor.
+///
+/// The callback resolves `currval(seq_name)` and `nextval(seq_name)` by
+/// looking up the named sequence in the catalog.
+pub(crate) fn make_sequence_callback(
+    catalog: Arc<Mutex<Catalog>>,
+) -> Arc<dyn Fn(&str, bool) -> Result<Value, String> + Send + Sync> {
+    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, String> {
+        let mut cat = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+        if is_nextval {
+            match cat.get_sequence_mut(seq_name) {
+                Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
+                None => Err(format!("Sequence '{}' not found", seq_name)),
+            }
+        } else {
+            match cat.get_sequence(seq_name) {
+                Some(entry) => Ok(Value::Int64(entry.curr_val())),
+                None => Err(format!("Sequence '{}' not found", seq_name)),
+            }
+        }
+    })
+}
+
+/// Register `currval` and `nextval` as scalar functions in the function registry.
+///
+/// These are the SQL-callable sequence functions (e.g. `SELECT nextval('my_seq')`).
+/// Deduplicates the logic that was previously inlined in `Database::new`.
+pub(crate) fn register_sequence_scalars(
+    registry: &mut akar_function::FunctionRegistry,
+    catalog: Arc<Mutex<Catalog>>,
+) {
+    use akar_function::registry::ScalarFunction;
+
+    let curr_catalog = catalog.clone();
+    registry.register_scalar(
+        "currval",
+        ScalarFunction::CustomScalar {
+            name: "currval".into(),
+            execute: Arc::new(move |args: &[Value]| -> Result<Value, String> {
+                if args.is_empty() {
+                    return Err("currval requires a sequence name argument".into());
+                }
+                let seq_name = match &args[0] {
+                    Value::String(s) => s.clone(),
+                    other => return Err(format!("currval expects a string, got {:?}", other.logical_type())),
+                };
+                let cat = curr_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                let seq = cat
+                    .get_sequence(&seq_name)
+                    .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                Ok(Value::Int64(seq.curr_val()))
+            }),
+        },
+    );
+
+    let next_catalog = catalog;
+    registry.register_scalar(
+        "nextval",
+        ScalarFunction::CustomScalar {
+            name: "nextval".into(),
+            execute: Arc::new(move |args: &[Value]| -> Result<Value, String> {
+                if args.is_empty() {
+                    return Err("nextval requires a sequence name argument".into());
+                }
+                let seq_name = match &args[0] {
+                    Value::String(s) => s.clone(),
+                    other => return Err(format!("nextval expects a string, got {:?}", other.logical_type())),
+                };
+                let mut cat = next_catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+                let seq = cat
+                    .get_sequence_mut(&seq_name)
+                    .ok_or_else(|| format!("Sequence '{}' not found", seq_name))?;
+                let result = seq.next_k_val(1);
+                Ok(Value::Int64(result))
+            }),
+        },
+    );
+}
 
 /// Convert a Value to its string representation for CSV output.
 pub(crate) fn value_to_csv_string(v: &Value) -> String {

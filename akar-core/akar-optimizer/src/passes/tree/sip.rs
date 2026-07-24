@@ -50,7 +50,7 @@ impl TreeOptimizationPass for SIPOptimization {
                         children: vec![*build_op],
                         cardinality: build_card,
                     });
-                    println!(
+                    tracing::debug!(
                         "SIPOptimization triggered: inserted SemiMasker for table_id {}",
                         table_id
                     );

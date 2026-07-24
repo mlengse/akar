@@ -59,18 +59,23 @@ impl Connection {
         // `commit_transaction` handles: Commit record append, WAL flush to disk,
         // LocalStorage flush to tables, ShadowFile apply to BM, auto-checkpoint.
         let sm = &self.database.storage_manager;
+        let tm = &self.database.transaction_manager;
+        let drain_fn = |timeout: std::time::Duration| -> bool {
+            tm.stop_new_txns_and_wait_until_all_leave(timeout)
+        };
         sm.commit_transaction(
             &resources.local_storage,
             &resources.shadow_file,
             self.database.config.checkpoint_threshold,
             txn_id,
+            Some(&drain_fn),
         )?;
 
         Ok(())
     }
 
     /// Rollback a write transaction: discard resources.
-    pub(crate) fn rollback_write_txn(&self, txn: &mut Transaction) -> Vec<akar_transaction::UndoRecord> {
+    pub(crate) fn rollback_write_txn(&self, txn: &mut Transaction) -> Result<Vec<akar_transaction::UndoRecord>, String> {
         let txn_id = txn.transaction_id;
         // Remove resources (discard them) — try to get them for cleanup
         let resources = self.txn_resources.lock().ok().and_then(|mut map| map.remove(&txn_id));
@@ -82,10 +87,14 @@ impl Connection {
         // Rollback in StorageManager too (if we have resources)
         if let Some(mut res) = resources {
             let sm = &self.database.storage_manager;
-            let _ = sm.rollback_transaction(&mut res.local_storage, &mut res.shadow_file, txn_id, &records.to_vec());
+            sm.rollback_transaction(&mut res.local_storage, &mut res.shadow_file, txn_id, &records.to_vec())
+                .map_err(|e| {
+                    tracing::error!("Storage rollback failed for txn#{}: {e}", txn_id);
+                    format!("Storage rollback failed: {e}")
+                })?;
         }
 
-        records
+        Ok(records)
     }
 
     pub(crate) fn is_write_statement(bound: &BoundStatement) -> bool {

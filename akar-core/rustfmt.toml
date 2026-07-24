@@ -1,5 +1,3 @@
 # Rustfmt configuration
 edition = "2024"
 max_width = 120
-imports_granularity = "Crate"
-group_imports = "StdExternalCrate"

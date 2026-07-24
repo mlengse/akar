@@ -162,7 +162,7 @@ pub fn map_and_execute_update(
                 columns,
                 options: cf.options.clone(),
                 table_catalog,
-                vfs: ctx.vfs.clone().expect("VFS not initialized in processor"),
+                vfs: ctx.vfs.clone().ok_or_else(|| "VFS not initialized in processor".to_string())?,
             };
             let result = copy_op.execute(current_input)?;
             Ok(result)

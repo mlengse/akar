@@ -38,6 +38,19 @@ jobs:
         working-directory: akar-core
 
   # ══════════════════════════════════════════════════════
+  # Security audit
+  # ══════════════════════════════════════════════════════
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          working-directory: akar-core
+
+  # ══════════════════════════════════════════════════════
   # Clippy lint check
   # ══════════════════════════════════════════════════════
   clippy:
@@ -48,6 +61,9 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
       - run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: akar-core
 
@@ -60,6 +76,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
       - run: cargo build --workspace
         working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast
@@ -74,6 +93,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
       - run: cargo build --workspace
         working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast
@@ -88,6 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
       - run: cargo build --workspace
         working-directory: akar-core
       - run: cargo test --workspace --no-fail-fast

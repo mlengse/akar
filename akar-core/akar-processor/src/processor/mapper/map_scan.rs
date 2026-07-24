@@ -74,7 +74,7 @@ pub fn map_and_execute_scan_node(
             docs_table: fq.docs_table.clone(),
             terms_table: fq.terms_table.clone(),
             posting_table: fq.posting_table.clone(),
-            table_catalog: ctx.table_catalog.clone().expect("table catalog required for FTS scan"),
+            table_catalog: ctx.table_catalog.clone().ok_or_else(|| "Table catalog required for FTS scan".to_string())?,
         });
     }
     if let Some(ref pred) = s.predicate {
