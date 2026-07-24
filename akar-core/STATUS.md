@@ -47,7 +47,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **📋 PLANNED** — see [`implementation_plan.md`](implementation_plan.md) |
-| **Sprint 12.5** | **Codebase Audit Fixes — 19/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
+| **Sprint 12.5** | **Codebase Audit Fixes — 23/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
 
 ---
 
@@ -714,7 +714,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-24: **1,538 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
-- **Sprint 12.5 — Codebase Audit Fixes:** 19 of 31 issues resolved. All 5 critical issues addressed (4 fixed,1 deferred — MVCC). See Section 9 for details.
+- **Sprint 12.5 — Codebase Audit Fixes:** 23 of 31 issues resolved. All 5 critical issues addressed (4 fixed, 1 deferred — MVCC). Issue #9 (unified error type) fully completed across all 8 crates. See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).
 - **Sprint 9 COMPLETE — P36 ALL DONE:** CSR Adjacency, AST ReturnClause, DDL Operators (6), Binder Type Resolution, ORDER BY/LIMIT/SKIP Propagation, Fix Ignored Tests, Checkpoint Implementation.
@@ -821,16 +821,18 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | 17 | Test helpers duplicated (12 `setup_db()` + 3 `exec()`) | Created `src/test_helpers.rs` as single source of truth; all test files migrated; `tests/common/mod.rs` re-exports; `tempfile` added as regular dep |
 | 25 | Fragile float assertions | 22 `assert_eq!` on `f64` → epsilon comparisons across `akar-algo`, `akar-graph`, `akar-fts` |
 
-### 9.3 Unified Error Type (Issue #9) — In Progress
+### 9.3 Unified Error Type (Issue #9) — ✅ COMPLETE
 
 | Crate | Error Type | Functions Migrated |
 |-------|-----------|-------------------|
-| `akar-common` | `AkarError`, `StorageError`, `TransactionError`, `CatalogError` | Defined with `From` impls + `lock_or_poisoned()` |
-| `akar-transaction` | `TransactionError` | 11 functions (`begin_write`, `lock_table`, `active_snapshot`, `commit`, `rollback`, `auto_commit`, etc.) |
-| `akar-storage` | `StorageError` | 36 functions (table CRUD, spiller, ART index, vector index, CSR, parquet, undo buffer, commit/rollback) |
-| `akar-catalog` | `CatalogError` | 9 functions (`add_column`, `drop_column`, `create_index`, `rename_column`, `rename_table`, etc.) |
-
-Remaining crates (binder, planner, optimizer, processor, main) use `From<ErrorType> for String` bridge.
+| `akar-common` | `AkarError`, `StorageError`, `TransactionError`, `CatalogError`, `BinderError`, `PlannerError`, `ProcessorError` | Defined with `From` impls + `lock_or_poisoned()` |
+| `akar-transaction` | `TransactionError` | 11 functions |
+| `akar-storage` | `StorageError` | 36 functions |
+| `akar-catalog` | `CatalogError` | 9 functions |
+| `akar-binder` | `BinderError` | 48 functions |
+| `akar-planner` | `PlannerError` | 19 functions |
+| `akar-processor` | `ProcessorError` | 54+ functions + type aliases |
+| `akar-main` | Cascade fixes | standalone_call.rs (27 trait impls), query.rs (3 closures), utils.rs |
 
 ### 9.4 Deferred Items
 
@@ -839,7 +841,6 @@ Remaining crates (binder, planner, optimizer, processor, main) use `From<ErrorTy
 | 1 | MVCC snapshot isolation | Most complex change (2-3 days), requires storage layer redesign |
 | 7 | Row-level MVCC conflict detection | Depends on #1 |
 | 8 | Dual catalog system | Large refactor, 2-3 days |
-| 9 | Unified error type | Leaf crates done (transaction, storage, catalog); remaining 6 crates use `From<Error> for String` bridge |
 | 12 | `Mutex<BM>` → `RwLock` | Medium effort, mechanical |
 | 13 | `TransactionManager` god-object | Medium effort, structural |
 | 18-31 | Remaining items | Various effort levels |

@@ -25,7 +25,7 @@ pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool
             return Err(format!(
                 "UNION column count mismatch: left has {num_fields} columns, right has {} columns",
                 chunk.num_fields()
-            ));
+            ).into());
         }
     }
 

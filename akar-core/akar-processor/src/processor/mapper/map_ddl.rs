@@ -150,7 +150,7 @@ pub fn map_and_execute_ddl(
                         .position(|c| c.name == *name)
                         .ok_or_else(|| format!("Column '{}' not found in '{}'", name, a.table_name))?;
                     if table.columns[pos].is_primary_key {
-                        return Err(format!("Cannot drop primary key column '{}'", name));
+                        return Err(format!("Cannot drop primary key column '{}'", name).into());
                     }
                     table.columns.remove(pos);
                     tracing::info!("Pipeline: Dropped column '{}' from '{}'", name, a.table_name);
@@ -165,10 +165,10 @@ pub fn map_and_execute_ddl(
                             .get_node_table_by_name(&a.table_name)
                             .ok_or_else(|| format!("Table '{}' not found", a.table_name))?;
                         if !table.columns.iter().any(|c| c.name == *old_name) {
-                            return Err(format!("Column '{}' not found in '{}'", old_name, a.table_name));
+                            return Err(format!("Column '{}' not found in '{}'", old_name, a.table_name).into());
                         }
                         if table.columns.iter().any(|c| c.name == *new_name) {
-                            return Err(format!("Column '{}' already exists in '{}'", new_name, a.table_name));
+                            return Err(format!("Column '{}' already exists in '{}'", new_name, a.table_name).into());
                         }
                     }
                     let mut table = tc.get_node_table_by_name_mut(&a.table_name).unwrap();
@@ -187,14 +187,14 @@ pub fn map_and_execute_ddl(
                 }
                 akar_parser::ast::AlterAction::RenameTable { new_name } => {
                     if tc.get_node_table_by_name(new_name).is_some() || tc.get_rel_table_by_name(new_name).is_some() {
-                        return Err(format!("Table '{}' already exists", new_name));
+                        return Err(format!("Table '{}' already exists", new_name).into());
                     }
                     if let Some(mut table) = tc.get_node_table_by_name_mut(&a.table_name) {
                         table.name = new_name.clone();
                     } else if let Some(mut table) = tc.get_rel_table_by_name_mut(&a.table_name) {
                         table.name = new_name.clone();
                     } else {
-                        return Err(format!("Table '{}' not found", a.table_name));
+                        return Err(format!("Table '{}' not found", a.table_name).into());
                     }
                     tracing::info!("Pipeline: Renamed table '{}' to '{}'", a.table_name, new_name);
                     Ok(ddl_success_chunk(&format!(
@@ -243,7 +243,7 @@ pub fn map_and_execute_ddl(
                 "cosine" => akar_vector::hnsw::DistanceMetric::Cosine,
                 "euclidean" | "l2" => akar_vector::hnsw::DistanceMetric::L2Squared,
                 "dot" => akar_vector::hnsw::DistanceMetric::DotProduct,
-                other => return Err(format!("Unknown vector metric '{other}'")),
+                other => return Err(format!("Unknown vector metric '{other}'").into()),
             };
 
             // Create the vector index in storage
@@ -427,7 +427,7 @@ pub fn map_and_execute_ddl(
             let result = exec.execute(current_input)?;
             Ok(result)
         }
-        _ => Err(format!("DDL operator not implemented in mapper: {:?}", op)),
+        _ => Err(format!("DDL operator not implemented in mapper: {:?}", op).into()),
     }
 }
 
@@ -478,6 +478,6 @@ fn parse_type_simple(type_name: &str) -> Result<akar_common::types::LogicalTypeI
         "TIMESTAMP" => Ok(akar_common::types::LogicalTypeID::Timestamp),
         "INTERVAL" => Ok(akar_common::types::LogicalTypeID::Interval),
         "UUID" => Ok(akar_common::types::LogicalTypeID::Uuid),
-        _ => Err(format!("Unknown type '{type_name}'")),
+        _ => Err(format!("Unknown type '{type_name}'").into()),
     }
 }
