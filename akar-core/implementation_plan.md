@@ -28,12 +28,12 @@
 | **P38** | DDL Completeness & Documentation | ✅ DONE | 11 | ✅ Complete |
 | **P39** | Arrow Aggregate Fast Path | ✅ DONE | 2 | ✅ Complete |
 | **P40** | Vectorized GROUP BY | ✅ DONE | 2 | ✅ Complete |
-| **AUDIT** | **Codebase Audit Fixes (18/31 issues)** | ✅ **DONE** | **—** | ✅ **18 issues resolved** |
+| **AUDIT** | **Codebase Audit Fixes (19/31 issues)** | ✅ **DONE** | **—** | ✅ **19 issues resolved** |
 | **P41** | **Stress Testing — Crash Recovery** | **📋 PLANNED** | **12** | Sprint 12 |
 | **P42** | **Full Release Benchmarks** | **📋 PLANNED** | **8** | Sprint 12 |
 
 > [!IMPORTANT]
-> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,538 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **18 of 31 audit issues resolved** (all 5 critical addressed).
+> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,538 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **19 of 31 audit issues resolved** (all 5 critical addressed).
 > **P41-P42: PLANNED** — Stress testing crash recovery (WAL replay, checkpoint under load, process-level crash simulation) and full release benchmarks (release profile optimization, large-scale benchmarks, CI-integrated benchmarking).
 
 ---
@@ -221,7 +221,7 @@ cargo test --workspace  # no regressions
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | Sprint 1-11 | P0-P40 | ~258 | ✅ ALL COMPLETE — see `STATUS.md` |
-| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ 18/31 issues resolved: critical safety, WAL atomicity + checksums, CI improvements, float assertions |
+| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ 19/31 issues resolved: critical safety, WAL atomicity + checksums, CI improvements, float assertions, set_value errors |
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **P41** Crash recovery stress tests. **P42** Full release benchmarks. |
 
 ---
@@ -232,7 +232,7 @@ cargo test --workspace  # no regressions
 graph TD
     P36_7["P36.7: Checkpoint Implementation ✅"] --> P41["📋 P41: Stress Testing Crash Recovery"]
     P37_3["P37.3: Benchmark Suite ✅"] --> P42["📋 P42: Full Release Benchmarks"]
-    AUDIT["AUDIT: Codebase Audit Fixes ✅ (17/31)"] --> P41
+    AUDIT["AUDIT: Codebase Audit Fixes ✅ (19/31)"] --> P41
     AUDIT --> P42
     P41 --> P41_1["P41.1: Process Crash Simulation"]
     P41 --> P41_2["P41.2: WAL Replay Under Load"]
@@ -246,15 +246,15 @@ graph TD
 
 ## Audit Fixes Summary (2026-07-24)
 
-18 of 31 issues resolved. Full details: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md)
+19 of 31 issues resolved. Full details: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md)
 
 | Category | Fixed | Deferred |
 |----------|:-----:|:--------:|
 | Critical (5) | 4 | 1 (MVCC) |
 | High (6) | 3 | 3 |
-| Medium (12) | 3 | 9 |
+| Medium (12) | 4 | 8 |
 | Low (8) | 1 | 7 |
-| **Total (31)** | **18** | **13** |
+| **Total (31)** | **19** | **12** |
 
 ## Design Decisions Log
 

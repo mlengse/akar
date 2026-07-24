@@ -47,7 +47,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **📋 PLANNED** — see [`implementation_plan.md`](implementation_plan.md) |
-| **Sprint 12.5** | **Codebase Audit Fixes — 17/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
+| **Sprint 12.5** | **Codebase Audit Fixes — 19/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
 
 ---
 
@@ -683,7 +683,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
-| `[AUDIT]` | Codebase audit fixes — 17/31 issues resolved: critical safety fixes (worker thread, drain bypass, unsafe borrow, rollback errors), WAL atomicity, CI improvements, float assertions, .expect() removal |
+| `[AUDIT]` | Codebase audit fixes — 19/31 issues resolved: critical safety fixes (worker thread, drain bypass, unsafe borrow, rollback errors), WAL atomicity, CI improvements, float assertions, .expect() removal, set_value error propagation |
 | `[P40]` | Vectorized GROUP BY with `take()` on ArrayRef — ~37× improvement + AggregateDetection correctness fix |
 | `[P39]` | Arrow fast path for SUM/AVG/MIN/MAX — ~100× improvement, scalar aggregates at parity with COUNT |
 | `[P38.1]` | DDL operator completions: all 6 remaining operators wired, pk index auto-creation |
@@ -714,7 +714,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-24: **1,538 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
-- **Sprint 12.5 — Codebase Audit Fixes:** 18 of 31 issues resolved. All 5 critical issues addressed (4 fixed,1 deferred — MVCC). See Section 9 for details.
+- **Sprint 12.5 — Codebase Audit Fixes:** 19 of 31 issues resolved. All 5 critical issues addressed (4 fixed,1 deferred — MVCC). See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).
 - **Sprint 9 COMPLETE — P36 ALL DONE:** CSR Adjacency, AST ReturnClause, DDL Operators (6), Binder Type Resolution, ORDER BY/LIMIT/SKIP Propagation, Fix Ignored Tests, Checkpoint Implementation.
@@ -786,7 +786,7 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 
 ## 9. Codebase Audit Fixes (2026-07-24 — Sprint 12.5)
 
-A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). Implementation plan: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md). **18 of 31 issues resolved (58%).**
+A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). Implementation plan: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md). **19 of 31 issues resolved (61%).**
 
 ### 9.1 Quick Wins — All Completed ✅
 
@@ -829,7 +829,7 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | 9 | Unified error type | Large surface area, 3-4 days |
 | 12 | `Mutex<BM>` → `RwLock` | Medium effort, mechanical |
 | 13 | `TransactionManager` god-object | Medium effort, structural |
-| 15 | `set_value().ok()` calls | 100+ locations, needs phased approach |
+| 15 | `set_value().ok()` calls | ~~100+ locations, needs phased approach~~ ✅ FIXED — 12 sites → `?`, wal.rs `Read` import fix |
 | 17-31 | Remaining items | Various effort levels |
 
 ---
