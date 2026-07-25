@@ -128,7 +128,6 @@ pub fn load_delta_table(table_path: &str) -> Result<DeltaTableInfo, String> {
 }
 
 /// Format a Delta schema JSON string into human-readable form.
-#[allow(dead_code)]
 fn format_schema_string(schema_str: &str) -> String {
     let json: serde_json::Value = match serde_json::from_str(schema_str) {
         Ok(v) => v,

@@ -44,10 +44,8 @@ pub struct NodeGroup {
     /// Optional MVCC version tracker for this group.
     pub version_info: Option<VersionInfo>,
     /// Optional spiller for disk-based memory management.
-    #[allow(dead_code)]
     spiller: Option<Arc<Spiller>>,
     /// List of spill files created during append operations.
-    #[allow(dead_code)]
     spill_files: Vec<SpillFile>,
 }
 

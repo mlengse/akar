@@ -134,7 +134,6 @@ pub(crate) fn pk_value_to_string(v: &Value) -> String {
 }
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
-#[allow(dead_code)]
 pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> akar_common::vector::DataChunk {
     use akar_common::types::PhysicalTypeID;
     use akar_common::vector::ValueVector;

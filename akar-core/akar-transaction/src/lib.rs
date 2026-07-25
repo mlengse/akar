@@ -301,7 +301,6 @@ pub struct TransactionManager {
     /// Signal flag: set to true when the background worker should shut down.
     shutdown_requested: Arc<AtomicBool>,
     /// Handle to the background auto-checkpoint worker thread.
-    #[allow(dead_code)]
     worker_handle: Option<JoinHandle<()>>,
     /// Configuration snapshot kept for reference (used during construction).
     #[allow(dead_code)]

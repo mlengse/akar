@@ -36,7 +36,6 @@ impl TreeOptimizationPass for CorrelatedSubqueryUnnesting {
     fn apply_tree(&self, root: &mut LogicalOperator) {
         // First pass: collect (accumulate_idx, build_side_ptr) pairs
         // to avoid borrow conflicts with the closure
-        #[allow(dead_code)]
         struct AccHashJoinInfo {
             build_side_idx: usize,
         }
