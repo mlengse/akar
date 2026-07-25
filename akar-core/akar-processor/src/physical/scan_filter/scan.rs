@@ -4,7 +4,7 @@ use crate::physical::scan_filter::PhysicalFilter;
 use crate::physical::types::{NodeSemiMask, OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::PhysicalFtsScan;
 use akar_common::types::{LogicalTypeID, PhysicalTypeID, Value};
-use akar_common::vector::{DataChunk, ValueVector};
+use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
 use akar_storage::table::ColumnDefinition;
 use arrow::array::{
@@ -99,67 +99,6 @@ impl PhysicalScan {
     pub fn with_evaluator(mut self, evaluator: Arc<Mutex<ExpressionEvaluator>>) -> Self {
         self.evaluator = Some(evaluator);
         self
-    }
-
-    /// Convert a Value to bytes in a ValueVector at the given row index.
-    #[allow(dead_code)]
-    fn write_value_to_vector(v: &mut ValueVector, row: usize, val: &Value) {
-        match val {
-            Value::Null => {
-                v.set_null(row, true);
-            }
-            Value::Bool(x) => {
-                if v.physical_type() == PhysicalTypeID::Bool {
-                    v.data_mut()[row] = if *x { 1 } else { 0 };
-                    v.set_null(row, false);
-                }
-            }
-            Value::Int64(x) => {
-                let offset = row * 8;
-                if offset + 8 <= v.data().len() {
-                    v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
-                    v.set_null(row, false);
-                }
-            }
-            Value::Int32(x) => {
-                let offset = row * 4;
-                if offset + 4 <= v.data().len() {
-                    v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
-                    v.set_null(row, false);
-                }
-            }
-            Value::Double(x) => {
-                let offset = row * 8;
-                if offset + 8 <= v.data().len() {
-                    v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
-                    v.set_null(row, false);
-                }
-            }
-            Value::Float(x) => {
-                let offset = row * 4;
-                if offset + 4 <= v.data().len() {
-                    v.data_mut()[offset..offset + 4].copy_from_slice(&x.to_le_bytes());
-                    v.set_null(row, false);
-                }
-            }
-            Value::String(s) => {
-                let offset = row * 256;
-                let bytes = s.as_bytes();
-                let len = bytes.len().min(255) as u8;
-                if offset < v.data().len() {
-                    v.data_mut()[offset] = len;
-                    let copy_len = bytes.len().min(255);
-                    if offset + 1 + copy_len <= v.data().len() {
-                        v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-                    }
-                    v.set_null(row, false);
-                }
-            }
-            _ => {
-                // For complex types, set null
-                v.set_null(row, true);
-            }
-        }
     }
 
     /// Determine the PhysicalTypeID for a Value, with fallback.

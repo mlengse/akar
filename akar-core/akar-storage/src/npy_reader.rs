@@ -279,36 +279,6 @@ fn read_values(raw: &[u8], dtype: &NpyDtype, count: usize) -> Result<Vec<Value>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    #[allow(dead_code)]
-    fn write_test_npy(path: &str, values: &[f64]) {
-        let mut file = std::fs::File::create(path).unwrap();
-
-        // Magic
-        file.write_all(b"\x93NUMPY").unwrap();
-        // Version
-        file.write_all(&[1u8, 0u8]).unwrap();
-        // Header
-        let header = format!(
-            "{{'descr': '<f8', 'fortran_order': False, 'shape': ({},), }}",
-            values.len()
-        );
-        // Pad header to 16-byte alignment, ensure it ends with \n
-        let mut header_bytes = header.into_bytes();
-        while (10 + header_bytes.len()) % 16 != 0 {
-            header_bytes.push(b' ');
-        }
-        header_bytes.push(b'\n');
-        let header_len = header_bytes.len() as u16;
-        file.write_all(&header_len.to_le_bytes()).unwrap();
-        file.write_all(&header_bytes).unwrap();
-
-        // Data
-        for &v in values {
-            file.write_all(&v.to_le_bytes()).unwrap();
-        }
-    }
 
     #[test]
     fn test_parse_simple_header() {

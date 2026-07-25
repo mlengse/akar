@@ -3,91 +3,18 @@
 //! Ported from C++ `gds_utils.h` / `gds_utils.cpp`.
 //!
 //! Provides the main execution orchestrator for graph algorithms:
-//! - `run_edge_compute`: Iterative BFS using frontier pairs
 //! - `run_vertex_compute`: Single-pass over all vertices
 //!
 //! Uses rayon for parallel execution.
 
 use akar_common::types::InternalID;
 
-use crate::gds::compute::EdgeCompute;
-use crate::gds::frontier::FrontierPair;
 use crate::graph::CSRAdjacency;
 
 /// GDS execution utilities.
 pub struct GDSUtils;
 
 impl GDSUtils {
-    /// Run iterative BFS-like computation on a CSR adjacency graph.
-    ///
-    /// Returns the number of iterations executed.
-    #[allow(dead_code)]
-    pub fn run_edge_compute(
-        graph: &CSRAdjacency,
-        source: u64,
-        frontier_pair: &mut dyn FrontierPair,
-        edge_compute: &mut dyn EdgeCompute,
-        max_iteration: u64,
-    ) -> u64 {
-        let n = graph.num_nodes();
-
-        // Initialize: mark source as active in iteration 0
-        if (source as usize) < n {
-            frontier_pair.add_node_to_next_frontier_offset(source);
-            frontier_pair.set_active_nodes_for_next_iter();
-        }
-
-        let mut num_iters = 0u64;
-
-        while frontier_pair.continue_next_iter(max_iteration as u16) {
-            frontier_pair.begin_new_iteration();
-
-            // Get active nodes on current frontier
-            let active_nodes: Vec<u64> = (0..n)
-                .filter(|&i| frontier_pair.is_active_on_current_frontier(i as u64))
-                .map(|i| i as u64)
-                .collect();
-
-            if active_nodes.is_empty() {
-                break;
-            }
-
-            // Process active nodes — sequential for simplicity (avoids &mut issues)
-            let mut added = Vec::new();
-            for &node_offset in &active_nodes {
-                let bound_node_id = InternalID {
-                    table_id: 0,
-                    offset: node_offset,
-                };
-                let neighbors = graph.neighbors(node_offset as usize);
-
-                for &(edge_id, ref dst) in neighbors {
-                    if edge_compute.edge_compute(bound_node_id, *dst, edge_id, true) {
-                        added.push(dst.offset);
-                    }
-                }
-            }
-
-            // Add all activated neighbors to the next frontier
-            for &offset in &added {
-                frontier_pair.add_node_to_next_frontier_offset(offset);
-            }
-
-            if !added.is_empty() {
-                frontier_pair.set_active_nodes_for_next_iter();
-            }
-
-            num_iters += 1;
-
-            // Check early termination
-            if edge_compute.terminate() {
-                break;
-            }
-        }
-
-        num_iters
-    }
-
     /// Run the shortest path BFS with path tracking.
     ///
     /// Returns a map from destination offsets to their parent lists.

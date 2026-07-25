@@ -121,24 +121,6 @@ pub fn download_blob(uri: &str) -> Result<String, String> {
     Ok(path_str)
 }
 
-/// Check whether the blob exists.
-#[allow(dead_code)]
-pub fn blob_exists(uri: &str) -> bool {
-    let parsed = match parse_azure_uri(uri) {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    let mut url = blob_url(&parsed);
-    if let Some(sas) = sas_token() {
-        let sas_clean = sas.strip_prefix('?').unwrap_or(&sas);
-        url.push_str(&format!("?{sas_clean}"));
-    }
-    match ureq::head(&url).call() {
-        Ok(resp) => resp.status() == 200,
-        Err(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

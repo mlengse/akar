@@ -455,11 +455,4 @@ pub fn lock_or_poisoned<T>(mutex: &std::sync::Mutex<T>) -> crate::error::Result<
         .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
 }
 
-/// Acquire a `parking_lot::Mutex`-style guard (if used) — same semantics.
-/// For `std::sync::Mutex`, prefer `lock_or_poisoned`.
-#[allow(dead_code)]
-pub fn lock_or_poisoned_arc<T>(mutex: &std::sync::Arc<std::sync::Mutex<T>>) -> crate::error::Result<std::sync::MutexGuard<'_, T>> {
-    mutex
-        .lock()
-        .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
-}
+
