@@ -820,6 +820,8 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | 16 | Sequence callback duplicated 3× | `make_sequence_callback()` + `register_sequence_scalars()` in `connection/utils.rs` (all 3/3 sites deduplicated) |
 | 17 | Test helpers duplicated (12 `setup_db()` + 3 `exec()`) | Created `src/test_helpers.rs` as single source of truth; all test files migrated; `tests/common/mod.rs` re-exports; `tempfile` added as regular dep |
 | 25 | Fragile float assertions | 22 `assert_eq!` on `f64` → epsilon comparisons across `akar-algo`, `akar-graph`, `akar-fts` |
+| 26 | 24 `#[allow(dead_code)]` in production code | 15 annotations removed, 8 dead code items deleted entirely, 11 justified remain (struct-level, test-only, placeholders) |
+| 27 | 74+ `.lock().unwrap()` — poison panic propagation | ~75 calls replaced with `.lock().map_err(\|e\| format!("Lock poisoned: {e}"))?` across 17 files in 7 crates; 53 justified remain (infallible functions, closures, tests) |
 
 ### 9.3 Unified Error Type (Issue #9) — ✅ COMPLETE
 
@@ -843,7 +845,7 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | 8 | Dual catalog system | Large refactor, 2-3 days |
 | 12 | `Mutex<BM>` → `RwLock` | Medium effort, mechanical |
 | 13 | `TransactionManager` god-object | Medium effort, structural |
-| 18-31 | Remaining items | Various effort levels |
+| 18-24, 28-31 | Remaining items | Various effort levels |
 
 ---
 
