@@ -17,5 +17,10 @@ tracing.workspace = true
 default = []
 native = ["tokio", "tokio-postgres"]
 
+[dev-dependencies]
+akar-catalog = { path = "../akar-catalog" }
+akar-common = { path = "../akar-common" }
+akar-extension = { path = "../akar-extension" }
+
 [lints]
 workspace = true

@@ -388,7 +388,7 @@ assert!((result.values[0] - 1.0).abs() < 1e-10, "expected ~1.0, got {}", result.
 **Estimated effort:** 1 hour
 **Files:** `akar-algo/src/lib.rs`, `akar-graph/src/gds/bfs_graph.rs`, `akar-graph/src/algorithms.rs`, `akar-fts/src/lib.rs`
 
-### 6.3 Add tests for untested crates
+### ✅ 6.3 Add tests for untested crates
 **Issue #24**
 
 Add basic smoke tests for:
@@ -399,7 +399,7 @@ Add basic smoke tests for:
 **Estimated effort:** 1 day
 **Files:** `akar-extension/src/lib.rs`, `akar-c/tests/`, `akar-cli/tests/`
 
-### 6.4 Add storage-layer fuzz targets
+### ✅ 6.4 Add storage-layer fuzz targets
 **Issue #28**
 
 Currently only 3 fuzz targets (query, expression, CSV). Storage has 0.

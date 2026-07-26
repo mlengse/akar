@@ -325,6 +325,8 @@ dependencies = [
 name = "akar-postgres"
 version = "0.1.0"
 dependencies = [
+ "akar-catalog",
+ "akar-common",
  "akar-extension",
  "akar-function",
  "tokio",

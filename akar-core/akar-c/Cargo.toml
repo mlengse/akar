@@ -10,7 +10,7 @@ categories.workspace = true
 authors.workspace = true
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
 akar-main = { path = "../akar-main" }

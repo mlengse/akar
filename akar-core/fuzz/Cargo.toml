@@ -10,6 +10,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 akar-main = { path = "../akar-main" }
+akar-storage = { path = "../akar-storage" }
+akar-common = { path = "../akar-common" }
 tempfile = "3.8"
 
 [[bin]]
@@ -27,6 +29,18 @@ doc = false
 [[bin]]
 name = "copy_from_csv"
 path = "fuzz_targets/copy_from_csv.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "wal_bytes"
+path = "fuzz_targets/wal_bytes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "compression_roundtrip"
+path = "fuzz_targets/compression_roundtrip.rs"
 test = false
 doc = false
 
