@@ -22,12 +22,7 @@ impl UndoBuffer {
 
     /// Record the old value of a cell before it is overwritten.
     pub fn record(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) {
-        self.records.push(UndoRecord {
-            table_id,
-            row_id,
-            column,
-            old_data,
-        });
+        self.records.push(UndoRecord::update(table_id, row_id, column, old_data));
     }
 
     /// Number of undo records accumulated.

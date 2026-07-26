@@ -2,7 +2,7 @@
 
 > **Akar** — Pure Rust embedded graph database for AI agent memory.
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Hasil audit:** `cargo test --workspace` → **1,538 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
+> **Hasil audit:** `cargo test --workspace` → **1,552 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **Performance parity verified (hot path only):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
@@ -15,8 +15,8 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
-| **Tests passing** | **1,538 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
-| **Integration tests** | **44 passed, 0 failed** ✅ |
+| **Tests passing** | **1,552 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
+| **Integration tests** | **58 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
 | **Optimizer passes** | **25** (18 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
@@ -28,7 +28,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
-| **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager** ✅ |
+| **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager + P41 Stress Tests (14 tests)** ✅ |
 | **Pipeline completeness** | **~95%** — all 12 DDL operators wired, Binder type resolution via catalog, BufferManager mmap/NUMA/readahead, StringDictionary encoding, 25 query optimization passes |
 
 ### Sprint Progress
@@ -46,7 +46,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 9 | P36: Critical Pipeline Gaps | 29 | ✅ COMPLETE |
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
-| **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **📋 PLANNED** — see [`implementation_plan.md`](implementation_plan.md) |
+| **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **P41 ✅ COMPLETE** — 14 crash recovery tests (12 SP). **P42 📋 PLANNED** — 8 SP. See [`implementation_plan.md`](implementation_plan.md) |
 | **Sprint 12.5** | **Codebase Audit Fixes — 25/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
 
 ---
@@ -540,6 +540,20 @@ Implemented in `ladybug/` C++ codebase:
 
 **Results:** GROUP BY + AVG **~37× improvement** (~54.7ms → ~1.5ms). Correctness bug fixed: GROUP BY expressions no longer silently dropped.
 
+### ✅ P41 — Stress Testing: Crash Recovery (12 SP)
+
+**Discovery:** Catalog is in-memory only — never serialized to disk. DDL records in WAL are explicitly skipped during replay. Cross-process DDL recovery is impossible. Only DML (Insert/Update/Delete) can be recovered if table schema exists from a prior checkpoint.
+
+| Sub-phase | Content | Status |
+|-----------|---------|--------|
+| P41.1 | Process-Level Crash Simulation — `crash_sim_child.rs` binary + CrashSimulator helper | ✅ (4 tests) |
+| P41.2 | WAL Replay Correctness Under Load — 1000-row stress, truncated WAL (50/25/10%), empty WAL | ✅ (5 tests) |
+| P41.3 | Checkpoint Atomicity Under Concurrent Load — multi-thread writes + checkpoint stress | ✅ (2 tests) |
+| P41.4 | Fault Injection — zeroed WAL, random bytes, single byte corruption | ✅ (3 tests) |
+
+**Files:** `akar-main/src/bin/crash_sim_child.rs` (new), `akar-main/tests/test_crash_recovery.rs` (new)
+**Result:** 14/14 tests pass, zero regressions across workspace.
+
 ---
 
 ## 3. Kesenjangan Tersisa (Gaps) — Audit Komprehensif 2026-07-18
@@ -617,7 +631,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 ---
 
-## 4. Test Results (Per 2026-07-24 — Audit Fixes Applied: 1,538 tests)
+## 4. Test Results (Per 2026-07-26 — P41 Complete: 1,552 tests)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
@@ -647,6 +661,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-main (delete_set) | 1 | ✅ Pass |
 | akar-main (fts) | 1 | ✅ Pass |
 | akar-main (proptest) | 3 | ✅ Pass |
+| akar-main (crash_recovery) | 14 | ✅ Pass |
 | akar-algo | 34 | ✅ Pass |
 | akar-duckdb | 9 | ✅ Pass |
 | akar-binder-test | 15 | ✅ Pass |
@@ -659,7 +674,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-migrate | 1 | ✅ Pass |
 | Extension crates (others) | 4 | ✅ Pass |
 | Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **1,538** | **✅ 1,538 pass, 0 failed, 5 ignored (doc-tests only)** |
+| **Total** | **1,552** | **✅ 1,552 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -683,6 +698,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[P41]` | Stress Testing: Crash Recovery — 14 tests (process crash simulation, WAL replay under load, checkpoint atomicity, fault injection). Catalog in-memory limitation discovered. |
 | `[AUDIT]` | Codebase audit fixes — 19/31 issues resolved: critical safety fixes (worker thread, drain bypass, unsafe borrow, rollback errors), WAL atomicity, CI improvements, float assertions, .expect() removal, set_value error propagation |
 | `[P40]` | Vectorized GROUP BY with `take()` on ArrayRef — ~37× improvement + AggregateDetection correctness fix |
 | `[P39]` | Arrow fast path for SUM/AVG/MIN/MAX — ~100× improvement, scalar aggregates at parity with COUNT |
@@ -713,8 +729,9 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-24: **1,538 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
-- **Sprint 12.5 — Codebase Audit Fixes:** 25 of 31 issues resolved. All 5 critical issues addressed (4 fixed, 1 deferred — MVCC). Issue #9 (unified error type) fully completed across all 8 crates. See Section 9 for details.
+- Per 2026-07-26: **1,552 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
+- **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible. See Section 2 for details.
+- **Sprint 12.5 — Codebase Audit Fixes:** 26 of 31 issues resolved. All 5 critical issues fixed (including P1.3 MVCC snapshot isolation). Issue #9 (unified error type) fully completed across all 8 crates. See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).
 - **Sprint 9 COMPLETE — P36 ALL DONE:** CSR Adjacency, AST ReturnClause, DDL Operators (6), Binder Type Resolution, ORDER BY/LIMIT/SKIP Propagation, Fix Ignored Tests, Checkpoint Implementation.
@@ -723,6 +740,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **P26.2 Fuzz Testing:** 3 cargo-fuzz targets, CI-integrated (P30.5b).
 - **P26.3 Property-Based Testing:** 3 proptest properties (round-trip, join associativity, filter pushdown).
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
+- **1,538 → 1,552 tests:** P41 adds 14 new crash recovery tests.
 
 ---
 
@@ -840,8 +858,8 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 
 | # | Issue | Reason |
 |---|-------|--------|
-| 1 | MVCC snapshot isolation | Most complex change (2-3 days), requires storage layer redesign |
-| 7 | Row-level MVCC conflict detection | Depends on #1 |
+| ~~1~~ | ~~MVCC snapshot isolation~~ | ✅ Done (P1.3) |
+| 7 | Row-level MVCC conflict detection | Depends on #1 (now done) |
 | 8 | Dual catalog system | Large refactor, 2-3 days |
 | 12 | `Mutex<BM>` → `RwLock` | Medium effort, mechanical |
 | 13 | `TransactionManager` god-object | Medium effort, structural |

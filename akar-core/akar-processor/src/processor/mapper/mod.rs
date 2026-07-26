@@ -31,6 +31,11 @@ pub struct ExecutionContext<'a, 'p> {
     pub sequence_fn: Option<SequenceFn>,
     pub subquery_fn: Option<SubqueryFn>,
     pub schema_ddl_fn: Option<SchemaDdlFn>,
+    /// MVCC snapshot timestamp. When `Some(ts)`, reads are isolated to data
+    /// committed at or before `ts`. `None` means read最新 (no isolation).
+    pub snapshot_ts: Option<u64>,
+    /// Commit history for MVCC visibility checks: `(txn_id, commit_ts)` pairs.
+    pub commit_history: Vec<(u64, u64)>,
 }
 
 impl<'a, 'p> ExecutionContext<'a, 'p> {
@@ -39,6 +44,7 @@ impl<'a, 'p> ExecutionContext<'a, 'p> {
     }
 
     /// Resolve table data and column definitions for a scan node.
+    /// When `snapshot_ts` is set on the context, uses MVCC-aware scan.
     pub fn resolve_scan_data<'b>(
         &self,
         table_name: &str,
@@ -53,11 +59,17 @@ impl<'a, 'p> ExecutionContext<'a, 'p> {
             if let Some(node_table) = tc.get_node_table_by_name(table_name) {
                 let num_rows = node_table.num_rows;
                 if num_rows > 0 {
-                    return (
-                        Some(node_table.to_column_major_data_with_predicate(predicate)),
-                        node_table.columns.clone(),
-                        num_rows,
-                    );
+                    let data = if self.snapshot_ts.is_some() {
+                        // MVCC-aware scan: filter by snapshot visibility
+                        node_table.to_column_major_data_with_snapshot_and_predicate(
+                            predicate,
+                            self.snapshot_ts,
+                            &self.commit_history,
+                        )
+                    } else {
+                        node_table.to_column_major_data_with_predicate(predicate)
+                    };
+                    return (Some(data), node_table.columns.clone(), num_rows);
                 }
             }
             // Try rel table
@@ -65,7 +77,7 @@ impl<'a, 'p> ExecutionContext<'a, 'p> {
                 let num_rows = rel_table.num_rows;
                 if num_rows > 0 {
                     return (
-                        Some(rel_table.to_column_major_data()), // Rel tables don't have zone map yet
+                        Some(rel_table.to_column_major_data()),
                         rel_table.columns.clone(),
                         num_rows,
                     );
@@ -81,10 +93,20 @@ impl<'a, 'p> ExecutionContext<'a, 'p> {
     /// Reads from NodeTable's NodeGroup column chunks, converts each
     /// ColumnChunk to an Arrow array, then concatenates per-group arrays
     /// into one array per column.
+    ///
+    /// When `snapshot_ts` is set, falls back to the Vec<Vec<Value>> path
+    /// since Arrow arrays don't support MVCC version chain traversal.
     pub fn resolve_scan_arrow_data(
         &self,
         table_name: &str,
     ) -> (Option<Vec<ArrayRef>>, Vec<akar_storage::table::ColumnDefinition>, u64) {
+        // When MVCC snapshot is active, skip the Arrow fast path — Arrow
+        // arrays don't support version chain traversal. The caller will
+        // fall back to the Vec<Vec<Value>> path which uses MVCC-aware reads.
+        if self.snapshot_ts.is_some() {
+            return (None, Vec::new(), 0);
+        }
+
         if let Some(ref tc) = self.table_catalog {
             if let Some(node_table) = tc.get_node_table_by_name(table_name) {
                 let num_rows = node_table.num_rows;

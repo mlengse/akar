@@ -73,9 +73,17 @@ impl NodeTable {
     /// rows with already-existing PK values. The hash index is updated after
     /// a successful insert.
     ///
+    /// When `txn_id` is `Some(...)`, the insert is recorded in VersionInfo
+    /// for MVCC snapshot isolation.
+    ///
     /// Returns an error if the number of values doesn't match the number of columns,
     /// or if a duplicate primary key value is detected.
     pub fn insert_row(&mut self, values: Vec<Value>) -> Result<u64, StorageError> {
+        self.insert_row_with_txn(values, None)
+    }
+
+    /// Insert a row with an optional transaction ID for MVCC tracking.
+    pub fn insert_row_with_txn(&mut self, values: Vec<Value>, txn_id: Option<u64>) -> Result<u64, StorageError> {
         if values.len() != self.columns.len() {
             return Err(StorageError::Page(format!(
                 "Column count mismatch: expected {} values, got {}",
@@ -111,11 +119,20 @@ impl NodeTable {
         let num_cols = self.columns.len();
         if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
             let start_offset = self.num_rows;
-            self.node_groups.push(NodeGroup::new(num_cols, start_offset));
+            let mut new_group = NodeGroup::new(num_cols, start_offset);
+            // Enable version info if MVCC tracking is requested
+            if txn_id.is_some() {
+                new_group.enable_version_info();
+            }
+            self.node_groups.push(new_group);
         }
 
         let current = self.node_groups.last_mut().unwrap();
-        current.append_row(values.clone())?;
+        // Enable version info on existing group if needed
+        if txn_id.is_some() {
+            current.enable_version_info();
+        }
+        current.append_row_with_txn(values.clone(), txn_id)?;
         self.num_rows += 1;
 
         // Update hash index with the PK value for this row
@@ -137,7 +154,13 @@ impl NodeTable {
 
     /// Batch insert multiple rows efficiently.
     /// Validates PK uniqueness, pre-allocates node groups, and bulk-appends.
+    /// When `txn_id` is `Some(...)`, inserts are recorded in VersionInfo for MVCC.
     pub fn insert_rows_batch(&mut self, rows: &[Vec<Value>]) -> Result<u64, StorageError> {
+        self.insert_rows_batch_with_txn(rows, None)
+    }
+
+    /// Batch insert with optional MVCC tracking.
+    pub fn insert_rows_batch_with_txn(&mut self, rows: &[Vec<Value>], txn_id: Option<u64>) -> Result<u64, StorageError> {
         if rows.is_empty() {
             return Ok(0);
         }
@@ -185,23 +208,34 @@ impl NodeTable {
             } else {
                 self.num_rows
             };
-            self.node_groups.push(NodeGroup::new(num_cols, off));
+            let mut new_group = NodeGroup::new(num_cols, off);
+            if txn_id.is_some() {
+                new_group.enable_version_info();
+            }
+            self.node_groups.push(new_group);
         }
 
         // Append to the last group (spilling into new groups if needed)
         let mut inserted = 0usize;
         while inserted < total_new {
             let current = self.node_groups.last_mut().unwrap();
+            if txn_id.is_some() {
+                current.enable_version_info();
+            }
             let rem = current.remaining();
             let take = (total_new - inserted).min(rem);
             for row in &rows[inserted..inserted + take] {
-                current.append_row(row.clone())?;
+                current.append_row_with_txn(row.clone(), txn_id)?;
             }
             self.num_rows += take as u64;
             inserted += take;
             if inserted < total_new {
                 let off = self.num_rows;
-                self.node_groups.push(NodeGroup::new(num_cols, off));
+                let mut new_group = NodeGroup::new(num_cols, off);
+                if txn_id.is_some() {
+                    new_group.enable_version_info();
+                }
+                self.node_groups.push(new_group);
             }
         }
 
@@ -355,6 +389,14 @@ impl NodeTable {
     /// Delete a row by its index. Marks the row as null by setting all its column
     /// values to `Value::Null`. This is a soft delete — the row slot remains.
     pub fn delete_row(&mut self, row_idx: u64) -> Result<(), StorageError> {
+        self.delete_row_with_txn(row_idx, None)
+    }
+
+    /// Delete a row with optional MVCC tracking.
+    ///
+    /// When `txn_id` is `Some(...)`, the delete is recorded in VersionInfo
+    /// for MVCC snapshot isolation.
+    pub fn delete_row_with_txn(&mut self, row_idx: u64, txn_id: Option<u64>) -> Result<(), StorageError> {
         if row_idx >= self.num_rows {
             return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
         }
@@ -364,6 +406,12 @@ impl NodeTable {
         for group in &mut self.node_groups {
             if row_idx < offset + group.num_nodes {
                 let local_row = (row_idx - offset) as usize;
+                // Record delete in VersionInfo if MVCC tracking is active
+                if let Some(txn) = txn_id {
+                    if let Some(ref vi) = group.version_info {
+                        vi.delete(txn, local_row as u32);
+                    }
+                }
                 // Set all columns to Null for this row
                 for col_chunk in &mut group.columns {
                     let _ = col_chunk.set_value(local_row, Value::Null);
@@ -428,6 +476,67 @@ impl NodeTable {
                 for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
                     match group.get_value(row, col) {
                         Some(v) => res_col.push(v.clone()),
+                        None => res_col.push(Value::Null),
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Like `to_column_major_data`, but with MVCC snapshot isolation.
+    ///
+    /// When `snapshot_ts` is `Some(...)`, rows inserted/deleted by transactions
+    /// committed after `snapshot_ts` are excluded, and versioned updates are
+    /// resolved to the value visible at that snapshot.
+    pub fn to_column_major_data_with_snapshot(
+        &self,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> Vec<Vec<Value>> {
+        let num_cols = self.columns.len();
+        let mut result = vec![Vec::new(); num_cols];
+
+        for group in &self.node_groups {
+            for row in 0..group.num_nodes as usize {
+                for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
+                    match group.get_value_owned_with_snapshot(row, col, snapshot_ts, commit_history) {
+                        Some(v) => res_col.push(v),
+                        None => res_col.push(Value::Null),
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Like `to_column_major_data_with_snapshot`, but applies an optional zone
+    /// map predicate to skip entire node groups.
+    pub fn to_column_major_data_with_snapshot_and_predicate(
+        &self,
+        predicate: Option<(usize, &str, &Value)>,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> Vec<Vec<Value>> {
+        let num_cols = self.columns.len();
+        let mut result = vec![Vec::new(); num_cols];
+
+        for group in &self.node_groups {
+            if let Some((col_idx, op, val)) = predicate
+                && let Some(col_chunk) = group.columns.get(col_idx)
+            {
+                use crate::predicate::{ZoneMapCheckResult, check_zone_map};
+                if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
+                    continue;
+                }
+            }
+
+            for row in 0..group.num_nodes as usize {
+                for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
+                    match group.get_value_owned_with_snapshot(row, col, snapshot_ts, commit_history) {
+                        Some(v) => res_col.push(v),
                         None => res_col.push(Value::Null),
                     }
                 }
