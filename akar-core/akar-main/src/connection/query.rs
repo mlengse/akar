@@ -154,7 +154,7 @@ impl Connection {
 
         // Check cache first
         {
-            let cache = self.statement_cache.lock().unwrap();
+            let cache = self.statement_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             if let Some(cached) = cache.get(trimmed) {
                 return Ok(cached.clone());
             }
@@ -171,7 +171,7 @@ impl Connection {
 
         // Cache it
         {
-            let mut cache = self.statement_cache.lock().unwrap();
+            let mut cache = self.statement_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             cache.insert(trimmed.to_string(), prepared.clone());
         }
 

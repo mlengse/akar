@@ -118,7 +118,7 @@ impl CliState {
                 }
             }
             "schema" => {
-                let cat = self.catalog.lock().unwrap();
+                let cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                 let entries: Vec<_> = cat.all_entries().collect();
                 if entries.is_empty() {
                     writeln!(output, "No tables.").ok();

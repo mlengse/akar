@@ -82,7 +82,9 @@ impl ShadowFile {
             None => return Ok(()), // No file to write to
         };
 
-        let mut bm = buffer_manager.lock().unwrap();
+        let mut bm = buffer_manager
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         for entry in self.entries.values().filter(|e| e.is_dirty) {
             let frame = bm.pin_mut(&file_name, entry.original_page_id)?;
             // Copy shadow data into the frame

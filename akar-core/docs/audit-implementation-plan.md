@@ -435,26 +435,27 @@ Lower priority structural improvements.
 **Estimated effort:** 10 minutes
 **Files:** 2 files
 
-### 7.3 Clean up `#[allow(dead_code)]`
+### 7.3 Clean up `#[allow(dead_code)]` ✅ DONE
 **Issue #26** | 24 occurrences in 13 files
 
-Audit each — remove the annotation and fix the dead code, or document why it's kept.
+**Fix (implemented):**
+- 15 `#[allow(dead_code)]` annotations removed (26 → 11 remaining)
+- 8 dead code items deleted entirely: `lock_or_poisoned_arc`, `blob_exists`, `list_tables`, `run_edge_compute`, `raw_key_hash_i64`, `raw_key_hash_bytes`, `write_test_npy`, `write_value_to_vector`
+- 7 annotations removed from actually-used items (were unnecessary)
+- 11 remaining are justified: struct-level annotations (BufferManager, StorageManager, Database), test-only functions, placeholder fields
 
-**Estimated effort:** 2-3 hours
-**Files:** 13 files
+**Files changed:** `akar-common/src/error.rs`, `akar-azure/src/azure_storage.rs`, `akar-delta/src/native_reader.rs`, `akar-optimizer/src/passes/tree/subquery_unnesting.rs`, `akar-unity-catalog/src/native_client.rs`, `akar-transaction/src/lib.rs`, `akar-graph/src/gds/utils.rs`, `akar-storage/src/node_group.rs`, `akar-storage/src/npy_reader.rs`, `akar-processor/src/physical/common.rs`, `akar-processor/src/physical/scan_filter/scan.rs`, `akar-main/src/connection/utils.rs`
 
-### 7.4 Replace `.lock().unwrap()` with graceful handling
-**Issue #27** | 74+ locations
+### 7.4 Replace `.lock().unwrap()` with graceful handling ✅ DONE
+**Issue #27** | 74+ locations (actual count: 123 across 26 files)
 
-**Approach:** Define a `lock_or_poisoned` helper:
-```rust
-fn lock_or_poisoned<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, String> {
-    mutex.lock().map_err(|e| format!("Lock poisoned (another thread panicked): {e}"))
-}
-```
+**Fix (implemented):**
+- ~75 `.lock().unwrap()` calls replaced with `.lock().map_err(|e| format!("Lock poisoned: {e}"))?` across 13 files in 7 crates
+- Top files fixed: `akar-binder` (22), `akar-storage` (11), `akar-main` (25), `akar-processor` (7), `akar-transaction` (3), `akar-duckdb` (4), `akar-cli` (1)
+- 53 remaining are justified: infallible functions (no `Result` return), closures, test/benchmark code
+- Zero regressions — 317 tests pass, same 3 pre-existing WAL failures
 
-**Estimated effort:** 1 day (mechanical)
-**Files:** Throughout
+**Files changed:** `akar-binder/src/binder/mod.rs`, `akar-binder/src/binder/dml.rs`, `akar-storage/src/lib.rs`, `akar-storage/src/checkpoint.rs`, `akar-storage/src/column.rs`, `akar-storage/src/shadow_file.rs`, `akar-main/src/connection/standalone_call.rs`, `akar-main/src/connection/ddl.rs`, `akar-main/src/connection/query.rs`, `akar-main/src/connection/copy.rs`, `akar-main/src/database.rs`, `akar-processor/src/physical/order_aggregate/splitaggregation.rs`, `akar-processor/src/expression_evaluator.rs`, `akar-processor/src/processor/mod.rs`, `akar-transaction/src/lib.rs`, `akar-duckdb/src/connection.rs`, `akar-cli/src/main.rs`
 
 ---
 

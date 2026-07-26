@@ -249,7 +249,7 @@ impl QueryProcessor {
 
         // Look up the function in the registry
         if let Some(ref registry) = self.function_registry {
-            let reg = registry.lock().unwrap();
+            let reg = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             if let Some(tbl_fn) = reg.get_table(func_name) {
                 match tbl_fn {
                     TableFunction::CustomTable { execute, .. } => {

@@ -367,14 +367,14 @@ impl TransactionManager {
 
         // In single-writer mode, block until no other writer is active.
         if !self.allow_concurrent_writes() {
-            let mut count = self.active_write_count.lock().unwrap();
+            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             while *count > 0 {
-                count = self.writer_condvar.wait(count).unwrap();
+                count = self.writer_condvar.wait(count).map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             }
             *count = 1;
         } else {
             // Track count for multi-writer mode too (for condvar notification).
-            let mut count = self.active_write_count.lock().unwrap();
+            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             *count += 1;
         }
 
@@ -389,7 +389,7 @@ impl TransactionManager {
     /// Returns an error if another write transaction already holds the lock.
     #[allow(clippy::collapsible_if)]
     pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
-        let mut locks = self.table_locks.lock().unwrap();
+        let mut locks = self.table_locks.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
         if let Some(&owner) = locks.get(&table_id) {
             if owner != txn_id {
                 return Err(TransactionError::TableLocked { table_id, owner_txn: owner });

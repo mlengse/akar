@@ -261,7 +261,10 @@ impl Column {
     /// Flush the column's dirty pages to disk.
     pub fn flush(&self) -> std::io::Result<()> {
         for i in 0..self.num_pages {
-            let mut bm = self.buffer_manager.lock().unwrap();
+            let mut bm = self
+                .buffer_manager
+                .lock()
+                .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
             bm.flush(&self.file_name, i)?;
         }
         Ok(())
@@ -702,7 +705,10 @@ impl Column {
     ///   start_off = 0 if i == 0 else end_offsets[i-1]
     ///   end_off   = end_offsets[i]
     fn write_value_to_page(&mut self, page_idx: u64, serialized: &[u8]) -> std::io::Result<()> {
-        let mut bm = self.buffer_manager.lock().unwrap();
+        let mut bm = self
+            .buffer_manager
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         let frame = bm.pin_mut(&self.file_name, page_idx)?;
         let page_size = self.file_handle.page_size;
 
@@ -792,7 +798,10 @@ impl Column {
 
     /// Read raw page data from the buffer manager.
     fn read_page_data(&self, page_idx: usize) -> std::io::Result<Vec<u8>> {
-        let mut bm = self.buffer_manager.lock().unwrap();
+        let mut bm = self
+            .buffer_manager
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         let frame = bm.pin(&self.file_name, page_idx as u64)?;
         let data = frame.data.clone();
         bm.unpin(&self.file_name, page_idx as u64);

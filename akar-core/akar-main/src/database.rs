@@ -187,7 +187,7 @@ impl Database {
 
         // Load all registered extensions
         {
-            let mut ext_registry = db.extension_registry.lock().unwrap();
+            let mut ext_registry = db.extension_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             let context = ExtensionContext::new(db.function_registry.clone(), db.catalog.clone(), db.vfs.clone());
             for result in ext_registry.load_all(&context) {
                 match result {
@@ -199,7 +199,7 @@ impl Database {
 
         // Register built-in sequence functions (nextval/currval)
         {
-            let mut reg = db.function_registry.lock().unwrap();
+            let mut reg = db.function_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             crate::connection::utils::register_sequence_scalars(&mut reg, db.catalog.clone());
         }
 

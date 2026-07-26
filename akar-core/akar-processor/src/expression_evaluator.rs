@@ -472,7 +472,7 @@ impl ExpressionEvaluator {
 
         // Look up the function
         let func = {
-            let reg = self.registry.lock().unwrap();
+            let reg = self.registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             reg.get_scalar(name).cloned()
         };
         let func = match func {
@@ -686,7 +686,7 @@ impl ExpressionEvaluator {
 
         // Look up the function in the registry
         let func = {
-            let reg = self.registry.lock().unwrap();
+            let reg = self.registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             reg.get_scalar(name).cloned()
         };
 

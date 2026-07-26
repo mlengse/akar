@@ -10,7 +10,7 @@ impl Connection {
         let dir = Path::new(&e.file_path);
         fs::create_dir_all(dir).map_err(|err| format!("Cannot create export directory '{}': {err}", e.file_path))?;
 
-        let catalog = self.database.catalog.lock().unwrap();
+        let catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
 
         // Generate schema.cypher
         let mut schema = String::new();
