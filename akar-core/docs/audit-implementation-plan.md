@@ -42,7 +42,7 @@ Line 318: `let _drained = true;` — the drain is completely bypassed. The metho
 **Estimated effort:** 3-4 hours
 **Files:** `akar-storage/src/lib.rs`, `akar-main/src/database.rs` (pass TM reference)
 
-### 1.3 Enforce MVCC snapshot isolation on reads
+### ✅ 1.3 Enforce MVCC snapshot isolation on reads
 **Issue #1** | `akar-storage/src/table.rs`
 
 `NodeTable::get_value()` and `scan_column()` read current in-memory state without checking snapshot timestamps. Concurrent readers see uncommitted writes.
@@ -538,7 +538,7 @@ After each phase:
 2. Run `cargo clippy --workspace -- -D warnings` — no new warnings
 3. Run `cargo fmt --all -- --check` — formatting consistent
 4. For Phase 1.3 (MVCC): add specific concurrency tests with multiple threads
-5. For Phase 2.1 (WAL): test crash recovery by killing process mid-write
+5. For Phase 2.1 (WAL): test crash recovery by killing process mid-write ✅ DONE (P41 — 14 tests, process-level crash simulation + WAL replay + checkpoint stress + fault injection)
 6. For Phase 3: verify error messages are descriptive via integration tests
 
 ---

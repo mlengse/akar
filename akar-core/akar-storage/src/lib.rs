@@ -442,8 +442,16 @@ impl StorageManager {
         }
 
         // Step 2: Flush local storage buffers to the actual tables
-        local_storage
-            .flush_to_tables(&self.table_catalog)?;
+        // Pass txn_id so inserts/deletes are recorded in VersionInfo for MVCC
+        let _commit_undo_records = local_storage
+            .flush_to_tables(&self.table_catalog, Some(txn_id))?;
+        // Undo records generated during commit for potential rollback-on-failure.
+        // Currently unused since commit is atomic, but stored for future use
+        // (e.g., partial-commit recovery).
+        tracing::debug!(
+            "commit_transaction: generated {} undo records for txn#{}",
+            _commit_undo_records.len(), txn_id
+        );
 
         // Step 3: Apply shadow pages to the BufferManager
         shadow_file
@@ -490,11 +498,27 @@ impl StorageManager {
         // Apply undo records in reverse order to restore pre-write state
         for record in undo_records.iter().rev() {
             if let Some(mut table) = self.table_catalog.get_node_table_mut(record.table_id) {
-                let values = deserialize_values_from_bytes(&record.old_data, 1);
-                if let Some(val) = values.into_iter().next() {
-                    table
-                        .update_cell(record.row_id, record.column as usize, val)
-                        .map_err(|e| StorageError::Undo(format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id)))?;
+                match record.undo_type {
+                    akar_transaction::UndoType::Update => {
+                        let values = deserialize_values_from_bytes(&record.old_data, 1);
+                        if let Some(val) = values.into_iter().next() {
+                            table
+                                .update_cell(record.row_id, record.column as usize, val)
+                                .map_err(|e| StorageError::Undo(format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id)))?;
+                        }
+                    }
+                    akar_transaction::UndoType::Insert => {
+                        // Rollback an insert: delete the row
+                        let _ = table.delete_row(record.row_id);
+                    }
+                    akar_transaction::UndoType::Delete => {
+                        // Rollback a delete: restore all column values
+                        let num_cols = table.columns.len();
+                        let values = deserialize_values_from_bytes(&record.old_data, num_cols);
+                        for (col_idx, val) in values.into_iter().enumerate() {
+                            let _ = table.update_cell(record.row_id, col_idx, val);
+                        }
+                    }
                 }
             }
         }

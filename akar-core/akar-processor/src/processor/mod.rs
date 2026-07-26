@@ -110,6 +110,10 @@ pub struct QueryProcessor {
     subquery_fn: Option<SubqueryFn>,
     /// Callback for schema-level DDL operations (CREATE/DROP SEQUENCE, EXPORT/IMPORT DATABASE).
     schema_ddl_fn: Option<SchemaDdlFn>,
+    /// MVCC snapshot timestamp for read isolation.
+    snapshot_ts: Option<u64>,
+    /// Commit history for MVCC visibility checks.
+    commit_history: Vec<(u64, u64)>,
 }
 
 impl QueryProcessor {
@@ -122,6 +126,8 @@ impl QueryProcessor {
             sequence_fn: None,
             subquery_fn: None,
             schema_ddl_fn: None,
+            snapshot_ts: None,
+            commit_history: Vec::new(),
         }
     }
 
@@ -135,6 +141,8 @@ impl QueryProcessor {
             sequence_fn: None,
             subquery_fn: None,
             schema_ddl_fn: None,
+            snapshot_ts: None,
+            commit_history: Vec::new(),
         }
     }
 
@@ -152,6 +160,8 @@ impl QueryProcessor {
             sequence_fn: None,
             subquery_fn: None,
             schema_ddl_fn: None,
+            snapshot_ts: None,
+            commit_history: Vec::new(),
         }
     }
 
@@ -176,6 +186,13 @@ impl QueryProcessor {
     /// Set the schema DDL callback (for CREATE/DROP SEQUENCE, EXPORT/IMPORT DATABASE).
     pub fn with_schema_ddl_fn(mut self, f: SchemaDdlFn) -> Self {
         self.schema_ddl_fn = Some(f);
+        self
+    }
+
+    /// Set MVCC snapshot parameters for read isolation.
+    pub fn with_snapshot(mut self, snapshot_ts: Option<u64>, commit_history: Vec<(u64, u64)>) -> Self {
+        self.snapshot_ts = snapshot_ts;
+        self.commit_history = commit_history;
         self
     }
 
@@ -220,6 +237,8 @@ impl QueryProcessor {
                 sequence_fn: self.sequence_fn.clone(),
                 subquery_fn: self.subquery_fn.clone(),
                 schema_ddl_fn: self.schema_ddl_fn.clone(),
+                snapshot_ts: self.snapshot_ts,
+                commit_history: self.commit_history.clone(),
             };
 
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, &mut ctx)?;

@@ -33,6 +33,17 @@ pub enum TransactionStatus {
     RolledBack,
 }
 
+/// Type of undo operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoType {
+    /// Restore a single cell to its previous value (column-level undo).
+    Update,
+    /// Delete a row that was inserted (row-level undo).
+    Insert,
+    /// Restore all columns of a deleted row (row-level undo).
+    Delete,
+}
+
 /// An undo record for rolling back a write transaction.
 #[derive(Debug, Clone)]
 pub struct UndoRecord {
@@ -40,6 +51,21 @@ pub struct UndoRecord {
     pub row_id: u64,
     pub column: u32,
     pub old_data: Vec<u8>,
+    pub undo_type: UndoType,
+}
+
+impl UndoRecord {
+    pub fn update(table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Self {
+        Self { table_id, row_id, column, old_data, undo_type: UndoType::Update }
+    }
+
+    pub fn insert(table_id: u64, row_id: u64) -> Self {
+        Self { table_id, row_id, column: 0, old_data: Vec::new(), undo_type: UndoType::Insert }
+    }
+
+    pub fn delete(table_id: u64, row_id: u64, old_row_data: Vec<u8>) -> Self {
+        Self { table_id, row_id, column: 0, old_data: old_row_data, undo_type: UndoType::Delete }
+    }
 }
 
 /// A database transaction context with MVCC state.
@@ -51,6 +77,10 @@ pub struct Transaction {
     pub status: TransactionStatus,
     pub undo_records: Vec<UndoRecord>,
     pub modified_tables: Vec<u64>,
+    /// Snapshot timestamp for MVCC read isolation.
+    /// Set to `Some(commit_ts)` at transaction begin time. Readers at this
+    /// snapshot see only data committed at or before this timestamp.
+    pub snapshot_ts: Option<u64>,
 }
 
 impl Transaction {
@@ -63,16 +93,26 @@ impl Transaction {
             status: TransactionStatus::Active,
             undo_records: Vec::new(),
             modified_tables: Vec::new(),
+            snapshot_ts: None,
         }
     }
 
     pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) {
-        self.undo_records.push(UndoRecord {
-            table_id,
-            row_id,
-            column,
-            old_data,
-        });
+        self.undo_records.push(UndoRecord::update(table_id, row_id, column, old_data));
+        if !self.modified_tables.contains(&table_id) {
+            self.modified_tables.push(table_id);
+        }
+    }
+
+    pub fn record_insert_undo(&mut self, table_id: u64, row_id: u64) {
+        self.undo_records.push(UndoRecord::insert(table_id, row_id));
+        if !self.modified_tables.contains(&table_id) {
+            self.modified_tables.push(table_id);
+        }
+    }
+
+    pub fn record_delete_undo(&mut self, table_id: u64, row_id: u64, old_row_data: Vec<u8>) {
+        self.undo_records.push(UndoRecord::delete(table_id, row_id, old_row_data));
         if !self.modified_tables.contains(&table_id) {
             self.modified_tables.push(table_id);
         }
@@ -244,6 +284,26 @@ impl TransactionContext {
         }
     }
 
+    /// Record an insert undo on the active transaction (for rollback: delete the row).
+    pub fn record_insert_undo(&mut self, table_id: u64, row_id: u64) -> Result<(), TransactionError> {
+        if let Some(ref mut txn) = self.active_txn {
+            txn.record_insert_undo(table_id, row_id);
+            Ok(())
+        } else {
+            Err(TransactionError::NoActiveTransaction)
+        }
+    }
+
+    /// Record a delete undo on the active transaction (for rollback: restore the row).
+    pub fn record_delete_undo(&mut self, table_id: u64, row_id: u64, old_row_data: Vec<u8>) -> Result<(), TransactionError> {
+        if let Some(ref mut txn) = self.active_txn {
+            txn.record_delete_undo(table_id, row_id, old_row_data);
+            Ok(())
+        } else {
+            Err(TransactionError::NoActiveTransaction)
+        }
+    }
+
     /// Lock a table on the active transaction.
     pub fn lock_table(&self, table_id: u64) -> Result<(), TransactionError> {
         let txn_id = self.active_txn_id().ok_or(TransactionError::NoActiveTransaction)?;
@@ -350,7 +410,9 @@ impl TransactionManager {
     /// run concurrently with each other (but not with a concurrent write).
     pub fn begin_read(&self) -> Transaction {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let tx = Transaction::new(id, TransactionType::ReadOnly);
+        let snapshot_ts = self.next_commit_ts.load(Ordering::Acquire);
+        let mut tx = Transaction::new(id, TransactionType::ReadOnly);
+        tx.snapshot_ts = Some(snapshot_ts);
         if let Ok(mut active) = self.active_transactions.lock() {
             active.insert(id, tx.clone());
         }
@@ -363,7 +425,9 @@ impl TransactionManager {
     /// Returns `Err` if the manager is shutting down.
     pub fn begin_write(&self) -> Result<Transaction, TransactionError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let tx = Transaction::new(id, TransactionType::Write);
+        let snapshot_ts = self.next_commit_ts.load(Ordering::Acquire);
+        let mut tx = Transaction::new(id, TransactionType::Write);
+        tx.snapshot_ts = Some(snapshot_ts);
 
         // In single-writer mode, block until no other writer is active.
         if !self.allow_concurrent_writes() {
@@ -447,6 +511,18 @@ impl TransactionManager {
             }
         }
         false
+    }
+
+    /// Get a snapshot of the commit history for MVCC visibility checks.
+    /// Returns `(txn_id, commit_ts)` pairs for all committed transactions.
+    pub fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
+        self.commit_history.lock().map(|h| h.clone()).unwrap_or_default()
+    }
+
+    /// Get the current value of `next_commit_ts` (the next timestamp that
+    /// will be assigned on commit). Used as a reference point for snapshots.
+    pub fn current_commit_ts(&self) -> u64 {
+        self.next_commit_ts.load(Ordering::Acquire)
     }
 
     pub fn num_active(&self) -> usize {

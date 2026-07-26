@@ -132,8 +132,21 @@ impl Connection {
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
 
+        // Capture MVCC snapshot for read isolation.
+        // For write transactions, use the txn's snapshot_ts.
+        // For read-only queries, capture a fresh snapshot from the transaction manager.
+        let (snapshot_ts, commit_history) = if let Some(ref txn) = txn_opt {
+            (txn.snapshot_ts, self.database.transaction_manager.commit_history_snapshot())
+        } else {
+            // Read-only query: capture snapshot at current commit point
+            let ts = self.database.transaction_manager.current_commit_ts();
+            let history = self.database.transaction_manager.commit_history_snapshot();
+            (Some(ts), history)
+        };
+
         // Execute
-        let processor = self.create_processor();
+        let processor = self.create_processor()
+            .with_snapshot(snapshot_ts, commit_history);
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -225,8 +238,13 @@ impl Connection {
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
 
+        // Capture MVCC snapshot for read isolation
+        let ts = self.database.transaction_manager.current_commit_ts();
+        let history = self.database.transaction_manager.commit_history_snapshot();
+
         // Execute
-        let processor = self.create_processor();
+        let processor = self.create_processor()
+            .with_snapshot(Some(ts), history);
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -391,7 +409,11 @@ impl Connection {
                 .with_schema_ddl_fn(schema_ddl_qf.clone())
                 .with_standalone_call_handler(Arc::new(
                     crate::connection::standalone_call::DbStandaloneCallHandler::new(db_qf.clone()),
-                ));
+                ))
+                .with_snapshot(
+                    Some(db_qf.transaction_manager.current_commit_ts()),
+                    db_qf.transaction_manager.commit_history_snapshot(),
+                );
 
                 let chunks = processor
                     .execute(&optimized_plan)
@@ -436,7 +458,11 @@ impl Connection {
                 .with_schema_ddl_fn(schema_ddl_sq.clone())
                 .with_standalone_call_handler(Arc::new(
                     crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone()),
-                ));
+                ))
+                .with_snapshot(
+                    Some(db.transaction_manager.current_commit_ts()),
+                    db.transaction_manager.commit_history_snapshot(),
+                );
 
                 processor
                     .execute(&optimized_plan)

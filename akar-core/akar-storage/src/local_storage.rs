@@ -7,6 +7,7 @@
 
 use crate::table::{NodeTable, RelTable, TableCatalog};
 use akar_common::error::StorageError;
+use akar_transaction::UndoRecord;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -60,27 +61,47 @@ impl LocalTableData {
         self.inserted_rows.is_empty() && self.deleted_row_ids.is_empty() && self.updated_rows.is_empty()
     }
 
-    /// Flush this table's buffered data to a `NodeTable`.
+    /// Flush this table's buffered data to a `NodeTable`, returning undo records.
     ///
     /// Deserialises each buffered row from binary format and calls
-    /// `node_table.insert_row()`.
-    pub fn flush_to_node_table(&self, node_table: &mut NodeTable) -> Result<(), StorageError> {
+    /// `node_table.insert_row_with_txn()`.
+    /// When `txn_id` is `Some(...)`, inserts/deletes are recorded in VersionInfo.
+    /// Returns undo records so the caller can store them for potential rollback.
+    pub fn flush_to_node_table(&self, table_id: u64, node_table: &mut NodeTable, txn_id: Option<u64>) -> Result<Vec<UndoRecord>, StorageError> {
+        use crate::column::Column;
+        let mut undo_records = Vec::new();
+
         for row_bytes in &self.inserted_rows {
             let values = crate::deserialize_values_from_bytes(row_bytes, node_table.columns.len());
-            node_table.insert_row(values)?;
+            let row_id = node_table.insert_row_with_txn(values, txn_id)?;
+            if txn_id.is_some() {
+                undo_records.push(UndoRecord::insert(table_id, row_id));
+            }
         }
+
         for row_id in &self.deleted_row_ids {
-            node_table.delete_row(*row_id)?;
+            let num_cols = node_table.columns.len();
+            let mut old_row_data = Vec::new();
+            for col_idx in 0..num_cols {
+                let val = node_table.get_value(*row_id as usize, col_idx)
+                    .cloned()
+                    .unwrap_or(akar_common::types::Value::Null);
+                old_row_data.extend_from_slice(&Column::serialize_value(&val));
+            }
+            node_table.delete_row_with_txn(*row_id, txn_id)?;
+            if txn_id.is_some() {
+                undo_records.push(UndoRecord::delete(table_id, *row_id, old_row_data));
+            }
         }
+
         for (row_id, row_bytes) in &self.updated_rows {
             let values = crate::deserialize_values_from_bytes(row_bytes, 1);
             if let Some(val) = values.into_iter().next() {
-                // Column 0 — for multi-column updates the caller should log one
-                // Update record per column.
                 node_table.update_cell(*row_id, 0, val)?;
             }
         }
-        Ok(())
+
+        Ok(undo_records)
     }
 
     /// Flush this table's buffered data to a `RelTable`.
@@ -131,19 +152,22 @@ impl LocalStorage {
     ///
     /// Called on commit. After a successful flush, the transaction's writes
     /// are visible to subsequent transactions.
-    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>) -> Result<(), StorageError> {
+    /// When `txn_id` is `Some(...)`, inserts/deletes are recorded in VersionInfo.
+    /// Returns undo records for potential rollback.
+    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>, txn_id: Option<u64>) -> Result<Vec<UndoRecord>, StorageError> {
+        let mut all_undo_records = Vec::new();
         for (&table_id, table_data) in &self.tables {
             if table_data.is_empty() {
                 continue;
             }
-            // Try node table first, then rel table
             if let Some(mut node_table) = catalog.get_node_table_mut(table_id) {
-                table_data.flush_to_node_table(&mut node_table)?;
+                let undo_records = table_data.flush_to_node_table(table_id, &mut node_table, txn_id)?;
+                all_undo_records.extend(undo_records);
             } else if let Some(mut rel_table) = catalog.get_rel_table_mut(table_id) {
                 table_data.flush_to_rel_table(&mut rel_table)?;
             }
         }
-        Ok(())
+        Ok(all_undo_records)
     }
 
     /// Clear all buffered data (called on rollback).
