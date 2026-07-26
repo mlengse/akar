@@ -345,7 +345,7 @@ impl Binder {
 
             // Look up in catalog
             if let Some(ref lbl) = label {
-                let catalog = self.catalog.lock().unwrap();
+                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                 match catalog.get_entry_by_name(lbl) {
                     Some(entry) if entry.is_node_table() => {
                         node_table_id = Some(entry.table_id());
@@ -401,7 +401,7 @@ impl Binder {
             let mut rel_table_id = None;
 
             if let Some(ref lbl) = edge_label {
-                let catalog = self.catalog.lock().unwrap();
+                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                 match catalog.get_entry_by_name(lbl) {
                     Some(entry) if entry.is_rel_table() => {
                         rel_table_id = Some(entry.table_id());
@@ -588,7 +588,7 @@ impl Binder {
                     })
                 } else {
                     // Check catalog for table references
-                    let catalog = self.catalog.lock().unwrap();
+                    let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                     if let Some(entry) = catalog.get_entry_by_name(name) {
                         let typ = if entry.is_node_table() {
                             LogicalTypeID::Node
@@ -622,7 +622,7 @@ impl Binder {
                         // Find the variable in scope to get its table label
                         if let Some(variable) = variables.iter().find(|v| v.name == *var_name) {
                             if let Some(ref table_label) = variable.label {
-                                let catalog = self.catalog.lock().unwrap();
+                                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                                 match catalog.get_property_type(table_label, prop) {
                                     Some(type_id) => type_id,
                                     None => {
@@ -856,7 +856,7 @@ impl Binder {
         }
 
         // Register with catalog
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.create_node_table(t.name.clone(), columns.clone()) {
             CatalogResult::Created { .. } => {}
             CatalogResult::AlreadyExists => {
@@ -884,7 +884,7 @@ impl Binder {
         }
 
         // Validate the referenced table exists in the catalog
-        let catalog = self.catalog.lock().unwrap();
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let entry = catalog
             .get_entry_by_name(&v.table_name)
             .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
@@ -909,7 +909,7 @@ impl Binder {
         }
 
         // Register with catalog
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.create_vector_index(
             v.index_name.clone(),
             v.table_name.clone(),
@@ -949,7 +949,7 @@ impl Binder {
 
         // Validate table and column exist
         {
-            let catalog = self.catalog.lock().unwrap();
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             let entry = catalog
                 .get_entry_by_name(&v.table_name)
                 .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
@@ -970,7 +970,7 @@ impl Binder {
         }
 
         // Register with catalog (separate lock for mutable access)
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         catalog.create_index(&v.table_name, v.index_name.clone(), index_type, &v.property)?;
 
         Ok(BoundStatement::BoundCreateIndex(BoundCreateIndex {
@@ -986,7 +986,7 @@ impl Binder {
             return Err("Index name cannot be empty".into());
         }
 
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         catalog.drop_index(&v.table_name, &v.index_name)?;
 
         Ok(BoundStatement::BoundDropIndex(BoundDropIndex {
@@ -1001,7 +1001,7 @@ impl Binder {
         }
 
         // Validate FROM and TO tables exist
-        let catalog = self.catalog.lock().unwrap();
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let src_id = catalog
             .get_table_id(&t.from)
             .ok_or_else(|| format!("Source table '{}' not found", t.from))?;
@@ -1024,7 +1024,7 @@ impl Binder {
         }
 
         // Register with catalog
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.create_rel_table(t.name.clone(), src_id, dst_id, columns.clone()) {
             CatalogResult::Created { .. } => {}
             CatalogResult::AlreadyExists => {
@@ -1042,7 +1042,7 @@ impl Binder {
     }
 
     fn bind_drop_table(&self, t: DropTable) -> Result<BoundStatement, BinderError> {
-        let mut catalog = self.catalog.lock().unwrap();
+        let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.drop_table(&t.name) {
             CatalogResult::Dropped { .. } => Ok(BoundStatement::BoundDropTable(BoundDropTable { name: t.name })),
             CatalogResult::NotFound => Err(format!("Table '{}' not found", t.name).into()),
@@ -1204,7 +1204,7 @@ impl Binder {
         let label = node.labels.first().ok_or("MERGE requires a label (table name)")?;
 
         // Lookup the table in catalog
-        let catalog = self.catalog.lock().unwrap();
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let entry = catalog
             .get_entry_by_name(label)
             .ok_or_else(|| format!("Table '{label}' not found"))?;
@@ -1240,7 +1240,7 @@ impl Binder {
             .ok_or("CREATE DML requires a node pattern")?;
         let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
 
-        let catalog = self.catalog.lock().unwrap();
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let entry = catalog
             .get_entry_by_name(label)
             .ok_or_else(|| format!("Table '{label}' not found"))?;
@@ -1519,7 +1519,7 @@ impl Binder {
 
         // Register macro tables in the logical catalog
         {
-            let mut catalog = self.catalog.lock().unwrap();
+            let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
 
             let docs_cols = vec![
                 akar_catalog::CatalogColumn {
@@ -1606,7 +1606,7 @@ impl Binder {
     fn bind_alter_table(&self, a: akar_parser::ast::AlterTable) -> Result<BoundStatement, BinderError> {
         // Validate table exists and extract column info
         let col_names: Vec<String> = {
-            let catalog = self.catalog.lock().unwrap();
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             let entry = catalog
                 .get_entry_by_name(&a.table_name)
                 .ok_or_else(|| format!("Table '{}' not found", a.table_name))?;
@@ -1686,7 +1686,7 @@ impl Binder {
 
     fn bind_copy_from(&self, c: akar_parser::ast::CopyFrom) -> Result<BoundStatement, BinderError> {
         // 1. Look up table in catalog and resolve column schema
-        let catalog = self.catalog.lock().unwrap();
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let entry = catalog
             .get_entry_by_name(&c.table_name)
             .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;

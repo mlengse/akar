@@ -138,14 +138,14 @@ impl DuckDbManager {
     /// Execute a SQL statement and return the number of rows affected.
     #[cfg(feature = "bundled")]
     pub fn execute(&self, sql: &str) -> Result<usize, String> {
-        let conn = self.connection.lock().unwrap();
+        let conn = self.connection.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         conn.execute(sql, []).map_err(|e| format!("DuckDB execute error: {e}"))
     }
 
     /// Execute a SQL statement (batch, no return).
     #[cfg(feature = "bundled")]
     pub fn execute_batch(&self, sql: &str) -> Result<(), String> {
-        let conn = self.connection.lock().unwrap();
+        let conn = self.connection.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         conn.execute_batch(sql)
             .map_err(|e| format!("DuckDB execute batch error: {e}"))
     }
@@ -154,7 +154,7 @@ impl DuckDbManager {
     #[cfg(feature = "bundled")]
     pub fn install_and_load(&self, name: &str) -> Result<(), String> {
         let sql = format!("INSTALL '{}'; LOAD '{}';", name, name);
-        let conn = self.connection.lock().unwrap();
+        let conn = self.connection.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         conn.execute_batch(&sql)
             .map_err(|e| format!("Failed to install/load DuckDB extension '{name}': {e}"))
     }
@@ -162,7 +162,7 @@ impl DuckDbManager {
     /// Query rows using a prepared statement.
     #[cfg(feature = "bundled")]
     pub fn query_rows(&self, sql: &str) -> Result<Vec<Vec<duckdb::types::Value>>, String> {
-        let conn = self.connection.lock().unwrap();
+        let conn = self.connection.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let mut stmt = match conn.prepare(sql) {
             Ok(s) => s,
             Err(e) => return Err(format!("DuckDB prepare error: {e}")),

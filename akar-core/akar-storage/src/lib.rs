@@ -225,7 +225,10 @@ impl StorageManager {
         self.table_catalog.create_art_index(table_name, index_name)?;
 
         // Register the index file with the BufferManager for persistence
-        let mut bm = self.buffer_manager.lock().unwrap();
+        let mut bm = self
+            .buffer_manager
+            .lock()
+            .map_err(|e| StorageError::BufferManager(format!("Lock poisoned: {e}")))?;
         let full_path = self.db_path.join(format!("{index_name}.art"));
         let file_name = index_name.to_string();
         if !bm.is_file_registered(&file_name) {
@@ -265,7 +268,10 @@ impl StorageManager {
 
     /// Perform a checkpoint: flush WAL + dirty pages to disk.
     pub fn checkpoint(&self) -> std::io::Result<checkpoint::CheckpointResult> {
-        let mut wal = self.wal.lock().unwrap();
+        let mut wal = self
+            .wal
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         checkpoint(&mut wal, &self.buffer_manager)
     }
 
@@ -328,7 +334,10 @@ impl StorageManager {
         }
 
         // Phase 2: Do the actual checkpoint
-        let mut wal = self.wal.lock().unwrap();
+        let mut wal = self
+            .wal
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         crate::checkpoint::checkpoint(&mut wal, &self.buffer_manager)
     }
 
@@ -423,7 +432,10 @@ impl StorageManager {
     ) -> Result<(), StorageError> {
         // Step 1: Write-ahead log the commit
         {
-            let mut wal = self.wal.lock().unwrap();
+            let mut wal = self
+                .wal
+                .lock()
+                .map_err(|e| StorageError::Wal(format!("Lock poisoned: {e}")))?;
             wal.append(crate::wal::WALRecord::Commit { transaction_id: txn_id });
             wal.flush_to_disk()
                 .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
@@ -467,7 +479,10 @@ impl StorageManager {
     ) -> Result<(), StorageError> {
         // Log the rollback to WAL
         {
-            let mut wal = self.wal.lock().unwrap();
+            let mut wal = self
+                .wal
+                .lock()
+                .map_err(|e| StorageError::Wal(format!("Lock poisoned: {e}")))?;
             wal.append(crate::wal::WALRecord::Rollback { transaction_id: txn_id });
             let _ = wal.flush_to_disk();
         }
@@ -502,7 +517,10 @@ impl StorageManager {
     /// Returns the number of records recovered, or an error if recovery
     /// fails (database is corrupt).
     pub fn recover(&self) -> std::io::Result<usize> {
-        let mut wal = self.wal.lock().unwrap();
+        let mut wal = self
+            .wal
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
 
         // Load WAL records from disk
         wal.load_from_disk()?;

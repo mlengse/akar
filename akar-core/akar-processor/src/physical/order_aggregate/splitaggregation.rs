@@ -135,7 +135,7 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
                 }
             }
             // Store counts into shared state
-            let mut shard = self.shared_state.current_shard().lock().unwrap();
+            let mut shard = self.shared_state.current_shard().lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             let bucket = shard.entry(0).or_default();
             bucket.clear();
             let states: Vec<AggValueState> = counts.into_iter().map(AggValueState::Count).collect();
@@ -165,7 +165,7 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
                     result_states.push(AggValueState::new(func));
                 }
             }
-            let mut shard = self.shared_state.current_shard().lock().unwrap();
+            let mut shard = self.shared_state.current_shard().lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             let bucket = shard.entry(0).or_default();
             bucket.clear();
             bucket.push((Value::Null, result_states));
@@ -194,7 +194,7 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
         }
 
         // Lock only the current thread's shard — not the global map
-        let mut shard = self.shared_state.current_shard().lock().unwrap();
+        let mut shard = self.shared_state.current_shard().lock().map_err(|e| format!("Lock poisoned: {e}"))?;
 
         for chunk in &input {
             for row in 0..chunk.size {
@@ -283,7 +283,7 @@ impl PhysicalAggregateScan {
         // Single chunk reference for the common path
         let chunk = if input.len() == 1 { Some(&input[0]) } else { None };
 
-        let mut shard = self.shared_state.current_shard().lock().unwrap();
+        let mut shard = self.shared_state.current_shard().lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         for (hash, (key, row_indices)) in &group_map {
             let group_size = row_indices.len() as u64;
             let mut group_states: Vec<AggValueState> = funcs.iter().map(AggValueState::new).collect();

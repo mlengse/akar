@@ -50,7 +50,9 @@ pub fn checkpoint(wal: &mut WAL, buffer_manager: &Arc<Mutex<BufferManager>>) -> 
 
     // Step 2: Flush all dirty BufferManager pages to disk.
     {
-        let mut bm = buffer_manager.lock().unwrap();
+        let mut bm = buffer_manager
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("Lock poisoned: {e}")))?;
         let stats_before = *bm.stats();
         bm.flush_all()?;
         let stats_after = *bm.stats();
