@@ -333,176 +333,67 @@ impl Drop for TransactionContext {
 /// system waits for all active transactions to finish before proceeding
 /// with the checkpoint. A background worker thread handles auto-checkpoint.
 pub struct TransactionManager {
+    lifecycle: TransactionLifecycle,
+    concurrency: ConcurrencyControl,
+    checkpoint: CheckpointCoordinator,
+}
+
+// ---------------------------------------------------------------------------
+// Sub-struct #1: Transaction Lifecycle — ID assignment, timestamps, registry
+// ---------------------------------------------------------------------------
+
+struct TransactionLifecycle {
     next_id: AtomicU64,
     next_commit_ts: AtomicU64,
     active_transactions: Mutex<HashMap<u64, Transaction>>,
-    /// Tracks which tables are locked by which transaction ID.
-    table_locks: Mutex<HashMap<u64, u64>>, // table_id → transaction_id
     commit_history: Mutex<Vec<(u64, u64)>>,
-    /// Whether concurrent writes are allowed. Can be toggled at runtime
-    /// (e.g., via `SET concurrent_writes=true|false`).
-    concurrent_writes: AtomicBool,
-    /// Active write transaction count (used for single-writer blocking).
-    active_write_count: Mutex<u32>,
-    /// Condvar for blocking writers in single-writer mode.
-    writer_condvar: Condvar,
-    // -- Checkpoint drain fields --
-    /// Gate mutex: held to prevent new transactions from starting during checkpoint.
-    mtx_for_starting_new_txns: Mutex<()>,
-    /// Gate mutex: held during the checkpoint operation itself.
-    #[allow(dead_code)]
-    mtx_for_checkpoint: Mutex<()>,
-    /// Condvar signalled when the active transaction count changes.
-    cv_active_txns_changed: Condvar,
-    /// Number of currently active transactions (across all types).
     active_txn_count: AtomicU32,
-    /// Signal flag: set to true when an auto-checkpoint is requested.
-    checkpoint_requested: Arc<AtomicBool>,
-    /// Signal flag: set to true when the background worker should shut down.
-    shutdown_requested: Arc<AtomicBool>,
-    /// Handle to the background auto-checkpoint worker thread.
-    worker_handle: Option<JoinHandle<()>>,
-    /// Configuration snapshot kept for reference (used during construction).
-    #[allow(dead_code)]
-    config: TransactionManagerConfig,
 }
 
-impl TransactionManager {
-    /// Create a transaction manager with default configuration.
-    pub fn new() -> Self {
-        Self::new_with_config(TransactionManagerConfig::default())
-    }
-
-    /// Create a transaction manager with the given configuration.
-    pub fn new_with_config(config: TransactionManagerConfig) -> Self {
+impl TransactionLifecycle {
+    fn new() -> Self {
         Self {
             next_id: AtomicU64::new(1),
             next_commit_ts: AtomicU64::new(1),
             active_transactions: Mutex::new(HashMap::new()),
-            table_locks: Mutex::new(HashMap::new()),
             commit_history: Mutex::new(Vec::new()),
-            concurrent_writes: AtomicBool::new(config.concurrent_writes),
-            active_write_count: Mutex::new(0),
-            writer_condvar: Condvar::new(),
-            mtx_for_starting_new_txns: Mutex::new(()),
-            mtx_for_checkpoint: Mutex::new(()),
-            cv_active_txns_changed: Condvar::new(),
             active_txn_count: AtomicU32::new(0),
-            checkpoint_requested: Arc::new(AtomicBool::new(false)),
-            shutdown_requested: Arc::new(AtomicBool::new(false)),
-            worker_handle: None,
-            config,
         }
     }
 
-    /// Check whether concurrent writes are currently allowed.
-    pub fn allow_concurrent_writes(&self) -> bool {
-        self.concurrent_writes.load(Ordering::Acquire)
+    fn next_txn_id(&self) -> u64 {
+        self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Toggle concurrent writes at runtime.
-    /// When set to `false`, falls back to single-writer (serialized) mode.
-    pub fn set_concurrent_writes(&self, enabled: bool) {
-        self.concurrent_writes.store(enabled, Ordering::Release);
+    fn snapshot_ts(&self) -> u64 {
+        self.next_commit_ts.load(Ordering::Acquire)
     }
 
-    /// Begin a new read-only transaction. Multiple read transactions can
-    /// run concurrently with each other (but not with a concurrent write).
-    pub fn begin_read(&self) -> Transaction {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let snapshot_ts = self.next_commit_ts.load(Ordering::Acquire);
-        let mut tx = Transaction::new(id, TransactionType::ReadOnly);
-        tx.snapshot_ts = Some(snapshot_ts);
+    fn assign_commit_ts(&self) -> u64 {
+        self.next_commit_ts.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn register(&self, txn: &Transaction) {
         if let Ok(mut active) = self.active_transactions.lock() {
-            active.insert(id, tx.clone());
+            active.insert(txn.transaction_id, txn.clone());
         }
         self.active_txn_count.fetch_add(1, Ordering::Release);
-        tx
     }
 
-    /// Begin a new write transaction. In single-writer mode (default),
-    /// this blocks until any active write transaction finishes.
-    /// Returns `Err` if the manager is shutting down.
-    pub fn begin_write(&self) -> Result<Transaction, TransactionError> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let snapshot_ts = self.next_commit_ts.load(Ordering::Acquire);
-        let mut tx = Transaction::new(id, TransactionType::Write);
-        tx.snapshot_ts = Some(snapshot_ts);
-
-        // In single-writer mode, block until no other writer is active.
-        if !self.allow_concurrent_writes() {
-            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
-            while *count > 0 {
-                count = self.writer_condvar.wait(count).map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
-            }
-            *count = 1;
-        } else {
-            // Track count for multi-writer mode too (for condvar notification).
-            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
-            *count += 1;
-        }
-
+    fn deregister(&self, txn_id: u64) {
         if let Ok(mut active) = self.active_transactions.lock() {
-            active.insert(id, tx.clone());
+            active.remove(&txn_id);
         }
-        self.active_txn_count.fetch_add(1, Ordering::Release);
-        Ok(tx)
+        self.active_txn_count.fetch_sub(1, Ordering::AcqRel);
     }
 
-    /// Lock a table for writing (called by the user after begin_write).
-    /// Returns an error if another write transaction already holds the lock.
-    #[allow(clippy::collapsible_if)]
-    pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
-        let mut locks = self.table_locks.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
-        if let Some(&owner) = locks.get(&table_id) {
-            if owner != txn_id {
-                return Err(TransactionError::TableLocked { table_id, owner_txn: owner });
-            }
-        }
-        locks.insert(table_id, txn_id);
-        Ok(())
-    }
-
-    /// Commit a transaction. For read-only transactions, this is immediate.
-    /// For write transactions, returns the undo records and commit timestamp
-    /// so the caller can flush to storage.
-    pub fn commit(&self, transaction: &mut Transaction) -> CommitResult {
-        if transaction.transaction_type == TransactionType::ReadOnly {
-            transaction.status = TransactionStatus::Committed;
-            transaction.commit_ts = Some(self.next_commit_ts.fetch_add(1, Ordering::SeqCst));
-            self.remove_from_active(transaction.transaction_id);
-            self.release_locks(transaction.transaction_id);
-            return CommitResult::Committed {
-                commit_ts: transaction.commit_ts.unwrap(),
-            };
-        }
-
-        // Release all table locks on commit
-        transaction.status = TransactionStatus::Committed;
-        let commit_ts = self.next_commit_ts.fetch_add(1, Ordering::SeqCst);
-        transaction.commit_ts = Some(commit_ts);
-
+    fn push_commit_history(&self, txn_id: u64, commit_ts: u64) {
         if let Ok(mut history) = self.commit_history.lock() {
-            history.push((transaction.transaction_id, commit_ts));
+            history.push((txn_id, commit_ts));
         }
-        self.remove_from_active(transaction.transaction_id);
-        self.release_locks(transaction.transaction_id);
-        self.decrement_writer_and_notify();
-        CommitResult::Committed { commit_ts }
     }
 
-    /// Roll back a transaction, returning any undo records that need to be applied.
-    pub fn rollback(&self, transaction: &mut Transaction) -> Vec<UndoRecord> {
-        transaction.status = TransactionStatus::RolledBack;
-        let records = transaction.undo_records.clone();
-        self.remove_from_active(transaction.transaction_id);
-        self.release_locks(transaction.transaction_id);
-        self.decrement_writer_and_notify();
-        records
-    }
-
-    /// Check if a transaction's changes are visible at the given snapshot timestamp.
-    pub fn is_visible(&self, txn_id: u64, snapshot_ts: u64) -> bool {
+    fn is_visible(&self, txn_id: u64, snapshot_ts: u64) -> bool {
         if let Ok(history) = self.commit_history.lock() {
             for &(id, commit_ts) in history.iter() {
                 if id == txn_id {
@@ -513,30 +404,84 @@ impl TransactionManager {
         false
     }
 
-    /// Get a snapshot of the commit history for MVCC visibility checks.
-    /// Returns `(txn_id, commit_ts)` pairs for all committed transactions.
-    pub fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
+    fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
         self.commit_history.lock().map(|h| h.clone()).unwrap_or_default()
     }
 
-    /// Get the current value of `next_commit_ts` (the next timestamp that
-    /// will be assigned on commit). Used as a reference point for snapshots.
-    pub fn current_commit_ts(&self) -> u64 {
+    fn current_commit_ts(&self) -> u64 {
         self.next_commit_ts.load(Ordering::Acquire)
     }
 
-    pub fn num_active(&self) -> usize {
+    fn num_active(&self) -> usize {
         self.active_transactions.lock().map(|a| a.len()).unwrap_or(0)
     }
 
-    /// Get a snapshot of all active transactions (cloned).
-    /// Returns `Ok(map)` on success where the map is `HashMap<u64, Transaction>`.
-    /// Used by Connection for COMMIT/ROLLBACK resolution.
-    pub fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, TransactionError> {
+    fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, TransactionError> {
         self.active_transactions
             .lock()
             .map(|a| a.clone())
             .map_err(|e| TransactionError::LockPoisoned(e.to_string()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-struct #2: Concurrency Control — table locks, writer serialization
+// ---------------------------------------------------------------------------
+
+struct ConcurrencyControl {
+    table_locks: Mutex<HashMap<u64, u64>>,
+    concurrent_writes: AtomicBool,
+    active_write_count: Mutex<u32>,
+    writer_condvar: Condvar,
+}
+
+impl ConcurrencyControl {
+    fn new(concurrent_writes: bool) -> Self {
+        Self {
+            table_locks: Mutex::new(HashMap::new()),
+            concurrent_writes: AtomicBool::new(concurrent_writes),
+            active_write_count: Mutex::new(0),
+            writer_condvar: Condvar::new(),
+        }
+    }
+
+    fn allow_concurrent_writes(&self) -> bool {
+        self.concurrent_writes.load(Ordering::Acquire)
+    }
+
+    fn acquire_write(&self) -> Result<(), TransactionError> {
+        if !self.allow_concurrent_writes() {
+            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+            while *count > 0 {
+                count = self.writer_condvar.wait(count).map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+            }
+            *count = 1;
+        } else {
+            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+            *count += 1;
+        }
+        Ok(())
+    }
+
+    fn release_write(&self) {
+        if let Ok(mut count) = self.active_write_count.lock() {
+            if *count > 0 {
+                *count -= 1;
+            }
+        }
+        self.writer_condvar.notify_one();
+    }
+
+    #[allow(clippy::collapsible_if)]
+    fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
+        let mut locks = self.table_locks.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+        if let Some(&owner) = locks.get(&table_id) {
+            if owner != txn_id {
+                return Err(TransactionError::TableLocked { table_id, owner_txn: owner });
+            }
+        }
+        locks.insert(table_id, txn_id);
+        Ok(())
     }
 
     fn release_locks(&self, txn_id: u64) {
@@ -544,63 +489,53 @@ impl TransactionManager {
             locks.retain(|_, &mut owner| owner != txn_id);
         }
     }
+}
 
-    fn remove_from_active(&self, txn_id: u64) {
-        if let Ok(mut active) = self.active_transactions.lock() {
-            active.remove(&txn_id);
-        }
-        // Decrement the global active count and notify checkpoint drain.
-        let prev = self.active_txn_count.fetch_sub(1, Ordering::AcqRel);
-        if prev > 0 {
-            self.cv_active_txns_changed.notify_all();
+// ---------------------------------------------------------------------------
+// Sub-struct #3: Checkpoint Coordinator — drain protocol, background worker
+// ---------------------------------------------------------------------------
+
+struct CheckpointCoordinator {
+    mtx_for_starting_new_txns: Mutex<()>,
+    #[allow(dead_code)]
+    mtx_for_checkpoint: Mutex<()>,
+    cv_active_txns_changed: Condvar,
+    checkpoint_requested: Arc<AtomicBool>,
+    shutdown_requested: Arc<AtomicBool>,
+    worker_handle: Option<JoinHandle<()>>,
+}
+
+impl CheckpointCoordinator {
+    fn new() -> Self {
+        Self {
+            mtx_for_starting_new_txns: Mutex::new(()),
+            mtx_for_checkpoint: Mutex::new(()),
+            cv_active_txns_changed: Condvar::new(),
+            checkpoint_requested: Arc::new(AtomicBool::new(false)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
+            worker_handle: None,
         }
     }
 
-    /// Decrement the active writer count and notify any blocked writers.
-    fn decrement_writer_and_notify(&self) {
-        let mut count = self.active_write_count.lock().unwrap();
-        if *count > 0 {
-            *count -= 1;
-        }
-        // If count reached 0, wake a waiting writer (single-writer mode).
-        self.writer_condvar.notify_one();
-    }
-
-    // ------------------------------------------------------------------
-    // Checkpoint drain API
-    // ------------------------------------------------------------------
-
-    /// Signal the background worker to schedule an auto-checkpoint.
-    /// The worker will acquire the checkpoint gate and drain active txns.
-    pub fn schedule_auto_checkpoint(&self) {
-        self.checkpoint_requested.store(true, Ordering::Release);
-        // Wake up the background worker if it's sleeping.
+    fn notify_active_txns_changed(&self) {
         self.cv_active_txns_changed.notify_all();
     }
 
-    /// Two-phase gate: stop new transactions from starting and wait
-    /// until all existing active transactions complete.
-    ///
-    /// Phase 1: Acquire `mtx_for_starting_new_txns` — new `begin_*()` calls
-    /// will block waiting for this lock.
-    ///
-    /// Phase 2: Wait on `cv_active_txns_changed` until `active_txn_count`
-    /// drops to 0.
-    ///
-    /// `timeout` is the maximum time to wait for active transactions to drain.
-    /// Returns `true` if all transactions drained, `false` on timeout.
-    pub fn stop_new_txns_and_wait_until_all_leave(&self, timeout: Duration) -> bool {
-        // Phase 1: Acquire the new-txns gate
+    fn schedule_auto_checkpoint(&self) {
+        self.checkpoint_requested.store(true, Ordering::Release);
+        self.cv_active_txns_changed.notify_all();
+    }
+
+    fn stop_new_txns_and_wait_until_all_leave(&self, active_txn_count: &AtomicU32, timeout: Duration) -> bool {
         let _gate = match self.mtx_for_starting_new_txns.lock() {
             Ok(g) => g,
             Err(_) => return false,
         };
 
-        // Phase 2: Wait until active_txn_count == 0, with timeout
         let start = std::time::Instant::now();
-        while self.active_txn_count.load(Ordering::Acquire) > 0 {
+        while active_txn_count.load(Ordering::Acquire) > 0 {
             if start.elapsed() >= timeout {
-                return false; // Timeout — active transactions still running
+                return false;
             }
             let _ = self
                 .cv_active_txns_changed
@@ -610,32 +545,22 @@ impl TransactionManager {
                 )
                 .unwrap();
         }
-
         true
     }
 
-    /// Check whether a checkpoint has been requested (for the worker loop).
-    pub fn is_checkpoint_requested(&self) -> bool {
+    fn is_checkpoint_requested(&self) -> bool {
         self.checkpoint_requested.load(Ordering::Acquire)
     }
 
-    /// Clear the checkpoint-requested flag.
-    pub fn clear_checkpoint_requested(&self) {
+    fn clear_checkpoint_requested(&self) {
         self.checkpoint_requested.store(false, Ordering::Release);
     }
 
-    /// Check whether shutdown has been requested.
-    pub fn is_shutdown_requested(&self) -> bool {
+    fn is_shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::Acquire)
     }
 
-    /// Start the background auto-checkpoint worker thread.
-    ///
-    /// The worker polls for checkpoint requests and also performs
-    /// periodic checks (every 1 second) based on WAL size.
-    /// The caller must provide a callback to perform the actual
-    /// checkpoint (typically `StorageManager::checkpoint_with_drain`).
-    pub fn start_auto_checkpoint_worker<F>(&mut self, checkpoint_fn: F)
+    fn start_worker<F>(&mut self, checkpoint_fn: F)
     where
         F: Fn() -> std::io::Result<()> + Send + 'static,
     {
@@ -647,26 +572,17 @@ impl TransactionManager {
             .spawn(move || {
                 tracing::info!("Auto-checkpoint worker started");
                 loop {
-                    // Check for shutdown
                     if shutdown_clone.load(Ordering::Acquire) {
                         tracing::info!("Auto-checkpoint worker shutting down");
                         break;
                     }
-
-                    // Check for checkpoint signal
                     if checkpoint_clone.load(Ordering::Acquire) {
                         checkpoint_clone.store(false, Ordering::Release);
                         match checkpoint_fn() {
-                            Ok(()) => {
-                                tracing::debug!("Auto-checkpoint completed");
-                            }
-                            Err(e) => {
-                                tracing::warn!("Auto-checkpoint failed: {e}");
-                            }
+                            Ok(()) => tracing::debug!("Auto-checkpoint completed"),
+                            Err(e) => tracing::warn!("Auto-checkpoint failed: {e}"),
                         }
                     }
-
-                    // Sleep before next poll
                     thread::sleep(Duration::from_millis(1000));
                 }
             })
@@ -675,19 +591,155 @@ impl TransactionManager {
         self.worker_handle = Some(handle);
     }
 
-    /// Request shutdown of the background worker.
-    pub fn request_shutdown(&self) {
+    fn request_shutdown(&self) {
         self.shutdown_requested.store(true, Ordering::Release);
         self.cv_active_txns_changed.notify_all();
+    }
+
+    fn join_worker(&mut self) {
+        if let Some(handle) = self.worker_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TransactionManager — top-level orchestrator
+// ---------------------------------------------------------------------------
+
+impl TransactionManager {
+    /// Create a transaction manager with default configuration.
+    pub fn new() -> Self {
+        Self::new_with_config(TransactionManagerConfig::default())
+    }
+
+    /// Create a transaction manager with the given configuration.
+    pub fn new_with_config(config: TransactionManagerConfig) -> Self {
+        Self {
+            lifecycle: TransactionLifecycle::new(),
+            concurrency: ConcurrencyControl::new(config.concurrent_writes),
+            checkpoint: CheckpointCoordinator::new(),
+        }
+    }
+
+    pub fn allow_concurrent_writes(&self) -> bool {
+        self.concurrency.allow_concurrent_writes()
+    }
+
+    pub fn set_concurrent_writes(&self, enabled: bool) {
+        self.concurrency.concurrent_writes.store(enabled, Ordering::Release);
+    }
+
+    pub fn begin_read(&self) -> Transaction {
+        let id = self.lifecycle.next_txn_id();
+        let snapshot_ts = self.lifecycle.snapshot_ts();
+        let mut tx = Transaction::new(id, TransactionType::ReadOnly);
+        tx.snapshot_ts = Some(snapshot_ts);
+        self.lifecycle.register(&tx);
+        tx
+    }
+
+    pub fn begin_write(&self) -> Result<Transaction, TransactionError> {
+        let id = self.lifecycle.next_txn_id();
+        let snapshot_ts = self.lifecycle.snapshot_ts();
+        let mut tx = Transaction::new(id, TransactionType::Write);
+        tx.snapshot_ts = Some(snapshot_ts);
+        self.concurrency.acquire_write()?;
+        self.lifecycle.register(&tx);
+        Ok(tx)
+    }
+
+    pub fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
+        self.concurrency.lock_table(txn_id, table_id)
+    }
+
+    pub fn commit(&self, transaction: &mut Transaction) -> CommitResult {
+        if transaction.transaction_type == TransactionType::ReadOnly {
+            transaction.status = TransactionStatus::Committed;
+            transaction.commit_ts = Some(self.lifecycle.assign_commit_ts());
+            self.lifecycle.deregister(transaction.transaction_id);
+            self.concurrency.release_locks(transaction.transaction_id);
+            return CommitResult::Committed { commit_ts: transaction.commit_ts.unwrap() };
+        }
+
+        transaction.status = TransactionStatus::Committed;
+        let commit_ts = self.lifecycle.assign_commit_ts();
+        transaction.commit_ts = Some(commit_ts);
+        self.lifecycle.push_commit_history(transaction.transaction_id, commit_ts);
+        self.lifecycle.deregister(transaction.transaction_id);
+        self.concurrency.release_locks(transaction.transaction_id);
+        self.concurrency.release_write();
+        self.checkpoint.notify_active_txns_changed();
+        CommitResult::Committed { commit_ts }
+    }
+
+    pub fn rollback(&self, transaction: &mut Transaction) -> Vec<UndoRecord> {
+        transaction.status = TransactionStatus::RolledBack;
+        let records = transaction.undo_records.clone();
+        self.lifecycle.deregister(transaction.transaction_id);
+        self.concurrency.release_locks(transaction.transaction_id);
+        self.concurrency.release_write();
+        self.checkpoint.notify_active_txns_changed();
+        records
+    }
+
+    pub fn is_visible(&self, txn_id: u64, snapshot_ts: u64) -> bool {
+        self.lifecycle.is_visible(txn_id, snapshot_ts)
+    }
+
+    pub fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
+        self.lifecycle.commit_history_snapshot()
+    }
+
+    pub fn current_commit_ts(&self) -> u64 {
+        self.lifecycle.current_commit_ts()
+    }
+
+    pub fn num_active(&self) -> usize {
+        self.lifecycle.num_active()
+    }
+
+    pub fn active_snapshot(&self) -> Result<HashMap<u64, Transaction>, TransactionError> {
+        self.lifecycle.active_snapshot()
+    }
+
+    pub fn schedule_auto_checkpoint(&self) {
+        self.checkpoint.schedule_auto_checkpoint();
+    }
+
+    pub fn stop_new_txns_and_wait_until_all_leave(&self, timeout: Duration) -> bool {
+        self.checkpoint
+            .stop_new_txns_and_wait_until_all_leave(&self.lifecycle.active_txn_count, timeout)
+    }
+
+    pub fn is_checkpoint_requested(&self) -> bool {
+        self.checkpoint.is_checkpoint_requested()
+    }
+
+    pub fn clear_checkpoint_requested(&self) {
+        self.checkpoint.clear_checkpoint_requested();
+    }
+
+    pub fn is_shutdown_requested(&self) -> bool {
+        self.checkpoint.is_shutdown_requested()
+    }
+
+    pub fn start_auto_checkpoint_worker<F>(&mut self, checkpoint_fn: F)
+    where
+        F: Fn() -> std::io::Result<()> + Send + 'static,
+    {
+        self.checkpoint.start_worker(checkpoint_fn);
+    }
+
+    pub fn request_shutdown(&self) {
+        self.checkpoint.request_shutdown();
     }
 }
 
 impl Drop for TransactionManager {
     fn drop(&mut self) {
         self.request_shutdown();
-        if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
-        }
+        self.checkpoint.join_worker();
     }
 }
 

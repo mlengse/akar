@@ -222,15 +222,15 @@ graph TD
 
 ## Audit Fixes Summary (2026-07-25)
 
-26 of 31 issues resolved. Full details: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md)
+28 of 31 issues resolved. Full details: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md)
 
 | Category | Fixed | Deferred |
 |----------|:-----:|:--------:|
 | Critical (5) | 5 | 0 |
 | High (6) | 3 | 3 |
-| Medium (12) | 6 | 6 |
+| Medium (12) | 8 | 4 |
 | Low (8) | 3 | 5 |
-| **Total (31)** | **26** | **7** |
+| **Total (31)** | **28** | **3** |
 
 ## Design Decisions Log
 

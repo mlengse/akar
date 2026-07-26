@@ -246,7 +246,7 @@ buffer_manager: Arc<RwLock<BufferManager>>,
 **Estimated effort:** 3-4 hours (mechanical search-replace + lock upgrade/downgrade audit)
 **Files:** `akar-storage/src/lib.rs`, all callers
 
-### 4.2 Reduce clones in expression evaluator
+### ✅ 4.2 Reduce clones in expression evaluator
 **Issue #18** | `akar-processor/src/expression_evaluator.rs`
 
 34+ `clone()` calls in the hottest query path.
@@ -260,7 +260,7 @@ buffer_manager: Arc<RwLock<BufferManager>>,
 **Estimated effort:** 1-2 days
 **Files:** `akar-processor/src/expression_evaluator.rs`
 
-### 4.3 Split `TransactionManager` god-object
+### ✅ 4.3 Split `TransactionManager` god-object
 **Issue #13** | `akar-transaction/src/lib.rs:273-307`
 
 14 fields mixing 4+ responsibilities.
