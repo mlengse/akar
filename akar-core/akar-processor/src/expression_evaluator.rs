@@ -84,7 +84,10 @@ impl ExpressionEvaluator {
             Expression::Constant(c) => self.evaluate_constant(c, chunk.size),
             Expression::Variable(name) => self.evaluate_variable(name, chunk),
             Expression::PropertyAccess(obj, prop) => self.evaluate_property_access(obj, prop, chunk),
-            Expression::FunctionCall(name, args) => self.evaluate_function_call(name, args, chunk),
+            Expression::FunctionCall(name, args) => {
+                let refs: Vec<&Expression> = args.iter().collect();
+                self.evaluate_function_call(name, &refs, chunk)
+            }
             Expression::BinaryOp(op, left, right) => self.evaluate_binary_op(op, left, right, chunk),
             Expression::UnaryOp(op, inner) => self.evaluate_unary_op(op, inner, chunk),
             Expression::List(items) => self.evaluate_list_literal(items, chunk),
@@ -138,7 +141,10 @@ impl ExpressionEvaluator {
             Expression::Constant(c) => self.evaluate_arrow_constant(c, chunk.size),
             Expression::Variable(name) => self.evaluate_arrow_variable(name, chunk),
             Expression::PropertyAccess(obj, prop) => self.evaluate_arrow_property_access(obj, prop, chunk),
-            Expression::FunctionCall(name, args) => self.evaluate_arrow_function_call(name, args, chunk),
+            Expression::FunctionCall(name, args) => {
+                let refs: Vec<&Expression> = args.iter().collect();
+                self.evaluate_arrow_function_call(name, &refs, chunk)
+            }
             Expression::BinaryOp(op, left, right) => self.evaluate_arrow_binary_op(op, left, right, chunk),
             Expression::UnaryOp(op, inner) => self.evaluate_arrow_unary_op(op, inner, chunk),
             // Fallback for complex types: use evaluate + from_legacy
@@ -259,7 +265,7 @@ impl ExpressionEvaluator {
                     BinaryOp::Like => "like",
                     _ => unreachable!(),
                 };
-                return self.evaluate_arrow_function_call(func_name, &[left.clone(), right.clone()], chunk);
+                return self.evaluate_arrow_function_call(func_name, &[left, right], chunk);
             }
             _ => {}
         }
@@ -288,8 +294,7 @@ impl ExpressionEvaluator {
         match self.apply_arrow_kernel(kernel_name, &left_arrow, &right_arrow) {
             Ok(result) => Ok(result),
             Err(_) => {
-                let fallback = Expression::BinaryOp(op.clone(), Box::new((*left).clone()), Box::new((*right).clone()));
-                let legacy = self.evaluate(&fallback, chunk)?;
+                let legacy = self.evaluate_binary_op(op, left, right, chunk)?;
                 Ok(ArrowVector::from_legacy(&legacy))
             }
         }
@@ -306,16 +311,14 @@ impl ExpressionEvaluator {
             UnaryOp::Not => {
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
                 self.apply_arrow_unary_kernel("not", &inner_arrow).or_else(|_| {
-                    let fallback = Expression::UnaryOp(UnaryOp::Not, Box::new(inner.clone()));
-                    let legacy = self.evaluate(&fallback, chunk)?;
+                    let legacy = self.evaluate_unary_op(&UnaryOp::Not, inner, chunk)?;
                     Ok(ArrowVector::from_legacy(&legacy))
                 })
             }
             UnaryOp::Negate => {
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
                 self.apply_arrow_unary_kernel("negate", &inner_arrow).or_else(|_| {
-                    let fallback = Expression::UnaryOp(UnaryOp::Negate, Box::new(inner.clone()));
-                    let legacy = self.evaluate(&fallback, chunk)?;
+                    let legacy = self.evaluate_unary_op(&UnaryOp::Negate, inner, chunk)?;
                     Ok(ArrowVector::from_legacy(&legacy))
                 })
             }
@@ -353,30 +356,26 @@ impl ExpressionEvaluator {
                     .array
                     .as_any()
                     .downcast_ref::<arrow::array::BooleanArray>()
-                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?
-                    .clone();
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?;
                 let r = right
                     .array
                     .as_any()
                     .downcast_ref::<arrow::array::BooleanArray>()
-                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?
-                    .clone();
-                Arc::new(and_kleene(&l, &r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?;
+                Arc::new(and_kleene(l, r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
             }
             "or" => {
                 let l = left
                     .array
                     .as_any()
                     .downcast_ref::<arrow::array::BooleanArray>()
-                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?
-                    .clone();
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", left.array.data_type()))?;
                 let r = right
                     .array
                     .as_any()
                     .downcast_ref::<arrow::array::BooleanArray>()
-                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?
-                    .clone();
-                Arc::new(or_kleene(&l, &r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
+                    .ok_or_else(|| format!("Arrow {name}: expected BooleanArray, got {:?}", right.array.data_type()))?;
+                Arc::new(or_kleene(l, r).map_err(|e| format!("Arrow {name} failed: {e}"))?)
             }
             "xor" => {
                 // XOR = (l AND NOT r) OR (NOT l AND r)
@@ -444,7 +443,7 @@ impl ExpressionEvaluator {
     fn evaluate_arrow_function_call(
         &self,
         name: &str,
-        args: &[Expression],
+        args: &[&Expression],
         chunk: &DataChunk,
     ) -> Result<ArrowVector, ProcessorError> {
         // Lambda-based functions use complex control flow — stick with evaluate
@@ -632,11 +631,9 @@ impl ExpressionEvaluator {
         if !chunk.field_names.is_empty()
             && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
         {
-            let _arc = chunk
-                .fields
-                .get(idx)
-                .cloned()
-                .ok_or_else(|| format!("Column '{}' (index {}) not found in chunk", prop, idx))?;
+            if chunk.fields.get(idx).is_none() {
+                return Err(format!("Column '{}' (index {}) not found in chunk", prop, idx).into());
+            }
             let phys_type = chunk.field_types[idx];
             let mut v = ValueVector::new(phys_type, chunk.size);
             v.resize(chunk.size);
@@ -657,7 +654,7 @@ impl ExpressionEvaluator {
     fn evaluate_function_call(
         &self,
         name: &str,
-        args: &[Expression],
+        args: &[&Expression],
         chunk: &DataChunk,
     ) -> Result<ValueVector, ProcessorError> {
         // Handle lambda-based list functions at expression level.
@@ -814,19 +811,19 @@ impl ExpressionEvaluator {
             BinaryOp::EndsWith => "ends_with",
             BinaryOp::Contains => "contains",
             BinaryOp::Like => {
-                return self.evaluate_function_call("like", &[left.clone(), right.clone()], chunk);
+                return self.evaluate_function_call("like", &[left, right], chunk);
             }
         };
 
         // Treat as a function call with two arguments
-        self.evaluate_function_call(func_name, &[left.clone(), right.clone()], chunk)
+        self.evaluate_function_call(func_name, &[left, right], chunk)
     }
 
     /// Evaluate a unary operation.
     fn evaluate_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
         match op {
-            UnaryOp::Not => self.evaluate_function_call("NOT", std::slice::from_ref(inner), chunk),
-            UnaryOp::Negate => self.evaluate_function_call("-", std::slice::from_ref(inner), chunk),
+            UnaryOp::Not => self.evaluate_function_call("NOT", std::slice::from_ref(&inner), chunk),
+            UnaryOp::Negate => self.evaluate_function_call("-", std::slice::from_ref(&inner), chunk),
             UnaryOp::IsNull => {
                 let vec = self.evaluate(inner, chunk)?;
                 let num_rows = vec.size();
@@ -1050,8 +1047,8 @@ impl ExpressionEvaluator {
 
         for row in 0..num_rows {
             let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
-            let items = match list_val {
-                Value::List(ref items) => items.clone(),
+            let items = match &list_val {
+                Value::List(items) => items.as_slice(),
                 _ => {
                     // Not a list → false for all quantifiers
                     store_value_in_vector(&mut result, row, &Value::Bool(false));
@@ -1062,7 +1059,7 @@ impl ExpressionEvaluator {
             // For each element, create a mini-chunk with the variable bound
             // and evaluate the predicate
             let mut true_count = 0u64;
-            for item in &items {
+            for item in items {
                 // Create a single-row chunk with the variable as first field
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
@@ -1102,14 +1099,14 @@ impl ExpressionEvaluator {
     }
 
     /// Extract the Lambda expression from function call arguments, if present.
-    fn extract_lambda_arg<'a>(&self, args: &'a [Expression]) -> Option<&'a Expression> {
-        args.iter().find(|a| matches!(a, Expression::Lambda { .. }))
+    fn extract_lambda_arg<'a>(&self, args: &'a [&Expression]) -> Option<&'a Expression> {
+        args.iter().find(|a| matches!(a, Expression::Lambda { .. })).copied()
     }
 
     /// Evaluate `list_transform(list, x -> body)` — apply lambda to each element.
     fn evaluate_list_transform(
         &self,
-        args: &[Expression],
+        args: &[&Expression],
         lambda: &Expression,
         chunk: &DataChunk,
     ) -> Result<ValueVector, ProcessorError> {
@@ -1131,7 +1128,7 @@ impl ExpressionEvaluator {
         for row in 0..num_rows {
             let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
             let items = match list_val {
-                Value::List(ref items) => items.clone(),
+                Value::List(items) => items,
                 _ => {
                     store_value_in_vector(&mut result, row, &Value::List(vec![]));
                     continue;
@@ -1139,10 +1136,10 @@ impl ExpressionEvaluator {
             };
 
             let mut transformed: Vec<Value> = Vec::with_capacity(items.len());
-            for item in &items {
+            for item in items {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, item);
+                store_value_in_vector(&mut elem_vec, 0, &item);
                 let mut mini_chunk = {
                     let arrow_fields = vec![&elem_vec]
                         .into_iter()
@@ -1169,7 +1166,7 @@ impl ExpressionEvaluator {
     /// Evaluate `list_filter(list, x -> predicate)` — keep elements where predicate is true.
     fn evaluate_list_filter(
         &self,
-        args: &[Expression],
+        args: &[&Expression],
         lambda: &Expression,
         chunk: &DataChunk,
     ) -> Result<ValueVector, ProcessorError> {
@@ -1191,7 +1188,7 @@ impl ExpressionEvaluator {
         for row in 0..num_rows {
             let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
             let items = match list_val {
-                Value::List(ref items) => items.clone(),
+                Value::List(items) => items,
                 _ => {
                     store_value_in_vector(&mut result, row, &Value::List(vec![]));
                     continue;
@@ -1199,10 +1196,10 @@ impl ExpressionEvaluator {
             };
 
             let mut filtered: Vec<Value> = Vec::with_capacity(items.len());
-            for item in &items {
+            for item in items {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, item);
+                store_value_in_vector(&mut elem_vec, 0, &item);
                 let mut mini_chunk = {
                     let arrow_fields = vec![&elem_vec]
                         .into_iter()
@@ -1220,10 +1217,10 @@ impl ExpressionEvaluator {
                 let pred_val = pred_vec.get_value(0).unwrap_or(Value::Null);
 
                 if matches!(pred_val, Value::Bool(true)) {
-                    filtered.push(item.clone());
+                    filtered.push(item);
                 } else if let Value::Int64(x) = pred_val {
                     if x != 0 {
-                        filtered.push(item.clone());
+                        filtered.push(item);
                     }
                 }
             }
@@ -1236,7 +1233,7 @@ impl ExpressionEvaluator {
     /// Evaluate `list_reduce(list, (acc, x) -> body, initial)` — fold over list.
     fn evaluate_list_reduce(
         &self,
-        args: &[Expression],
+        args: &[&Expression],
         lambda: &Expression,
         chunk: &DataChunk,
     ) -> Result<ValueVector, ProcessorError> {
@@ -1291,10 +1288,19 @@ impl ExpressionEvaluator {
         let mut result = ValueVector::new(akar_common::types::PhysicalTypeID::Int64, num_rows);
         result.resize(num_rows);
 
+        // Pre-build field_names template (avoids N String clones per list element)
+        let field_names_template = {
+            let mut names = vec![acc_name.clone()];
+            if !elem_name.is_empty() {
+                names.push(elem_name.clone());
+            }
+            names
+        };
+
         for row in 0..num_rows {
             let list_val = list_vec.get_value(row).unwrap_or(Value::Null);
             let items = match list_val {
-                Value::List(ref items) => items.clone(),
+                Value::List(items) => items,
                 _ => {
                     store_value_in_vector(&mut result, row, &Value::Null);
                     continue;
@@ -1302,14 +1308,14 @@ impl ExpressionEvaluator {
             };
 
             let mut acc = initial_vec.get_value(row).unwrap_or(Value::Null);
-            for item in &items {
+            for item in items {
                 // Create mini-chunk with acc as field 0 and item as field 1
                 let mut acc_vec = ValueVector::new(acc.physical_type(), 1);
                 acc_vec.resize(1);
                 store_value_in_vector(&mut acc_vec, 0, &acc);
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, item);
+                store_value_in_vector(&mut elem_vec, 0, &item);
                 let mut mini_chunk = {
                     let arrow_fields = vec![&acc_vec, &elem_vec]
                         .into_iter()
@@ -1321,10 +1327,7 @@ impl ExpressionEvaluator {
                         .collect::<Vec<_>>();
                     DataChunk::new(arrow_fields, arrow_field_types)
                 };
-                mini_chunk.field_names.push(acc_name.clone());
-                if !elem_name.is_empty() {
-                    mini_chunk.field_names.push(elem_name.clone());
-                }
+                mini_chunk.field_names = field_names_template.clone();
 
                 let body_vec = self.evaluate(body, &mini_chunk)?;
                 acc = body_vec.get_value(0).unwrap_or(Value::Null);
