@@ -16,21 +16,22 @@ pub struct akar_system_config {
 
 #[repr(C)]
 pub struct akar_database {
-    _database: *mut c_void,
+    pub _database: *mut c_void,
 }
 
 #[repr(C)]
 pub struct akar_connection {
-    _connection: *mut c_void,
+    pub _connection: *mut c_void,
 }
 
 #[repr(C)]
 pub struct akar_query_result {
-    _query_result: *mut c_void,
-    _is_owned_by_cpp: bool,
+    pub _query_result: *mut c_void,
+    pub _is_owned_by_cpp: bool,
 }
 
 #[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum akar_state {
     AkarSuccess = 0,
     AkarError = 1,

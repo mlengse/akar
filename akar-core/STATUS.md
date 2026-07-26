@@ -47,7 +47,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **P41 ✅ COMPLETE** — 14 crash recovery tests (12 SP). **P42 📋 PLANNED** — 8 SP. See [`implementation_plan.md`](implementation_plan.md) |
-| **Sprint 12.5** | **Codebase Audit Fixes — 25/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
+| **Sprint 12.5** | **Codebase Audit Fixes — 28/31 issues resolved** | **—** | **✅ PARTIAL** — see Section 9 below |
 
 ---
 
