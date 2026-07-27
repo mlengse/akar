@@ -403,7 +403,7 @@ impl Connection {
 
                 let processor = QueryProcessor::with_catalog(
                     db_qf.function_registry.clone(),
-                    db_qf.storage_manager.table_catalog(),
+                    db_qf.table_catalog(),
                     db_qf.vfs.clone(),
                 )
                 .with_schema_ddl_fn(schema_ddl_qf.clone())
@@ -451,7 +451,7 @@ impl Connection {
 
                 let processor = QueryProcessor::with_catalog(
                     db.function_registry.clone(),
-                    db.storage_manager.table_catalog(),
+                    db.table_catalog(),
                     db.vfs.clone(),
                 )
                 .with_sequence_fn(seq_fn_inner)
@@ -472,7 +472,7 @@ impl Connection {
 
         QueryProcessor::with_catalog(
             self.database.function_registry.clone(),
-            self.database.storage_manager.table_catalog(),
+            self.database.table_catalog(),
             self.database.vfs.clone(),
         )
         .with_sequence_fn(seq_fn)

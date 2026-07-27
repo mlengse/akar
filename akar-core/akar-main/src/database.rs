@@ -134,14 +134,217 @@ impl Database {
         crate::storage_driver::StorageDriver::new(self.storage_manager.clone(), self.catalog.clone(), self.vfs.clone())
     }
 
-    /// Get a reference to the table catalog for programmatic data access.
+    /// Get a reference to the schema catalog for programmatic metadata access.
     pub fn catalog(&self) -> Arc<Mutex<Catalog>> {
         self.catalog.clone()
     }
 
-    /// Get the table catalog for programmatic data access.
+    /// Get the data table catalog for programmatic data access.
+    ///
+    /// Prefer using the unified DDL methods on `Database` instead of
+    /// accessing the table catalog directly.
     pub fn table_catalog(&self) -> Arc<akar_storage::TableCatalog> {
         self.storage_manager.table_catalog()
+    }
+
+    // ── Unified DDL operations ──────────────────────────────────────────
+    //
+    // These methods ensure storage-level table creation/deletion is atomic.
+    // Schema entries are managed by the binder (via `Catalog`) during the
+    // bind phase.  These methods handle the data-level side:
+    // storage table creation, serial sequences, ART indexes.
+
+    /// Create a node table: data table + serial sequences + ART index.
+    ///
+    /// The schema entry is created by the binder during `bind()`.
+    /// This method creates the storage-level table and associated resources.
+    pub fn create_node_table(
+        &self,
+        name: String,
+        columns: Vec<akar_catalog::CatalogColumn>,
+    ) -> Result<u64, String> {
+        // 1. Create the data-level table
+        let storage_columns: Vec<akar_storage::table::ColumnDefinition> = columns
+            .iter()
+            .map(|c| akar_storage::table::ColumnDefinition {
+                name: c.name.clone(),
+                logical_type: c.logical_type,
+                is_primary_key: c.is_primary_key,
+                compression: c.compression,
+            })
+            .collect();
+        let node_table = self.storage_manager
+            .create_node_table(name.clone(), storage_columns);
+        let table_id = node_table.table_id;
+
+        // 2. Auto-create backing sequences for SERIAL columns
+        {
+            let mut cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            for col in &columns {
+                if col.logical_type == akar_common::types::LogicalTypeID::Serial {
+                    if let akar_catalog::CatalogResult::Created { .. } =
+                        cat.create_serial_sequence(&name, &col.name)
+                    {
+                        tracing::info!("Created serial sequence for {name}.{}", col.name);
+                    }
+                }
+            }
+        }
+
+        // 3. Auto-create ART index for primary key
+        if columns.iter().any(|c| c.is_primary_key) {
+            let index_name = format!("{name}_pk_idx");
+            if let Err(e) = self.storage_manager.create_art_index(&name, &index_name) {
+                tracing::warn!("Failed to create ART index for table {name}: {e}");
+            }
+        }
+
+        tracing::info!("Created node table '{name}'");
+        Ok(table_id)
+    }
+
+    /// Create a rel table: data table.
+    ///
+    /// The schema entry is created by the binder during `bind()`.
+    /// This method creates the storage-level table.
+    pub fn create_rel_table(
+        &self,
+        name: String,
+        src_table_id: u64,
+        dst_table_id: u64,
+        columns: Vec<akar_catalog::CatalogColumn>,
+    ) -> Result<u64, String> {
+        // 1. Create the data-level table
+        let storage_columns: Vec<akar_storage::table::ColumnDefinition> = columns
+            .iter()
+            .map(|c| akar_storage::table::ColumnDefinition {
+                name: c.name.clone(),
+                logical_type: c.logical_type,
+                is_primary_key: c.is_primary_key,
+                compression: c.compression,
+            })
+            .collect();
+        let rel_table = self.storage_manager
+            .create_rel_table(name.clone(), src_table_id, dst_table_id, storage_columns);
+        let table_id = rel_table.table_id;
+
+        tracing::info!("Created rel table '{name}'");
+        Ok(table_id)
+    }
+
+    /// Drop a table: serial sequences + data table + schema entry.
+    pub fn drop_table(&self, name: &str) -> Result<(), String> {
+        // 1. Drop auto-created serial sequences
+        {
+            let mut cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let serial_seqs: Vec<String> = cat
+                .sequences()
+                .iter()
+                .filter(|s| s.name.ends_with("_serial"))
+                .filter(|s| s.name.starts_with(&format!("{name}_")))
+                .map(|s| s.name.clone())
+                .collect();
+            for seq_name in serial_seqs {
+                if let akar_catalog::CatalogResult::Dropped { .. } = cat.drop_sequence(&seq_name) {
+                    tracing::info!("Dropped serial sequence '{seq_name}'");
+                }
+            }
+            // Drop schema entry
+            cat.drop_table(name);
+        }
+
+        // 2. Drop the data table
+        self.storage_manager.table_catalog().drop_node_table(name);
+        self.storage_manager.table_catalog().drop_rel_table(name);
+
+        tracing::info!("Dropped table '{name}'");
+        Ok(())
+    }
+
+    /// Create a vector index: data index + auto-populate.
+    ///
+    /// The schema entry is created by the binder during `bind()`.
+    #[cfg(feature = "vector-extension")]
+    pub fn create_vector_index(
+        &self,
+        index_name: String,
+        table_name: String,
+        column_name: String,
+        metric: akar_vector::hnsw::DistanceMetric,
+        dimensions: u32,
+    ) -> Result<(), String> {
+        // 1. Create the data-level index
+        self.storage_manager.create_vector_index(
+            index_name.clone(),
+            table_name.clone(),
+            column_name.clone(),
+            metric,
+            dimensions,
+        );
+
+        // 2. Auto-populate from existing table data
+        let table_catalog = self.storage_manager.table_catalog();
+        if let Some(table) = table_catalog.get_node_table_by_name(&table_name) {
+            let col_idx = table.columns.iter().position(|c| c.name == column_name);
+            if let Some(col_idx) = col_idx {
+                for row_id in 0..table.num_rows as usize {
+                    if let Some(val) = table.get_value(row_id, col_idx) {
+                        if let Ok(vec) = akar_storage::extract_f64_list_from_value(val) {
+                            if let Some(mut vi) = table_catalog.get_vector_index_by_name_mut(&index_name) {
+                                vi.hnsw_mut().insert(vec, row_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Created vector index '{index_name}'");
+        Ok(())
+    }
+
+    /// Create an ART index on a node table: data index.
+    ///
+    /// The schema entry is created by the binder during `bind()`.
+    pub fn create_art_index(
+        &self,
+        table_name: &str,
+        index_name: &str,
+    ) -> Result<(), String> {
+        self.storage_manager.create_art_index(table_name, index_name)?;
+        Ok(())
+    }
+
+    /// Drop an ART index from a node table: data index + schema entry.
+    pub fn drop_art_index(
+        &self,
+        table_name: &str,
+        _index_name: &str,
+    ) -> Result<(), String> {
+        self.storage_manager.drop_art_index(table_name, _index_name)?;
+
+        // Update the schema entry
+        {
+            let mut cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            if let Some(entry) = cat.get_entry_by_name_mut(table_name) {
+                if let akar_catalog::CatalogEntry::NodeTable(t) = entry {
+                    t.index_type = None;
+                    t.index_name = None;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the number of rows in a table by name.
+    pub fn table_num_rows(&self, name: &str) -> u64 {
+        self.storage_manager.table_catalog().node_table_num_rows(name)
+    }
+
+    /// Get table IDs for write operations (used by transaction locking).
+    pub fn get_table_id(&self, name: &str) -> Option<u64> {
+        self.catalog.lock().ok()?.get_table_id(name)
     }
 
     /// Open or create a database at the given path.
