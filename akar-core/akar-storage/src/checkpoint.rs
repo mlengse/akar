@@ -59,7 +59,7 @@ pub fn checkpoint(wal: &mut WAL, buffer_manager: &Arc<Mutex<BufferManager>>) -> 
         let pages_flushed = stats_after.page_writes - stats_before.page_writes;
 
         // Step 3: Clear the WAL after pages are durable.
-        wal.clear();
+        wal.clear()?;
 
         // Step 4: Append a Checkpoint marker and flush again.
         wal.append(WALRecord::Checkpoint);

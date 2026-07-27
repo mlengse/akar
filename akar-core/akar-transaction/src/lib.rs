@@ -616,7 +616,7 @@ impl CheckpointCoordinator {
     }
 
     fn stop_new_txns_and_wait_until_all_leave(&self, active_txn_count: &AtomicU32, timeout: Duration) -> bool {
-        let _gate = match self.mtx_for_starting_new_txns.lock() {
+        let mut gate = match self.mtx_for_starting_new_txns.lock() {
             Ok(g) => g,
             Err(_) => return false,
         };
@@ -626,13 +626,16 @@ impl CheckpointCoordinator {
             if start.elapsed() >= timeout {
                 return false;
             }
-            let _ = self
+            let result = self
                 .cv_active_txns_changed
                 .wait_timeout(
-                    self.mtx_for_starting_new_txns.lock().unwrap(),
+                    gate,
                     Duration::from_millis(100),
-                )
-                .unwrap();
+                );
+            match result {
+                Ok((g, _)) => gate = g,
+                Err(_) => return false,
+            }
         }
         true
     }
