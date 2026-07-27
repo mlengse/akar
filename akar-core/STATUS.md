@@ -731,7 +731,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
 - Per 2026-07-26: **1,552 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
 - **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible. See Section 2 for details.
-- **Sprint 12.5 — Codebase Audit Fixes:** 28 of 31 issues resolved. All 5 critical issues fixed (including P1.3 MVCC snapshot isolation). Issue #9 (unified error type) fully completed across all 8 crates. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. See Section 9 for details.
+- **Sprint 12.5 — Codebase Audit Fixes:** 29 of 31 issues resolved. All 5 critical issues fixed (including P1.3 MVCC snapshot isolation). Issue #9 (unified error type) fully completed across all 8 crates. Issue #8 (dual catalog) resolved via unified DDL on Database. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. 2 items deferred: row-level MVCC conflict detection (#7, low priority) and feature-gated CI tests (#31, low priority). See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).
 - **Sprint 9 COMPLETE — P36 ALL DONE:** CSR Adjacency, AST ReturnClause, DDL Operators (6), Binder Type Resolution, ORDER BY/LIMIT/SKIP Propagation, Fix Ignored Tests, Checkpoint Implementation.
@@ -804,7 +804,7 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 
 ## 9. Codebase Audit Fixes (2026-07-24 — Sprint 12.5)
 
-A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). Implementation plan: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md). **28 of 31 issues resolved (90%).**
+A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). **29 of 31 issues resolved (94%). 1 N/A (RwLock). 2 deferred low-priority items.**
 
 ### 9.1 Quick Wins — All Completed ✅
 
@@ -859,8 +859,8 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | # | Issue | Reason |
 |---|-------|--------|
 | ~~1~~ | ~~MVCC snapshot isolation~~ | ✅ Done (P1.3) |
-| 7 | Row-level MVCC conflict detection | Depends on #1 (now done) |
-| 8 | Dual catalog system | Large refactor, 2-3 days |
+| 7 | Row-level MVCC conflict detection | Depends on #1 (now done); low priority |
+| ~~8~~ | ~~Dual catalog system~~ | ✅ Done (7.1 — unified DDL through Database) |
 | 12 | `Mutex<BM>` → `RwLock` | 🚫 N/A — 87.5% sites need &mut self |
 | 31 | Feature-gated CI tests | Low priority, extension crates test individually |
 
