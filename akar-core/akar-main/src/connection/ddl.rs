@@ -3,7 +3,6 @@ use super::utils::{ast_constant_to_value, pk_value_to_string, value_to_csv_strin
 use crate::query_result::QueryResult;
 use akar_binder::bound_statement::BoundStatement;
 use akar_common::types::Value;
-use akar_storage::table::ColumnDefinition;
 
 impl Connection {
     /// Handle DDL statements by checking the bound statement type.
@@ -259,100 +258,46 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateNodeTable(t) => {
-                // Also create a storage table with in-memory data capacity
-                let columns: Vec<ColumnDefinition> = t
+                let columns: Vec<akar_catalog::CatalogColumn> = t
                     .columns
                     .iter()
-                    .map(|c| ColumnDefinition {
+                    .map(|c| akar_catalog::CatalogColumn {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
                         compression: akar_common::enums::CompressionType::Uncompressed,
+                        default_value: None,
                     })
                     .collect();
-                self.database.storage_manager.create_node_table(t.name.clone(), columns);
-
-                // Auto-create backing sequences for SERIAL columns
-                {
-                    let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-                    for col in &t.columns {
-                        if col.logical_type == akar_common::types::LogicalTypeID::Serial {
-                            match catalog.create_serial_sequence(&t.name, &col.name) {
-                                akar_catalog::CatalogResult::Created { .. } => {
-                                    tracing::info!("Created serial sequence for {}.{}", t.name, col.name);
-                                }
-                                other => {
-                                    tracing::warn!(
-                                        "Failed to create serial sequence for {}.{}: {:?}",
-                                        t.name,
-                                        col.name,
-                                        other
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                // Auto-create ART index for primary key
-                if t.columns.iter().any(|c| c.is_primary_key) {
-                    let index_name = format!("{}_pk_idx", t.name);
-                    if let Err(e) = self.database.storage_manager.create_art_index(&t.name, &index_name) {
-                        tracing::warn!("Failed to create ART index for table {}: {}", t.name, e);
-                    }
-                }
-
-                tracing::info!("Created node table '{}'", t.name);
+                self.database.create_node_table(t.name.clone(), columns)?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Node table '{}' created",
                     t.name
                 ))))
             }
             BoundStatement::BoundCreateRelTable(t) => {
-                // Create a storage rel table
-                let columns: Vec<ColumnDefinition> = t
+                let columns: Vec<akar_catalog::CatalogColumn> = t
                     .columns
                     .iter()
-                    .map(|c| ColumnDefinition {
+                    .map(|c| akar_catalog::CatalogColumn {
                         name: c.name.clone(),
                         logical_type: c.logical_type,
                         is_primary_key: c.is_primary_key,
                         compression: akar_common::enums::CompressionType::Uncompressed,
+                        default_value: None,
                     })
                     .collect();
                 let src_id = 0; // src table ID resolved during binding
                 let dst_id = 0;
                 self.database
-                    .storage_manager
-                    .create_rel_table(t.name.clone(), src_id, dst_id, columns);
-                tracing::info!("Created rel table '{}'", t.name);
+                    .create_rel_table(t.name.clone(), src_id, dst_id, columns)?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Rel table '{}' created",
                     t.name
                 ))))
             }
             BoundStatement::BoundDropTable(t) => {
-                // Drop auto-created serial sequences for the table
-                {
-                    let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-                    // Find and drop any sequences matching `{name}_*_serial`
-                    let serial_seqs: Vec<String> = catalog
-                        .sequences()
-                        .iter()
-                        .filter(|s| s.name.ends_with("_serial"))
-                        .filter(|s| {
-                            // Match format: {table_name}_{column_name}_serial
-                            s.name.starts_with(&format!("{}_", t.name))
-                        })
-                        .map(|s| s.name.clone())
-                        .collect();
-                    for seq_name in serial_seqs {
-                        if let akar_catalog::CatalogResult::Dropped { .. } = catalog.drop_sequence(&seq_name) {
-                            tracing::info!("Dropped serial sequence '{}'", seq_name);
-                        }
-                    }
-                }
-
-                tracing::info!("Dropped table '{}'", t.name);
+                self.database.drop_table(&t.name)?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Table '{}' dropped",
                     t.name
@@ -367,36 +312,13 @@ impl Connection {
                     "dot" => akar_vector::hnsw::DistanceMetric::DotProduct,
                     other => return Err(format!("Unknown metric '{other}'")),
                 };
-
-                // Create the vector index in storage
-                self.database.storage_manager.create_vector_index(
+                self.database.create_vector_index(
                     idx.index_name.clone(),
                     idx.table_name.clone(),
                     idx.column_name.clone(),
                     metric,
                     idx.dimensions as u32,
-                );
-
-                // Auto-populate from existing table data
-                let table_catalog = self.database.storage_manager.table_catalog();
-                if let Some(table) = table_catalog.get_node_table_by_name(&idx.table_name) {
-                    let col_idx = table.columns.iter().position(|c| c.name == idx.column_name);
-                    if let Some(col_idx) = col_idx {
-                        // Scan all rows and extract vectors
-                        for row_id in 0..table.num_rows as usize {
-                            if let Some(val) = table.get_value(row_id, col_idx) {
-                                if let Ok(vec) = akar_storage::extract_f64_list_from_value(val) {
-                                    // Get mutable access and insert into HNSW
-                                    if let Some(mut vi) = table_catalog.get_vector_index_by_name_mut(&idx.index_name) {
-                                        vi.hnsw_mut().insert(vec, row_id);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                tracing::info!("Created vector index '{}'", idx.index_name);
+                )?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Vector index '{}' created",
                     idx.index_name
@@ -498,7 +420,7 @@ impl Connection {
             BoundStatement::BoundCreateDml(c) => {
                 tracing::info!("CREATE DML into '{}'", c.table_name);
 
-                let catalog = self.database.storage_manager.table_catalog();
+                let catalog = self.database.table_catalog();
                 let mut table = catalog
                     .get_node_table_by_name_mut(&c.table_name)
                     .ok_or_else(|| format!("Table '{}' not found in storage", c.table_name))?;
@@ -560,7 +482,7 @@ impl Connection {
                 tracing::info!("MERGE into '{}'", m.table_name);
 
                 // Get the table — DashMap handles locking internally
-                let catalog = self.database.storage_manager.table_catalog();
+                let catalog = self.database.table_catalog();
                 let mut table = catalog
                     .get_node_table_by_name_mut(&m.table_name)
                     .ok_or_else(|| format!("Table '{}' not found in storage", m.table_name))?;
@@ -626,10 +548,7 @@ impl Connection {
                 }
             }
             BoundStatement::BoundCreateIndex(idx) => {
-                // Create ART index on the node table
-                self.database
-                    .storage_manager
-                    .create_art_index(&idx.table_name, &idx.index_name)?;
+                self.database.create_art_index(&idx.table_name, &idx.index_name)?;
                 tracing::info!(
                     "Created '{}' index '{}' on '{}'",
                     idx.index_type.as_str(),
@@ -644,10 +563,7 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundDropIndex(idx) => {
-                // Drop ART index from the node table
-                self.database
-                    .storage_manager
-                    .drop_art_index(&idx.table_name, &idx.index_name)?;
+                self.database.drop_art_index(&idx.table_name, &idx.index_name)?;
                 tracing::info!("Dropped index '{}' from '{}'", idx.index_name, idx.table_name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Index '{}' dropped from table '{}'",
@@ -743,7 +659,7 @@ impl Connection {
             BoundStatement::BoundAnalyze(a) => {
                 tracing::info!("ANALYZE {} tables", a.table_ids.len());
                 let mut stats = self.database.stats_store.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-                let catalog = self.database.storage_manager.table_catalog();
+                let catalog = self.database.table_catalog();
 
                 for &table_id in &a.table_ids {
                     // Try node table first, then rel table

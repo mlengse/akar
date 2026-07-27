@@ -241,7 +241,7 @@ impl StorageManager {
 
     /// Drop an ART index from a node table.
     pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), StorageError> {
-        Ok(self.table_catalog.drop_art_index(table_name)?)
+        self.table_catalog.drop_art_index(table_name)
     }
 
     /// Get the ART index for a node table (cloned copy for read-only access).
