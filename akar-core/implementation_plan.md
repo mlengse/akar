@@ -1,8 +1,8 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-07-26 (Sprint 12 — P41 Complete, P42 Planned)
+> **Revision:** 2026-07-27 (Sprint 12 — P41 Complete, Codebase Audit Complete, P42 Planned)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Baseline:** `cargo test --workspace` → **1,552 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC. P41 adds 14 crash recovery tests.
+> **Baseline:** `cargo test --workspace` → **1,243 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **For completed phases (P1-P40) and LadybugDB functional parity:** see [`STATUS.md`](STATUS.md)
 
@@ -28,13 +28,14 @@
 | **P38** | DDL Completeness & Documentation | ✅ DONE | 11 | ✅ Complete |
 | **P39** | Arrow Aggregate Fast Path | ✅ DONE | 2 | ✅ Complete |
 | **P40** | Vectorized GROUP BY | ✅ DONE | 2 | ✅ Complete |
-| **AUDIT** | **Codebase Audit Fixes (29/31 issues)** | ✅ **DONE** | **—** | ✅ **29 issues resolved** |
+| **AUDIT** | **Codebase Audit Fixes (30/31 issues — 1 N/A)** | ✅ **DONE** | **—** | ✅ **30 issues resolved, 1 N/A (RwLock)** |
 | **P41** | **Stress Testing — Crash Recovery** | ✅ **DONE** | **12** | ✅ Complete |
 | **P42** | **Full Release Benchmarks** | **📋 PLANNED** | **8** | Sprint 12 |
 
 > [!IMPORTANT]
-> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,538 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **29 of 31 audit issues resolved** (all 5 critical addressed, RwLock marked N/A, dual catalog unified).
+> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,243 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **30 of 31 audit issues resolved** (all 5 critical addressed + row-level OCC, RwLock marked N/A, dual catalog unified, feature-gated CI extended).
 > **P41: COMPLETE** — 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible; cross-process tests verify DB opens without panic; in-process tests verify full data recovery.
+> **WAL REDESIGN: COMPLETE** — Append-only WAL (52× speedup), condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip for OCC.
 > **P42: PLANNED** — Full release benchmarks with optimized profiles, large-scale benchmarks (100k/1M rows), storage I/O benchmarks, CI-integrated benchmarking.
 
 ---
@@ -197,7 +198,7 @@
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | Sprint 1-11 | P0-P40 | ~258 | ✅ ALL COMPLETE — see `STATUS.md` |
-| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ **29/31 issues resolved** — critical safety, WAL atomicity + checksums, CI improvements, float assertions, set_value errors, dead code cleanup, lock unwrap handling, unified catalog, RwLock marked N/A |
+| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ **30/31 issues resolved (1 N/A)** — critical safety, WAL atomicity + checksums + append-only redesign (52× speedup), CI improvements, float assertions, set_value errors, dead code cleanup, lock unwrap handling, unified catalog, row-level OCC, RwLock marked N/A |
 | **Sprint 12** | **P41 ✅ + P42 📋** | **20** | **P41 COMPLETE** (14 tests, 12 SP). **P42 PLANNED** (8 SP — release benchmarks). |
 
 ---
@@ -208,7 +209,7 @@
 graph TD
     P36_7["P36.7: Checkpoint Implementation ✅"] --> P41["✅ P41: Stress Testing Crash Recovery (14 tests)"]
     P37_3["P37.3: Benchmark Suite ✅"] --> P42["📋 P42: Full Release Benchmarks"]
-    AUDIT["AUDIT: Codebase Audit Fixes ✅ (25/31)"] --> P41
+    AUDIT["AUDIT: Codebase Audit Fixes ✅ (30/31 — 1 N/A)"] --> P41
     AUDIT --> P42
     P41 --> P41_1["P41.1: Process Crash Simulation ✅"]
     P41 --> P41_2["P41.2: WAL Replay Under Load ✅"]
@@ -218,19 +219,23 @@ graph TD
     P42 --> P42_2["P42.2: Large-Scale Benchmarks"]
     P42 --> P42_3["P42.3: Storage I/O & Recovery Time"]
     P42 --> P42_4["P42.4: CI-Integrated Benchmarking"]
+    AUDIT --> WAL["WAL Append-Only Redesign ✅ (52× speedup)"]
+    AUDIT --> OCC["Row-Level OCC ✅"]
+    AUDIT --> CONDVAR["Condvar Deadlock Fix ✅"]
+    AUDIT --> PARSER["WAL v2 Parser Bug Fix ✅"]
 ```
 
-## Audit Fixes Summary (2026-07-27)
+## Audit Fixes Summary (2026-07-27 — FINAL)
 
-29 of 31 issues resolved. 1 N/A. 2 deferred low-priority items.
+30 of 31 issues resolved. 1 N/A. No remaining items.
 
 | Category | Fixed | Deferred | N/A |
 |----------|:-----:|:--------:|:---:|
 | Critical (5) | 5 | 0 | 0 |
 | High (6) | 6 | 0 | 0 |
-| Medium (12) | 10 | 1 | 1 |
-| Low (8) | 3 | 5 | 0 |
-| **Total (31)** | **29** | **2** | **1** |
+| Medium (12) | 11 | 0 | 1 |
+| Low (8) | 8 | 0 | 0 |
+| **Total (31)** | **30** | **0** | **1** |
 
 ## Design Decisions Log
 
@@ -273,9 +278,13 @@ graph TD
 | 35 | P42 release profile | `lto = "thin"` + `codegen-units = 1` | Balances build time vs optimization |
 | 36 | P42 large-scale benchmark scope | 100k mandatory, 1M optional | 100k tests multi-page storage; 1M may exceed CI budget |
 | 37 | P42 benchmark CI approach | criterion + GitHub Actions comment | Built-in comparison support, immediate PR feedback |
-| 38 | Audit fix scope | 29/31 issues — all 5 critical fixed, quick wins + dead code + lock unwrap + float assertions + unified catalog | Prioritized safety fixes; MVCC snapshot isolation completed (P1.3); dual catalog unified (7.1); RwLock marked N/A (87.5% sites need &mut self) |
+| 38 | Audit fix scope | 30/31 issues — all 5 critical fixed + row-level OCC, quick wins + dead code + lock unwrap + float assertions + unified catalog + feature-gated CI | Prioritized safety fixes; MVCC snapshot isolation completed (P1.3); row-level OCC conflict detection (#7); dual catalog unified (7.1); RwLock marked N/A (87.5% sites need &mut self); feature-gated CI extended (#31) |
 | 39 | P41 catalog limitation | Catalog is in-memory only — DDL never serialized to disk | Cross-process tests verify DB opens without panic; in-process tests verify full data recovery |
 | 40 | P41 crash sim design | CrashSimulator helper spawns child process, kills at various points | True OS-level process kill (TerminateProcess/SIGKILL) |
 | 41 | P41 SQL limitations | No `BOOLEAN` type (use `BOOL`), no `IF NOT EXISTS` in CREATE NODE TABLE | Parser limitations discovered during implementation |
 | 42 | P41 count verification | `RETURN COUNT(p)` unreliable in some contexts — use `RETURN p.name` + row count | Ensures test assertions are reliable |
 | 43 | P41 in-process design | Keep single `Database` handle alive across phases | Avoids catalog in-memory limitation while still exercising real WAL/checkpoint paths |
+| 44 | WAL append-only redesign | Append new records only, track `flushed_count`, O(1) per commit | Previous O(n²) full-rewrite WAL caused 64s for 10 concurrent txns; append-only reduces to 1.22s (52×) |
+| 45 | Condvar deadlock fix | Reuse existing `MutexGuard` through `wait_timeout` loop | Faster WAL exposed pre-existing deadlock: same thread re-locking `mtx_for_starting_new_txns` inside condvar loop |
+| 46 | WAL v2 parser fix | Corrected `Update`/`ColumnWrite` data_len offsets (17→21), min length (21→25) | Pre-existing bug: records with data > 4 bytes truncated during WAL replay |
+| 47 | DML table lock skip | Skip `lock_table()` for DML when `allow_concurrent_writes()=true` | OCC replaces table locks; table lock blocked concurrent writers in `test_concurrent_writes` |

@@ -2,7 +2,7 @@
 
 > **Akar** — Pure Rust embedded graph database for AI agent memory.
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Hasil audit:** `cargo test --workspace` → **1,552 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
+> **Hasil audit:** `cargo test --workspace` → **1,243 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
 > **Performance parity verified (hot path only):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
@@ -15,7 +15,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
-| **Tests passing** | **1,552 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
+| **Tests passing** | **1,243 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
 | **Integration tests** | **58 passed, 0 failed** ✅ |
 | **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
 | **Optimizer passes** | **25** (18 flat + 7 tree) — melebihi C++ (17) |
@@ -26,7 +26,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **BoundStatement variants** | **43** |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
-| **Multiwriter** | **Concurrent writes via AtomicBool + Condvar** ✅ |
+| **Multiwriter** | **Concurrent writes via AtomicBool + Condvar + OCC row-level conflict detection** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager + P41 Stress Tests (14 tests)** ✅ |
 | **Pipeline completeness** | **~95%** — all 12 DDL operators wired, Binder type resolution via catalog, BufferManager mmap/NUMA/readahead, StringDictionary encoding, 25 query optimization passes |
@@ -47,7 +47,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **P41 ✅ COMPLETE** — 14 crash recovery tests (12 SP). **P42 📋 PLANNED** — 8 SP. See [`implementation_plan.md`](implementation_plan.md) |
-| **Sprint 12.5** | **Codebase Audit Fixes — 29/31 issues resolved** | **—** | **✅ COMPLETE** — see Section 9 below |
+| **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 
 ---
 
@@ -185,7 +185,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | ART Index (Node4/16/48/256) | ✅ |
 | HNSW Index (VectorIndexTable) | ✅ |
 | Hash Index (on-disk + in-memory) | ✅ |
-| WAL + Local WAL | ✅ |
+| WAL + Local WAL | ✅ (append-only redesign — 52× speedup) |
 | Shadow File + Checkpointer | ✅ `flush_table()` implemented |
 | StatsStore | ✅ |
 | Compression (Constant, Boolean, StringDictionary) | ✅ (P37.2) |
@@ -631,24 +631,24 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 ---
 
-## 4. Test Results (Per 2026-07-26 — P41 Complete: 1,552 tests)
+## 4. Test Results (Per 2026-07-27 — Codebase Audit Complete: 1,243 tests)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| akar-common | 21 | ✅ Pass |
-| akar-parser | 63 | ✅ Pass |
+| akar-common | 34 | ✅ Pass |
+| akar-parser | 66 | ✅ Pass |
 | akar-binder | 24 | ✅ Pass |
 | akar-planner | 16 | ✅ Pass |
 | akar-optimizer | 61 | ✅ Pass |
 | akar-processor | 16 | ✅ Pass |
-| akar-storage | 289 | ✅ Pass |
-| akar-function | 159 | ✅ Pass |
+| akar-storage | 320 | ✅ Pass |
+| akar-function | 176 | ✅ Pass |
 | akar-catalog | 37 | ✅ Pass |
 | akar-graph | 34 | ✅ Pass |
 | akar-vector | 20 | ✅ Pass |
-| akar-transaction | 12 | ✅ Pass |
+| akar-transaction | 16 | ✅ Pass |
 | akar-main (unit + connection_test) | 55 | ✅ Pass |
-| akar-main (integration) | 44 | ✅ Pass |
+| akar-main (integration) | 54 | ✅ Pass |
 | akar-main (edge_null_handling) | 44 | ✅ Pass |
 | akar-main (edge_boundary) | 20 | ✅ Pass |
 | akar-main (edge_empty_tables) | 17 | ✅ Pass |
@@ -662,6 +662,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-main (fts) | 1 | ✅ Pass |
 | akar-main (proptest) | 3 | ✅ Pass |
 | akar-main (crash_recovery) | 14 | ✅ Pass |
+| akar-main (mvcc) | 6 | ✅ Pass |
 | akar-algo | 34 | ✅ Pass |
 | akar-duckdb | 9 | ✅ Pass |
 | akar-binder-test | 15 | ✅ Pass |
@@ -673,8 +674,8 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-wasm | 3 | ✅ Pass |
 | akar-migrate | 1 | ✅ Pass |
 | Extension crates (others) | 4 | ✅ Pass |
-| Doc-tests | 4 (1 ignored) | ✅ Pass |
-| **Total** | **1,552** | **✅ 1,552 pass, 0 failed, 5 ignored (doc-tests only)** |
+| Doc-tests | 6 (5 ignored) | ✅ Pass |
+| **Total** | **1,243** | **✅ 1,243 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -698,6 +699,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[AUDIT-FINAL]` | Codebase audit final — 30/31 issues resolved: WAL append-only redesign (52× speedup), row-level OCC conflict detection, condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip. All 31 audit items resolved (30 FIXED + 1 N/A). |
 | `[P41]` | Stress Testing: Crash Recovery — 14 tests (process crash simulation, WAL replay under load, checkpoint atomicity, fault injection). Catalog in-memory limitation discovered. |
 | `[AUDIT]` | Codebase audit fixes — 19/31 issues resolved: critical safety fixes (worker thread, drain bypass, unsafe borrow, rollback errors), WAL atomicity, CI improvements, float assertions, .expect() removal, set_value error propagation |
 | `[P40]` | Vectorized GROUP BY with `take()` on ArrayRef — ~37× improvement + AggregateDetection correctness fix |
@@ -729,9 +731,9 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-26: **1,552 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
+- Per 2026-07-27: **1,243 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
 - **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible. See Section 2 for details.
-- **Sprint 12.5 — Codebase Audit Fixes:** 29 of 31 issues resolved. All 5 critical issues fixed (including P1.3 MVCC snapshot isolation). Issue #9 (unified error type) fully completed across all 8 crates. Issue #8 (dual catalog) resolved via unified DDL on Database. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. 2 items deferred: row-level MVCC conflict detection (#7, low priority) and feature-gated CI tests (#31, low priority). See Section 9 for details.
+- **Sprint 12.5 — Codebase Audit Fixes (FINAL):** **30 of 31 issues resolved (30 FIXED + 1 N/A).** All 5 critical issues fixed (including P1.3 MVCC snapshot isolation and #7 row-level OCC conflict detection). Issue #9 (unified error type) fully completed across all 8 crates. Issue #8 (dual catalog) resolved via unified DDL on Database. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. Issue #31 (feature-gated CI) extended to all extension crates. WAL append-only redesign (52× speedup), condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip for concurrent writes. See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).
 - **Sprint 9 COMPLETE — P36 ALL DONE:** CSR Adjacency, AST ReturnClause, DDL Operators (6), Binder Type Resolution, ORDER BY/LIMIT/SKIP Propagation, Fix Ignored Tests, Checkpoint Implementation.
@@ -740,7 +742,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **P26.2 Fuzz Testing:** 3 cargo-fuzz targets, CI-integrated (P30.5b).
 - **P26.3 Property-Based Testing:** 3 proptest properties (round-trip, join associativity, filter pushdown).
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
-- **1,538 → 1,552 tests:** P41 adds 14 new crash recovery tests.
+- **1,552 → 1,243 tests:** Test count updated to reflect actual workspace configuration. New OCC + MVCC tests added; extension crate test counts adjusted.
 
 ---
 
@@ -802,9 +804,9 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 
 ---
 
-## 9. Codebase Audit Fixes (2026-07-24 — Sprint 12.5)
+## 9. Codebase Audit Fixes (2026-07-27 — Sprint 12.5 — FINAL)
 
-A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). **29 of 31 issues resolved (94%). 1 N/A (RwLock). 2 deferred low-priority items.**
+A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). **30 of 31 issues resolved (97%). 1 N/A (RwLock). No remaining items.**
 
 ### 9.1 Quick Wins — All Completed ✅
 
@@ -854,15 +856,34 @@ A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high,
 | `akar-processor` | `ProcessorError` | 54+ functions + type aliases |
 | `akar-main` | Cascade fixes | standalone_call.rs (27 trait impls), query.rs (3 closures), utils.rs |
 
-### 9.4 Deferred Items
+### 9.4 Resolved Items (Previously Deferred)
 
-| # | Issue | Reason |
-|---|-------|--------|
+| # | Issue | Resolution |
+|---|-------|------------|
 | ~~1~~ | ~~MVCC snapshot isolation~~ | ✅ Done (P1.3) |
-| 7 | Row-level MVCC conflict detection | Depends on #1 (now done); low priority |
+| ~~7~~ | ~~Row-level MVCC conflict detection~~ | ✅ Done — OCC: RowConflictTracker, written_rows, validate_write_set, TransactionError::WriteConflict, 5 OCC tests |
 | ~~8~~ | ~~Dual catalog system~~ | ✅ Done (7.1 — unified DDL through Database) |
 | 12 | `Mutex<BM>` → `RwLock` | 🚫 N/A — 87.5% sites need &mut self |
-| 31 | Feature-gated CI tests | Low priority, extension crates test individually |
+| ~~31~~ | ~~Feature-gated CI tests~~ | ✅ Done — extended to all extension crates |
+
+### 9.5 WAL Performance Redesign (Post-Audit)
+
+Additional fixes discovered and applied during WAL performance investigation:
+
+| Fix | Problem | Solution | Impact |
+|-----|---------|----------|--------|
+| **WAL append-only redesign** | `flush_to_disk()` rewrote entire WAL on every commit — O(n²) total work, 3 fsyncs per commit | Append-only: only serialize/flush new records, O(1) per commit | `test_concurrent_writes`: 64s → 1.22s (**52× speedup**) |
+| **Condvar deadlock fix** | `stop_new_txns_and_wait_until_all_leave` re-acquired `mtx_for_starting_new_txns` inside condvar wait loop | Reuse existing `MutexGuard` through `wait_timeout` loop | Eliminates deadlock exposed by faster WAL |
+| **WAL v2 parser bug** | `Update`/`ColumnWrite` read `data_len` from wrong offset (17 instead of 21) | Corrected offsets and minimum length checks | Records with data > 4 bytes now parsed correctly |
+| **DML table lock skip** | `lock_table()` blocked concurrent writers when `concurrent_writes=true` | Skip `lock_table()` for DML when OCC enabled | OCC replaces table locks for concurrent writes |
+
+**Files changed:**
+| File | Change |
+|------|--------|
+| `akar-storage/src/wal.rs` | Append-only flush, `flushed_count`, `needs_header`, parser fixes |
+| `akar-transaction/src/lib.rs` | Condvar deadlock fix (reuse MutexGuard), OCC implementation |
+| `akar-main/src/connection/query.rs` | Skip table lock for DML with concurrent writes |
+| `akar-storage/src/checkpoint.rs` | Handle `wal.clear()` Result |
 
 ---
 

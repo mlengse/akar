@@ -157,9 +157,17 @@ impl fmt::Display for WALRecord {
 }
 
 /// Write-Ahead Log for durability.
+///
+/// Uses an append-only on-disk format: each `flush_to_disk()` call serializes
+/// only the **new** records since the last flush and appends them to the file.
+/// The full file is only rewritten during `clear()` (checkpoint).
 pub struct WAL {
     path: PathBuf,
     records: Vec<WALRecord>,
+    /// Number of records that have been flushed to disk.
+    flushed_count: usize,
+    /// Whether the next flush should write the file header (true after `clear()`).
+    needs_header: bool,
     total_size: usize,
     is_dirty: bool,
 }
@@ -169,6 +177,8 @@ impl WAL {
         Self {
             path,
             records: Vec::new(),
+            flushed_count: 0,
+            needs_header: true,
             total_size: 0,
             is_dirty: false,
         }
@@ -231,10 +241,23 @@ impl WAL {
     pub fn records(&self) -> &[WALRecord] {
         &self.records
     }
-    pub fn clear(&mut self) {
+    /// Clear all in-memory records and truncate the WAL file on disk.
+    ///
+    /// Called during checkpoint after dirty pages have been flushed — at this
+    /// point the WAL data is durable in the main DB files and can be discarded.
+    pub fn clear(&mut self) -> std::io::Result<()> {
         self.records.clear();
+        self.flushed_count = 0;
         self.total_size = 0;
         self.is_dirty = false;
+        self.needs_header = true;
+        // Truncate the WAL file to empty so the next flush starts fresh.
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&self.path)?
+            .sync_data()
     }
     pub fn len(&self) -> usize {
         self.records.len()
@@ -260,10 +283,15 @@ impl WAL {
         Ok(())
     }
 
-    /// Persist the WAL to disk atomically.
+    /// Append-only flush: serialize only records not yet on disk.
     ///
-    /// Writes to a temporary file, fsyncs, then atomically renames over the
-    /// old WAL. This ensures a crash mid-write never corrupts the existing WAL.
+    /// Instead of rewriting the entire WAL file (O(n) per flush → O(n²) total),
+    /// this method serializes only the **new** records since the last flush and
+    /// appends them to the existing file. The header is written once on the
+    /// first flush after a `clear()` (checkpoint).
+    ///
+    /// Crash safety: CRC32 per record detects partial appends. A partial final
+    /// record is silently skipped on recovery.
     ///
     /// ## On-disk format (v2)
     ///
@@ -277,19 +305,40 @@ impl WAL {
     /// │   payload (variable)                         │
     /// └──────────────────────────────────────────────┘
     /// ```
-    pub fn flush_to_disk(&self) -> std::io::Result<()> {
+    pub fn flush_to_disk(&mut self) -> std::io::Result<()> {
+        if self.flushed_count >= self.records.len() {
+            return Ok(()); // Nothing new to write
+        }
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(&self.path)?;
+
+        // Write header on fresh WAL (after clear() or first ever write).
+        if self.needs_header {
+            file.write_all(WAL_MAGIC)?;
+            file.write_all(&WAL_VERSION.to_le_bytes())?;
+            self.needs_header = false;
+        }
+
+        // Append only records not yet on disk.
+        let new_records = &self.records[self.flushed_count..];
+        Self::append_records_to_file(&mut file, new_records)?;
+
+        self.flushed_count = self.records.len();
+        file.sync_data()
+    }
+
+    /// Serialize one WAL record + CRC32 and write it to the file.
+    fn append_records_to_file(
+        file: &mut std::fs::File,
+        records: &[WALRecord],
+    ) -> std::io::Result<()> {
         use akar_common::serialization::Serialize;
-        let tmp_path = self.path.with_extension("log.tmp");
-        let mut file = std::fs::File::create(&tmp_path)?;
-
-        // Write WAL header
-        file.write_all(WAL_MAGIC)?;
-        file.write_all(&WAL_VERSION.to_le_bytes())?;
-
-        let mut crc_buf = [0u8; 4]; // scratch for CRC32 output
-        for record in &self.records {
-            // Serialize record payload into a temporary buffer so we can
-            // compute CRC32 over the complete tag+payload before writing.
+        let mut crc_buf = [0u8; 4];
+        for record in records {
             let mut payload = Vec::new();
             match record {
                 WALRecord::Insert { table_id, data } => {
@@ -382,19 +431,6 @@ impl WAL {
             file.write_all(&crc_buf)?;
             file.write_all(&payload)?;
         }
-        // Fsync the temp file to ensure all data is written to disk
-        file.sync_all()?;
-
-        // Atomic rename: temp → WAL path.
-        std::fs::rename(&tmp_path, &self.path)?;
-
-        // Fsync the parent directory to ensure the rename is durable
-        if let Some(parent) = self.path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
-        }
-
         Ok(())
     }
 
@@ -468,22 +504,24 @@ impl WAL {
                     }
                     b'D' => 1 + 8 + 8, // tag + table_id + row_id
                     b'U' => {
-                        if record_data.len() < 21 {
+                        // Layout: tag(1) + table_id(8) + row_id(8) + column(4) + data_len(4) + data
+                        if record_data.len() < 25 {
                             skipped += 1;
                             break;
                         }
                         let data_len =
-                            u32::from_le_bytes(record_data[17..21].try_into().unwrap()) as usize;
+                            u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
                         1 + 8 + 8 + 4 + 4 + data_len
                     }
                     b'F' => 1 + 8 + 1, // tag + page_idx + is_free
                     b'W' => {
-                        if record_data.len() < 21 {
+                        // Layout: tag(1) + table_id(8) + col_id(4) + page_id(8) + data_len(4) + data
+                        if record_data.len() < 25 {
                             skipped += 1;
                             break;
                         }
                         let data_len =
-                            u32::from_le_bytes(record_data[17..21].try_into().unwrap()) as usize;
+                            u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
                         1 + 8 + 4 + 8 + 4 + data_len
                     }
                     b'L' => {
@@ -540,6 +578,9 @@ impl WAL {
             );
         }
 
+        // All loaded records are already on disk — nothing to re-flush.
+        self.flushed_count = self.records.len();
+        self.needs_header = false;
         self.total_size = buffer.len();
         self.is_dirty = !self.records.is_empty();
         Ok(())
@@ -688,7 +729,7 @@ mod tests {
         assert!(wal.is_dirty());
         wal.append(WALRecord::Commit { transaction_id: 42 });
         assert_eq!(wal.len(), 2);
-        wal.clear();
+        wal.clear().unwrap();
         assert!(wal.is_empty());
         assert!(!wal.is_dirty());
     }

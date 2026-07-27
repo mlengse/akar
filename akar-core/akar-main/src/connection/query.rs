@@ -112,11 +112,15 @@ impl Connection {
             return Ok(result);
         }
 
-        // Lock all tables required by this query if in a write transaction
+        // Lock tables for DML writes only in single-writer mode.
+        // When concurrent_writes is enabled, OCC row-level conflict detection
+        // replaces table-level locking (see record_write / validate_write_set).
         if let Some(ref txn) = txn_opt {
-            let write_tables = Connection::extract_write_tables(bound);
-            for tid in write_tables {
-                self.database.transaction_manager.lock_table(txn.transaction_id, tid)?;
+            if !self.database.transaction_manager.allow_concurrent_writes() {
+                let write_tables = Connection::extract_write_tables(bound);
+                for tid in write_tables {
+                    self.database.transaction_manager.lock_table(txn.transaction_id, tid)?;
+                }
             }
         }
 
