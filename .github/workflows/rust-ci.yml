@@ -127,18 +127,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
       - name: Build with all extension features
         run: |
           cargo build -p akar-main \
-            --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,adbc
+            --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,iceberg-extension,azure-extension,postgres-extension,unity-catalog-extension,adbc
           cargo build -p akar-cli
         working-directory: akar-core
       - name: Test with all features
         run: |
           cargo test -p akar-main \
-            --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,adbc \
+            --features json-extension,fts-extension,vector-extension,httpfs-extension,duckdb-extension,algo-extension,neo4j-extension,llm-extension,sqlite-extension,delta-extension,iceberg-extension,azure-extension,postgres-extension,unity-catalog-extension,adbc \
             --no-fail-fast
+        working-directory: akar-core
+      - name: Test individual extension crates
+        run: |
           cargo test -p akar-json -p akar-fts -p akar-vector -p akar-algo \
+            -p akar-httpfs -p akar-neo4j -p akar-llm -p akar-extension \
+            -p akar-migrate -p akar-delta -p akar-iceberg -p akar-azure \
+            -p akar-postgres -p akar-unity-catalog \
             --no-fail-fast
         working-directory: akar-core
 

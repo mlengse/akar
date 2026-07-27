@@ -114,6 +114,10 @@ pub struct QueryProcessor {
     snapshot_ts: Option<u64>,
     /// Commit history for MVCC visibility checks.
     commit_history: Vec<(u64, u64)>,
+    /// Row-level write set accumulated during execution.
+    /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
+    /// Read by the connection layer after execution for OCC conflict detection.
+    written_rows: Mutex<Vec<(u64, u64)>>,
 }
 
 impl QueryProcessor {
@@ -128,6 +132,7 @@ impl QueryProcessor {
             schema_ddl_fn: None,
             snapshot_ts: None,
             commit_history: Vec::new(),
+            written_rows: Mutex::new(Vec::new()),
         }
     }
 
@@ -143,6 +148,7 @@ impl QueryProcessor {
             schema_ddl_fn: None,
             snapshot_ts: None,
             commit_history: Vec::new(),
+            written_rows: Mutex::new(Vec::new()),
         }
     }
 
@@ -162,6 +168,7 @@ impl QueryProcessor {
             schema_ddl_fn: None,
             snapshot_ts: None,
             commit_history: Vec::new(),
+            written_rows: Mutex::new(Vec::new()),
         }
     }
 
@@ -239,9 +246,17 @@ impl QueryProcessor {
                 schema_ddl_fn: self.schema_ddl_fn.clone(),
                 snapshot_ts: self.snapshot_ts,
                 commit_history: self.commit_history.clone(),
+                written_rows: Vec::new(),
             };
 
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, &mut ctx)?;
+
+            // Accumulate written rows from this operator into the processor's write set
+            if !ctx.written_rows.is_empty() {
+                if let Ok(mut writes) = self.written_rows.lock() {
+                    writes.append(&mut ctx.written_rows);
+                }
+            }
 
             if let LogicalOperator::ScanRel(_) = op {
                 // Accumulate: extend rather than replace for ScanRel
@@ -255,6 +270,15 @@ impl QueryProcessor {
         }
 
         Ok(intermediate_result.unwrap_or_default())
+    }
+
+    /// Take the accumulated write set from the processor.
+    /// Returns all (table_id, row_id) pairs written during the last execution.
+    pub fn take_written_rows(&self) -> Vec<(u64, u64)> {
+        self.written_rows
+            .lock()
+            .map(|mut w| std::mem::take(&mut *w))
+            .unwrap_or_default()
     }
 
     /// Execute a table function call by looking up the function in the registry

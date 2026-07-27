@@ -41,7 +41,8 @@ impl Connection {
 
         // Step 1: Commit via TransactionManager (assigns commit_ts, releases locks)
         let tm = &self.database.transaction_manager;
-        let commit_result = tm.commit(txn);
+        let commit_result = tm.commit(txn)
+            .map_err(|e| format!("Transaction commit failed: {e}"))?;
         let _commit_ts = match commit_result {
             akar_transaction::CommitResult::Committed { commit_ts } => commit_ts,
         };

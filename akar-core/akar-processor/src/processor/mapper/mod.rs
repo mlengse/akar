@@ -36,6 +36,10 @@ pub struct ExecutionContext<'a, 'p> {
     pub snapshot_ts: Option<u64>,
     /// Commit history for MVCC visibility checks: `(txn_id, commit_ts)` pairs.
     pub commit_history: Vec<(u64, u64)>,
+    /// Row-level write set for OCC conflict detection.
+    /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
+    /// The connection layer reads this after execution and calls `record_write()`.
+    pub written_rows: Vec<(u64, u64)>,
 }
 
 impl<'a, 'p> ExecutionContext<'a, 'p> {

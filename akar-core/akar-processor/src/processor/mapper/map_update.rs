@@ -26,6 +26,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = set_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_set_writes(sl.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::Delete(dl) => {
@@ -44,6 +46,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = delete_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_delete_writes(dl.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::CreateNode(cn) => {
@@ -60,6 +64,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = create_node_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(cn.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::CreateRel(cr) => {
@@ -77,6 +83,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = create_rel_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(cr.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::Extend(ex) => {
@@ -96,6 +104,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = extend_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(ex.rel_table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::Merge(m) => {
@@ -139,6 +149,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = merge_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(m.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::CopyFrom(cf) => {
@@ -166,6 +178,8 @@ pub fn map_and_execute_update(
                 vfs: ctx.vfs.clone().ok_or_else(|| "VFS not initialized in processor".to_string())?,
             };
             let result = copy_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(cf.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::BatchInsert(bi) => {
@@ -181,6 +195,8 @@ pub fn map_and_execute_update(
                 table_catalog,
             };
             let result = batch_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(bi.table_id, &result, ctx);
             Ok(result)
         }
         LogicalOperator::Insert(i) => {
@@ -192,8 +208,50 @@ pub fn map_and_execute_update(
                 table_catalog: ctx.table_catalog.clone().unwrap(),
             };
             let result = exec.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(i.table_id, &result, ctx);
             Ok(result)
         }
         _ => Err(format!("Not an update operator: {:?}", op).into()),
     }
+}
+
+/// Record rows written by a SET operation for OCC conflict detection.
+/// The result DataChunk contains the row indices that were updated (first column).
+fn record_set_writes(table_id: u64, result: &[DataChunk], ctx: &mut ExecutionContext) {
+    if let Some(chunk) = result.first() {
+        for row in 0..chunk.size {
+            if !chunk.fields.is_empty() {
+                if let Some(akar_common::types::Value::Int64(row_idx)) = chunk.get_value(0, row) {
+                    ctx.written_rows.push((table_id, row_idx as u64));
+                }
+            }
+        }
+    }
+}
+
+/// Record rows written by a DELETE operation for OCC conflict detection.
+/// The result DataChunk contains the row indices that were deleted (first column).
+fn record_delete_writes(table_id: u64, result: &[DataChunk], ctx: &mut ExecutionContext) {
+    if let Some(chunk) = result.first() {
+        for row in 0..chunk.size {
+            if !chunk.fields.is_empty() {
+                if let Some(akar_common::types::Value::Int64(row_idx)) = chunk.get_value(0, row) {
+                    ctx.written_rows.push((table_id, row_idx as u64));
+                }
+            }
+        }
+    }
+}
+
+/// Record rows written by an INSERT operation for OCC conflict detection.
+/// For inserts, we use row_id = 0 as a sentinel to indicate "new row added".
+/// The actual row_id will be assigned during commit, but we need to track
+/// that this transaction modified the table.
+fn record_insert_writes(table_id: u64, _result: &[DataChunk], ctx: &mut ExecutionContext) {
+    // For inserts, we record the table_id with row_id = 0 as a sentinel.
+    // This ensures that concurrent transactions on the same table will
+    // detect a conflict at the table level.
+    // TODO: In the future, we could track specific row IDs for more granular conflict detection.
+    ctx.written_rows.push((table_id, 0));
 }

@@ -151,6 +151,15 @@ impl Connection {
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
 
+        // Record row-level writes for OCC conflict detection
+        if let Some(ref txn) = txn_opt {
+            let written_rows = processor.take_written_rows();
+            let tm = &self.database.transaction_manager;
+            for (table_id, row_id) in written_rows {
+                tm.record_write(txn.transaction_id, table_id, row_id);
+            }
+        }
+
         // Auto-checkpoint after DML execution
         self.maybe_auto_checkpoint()?;
 
