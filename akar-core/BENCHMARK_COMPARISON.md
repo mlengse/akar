@@ -12,9 +12,9 @@
 
 ```bash
 # Run Rust benchmarks (operator micro-benchmarks)
-cd kuzu-core
-cargo bench -p kuzu-processor   # Scan, Filter, Join, OrderBy, Aggregate, ExpressionEval
-cargo bench -p kuzu-main         # Full pipeline + Storage
+cd akar-core
+cargo bench -p akar-processor   # Scan, Filter, Join, OrderBy, Aggregate, ExpressionEval
+cargo bench -p akar-main         # Full pipeline + Storage
 
 # View HTML reports
 # Open target/criterion/report/index.html
@@ -24,13 +24,13 @@ cargo bench -p kuzu-main         # Full pipeline + Storage
 
 ## TL;DR
 
-The Rust Kuzu port shows **competitive performance** against **both** C++ implementations (Vela KuzuDB and LadybugDB). Phase 2 Arrow-native expression evaluation delivered **10–24× speedup** on filter/evaluation hot paths. See [C++ Setup](#cpp-setup) for build instructions.
+The Rust akar port shows **competitive performance** against **both** C++ implementations (Vela KuzuDB and LadybugDB). Phase 2 Arrow-native expression evaluation delivered **10–24× speedup** on filter/evaluation hot paths. See [C++ Setup](#cpp-setup) for build instructions.
 
 **Current Status:**
 - ✅ Rust micro-benchmarks: 38+ criterion benchmarks across scan, filter, join, sort, aggregate, expression eval
 - ✅ Full pipeline benchmarks: parse→bind→plan→optimize→execute
 - ✅ Arrow-native expression evaluation: **10–24× faster** for comparison/boolean/arithmetic ops
-- ✅ **Vela C++** baseline: kuzu_benchmark.exe built and run (10k rows)
+- ✅ **Vela C++** baseline: akar_benchmark.exe built and run (10k rows)
 - ✅ **LadybugDB C++** baseline: lbug_benchmark.exe built and run (10k rows, 2026-07-18)
 - ✅ **3-way parity verified: Rust ≈ Vela ≈ Ladybug** (397 µs Rust vs 400 µs Vela vs 374 µs Ladybug) on SQL-level filter+count
 - ✅ Phase 1 (scan optimization): direct `ColumnChunk→Arrow` path — 7.8× scan improvement
@@ -72,7 +72,7 @@ Hardware: See `criterion` report in `target/criterion/` for detailed system info
 | `scan/small_100_rows` (full pipeline) | **20.0 µs** | — | Via `Connection::query()` |
 | `scan/medium_1k_rows` (full pipeline) | **86.5 µs** | — | Via `Connection::query()` |
 
-**C++ comparison:** TBD — requires serialized tinysnb dataset and `kuzu_shell` to create a database.
+**C++ comparison:** TBD — requires serialized tinysnb dataset and `akar_shell` to create a database.
 
 ### Filter Throughput
 
@@ -182,9 +182,9 @@ These micro-benchmarks directly compare the old per-row `evaluate()` path (Value
 
 ## C++ Benchmark Status
 
-### Vela C++ (`kuzu_benchmark`) — Status: ✅ Built and Run (2026-07-16)
+### Vela C++ (`akar_benchmark`) — Status: ✅ Built and Run (2026-07-16)
 
-The Vela C++ benchmark binary at `build/release/tools/benchmark/kuzu_benchmark.exe` (19 MB, built 2026-07-12).
+The Vela C++ benchmark binary at `build/release/tools/benchmark/akar_benchmark.exe` (19 MB, built 2026-07-12).
 
 ### LadybugDB C++ (`lbug_benchmark`) — Status: ✅ Built and Run (2026-07-18)
 
@@ -208,7 +208,7 @@ cmake --build build/release --target lbug_shell
 
 | Runtime | Dataset | Query | Execution Time | Methodology |
 |---------|---------|-------|---------------|-------------|
-| Vela C++ (`kuzu_benchmark`) | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.400 ms** avg | Full query: scan→materialize→filter→aggregate |
+| Vela C++ (`akar_benchmark`) | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.400 ms** avg | Full query: scan→materialize→filter→aggregate |
 | **LadybugDB C++ (`lbug_benchmark`)** | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.374 ms** avg | Full query: scan→materialize→filter→aggregate |
 | Rust (`criterion`) | In-memory DataChunk (10k) | PhysicalFilter + COUNT | **0.062 ms** avg | Operator-only: pre-loaded in-memory data |
 
@@ -232,14 +232,14 @@ All three runtimes ran the **identical** query on **identical** 10k-row datasets
 MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)
 ```
 
-| Metric | Vela C++ (`kuzu_benchmark`) | LadybugDB C++ (`lbug_benchmark`) | Rust (`conn.execute`) | Rust (`conn.query`) |
+| Metric | Vela C++ (`akar_benchmark`) | LadybugDB C++ (`lbug_benchmark`) | Rust (`conn.execute`) | Rust (`conn.query`) |
 |--------|----------------------------|----------------------------------|----------------------|---------------------|
 | Scope | plan→optimize→execute | plan→optimize→execute | plan→optimize→execute | prepare+plan+optimize+execute |
 | Mean time | **400 µs** | **374 µs** | **397 µs** | **366 µs** |
 | Ratio vs Vela | 1× | **0.94×** | **~equivalent** | **0.92×** |
 | Compiler | MSVC 2022 | Clang 22 (LLVM-MinGW) | rustc (LLVM) | rustc (LLVM) |
 
-> **Update (2026-07-18):** 3-way parity verified. LadybugDB C++ benchmark was built from the independent `ladybug/` submodule (v0.18.0) using Clang 22/MinGW and shows **374 µs** — slightly faster than Vela's MSVC build. **Rust is at parity with both independent C++ implementations.**
+> **Update (2026-07-27):** P42 large-scale benchmarks complete. 100K/1M row scalability measured. Near-linear scaling confirmed (10K→1M: ~74× for scan, ~80× for filter). Sort/group_by at 100K+ deferred (radixsort OOB bug).
 
 **Key insight:** The original 4.5× gap was entirely in `processor.execute()` — the physical operator execution. Profiling with `std::time::Instant` at each phase of `conn.execute()` reveals:
 
@@ -258,26 +258,26 @@ MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)
 
 ```powershell
 # Step 1: Build the C++ project (already done)
-cd C:\path\to\kuzu
+cd C:\path\to\akar
 cmake -B build/release -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARK=ON -GNinja .
-cmake --build build/release --target kuzu_benchmark
+cmake --build build/release --target akar_benchmark
 
 # Step 2: Create a serialized database
-$shell = "build/release/tools/shell/kuzu.exe"
+$shell = "build/release/tools/shell/akar.exe"
 $db = "build/release/bench10k/db.kz"
 & $shell $db < schema.cypher     # Create tables
 & $shell $db < copy.cypher       # Load data
 
 # Step 3: Run C++ benchmarks
-build/release/tools/benchmark/kuzu_benchmark.exe `
+build/release/tools/benchmark/akar_benchmark.exe `
   --dataset=build/release/bench10k/db.kz `
   --benchmark=benchmark/queries/micro `
   --warmup=3 --run=5 --out=build/release/bench_results `
   --bm-size=8192 --thread=16 --profile
 
 # Step 4: Compare with Rust
-cd kuzu-core
-cargo bench -p kuzu-processor -- physical_filter
+cd akar-core
+cargo bench -p akar-processor -- physical_filter
 ```
 
 > **Note:** The C++ benchmark suite covers 84+ benchmark files across 5 datasets
@@ -304,7 +304,7 @@ def parse_rust_bencher(path):
     return results
 
 def parse_cpp_json(path):
-    """Parse kuzu_benchmark --json output."""
+    """Parse akar_benchmark --json output."""
     with open(path) as f:
         data = json.load(f)
     return {b['name']: b['real_time'] / 1000.0 for b in data.get('benchmarks', [])}
@@ -340,7 +340,7 @@ if __name__ == '__main__':
 
 ## Gap Analysis
 
-| Operator | Rust (kuzu-processor) | C++ (kuzu_benchmark) | Gap Ratio | Status |
+| Operator | Rust (akar-processor) | C++ (akar_benchmark) | Gap Ratio | Status |
 |----------|---------------|--------------|-----------|--------|
 | **Seq Scan** (10K, 4 cols) | ~0.643 ms | *Part of E2E* | — | 🟢 Baseline captured |
 | **Filter** (constant true, 10K) | **~0.018 ms** | *Part of E2E* | — | 🟢 **Phase 2: 24× faster** |
@@ -407,7 +407,7 @@ Instrumented every phase of `conn.execute()` with `std::time::Instant` during th
 
 ### Operator-Level Profiling Results
 
-Instrumented each physical operator inside `processor.execute()` via `map_and_execute` in kuzu-processor:
+Instrumented each physical operator inside `processor.execute()` via `map_and_execute` in akar-processor:
 
 **Before fix (2026-07-16):**
 
@@ -460,14 +460,14 @@ DataChunk { fields: Vec<ArrayRef> } → Aggregate operator
 **Impact:** ScanNode went from ~1.4 ms → ~180 µs (**7.8× faster**). Full `conn.execute()` went from 1,787 µs → 529 µs (**3.4× faster**).
 
 Files changed:
-1. `kuzu-storage/src/column_chunk.rs` — Added `ColumnChunk::to_arrow_array() -> ArrayRef` that reads `self.values` inline into Arrow builders, skipping `Vec<Vec<Value>>` (line 235)
-2. `kuzu-processor/src/physical/scan_filter/scan.rs` — Added `table_arrow_data: Option<Vec<ArrayRef>>` field, `with_arrow_data()` builder, two execute paths: `execute_with_arrow_arrays()` (fast, uses `arrow::compute::take`) and `execute_with_value_data()` (legacy) (line 44)
-3. `kuzu-processor/src/processor/mapper/mod.rs` — Added `resolve_scan_arrow_data()` that reads NodeGroup column chunks directly into Arrow arrays and concatenates per-group arrays (line 77)
-4. `kuzu-processor/src/processor/mapper/map_scan.rs` — `map_and_execute_scan_node()` tries Arrow fast path first; falls back to legacy if arrow data unavailable (line 55)
+1. `akar-storage/src/column_chunk.rs` — Added `ColumnChunk::to_arrow_array() -> ArrayRef` that reads `self.values` inline into Arrow builders, skipping `Vec<Vec<Value>>` (line 235)
+2. `akar-processor/src/physical/scan_filter/scan.rs` — Added `table_arrow_data: Option<Vec<ArrayRef>>` field, `with_arrow_data()` builder, two execute paths: `execute_with_arrow_arrays()` (fast, uses `arrow::compute::take`) and `execute_with_value_data()` (legacy) (line 44)
+3. `akar-processor/src/processor/mapper/mod.rs` — Added `resolve_scan_arrow_data()` that reads NodeGroup column chunks directly into Arrow arrays and concatenates per-group arrays (line 77)
+4. `akar-processor/src/processor/mapper/map_scan.rs` — `map_and_execute_scan_node()` tries Arrow fast path first; falls back to legacy if arrow data unavailable (line 55)
 
 ### Aggregate Breakdown
 
-`PhysicalAggregate::execute()` at `kuzu-processor/src/physical/order_aggregate/aggregate.rs:38`:
+`PhysicalAggregate::execute()` at `akar-processor/src/physical/order_aggregate/aggregate.rs:38`:
 - Iterates filtered rows, increments a counter for each passing row
 - **~350 µs** for ~7,000 passing rows (≈70% selectivity from `age > 30` on uniform distribution)
 - This is ~50 ns/row — reasonable for per-row dispatch via trait objects
@@ -538,23 +538,57 @@ These passes benefit more complex query patterns (nested subqueries, UNION ALL +
 
 ---
 
+## P42.2 — Large-Scale Benchmarks (2026-07-27)
+
+Scalability benchmarks at 10K, 100K, and 1M rows. Each scale tier uses a dedicated database (separate `OnceLock` with CSV-based bulk load). Measured via `bench_scale` binary (3 iterations, release profile).
+
+### Scalability Results (release profile, separate DB per tier)
+
+| Scale | Load Time | Scan | Filter | COUNT | Filter+COUNT |
+|-------|-----------|------|--------|-------|-------------|
+| **10K** | 30 ms | 3.0 ms | 2.9 ms | 2.8 ms | 3.2 ms |
+| **100K** | 151 ms | 23.4 ms | 22.7 ms | 23.8 ms | 23.7 ms |
+| **1M** | 1,523 ms | 222 ms | 235 ms | 212 ms | 237 ms |
+
+### Scaling Ratio (vs 10K baseline)
+
+| Scale | Scan | Filter | COUNT | Filter+COUNT |
+|-------|------|--------|-------|-------------|
+| **10K → 100K** (10× data) | 7.8× | 7.8× | 8.5× | 7.4× |
+| **10K → 1M** (100× data) | 74× | 81× | 75× | 74× |
+
+**Near-linear scaling confirmed.** 10× data → ~8× time (CPU-bound). 100× data → ~75× time (slightly sub-linear due to amortized fixed costs).
+
+### Notes
+
+- Sort and Group By at 100K+ deferred — radixsort OOB bug at `radixsort.rs:54` for >10K rows (separate issue, not P42 scope)
+- 100K benchmarks: `scan`, `filter`, `aggregate` (count, sum, filter_count)
+- 1M benchmarks: `scan`, `aggregate` (count, sum, filter_count)
+- Criterion bench names: `ladybug_100k/*`, `ladybug_1m/*`
+
+---
+
 ## Running the Benchmarks
 
 ### All Rust benchmarks
 
 ```bash
-cd kuzu-core
+cd akar-core
 
 # Full pipeline benchmarks (5 rows, small dataset)
-cargo bench -p kuzu-main
+cargo bench -p akar-main
+
+# Large-scale benchmarks (100K/1M rows — takes several minutes)
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_100k"
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"
 
 # Individual operator benchmarks (various sizes)
-cargo bench -p kuzu-processor --bench physical_scan
-cargo bench -p kuzu-processor --bench physical_filter
-cargo bench -p kuzu-processor --bench physical_hash_join
-cargo bench -p kuzu-processor --bench physical_order_by
-cargo bench -p kuzu-processor --bench physical_aggregate
-cargo bench -p kuzu-processor --bench evaluate_arrow    # Expression eval old vs new
+cargo bench -p akar-processor --bench physical_scan
+cargo bench -p akar-processor --bench physical_filter
+cargo bench -p akar-processor --bench physical_hash_join
+cargo bench -p akar-processor --bench physical_order_by
+cargo bench -p akar-processor --bench physical_aggregate
+cargo bench -p akar-processor --bench evaluate_arrow    # Expression eval old vs new
 
 # All benchmarks (takes ~30+ minutes)
 cargo bench --workspace
@@ -569,7 +603,7 @@ See "To Collect C++ Numbers" section above.
 ## Detailed Results Location
 
 HTML reports with full statistical analysis are generated in:
-- `kuzu-core/target/criterion/` — Rust criterion reports
+- `akar-core/target/criterion/` — Rust criterion reports
 - `build/release/tools/benchmark/` (if `--out` specified) — C++ log files
 
 Open the `report/index.html` files in any browser for interactive charts.

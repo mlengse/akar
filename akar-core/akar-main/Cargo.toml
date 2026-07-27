@@ -79,5 +79,13 @@ harness = false
 name = "ladybug_suite"
 harness = false
 
+[[bench]]
+name = "storage_io_bench"
+harness = false
+
+[[bench]]
+name = "recovery_time_bench"
+harness = false
+
 [lints]
 workspace = true

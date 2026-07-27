@@ -8,6 +8,8 @@ use tempfile::TempDir;
 static BENCH_DIR: OnceLock<TempDir> = OnceLock::new();
 static BENCH_DB_NODES: OnceLock<Arc<Database>> = OnceLock::new();
 static BENCH_DB_FULL: OnceLock<Arc<Database>> = OnceLock::new();
+static BENCH_DB_100K: OnceLock<Arc<Database>> = OnceLock::new();
+static BENCH_DB_1M: OnceLock<Arc<Database>> = OnceLock::new();
 
 fn setup_nodes_db(dir: &TempDir) -> Arc<Database> {
     let db_path = dir.path().join("nodes_only");
@@ -139,6 +141,76 @@ fn get_nodes_db() -> Connection {
 fn get_full_db() -> Connection {
     let dir = BENCH_DIR.get_or_init(|| tempfile::tempdir().unwrap());
     let db = BENCH_DB_FULL.get_or_init(|| setup_full_db(dir));
+    Connection::new(db)
+}
+
+fn setup_100k_db(dir: &TempDir) -> Arc<Database> {
+    let db_path = dir.path().join("bench_100k");
+    let config = SystemConfig::default();
+    let database = Arc::new(Database::new(db_path, config).unwrap());
+    let conn = Connection::new(&database);
+
+    conn.query(
+        "CREATE NODE TABLE Person(ID INT64, name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (ID))",
+    )
+    .unwrap();
+
+    let csv_path = dir.path().join("person_100k.csv");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "ID,name,age,score,active").unwrap();
+        for i in 0..100_000u64 {
+            let age = (i * 7 + 13) % 101;
+            let score = (i as f64) * 0.001 + 50.0;
+            let active = i % 3 != 0;
+            writeln!(f, "{i},P{i},{age},{score},{active}").unwrap();
+        }
+    }
+    let fp = csv_path.to_string_lossy().replace('\\', "/");
+    conn.query(&format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+    database
+}
+
+fn setup_1m_db(dir: &TempDir) -> Arc<Database> {
+    let db_path = dir.path().join("bench_1m");
+    let config = SystemConfig::default();
+    let database = Arc::new(Database::new(db_path, config).unwrap());
+    let conn = Connection::new(&database);
+
+    conn.query(
+        "CREATE NODE TABLE Person(ID INT64, name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY (ID))",
+    )
+    .unwrap();
+
+    let csv_path = dir.path().join("person_1m.csv");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "ID,name,age,score,active").unwrap();
+        for i in 0..1_000_000u64 {
+            let age = (i * 7 + 13) % 101;
+            let score = (i as f64) * 0.0001 + 50.0;
+            let active = i % 3 != 0;
+            writeln!(f, "{i},P{i},{age},{score},{active}").unwrap();
+        }
+    }
+    let fp = csv_path.to_string_lossy().replace('\\', "/");
+    conn.query(&format!("COPY Person FROM '{fp}' (HEADER true)")).unwrap();
+
+    database
+}
+
+fn get_100k_db() -> Connection {
+    let dir = BENCH_DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    let db = BENCH_DB_100K.get_or_init(|| setup_100k_db(dir));
+    Connection::new(db)
+}
+
+fn get_1m_db() -> Connection {
+    let dir = BENCH_DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    let db = BENCH_DB_1M.get_or_init(|| setup_1m_db(dir));
     Connection::new(db)
 }
 
@@ -347,6 +419,103 @@ fn bench_buffer_manager(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_100k_scan(c: &mut Criterion) {
+    let conn = get_100k_db();
+    let mut group = c.benchmark_group("ladybug_100k/scan");
+    group.throughput(criterion::Throughput::Elements(100_000));
+    group.bench_function("scan_all", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN p.ID, p.name"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
+fn bench_100k_filter(c: &mut Criterion) {
+    let conn = get_100k_db();
+    let mut group = c.benchmark_group("ladybug_100k/filter");
+    group.throughput(criterion::Throughput::Elements(100_000));
+    group.bench_function("filter_age_gt_50", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) WHERE p.age > 50 RETURN p.ID, p.name"));
+            black_box(r.unwrap());
+        })
+    });
+    group.bench_function("filter_active_and_young", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box(
+                "MATCH (p:Person) WHERE p.active = true AND p.age < 30 RETURN p.ID",
+            ));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
+fn bench_100k_aggregate(c: &mut Criterion) {
+    let conn = get_100k_db();
+    let mut group = c.benchmark_group("ladybug_100k/aggregate");
+    group.throughput(criterion::Throughput::Elements(100_000));
+    group.bench_function("count_all", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.bench_function("sum_age", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN SUM(p.age)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.bench_function("filter_count", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
+fn bench_1m_scan(c: &mut Criterion) {
+    let conn = get_1m_db();
+    let mut group = c.benchmark_group("ladybug_1m/scan");
+    group.throughput(criterion::Throughput::Elements(1_000_000));
+    group.bench_function("scan_all", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN p.ID, p.name"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
+fn bench_1m_aggregate(c: &mut Criterion) {
+    let conn = get_1m_db();
+    let mut group = c.benchmark_group("ladybug_1m/aggregate");
+    group.throughput(criterion::Throughput::Elements(1_000_000));
+    group.bench_function("count_all", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.bench_function("sum_age", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN SUM(p.age)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.bench_function("filter_count", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_simple_scan,
@@ -357,5 +526,10 @@ criterion_group!(
     bench_join,
     bench_complex,
     bench_buffer_manager,
+    bench_100k_scan,
+    bench_100k_filter,
+    bench_100k_aggregate,
+    bench_1m_scan,
+    bench_1m_aggregate,
 );
 criterion_main!(benches);

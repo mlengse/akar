@@ -46,7 +46,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | Sprint 9 | P36: Critical Pipeline Gaps | 29 | ✅ COMPLETE |
 | Sprint 10 | P37: Storage & Performance | 18 | ✅ COMPLETE |
 | Sprint 11 | P38-P40: DDL, Aggregate Fixes, Vectorized GROUP BY | 15 | ✅ COMPLETE |
-| **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **P41 ✅ COMPLETE** — 14 crash recovery tests (12 SP). **P42 📋 PLANNED** — 8 SP. See [`implementation_plan.md`](implementation_plan.md) |
+| **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **✅ COMPLETE** — P41 (14 crash recovery tests, 12 SP). P42 (8 SP — release profiles, 100K/1M scale benchmarks, storage I/O, CI workflow). |
 | **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 
 ---
@@ -878,6 +878,7 @@ Additional fixes discovered and applied during WAL performance investigation:
 | **DML table lock skip** | `lock_table()` blocked concurrent writers when `concurrent_writes=true` | Skip `lock_table()` for DML when OCC enabled | OCC replaces table locks for concurrent writes |
 
 **Files changed:**
+
 | File | Change |
 |------|--------|
 | `akar-storage/src/wal.rs` | Append-only flush, `flushed_count`, `needs_header`, parser fixes |

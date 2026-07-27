@@ -80,17 +80,23 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 
 ## Benchmarks
 
-Performance parity with the original C++ implementation has been verified:
+Performance parity with the original C++ implementation has been verified. Large-scale benchmarks (100K/1M rows) confirm near-linear scaling:
 
-| Query Pattern | Akar (Rust) | C++ (original) |
-|---|---|---|
-| `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)` 10k rows | **397 µs** | 400 µs |
-| Filter + COUNT (end-to-end) | **397 µs** | 400 µs |
+| Scale | Scan | Filter | COUNT | Filter+COUNT |
+|---|---|---|---|---|
+| 10K rows | **3.0 ms** | **2.9 ms** | **2.8 ms** | **3.2 ms** |
+| 100K rows | **23.4 ms** | **22.7 ms** | **23.8 ms** | **23.7 ms** |
+| 1M rows | **222 ms** | **235 ms** | **212 ms** | **237 ms** |
+
+**3-way C++ parity** (10K, `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`):
+- Rust: **397 µs** | Vela C++: **400 µs** | LadybugDB C++: **374 µs**
 
 Run benchmarks locally:
 
 ```bash
-cargo bench -p akar-main
+cargo bench -p akar-main                          # 10K benchmarks
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_100k"  # 100K
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M
 ```
 
 ## Extensions

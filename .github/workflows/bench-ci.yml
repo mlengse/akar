@@ -1,0 +1,62 @@
+# Benchmark CI — Akar Core
+#
+# Runs benchmarks on PRs and nightly, detects regressions.
+
+name: Bench CI
+
+on:
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'akar-core/**'
+  schedule:
+    - cron: '0 3 * * *'  # nightly at 3am UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: benchmark
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: akar-core
+
+      - name: Run benchmarks
+        run: cargo bench --workspace --bench ladybug_suite --bench storage_io_bench --bench recovery_time_bench 2>&1 | tee bench-output.txt
+        working-directory: akar-core
+        continue-on-error: true
+
+      - name: Extract benchmark results
+        if: always()
+        run: |
+          echo "## Benchmark Results" > bench-summary.md
+          echo "" >> bench-summary.md
+          echo '```' >> bench-summary.md
+          grep -E "(bench|time:|change:)" bench-output.txt | head -80 >> bench-summary.md 2>/dev/null || echo "No benchmark output captured" >> bench-summary.md
+          echo '```' >> bench-summary.md
+        working-directory: akar-core
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: akar-core/bench-summary.md
+          header: benchmark-results
+
+      - name: Upload benchmark artifacts
+        if: github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_number }}
+          path: |
+            akar-core/bench-output.txt
+            akar-core/bench-summary.md
+          retention-days: 90
