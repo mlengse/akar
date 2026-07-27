@@ -28,12 +28,12 @@
 | **P38** | DDL Completeness & Documentation | ✅ DONE | 11 | ✅ Complete |
 | **P39** | Arrow Aggregate Fast Path | ✅ DONE | 2 | ✅ Complete |
 | **P40** | Vectorized GROUP BY | ✅ DONE | 2 | ✅ Complete |
-| **AUDIT** | **Codebase Audit Fixes (25/31 issues)** | ✅ **DONE** | **—** | ✅ **25 issues resolved** |
+| **AUDIT** | **Codebase Audit Fixes (28/31 issues)** | ✅ **DONE** | **—** | ✅ **28 issues resolved** |
 | **P41** | **Stress Testing — Crash Recovery** | ✅ **DONE** | **12** | ✅ Complete |
 | **P42** | **Full Release Benchmarks** | **📋 PLANNED** | **8** | Sprint 12 |
 
 > [!IMPORTANT]
-> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,538 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **25 of 31 audit issues resolved** (all 5 critical addressed).
+> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,538 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **28 of 31 audit issues resolved** (all 5 critical addressed, RwLock marked N/A).
 > **P41: COMPLETE** — 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible; cross-process tests verify DB opens without panic; in-process tests verify full data recovery.
 > **P42: PLANNED** — Full release benchmarks with optimized profiles, large-scale benchmarks (100k/1M rows), storage I/O benchmarks, CI-integrated benchmarking.
 
@@ -197,7 +197,7 @@
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | Sprint 1-11 | P0-P40 | ~258 | ✅ ALL COMPLETE — see `STATUS.md` |
-| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ 25/31 issues resolved: critical safety, WAL atomicity + checksums, CI improvements, float assertions, set_value errors, dead code cleanup, lock unwrap handling |
+| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ **28/31 issues resolved** — critical safety, WAL atomicity + checksums, CI improvements, float assertions, set_value errors, dead code cleanup, lock unwrap handling, RwLock marked N/A |
 | **Sprint 12** | **P41 ✅ + P42 📋** | **20** | **P41 COMPLETE** (14 tests, 12 SP). **P42 PLANNED** (8 SP — release benchmarks). |
 
 ---
@@ -220,17 +220,17 @@ graph TD
     P42 --> P42_4["P42.4: CI-Integrated Benchmarking"]
 ```
 
-## Audit Fixes Summary (2026-07-25)
+## Audit Fixes Summary (2026-07-27)
 
 28 of 31 issues resolved. Full details: [`docs/audit-implementation-plan.md`](docs/audit-implementation-plan.md)
 
-| Category | Fixed | Deferred |
-|----------|:-----:|:--------:|
-| Critical (5) | 5 | 0 |
-| High (6) | 3 | 3 |
-| Medium (12) | 8 | 4 |
-| Low (8) | 3 | 5 |
-| **Total (31)** | **28** | **3** |
+| Category | Fixed | Deferred | N/A |
+|----------|:-----:|:--------:|:---:|
+| Critical (5) | 5 | 0 | 0 |
+| High (6) | 5 | 1 | 0 |
+| Medium (12) | 8 | 3 | 1 |
+| Low (8) | 3 | 5 | 0 |
+| **Total (31)** | **28** | **1** | **1** |
 
 ## Design Decisions Log
 
@@ -273,7 +273,7 @@ graph TD
 | 35 | P42 release profile | `lto = "thin"` + `codegen-units = 1` | Balances build time vs optimization |
 | 36 | P42 large-scale benchmark scope | 100k mandatory, 1M optional | 100k tests multi-page storage; 1M may exceed CI budget |
 | 37 | P42 benchmark CI approach | criterion + GitHub Actions comment | Built-in comparison support, immediate PR feedback |
-| 38 | Audit fix scope | 26/31 issues — all 5 critical fixed, quick wins + dead code + lock unwrap | Prioritized safety fixes; MVCC snapshot isolation completed (P1.3) |
+| 38 | Audit fix scope | 28/31 issues — all 5 critical fixed, quick wins + dead code + lock unwrap + float assertions | Prioritized safety fixes; MVCC snapshot isolation completed (P1.3); RwLock marked N/A (87.5% sites need &mut self) |
 | 39 | P41 catalog limitation | Catalog is in-memory only — DDL never serialized to disk | Cross-process tests verify DB opens without panic; in-process tests verify full data recovery |
 | 40 | P41 crash sim design | CrashSimulator helper spawns child process, kills at various points | True OS-level process kill (TerminateProcess/SIGKILL) |
 | 41 | P41 SQL limitations | No `BOOLEAN` type (use `BOOL`), no `IF NOT EXISTS` in CREATE NODE TABLE | Parser limitations discovered during implementation |
