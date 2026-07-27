@@ -79,5 +79,18 @@ collapsible_match = "allow"
 collapsible_if = "allow"
 cloned_ref_to_slice_refs = "allow"
 
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-debug]
+inherits = "release"
+opt-level = 3
+debug = true
+strip = false
+
 [profile.bench]
 debug = true
