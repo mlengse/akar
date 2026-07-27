@@ -257,9 +257,9 @@ mod tests {
         let result = weakly_connected_components(&csr);
         assert_eq!(result.values.len(), 4);
         // All nodes are in the same component (the graph is connected)
-        assert_eq!(result.values[0], result.values[1]);
-        assert_eq!(result.values[1], result.values[2]);
-        assert_eq!(result.values[2], result.values[3]);
+        assert!((result.values[0] - result.values[1]).abs() < 1e-10);
+        assert!((result.values[1] - result.values[2]).abs() < 1e-10);
+        assert!((result.values[2] - result.values[3]).abs() < 1e-10);
     }
 
     #[test]
@@ -294,11 +294,11 @@ mod tests {
         let csr = CSRAdjacency::build(&edges, 6);
         let result = weakly_connected_components(&csr);
         // Nodes 0,1,2 are in one component; 3,4,5 in another
-        assert_eq!(result.values[0], result.values[1]);
-        assert_eq!(result.values[1], result.values[2]);
-        assert_eq!(result.values[3], result.values[4]);
-        assert_eq!(result.values[4], result.values[5]);
-        assert_ne!(result.values[0], result.values[3]);
+        assert!((result.values[0] - result.values[1]).abs() < 1e-10);
+        assert!((result.values[1] - result.values[2]).abs() < 1e-10);
+        assert!((result.values[3] - result.values[4]).abs() < 1e-10);
+        assert!((result.values[4] - result.values[5]).abs() < 1e-10);
+        assert!((result.values[0] - result.values[3]).abs() >= 1e-10);
     }
 
     #[test]

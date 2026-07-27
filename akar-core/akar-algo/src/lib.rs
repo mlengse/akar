@@ -1707,9 +1707,9 @@ mod tests {
         let csr = disconnected_csr();
         let result = compute_wcc(&csr);
         assert_eq!(result.values.len(), 4);
-        assert_eq!(result.values[0], result.values[1]); // same component
-        assert_eq!(result.values[2], result.values[3]); // same component
-        assert_ne!(result.values[0], result.values[2]); // different components
+        assert!((result.values[0] - result.values[1]).abs() < 1e-10); // same component
+        assert!((result.values[2] - result.values[3]).abs() < 1e-10); // same component
+        assert!((result.values[0] - result.values[2]).abs() >= 1e-10); // different components
     }
 
     #[test]
@@ -1764,9 +1764,9 @@ mod tests {
         let csr = disconnected_csr();
         let result = compute_spanning_forest(&csr);
         assert_eq!(result.values.len(), 4);
-        assert_eq!(result.values[0], result.values[1]); // same component
-        assert_eq!(result.values[2], result.values[3]); // same component
-        assert_ne!(result.values[0], result.values[2]); // different components
+        assert!((result.values[0] - result.values[1]).abs() < 1e-10); // same component
+        assert!((result.values[2] - result.values[3]).abs() < 1e-10); // same component
+        assert!((result.values[0] - result.values[2]).abs() >= 1e-10); // different components
     }
 
     #[test]
