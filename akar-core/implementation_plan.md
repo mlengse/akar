@@ -1,6 +1,6 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-07-27 (Sprint 12 — P41 Complete, P42 Complete, Codebase Audit Complete)
+> **Revision:** 2026-07-27 (Sprint 12 Complete — P43-P45 Planned)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 > **Baseline:** `cargo test --workspace` → **1,243 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
@@ -30,167 +30,231 @@
 | **P40** | Vectorized GROUP BY | ✅ DONE | 2 | ✅ Complete |
 | **AUDIT** | **Codebase Audit Fixes (30/31 issues — 1 N/A)** | ✅ **DONE** | **—** | ✅ **30 issues resolved, 1 N/A (RwLock)** |
 | **P41** | **Stress Testing — Crash Recovery** | ✅ **DONE** | **12** | ✅ Complete |
-| **P42** | **Full Release Benchmarks** | ✅ **DONE** | **8** | ✅ Complete — P42.1 ✅, P42.2 ✅, P42.3 ✅, P42.4 ✅ |
+| **P42** | **Full Release Benchmarks** | ✅ **DONE** | **8** | ✅ Complete |
+| **P43** | **Bug Fixes & Known Issues** | 📋 **PLANNED** | **3** | Sprint 13 |
+| **P44** | **Performance Optimization** | 📋 **PLANNED** | **8** | Sprint 13 |
+| **P45** | **Production Readiness** | 📋 **PLANNED** | **5** | Sprint 14 |
 
 > [!IMPORTANT]
-> **P1-P40 + AUDIT: ALL COMPLETE** — 0 ignored tests, 1,243 pass, 3-way C++ parity verified, all 12 DDL operators wired, 25 optimizer passes, native readers for all 4 extensions. **30 of 31 audit issues resolved** (all 5 critical addressed + row-level OCC, RwLock marked N/A, dual catalog unified, feature-gated CI extended).
-> **P41: COMPLETE** — 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible; cross-process tests verify DB opens without panic; in-process tests verify full data recovery.
-> **WAL REDESIGN: COMPLETE** — Append-only WAL (52× speedup), condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip for OCC.
-> **P42: COMPLETE** — Full release benchmarks with optimized profiles, large-scale benchmarks (100k/1M rows), storage I/O benchmarks, CI-integrated benchmarking.
+> **P1-P42 + AUDIT: ALL COMPLETE** — 1,243 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized.
+> **P43-P45: PLANNED** — Bug fixes (radixsort OOB), performance optimization (5 targets from benchmark analysis), production readiness (catalog serialization, crates.io publishing).
 
 ---
 
-## 📋 SPRINT 12: STRESS TESTING & RELEASE BENCHMARKS (P41-P42)
+## ✅ SPRINT 12: STRESS TESTING & RELEASE BENCHMARKS (P41-P42) — COMPLETE
 
-> **P41 COMPLETE ✅** — 14 tests, 12 SP. See results below.
-> **P42: COMPLETE ✅** — 8 SP. See results below.
-> **Target:** Full release benchmarks with optimized profiles.
+### P41: Stress Testing — Crash Recovery (12 SP) — COMPLETE
 
-### ✅ P41: Stress Testing — Crash Recovery (12 SP) — COMPLETE
+14 crash recovery tests across 4 areas: process-level crash simulation (4 tests), WAL replay correctness under load + truncation (5 tests), checkpoint atomicity under concurrent load (2 tests), fault injection (3 tests). Key discovery: catalog is in-memory only — DDL recovery impossible cross-process.
 
-**Discovery:** Catalog is in-memory only (never serialized to disk). DDL records in WAL are explicitly skipped during replay (`akar-storage/src/lib.rs:603-613`). Cross-process DDL recovery is impossible. Only DML (Insert/Update/Delete) can be recovered if the table schema already exists from a prior checkpoint.
+### P42: Full Release Benchmarks (8 SP) — COMPLETE
 
-**Cross-process tests** verify DB opens without panic (no row count assertion). **In-process tests** keep a single `Database` handle alive across all phases and verify full data recovery.
+| Sub | Area | Key Result |
+|-----|------|------------|
+| P42.1 | Release profile | `opt-level=3`, `lto="thin"`, `codegen-units=1`, `panic="abort"`, `strip=true` + `release-debug` profile |
+| P42.2 | Large-scale benchmarks | 100K/1M rows measured: 10K→100K ~8×, 10K→1M ~75× (near-linear) |
+| P42.3 | Storage I/O & recovery | `storage_io_bench.rs` + `recovery_time_bench.rs` created and verified |
+| P42.4 | CI benchmark workflow | `.github/workflows/bench-ci.yml` — PR comment + nightly artifact upload |
 
-#### ✅ P41.1 — Process-Level Crash Simulation Harness (4 SP)
+**Scalability results (release profile):**
 
-**Implemented:** `crash_sim_child.rs` binary (4 modes: `write`, `write-burst`, `write-and-checkpoint`, `verify`) + `test_crash_recovery.rs` with `CrashSimulator` helper.
+| Scale | Scan | Filter | COUNT | Filter+COUNT |
+|-------|------|--------|-------|-------------|
+| 10K | 3.0 ms | 2.9 ms | 2.8 ms | 3.2 ms |
+| 100K | 23.4 ms | 22.7 ms | 23.8 ms | 23.7 ms |
+| 1M | 222 ms | 235 ms | 212 ms | 237 ms |
 
-| Test | Description | Result |
-|------|-------------|--------|
-| `test_crash_after_wal_flush_recovery` | Kill after 100 writes + auto-checkpoint + WAL flush | DB opens without panic ✅ |
-| `test_crash_mid_write_no_commit` | Kill during write burst (no checkpoint) | DB opens without panic ✅ |
-| `test_crash_after_checkpoint_clean_recovery` | Kill after checkpoint | DB opens without panic ✅ |
-| `test_crash_concurrent_writes_recovery` | Kill with multiple tables + interleaved writes | DB opens without panic ✅ |
+**Known limitation:** Sort/group_by at 100K+ deferred — radixsort OOB bug at `radixsort.rs:54` for >10K rows.
 
-**Technical notes:**
-- `Connection::new()` requires `&Arc<Database>` — all DB handles wrapped in `Arc`
-- Parser does not support `BOOLEAN` type — use `BOOL` instead
-- Parser does not support `IF NOT EXISTS` in `CREATE NODE TABLE`
+---
 
-#### ✅ P41.2 — WAL Replay Correctness Under Load (3 SP)
+## 📋 SPRINT 13: BUG FIXES & PERFORMANCE (P43-P44)
 
-| Test | Description | Result |
-|------|-------------|--------|
-| `test_wal_replay_large_records` | 1000 rows inserted, auto-checkpoint, WAL flush, open new DB | Recovery succeeds ✅ |
-| `test_wal_replay_truncated_50` | WAL file truncated to 50% | Recovery skips partial records ✅ |
-| `test_wal_replay_truncated_25` | WAL file truncated to 25% | Recovery skips partial records ✅ |
-| `test_wal_replay_truncated_10` | WAL file truncated to 10% | Recovery skips partial records ✅ |
-| `test_wal_replay_empty` | Empty WAL file | Recovery succeeds ✅ |
+### P43: Bug Fixes & Known Issues (3 SP)
 
-**Technical note:** `MATCH (p:Person) RETURN COUNT(p)` can return 0 in some contexts. Use `MATCH (p:Person) RETURN p.name` and count result rows via `result.chunks.iter().flat_map(...)` for reliable count verification.
+**Masalah:** Radixsort OOB crash untuk data >10K rows. OCC insert conflict detection masih table-level (bukan row-level). C++ benchmark per-operator comparison cells masih TBD.
 
-#### ✅ P41.3 — Checkpoint Atomicity Under Concurrent Load (3 SP)
+#### P43.1 — Fix Radixsort OOB Bug (1 SP)
 
-| Test | Description | Result |
-|------|-------------|--------|
-| `test_concurrent_writes_checkpoint_stress` | 4 writer threads × 250 writes + checkpoint stress (single `Database` handle alive throughout) | All data recovered after restart ✅ |
-| `test_auto_checkpoint_threshold_various` | Thresholds: 1KB, 64KB, 1MB — data survives restart | All thresholds work ✅ |
+**Goal:** Fix `radixsort.rs:54` index out of bounds untuk data >10K rows. Unlock sort/group_by benchmarks di 100K+.
 
-**Design note:** In-process tests keep a single `Database` handle alive across all phases. This avoids the catalog in-memory limitation (table schemas would be lost on close) while still exercising real WAL/checkpoint paths.
-
-#### ✅ P41.4 — Fault Injection Layer (2 SP)
-
-| Test | Description | Result |
-|------|-------------|--------|
-| `test_zeroed_wal_recovery` | WAL replaced with all zeros | Recovery skips corrupted WAL, DB opens ✅ |
-| `test_random_bytes_wal_recovery` | WAL replaced with random bytes | Recovery skips corrupted records, DB opens ✅ |
-| `test_single_byte_wal_recovery` | WAL replaced with single byte | Recovery handles minimal corruption, DB opens ✅ |
-
-**Note:** Fault injection implemented as inline file manipulation in tests rather than a separate `FaultInjector` trait — simpler and achieves the same fault scenarios.
-
-### P42: Full Release Benchmarks (8 SP)
-
-**Masalah:** Release profile saat ini minimal (`debug = true` saja). Semua benchmark hanya 10k rows. Tidak ada CI-integrated benchmarking. Recovery time belum diukur.
-
-#### ✅ P42.1 — Release Profile Optimization (2 SP) — COMPLETE
-
-**Goal:** Optimize release profile untuk production performance.
-
-| Task | Description | Files | SP |
-|------|-------------|-------|:---:|
-| P42.1a | Update `[profile.release]`: `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`, hapus `debug = true` | `akar-core/Cargo.toml` | 1 |
-| P42.1b | Buat `[profile.release-debug]` — `opt-level = 3` + `debug = true` untuk profiling tanpa mengorbankan release performance | `akar-core/Cargo.toml` | 1 |
+| Task | Description | Files |
+|------|-------------|-------|
+| P43.1a | Investigate root cause — `tmp_keys[idx]` OOB, likely indices exceeding keys length | `akar-processor/src/physical/order_aggregate/radixsort.rs` |
+| P43.1b | Fix and add test: sort 100K rows, verify correctness | `akar-processor/src/physical/order_aggregate/radixsort.rs`, test file |
+| P43.1c | Re-enable 100K sort/group_by benchmarks in `ladybug_suite.rs` | `akar-main/benches/ladybug_suite.rs` |
 
 **Acceptance criteria:**
-- `cargo build --release` menghasilkan binary yang lebih kecil dan lebih cepat ✅
-- `cargo bench --profile=release` menggunakan optimized profile ✅
-- `cargo build --profile=release-debug` tersedia untuk profiling ✅
-- Tidak ada regressions di `cargo test --workspace` ✅
+- `cargo test --workspace` passes ✅
+- Sort 100K rows without crash ✅
+- `bench_100k_sort` and `bench_100k_group_by` benchmarks run successfully ✅
 
-#### ✅ P42.2 — Large-Scale Benchmarks (3 SP) — COMPLETE
+#### P43.2 — OCC Insert Row-Level Granularity (1 SP)
 
-**Goal:** Benchmark dengan dataset yang lebih besar (100k, 1M rows) untuk mengukur scalability.
+**Goal:** Upgrade OCC conflict detection for inserts dari table-level sentinel `(table_id, 0)` ke row-level tracking.
 
-| Task | Description | Files | SP |
-|------|-------------|-------|:---:|
-| P42.2a | Tambah 100k rows benchmark ke `ladybug_suite.rs` — scan, filter, aggregate, sort, join | `akar-main/benches/ladybug_suite.rs` | 1.5 |
-| P42.2b | Tambah 1M rows benchmark (opsional, hanya untuk scan + aggregate) | `akar-main/benches/ladybug_suite.rs` | 1.5 |
-
-**Benchmark matrix yang dihasilkan:**
-
-| Category | 10k (existing) | 100k (new) | 1M (new) |
-|----------|:---:|:---:|:---:|
-| scan | ✅ | ✅ | ✅ |
-| filter | ✅ | ✅ | — |
-| aggregate | ✅ | ✅ | ✅ |
-| sort | ✅ | — (radixsort OOB >10K) | — |
-| group_by | ✅ | — (radixsort OOB >10K) | — |
+| Task | Description | Files |
+|------|-------------|-------|
+| P43.2a | Track `(table_id, row_id)` untuk inserts di `RowConflictTracker` | `akar-transaction/src/lib.rs` |
+| P43.2b | Update `validate_write_set()` untuk compare specific row IDs | `akar-transaction/src/lib.rs` |
+| P43.2c | Update `map_update.rs:255` TODO — remove sentinel, use actual row IDs | `akar-processor/src/physical/update_delete/map_update.rs` |
 
 **Acceptance criteria:**
-- Semua benchmark 100k rows compile dan run ✅
-- 1M rows benchmark (scan + aggregate) compile dan run ✅
-- Hasil ditambahkan ke `BENCHMARK_COMPARISON.md` ✅
-- Criterion HTML reports tersedia di `target/criterion/` ✅
-- Near-linear scaling verified: 100K = ~8× of 10K, 1M = ~75× of 10K ✅
-- Sort/group_by at 100K+ deferred (radixsort OOB bug at >10K rows — separate issue) ✅
+- Inserts detect conflicts at row level (not table level) ✅
+- Existing OCC tests pass ✅
+- New test: concurrent inserts to same primary key → WriteConflict ✅
 
-#### ✅ P42.3 — Storage I/O & Recovery Time Benchmarks (2 SP) — COMPLETE
+#### P43.3 — C++ Benchmark Per-Operator Comparison (1 SP)
 
-**Goal:** Ukur throughput storage operations dan recovery time.
+**Goal:** Fill TBD cells in `BENCHMARK_COMPARISON.md` dengan per-operator C++ comparison data.
 
-| Task | Description | Files | SP |
-|------|-------------|-------|:---:|
-| P42.3a | Buat `storage_io_bench.rs` — write throughput (INSERT batch), checkpoint throughput, WAL flush throughput | `akar-main/benches/storage_io_bench.rs` (baru) | 1 |
-| P42.3b | Buat `recovery_time_bench.rs` — ukur recovery time untuk WAL file berbagai ukuran (1KB, 64KB, 1MB, 10MB) | `akar-main/benches/recovery_time_bench.rs` (baru) | 1 |
-
-**Benchmarks yang dihasilkan:**
-
-| Benchmark | Target | Metric |
-|-----------|--------|--------|
-| `write_throughput/1k_rows` | INSERT throughput | rows/sec |
-| `write_throughput/10k_rows` | INSERT throughput | rows/sec |
-| `checkpoint_throughput/10k_dirty` | Checkpoint time | µs |
-| `checkpoint_throughput/100k_dirty` | Checkpoint time | µs |
-| `wal_flush/1kb` | WAL flush time | µs |
-| `wal_flush/1mb` | WAL flush time | µs |
-| `recovery_time/wal_1kb` | Recovery duration | µs |
-| `recovery_time/wal_64kb` | Recovery duration | µs |
-| `recovery_time/wal_1mb` | Recovery duration | µs |
-| `recovery_time/wal_10mb` | Recovery duration | µs |
+| Task | Description | Files |
+|------|-------------|-------|
+| P43.3a | Run C++ `akar_benchmark` for individual operators (scan, filter, join, sort, aggregate) | `benchmark/queries/micro/` |
+| P43.3b | Update Gap Analysis table di `BENCHMARK_COMPARISON.md` | `BENCHMARK_COMPARISON.md` |
 
 **Acceptance criteria:**
-- Semua benchmark compile dan run ✅
-- Recovery time benchmarks menjalankan `StorageManager::recover()` dengan WAL file yang di-generate ✅
-- Hasil ditambahkan ke `BENCHMARK_COMPARISON.md` ✅
+- All Gap Analysis table cells filled (no more TBD) ✅
+- Comparison ratios documented ✅
 
-#### ✅ P42.4 — CI-Integrated Benchmarking (1 SP) — COMPLETE
+### P44: Performance Optimization (8 SP)
 
-**Goal:** GitHub Actions workflow yang otomatis run benchmarks dan compare against baseline.
+**Masalah:** 5 optimization opportunities identified dari benchmark analysis. Hash join build lambat, variable expressions masih via `from_legacy()`, sort overhead tinggi, multi-key GROUP BY lambat, pipeline overhead ~55%.
 
-| Task | Description | Files | SP |
-|------|-------------|-------|:---:|
-| P42.4a | Buat `.github/workflows/bench-ci.yml` — trigger on PR + nightly, run `cargo bench --workspace`, save baseline, compare | `.github/workflows/bench-ci.yml` (baru) | 1 |
+#### P44.1 — Hash Join Build Phase Optimization (2 SP)
 
-**Workflow behavior:**
-- **PR trigger:** Run benchmarks, compare against `main` baseline, post comment dengan regression detection (threshold: >10% regression = fail)
-- **Nightly trigger:** Run all benchmarks, save results ke `gh-pages` branch atau benchmark artifact
-- **Manual trigger:** `workflow_dispatch` dengan input `baseline_ref` untuk compare
+**Goal:** Investigate dan optimize hash join build phase. `join/10k_build_100_probe` saat ini 1.45ms — dominasi dari hash table construction.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P44.1a | Profile hash function quality — hitung collision rate untuk typical workloads | `akar-processor/src/physical/join/hash_join.rs` |
+| P44.1b | Pre-size hash table berdasarkan build-side cardinality estimate | `akar-processor/src/physical/join/hash_join.rs` |
+| P44.1c | Evaluate switch ke `ahash`/`foldhash` hasher (lebih cepat untuk integer keys) | `akar-processor/Cargo.toml`, hash_join.rs |
 
 **Acceptance criteria:**
-- Workflow compiles dan runnable ✅
-- PR comment menampilkan per-benchmark comparison ✅
-- Nightly baseline tersimpan untuk historical tracking ✅
+- `join/10k_build_100_probe` improved by ≥20% ✅
+- `join/1k_build_1k_probe` improved by ≥10% ✅
+- No regressions ✅
+
+#### P44.2 — Storage-Layer Native Arrow Arrays (3 SP)
+
+**Goal:** Eliminate `from_legacy()` conversion overhead. Variable expressions saat ini masih ValueVector → Arrow, menambah ~22µs overhead per query.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P44.2a | Make `DataChunk.fields` native `Vec<ArrayRef>` instead of `Vec<ValueVector>` | `akar-common/src/data_chunk.rs` |
+| P44.2b | Update operator interfaces untuk accept `ArrayRef` langsung | `akar-processor/src/physical/` (multiple files) |
+| P44.2c | Eliminate `from_legacy()` di expression evaluator | `akar-processor/src/physical/expression/` |
+
+**Acceptance criteria:**
+- `variable` dispatch benchmark improved from 24.5µs → <5µs ✅
+- `x > 5` + selection benchmark maintains 16×+ speedup ✅
+- All tests pass ✅
+
+**Note:** This is a large refactor touching 40+ operator files. Consider phased approach — start with scan→filter hot path, then extend.
+
+#### P44.3 — ORDER BY Sort Optimization (1 SP)
+
+**Goal:** Reduce sort overhead untuk large inputs. `sort/single_key_10k` saat ini ~2.3ms.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P44.3a | Implement `sort_in_place` — sort indices tanpa collect ke `Vec<Value>` | `akar-processor/src/physical/order_aggregate/` |
+| P44.3b | Benchmark improvement di 10K rows | `ladybug_suite.rs` |
+
+**Acceptance criteria:**
+- `sort/single_key_10k` improved by ≥30% ✅
+- `sort/multi_key_10k` improved by ≥20% ✅
+
+#### P44.4 — Multi-key GROUP BY Hasher (1 SP)
+
+**Goal:** Improve multi-key GROUP BY performance. `group_by/multi_key_10k` saat ini ~4ms.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P44.4a | Switch hasher ke `ahash`/`foldhash` untuk composite keys | `akar-processor/src/physical/order_aggregate/aggregate_hash_table.rs` |
+| P44.4b | Pre-size hash table berdasarkan cardinality estimate | same file |
+
+**Acceptance criteria:**
+- `group_by/multi_key_10k` improved by ≥30% ✅
+- `group_by/string_key_10k` improved by ≥20% ✅
+
+#### P44.5 — Query Plan Caching (1 SP)
+
+**Goal:** Cache prepared plans untuk repeated queries. Pipeline overhead saat ini ~55% dari raw scan.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P44.5a | Implement `PlanCache` LRU cache di `Connection` level | `akar-main/src/connection/mod.rs` |
+| P44.5b | Cache key = normalized query string | same file |
+| P44.5c | Benchmark improvement untuk repeated queries | `ladybug_suite.rs` |
+
+**Acceptance criteria:**
+- Repeated queries hit cache (second execution ≥50% faster) ✅
+- Cache eviction works correctly ✅
+- No memory leak ✅
+
+---
+
+## 📋 SPRINT 14: PRODUCTION READINESS (P45)
+
+### P45: Production Readiness (5 SP)
+
+**Masalah:** Catalog in-memory only (DDL recovery impossible cross-process). 16+ crates belum published ke crates.io. Physical operator parity ~66% vs C++.
+
+#### P45.1 — Catalog Serialization to Disk (2 SP)
+
+**Goal:** Serialize catalog ke disk agar DDL recovery mungkin cross-process.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P45.1a | Implement `Catalog::serialize()` / `Catalog::deserialize()` — JSON atau bincode | `akar-catalog/src/lib.rs` |
+| P45.1b | Save catalog saat checkpoint, load saat `Database::open()` | `akar-storage/src/checkpoint.rs`, `akar-main/src/database/mod.rs` |
+| P45.1c | Update WAL replay untuk use deserialized catalog (hilangkan DDL skip) | `akar-storage/src/lib.rs:603-613` |
+| P45.1d | Add cross-process DDL recovery test | test file |
+
+**Acceptance criteria:**
+- DDL (CREATE TABLE, CREATE REL TABLE) survives database restart ✅
+- Cross-process test: create table in process A, open in process B → table exists ✅
+- Backward compatible — databases without catalog file still work ✅
+
+#### P45.2 — crates.io Publishing Preparation (2 SP)
+
+**Goal:** Siapkan semua crates untuk crates.io publishing.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P45.2a | Add `license`, `description`, `repository`, `keywords`, `categories` ke semua Cargo.toml | All 31 `Cargo.toml` files |
+| P45.2b | Set `publish = true` untuk crates yang akan di-publish | Same |
+| P45.2c | Create workspace-level `Cargo.toml` publish order (dependency-ordered) | `akar-core/Cargo.toml` |
+| P45.2d | Dry-run `cargo publish --dry-run` untuk semua crates | All |
+
+**Acceptance criteria:**
+- `cargo publish --dry-run` succeeds untuk semua crates ✅
+- Dependency order documented ✅
+- README.md updated dengan installation instructions ✅
+
+**Publishing order** (dependency-ordered):
+```
+akar-common → akar-parser → akar-catalog → akar-function → akar-extension
+→ akar-binder → akar-planner → akar-optimizer → akar-storage → akar-transaction
+→ akar-processor → akar-main → akar-algo → akar-fts → akar-vector → akar-wasm
+```
+
+#### P45.3 — Physical Operator Parity Gap Analysis (1 SP)
+
+**Goal:** Document gap antara Rust (46 operators) dan C++ (67 operators). Identifikasi mana yang worth implementing.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P45.3a | List all C++ physical operators dari KuzuDB source | External research |
+| P45.3b | Map ke Rust equivalents, identify gaps | `STATUS.md` |
+| P45.3c | Prioritize gaps berdasarkan query patterns yang dibutuhkan | `implementation_plan.md` |
+
+**Acceptance criteria:**
+- Gap analysis table di `STATUS.md` updated ✅
+- Priority ranking untuk missing operators ✅
+- Decision: implement vs defer untuk setiap gap ✅
 
 ---
 
@@ -198,9 +262,9 @@
 
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
-| Sprint 1-11 | P0-P40 | ~258 | ✅ ALL COMPLETE — see `STATUS.md` |
-| Sprint 12.5 | **Codebase Audit Fixes** | **—** | ✅ **30/31 issues resolved (1 N/A)** — critical safety, WAL atomicity + checksums + append-only redesign (52× speedup), CI improvements, float assertions, set_value errors, dead code cleanup, lock unwrap handling, unified catalog, row-level OCC, RwLock marked N/A |
-| **Sprint 12** | **P41 ✅ + P42 ✅** | **20** | **P41 COMPLETE** (14 tests, 12 SP). **P42 COMPLETE** (8 SP — release benchmarks, 100K/1M scale, storage I/O, CI workflow). |
+| Sprint 1-12 | P0-P42 + AUDIT | ~298 | ✅ ALL COMPLETE — see `STATUS.md` |
+| **Sprint 13** | **P43 Bug Fixes + P44 Performance** | **11** | Radixsort fix, OCC row-level inserts, C++ benchmark data, hash join optimization, Arrow native arrays, sort optimization, GROUP BY hasher, plan caching |
+| **Sprint 14** | **P45 Production Readiness** | **5** | Catalog serialization, crates.io publishing, operator parity analysis |
 
 ---
 
@@ -208,23 +272,30 @@
 
 ```mermaid
 graph TD
-    P36_7["P36.7: Checkpoint Implementation ✅"] --> P41["✅ P41: Stress Testing Crash Recovery (14 tests)"]
-    P37_3["P37.3: Benchmark Suite ✅"] --> P42["✅ P42: Full Release Benchmarks"]
-    AUDIT["AUDIT: Codebase Audit Fixes ✅ (30/31 — 1 N/A)"] --> P41
-    AUDIT --> P42
-    P41 --> P41_1["P41.1: Process Crash Simulation ✅"]
-    P41 --> P41_2["P41.2: WAL Replay Under Load ✅"]
-    P41 --> P41_3["P41.3: Checkpoint Atomicity ✅"]
-    P41 --> P41_4["P41.4: Fault Injection ✅"]
-    P42 --> P42_1["P42.1: Release Profile ✅"]
-    P42 --> P42_2["P42.2: Large-Scale Benchmarks ✅"]
-    P42 --> P42_3["P42.3: Storage I/O & Recovery Time ✅"]
-    P42 --> P42_4["P42.4: CI-Integrated Benchmarking ✅"]
-    AUDIT --> WAL["WAL Append-Only Redesign ✅ (52× speedup)"]
-    AUDIT --> OCC["Row-Level OCC ✅"]
-    AUDIT --> CONDVAR["Condvar Deadlock Fix ✅"]
-    AUDIT --> PARSER["WAL v2 Parser Bug Fix ✅"]
+    P42["✅ P42: Full Release Benchmarks"] --> P43["📋 P43: Bug Fixes & Known Issues"]
+    P42 --> P44["📋 P44: Performance Optimization"]
+    P43 --> P45["📋 P45: Production Readiness"]
+    P44 --> P45
+
+    P43 --> P43_1["P43.1: Radixsort OOB Fix"]
+    P43 --> P43_2["P43.2: OCC Insert Row-Level"]
+    P43 --> P43_3["P43.3: C++ Benchmark TBDs"]
+
+    P44 --> P44_1["P44.1: Hash Join Build"]
+    P44 --> P44_2["P44.2: Native Arrow Arrays"]
+    P44 --> P44_3["P44.3: Sort Optimization"]
+    P44 --> P44_4["P44.4: GROUP BY Hasher"]
+    P44 --> P44_5["P44.5: Plan Caching"]
+
+    P45 --> P45_1["P45.1: Catalog Serialization"]
+    P45 --> P45_2["P45.2: crates.io Publishing"]
+    P45 --> P45_3["P45.3: Operator Parity Analysis"]
+
+    P43_1 -.->|"unlocks 100K+ sort benchmarks"| P44
+    P44_2 -.->|"eliminates from_legacy overhead"| P44_5
 ```
+
+---
 
 ## Audit Fixes Summary (2026-07-27 — FINAL)
 
@@ -278,15 +349,25 @@ graph TD
 | 34 | P41 fault injection approach | Feature-gated trait object (`fault-injection` feature) | Zero-cost when disabled |
 | 35 | P42 release profile | `lto = "thin"` + `codegen-units = 1` | Balances build time vs optimization |
 | 36 | P42 large-scale benchmark scope | 100k mandatory, 1M optional (scan + aggregate only) | 100k tests multi-page storage; 1M uses dedicated OnceLock DB to avoid setup timeout |
-| 48 | P42.2 large-scale design | Dedicated `OnceLock` per scale tier with lazy CSV generation | Avoids re-generating CSV for every benchmark group; same pattern as existing 10K setup |
 | 37 | P42 benchmark CI approach | criterion + GitHub Actions comment | Built-in comparison support, immediate PR feedback |
-| 38 | Audit fix scope | 30/31 issues — all 5 critical fixed + row-level OCC, quick wins + dead code + lock unwrap + float assertions + unified catalog + feature-gated CI | Prioritized safety fixes; MVCC snapshot isolation completed (P1.3); row-level OCC conflict detection (#7); dual catalog unified (7.1); RwLock marked N/A (87.5% sites need &mut self); feature-gated CI extended (#31) |
+| 38 | Audit fix scope | 30/31 issues — all 5 critical fixed + row-level OCC, quick wins + dead code + lock unwrap + float assertions + unified catalog + feature-gated CI | Prioritized safety fixes |
 | 39 | P41 catalog limitation | Catalog is in-memory only — DDL never serialized to disk | Cross-process tests verify DB opens without panic; in-process tests verify full data recovery |
 | 40 | P41 crash sim design | CrashSimulator helper spawns child process, kills at various points | True OS-level process kill (TerminateProcess/SIGKILL) |
 | 41 | P41 SQL limitations | No `BOOLEAN` type (use `BOOL`), no `IF NOT EXISTS` in CREATE NODE TABLE | Parser limitations discovered during implementation |
 | 42 | P41 count verification | `RETURN COUNT(p)` unreliable in some contexts — use `RETURN p.name` + row count | Ensures test assertions are reliable |
 | 43 | P41 in-process design | Keep single `Database` handle alive across phases | Avoids catalog in-memory limitation while still exercising real WAL/checkpoint paths |
-| 44 | WAL append-only redesign | Append new records only, track `flushed_count`, O(1) per commit | Previous O(n²) full-rewrite WAL caused 64s for 10 concurrent txns; append-only reduces to 1.22s (52×) |
-| 45 | Condvar deadlock fix | Reuse existing `MutexGuard` through `wait_timeout` loop | Faster WAL exposed pre-existing deadlock: same thread re-locking `mtx_for_starting_new_txns` inside condvar loop |
-| 46 | WAL v2 parser fix | Corrected `Update`/`ColumnWrite` data_len offsets (17→21), min length (21→25) | Pre-existing bug: records with data > 4 bytes truncated during WAL replay |
-| 47 | DML table lock skip | Skip `lock_table()` for DML when `allow_concurrent_writes()=true` | OCC replaces table locks; table lock blocked concurrent writers in `test_concurrent_writes` |
+| 44 | WAL append-only redesign | Append new records only, track `flushed_count`, O(1) per commit | Previous O(n²) full-rewrite WAL caused 64s; append-only reduces to 1.22s (52×) |
+| 45 | Condvar deadlock fix | Reuse existing `MutexGuard` through `wait_timeout` loop | Faster WAL exposed pre-existing deadlock |
+| 46 | WAL v2 parser fix | Corrected `Update`/`ColumnWrite` data_len offsets (17→21), min length (21→25) | Records with data > 4 bytes truncated during WAL replay |
+| 47 | DML table lock skip | Skip `lock_table()` for DML when `allow_concurrent_writes()=true` | OCC replaces table locks for concurrent writes |
+| 49 | P43 radixsort fix priority | Fix first — unlocks 100K+ sort/group_by benchmarks | Bug blocks 50% of P42.2 benchmark matrix at scale |
+| 50 | P43 OCC row-level inserts | Upgrade from table-level sentinel to row-level tracking | Consistent with existing update/delete row-level OCC |
+| 51 | P43 C++ benchmark scope | Per-operator comparison, not full E2E | E2E parity already verified; per-operator fills documentation gaps |
+| 52 | P44 hash join approach | Profile + pre-size + evaluate hasher | Avoid unsafe RawTable; use existing HashMap infrastructure |
+| 53 | P44 Arrow native arrays scope | Phased: scan→filter hot path first, then extend | 40+ operator files — incremental migration reduces risk |
+| 54 | P44 sort optimization | `sort_in_place` indices without `Vec<Value>` collect | Eliminates one allocation + copy in sort pipeline |
+| 55 | P44 GROUP BY hasher | `ahash`/`foldhash` for integer composite keys | Faster than default SipHash for known-key workloads |
+| 56 | P44 plan caching | LRU cache at Connection level, key = normalized query | Simple implementation; avoids re-planning identical queries |
+| 57 | P45 catalog serialization | JSON or bincode, save at checkpoint | JSON for debuggability; bincode for performance (choose one) |
+| 58 | P45 crates.io scope | All 16+ non-internal crates | Full ecosystem availability; defer NPM/WASM publishing |
+| 59 | P45 operator parity scope | Analysis first, implement based on priority | Not all 67 C++ operators are needed for 95% query coverage |
