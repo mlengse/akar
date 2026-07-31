@@ -175,7 +175,9 @@ impl Connection {
     ) -> Result<QueryResult, String> {
         // Route: DDL vs DML (handle_ddl returns Some for DDL, None for DML)
         if let Some(result) = self.handle_ddl(bound)? {
-            // DDL may have modified the catalog; checkpoint if needed.
+            // DDL may have modified the catalog; persist it so schema
+            // changes survive a restart, then checkpoint if needed.
+            self.database.persist_catalog()?;
             self.maybe_auto_checkpoint()?;
             return Ok(result);
         }
@@ -297,6 +299,7 @@ impl Connection {
 
         // Handle DDL prepared statements
         if let Some(result) = self.handle_ddl(&prepared.bound_statement)? {
+            self.database.persist_catalog()?;
             self.maybe_auto_checkpoint()?;
             return Ok(result);
         }

@@ -7,6 +7,8 @@
 ///   write              — Insert rows one-by-one, commit each
 ///   write-burst        — Insert rows in batches of 100
 ///   write-and-checkpoint — Insert rows then force a CHECKPOINT
+///   ddl-recovery       — Open an existing DB, verify `Person` exists (created
+///                        by the parent process), create `Person2`, insert a row
 ///
 /// The parent process is expected to have already created the DB, table, and
 /// checkpointed it. This process only performs DML (INSERT).
@@ -51,11 +53,13 @@ fn main() {
     let db = Arc::new(Database::new(&db_path, config).expect("Failed to create/open database"));
     let conn = Connection::new(&db);
 
-    // Create the Person table (in-memory catalog, per-process)
-    conn.query(
-        "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))",
-    )
-    .expect("Failed to create Person table");
+    if mode != "ddl-recovery" {
+        // Create the Person table (in-memory catalog, per-process)
+        conn.query(
+            "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))",
+        )
+        .expect("Failed to create Person table");
+    }
 
     match mode.as_str() {
         "write" => {
@@ -103,6 +107,26 @@ fn main() {
                 .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
             }
             conn.query("CHECKPOINT").expect("Failed to checkpoint");
+        }
+        "ddl-recovery" => {
+            // Cross-process DDL recovery: the `Person` table was created by the
+            // parent process and persisted to catalog.json. It must be visible
+            // here without re-creating it.
+            let person_exists = db
+                .catalog()
+                .lock()
+                .map(|c| c.contains("Person"))
+                .unwrap_or(false);
+            if !person_exists {
+                eprintln!("DDL-RECOVERY-FAIL: 'Person' table missing after restart");
+                std::process::exit(2);
+            }
+            // Create a new table in this process; it must be persisted so the
+            // parent process can see it after we exit.
+            conn.query("CREATE NODE TABLE Person2(name STRING, PRIMARY KEY(name))")
+                .expect("Failed to create Person2 table");
+            conn.query("CREATE (:Person2 {name: 'child_row'})").expect("insert failed");
+            println!("DDL-RECOVERY-OK");
         }
         _ => {
             eprintln!("Unknown mode: {}", mode);

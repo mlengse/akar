@@ -3,11 +3,11 @@
 //! Tests crash recovery by spawning child processes, killing them at various
 //! points, and verifying the database remains usable after recovery.
 //!
-//! Architecture note: The catalog (table schema) is in-memory only and never
-//! serialized to disk. DDL records in the WAL are skipped during replay.
-//! Therefore, cross-process tests verify that the DB can be reopened without
-//! panic — not that data is fully recovered. In-process tests verify full
-//! data recovery (WAL corruption, truncation, etc.).
+//! Architecture note: The catalog (table schema) is persisted to disk as
+//! `catalog.json` after every DDL (see P45.1), so schemas survive a restart.
+//! Data rows are held in-memory only; WAL DML records carry recent writes but
+//! are replayed into the restored tables. In-process tests verify full data
+//! recovery (WAL corruption, truncation, etc.).
 
 use std::fs;
 use std::path::{Path, PathBuf};
