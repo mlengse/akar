@@ -453,6 +453,32 @@ fn bench_100k_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_100k_sort(c: &mut Criterion) {
+    let conn = get_100k_db();
+    let mut group = c.benchmark_group("ladybug_100k/sort");
+    group.throughput(criterion::Throughput::Elements(100_000));
+    group.bench_function("sort_single_key", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN p.ID, p.name ORDER BY p.age"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
+fn bench_100k_group_by(c: &mut Criterion) {
+    let conn = get_100k_db();
+    let mut group = c.benchmark_group("ladybug_100k/group_by");
+    group.throughput(criterion::Throughput::Elements(100_000));
+    group.bench_function("group_by_age", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) RETURN p.age, COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+    group.finish();
+}
+
 fn bench_100k_aggregate(c: &mut Criterion) {
     let conn = get_100k_db();
     let mut group = c.benchmark_group("ladybug_100k/aggregate");
@@ -516,6 +542,35 @@ fn bench_1m_aggregate(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_plan_cache(c: &mut Criterion) {
+    let conn = get_nodes_db();
+    let mut group = c.benchmark_group("ladybug/plan_cache");
+    group.throughput(criterion::Throughput::Elements(10_000));
+
+    // Warm up: first query in each benchmark populates the plan cache; all
+    // subsequent iterations skip parse/bind/plan/optimize (cache hits).
+    group.bench_function("repeated_query_cache_hit", |b| {
+        b.iter(|| {
+            let r = conn.query(black_box("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)"));
+            black_box(r.unwrap());
+        })
+    });
+
+    // Vary a constant each iteration → cache miss every time (full pipeline).
+    // Represents the pre-P44.5 cost of repeated-but-different queries.
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    group.bench_function("varying_query_cache_miss", |b| {
+        b.iter(|| {
+            let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1000;
+            let q = format!("MATCH (p:Person) WHERE p.age > {n} RETURN COUNT(p)");
+            let r = conn.query(black_box(q.as_str()));
+            black_box(r.unwrap());
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_simple_scan,
@@ -529,7 +584,10 @@ criterion_group!(
     bench_100k_scan,
     bench_100k_filter,
     bench_100k_aggregate,
+    bench_100k_sort,
+    bench_100k_group_by,
     bench_1m_scan,
     bench_1m_aggregate,
+    bench_plan_cache,
 );
 criterion_main!(benches);

@@ -40,19 +40,17 @@ pub fn radix_sort_indices(indices: &mut [usize], keys: &[i64]) {
             total += prev;
         }
 
-        // Scatter
+        // Scatter — move both tmp_keys and indices together
+        let mut next_keys = vec![0u64; len];
         for (i, &k) in tmp_keys.iter().enumerate() {
             let bucket = ((k >> (pass * RADIX_BITS)) & 0xFF) as usize;
             let pos = counts[bucket] as usize;
             tmp_indices[pos] = indices[i];
+            next_keys[pos] = k;
             counts[bucket] += 1;
         }
         indices.copy_from_slice(&tmp_indices);
-
-        // Rebuild keys in sorted order
-        for (i, &idx) in indices.iter().enumerate() {
-            tmp_keys[i] = (keys[idx] as u64) ^ (1u64 << 63);
-        }
+        tmp_keys = next_keys;
     }
 }
 

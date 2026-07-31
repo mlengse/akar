@@ -22,7 +22,7 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let mut inserted_count = 0u64;
+        let mut assigned_row_ids: Vec<i64> = Vec::new();
         let mut table = self
             .table_catalog
             .get_node_table_by_name_mut(&self.table_name)
@@ -52,20 +52,33 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
                     }
                 }
 
-                // Add the row to the node table
-                if table.insert_row(row_values).is_ok() {
-                    inserted_count += 1;
+                // Add the row to the node table; capture assigned row_id for OCC
+                if let Ok(row_id) = table.insert_row(row_values) {
+                    assigned_row_ids.push(row_id as i64);
                 }
             }
         }
 
+        let inserted_count = assigned_row_ids.len();
         tracing::info!("INSERT NODE: added {inserted_count} rows to '{}'", self.table_name);
 
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-        v.resize(1);
-        v.set_i64(0, inserted_count as i64);
-        let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
+        let mut count_v = ValueVector::new(PhysicalTypeID::Int64, 1);
+        count_v.resize(1);
+        count_v.set_i64(0, inserted_count as i64);
+        let arr_count = akar_common::arrow_vector::ArrowVector::from_legacy(&count_v).array;
+
+        // Column 1: assigned row IDs (used by record_insert_writes for OCC row-level tracking)
+        let mut ids_v = ValueVector::new(PhysicalTypeID::Int64, assigned_row_ids.len());
+        ids_v.resize(assigned_row_ids.len());
+        for (i, rid) in assigned_row_ids.iter().enumerate() {
+            ids_v.set_i64(i, *rid);
+        }
+        let arr_ids = akar_common::arrow_vector::ArrowVector::from_legacy(&ids_v).array;
+
+        Ok(vec![DataChunk::new(
+            vec![arr_count, arr_ids],
+            vec![PhysicalTypeID::Int64, PhysicalTypeID::Int64],
+        )])
     }
 }
 

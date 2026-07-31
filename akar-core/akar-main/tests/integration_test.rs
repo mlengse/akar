@@ -370,6 +370,82 @@ fn test_clear_cache() {
     assert_eq!(conn.cache_size(), 0);
 }
 
+// ==================== Plan cache tests ====================
+
+#[test]
+fn test_plan_cache_populates_and_hits() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, name STRING, PRIMARY KEY (id))");
+
+    assert_eq!(conn.plan_cache_size(), 0);
+
+    let r1 = conn.query("MATCH (t:T) RETURN t.name").unwrap();
+    assert!(r1.is_success());
+    assert_eq!(conn.plan_cache_size(), 1, "Query plan should be cached");
+
+    // Repeated query with different whitespace should hit the same entry
+    let r2 = conn.query("MATCH  (t:T)  RETURN   t.name").unwrap();
+    assert!(r2.is_success());
+    assert_eq!(conn.plan_cache_size(), 1, "Key should be whitespace-insensitive");
+
+    // clear_cache wipes the plan cache too
+    conn.clear_cache();
+    assert_eq!(conn.plan_cache_size(), 0);
+}
+
+#[test]
+fn test_plan_cache_ddl_invalidation() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, name STRING, PRIMARY KEY (id))");
+
+    conn.query("MATCH (t:T) RETURN t.name").unwrap();
+    assert_eq!(conn.plan_cache_size(), 1);
+
+    // DDL bumps the catalog version, so the cached entry becomes stale
+    exec(&conn, "CREATE NODE TABLE U(id INT64, PRIMARY KEY (id))");
+
+    // Next query misses the stale entry, re-plans, and re-caches
+    let r = conn.query("MATCH (t:T) RETURN t.name").unwrap();
+    assert!(r.is_success());
+    assert_eq!(conn.plan_cache_size(), 1);
+}
+
+#[test]
+fn test_plan_cache_ddl_not_cached() {
+    let (_db, conn) = setup_db();
+
+    // DDL statements must never populate the plan cache
+    exec(&conn, "CREATE NODE TABLE T(id INT64, PRIMARY KEY (id))");
+    assert_eq!(conn.plan_cache_size(), 0);
+}
+
+#[test]
+fn test_plan_cache_repeated_query_correct_results() {
+    use akar_common::types::Value;
+
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+
+    {
+        let catalog = db.table_catalog();
+        let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+            .unwrap();
+    }
+
+    // First execution populates the cache; subsequent executions reuse the plan
+    for _ in 0..3 {
+        let result = conn.query("MATCH (p:Person) WHERE p.age > 26 RETURN p.name").unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.num_rows(), 1, "Only Alice should match age > 26");
+    }
+    assert_eq!(conn.plan_cache_size(), 1);
+}
+
 #[test]
 fn test_parameter_parse_and_bind() {
     let (_db, conn) = setup_db();

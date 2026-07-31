@@ -1,9 +1,89 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::common::{store_value_in_vector, value_hash, value_hash_fast};
+use crate::physical::common::{hash_value_into, store_value_in_vector, value_hash};
 use crate::physical::types::{HashJoinTable, NodeSemiMask, OperatorResult};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+/// Hash a single DataChunk cell directly from its Arrow array, avoiding
+/// intermediate `Value` creation (especially the string `to_string()` alloc).
+/// Returns `None` for null values so callers can skip them like the old code
+/// skipped `Value::Null`.
+#[inline]
+fn hash_chunk_cell(chunk: &DataChunk, col: usize, row: usize) -> Option<u64> {
+    if col >= chunk.fields.len() || chunk.is_null(col, row) {
+        return None;
+    }
+    let mut hasher = ahash::AHasher::default();
+    match chunk.field_types[col] {
+        PhysicalTypeID::Int64 => {
+            let v = chunk.get_i64(col, row).unwrap_or(0);
+            v.hash(&mut hasher);
+        }
+        PhysicalTypeID::Int32 => {
+            let v = chunk.get_i32(col, row).unwrap_or(0);
+            v.hash(&mut hasher);
+        }
+        PhysicalTypeID::Double => {
+            let v = chunk.get_f64(col, row).unwrap_or(0.0);
+            v.to_bits().hash(&mut hasher);
+        }
+        PhysicalTypeID::Bool => {
+            let v = chunk.get_bool(col, row).unwrap_or(false);
+            v.hash(&mut hasher);
+        }
+        PhysicalTypeID::String => {
+            if let Some(s) = chunk.get_string(col, row) {
+                s.hash(&mut hasher);
+            }
+        }
+        _ => {
+            if let Some(val) = chunk.get_value(col, row) {
+                hash_value_into(&val, &mut hasher);
+            }
+        }
+    }
+    Some(hasher.finish())
+}
+
+/// Compare two DataChunk cells for join key equality without building Values.
+#[inline]
+fn chunk_cells_equal(
+    left: &DataChunk,
+    left_col: usize,
+    left_row: usize,
+    right: &DataChunk,
+    right_col: usize,
+    right_row: usize,
+) -> bool {
+    if left.is_null(left_col, left_row) || right.is_null(right_col, right_row) {
+        return left.is_null(left_col, left_row) && right.is_null(right_col, right_row);
+    }
+    match (left.field_types[left_col], right.field_types[right_col]) {
+        (PhysicalTypeID::Int64, PhysicalTypeID::Int64) => {
+            left.get_i64(left_col, left_row) == right.get_i64(right_col, right_row)
+        }
+        (PhysicalTypeID::Int32, PhysicalTypeID::Int32) => {
+            left.get_i32(left_col, left_row) == right.get_i32(right_col, right_row)
+        }
+        (PhysicalTypeID::Int64, PhysicalTypeID::Int32) | (PhysicalTypeID::Int32, PhysicalTypeID::Int64) => {
+            let a = left.get_i64(left_col, left_row).or_else(|| left.get_i32(left_col, left_row).map(|v| v as i64));
+            let b = right.get_i64(right_col, right_row).or_else(|| right.get_i32(right_col, right_row).map(|v| v as i64));
+            a == b
+        }
+        (PhysicalTypeID::Double, PhysicalTypeID::Double) => {
+            left.get_f64(left_col, left_row) == right.get_f64(right_col, right_row)
+        }
+        (PhysicalTypeID::Bool, PhysicalTypeID::Bool) => {
+            left.get_bool(left_col, left_row) == right.get_bool(right_col, right_row)
+        }
+        (PhysicalTypeID::String, PhysicalTypeID::String) => {
+            left.get_string(left_col, left_row) == right.get_string(right_col, right_row)
+        }
+        _ => left.get_value(left_col, left_row) == right.get_value(right_col, right_row),
+    }
+}
 // ==================== CrossProduct ====================
 
 /// Physical cross product (Cartesian product) operator.
@@ -563,11 +643,9 @@ impl JoinHashTable {
 
         for (ci, chunk) in build_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
-                if matches!(key, Value::Null) {
+                let Some(hash) = hash_chunk_cell(chunk, build_col, row) else {
                     continue;
-                }
-                let hash = value_hash_fast(&key);
+                };
                 table
                     .entry(hash)
                     .or_insert_with(|| Vec::with_capacity(4))
@@ -592,11 +670,9 @@ impl JoinHashTable {
                 let mut local: hashbrown::HashMap<u64, Vec<(usize, usize)>> =
                     hashbrown::HashMap::with_capacity(chunk.size * 4 / 3);
                 for row in 0..chunk.size {
-                    let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
-                    if matches!(key, Value::Null) {
+                    let Some(hash) = hash_chunk_cell(chunk, build_col, row) else {
                         continue;
-                    }
-                    let hash = value_hash_fast(&key);
+                    };
                     local
                         .entry(hash)
                         .or_insert_with(|| Vec::with_capacity(4))
@@ -658,17 +734,14 @@ impl JoinHashTable {
 
         for (pci, chunk) in probe_chunks.iter().enumerate() {
             for row in 0..chunk.size {
-                let probe_key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
-                if matches!(probe_key, Value::Null) {
+                let Some(probe_hash) = hash_chunk_cell(chunk, probe_col, row) else {
                     continue;
-                }
-                let probe_hash = value_hash_fast(&probe_key);
+                };
 
                 if let Some(locations) = hash_table.get(&probe_hash) {
                     // Verify key equality for each candidate
                     for &(bci, brow) in locations {
-                        let build_key = build_chunks[bci].get_value(build_col, brow).unwrap_or(Value::Null);
-                        if build_key == probe_key {
+                        if chunk_cells_equal(&build_chunks[bci], build_col, brow, chunk, probe_col, row) {
                             matches.push((bci, brow, pci, row));
                         }
                     }
