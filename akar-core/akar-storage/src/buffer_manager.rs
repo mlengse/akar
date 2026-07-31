@@ -341,6 +341,25 @@ impl BufferManager {
             .collect()
     }
 
+    /// Drop all state for a file: cached frames, registration, mmap region,
+    /// and sequential-access tracking. Used when a file is deleted or rebuilt
+    /// from scratch (e.g. a full persistence-mirror rewrite) so stale frames
+    /// are not re-read under the same file name.
+    pub fn drop_file(&mut self, file_name: &str) {
+        let path = self.files.get(file_name).map(|f| f.path.clone());
+        self.frames.retain(|(f, _), _| f != file_name);
+        self.clock_order.retain(|(f, _)| f != file_name);
+        self.files.remove(file_name);
+        self.last_accessed.remove(file_name);
+        self.prev_last_accessed.remove(file_name);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(p) = path {
+            let pstr = p.to_string_lossy().to_string();
+            self.mmap_regions.remove(&pstr);
+        }
+        self.update_stats();
+    }
+
     /// Access the NUMA topology info.
     pub fn numa_info(&self) -> &NumaInfo {
         &self.numa_info

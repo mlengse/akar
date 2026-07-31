@@ -60,14 +60,14 @@ fn test_ddl_schema_survives_restart() {
         assert!(catalog.contains("id_seq"), "id_seq sequence should survive restart");
     }
 
-    // Data rows are in-memory only and are not replayed across restarts
-    // (P45.1 scope is DDL metadata); the restored table must be usable.
-    assert_eq!(db.table_num_rows("Person"), 0);
+    // Committed rows are durable (P45.4): the WAL replayed the two inserts
+    // into the restored tables, so `Person` has its rows back after restart.
+    assert_eq!(db.table_num_rows("Person"), 2);
 
-    // The restored table must accept new writes.
+    // The restored table must accept new writes on top of the durable rows.
     let conn = akar_main::Connection::new(&db);
     conn.query("CREATE (:Person {name: 'carol', age: 40})").expect("post-restart insert failed");
-    assert_eq!(db.table_num_rows("Person"), 1);
+    assert_eq!(db.table_num_rows("Person"), 3);
 }
 
 #[test]

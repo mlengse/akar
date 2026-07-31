@@ -33,12 +33,12 @@
 | **P42** | **Full Release Benchmarks** | ✅ **DONE** | **8** | ✅ Complete |
 | **P43** | **Bug Fixes & Known Issues** | ✅ **DONE** | **3** | ✅ Complete (P43.3 CANCELLED) |
 | **P44** | **Performance Optimization** | ✅ **DONE** | **8** | ✅ Complete |
-| **P45** | **Production Readiness** | 🔄 **IN PROGRESS** | **5** | Sprint 14 |
+| **P45** | **Production Readiness** | 🔄 **IN PROGRESS** | **8** | Sprint 14 |
 
 > [!IMPORTANT]
 > **P1-P44 + AUDIT: ALL COMPLETE** — 1,258 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed.
 > **P43.3: CANCELLED** — C++ per-operator benchmark source was removed from the repo by review decision (2026-07-31); not needed — SQL-level E2E 3-way parity already verified (~1×).
-> **P45: IN PROGRESS (Sprint 14)** — P45.1 catalog serialization DONE (DDL + cross-process recovery); P45.2 crates.io publishing; P45.3 operator parity analysis pending.
+> **P45: IN PROGRESS (Sprint 14)** — P45.1 catalog serialization DONE (DDL + cross-process recovery); P45.4 data durability DONE (durable column mirrors, crash recovery, read-only enforcement, cross-process locking — 8 new integration tests); P45.3 operator parity analysis; P45.2 crates.io publishing = **langkah terakhir**.
 
 ---
 
@@ -243,11 +243,46 @@
 **Notes:**
 - Design decision: catalog file (`catalog.json`) adalah source of truth untuk DDL; WAL hanya membawa DML. DDL records tetap di-skip saat WAL replay (konsisten dengan doc comment `recover()` yang sudah mendesain ini).
 - Runtime sequence state (`curr_val`) tidak ikut terpersist (hanya schema); replay dari WAL = future work.
-- Data rows in-memory only — WAL DML di-replay ke restored tables (LocalWALData bulk records masih di-skip saat recovery).
 
-#### P45.2 — crates.io Publishing Preparation (2 SP)
+#### P45.4 — Data Durability (3 SP) 🔄 IN PROGRESS
+
+**Goal:** Menutup gap kritis untuk production — data row yang ditulis lewat query harus bertahan restart.
+
+**Latar belakang:** Saat ini semua DML (CREATE/MATCH) hidup di `NodeGroup` in-memory (`akar-storage/src/table.rs`). Commit hanya append marker `Commit` ke WAL (`lib.rs:496`); row data tidak pernah di-flush ke file `Column` (`col_<tid>_<cid>`) maupun WAL. `CHECKPOINT` hanya flush dirty page BufferManager (layer `Column`), bukan `NodeGroup`. Akibatnya semua data hilang saat restart (clean maupun crash) — sudah diverifikasi di test P45.1 (`table_num_rows == 0` setelah reopen). Layer `Column` + checkpoint sudah ada dan teruji; yang kurang adalah bridge ke jalur query.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| P45.4a | Flush `NodeGroup` → `Column` files saat commit/checkpoint | `akar-storage/src/table.rs`, `akar-storage/src/column.rs`, `akar-storage/src/local_storage.rs` |
+| P45.4b | Load `Column` files → `NodeGroup` saat `Database::new` (setelah `restore_storage_from_catalog`) | `akar-main/src/database.rs` |
+| P45.4c | WAL replay restore data — handle `LocalWALData`/`Insert` records | `akar-storage/src/lib.rs:617-698` |
+| P45.4d | Enforce `read_only` mode (blokir DDL/DML saat read-only) | `akar-main/src/connection/query.rs`, `ddl.rs` |
+| P45.4e | File-lock multi-proses (cegah dua proses buka DB yang sama) | `akar-storage/src/lib.rs`, `akar-main/src/database.rs` |
+| P45.4f | Integration tests: data survives clean restart + crash recovery | `akar-main/tests/` |
+
+**Acceptance criteria:**
+- Data row bertahan clean shutdown + restart (dengan dan tanpa `CHECKPOINT`) ✅
+- Data row bertahan crash recovery (child process di-kill) ✅
+- `read_only: true` menolak DDL/DML ✅
+- Dua proses tidak bisa membuka DB yang sama (error jelas) ✅
+
+**Implemented design (`akar-storage/src/persistence.rs`, new file):**
+- **Durable column mirror.** Each node/rel table gets a per-column mirror file `col_{table_id}_{col_idx}` plus a `.meta` sidecar (row/edge count, flush version). `sync_node_table` / `sync_rel_table` are called from the commit path and from `CHECKPOINT`; the mirror is written **incrementally** when clean (append new rows only) and **fully rewritten** when the table is `persistence_dirty` (after UPDATE/DELETE).
+- **Oversized values overflow sidecar.** A `Column` page holds at most `page_size` bytes (8 KB), so a single value larger than one page (e.g. a 100 KB string) previously made the whole commit fail (`OutOfMemory: value of N bytes does not fit in page`). Such values are now serialized into a per-table overflow file `col_{table_id}.ovf` (`TablePersistenceState.oversized: Vec<HashMap<u64, Vec<u8>>>`, one map per column: row → serialized bytes); the mirror stores a `Null` placeholder in that slot so row indices stay aligned, and the loader substitutes `Column::deserialize_value_bytes` for the placeholder. The `.ovf` file is written on every sync, deleted on table drop, and its absence is treated as "no overflow" (backwards compatible).
+- **Restore on open.** After `restore_storage_from_catalog`, `load_persisted_rows` / `load_persisted_edges` read the mirrors into fresh `NodeGroup`s and rebuild the PK hash index. Soft-deleted rows (all-`Null` PK) are preserved as empty row slots but excluded from the PK index, so the delete state survives restart.
+- **Rewrite must drop the old mirror first.** A fresh `Column` bound to the same `col_{tid}_{ci}` name would otherwise reuse cached BufferManager frames/mmap from the previous mirror and append after stale data. `BufferManager::drop_file(file_name)` (new in `buffer_manager.rs`) evicts frames, removes the clock order + `files` registration, clears `last_accessed`/`prev_last_accessed`, and drops the (non-wasm) mmap region; `TablePersistence::remove` then deletes the data + `.meta` files so the rewrite starts at page 0 (`FileHandle::new` derives `num_pages` from the filesystem size).
+- **WAL is marker-only in practice.** `LocalWAL` records for in-memory tables are vestigial (only Commit/Checkpoint markers), so `recover()` normally replays 0 data records on a clean restart and the mirror is the real durability mechanism. When `recover()` does re-persist the mirror after replaying real WAL data records, it uses the same drop-then-rebuild path to avoid double-applying committed rows (`database.rs:559`).
+- **Locking (P45.4e).** The first writable open takes an exclusive file lock; additional opens of the same path fail with a clear "already open" error. Read-only opens take shared locks (multiple readers OK, a writer is blocked while readers hold the lock). `read_only` (P45.4d) rejects DDL/DML with a "read-only" error while allowing reads.
+- **Tests** (`akar-main/tests/test_data_durability.rs`, 8 tests): clean restart restores rows with and without `CHECKPOINT`; storage-level UPDATE + soft-DELETE survive restart; rel-table edges + properties survive; crash recovery via `CrashSimulator` child (recovered count in `1..=200`, no duplicates, table usable after recovery); read-only rejects writes; exclusive/shared lock behavior.
+
+**Known pre-existing limitations (out of P45.4 scope, tracked separately):**
+- SQL `SET`/`DELETE` on matched nodes is a no-op: the scan emits user columns only (no internal row-id column), while `PhysicalSet`/`PhysicalDelete` read the row index from chunk column 0, and `LogicalSet.column_idx` resolves to `0`. The durability tests therefore exercise UPDATE/DELETE at the storage layer (`update_cell`/`delete_row`), which is what the mirror actually persists.
+- SQL `RETURN r.prop` on a rel-table pattern traversal returns the src internal id instead of the edge property (in-session and after restart alike); rel durability is asserted via the storage `edges`/`properties` arrays.
+
+#### P45.2 — crates.io Publishing Preparation (2 SP) — **LANGKAH TERAKHIR**
 
 **Goal:** Siapkan semua crates untuk crates.io publishing.
+
+> ⚠️ **P45.2 hanya dikerjakan setelah P45.1–P45.4 selesai.** Data durability adalah prasyarat — mem-publish engine yang kehilangan data saat restart tidak bisa diterima. P45.3 (parity analysis, dokumentasi-only) boleh dikerjakan paralel dengan P45.4.
 
 | Task | Description | Files |
 |------|-------------|-------|
@@ -398,5 +433,7 @@ graph TD
 | 56 | P44 plan caching | LRU cache at Connection level, key = normalized query | Simple implementation; avoids re-planning identical queries |
 | 57 | P45 catalog serialization | **JSON** via serde, atomic tmp+rename, written after every DDL (not only at checkpoint) | Chosen JSON for debuggability; catalog write is small & infrequent (DDL only); no perf concern |
 | 58 | P45 crates.io scope | All 16+ non-internal crates | Full ecosystem availability; defer NPM/WASM publishing |
+| 61 | P45.4 data durability | **Column files are source of truth for row data** — NodeGroup flushed on commit/checkpoint, loaded at `Database::new`; WAL replay restores un-checkpointed commits | Existing `Column` disk layer is already tested; reuse it rather than inventing a new format |
+| 62 | P45 ordering | P45.2 (crates.io) is the **last** step, after P45.1–P45.4 | Publishing a DB engine that loses data on restart is unacceptable |
 | 59 | P45 operator parity scope | Analysis first, implement based on priority | Not all 67 C++ operators are needed for 95% query coverage |
 | 60 | Sprint 13 benchmark acceptance | Deferred to CI / healthy machine | Criterion harness hangs on this machine (pre-change binary hangs identically → environment, not regression); `cargo test --workspace` remains the gate |

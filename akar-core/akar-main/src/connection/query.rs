@@ -117,6 +117,11 @@ impl Connection {
         bound: &BoundStatement,
         plan: Option<&Vec<LogicalOperator>>,
     ) -> Result<QueryResult, String> {
+        // Read-only databases reject any write statement (DDL or DML).
+        if self.database.config.read_only && Connection::is_write_statement(bound) {
+            return Err("Database is in read-only mode; write statements are not allowed".into());
+        }
+
         // Determine if this is a write operation and begin a transaction if so.
         // Only wrap in a transaction when concurrent_writes is enabled.
         // In single-writer mode, the old direct-write path is kept for
@@ -232,6 +237,17 @@ impl Connection {
             }
         }
 
+        // Single-writer mode: DML wrote directly into the in-memory tables,
+        // bypassing `commit_transaction`'s mirror sync. Persist the durable
+        // column mirrors so committed rows survive a restart even when the
+        // auto-checkpoint threshold is disabled (P45.4).
+        if txn_opt.is_none() && Connection::is_write_statement(bound) {
+            self.database
+                .storage_manager
+                .persist_all_tables()
+                .map_err(|e| format!("Failed to persist tables: {e}"))?;
+        }
+
         // Auto-checkpoint after DML execution
         self.maybe_auto_checkpoint()?;
 
@@ -297,6 +313,11 @@ impl Connection {
             return Err(format!("Expected {} parameter(s), got {}", num_expected, params.len()));
         }
 
+        // Read-only databases reject any write statement (DDL or DML).
+        if self.database.config.read_only && Connection::is_write_statement(&prepared.bound_statement) {
+            return Err("Database is in read-only mode; write statements are not allowed".into());
+        }
+
         // Handle DDL prepared statements
         if let Some(result) = self.handle_ddl(&prepared.bound_statement)? {
             self.database.persist_catalog()?;
@@ -330,6 +351,16 @@ impl Connection {
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
+
+        // This prepared path executes DML directly (no OCC transaction wrap),
+        // so persist the durable column mirrors to keep committed rows durable
+        // across restarts (P45.4).
+        if Connection::is_write_statement(&prepared.bound_statement) {
+            self.database
+                .storage_manager
+                .persist_all_tables()
+                .map_err(|e| format!("Failed to persist tables: {e}"))?;
+        }
 
         // Auto-checkpoint after DML execution
         self.maybe_auto_checkpoint()?;

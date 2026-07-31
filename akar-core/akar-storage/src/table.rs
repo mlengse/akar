@@ -47,6 +47,9 @@ pub struct NodeTable {
     /// Optional ART (Adaptive Radix Tree) index for PK range scans.
     /// When present, `insert_row()` also updates this index automatically.
     pub art_index: Option<ArtPrimaryKeyIndex>,
+    /// Set when an UPDATE/DELETE touches the table. The durable column mirror
+    /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    pub persistence_dirty: bool,
 }
 
 impl NodeTable {
@@ -61,6 +64,7 @@ impl NodeTable {
             node_groups: Vec::new(),
             hash_index: HashIndex::new(),
             art_index: None,
+            persistence_dirty: false,
         }
     }
 
@@ -363,6 +367,71 @@ impl NodeTable {
         result
     }
 
+    /// Rebuild the table's in-memory state from rows loaded off the durable
+    /// column mirror (see `persistence.rs`).
+    ///
+    /// Populates `node_groups`, `num_rows`, the PK hash index, and the ART
+    /// index directly, bypassing PK uniqueness checks so that soft-deleted
+    /// rows (whose PK is `Null`) can be restored at their original row
+    /// offsets.
+    pub fn load_persisted_rows(&mut self, rows: Vec<Vec<Value>>) -> Result<(), StorageError> {
+        let num_cols = self.columns.len();
+        self.node_groups.clear();
+        self.hash_index.clear();
+
+        let mut offset = 0u64;
+        let mut group = NodeGroup::new(num_cols, offset);
+        for row in &rows {
+            if row.len() != num_cols {
+                return Err(StorageError::Page(format!(
+                    "load_persisted_rows: expected {num_cols} values, got {}",
+                    row.len()
+                )));
+            }
+            group.append_row_with_txn(row.clone(), None)?;
+            offset += 1;
+            if group.is_full() {
+                self.node_groups.push(group);
+                group = NodeGroup::new(num_cols, offset);
+            }
+        }
+        if group.num_nodes > 0 {
+            self.node_groups.push(group);
+        }
+        self.num_rows = offset;
+
+        // Rebuild the PK hash index (skip soft-deleted rows with a Null PK).
+        if self.primary_key_column < num_cols {
+            for (row_idx, values) in rows.iter().enumerate() {
+                let pk = &values[self.primary_key_column];
+                if matches!(pk, Value::Null) {
+                    continue;
+                }
+                let key = pk_value_to_string(pk);
+                self.hash_index.insert(key, row_idx as u64);
+            }
+        }
+
+        // Rebuild the ART index if present.
+        if self.art_index.is_some()
+            && self.primary_key_column < num_cols
+        {
+            if let Some(art) = &mut self.art_index {
+                art.clear();
+                for (row_idx, values) in rows.iter().enumerate() {
+                    let pk = &values[self.primary_key_column];
+                    if matches!(pk, Value::Null) {
+                        continue;
+                    }
+                    if let Some(key) = ArtKey::from_value(pk) {
+                        art.insert(&key, row_idx as u64);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Update a single cell (row, column) with a new value.
     pub fn update_cell(&mut self, row_idx: u64, col_idx: usize, value: Value) -> Result<(), StorageError> {
         if col_idx >= self.columns.len() {
@@ -371,6 +440,7 @@ impl NodeTable {
         if row_idx >= self.num_rows {
             return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
         }
+        self.persistence_dirty = true;
 
         let mut offset = 0u64;
         for group in &mut self.node_groups {
@@ -400,6 +470,7 @@ impl NodeTable {
         if row_idx >= self.num_rows {
             return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
         }
+        self.persistence_dirty = true;
 
         // Locate the node group containing this row
         let mut offset = 0u64;
@@ -612,6 +683,9 @@ pub struct RelTable {
     pub csr_index: Option<CsrIndex>,
     /// Column-major property storage: properties[col_idx][edge_idx].
     pub properties: Vec<Vec<Value>>,
+    /// Set when an UPDATE/DELETE touches the table. The durable column mirror
+    /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    pub persistence_dirty: bool,
 }
 
 impl RelTable {
@@ -635,6 +709,7 @@ impl RelTable {
             rev_adj: HashMap::new(),
             csr_index: None,
             properties: vec![Vec::new(); num_cols],
+            persistence_dirty: false,
         }
     }
 
@@ -739,6 +814,7 @@ impl RelTable {
 
         // Tombstone the edge
         self.edges[edge_idx] = (u64::MAX, u64::MAX);
+        self.persistence_dirty = true;
 
         // Nullify properties
         for col in &mut self.properties {
@@ -760,6 +836,7 @@ impl RelTable {
         }
 
         self.properties[col_idx][edge_idx] = value;
+        self.persistence_dirty = true;
         Ok(())
     }
 

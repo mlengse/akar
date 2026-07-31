@@ -83,6 +83,11 @@ impl<K: Hash + Eq + Clone> HashIndex<K> {
         self.entries.is_empty()
     }
 
+    /// Remove all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
     /// Iterate over all (key, offset) entries.
     pub fn iter(&self) -> impl Iterator<Item = (&K, &u64)> {
         self.entries.iter()

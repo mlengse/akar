@@ -49,7 +49,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **✅ COMPLETE** — P41 (14 crash recovery tests, 12 SP). P42 (8 SP — release profiles, 100K/1M scale benchmarks, storage I/O, CI workflow). |
 | **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 | **Sprint 13** | **P43-P44: Bug Fixes & Performance** | **11** | **✅ COMPLETE** — P43.1 radixsort OOB fix, P43.2 OCC row-level inserts, P44.1 hash join build opt, P44.2 native Arrow arrays (verified), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching. **P43.3 cancelled** (C++ benchmark source removed by design). See Section 2. |
-| **Sprint 14** | **P45: Production Readiness** | **5** | 🔄 **IN PROGRESS** — P45.1 catalog serialization ✅ DONE (DDL survives restart, cross-process recovery). P45.2 crates.io publishing & P45.3 operator parity pending. |
+| **Sprint 14** | **P45: Production Readiness** | **8** | 🔄 **IN PROGRESS** — P45.1 catalog serialization ✅ DONE (DDL survives restart, cross-process recovery). P45.4 data durability ✅ DONE (durable column mirrors via `persistence.rs`, `BufferManager::drop_file` rewrite fix, oversized-value `.ovf` overflow sidecar, crash recovery, `read_only` enforcement, exclusive/shared file locks; 8 new tests in `test_data_durability.rs` + storage-level overflow round-trip). P45.3 operator parity pending. P45.2 crates.io = langkah terakhir. |
 
 ---
 

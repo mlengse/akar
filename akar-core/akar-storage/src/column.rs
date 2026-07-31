@@ -369,6 +369,13 @@ impl Column {
         buf
     }
 
+    /// Deserialize a single value from its serialised byte sequence.
+    pub(crate) fn deserialize_value_bytes(data: &[u8]) -> std::io::Result<Value> {
+        let mut pos = 0usize;
+        let value = Self::deserialize_value(data, &mut pos)?;
+        Ok(value)
+    }
+
     fn serialize_into(buf: &mut Vec<u8>, value: &Value) {
         match value {
             Value::Null => buf.push(TAG_NULL),

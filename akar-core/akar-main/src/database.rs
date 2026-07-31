@@ -20,6 +20,13 @@ use std::sync::{Arc, Mutex};
 /// restarts via this file); WAL records only carry DML.
 pub const CATALOG_FILE_NAME: &str = "catalog.json";
 
+/// Name of the file holding the cross-process lock.
+///
+/// The lock file is created with an exclusive lock by the first process to
+/// open a database directory and prevents a second process from opening the
+/// same directory concurrently (P45.4). Read-only opens take a shared lock.
+pub const LOCK_FILE_NAME: &str = "akar.lock";
+
 /// Configuration for the database.
 #[derive(Debug, Clone)]
 pub struct SystemConfig {
@@ -94,6 +101,9 @@ pub struct Database {
     /// Runtime-overridable spill threshold via `SET spill_threshold`.
     /// 0 means "use config default".
     spill_threshold_override: AtomicU64,
+    /// Cross-process lock file handle (kept alive for the lifetime of the
+    /// database so the OS lock is released only on `Database` drop).
+    _lock_file: Option<std::fs::File>,
 }
 
 impl Database {
@@ -261,8 +271,17 @@ impl Database {
         }
 
         // 2. Drop the data table
-        self.storage_manager.table_catalog().drop_node_table(name);
-        self.storage_manager.table_catalog().drop_rel_table(name);
+        let table_catalog = self.storage_manager.table_catalog();
+        let node_tid = table_catalog.get_node_table_by_name(name).map(|t| t.table_id);
+        let rel_tid = table_catalog.get_rel_table_by_name(name).map(|t| t.table_id);
+        table_catalog.drop_node_table(name);
+        table_catalog.drop_rel_table(name);
+        if let Some(tid) = node_tid {
+            self.storage_manager.drop_table_persistence(tid);
+        }
+        if let Some(tid) = rel_tid {
+            self.storage_manager.drop_table_persistence(tid);
+        }
 
         tracing::info!("Dropped table '{name}'");
         Ok(())
@@ -434,6 +453,39 @@ impl Database {
     /// Returns `Err` if the path is not writable or if existing data is corrupt.
     pub fn new(db_path: impl Into<PathBuf>, config: SystemConfig) -> Result<Self, String> {
         let db_path = db_path.into();
+        let is_memory = db_path.to_string_lossy() == ":memory:";
+
+        // Multi-process guard: take a file lock on <db_path>/akar.lock so two
+        // processes cannot open the same database directory concurrently.
+        // Read-only opens take a shared lock (multiple readers allowed); write
+        // opens take an exclusive lock. The handle is kept alive for the
+        // lifetime of the Database to hold the lock.
+        let lock_file = if is_memory {
+            None
+        } else {
+            std::fs::create_dir_all(&db_path)
+                .map_err(|e| format!("Failed to create database directory '{}': {e}", db_path.display()))?;
+            let lock_path = db_path.join(LOCK_FILE_NAME);
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&lock_path)
+                .map_err(|e| format!("Failed to open lock file '{}': {e}", lock_path.display()))?;
+            let result = if config.read_only {
+                file.try_lock_shared()
+            } else {
+                file.try_lock()
+            };
+            result.map_err(|_| {
+                format!(
+                    "Database '{}' is already open by another process",
+                    db_path.display()
+                )
+            })?;
+            Some(file)
+        };
+
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));
         let task_system = Arc::new(TaskSystem::new(config.max_num_threads as usize));
 
@@ -468,6 +520,7 @@ impl Database {
             stats_store,
             vfs,
             spill_threshold_override: AtomicU64::new(0),
+            _lock_file: lock_file,
             config,
         };
 
@@ -496,13 +549,33 @@ impl Database {
             crate::connection::utils::register_sequence_scalars(&mut reg, db.catalog.clone());
         }
 
-        // Attempt WAL recovery from a previous session
-        if let Err(e) = db.storage_manager.recover() {
-            tracing::warn!(
-                "WAL recovery failed (database may need manual repair): {e}. \
-                 Starting with fresh state."
-            );
-            // Do not fail — allow read-only or empty-state start
+        // Restore durable column mirrors when the WAL has nothing to replay.
+        //
+        // `recover()` returns the number of data records it replayed. When it
+        // returns 0 (fresh database, clean shutdown, or last checkpoint), the
+        // committed rows live in the durable column mirrors and are restored
+        // here. When it replayed WAL records, the mirrors are re-persisted by
+        // recover(), so they are only consulted when they are authoritative —
+        // this avoids double-applying committed rows (P45.4).
+        let recovered = match db.storage_manager.recover() {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(
+                    "WAL recovery failed (database may need manual repair): {e}. \
+                     Starting with fresh state."
+                );
+                0
+            }
+        };
+        if recovered == 0 {
+            match db.storage_manager.load_persisted_tables() {
+                Ok(n) => {
+                    if n > 0 {
+                        tracing::info!("Restored {n} table(s) from durable column mirrors");
+                    }
+                }
+                Err(e) => tracing::warn!("Failed to restore tables from column mirrors: {e}"),
+            }
         }
 
         Ok(db)

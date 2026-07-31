@@ -23,6 +23,7 @@ pub mod node_group;
 pub mod npy_reader;
 pub mod page;
 pub mod page_manager;
+pub mod persistence;
 #[cfg(feature = "parquet")]
 pub mod parquet_reader;
 #[cfg(feature = "parquet")]
@@ -59,6 +60,7 @@ pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
 pub use page_manager::PageManager;
+pub use persistence::TablePersistence;
 pub use shadow_file::ShadowFile;
 pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use string_dictionary::StringDictionary;
@@ -93,6 +95,8 @@ pub struct StorageManager {
     page_manager: Option<Arc<PageManager>>,
     /// Lock-free table catalog using DashMap internally.
     pub(crate) table_catalog: Arc<TableCatalog>,
+    /// Durable column mirrors for in-memory tables (P45.4).
+    table_persistence: TablePersistence,
 }
 
 /// Storage info returned by CALL storage_info().
@@ -156,6 +160,7 @@ impl StorageManager {
             memory_manager,
             page_manager: Some(Arc::new(pm)),
             table_catalog: Arc::new(TableCatalog::new()),
+            table_persistence: TablePersistence::new(),
         }
     }
 
@@ -188,6 +193,37 @@ impl StorageManager {
     /// Get a reference to the table catalog for reading/writing table data.
     pub fn table_catalog(&self) -> Arc<TableCatalog> {
         self.table_catalog.clone()
+    }
+
+    /// Flush all node + rel tables into their durable column mirrors.
+    ///
+    /// Called after every write (commit or single-writer DML) and at
+    /// checkpoint time so committed rows survive restarts (P45.4).
+    pub fn persist_all_tables(&self) -> Result<(), StorageError> {
+        if self.db_path.to_string_lossy() == ":memory:" {
+            return Ok(()); // In-memory databases have nothing to persist
+        }
+        let page_size = self.buffer_manager.lock().unwrap().page_size();
+        self.table_persistence
+            .persist_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
+    }
+
+    /// Load all persisted tables from their durable column mirrors.
+    ///
+    /// Called during `Database::new()` AFTER tables are restored from the
+    /// persisted catalog. Returns the number of tables that had persisted data.
+    pub fn load_persisted_tables(&self) -> Result<usize, StorageError> {
+        if self.db_path.to_string_lossy() == ":memory:" {
+            return Ok(0); // In-memory databases have no persisted mirrors
+        }
+        let page_size = self.buffer_manager.lock().unwrap().page_size();
+        self.table_persistence
+            .load_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
+    }
+
+    /// Delete the durable column mirror for a dropped table.
+    pub fn drop_table_persistence(&self, table_id: u64) {
+        self.table_persistence.remove(table_id, &self.db_path, &self.buffer_manager);
     }
 
     /// Log a column write to the WAL before applying it to the BufferManager.
@@ -390,6 +426,14 @@ impl StorageManager {
             }
         }
 
+        // Persist in-memory tables to their durable column mirrors so the
+        // checkpoint's BufferManager flush writes them to disk too (P45.4).
+        // Done before the checkpoint so a crash after WAL truncation still
+        // leaves the mirror consistent with the tables.
+        if let Err(e) = self.persist_all_tables() {
+            tracing::warn!("Persist tables before checkpoint failed: {e}");
+        }
+
         // Phase 2: Do the actual checkpoint
         let mut wal = self
             .wal
@@ -466,9 +510,10 @@ impl StorageManager {
     ///
     /// Orchestrates the full commit pipeline:
     /// 1. Append `Commit` record to the WAL (write-ahead log)
-    /// 2. Flush `LocalStorage` buffered writes to the actual tables
-    /// 3. Apply `ShadowFile` copy-on-write pages to the BufferManager
-    /// 4. Optionally checkpoint if the WAL threshold is met
+    /// 2. Flush node/rel tables to their durable column mirrors (P45.4)
+    /// 3. Flush `LocalStorage` buffered writes to the actual tables
+    /// 4. Apply `ShadowFile` copy-on-write pages to the BufferManager
+    /// 5. Optionally checkpoint if the WAL threshold is met
     ///
     /// # Arguments
     ///
@@ -498,7 +543,12 @@ impl StorageManager {
                 .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
         }
 
-        // Step 2: Flush local storage buffers to the actual tables
+        // Step 2: Flush in-memory tables to their durable column mirrors so
+        // committed rows survive process restarts.
+        self.persist_all_tables()
+            .map_err(|e| StorageError::LocalStorage(format!("table persist failed during commit: {e}")))?;
+
+        // Step 3: Flush local storage buffers to the actual tables
         // Pass txn_id so inserts/deletes are recorded in VersionInfo for MVCC
         let _commit_undo_records = local_storage
             .flush_to_tables(&self.table_catalog, Some(txn_id))?;
@@ -510,12 +560,12 @@ impl StorageManager {
             _commit_undo_records.len(), txn_id
         );
 
-        // Step 3: Apply shadow pages to the BufferManager
+        // Step 4: Apply shadow pages to the BufferManager
         shadow_file
             .apply(&self.buffer_manager)
             .map_err(|e| StorageError::ShadowFile(format!("ShadowFile apply failed during commit: {e}")))?;
 
-        // Step 4: Auto-checkpoint if needed
+        // Step 5: Auto-checkpoint if needed
         if let Err(e) = self.maybe_checkpoint(checkpoint_threshold, drain_fn) {
             tracing::warn!("Checkpoint after commit failed: {e}");
             // Non-fatal — data is already in tables and WAL
@@ -610,7 +660,7 @@ impl StorageManager {
             return Ok(0); // Nothing to recover
         }
 
-        let count = wal.len();
+        let mut data_records = 0usize;
         let catalog = self.table_catalog.clone();
 
         // Replay each record
@@ -627,13 +677,15 @@ impl StorageManager {
                         if let Err(e) = table.insert_row(values) {
                             return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
                         }
+                        data_records += 1;
                     }
                 }
                 WALRecord::Delete { table_id, row_id } => {
-                    if let Some(mut table) = cat.get_node_table_mut(*table_id)
-                        && let Err(e) = table.delete_row(*row_id)
-                    {
-                        return Err(std::io::Error::other(format!("WAL recovery delete failed: {e}")));
+                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
+                        if let Err(e) = table.delete_row(*row_id) {
+                            return Err(std::io::Error::other(format!("WAL recovery delete failed: {e}")));
+                        }
+                        data_records += 1;
                     }
                 }
                 WALRecord::Update {
@@ -644,10 +696,11 @@ impl StorageManager {
                 } => {
                     if let Some(mut table) = cat.get_node_table_mut(*table_id) {
                         let values = deserialize_values_from_bytes(data, 1);
-                        if let Some(val) = values.into_iter().next()
-                            && let Err(e) = table.update_cell(*row_id, *column as usize, val)
-                        {
-                            return Err(std::io::Error::other(format!("WAL recovery update failed: {e}")));
+                        if let Some(val) = values.into_iter().next() {
+                            if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
+                                return Err(std::io::Error::other(format!("WAL recovery update failed: {e}")));
+                            }
+                            data_records += 1;
                         }
                     }
                 }
@@ -697,13 +750,20 @@ impl StorageManager {
             Ok(())
         })?;
 
-        // After successful replay, take a checkpoint to reset the WAL
-        // and make all recovered data durable.
+        // After successful replay, mirror the recovered rows into the durable
+        // column mirrors as well, so a subsequent startup with an empty WAL
+        // restores from the mirror instead of the (now truncated) log.
+        if data_records > 0 {
+            self.persist_all_tables()
+                .map_err(|e| std::io::Error::other(format!("WAL recovery: persist tables failed: {e}")))?;
+        }
+
+        // Take a checkpoint to reset the WAL and make all recovered data durable.
         if let Err(e) = checkpoint(&mut wal, &self.buffer_manager) {
             tracing::warn!("WAL recovery: checkpoint after replay failed: {e}");
         }
 
-        Ok(count)
+        Ok(data_records)
     }
 }
 
