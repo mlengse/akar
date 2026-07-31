@@ -29,7 +29,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar + OCC row-level conflict detection** ✅ |
 | **ADBC** | **AdbcDatabase/Connection/Statement** ✅ |
 | **Crash Recovery** | **Undo Buffer + WAL Replayer (6 DDL variants) + Page Manager + P41 Stress Tests (14 tests)** ✅ |
-| **Pipeline completeness** | **~95%** — all 12 DDL operators wired, Binder type resolution via catalog, BufferManager mmap/NUMA/readahead, StringDictionary encoding, 25 query optimization passes |
+| **Pipeline completeness** | **~95%** — all 12 DDL operators wired, Binder type resolution via catalog, catalog persistence (DDL survives restart, P45.1), BufferManager mmap/NUMA/readahead, StringDictionary encoding, 25 query optimization passes |
 
 ### Sprint Progress
 
@@ -49,6 +49,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **✅ COMPLETE** — P41 (14 crash recovery tests, 12 SP). P42 (8 SP — release profiles, 100K/1M scale benchmarks, storage I/O, CI workflow). |
 | **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 | **Sprint 13** | **P43-P44: Bug Fixes & Performance** | **11** | **✅ COMPLETE** — P43.1 radixsort OOB fix, P43.2 OCC row-level inserts, P44.1 hash join build opt, P44.2 native Arrow arrays (verified), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching. **P43.3 cancelled** (C++ benchmark source removed by design). See Section 2. |
+| **Sprint 14** | **P45: Production Readiness** | **5** | 🔄 **IN PROGRESS** — P45.1 catalog serialization ✅ DONE (DDL survives restart, cross-process recovery). P45.2 crates.io publishing & P45.3 operator parity pending. |
 
 ---
 
@@ -659,7 +660,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 ---
 
-## 4. Test Results (Per 2026-07-31 — Sprint 13 Complete: 1,258 tests)
+## 4. Test Results (Per 2026-07-31 — Sprint 14 in progress: 1,266 tests)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
@@ -671,12 +672,13 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-processor | 16 | ✅ Pass |
 | akar-storage | 320 | ✅ Pass |
 | akar-function | 176 | ✅ Pass |
-| akar-catalog | 37 | ✅ Pass |
+| akar-catalog | 39 | ✅ Pass |
 | akar-graph | 34 | ✅ Pass |
 | akar-vector | 20 | ✅ Pass |
 | akar-transaction | 16 | ✅ Pass |
 | akar-main (unit + connection_test) | 63 | ✅ Pass |
 | akar-main (integration) | 58 | ✅ Pass |
+| akar-main (catalog_persistence) | 6 | ✅ Pass |
 | akar-main (plan_cache_timing) | 1 | ✅ Pass |
 | akar-main (edge_null_handling) | 44 | ✅ Pass |
 | akar-main (edge_boundary) | 20 | ✅ Pass |
@@ -704,7 +706,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-migrate | 1 | ✅ Pass |
 | Extension crates (others) | 4 | ✅ Pass |
 | Doc-tests | 6 (5 ignored) | ✅ Pass |
-| **Total** | **1,258** | **✅ 1,258 pass, 0 failed, 5 ignored (doc-tests only)** |
+| **Total** | **1,266** | **✅ 1,266 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -728,6 +730,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Commit | Deskripsi |
 |--------|-----------|
+| `[P45.1]` | Catalog serialization to disk — `Catalog::serialize/deserialize` (JSON, atomic tmp+rename) + serde derives (all catalog types, `CompressionType`); persist after every DDL; restore storage tables with same table IDs at `Database::new` (node/rel + ART index, `bump_next_table_id`); 2 catalog unit tests + 6 integration tests incl. true cross-process DDL recovery (`crash_sim_child ddl-recovery` mode). |
 | `[P44.5]` | Query plan caching — LRU `PlanCache` (cap 100) at Connection level, normalized-query keys, catalog-version invalidation, `build_optimized_plan`/`execute_with_plan` refactor. 11 unit + 4 integration + 1 timing regression test. |
 | `[P44.1]` | Hash join build opt — `hash_chunk_cell`/`chunk_cells_equal` hash+compare join keys directly from Arrow arrays (no per-row `Value`). `value_hash_fast` dead code removed. |
 | `[P44.2]` | Native Arrow arrays verified — `evaluate_arrow_variable` reads `ArrayRef` directly; variable 148µs → 18ns, `x>5` 19.8×. Bench comment + docs updated. |
@@ -767,9 +770,10 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-31: **1,258 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
+- Per 2026-07-31: **1,266 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
+- **Sprint 14 — P45.1 COMPLETE (catalog serialization):** `Catalog::serialize_to_json/deserialize_from_json/save_to_path/load_from_path` + serde derives; catalog file (`catalog.json`) = source of truth for DDL, ditulis atomically setelah setiap DDL; `Database::new` load + `restore_storage_from_catalog` (node/rel table + ART index dengan table ID sama, `next_table_id` di-bump); 2 catalog unit + 6 integration tests incl. cross-process DDL recovery (table dibuat di proses A terlihat di proses B dan sebaliknya). Backward-compatible (tanpa catalog file = fresh DB). Data rows & runtime sequence state tetap in-memory (P45.1 scope = DDL metadata).
 - **Sprint 13 — P43/P44 COMPLETE (2026-07-31):** P43.1 radixsort OOB fix, P43.2 OCC insert row-level granularity, P44.1 hash join build opt (Arrow-native key hashing), P44.2 native Arrow arrays verified (variable 148µs → 18ns, `x>5` 19.8×), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching (LRU, catalog-version invalidation, 16 new tests). **P43.3 CANCELLED** — C++ per-operator benchmark source removed from repo by review decision; SQL-level 3-way parity already verified (~1×).
-- **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog is in-memory only — cross-process DDL recovery not possible. See Section 2 for details.
+- **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog persistence for DDL landed later in P45.1 (Sprint 14). See Section 2 for details.
 - **Sprint 12.5 — Codebase Audit Fixes (FINAL):** **30 of 31 issues resolved (30 FIXED + 1 N/A).** All 5 critical issues fixed (including P1.3 MVCC snapshot isolation and #7 row-level OCC conflict detection). Issue #9 (unified error type) fully completed across all 8 crates. Issue #8 (dual catalog) resolved via unified DDL on Database. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. Issue #31 (feature-gated CI) extended to all extension crates. WAL append-only redesign (52× speedup), condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip for concurrent writes. See Section 9 for details.
 - **Sprint 11 COMPLETE — P38-P40 ALL DONE:** P38.1 (all 12 DDL operators wired), P38.2 (benchmark verification), P38.3 (documentation). P39 (Arrow fast path ~100× improvement). P40 (Vectorized GROUP BY ~37× improvement + AggregateDetection correctness fix).
 - **Sprint 10 COMPLETE — P37.1-P37.5 ALL DONE:** BufferManager mmap/NUMA/readahead, StringDictionary encoding, benchmark suite, 3 new optimizer passes (25 total), Production Readiness (LadybugDB C++).

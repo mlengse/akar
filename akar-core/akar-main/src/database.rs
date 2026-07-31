@@ -8,10 +8,17 @@ use akar_extension::{ExtensionContext, ExtensionRegistry};
 use akar_function::FunctionRegistry;
 use akar_storage::StorageManager;
 use akar_storage::stats::StatsStore;
+use akar_storage::table::ColumnDefinition;
 use akar_transaction::TransactionManager;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+/// Name of the file that holds the serialized system catalog.
+///
+/// The catalog file is the source of truth for DDL (schema changes survive
+/// restarts via this file); WAL records only carry DML.
+pub const CATALOG_FILE_NAME: &str = "catalog.json";
 
 /// Configuration for the database.
 #[derive(Debug, Clone)]
@@ -347,6 +354,76 @@ impl Database {
         self.catalog.lock().ok()?.get_table_id(name)
     }
 
+    /// Path of the persisted catalog file for this database.
+    pub fn catalog_file_path(&self) -> PathBuf {
+        self.storage_manager.db_path().join(CATALOG_FILE_NAME)
+    }
+
+    /// Returns `true` when the database runs fully in-memory (`:memory:`),
+    /// in which case catalog persistence is skipped.
+    pub fn is_in_memory(&self) -> bool {
+        self.storage_manager.db_path().to_string_lossy() == ":memory:"
+    }
+
+    /// Persist the system catalog to disk.
+    ///
+    /// Called after every DDL statement so schema changes survive restarts.
+    /// The write is atomic (temp file + rename) and no-ops for `:memory:`
+    /// databases.
+    pub fn persist_catalog(&self) -> Result<(), String> {
+        if self.is_in_memory() {
+            return Ok(());
+        }
+        let catalog = self
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        catalog
+            .save_to_path(&self.catalog_file_path())
+            .map_err(|e| format!("Failed to persist catalog: {e}"))
+    }
+
+    /// Restore storage-level tables from the loaded catalog.
+    ///
+    /// Called during `Database::new` after the catalog file is loaded so that
+    /// WAL DML replay and subsequent queries reference the same table IDs that
+    /// were in use when the database was shut down.
+    fn restore_storage_from_catalog(&self) {
+        let catalog = match self.catalog.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        for entry in catalog.all_entries() {
+            match entry {
+                akar_catalog::CatalogEntry::NodeTable(t) => {
+                    let columns: Vec<_> = t.columns.iter().map(ColumnDefinition::from).collect();
+                    let index_name = if t.has_art_index() {
+                        t.index_name.as_deref()
+                    } else {
+                        None
+                    };
+                    self.storage_manager.restore_node_table(
+                        t.table_id,
+                        t.name.clone(),
+                        columns,
+                        index_name,
+                    );
+                }
+                akar_catalog::CatalogEntry::RelTable(t) => {
+                    let columns: Vec<_> = t.columns.iter().map(ColumnDefinition::from).collect();
+                    self.storage_manager.restore_rel_table(
+                        t.table_id,
+                        t.name.clone(),
+                        t.src_table_id,
+                        t.dst_table_id,
+                        columns,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Open or create a database at the given path.
     ///
     /// # Arguments
@@ -359,7 +436,16 @@ impl Database {
         let db_path = db_path.into();
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));
         let task_system = Arc::new(TaskSystem::new(config.max_num_threads as usize));
-        let catalog = Arc::new(Mutex::new(Catalog::new()));
+
+        // Load a previously-persisted catalog (if any). Fresh databases and
+        // databases created before catalog persistence start with an empty
+        // catalog, preserving backward compatibility.
+        let catalog_file = db_path.join(CATALOG_FILE_NAME);
+        let catalog = Arc::new(Mutex::new(
+            akar_catalog::Catalog::load_from_path(&catalog_file)
+                .map_err(|e| format!("Failed to load persisted catalog: {e}"))?
+                .unwrap_or_default(),
+        ));
         let transaction_manager = {
             let tx_config = akar_transaction::TransactionManagerConfig {
                 concurrent_writes: config.concurrent_writes,
@@ -384,6 +470,10 @@ impl Database {
             spill_threshold_override: AtomicU64::new(0),
             config,
         };
+
+        // Recreate storage-level tables from the restored catalog (if any) so
+        // WAL DML replay below operates on the same table IDs.
+        db.restore_storage_from_catalog();
 
         // Load built-in extensions
         db.register_builtin_extensions();

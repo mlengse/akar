@@ -45,6 +45,9 @@ impl Connection {
                 tracing::info!("FOREACH executing sub-statement for item={:?}", item_val);
                 // Execute the sub-statement directly
                 let result = self.handle_ddl(&substituted)?;
+                if result.is_some() {
+                    self.database.persist_catalog()?;
+                }
                 tracing::info!("FOREACH sub-statement result: {:?}", result);
             }
         }

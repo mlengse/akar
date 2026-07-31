@@ -33,12 +33,12 @@
 | **P42** | **Full Release Benchmarks** | ✅ **DONE** | **8** | ✅ Complete |
 | **P43** | **Bug Fixes & Known Issues** | ✅ **DONE** | **3** | ✅ Complete (P43.3 CANCELLED) |
 | **P44** | **Performance Optimization** | ✅ **DONE** | **8** | ✅ Complete |
-| **P45** | **Production Readiness** | 📋 **PLANNED** | **5** | Sprint 14 |
+| **P45** | **Production Readiness** | 🔄 **IN PROGRESS** | **5** | Sprint 14 |
 
 > [!IMPORTANT]
 > **P1-P44 + AUDIT: ALL COMPLETE** — 1,258 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed.
 > **P43.3: CANCELLED** — C++ per-operator benchmark source was removed from the repo by review decision (2026-07-31); not needed — SQL-level E2E 3-way parity already verified (~1×).
-> **P45: PLANNED (Sprint 14)** — catalog serialization, crates.io publishing, operator parity analysis.
+> **P45: IN PROGRESS (Sprint 14)** — P45.1 catalog serialization DONE (DDL + cross-process recovery); P45.2 crates.io publishing; P45.3 operator parity analysis pending.
 
 ---
 
@@ -224,21 +224,26 @@
 
 **Masalah:** Catalog in-memory only (DDL recovery impossible cross-process). 16+ crates belum published ke crates.io. Physical operator parity ~66% vs C++.
 
-#### P45.1 — Catalog Serialization to Disk (2 SP)
+#### P45.1 — Catalog Serialization to Disk (2 SP) ✅ DONE
 
 **Goal:** Serialize catalog ke disk agar DDL recovery mungkin cross-process.
 
-| Task | Description | Files |
-|------|-------------|-------|
-| P45.1a | Implement `Catalog::serialize()` / `Catalog::deserialize()` — JSON atau bincode | `akar-catalog/src/lib.rs` |
-| P45.1b | Save catalog saat checkpoint, load saat `Database::open()` | `akar-storage/src/checkpoint.rs`, `akar-main/src/database/mod.rs` |
-| P45.1c | Update WAL replay untuk use deserialized catalog (hilangkan DDL skip) | `akar-storage/src/lib.rs:603-613` |
-| P45.1d | Add cross-process DDL recovery test | test file |
+| Task | Description | Files | Status |
+|------|-------------|-------|--------|
+| P45.1a | Implement `Catalog::serialize()` / `Catalog::deserialize()` — JSON | `akar-catalog/src/lib.rs` | ✅ `serialize_to_json` / `deserialize_from_json` / `save_to_path` / `load_from_path` (atomic tmp+rename); serde derives on all catalog types + `CompressionType` |
+| P45.1b | Save catalog setelah DDL, load saat `Database::new()` | `akar-main/src/database.rs` | ✅ `persist_catalog()` dipanggil setelah setiap DDL (query.rs execute + execute_query_inner + FOREACH); load + `restore_storage_from_catalog()` di `Database::new` |
+| P45.1c | Restore storage tables (node/rel + ART index) dengan table ID yang sama | `akar-storage/src/table.rs`, `akar-storage/src/lib.rs` | ✅ `create_node_table_with_id` / `create_rel_table_with_id` + `bump_next_table_id`; `restore_node_table` / `restore_rel_table` |
+| P45.1d | Add cross-process DDL recovery test | `test_catalog_persistence.rs`, `crash_sim_child.rs` | ✅ 6 tests: schema/sequence/drop survive restart, backward-compat, in-memory skip, true cross-process (child verifies parent's table + persists new table) |
 
 **Acceptance criteria:**
 - DDL (CREATE TABLE, CREATE REL TABLE) survives database restart ✅
 - Cross-process test: create table in process A, open in process B → table exists ✅
 - Backward compatible — databases without catalog file still work ✅
+
+**Notes:**
+- Design decision: catalog file (`catalog.json`) adalah source of truth untuk DDL; WAL hanya membawa DML. DDL records tetap di-skip saat WAL replay (konsisten dengan doc comment `recover()` yang sudah mendesain ini).
+- Runtime sequence state (`curr_val`) tidak ikut terpersist (hanya schema); replay dari WAL = future work.
+- Data rows in-memory only — WAL DML di-replay ke restored tables (LocalWALData bulk records masih di-skip saat recovery).
 
 #### P45.2 — crates.io Publishing Preparation (2 SP)
 
@@ -373,7 +378,7 @@ graph TD
 | 36 | P42 large-scale benchmark scope | 100k mandatory, 1M optional (scan + aggregate only) | 100k tests multi-page storage; 1M uses dedicated OnceLock DB to avoid setup timeout |
 | 37 | P42 benchmark CI approach | criterion + GitHub Actions comment | Built-in comparison support, immediate PR feedback |
 | 38 | Audit fix scope | 30/31 issues — all 5 critical fixed + row-level OCC, quick wins + dead code + lock unwrap + float assertions + unified catalog + feature-gated CI | Prioritized safety fixes |
-| 39 | P41 catalog limitation | Catalog is in-memory only — DDL never serialized to disk | Cross-process tests verify DB opens without panic; in-process tests verify full data recovery |
+| 39 | P41 catalog limitation | ~~Catalog is in-memory only~~ → **SUPERSEDED by P45.1 (2026-07-31)**: catalog serialized to `catalog.json` after every DDL; schema survives restarts; storage tables restored with same table IDs | P41-era cross-process tests verified open-without-panic; P45.1 adds real DDL recovery (cross-process verified) |
 | 40 | P41 crash sim design | CrashSimulator helper spawns child process, kills at various points | True OS-level process kill (TerminateProcess/SIGKILL) |
 | 41 | P41 SQL limitations | No `BOOLEAN` type (use `BOOL`), no `IF NOT EXISTS` in CREATE NODE TABLE | Parser limitations discovered during implementation |
 | 42 | P41 count verification | `RETURN COUNT(p)` unreliable in some contexts — use `RETURN p.name` + row count | Ensures test assertions are reliable |
@@ -391,7 +396,7 @@ graph TD
 | 54 | P44 sort optimization | `sort_in_place` indices without `Vec<Value>` collect | Eliminates one allocation + copy in sort pipeline |
 | 55 | P44 GROUP BY hasher | `ahash`/`foldhash` for integer composite keys | Faster than default SipHash for known-key workloads |
 | 56 | P44 plan caching | LRU cache at Connection level, key = normalized query | Simple implementation; avoids re-planning identical queries |
-| 57 | P45 catalog serialization | JSON or bincode, save at checkpoint | JSON for debuggability; bincode for performance (choose one) |
+| 57 | P45 catalog serialization | **JSON** via serde, atomic tmp+rename, written after every DDL (not only at checkpoint) | Chosen JSON for debuggability; catalog write is small & infrequent (DDL only); no perf concern |
 | 58 | P45 crates.io scope | All 16+ non-internal crates | Full ecosystem availability; defer NPM/WASM publishing |
 | 59 | P45 operator parity scope | Analysis first, implement based on priority | Not all 67 C++ operators are needed for 95% query coverage |
 | 60 | Sprint 13 benchmark acceptance | Deferred to CI / healthy machine | Criterion harness hangs on this machine (pre-change binary hangs identically → environment, not regression); `cargo test --workspace` remains the gate |
