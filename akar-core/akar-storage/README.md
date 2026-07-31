@@ -1,4 +1,4 @@
-# Kuzu Storage
+# Akar Storage
 
 Page-based columnar storage engine with buffer management, WAL, compression, indexing, and data readers.
 
@@ -20,7 +20,7 @@ Page-based columnar storage engine with buffer management, WAL, compression, ind
 
 **CSV Reader:** Full CSV parser with header detection, custom delimiter/quote/escape, type coercion for all 28+ Value variants, error reporting with line numbers.
 
-**Parquet Reader:** Parquet file reader using Apache Arrow/Parquet crates (v53). Row group reading, Arrow→Kuzu type mapping (Int64→INT64, Utf8→STRING, etc.).
+**Parquet Reader:** Parquet file reader using Apache Arrow/Parquet crates (v53). Row group reading, Arrow→Akar type mapping (Int64→INT64, Utf8→STRING, etc.).
 
 **Index:** Generic hash index with collision resolution.
 

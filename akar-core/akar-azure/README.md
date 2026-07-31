@@ -1,4 +1,4 @@
-# Kuzu Azure Blob Storage Extension
+# Akar Azure Blob Storage Extension
 
 Azure Blob Storage integration via DuckDB delegation using `DuckDbAttachHelper`.
 

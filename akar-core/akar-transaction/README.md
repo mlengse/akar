@@ -1,4 +1,4 @@
-# Kuzu Transaction Manager
+# Akar Transaction Manager
 
 MVCC-based serializable ACID transaction manager.
 

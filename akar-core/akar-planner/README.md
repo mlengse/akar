@@ -1,4 +1,4 @@
-# Kuzu Planner
+# Akar Planner
 
 Logical query plan construction from bound statements.
 

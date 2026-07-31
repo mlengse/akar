@@ -1,5 +1,5 @@
 @echo off
-echo ===== Kuzu Rust Environment Check =====
+echo ===== Akar Rust Environment Check =====
 echo.
 echo --- Rust ---
 where rustc 2>nul
@@ -26,7 +26,7 @@ echo.
 echo --- Build Commands ---
 echo   cargo build --target x86_64-pc-windows-gnu
 echo   cargo test --target x86_64-pc-windows-gnu --workspace
-echo   cargo run --bin kuzu-cli
+echo   cargo run --bin akar-cli
 echo.
 echo --- Rust Targets ---
 rustup target list --installed

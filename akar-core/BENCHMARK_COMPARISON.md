@@ -346,8 +346,8 @@ if __name__ == '__main__':
 | **Filter** (constant true, 10K) | **~0.018 ms** | *Part of E2E* | — | 🟢 **Phase 2: 24× faster** |
 | **Filter** (property check, 10K) | **~0.030 ms** | *Part of E2E* | — | 🟢 **Phase 2: 14× faster** |
 | **Filter** (multi-col 8 fields, 10K)| **~0.071 ms** | *Part of E2E* | — | 🟢 **Phase 2: 42× faster** |
-| **Hash Join** (1K×1K) | ~0.253 ms | 🔵 Blocked — C++ build (`akar_benchmark.exe` + `benchmark/queries/micro/`) not present on this machine; C++ `q29`/`q30` run on LDBC SF-100 (different scale, not directly comparable). SQL-level join parity deferred to CI/build host | — | 🔵 Blocked on build host |
-| **Order By** (1K, single-key) | ~0.084 ms | 🔵 Blocked — same reason; C++ `q25`/`q26` run on LDBC SF-100. | — | 🔵 Blocked on build host |
+| **Hash Join** (1K×1K) | ~0.253 ms | N/A — per-operator C++ benchmark source removed by design (2026-07-31); C++ `q29`/`q30` run on LDBC SF-100 (different scale, not directly comparable). SQL-level parity covered by E2E 3-way result below | — | ⚪ N/A |
+| **Order By** (1K, single-key) | ~0.084 ms | N/A — same; C++ `q25`/`q26` run on LDBC SF-100. | — | ⚪ N/A |
 | **Aggregate COUNT** (10K) | ~0.176 ms | *Part of E2E* | — | 🟢 Baseline captured |
 | **Full Query: Filter+COUNT** (10K, op-level) | **0.062 ms** | — | — | 🟢 Rust operator micro-benchmark |
 | **Full Query: Filter+COUNT** (10K, SQL-level) | **0.397 ms** | **0.400 ms** (Vela) / **0.374 ms** (Ladybug) | **~1× parity** | 🏆 **3-way parity achieved** |

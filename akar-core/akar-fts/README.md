@@ -1,6 +1,6 @@
-# Kuzu Full-Text Search Extension
+# Akar Full-Text Search Extension
 
-Full-text search capabilities for the Kuzu database engine.
+Full-text search capabilities for the Akar database engine.
 
 **Components:**
 - `Stemmer` — English Porter stemmer

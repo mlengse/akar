@@ -1,6 +1,6 @@
-# Kuzu Common
+# Akar Common
 
-Core type system and utilities for the Kuzu database engine.
+Core type system and utilities for the Akar database engine.
 
 **Types:** `LogicalTypeID` (37 variants including Decimal, UUID, struct types), `PhysicalTypeID` (17 variants), `Value` (28 variants: Null, Bool, Int8–Int64, UInt8–UInt64, Int128, Float, Double, String, Blob, Date, Timestamp variants, Interval, InternalID, List, Map, Struct), date/time types.
 

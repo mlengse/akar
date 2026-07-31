@@ -1,4 +1,4 @@
-# Kuzu Graph Algorithm Extension
+# Akar Graph Algorithm Extension
 
 Graph algorithm functions callable from Cypher queries.
 
@@ -13,7 +13,7 @@ Graph algorithm functions callable from Cypher queries.
 
 **Usage pattern:**
 ```cypher
-LOAD EXTENSION '.../libalgo.kuzu_extension';
+LOAD EXTENSION '.../libalgo.Akar_extension';
 CALL PROJECT_GRAPH('g', ['Person'], ['knows']);
 CALL page_rank('g') RETURN node.id, rank ORDER BY rank DESC LIMIT 10;
 CALL DROP_PROJECTED_GRAPH('g');

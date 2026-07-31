@@ -881,6 +881,17 @@ impl TableCatalog {
         table
     }
 
+    /// Recreate a node table at a specific table ID (used when restoring a
+    /// persisted catalog during recovery). Advances `next_table_id` so that
+    /// subsequent auto-assigned IDs never collide with restored ones.
+    pub fn create_node_table_with_id(&self, table_id: u64, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
+        self.bump_next_table_id(table_id);
+        let table = NodeTable::new(table_id, name.clone(), columns);
+        self.node_name_to_id.insert(name, table_id);
+        self.node_tables.insert(table_id, table.clone());
+        table
+    }
+
     pub fn create_rel_table(
         &self,
         name: String,
@@ -893,6 +904,41 @@ impl TableCatalog {
         self.rel_name_to_id.insert(name, table_id);
         self.rel_tables.insert(table_id, table.clone());
         table
+    }
+
+    /// Recreate a rel table at a specific table ID (used when restoring a
+    /// persisted catalog during recovery). Advances `next_table_id` so that
+    /// subsequent auto-assigned IDs never collide with restored ones.
+    pub fn create_rel_table_with_id(
+        &self,
+        table_id: u64,
+        name: String,
+        src_table_id: u64,
+        dst_table_id: u64,
+        columns: Vec<ColumnDefinition>,
+    ) -> RelTable {
+        self.bump_next_table_id(table_id);
+        let table = RelTable::new(table_id, name.clone(), src_table_id, dst_table_id, columns);
+        self.rel_name_to_id.insert(name, table_id);
+        self.rel_tables.insert(table_id, table.clone());
+        table
+    }
+
+    /// Advance `next_table_id` to be strictly greater than `table_id` so
+    /// restored IDs are never re-issued by `create_node_table`/`create_rel_table`.
+    fn bump_next_table_id(&self, table_id: u64) {
+        let mut next = self.next_table_id.load(std::sync::atomic::Ordering::SeqCst);
+        while next <= table_id {
+            match self.next_table_id.compare_exchange(
+                next,
+                table_id + 1,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(current) => next = current,
+            }
+        }
     }
 
     pub fn get_node_table(&self, table_id: u64) -> Option<dashmap::mapref::one::Ref<'_, u64, NodeTable>> {

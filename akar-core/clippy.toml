@@ -1,4 +1,4 @@
-# Clippy configuration — Kuzu Core Workspace
+# Clippy configuration — Akar Core Workspace
 #
 # Relaxed pedantic settings for a large workspace port.
 # Individual crates may further restrict via #![warn(...)] attributes.

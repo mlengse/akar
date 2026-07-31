@@ -1,4 +1,4 @@
-# Migrating to Kuzu Rust (v1.0.0)
+# Migrating to Akar Rust (v1.0.0)
 
 This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-core`.
 

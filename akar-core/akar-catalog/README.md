@@ -1,4 +1,4 @@
-# Kuzu Catalog
+# Akar Catalog
 
 System catalog managing schema metadata — node tables, relationship tables, and their columns.
 

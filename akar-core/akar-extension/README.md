@@ -1,4 +1,4 @@
-# Kuzu Extension Framework
+# Akar Extension Framework
 
 Extension trait (CustomScalar/CustomTable) and registry for loading and dispatching third-party extensions.
 

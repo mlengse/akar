@@ -54,8 +54,8 @@ cargo run --bin akar-cli -- /path/to/db
 ### Example: Cypher via Rust API
 
 ```rust
-use kuzu_main::database::{Database, SystemConfig};
-use kuzu_main::connection::Connection;
+use akar_main::database::{Database, SystemConfig};
+use akar_main::connection::Connection;
 
 let db = Database::new("/path/to/db", SystemConfig::default())?;
 let conn = Connection::new(&db);
@@ -161,7 +161,7 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 | `akar-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `akar-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
 | `akar-neo4j` | 12 | ✅ | Bolt protocol integration |
-| `akar-wasm` | - | ✅ | KuzuDatabase, KuzuConnection, PreparedStatement wrappers untuk NodeJS |
+| `akar-wasm` | - | ✅ | AkarDatabase, AkarConnection, AkarPreparedStatement wrappers untuk NodeJS |
 | Extension crates | 6 | ✅ | Azure(1), Delta(1), Iceberg(1), Postgres(1), SQLite(1), Unity(1) |
 
 ## Storage Engine Features
@@ -214,7 +214,7 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 |--------|--------|--------|
 | CSV | `CsvReader` (csv crate) | ✅ Header detection, custom delimiter/quote/escape, type coercion, error reporting |
 | TSV | `CsvReader` (tab delimiter) | ✅ |
-| Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Kuzu type mapping, projection pushdown |
+| Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Akar type mapping, projection pushdown |
 | HTTP(S)/S3 | `akar-httpfs` extension | ✅ |
 
 ## Optimizer Passes — 21 Total (14 Flat + 7 Tree)

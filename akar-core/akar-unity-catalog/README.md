@@ -1,4 +1,4 @@
-# Kuzu Unity Catalog Extension
+# Akar Unity Catalog Extension
 
 Unity Catalog integration via DuckDB delegation using `DuckDbAttachHelper`.
 

@@ -1,4 +1,4 @@
-# Kuzu SQLite Extension
+# Akar SQLite Extension
 
 SQLite integration using native `rusqlite` crate (bundled).
 

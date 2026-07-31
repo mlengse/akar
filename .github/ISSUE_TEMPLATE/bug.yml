@@ -10,8 +10,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Kuzu version
-      description: What version of Kuzu are you using?
+      label: Akar version
+      description: What version of Akar are you using?
       placeholder: v0.4.0
     validations:
       required: false
