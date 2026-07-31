@@ -1,3 +1,4 @@
+use super::plan_cache::{normalize_query, CachedPlan};
 use super::Connection;
 use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
@@ -8,6 +9,7 @@ use akar_common::types::Value;
 use akar_optimizer::Optimizer;
 use akar_parser::parse;
 use akar_planner::QueryPlanner;
+use akar_planner::logical_operator::LogicalOperator;
 use akar_processor::QueryProcessor;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,6 +57,29 @@ impl Connection {
             )));
         }
 
+        // Normalize the query into a stable cache key
+        let normalized = normalize_query(trimmed);
+
+        // Try the plan cache first — skips parse/bind/plan/optimize entirely.
+        // Entries are only valid if the catalog hasn't changed since build.
+        let catalog_version = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Catalog lock error: {e}"))?
+            .version();
+
+        {
+            let mut cache = self.plan_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            if let Some(cached) = cache.get(&normalized).filter(|c| c.catalog_version == catalog_version) {
+                let bound = cached.bound.clone();
+                let plan = cached.plan.clone();
+                drop(cache);
+                return self.execute_with_plan(&bound, Some(&plan));
+            }
+        }
+
+        // Cache miss: full pipeline
         // 1. Parse
         let statement = parse(trimmed).map_err(|e| format!("Parse error: {e}"))?;
 
@@ -62,19 +87,49 @@ impl Connection {
         let binder = Binder::new(self.database.catalog.clone());
         let bound = binder.bind(statement).map_err(|e| format!("Bind error: {e}"))?;
 
-        // 3. Determine if this is a write operation and begin a transaction if so.
-        //    Only wrap in a transaction when concurrent_writes is enabled.
-        //    In single-writer mode, the old direct-write path is kept for
-        //    backward compatibility (no WAL commit records for pure DDL).
+        // 3. Build (and cache) the optimized plan for plan-cachable statements.
+        //    DDL and other non-query statements are routed inside
+        //    execute_query_inner and never cached.
+        let plan_opt: Option<Vec<LogicalOperator>> = if is_plan_cachable(&bound) {
+            let plan = self.build_optimized_plan(&bound)?;
+            let mut cache = self.plan_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            cache.insert(
+                normalized,
+                CachedPlan {
+                    bound: bound.clone(),
+                    plan: plan.clone(),
+                    catalog_version,
+                },
+            );
+            Some(plan)
+        } else {
+            None
+        };
+
+        self.execute_with_plan(&bound, plan_opt.as_ref())
+    }
+
+    /// Shared execution path for `query()`: wraps write statements in an OCC
+    /// transaction (when concurrent writes are enabled) and delegates to
+    /// `execute_query_inner`, committing or rolling back as appropriate.
+    fn execute_with_plan(
+        &self,
+        bound: &BoundStatement,
+        plan: Option<&Vec<LogicalOperator>>,
+    ) -> Result<QueryResult, String> {
+        // Determine if this is a write operation and begin a transaction if so.
+        // Only wrap in a transaction when concurrent_writes is enabled.
+        // In single-writer mode, the old direct-write path is kept for
+        // backward compatibility (no WAL commit records for pure DDL).
         let concurrent_mode = self.database.transaction_manager.allow_concurrent_writes();
-        let is_write = concurrent_mode && Connection::is_write_statement(&bound);
+        let is_write = concurrent_mode && Connection::is_write_statement(bound);
         let mut txn_opt: Option<akar_transaction::Transaction> =
             if is_write { Some(self.begin_write_txn()?) } else { None };
 
-        // 4. Execute the query within a transaction scope
-        let query_result = self.execute_query_inner(&bound, txn_opt.as_mut());
+        // Execute the query within a transaction scope
+        let query_result = self.execute_query_inner(bound, txn_opt.as_mut(), plan);
 
-        // 5. Commit or rollback based on result
+        // Commit or rollback based on result
         match (is_write, &query_result) {
             (true, Ok(_)) => {
                 if let Some(ref mut txn) = txn_opt {
@@ -99,11 +154,24 @@ impl Connection {
         query_result
     }
 
+    /// Run planner + optimizer to produce the optimized logical plan.
+    fn build_optimized_plan(&self, bound: &BoundStatement) -> Result<Vec<LogicalOperator>, String> {
+        let planner = QueryPlanner::new();
+        let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
+        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
+        Ok(optimizer.optimize(logical_plan))
+    }
+
     /// Inner query execution (after parsing and binding, before commit/rollback).
+    ///
+    /// `cached_plan` carries a pre-built optimized plan from the plan cache;
+    /// when `None`, the plan is built here (DDL and non-query statements
+    /// return before this point).
     pub(crate) fn execute_query_inner(
         &self,
         bound: &BoundStatement,
         txn_opt: Option<&mut akar_transaction::Transaction>,
+        cached_plan: Option<&Vec<LogicalOperator>>,
     ) -> Result<QueryResult, String> {
         // Route: DDL vs DML (handle_ddl returns Some for DDL, None for DML)
         if let Some(result) = self.handle_ddl(bound)? {
@@ -124,17 +192,15 @@ impl Connection {
             }
         }
 
-        // Plan
-        let planner = QueryPlanner::new();
-        let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
+        // Plan (from cache when available, otherwise build now)
+        let optimized_plan: Vec<LogicalOperator> = match cached_plan {
+            Some(plan) => plan.clone(),
+            None => self.build_optimized_plan(bound)?,
+        };
 
-        if logical_plan.is_empty() {
+        if optimized_plan.is_empty() {
             return Ok(QueryResult::success_message("Query executed (no result)".into()));
         }
-
-        // Optimize
-        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
-        let optimized_plan = optimizer.optimize(logical_plan);
 
         // Capture MVCC snapshot for read isolation.
         // For write transactions, use the txn's snapshot_ts.
@@ -537,4 +603,18 @@ impl Connection {
         tracing::debug!("Sync checkpoint completed");
         Ok(())
     }
+}
+
+/// Whether a bound statement produces a query plan that is safe to cache.
+/// Only query-shaped statements are eligible — DDL and other statement types
+/// are routed inside `execute_query_inner` and must not be cached (their plans
+/// would be stale the moment the catalog changes).
+fn is_plan_cachable(bound: &BoundStatement) -> bool {
+    matches!(
+        bound,
+        BoundStatement::BoundQuery(_)
+            | BoundStatement::BoundUnion(_)
+            | BoundStatement::BoundMerge(_)
+            | BoundStatement::BoundCreateDml(_)
+    )
 }

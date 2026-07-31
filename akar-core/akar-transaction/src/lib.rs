@@ -1095,6 +1095,53 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_row_level_no_conflict_different_rows() {
+        let config = TransactionManagerConfig {
+            concurrent_writes: true,
+        };
+        let tm = TransactionManager::new_with_config(config);
+        let mut tx1 = tm.begin_write().unwrap();
+        let mut tx2 = tm.begin_write().unwrap();
+
+        // Two concurrent inserts with different primary keys map to
+        // different internal row IDs — no OCC conflict (row-level, not table-level).
+        tm.record_write(tx1.transaction_id, 1, 100);
+        tm.record_write(tx2.transaction_id, 1, 101);
+
+        assert!(matches!(tm.commit(&mut tx1), Ok(CommitResult::Committed { .. })));
+        assert!(matches!(tm.commit(&mut tx2), Ok(CommitResult::Committed { .. })));
+    }
+
+    #[test]
+    fn test_insert_same_primary_key_write_conflict() {
+        let config = TransactionManagerConfig {
+            concurrent_writes: true,
+        };
+        let tm = TransactionManager::new_with_config(config);
+        let mut tx1 = tm.begin_write().unwrap();
+        let mut tx2 = tm.begin_write().unwrap();
+
+        // Both transactions insert a node with the SAME primary key value,
+        // which resolves to the same internal row ID. The second commit
+        // must produce a WriteConflict.
+        tm.record_write(tx1.transaction_id, 1, 100);
+        tm.record_write(tx2.transaction_id, 1, 100);
+
+        let result = tm.commit(&mut tx1);
+        assert!(result.is_err(), "Expected WriteConflict but got {:?}", result);
+        match result.unwrap_err() {
+            TransactionError::WriteConflict { table_id, row_id, conflicting_txn } => {
+                assert_eq!(table_id, 1);
+                assert_eq!(row_id, 100);
+                assert_eq!(conflicting_txn, tx2.transaction_id);
+            }
+            other => panic!("Expected WriteConflict, got {:?}", other),
+        }
+
+        assert!(matches!(tm.commit(&mut tx2), Ok(CommitResult::Committed { .. })));
+    }
+
+    #[test]
     fn test_row_write_with_table_lock() {
         let config = TransactionManagerConfig {
             concurrent_writes: true,

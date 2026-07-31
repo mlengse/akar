@@ -5,6 +5,58 @@ use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::Value;
 use akar_common::vector::{DataChunk, ValueVector};
 
+// ==================== ChunkAccessor ====================
+
+/// Provides random-access by global row index across multiple DataChunks.
+/// Eliminates the need to pre-collect all values into Vec<Vec<(Value, bool)>>.
+struct ChunkAccessor<'a> {
+    chunks: &'a [DataChunk],
+    offsets: Vec<usize>,
+    num_fields: usize,
+}
+
+impl<'a> ChunkAccessor<'a> {
+    fn new(chunks: &'a [DataChunk]) -> Self {
+        let mut offsets = Vec::with_capacity(chunks.len());
+        let mut cum = 0usize;
+        for c in chunks {
+            offsets.push(cum);
+            cum += c.size;
+        }
+        let num_fields = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+        Self { chunks, offsets, num_fields }
+    }
+
+    fn total_rows(&self) -> usize {
+        self.offsets.last().map(|&o| o + self.chunks.last().unwrap().size).unwrap_or(0)
+    }
+
+    fn resolve(&self, global_row: usize) -> (usize, usize) {
+        for (ci, chunk) in self.chunks.iter().enumerate() {
+            let offset = self.offsets[ci];
+            if global_row < offset + chunk.size {
+                return (ci, global_row - offset);
+            }
+        }
+        (self.chunks.len() - 1, 0)
+    }
+
+    fn get_value(&self, col: usize, global_row: usize) -> Value {
+        let (ci, local) = self.resolve(global_row);
+        self.chunks[ci].get_value(col, local).unwrap_or(Value::Null)
+    }
+
+    fn is_null(&self, col: usize, global_row: usize) -> bool {
+        let (ci, local) = self.resolve(global_row);
+        self.chunks[ci].is_null(col, local)
+    }
+
+    fn physical_type(&self, col: usize, global_row: usize) -> akar_common::types::PhysicalTypeID {
+        let (ci, local) = self.resolve(global_row);
+        self.chunks[ci].get_value(col, local).map(|v| v.physical_type()).unwrap_or(akar_common::types::PhysicalTypeID::Int64)
+    }
+}
+
 // ==================== OrderBy ====================
 
 pub struct PhysicalOrderBy {
@@ -21,31 +73,28 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             return Ok(Vec::new());
         }
 
-        let total_rows: usize = input.iter().map(|c| c.size).sum();
+        let accessor = ChunkAccessor::new(&input);
+        let total_rows = accessor.total_rows();
         if total_rows == 0 {
             return Ok(input);
         }
 
-        // Collect all values per column as Value (supports all types)
-        let num_fields = input[0].num_fields();
-        let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
-
-        for chunk in &input {
-            for row in 0..chunk.size {
-                for col in 0..num_fields {
-                    if let Some(field) = chunk.fields.get(col) {
-                        let val = chunk.get_value(col, row).unwrap_or(Value::Null);
-                        let is_null = field.is_null(row);
-                        all_values[col].push((val, is_null));
-                    }
-                }
-            }
-        }
+        let num_fields = accessor.num_fields;
+        let field_names = input[0].field_names.clone();
 
         // Use BlockMergeSorter for large data, simple sort for small
         let block_size = 10000usize;
         let indices = if total_rows > block_size && !self.sort_keys.is_empty() {
             let sorter = BlockMergeSorter::new(block_size, self.sort_keys.clone());
+            // Multi-block path still needs collected key values for k-way merge
+            let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
+            for global_row in 0..total_rows {
+                for col in 0..num_fields {
+                    let val = accessor.get_value(col, global_row);
+                    let is_null = accessor.is_null(col, global_row);
+                    all_values[col].push((val, is_null));
+                }
+            }
             sorter.sort(&all_values, num_fields)
         } else {
             let mut indices: Vec<usize> = (0..total_rows).collect();
@@ -56,7 +105,9 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
                         if col >= num_fields {
                             continue;
                         }
-                        let cmp = value_cmp(&all_values[col][*a].0, &all_values[col][*b].0);
+                        let va = accessor.get_value(col, *a);
+                        let vb = accessor.get_value(col, *b);
+                        let cmp = value_cmp(&va, &vb);
                         if cmp != std::cmp::Ordering::Equal {
                             return if ascending { cmp } else { cmp.reverse() };
                         }
@@ -67,9 +118,6 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             indices
         };
 
-        // Capture field_names from input chunks for output propagation
-        let field_names = input[0].field_names.clone();
-
         // Build sorted output chunks (up to 100 rows per chunk)
         let chunk_size = 100usize;
         let mut output = Vec::new();
@@ -78,16 +126,15 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             let size = chunk_end - chunk_start;
             let mut fields = Vec::new();
             for col in 0..num_fields {
-                let first_val = &all_values[col][indices[chunk_start]].0;
-                let phys_type = first_val.physical_type();
+                let phys_type = accessor.physical_type(col, indices[chunk_start]);
                 let mut v = ValueVector::new(phys_type, size);
                 v.resize(size);
                 for (out_idx, &src_idx) in indices[chunk_start..chunk_end].iter().enumerate() {
-                    let (ref val, is_null) = all_values[col][src_idx];
-                    if is_null || matches!(val, Value::Null) {
+                    if accessor.is_null(col, src_idx) {
                         v.set_null(out_idx, true);
                     } else {
-                        store_value_in_vector(&mut v, out_idx, val);
+                        let val = accessor.get_value(col, src_idx);
+                        store_value_in_vector(&mut v, out_idx, &val);
                     }
                 }
                 fields.push(v);

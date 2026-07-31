@@ -195,7 +195,7 @@ impl Connection {
             BoundStatement::BoundCopyTo(c) => {
                 // Execute the inner query
                 let inner_bound = BoundStatement::BoundQuery(c.query.clone());
-                let result = self.execute_query_inner(&inner_bound, None)?;
+                let result = self.execute_query_inner(&inner_bound, None, None)?;
 
                 // Write results to file
                 let path = std::path::Path::new(&c.file_path);

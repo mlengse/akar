@@ -137,12 +137,3 @@ pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) 
     }
 }
 
-/// Fast hash using ahash — ~3-5× faster than SipHash for integer keys.
-/// Used in the hot path of JoinHashTable build/probe.
-#[inline(always)]
-pub(crate) fn value_hash_fast(val: &Value) -> u64 {
-    use std::hash::Hasher;
-    let mut hasher = ahash::AHasher::default();
-    hash_value_into(val, &mut hasher);
-    hasher.finish()
-}

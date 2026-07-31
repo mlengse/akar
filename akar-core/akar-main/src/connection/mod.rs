@@ -17,6 +17,7 @@
 pub mod copy;
 pub mod ddl;
 pub mod dml;
+pub mod plan_cache;
 pub mod query;
 pub mod standalone_call;
 pub mod substitute;
@@ -25,8 +26,12 @@ pub mod utils;
 
 use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;
+use plan_cache::{CachedPlan, PlanCache};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+/// Default capacity for the query plan LRU cache.
+const PLAN_CACHE_CAPACITY: usize = 100;
 
 /// Per-transaction resources held during an active write transaction.
 pub(crate) struct TxnResources {
@@ -64,6 +69,10 @@ pub struct Connection {
     pub(crate) database: Arc<Database>,
     /// Cache of prepared statements (query → PreparedStatement).
     pub(crate) statement_cache: Mutex<HashMap<String, PreparedStatement>>,
+    /// LRU cache of optimized query plans keyed by normalized query string.
+    /// Entries are validated against the catalog version on lookup, so DDL
+    /// (via any connection) invalidates them implicitly.
+    pub(crate) plan_cache: Mutex<PlanCache<CachedPlan>>,
     /// Per-transaction resources keyed by transaction ID.
     /// Set up when `begin_write()` is called, cleaned up on commit/rollback.
     pub(crate) txn_resources: Mutex<HashMap<u64, TxnResources>>,
@@ -79,13 +88,17 @@ impl Connection {
         Self {
             database: database.clone(),
             statement_cache: Mutex::new(HashMap::new()),
+            plan_cache: Mutex::new(PlanCache::new(PLAN_CACHE_CAPACITY)),
             txn_resources: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Clear the prepared statement cache.
+    /// Clear the prepared statement and plan caches.
     pub fn clear_cache(&self) {
         if let Ok(mut cache) = self.statement_cache.lock() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.plan_cache.lock() {
             cache.clear();
         }
     }
@@ -93,5 +106,10 @@ impl Connection {
     /// Number of cached prepared statements.
     pub fn cache_size(&self) -> usize {
         self.statement_cache.lock().map(|c| c.len()).unwrap_or(0)
+    }
+
+    /// Number of cached query plans.
+    pub fn plan_cache_size(&self) -> usize {
+        self.plan_cache.lock().map(|c| c.len()).unwrap_or(0)
     }
 }

@@ -359,47 +359,99 @@ impl AggregateHashTable {
     }
 }
 
-/// Hash group key columns directly without allocating Vec<Value> or Value::List.
-/// For single column, computes hash directly from the value. For multiple columns,
-/// hashes each column value sequentially through the same hasher.
+/// Hash group key columns directly from Arrow arrays without creating intermediate `Value` objects.
+/// For strings, avoids the `to_string()` allocation that `get_value()` would incur.
+/// For primitives, avoids `Value` enum dispatch overhead.
 pub fn hash_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> u64 {
     use std::hash::Hasher;
+    use std::hash::Hash;
     let mut hasher = ahash::AHasher::default();
     for &gc in group_cols {
-        let val = chunk
-            .fields
-            .get(gc as usize)
-            .map(|_| chunk.get_value(gc as usize, row))
-            .unwrap_or(Some(Value::Null))
-            .unwrap_or(Value::Null);
-        hash_value_into(&val, &mut hasher);
+        let col = gc as usize;
+        if col >= chunk.fields.len() {
+            0u8.hash(&mut hasher);
+            continue;
+        }
+        if chunk.is_null(col, row) {
+            0u8.hash(&mut hasher);
+            continue;
+        }
+        match chunk.field_types[col] {
+            PhysicalTypeID::Int64 => {
+                let v = chunk.get_i64(col, row).unwrap_or(0);
+                v.hash(&mut hasher);
+            }
+            PhysicalTypeID::Int32 => {
+                let v = chunk.get_i32(col, row).unwrap_or(0);
+                v.hash(&mut hasher);
+            }
+            PhysicalTypeID::Double => {
+                let v = chunk.get_f64(col, row).unwrap_or(0.0);
+                v.to_bits().hash(&mut hasher);
+            }
+            PhysicalTypeID::Bool => {
+                let v = chunk.get_bool(col, row).unwrap_or(false);
+                v.hash(&mut hasher);
+            }
+            PhysicalTypeID::String => {
+                if let Some(s) = chunk.get_string(col, row) {
+                    s.hash(&mut hasher);
+                }
+            }
+            _ => {
+                // Fallback: create Value for types we don't handle directly
+                if let Some(val) = chunk.get_value(col, row) {
+                    hash_value_into(&val, &mut hasher);
+                }
+            }
+        }
     }
     hasher.finish()
 }
 
 /// Check if a stored group key matches the current row's group column values.
-/// Avoids creating Value::List for the comparison.
+/// Avoids creating Value::List or intermediate Value objects for comparison.
 pub fn keys_equal(stored: &Value, chunk: &DataChunk, group_cols: &[u32], row: usize) -> bool {
     if group_cols.len() == 1 {
         let col = group_cols[0] as usize;
-        let val = chunk
-            .fields
-            .get(col)
-            .map(|_| chunk.get_value(col, row))
-            .unwrap_or(Some(Value::Null))
-            .unwrap_or(Value::Null);
-        return *stored == val;
+        if col >= chunk.fields.len() {
+            return *stored == Value::Null;
+        }
+        if chunk.is_null(col, row) {
+            return *stored == Value::Null;
+        }
+        return match stored {
+            Value::Int64(v) => chunk.get_i64(col, row).map_or(false, |x| x == *v),
+            Value::Int32(v) => chunk.get_i32(col, row).map_or(false, |x| x == *v),
+            Value::Double(v) => chunk.get_f64(col, row).map_or(false, |x| x == *v),
+            Value::Bool(v) => chunk.get_bool(col, row).map_or(false, |x| x == *v),
+            Value::String(v) => chunk.get_string(col, row).map_or(false, |x| x == *v),
+            _ => {
+                let val = chunk.get_value(col, row).unwrap_or(Value::Null);
+                *stored == val
+            }
+        };
     }
     match stored {
         Value::List(vals) if vals.len() == group_cols.len() => vals.iter().enumerate().all(|(i, v)| {
             let col = group_cols[i] as usize;
-            let val = chunk
-                .fields
-                .get(col)
-                .map(|_| chunk.get_value(col, row))
-                .unwrap_or(Some(Value::Null))
-                .unwrap_or(Value::Null);
-            *v == val
+            if col >= chunk.fields.len() {
+                return *v == Value::Null;
+            }
+            if chunk.is_null(col, row) {
+                return *v == Value::Null;
+            }
+            match v {
+                Value::Int64(expected) => chunk.get_i64(col, row).map_or(false, |x| x == *expected),
+                Value::Int32(expected) => chunk.get_i32(col, row).map_or(false, |x| x == *expected),
+                Value::Double(expected) => chunk.get_f64(col, row).map_or(false, |x| x == *expected),
+                Value::Bool(expected) => chunk.get_bool(col, row).map_or(false, |x| x == *expected),
+                Value::String(expected) => chunk.get_string(col, row).map_or(false, |x| x == *expected),
+                _ => {
+                    let val = chunk.get_value(col, row).unwrap_or(Value::Null);
+                    *v == val
+                }
+            }
         }),
         _ => false,
     }

@@ -119,8 +119,9 @@ fn bench_constant_true(c: &mut Criterion) {
     group.finish();
 }
 
-/// Variable reference — old vs new. Both paths share `from_legacy` for variable
-/// extraction, so this benchmarks the evaluate dispatch overhead only.
+/// Variable reference — old vs new. The new Arrow path reads the chunk field
+/// directly (an Arc clone of the ArrayRef), so this measures the dispatch
+/// overhead eliminated by native Arrow arrays in DataChunk.
 fn bench_variable(c: &mut Criterion) {
     let eval = ExpressionEvaluator::new(make_registry());
     let expr = Expression::Variable("x".into());

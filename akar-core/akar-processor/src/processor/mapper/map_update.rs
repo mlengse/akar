@@ -245,13 +245,18 @@ fn record_delete_writes(table_id: u64, result: &[DataChunk], ctx: &mut Execution
 }
 
 /// Record rows written by an INSERT operation for OCC conflict detection.
-/// For inserts, we use row_id = 0 as a sentinel to indicate "new row added".
-/// The actual row_id will be assigned during commit, but we need to track
-/// that this transaction modified the table.
-fn record_insert_writes(table_id: u64, _result: &[DataChunk], ctx: &mut ExecutionContext) {
-    // For inserts, we record the table_id with row_id = 0 as a sentinel.
-    // This ensures that concurrent transactions on the same table will
-    // detect a conflict at the table level.
-    // TODO: In the future, we could track specific row IDs for more granular conflict detection.
-    ctx.written_rows.push((table_id, 0));
+/// When the result chunk contains a second column with assigned row IDs,
+/// tracks at row level. Otherwise, row-level inserts are not tracked
+/// (PK uniqueness is enforced by the storage layer's hash index).
+fn record_insert_writes(table_id: u64, result: &[DataChunk], ctx: &mut ExecutionContext) {
+    if let Some(chunk) = result.first() {
+        // Column 0 = inserted_count, Column 1 = assigned row IDs (optional)
+        if chunk.fields.len() > 1 {
+            for row in 0..chunk.fields[1].len() {
+                if let Some(akar_common::types::Value::Int64(row_id)) = chunk.get_value(1, row) {
+                    ctx.written_rows.push((table_id, row_id as u64));
+                }
+            }
+        }
+    }
 }
