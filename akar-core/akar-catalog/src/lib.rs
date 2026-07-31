@@ -3,9 +3,10 @@
 use akar_common::error::CatalogError;
 use akar_common::types::LogicalTypeID;
 use hashbrown::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// A table column definition in the catalog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogColumn {
     pub name: String,
     pub logical_type: LogicalTypeID,
@@ -15,7 +16,7 @@ pub struct CatalogColumn {
 }
 
 /// Index type for primary key indexes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndexType {
     /// Default hash index (equality-only lookup).
     Hash,
@@ -42,7 +43,7 @@ impl IndexType {
 }
 
 /// A node table entry in the catalog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeTableEntry {
     pub table_id: u64,
     pub name: String,
@@ -75,7 +76,7 @@ impl NodeTableEntry {
 }
 
 /// A relationship table entry in the catalog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelTableEntry {
     pub table_id: u64,
     pub name: String,
@@ -94,7 +95,7 @@ impl RelTableEntry {
 ///
 /// Supports `CREATE SEQUENCE` DDL and `SERIAL` column auto-increment.
 /// Thread-safe via internal Mutex for concurrent `nextval`/`currval` access.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SequenceEntry {
     pub sequence_id: u64,
     pub name: String,
@@ -182,7 +183,7 @@ impl SequenceEntry {
 }
 
 /// A vector index entry in the catalog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorIndexEntry {
     pub index_id: u64,
     pub name: String,
@@ -197,7 +198,7 @@ pub struct VectorIndexEntry {
 /// Foreign tables represent tables from external catalogs (e.g., DuckDB, Postgres, SQLite)
 /// that are attached to the current database. They behave like read-only tables with
 /// a source type identifying the external engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignTableEntry {
     pub table_id: u64,
     pub name: String,
@@ -218,7 +219,7 @@ impl ForeignTableEntry {
 /// Macros are expanded at binding time via parameter substitution.
 ///
 /// Ported from C++ `scalar_macro_catalog_entry.h`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScalarMacroEntry {
     pub macro_id: u64,
     pub name: String,
@@ -257,7 +258,7 @@ impl ScalarMacroEntry {
 /// Ported from C++ `ParsedGraphEntry` / `GraphEntrySet` system.
 /// Projected graphs are either NATIVE (defined via node/rel table lists)
 /// or CYPHER (defined via a Cypher query).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectedGraphInfo {
     pub name: String,
     /// "NATIVE" or "CYPHER"
@@ -267,7 +268,7 @@ pub struct ProjectedGraphInfo {
 }
 
 /// An entry in the system catalog (node table, rel table, vector index, sequence, or foreign table).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CatalogEntry {
     NodeTable(NodeTableEntry),
     RelTable(RelTableEntry),
@@ -384,7 +385,7 @@ pub enum CatalogResult {
 ///
 /// Provides CRUD operations for tables (node and relationship tables),
 /// schema validation, and lookup by name or ID.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Catalog {
     entries: HashMap<u64, CatalogEntry>,
     name_to_id: HashMap<String, u64>,
@@ -1148,6 +1149,50 @@ impl Catalog {
         }
         CatalogResult::Created { table_id }
     }
+
+    /// Serialize the catalog to a JSON byte vector.
+    pub fn serialize_to_json(&self) -> Result<Vec<u8>, CatalogError> {
+        serde_json::to_vec_pretty(self)
+            .map_err(|e| CatalogError::InvalidOperation(format!("catalog serialization failed: {e}")))
+    }
+
+    /// Deserialize a catalog from a JSON byte vector.
+    pub fn deserialize_from_json(bytes: &[u8]) -> Result<Self, CatalogError> {
+        serde_json::from_slice(bytes).map_err(|e| {
+            CatalogError::InvalidOperation(format!("catalog deserialization failed: {e}"))
+        })
+    }
+
+    /// Atomically save the catalog to a file at `path`.
+    ///
+    /// Writes to a temporary sibling file first, then renames it over `path`
+    /// so a crash mid-write never leaves a partially-written catalog file.
+    pub fn save_to_path(&self, path: &std::path::Path) -> Result<(), CatalogError> {
+        let bytes = self.serialize_to_json()?;
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, bytes).map_err(|e| {
+            CatalogError::InvalidOperation(format!("failed to write catalog to {tmp_path:?}: {e}"))
+        })?;
+        std::fs::rename(&tmp_path, path).map_err(|e| {
+            CatalogError::InvalidOperation(format!("failed to rename catalog to {path:?}: {e}"))
+        })?;
+        Ok(())
+    }
+
+    /// Load a catalog from a file at `path`.
+    ///
+    /// Returns `Ok(None)` when the file does not exist (fresh database),
+    /// which keeps databases created before catalog persistence fully
+    /// backward compatible.
+    pub fn load_from_path(path: &std::path::Path) -> Result<Option<Self>, CatalogError> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(path).map_err(|e| {
+            CatalogError::InvalidOperation(format!("failed to read catalog from {path:?}: {e}"))
+        })?;
+        Self::deserialize_from_json(&bytes).map(Some)
+    }
 }
 
 #[cfg(test)]
@@ -1199,6 +1244,62 @@ mod tests {
         );
         assert!(matches!(result, CatalogResult::Created { .. }));
         assert_eq!(cat.len(), 2);
+    }
+
+    #[test]
+    fn test_serialize_roundtrip() {
+        let mut cat = Catalog::new();
+        cat.create_node_table("Person".into(), sample_node_columns());
+        cat.create_rel_table(
+            "Knows".into(),
+            0,
+            0,
+            vec![CatalogColumn {
+                name: "since".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                default_value: None,
+                compression: akar_common::enums::CompressionType::Uncompressed,
+            }],
+        );
+        cat.create_sequence("my_seq".to_string(), 1, 1, 1, 1_000_000, false);
+        cat.create_foreign_table("ext".into(), vec![], "duckdb".into());
+
+        let bytes = cat.serialize_to_json().expect("serialize");
+        let restored = Catalog::deserialize_from_json(&bytes).expect("deserialize");
+
+        assert_eq!(restored.version(), cat.version());
+        assert_eq!(restored.len(), cat.len());
+        let person = restored.get_entry_by_name("Person").unwrap();
+        assert!(person.is_node_table());
+        assert_eq!(person.columns().len(), 2);
+        let knows = restored.get_entry_by_name("Knows").unwrap();
+        assert!(knows.is_rel_table());
+        let seq = restored.get_sequence("my_seq").unwrap();
+        assert_eq!(seq.curr_val(), 1);
+        let ext = restored.get_entry_by_name("ext").unwrap();
+        assert!(ext.is_foreign_table());
+    }
+
+    #[test]
+    fn test_save_load_path_roundtrip() {
+        let mut cat = Catalog::new();
+        cat.create_node_table("Person".into(), sample_node_columns());
+
+        let dir = std::env::temp_dir().join(format!("akar_catalog_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("catalog.json");
+
+        cat.save_to_path(&path).expect("save");
+        let loaded = Catalog::load_from_path(&path).expect("load").expect("some");
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.get_entry_by_name("Person").is_some());
+
+        // Loading a non-existent file yields None (fresh database).
+        let missing = dir.join("absent.json");
+        assert!(Catalog::load_from_path(&missing).unwrap().is_none());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

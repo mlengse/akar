@@ -1,7 +1,9 @@
 //! Enumeration types used across Akar.
 
+use serde::{Deserialize, Serialize};
+
 /// Compression algorithm types for column storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompressionType {
     Uncompressed,
     Constant,

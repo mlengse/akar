@@ -1,6 +1,6 @@
-# Kuzu WASM — WebAssembly Bindings
+# Akar WASM — WebAssembly Bindings
 
-Node.js WebAssembly bindings for the Kuzu embedded graph database.
+Node.js WebAssembly bindings for the Akar embedded graph database.
 
 ## Quick Start
 

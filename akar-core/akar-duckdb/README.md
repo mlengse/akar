@@ -1,6 +1,6 @@
-# Kuzu DuckDB Extension
+# Akar DuckDB Extension
 
-DuckDB integration for the Kuzu database engine using the `duckdb` crate (v1.10504.0).
+DuckDB integration for the Akar database engine using the `duckdb` crate (v1.10504.0).
 
 **Modes:** In-memory, file-based, local (temporary)
 

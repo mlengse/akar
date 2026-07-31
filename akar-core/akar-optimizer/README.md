@@ -1,4 +1,4 @@
-# Kuzu Optimizer
+# Akar Optimizer
 
 Query optimization passes that transform the logical plan for better performance.
 

@@ -1,6 +1,6 @@
-# Kuzu Main
+# Akar Main
 
-Public API for the Kuzu database engine.
+Public API for the Akar database engine.
 
 **`Database`** — Main entry point. Initializes all subsystems (storage, transaction manager, catalog, function registry, extensions, stats store).
 

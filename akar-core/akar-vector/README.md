@@ -1,6 +1,6 @@
-# Kuzu Vector Similarity Search Extension
+# Akar Vector Similarity Search Extension
 
-Vector similarity search for the Kuzu database engine.
+Vector similarity search for the Akar database engine.
 
 **Functions:** Vector similarity search operations
 

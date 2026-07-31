@@ -1,4 +1,4 @@
-# Kuzu Neo4j Extension
+# Akar Neo4j Extension
 
 Neo4j integration via Bolt protocol.
 

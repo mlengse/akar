@@ -10,15 +10,11 @@ Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzu
 
 ## Why Akar
 
-AI agents need memory that captures relationships, not just documents. When an agent traces a chain like `Founder → Company → Round → Outcome`, that is a multi-hop graph traversal. Akar runs these **374x faster** than Neo4j on path queries (0.009s vs 3.22s) while requiring **zero infrastructure** (no server, no Docker, no connection pool).
+AI agents need memory that captures relationships, not just documents. When an agent traces a chain like `Founder → Company → Round → Outcome`, that is a multi-hop graph traversal. Akar handles exactly this pattern as an embedded, in-process database — requiring **zero infrastructure** (no server, no Docker, no connection pool).
 
-| Capability | Akar | Neo4j | Vector DB |
-|---|---|---|---|
-| Multi-hop path queries | 0.009s | 3.22s | Not supported |
-| Infrastructure required | None (in-process) | Server + config | Server + config |
-| Concurrent writes | Yes | Yes | Yes |
-| Causal chain traversal | Native | Native | Approximate (embedding) |
-| License | GPLv3 | GPLv3 / Commercial | Varies |
+Performance is validated against two independent C++ implementations of the same architecture (KuzuDB): **3-way parity** on the hot path (`MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`, 10k rows): Rust **397 µs** ≈ Kuzu C++ **400 µs** ≈ LadybugDB C++ **374 µs**. See [`BENCHMARK_COMPARISON.md`](akar-core/BENCHMARK_COMPARISON.md).
+
+> **Note:** Akar has **not** been benchmarked directly against Neo4j or any vector database. Verified comparisons are limited to the Kuzu C++ (Vela) and LadybugDB C++ implementations on identical 10k-row datasets.
 
 ## Quick Start
 
@@ -80,7 +76,7 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 
 ## Benchmarks
 
-Performance parity with the original C++ implementation has been verified. Large-scale benchmarks (100K/1M rows) confirm near-linear scaling:
+Performance parity with the C++ implementations of the same architecture (KuzuDB/Vela and LadybugDB) has been verified on the hot path. Large-scale benchmarks (100K/1M rows) confirm near-linear scaling:
 
 | Scale | Scan | Filter | COUNT | Filter+COUNT |
 |---|---|---|---|---|
@@ -90,6 +86,8 @@ Performance parity with the original C++ implementation has been verified. Large
 
 **3-way C++ parity** (10K, `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`):
 - Rust: **397 µs** | Vela C++: **400 µs** | LadybugDB C++: **374 µs**
+
+Repeated queries benefit from the **plan cache** (LRU at the connection level): identical statements skip parse/bind/plan/optimize entirely, which is significant for planning-dominated workloads (complex plans on small data).
 
 Run benchmarks locally:
 

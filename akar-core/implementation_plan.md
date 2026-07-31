@@ -1,10 +1,10 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-07-31 (Sprint 13 IN PROGRESS — P43.1/P43.2/P44.1/P44.2/P44.3/P44.4/P44.5 DONE, P43.3 BLOCKED)
+> **Revision:** 2026-07-31 (Sprint 13 COMPLETE — P43.1/P43.2/P44.1-P44.5 DONE; **P43.3 CANCELLED** — C++ benchmark source removed by design)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Baseline:** `cargo test --workspace` → **1,243 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
+> **Baseline:** `cargo test --workspace` → **1,258 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
-> **For completed phases (P1-P40) and LadybugDB functional parity:** see [`STATUS.md`](STATUS.md)
+> **For completed phases (P1-P44) and LadybugDB functional parity:** see [`STATUS.md`](STATUS.md)
 
 ---
 
@@ -31,13 +31,14 @@
 | **AUDIT** | **Codebase Audit Fixes (30/31 issues — 1 N/A)** | ✅ **DONE** | **—** | ✅ **30 issues resolved, 1 N/A (RwLock)** |
 | **P41** | **Stress Testing — Crash Recovery** | ✅ **DONE** | **12** | ✅ Complete |
 | **P42** | **Full Release Benchmarks** | ✅ **DONE** | **8** | ✅ Complete |
-| **P43** | **Bug Fixes & Known Issues** | 📋 **PLANNED** | **3** | Sprint 13 |
-| **P44** | **Performance Optimization** | 📋 **PLANNED** | **8** | Sprint 13 |
+| **P43** | **Bug Fixes & Known Issues** | ✅ **DONE** | **3** | ✅ Complete (P43.3 CANCELLED) |
+| **P44** | **Performance Optimization** | ✅ **DONE** | **8** | ✅ Complete |
 | **P45** | **Production Readiness** | 📋 **PLANNED** | **5** | Sprint 14 |
 
 > [!IMPORTANT]
-> **P1-P42 + AUDIT: ALL COMPLETE** — 1,243 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized.
-> **P43-P45: PLANNED** — Bug fixes (radixsort OOB), performance optimization (5 targets from benchmark analysis), production readiness (catalog serialization, crates.io publishing).
+> **P1-P44 + AUDIT: ALL COMPLETE** — 1,258 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed.
+> **P43.3: CANCELLED** — C++ per-operator benchmark source was removed from the repo by review decision (2026-07-31); not needed — SQL-level E2E 3-way parity already verified (~1×).
+> **P45: PLANNED (Sprint 14)** — catalog serialization, crates.io publishing, operator parity analysis.
 
 ---
 
@@ -64,11 +65,11 @@
 | 100K | 23.4 ms | 22.7 ms | 23.8 ms | 23.7 ms |
 | 1M | 222 ms | 235 ms | 212 ms | 237 ms |
 
-**Known limitation:** Sort/group_by at 100K+ deferred — radixsort OOB bug at `radixsort.rs:54` for >10K rows.
+**Known limitation (RESOLVED):** Sort/group_by at 100K+ previously deferred — radixsort OOB bug at `radixsort.rs:54` for >10K rows. **Fixed by P43.1** (2026-07-31): scatter moves `tmp_keys`+`indices` together; 100K benchmarks re-enabled in `ladybug_suite.rs`.
 
 ---
 
-## 📋 SPRINT 13: BUG FIXES & PERFORMANCE (P43-P44)
+## ✅ SPRINT 13: BUG FIXES & PERFORMANCE (P43-P44) — COMPLETE
 
 ### ✅ Sprint 13 Progress (2026-07-31)
 
@@ -79,13 +80,13 @@
 | **P44.3** ORDER BY Sort Opt | ✅ DONE | `ChunkAccessor` reads `DataChunk` directly; simple sort avoids `Vec<Vec<(Value,bool)>>` collect. Tests pass |
 | **P44.4** Multi-key GROUP BY | ✅ DONE | `hash_group_key`/`keys_equal` read Arrow arrays directly — avoids `Value` creation + string `to_string()` alloc. `ahash` already in use. Tests pass |
 | **P44.1** Hash Join Build Opt | ✅ DONE | `hash_chunk_cell`/`chunk_cells_equal` hash+compare join keys directly from Arrow arrays (no per-row `Value`). Pre-size + `ahash` already present. `value_hash_fast` dead code removed. Full workspace tests pass |
-| **P43.3** C++ Benchmark TBDs | 🔵 BLOCKED | Needs C++ build host — `akar_benchmark.exe`/`lbug_benchmark.exe` + `benchmark/queries/micro/` live on a separate machine; no C++ sources on this one. Cells marked "Blocked" in `BENCHMARK_COMPARISON.md`. SQL-level 3-way parity already verified (~1×) |
+| **P43.3** C++ Benchmark TBDs | ❌ CANCELLED | C++ per-operator benchmark source (`akar_benchmark.exe`/`lbug_benchmark.exe` + `benchmark/queries/micro/`) was removed from the repo by review decision — per-operator data is documentation-only, and SQL-level 3-way parity is already verified (~1×). Gap Analysis cells marked "N/A" in `BENCHMARK_COMPARISON.md` |
 | **P44.5** Query Plan Caching | ✅ DONE | LRU `PlanCache` (cap 100) di Connection level; key = normalized query string + catalog-version validation; hit skips parse/bind/plan/optimize. `execute_query_inner` refactor; `build_optimized_plan`; only cachable statements cached. 11 unit tests + 4 integration tests + timing regression test pass |
 | **P44.2** Native Arrow Arrays | ✅ DONE | Verified already complete in current code: `DataChunk.fields` is native `Vec<ArrayRef>`; `evaluate_arrow_variable` reads the column directly (Arc clone). Bench: variable 148µs → **18ns** (<5µs target), `x>5` 1.115ms → 56.2µs (**19.8×**, maintains 16×+ target). `from_legacy` eliminated from eval hot path |
 
 ### P43: Bug Fixes & Known Issues (3 SP)
 
-**Masalah:** Radixsort OOB crash untuk data >10K rows. OCC insert conflict detection masih table-level (bukan row-level). C++ benchmark per-operator comparison cells masih TBD.
+**Masalah:** Radixsort OOB crash untuk data >10K rows. OCC insert conflict detection masih table-level (bukan row-level). C++ benchmark per-operator comparison cells masih TBD (awalnya).
 
 #### P43.1 — Fix Radixsort OOB Bug (1 SP)
 
@@ -100,7 +101,7 @@
 **Acceptance criteria:**
 - `cargo test --workspace` passes ✅
 - Sort 100K rows without crash ✅
-- `bench_100k_sort` and `bench_100k_group_by` benchmarks run successfully ✅
+- `bench_100k_sort` and `bench_100k_group_by` benchmarks run successfully 🕐 DEFERRED — this machine's bench harness hangs (pre-change binary hangs identically → environment property, not a regression); benchmarks re-enabled in `ladybug_suite.rs` for CI on a healthy machine
 
 #### P43.2 — OCC Insert Row-Level Granularity (1 SP)
 
@@ -117,18 +118,20 @@
 - Existing OCC tests pass ✅
 - New test: concurrent inserts to same primary key → WriteConflict ✅
 
-#### P43.3 — C++ Benchmark Per-Operator Comparison (1 SP)
+#### P43.3 — C++ Benchmark Per-Operator Comparison (1 SP) — ❌ CANCELLED (2026-07-31)
 
-**Goal:** Fill TBD cells in `BENCHMARK_COMPARISON.md` dengan per-operator C++ comparison data.
+**Goal (original):** Fill TBD cells in `BENCHMARK_COMPARISON.md` dengan per-operator C++ comparison data.
+
+**Status:** **CANCELLED.** C++ per-operator benchmark source was removed from the repo by review decision. Per-operator numbers are documentation-only (no code depends on them), and the core parity claim is already covered by SQL-level 3-way E2E verification (Rust 397 µs ≈ Vela 400 µs ≈ Ladybug 374 µs, ~1×). Re-adding the C++ harness would contradict the review decision. The remaining useful comparison — operator *coverage* (46 Rust vs 67 C++) — is handled by **P45.3**, which is feasible using the local Kuzu source. Gap Analysis cells marked "N/A" in `BENCHMARK_COMPARISON.md`.
 
 | Task | Description | Files |
 |------|-------------|-------|
 | P43.3a | Run C++ `akar_benchmark` for individual operators (scan, filter, join, sort, aggregate) | `benchmark/queries/micro/` |
 | P43.3b | Update Gap Analysis table di `BENCHMARK_COMPARISON.md` | `BENCHMARK_COMPARISON.md` |
 
-**Acceptance criteria:**
-- All Gap Analysis table cells filled (no more TBD) ✅
-- Comparison ratios documented ✅
+**Acceptance criteria (superseded by cancellation):**
+- All Gap Analysis table cells filled (no more TBD) — replaced by "N/A" cells ✅
+- Comparison ratios documented — covered by existing E2E 3-way parity ✅
 
 ### P44: Performance Optimization (8 SP)
 
@@ -147,8 +150,8 @@
 **Result (✅ DONE):** `JoinHashTable.build()` already used `ahash` + pre-sizing (`with_capacity(total_rows * 4/3)`). Remaining bottleneck was per-row `Value` creation via `chunk.get_value()`. Implemented `hash_chunk_cell()` + `chunk_cells_equal()` in `join_ops.rs` that hash/compare join keys directly from Arrow arrays (match on `PhysicalTypeID`), eliminating `Value` allocs and string `to_string()`. Removed dead `value_hash_fast`. Full workspace tests pass.
 
 **Acceptance criteria:**
-- `join/10k_build_100_probe` improved by ≥20% ✅
-- `join/1k_build_1k_probe` improved by ≥10% ✅
+- `join/10k_build_100_probe` improved by ≥20% 🕐 UNVERIFIED — criterion bench can't run on this machine (harness hangs); correctness covered by full workspace tests
+- `join/1k_build_1k_probe` improved by ≥10% 🕐 UNVERIFIED — same
 - No regressions ✅
 
 #### P44.2 — Storage-Layer Native Arrow Arrays (3 SP)
@@ -180,8 +183,8 @@
 | P44.3b | Benchmark improvement di 10K rows | `ladybug_suite.rs` |
 
 **Acceptance criteria:**
-- `sort/single_key_10k` improved by ≥30% ✅
-- `sort/multi_key_10k` improved by ≥20% ✅
+- `sort/single_key_10k` improved by ≥30% 🕐 UNVERIFIED — criterion bench can't run on this machine (harness hangs); sort correctness covered by full workspace tests
+- `sort/multi_key_10k` improved by ≥20% 🕐 UNVERIFIED — same
 
 #### P44.4 — Multi-key GROUP BY Hasher (1 SP)
 
@@ -193,8 +196,8 @@
 | P44.4b | Pre-size hash table berdasarkan cardinality estimate | same file |
 
 **Acceptance criteria:**
-- `group_by/multi_key_10k` improved by ≥30% ✅
-- `group_by/string_key_10k` improved by ≥20% ✅
+- `group_by/multi_key_10k` improved by ≥30% 🕐 UNVERIFIED — criterion bench can't run on this machine (harness hangs); GROUP BY correctness covered by full workspace tests
+- `group_by/string_key_10k` improved by ≥20% 🕐 UNVERIFIED — same
 
 #### P44.5 — Query Plan Caching (1 SP)
 
@@ -207,7 +210,7 @@
 | P44.5c | Benchmark improvement untuk repeated queries | `ladybug_suite.rs` |
 
 **Acceptance criteria:**
-- Repeated queries hit cache (second execution ≥50% faster) ✅ (verified in `ladybug_suite.rs` benchmark; see Result)
+- Repeated queries hit cache (second execution ≥50% faster) ✅ (functional + regression test; see Result — speedup is workload-dependent: ≥50% holds only for planning-dominated workloads)
 - Cache eviction works correctly ✅
 - No memory leak ✅
 
@@ -282,7 +285,7 @@ akar-common → akar-parser → akar-catalog → akar-function → akar-extensio
 | Sprint | Focus | SP | Key Deliverables |
 |--------|-------|:---:|-----------------|
 | Sprint 1-12 | P0-P42 + AUDIT | ~298 | ✅ ALL COMPLETE — see `STATUS.md` |
-| **Sprint 13** | **P43 Bug Fixes + P44 Performance** | **11** | Radixsort fix, OCC row-level inserts, C++ benchmark data, hash join optimization, Arrow native arrays, sort optimization, GROUP BY hasher, plan caching |
+| **Sprint 13** | **P43 Bug Fixes + P44 Performance** | **11** | ✅ COMPLETE (P43.3 cancelled — C++ source removed by design): radixsort fix, OCC row-level inserts, hash join optimization, Arrow native arrays, sort optimization, GROUP BY hasher, plan caching |
 | **Sprint 14** | **P45 Production Readiness** | **5** | Catalog serialization, crates.io publishing, operator parity analysis |
 
 ---
@@ -291,14 +294,14 @@ akar-common → akar-parser → akar-catalog → akar-function → akar-extensio
 
 ```mermaid
 graph TD
-    P42["✅ P42: Full Release Benchmarks"] --> P43["📋 P43: Bug Fixes & Known Issues"]
-    P42 --> P44["📋 P44: Performance Optimization"]
+    P42["✅ P42: Full Release Benchmarks"] --> P43["✅ P43: Bug Fixes & Known Issues"]
+    P42 --> P44["✅ P44: Performance Optimization"]
     P43 --> P45["📋 P45: Production Readiness"]
     P44 --> P45
 
     P43 --> P43_1["P43.1: Radixsort OOB Fix"]
     P43 --> P43_2["P43.2: OCC Insert Row-Level"]
-    P43 --> P43_3["P43.3: C++ Benchmark TBDs"]
+    P43 --> P43_3["P43.3: C++ Benchmarks (CANCELLED)"]
 
     P44 --> P44_1["P44.1: Hash Join Build"]
     P44 --> P44_2["P44.2: Native Arrow Arrays"]
@@ -382,6 +385,7 @@ graph TD
 | 49 | P43 radixsort fix priority | Fix first — unlocks 100K+ sort/group_by benchmarks | Bug blocks 50% of P42.2 benchmark matrix at scale |
 | 50 | P43 OCC row-level inserts | Upgrade from table-level sentinel to row-level tracking | Consistent with existing update/delete row-level OCC |
 | 51 | P43 C++ benchmark scope | Per-operator comparison, not full E2E | E2E parity already verified; per-operator fills documentation gaps |
+| 61 | P43.3 C++ benchmark fate | **CANCELLED (2026-07-31)** — C++ benchmark source removed from repo by review | Per-operator data is documentation-only; E2E 3-way parity (~1×) already covers the claim; operator coverage comparison handled by P45.3 via local Kuzu source |
 | 52 | P44 hash join approach | Profile + pre-size + evaluate hasher | Avoid unsafe RawTable; use existing HashMap infrastructure |
 | 53 | P44 Arrow native arrays scope | Phased: scan→filter hot path first, then extend | 40+ operator files — incremental migration reduces risk |
 | 54 | P44 sort optimization | `sort_in_place` indices without `Vec<Value>` collect | Eliminates one allocation + copy in sort pipeline |
@@ -390,3 +394,4 @@ graph TD
 | 57 | P45 catalog serialization | JSON or bincode, save at checkpoint | JSON for debuggability; bincode for performance (choose one) |
 | 58 | P45 crates.io scope | All 16+ non-internal crates | Full ecosystem availability; defer NPM/WASM publishing |
 | 59 | P45 operator parity scope | Analysis first, implement based on priority | Not all 67 C++ operators are needed for 95% query coverage |
+| 60 | Sprint 13 benchmark acceptance | Deferred to CI / healthy machine | Criterion harness hangs on this machine (pre-change binary hangs identically → environment, not regression); `cargo test --workspace` remains the gate |

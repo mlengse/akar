@@ -1,4 +1,4 @@
-# Kuzu Processor
+# Akar Processor
 
 Physical operator execution pipeline — the runtime that executes query plans.
 

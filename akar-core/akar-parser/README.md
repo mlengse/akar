@@ -1,4 +1,4 @@
-# Kuzu Parser
+# Akar Parser
 
 Cypher query parser using pest.rs PEG grammar.
 

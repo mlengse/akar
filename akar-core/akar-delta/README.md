@@ -1,4 +1,4 @@
-# Kuzu Delta Lake Extension
+# Akar Delta Lake Extension
 
 Delta Lake integration via DuckDB delegation using `DuckDbAttachHelper`.
 

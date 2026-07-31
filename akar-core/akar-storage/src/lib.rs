@@ -67,6 +67,21 @@ pub use undo_buffer::UndoBuffer;
 pub use vector_index::{VectorIndexTable, extract_f64_list_from_value};
 pub use wal_replayer::{ReplayResult, WALReplayer};
 
+/// Convert a catalog column definition into a storage-level column definition.
+///
+/// `CatalogColumn.default_value` is handled at the binder/schema layer and does
+/// not need to be materialized in the storage table.
+impl From<&akar_catalog::CatalogColumn> for ColumnDefinition {
+    fn from(c: &akar_catalog::CatalogColumn) -> Self {
+        ColumnDefinition {
+            name: c.name.clone(),
+            logical_type: c.logical_type,
+            is_primary_key: c.is_primary_key,
+            compression: c.compression,
+        }
+    }
+}
+
 /// The storage manager — root of the storage engine.
 #[allow(dead_code)]
 pub struct StorageManager {
@@ -184,6 +199,48 @@ impl StorageManager {
     /// Create a node table in the catalog and return its ID.
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
         self.table_catalog.create_node_table(name, columns)
+    }
+
+    /// Restore a node table at a specific table ID during recovery from a
+    /// persisted catalog. Optionally recreates an ART primary-key index and
+    /// registers its file with the BufferManager.
+    pub fn restore_node_table(
+        &self,
+        table_id: u64,
+        name: String,
+        columns: Vec<ColumnDefinition>,
+        index_name: Option<&str>,
+    ) -> NodeTable {
+        let table = self
+            .table_catalog
+            .create_node_table_with_id(table_id, name.clone(), columns);
+
+        if let Some(index_name) = index_name {
+            // Register the index file with the BufferManager for persistence
+            let mut bm = self.buffer_manager.lock().unwrap();
+            let full_path = self.db_path.join(format!("{index_name}.art"));
+            if !bm.is_file_registered(index_name) {
+                bm.register_file(index_name, full_path);
+            }
+            drop(bm);
+
+            let _ = self.table_catalog.create_art_index(&name, index_name);
+        }
+        table
+    }
+
+    /// Restore a rel table at a specific table ID during recovery from a
+    /// persisted catalog.
+    pub fn restore_rel_table(
+        &self,
+        table_id: u64,
+        name: String,
+        src_table_id: u64,
+        dst_table_id: u64,
+        columns: Vec<ColumnDefinition>,
+    ) -> RelTable {
+        self.table_catalog
+            .create_rel_table_with_id(table_id, name, src_table_id, dst_table_id, columns)
     }
 
     /// Create a vector index in the catalog and register its file with the BufferManager.

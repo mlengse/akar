@@ -1,4 +1,4 @@
-# Kuzu Binder
+# Akar Binder
 
 Semantic analysis and symbol resolution for Cypher queries.
 

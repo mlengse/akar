@@ -30,7 +30,7 @@ cargo run --bin akar-migrate -- --from /path/to/export-dir --to /path/to/new/rus
 Update your `Cargo.toml`:
 ```toml
 [dependencies]
-akar = { git = "https://github.com/kuzudb/akar-rust", branch = "main" }
+akar = { git = "https://github.com/anjangkusumanetra/akar", branch = "main" }
 ```
 
 ### Basic Connection

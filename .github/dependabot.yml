@@ -1,4 +1,4 @@
-# Dependabot — automated dependency updates for Kuzu Core
+# Dependabot — automated dependency updates for Akar Core
 #
 # Keeps Rust crate dependencies up to date with weekly PRs.
 # Groups patch/minor updates together to reduce noise.

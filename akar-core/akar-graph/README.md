@@ -1,4 +1,4 @@
-# Kuzu Graph
+# Akar Graph
 
 CSR adjacency graph and graph algorithms.
 

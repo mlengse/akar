@@ -1,4 +1,4 @@
-# Kuzu Apache Iceberg Extension
+# Akar Apache Iceberg Extension
 
 Apache Iceberg integration via DuckDB delegation using `DuckDbAttachHelper`.
 

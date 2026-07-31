@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "WASM bindings for Kuzu — embedded graph database"
+description = "WASM bindings for Akar — embedded graph database"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

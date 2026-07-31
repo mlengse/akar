@@ -1,4 +1,4 @@
-# Kuzu Function
+# Akar Function
 
 Built-in function registry with scalar, aggregate, and table function dispatch.
 
