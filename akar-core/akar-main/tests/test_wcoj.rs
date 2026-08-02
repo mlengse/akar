@@ -114,6 +114,42 @@ fn test_wcoj_fan_out_semantics_single_shared_node() {
 }
 
 #[test]
+fn test_comma_pattern_chain_shared_var() {
+    // P48.1: comma-separated patterns sharing a bound variable `b` must not
+    // re-scan `b` (which previously produced a CrossProduct of two Person scans).
+    let (_db, conn) = setup_db();
+    setup(&conn);
+    // r1: 0->1, 0->2 ; r3: 1->2. Path through a=0: only (0, 1, 2).
+    let sql =
+        "MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    assert_rows(&conn, sql, &[(0, 1, 2)]);
+}
+
+#[test]
+fn test_comma_pattern_chain_no_cross_product() {
+    // P48.1 plan-level guard: the shared `b` must not be scanned twice.
+    let (_db, conn) = setup_db();
+    setup(&conn);
+    let result = conn
+        .query("EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id")
+        .unwrap();
+    assert!(result.is_success(), "EXPLAIN failed: {:?}", result.error_message);
+    let mut plan = String::new();
+    for chunk in &result.chunks {
+        if chunk.size > 0 {
+            if let Some(Value::String(s)) = chunk.get_value(0, 0) {
+                plan = s;
+            }
+        }
+    }
+    assert!(
+        !plan.contains("CrossProduct"),
+        "expected no CrossProduct (shared variable re-scanned), got:\n{plan}"
+    );
+    assert_eq!(plan.matches("ScanNode").count(), 1, "expected a single Person scan, got:\n{plan}");
+}
+
+#[test]
 fn test_wcoj_cross_product_fan_out() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE N(id INT64, PRIMARY KEY(id))");

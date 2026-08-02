@@ -1699,6 +1699,10 @@ impl Binder {
             .ok_or_else(|| format!("Table '{}' not found", c.table_name))?;
         let table_id = entry.table_id();
         let columns: Vec<akar_catalog::CatalogColumn> = entry.columns().to_vec();
+        // Rel tables store their source/destination node IDs in dedicated
+        // columns (`src_table_id`/`dst_table_id`), so a rel-table COPY file
+        // carries two extra leading columns: [SRC, DST, ...user props].
+        let is_rel_table = entry.is_rel_table();
         drop(catalog);
 
         // 2. Validate file path exists and is accessible
@@ -1734,12 +1738,17 @@ impl Binder {
                 }
 
                 let csv_col_count = trimmed.split(delimiter).count();
-                if csv_col_count != columns.len() {
+                // For rel tables the file has [SRC, DST] plus user properties.
+                let expected_col_count = if is_rel_table {
+                    columns.len() + 2
+                } else {
+                    columns.len()
+                };
+                if csv_col_count != expected_col_count {
                     return Err(format!(
                         "Column count mismatch: CSV header has {csv_col_count} columns \
-                         but table '{}' has {} columns",
+                         but table '{}' has {expected_col_count} columns",
                         c.table_name,
-                        columns.len()
                     ).into());
                 }
             }

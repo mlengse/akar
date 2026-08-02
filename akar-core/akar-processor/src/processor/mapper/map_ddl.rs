@@ -321,10 +321,16 @@ pub fn map_and_execute_ddl(
             // Build values from pattern properties, defaulting to Null
             let mut values: Vec<akar_common::types::Value> =
                 table.columns.iter().map(|_| akar_common::types::Value::Null).collect();
-            for (prop_name, expr) in &c.properties {
-                if let Some(col_idx) = table.columns.iter().position(|col| col.name == *prop_name) {
-                    if let akar_parser::ast::Expression::Constant(con) = expr {
-                        values[col_idx] = ast_constant_to_value(con);
+            {
+                let registry = ctx
+                    .function_registry
+                    .clone()
+                    .ok_or("CREATE DML requires a function registry")?;
+                let registry = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                for (prop_name, expr) in &c.properties {
+                    if let Some(col_idx) = table.columns.iter().position(|col| col.name == *prop_name) {
+                        values[col_idx] =
+                            crate::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
                     }
                 }
             }
@@ -442,19 +448,6 @@ fn ddl_success_chunk(message: &str) -> Vec<DataChunk> {
     chunk.size = 1;
     chunk.field_names = vec!["result".to_string()];
     vec![chunk]
-}
-
-/// Convert an AST constant to a Value.
-fn ast_constant_to_value(c: &akar_parser::ast::Constant) -> akar_common::types::Value {
-    use akar_common::types::Value;
-    use akar_parser::ast::Constant;
-    match c {
-        Constant::Null => Value::Null,
-        Constant::Bool(b) => Value::Bool(*b),
-        Constant::Integer(i) => Value::Int64(*i),
-        Constant::Float(f) => Value::Double(*f),
-        Constant::String(s) => Value::String(s.clone()),
-    }
 }
 
 /// Minimal type parser for ALTER TABLE ADD COLUMN (avoids Akar-binder dependency).

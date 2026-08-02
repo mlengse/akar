@@ -11,6 +11,7 @@ use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
 use akar_common::error::PlannerError;
 use akar_parser::ast::Expression;
+use std::collections::HashSet;
 
 /// The query planner transforms bound statements into logical query plans.
 pub struct QueryPlanner;
@@ -313,6 +314,10 @@ impl QueryPlanner {
         let mut skip: Option<u64> = None;
         // Flag to skip destination node pattern consumed by RecursiveExtend or Extend
         let mut skip_next_node = false;
+        // Node variables already bound to a scan in the current pipeline.
+        // Prevents duplicate scans for a shared variable across comma patterns
+        // (P48.1): `MATCH (a)-[:r1]->(b), (b)-[:r3]->(c)` must not scan `b` twice.
+        let mut available_vars: HashSet<String> = HashSet::new();
 
         for clause in query.clauses {
             match clause {
@@ -359,7 +364,10 @@ impl QueryPlanner {
 
                                 // Scan source node
                                 let node_var = &pattern.node_variable;
-                                if !skip_current_node_scan {
+                                let var_len_src_bound = node_var
+                                    .as_ref()
+                                    .map_or(false, |v| available_vars.contains(v));
+                                if !skip_current_node_scan && !var_len_src_bound {
                                     if let Some(label) = pattern.node_label {
                                         scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                             table_name: label,
@@ -370,6 +378,9 @@ impl QueryPlanner {
                                             fts_query: fts_to_assign.take(),
                                             predicate: None,
                                         }));
+                                        if let Some(v) = node_var {
+                                            available_vars.insert(v.clone());
+                                        }
                                     }
                                 }
 
@@ -384,7 +395,7 @@ impl QueryPlanner {
                                     source_var: node_var.clone().unwrap_or_default(),
                                     source_table_id: pattern.node_table_id.unwrap_or(0),
                                     edge_var: edge.variable.clone(),
-                                    target_var,
+                                    target_var: target_var.clone(),
                                     rel_table_ids,
                                     rel_labels,
                                     lower_bound: lb,
@@ -395,6 +406,10 @@ impl QueryPlanner {
                                     cost_output_name: None,
                                     cardinality: 0,
                                 }));
+                                // The destination node is produced by the RecursiveExtend (P48.1).
+                                if !target_var.is_empty() {
+                                    available_vars.insert(target_var);
+                                }
                                 // Skip the destination node pattern scan
                                 skip_next_node = true;
                                 continue;
@@ -403,7 +418,10 @@ impl QueryPlanner {
                             // Regular (non-var-length) edge → create Extend
                             // Scan the source node (clone what we need before pattern is moved)
                             let src_node_var = pattern.node_variable.clone();
-                            if !skip_current_node_scan {
+                            let src_already_bound = src_node_var
+                                .as_ref()
+                                .map_or(false, |v| available_vars.contains(v));
+                            if !skip_current_node_scan && !src_already_bound {
                                 if let Some(label) = &pattern.node_label {
                                     scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                         table_name: label.clone(),
@@ -414,6 +432,9 @@ impl QueryPlanner {
                                         fts_query: fts_to_assign.take(),
                                         predicate: None,
                                     }));
+                                    if let Some(v) = &src_node_var {
+                                        available_vars.insert(v.clone());
+                                    }
                                 }
                             }
 
@@ -430,11 +451,16 @@ impl QueryPlanner {
                                     rel_table_id: edge.rel_table_id.unwrap_or(0),
                                     bound_node_var: src_node_var.unwrap_or_default(),
                                     direction: edge.direction.clone(),
-                                    dst_node_var: dst_var,
+                                    dst_node_var: dst_var.clone(),
                                     dst_table_name,
                                     dst_table_id,
                                     cardinality: 0,
                                 }));
+                                // The destination node is produced by this Extend — it becomes
+                                // available to later patterns without a fresh scan (P48.1).
+                                if !dst_var.is_empty() {
+                                    available_vars.insert(dst_var);
+                                }
 
                                 // Skip the destination node pattern scan
                                 skip_next_node = true;
@@ -445,15 +471,21 @@ impl QueryPlanner {
                         // Regular (non-var-length) pattern without edge: Scan node only
                         if !skip_current_node_scan {
                             if let Some(label) = pattern.node_label {
-                                scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                    table_name: label,
-                                    table_id: pattern.node_table_id.unwrap_or(0),
-                                    alias: pattern.node_variable,
-                                    columns: Vec::new(),
-                                    cardinality: 0,
-                                    fts_query: fts_to_assign.take(),
-                                    predicate: None,
-                                }));
+                                let var = pattern.node_variable.clone();
+                                if !var.as_ref().map_or(false, |v| available_vars.contains(v)) {
+                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                        table_name: label,
+                                        table_id: pattern.node_table_id.unwrap_or(0),
+                                        alias: var.clone(),
+                                        columns: Vec::new(),
+                                        cardinality: 0,
+                                        fts_query: fts_to_assign.take(),
+                                        predicate: None,
+                                    }));
+                                    if let Some(v) = var {
+                                        available_vars.insert(v);
+                                    }
+                                }
                             }
                         }
                     }

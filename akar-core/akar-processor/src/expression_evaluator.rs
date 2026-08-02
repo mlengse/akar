@@ -1405,6 +1405,37 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
                 v.set_null(row, false);
             }
         }
+        Value::Date(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&(x.0 as i64).to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::Timestamp(x)
+        | Value::TimestampNs(x)
+        | Value::TimestampMs(x)
+        | Value::TimestampSec(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.0.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::TimestampTz(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.0.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::DTime(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
         Value::Int32(x) => {
             let offset = row * 4;
             if offset + 4 <= v.data().len() {
@@ -1471,6 +1502,14 @@ fn build_arrow_from_values(
                 match v {
                     Value::Null => builder.append_null(),
                     Value::Int64(n) => builder.append_value(*n),
+                    Value::Int32(n) => builder.append_value(*n as i64),
+                    Value::Date(n) => builder.append_value(n.0 as i64),
+                    Value::Timestamp(n)
+                    | Value::TimestampNs(n)
+                    | Value::TimestampMs(n)
+                    | Value::TimestampSec(n) => builder.append_value(n.0),
+                    Value::TimestampTz(n) => builder.append_value(n.0),
+                    Value::DTime(n) => builder.append_value(*n),
                     _ => builder.append_null(),
                 }
             }

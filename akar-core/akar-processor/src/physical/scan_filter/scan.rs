@@ -112,18 +112,18 @@ impl PhysicalScan {
             Value::Int8(_) | Value::UInt8(_) => PhysicalTypeID::Int8,
             Value::Double(_) => PhysicalTypeID::Double,
             Value::Float(_) => PhysicalTypeID::Float,
-            Value::String(_)
-            | Value::Date(_)
+            Value::String(_) => PhysicalTypeID::String,
+            Value::Date(_)
             | Value::Timestamp(_)
             | Value::TimestampTz(_)
             | Value::TimestampNs(_)
             | Value::TimestampMs(_)
             | Value::TimestampSec(_)
-            | Value::Interval(_) => PhysicalTypeID::String,
+            | Value::DTime(_) => PhysicalTypeID::Int64,
+            Value::Interval(_) => PhysicalTypeID::String,
             Value::Blob(_) => PhysicalTypeID::Blob,
             Value::UInt128(_) => PhysicalTypeID::Int128,
             Value::Json(_) => PhysicalTypeID::String,
-            Value::DTime(_) => PhysicalTypeID::Int64,
             Value::Union(_, _) => PhysicalTypeID::Struct,
             Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => PhysicalTypeID::Int64,
         }
@@ -143,15 +143,15 @@ impl PhysicalScan {
             LogicalTypeID::Int8 | LogicalTypeID::UInt8 => PhysicalTypeID::Int8,
             LogicalTypeID::Double | LogicalTypeID::Decimal => PhysicalTypeID::Double,
             LogicalTypeID::Float => PhysicalTypeID::Float,
-            LogicalTypeID::String
-            | LogicalTypeID::Date
+            LogicalTypeID::Date
             | LogicalTypeID::Timestamp
             | LogicalTypeID::TimestampTz
             | LogicalTypeID::TimestampMs
             | LogicalTypeID::TimestampNs
             | LogicalTypeID::TimestampSec
+            | LogicalTypeID::Time => PhysicalTypeID::Int64,
+            LogicalTypeID::String
             | LogicalTypeID::Interval
-            | LogicalTypeID::Time
             | LogicalTypeID::Json => PhysicalTypeID::String,
             LogicalTypeID::Blob => PhysicalTypeID::Blob,
             LogicalTypeID::Any
@@ -194,6 +194,13 @@ impl PhysicalScan {
                         Some(Value::UInt32(v)) => builder.append_value(*v as i64),
                         Some(Value::UInt16(v)) => builder.append_value(*v as i64),
                         Some(Value::UInt8(v)) => builder.append_value(*v as i64),
+                        Some(Value::Date(v)) => builder.append_value(v.0 as i64),
+                        Some(Value::Timestamp(v))
+                        | Some(Value::TimestampNs(v))
+                        | Some(Value::TimestampMs(v))
+                        | Some(Value::TimestampSec(v)) => builder.append_value(v.0),
+                        Some(Value::TimestampTz(v)) => builder.append_value(v.0),
+                        Some(Value::DTime(v)) => builder.append_value(*v),
                         _ => builder.append_null(),
                     }
                 }

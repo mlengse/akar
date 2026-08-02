@@ -1,7 +1,12 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use crate::physical::write_ops::delete::ast_constant_to_value;
 use akar_common::types::PhysicalTypeID;
+use akar_common::types::Value;
 use akar_common::vector::{DataChunk, ValueVector};
+use akar_function::registry::FunctionRegistry;
+use akar_function::scalar::evaluate_scalar;
+use akar_parser::ast::Expression;
 use akar_storage::table::TableCatalog;
 use std::sync::Arc;
 
@@ -106,5 +111,31 @@ pub fn evaluate_expression_for_row(
                 akar_common::types::Value::Null
             }
         }
+    }
+}
+
+/// Evaluate a constant-only expression (literal or function call over
+/// literals) into a `Value`, using the function registry. Used by the
+/// CREATE DML write path to support expressions like `DATE('2024-01-15')`.
+/// Returns `Value::Null` for expressions that reference variables or
+/// otherwise cannot be folded without a row context.
+pub fn evaluate_constant_expr(expr: &Expression, registry: &FunctionRegistry) -> Value {
+    match expr {
+        Expression::Constant(c) => ast_constant_to_value(c),
+        Expression::FunctionCall(name, args) => {
+            let arg_values: Vec<Value> = args
+                .iter()
+                .map(|a| evaluate_constant_expr(a, registry))
+                .collect();
+            if arg_values.iter().any(|v| matches!(v, Value::Null)) {
+                return Value::Null;
+            }
+            let func = match registry.get_scalar(name).cloned() {
+                Some(f) => f,
+                None => return Value::Null,
+            };
+            evaluate_scalar(&func, &arg_values).unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
     }
 }

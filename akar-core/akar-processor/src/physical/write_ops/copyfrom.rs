@@ -37,8 +37,12 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
 
-        // 2. Build config and convert column schema
-        let catalog_cols: Vec<akar_catalog::CatalogColumn> = self
+        // 2. Build config and convert column schema.
+        //    For rel tables the COPY file carries two leading [from, to] columns
+        //    (node PK values) ahead of the user properties. Synthesize those two
+        //    columns (typed as the src/dst node PK types) so readers validate
+        //    `columns.len() + 2` and the insert branch can resolve PKs -> offsets.
+        let mut catalog_cols: Vec<akar_catalog::CatalogColumn> = self
             .columns
             .iter()
             .map(|c| akar_catalog::CatalogColumn {
@@ -49,6 +53,32 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 default_value: None,
             })
             .collect();
+        {
+            let rel_meta = self.table_catalog.get_rel_table_by_name(&self.table_name);
+            if let Some(rel) = &rel_meta {
+                let src_pk_type = self
+                    .table_catalog
+                    .get_node_table(rel.src_table_id)
+                    .map(|n| n.columns[n.primary_key_column].logical_type)
+                    .unwrap_or(akar_common::types::LogicalTypeID::Int64);
+                let dst_pk_type = self
+                    .table_catalog
+                    .get_node_table(rel.dst_table_id)
+                    .map(|n| n.columns[n.primary_key_column].logical_type)
+                    .unwrap_or(akar_common::types::LogicalTypeID::Int64);
+                let synthetic = |name: &str, logical_type: akar_common::types::LogicalTypeID| {
+                    akar_catalog::CatalogColumn {
+                        name: name.to_string(),
+                        logical_type,
+                        is_primary_key: false,
+                        compression: akar_common::enums::CompressionType::Uncompressed,
+                        default_value: None,
+                    }
+                };
+                catalog_cols.insert(0, synthetic("from", src_pk_type));
+                catalog_cols.insert(1, synthetic("to", dst_pk_type));
+            }
+        }
 
         // 3. Read the file
         let rows = match ext.as_str() {
@@ -94,21 +124,33 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 self.table_name
             );
         } else if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
-            let rels: Vec<(u64, u64, Vec<Value>)> = rows
-                .iter()
-                .map(|row| {
-                    let from = match &row[0] {
-                        Value::Int64(v) => *v as u64,
-                        _ => 0, // Will fail validation below
-                    };
-                    let to = match &row[1] {
-                        Value::Int64(v) => *v as u64,
-                        _ => 0,
-                    };
-                    let props = row[2..].to_vec();
-                    (from, to, props)
-                })
-                .collect();
+            // Rel COPY files carry [from, to, ...props] where from/to are node PK
+            // values. Resolve them to internal node offsets via the src/dst node
+            // tables' PK index (mirrors C++ IndexLookupInfo).
+            let src_node = self.table_catalog.get_node_table(table.src_table_id);
+            let dst_node = self.table_catalog.get_node_table(table.dst_table_id);
+            let mut rels: Vec<(u64, u64, Vec<Value>)> = Vec::with_capacity(rows.len());
+            for row in &rows {
+                let from = src_node
+                    .as_ref()
+                    .and_then(|n| n.lookup_by_pk(&row[0]))
+                    .ok_or_else(|| {
+                        format!(
+                            "COPY rel: source node with PK {:?} not found in table '{}'",
+                            row[0], self.table_name
+                        )
+                    })?;
+                let to = dst_node
+                    .as_ref()
+                    .and_then(|n| n.lookup_by_pk(&row[1]))
+                    .ok_or_else(|| {
+                        format!(
+                            "COPY rel: destination node with PK {:?} not found in table '{}'",
+                            row[1], self.table_name
+                        )
+                    })?;
+                rels.push((from, to, row[2..].to_vec()));
+            }
             let count = table
                 .insert_rels_batch(&rels)
                 .map_err(|e| format!("Batch insert rel error: {e}"))?;

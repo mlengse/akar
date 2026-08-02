@@ -5,6 +5,7 @@
 use crate::logical_operator::*;
 use akar_binder::bound_statement::{BoundExpression, BoundPattern};
 use akar_parser::ast::{BinaryOp, EdgeDirection, Expression};
+use std::collections::HashSet;
 
 /// A join plan tree representing how to combine scan operators.
 #[derive(Debug, Clone)]
@@ -28,6 +29,10 @@ pub enum JoinPlan {
 /// 1. Start with the first scan as the base
 /// 2. For each remaining scan, find any join conditions from the filter
 /// 3. If join conditions exist → HashJoin, otherwise → CrossProduct
+///
+/// P48.3: before joining, single-variable WHERE conjuncts (e.g. `b.id >= 0`)
+/// are pushed into the predicate of the scan whose alias matches that variable.
+/// This lets `PhysicalScan` prune rows before the cross product is materialized.
 pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundExpression>) -> JoinPlan {
     if scans.is_empty() {
         return JoinPlan::Leaf(LogicalOperator::ScanNode(LogicalScanNode {
@@ -41,8 +46,18 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
         }));
     }
 
+    let mut scans = scans;
     if scans.len() == 1 {
+        // P48.3: also push single-variable predicates for the single-scan case
+        // so the scan can prune rows before any Extend/Projection downstream.
+        if let Some(filter) = filter_expr {
+            push_single_var_predicates(&mut scans, &filter.expression);
+        }
         return JoinPlan::Leaf(scans.into_iter().next().unwrap());
+    }
+
+    if let Some(filter) = filter_expr {
+        push_single_var_predicates(&mut scans, &filter.expression);
     }
 
     // Extract table aliases from scans for join condition matching
@@ -82,6 +97,103 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
     }
 
     result
+}
+
+/// Split an expression into a list of top-level AND conjuncts.
+fn split_and_conjuncts(expr: &Expression) -> Vec<Expression> {
+    match expr {
+        Expression::BinaryOp(BinaryOp::And, left, right) => {
+            let mut out = split_and_conjuncts(left);
+            out.extend(split_and_conjuncts(right));
+            out
+        }
+        other => vec![other.clone()],
+    }
+}
+
+/// Collect the set of variable names referenced by an expression.
+fn collect_variables(expr: &Expression, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Variable(v) => {
+            out.insert(v.clone());
+        }
+        Expression::PropertyAccess(base, _) => collect_variables(base, out),
+        Expression::FunctionCall(_, args) => {
+            for a in args {
+                collect_variables(a, out);
+            }
+        }
+        Expression::BinaryOp(_, left, right) => {
+            collect_variables(left, out);
+            collect_variables(right, out);
+        }
+        Expression::UnaryOp(_, inner) => collect_variables(inner, out),
+        Expression::List(items) => {
+            for item in items {
+                collect_variables(item, out);
+            }
+        }
+        Expression::Map(items) => {
+            for (_, e) in items {
+                collect_variables(e, out);
+            }
+        }
+        Expression::Case(c) => {
+            if let Some(s) = &c.subject {
+                collect_variables(s, out);
+            }
+            for alt in &c.alternatives {
+                collect_variables(&alt.when, out);
+                collect_variables(&alt.then, out);
+            }
+            if let Some(e) = &c.else_expr {
+                collect_variables(e, out);
+            }
+        }
+        Expression::ListPredicate { list, predicate, .. } => {
+            collect_variables(list, out);
+            collect_variables(predicate, out);
+        }
+        Expression::Lambda { body, .. } => collect_variables(body, out),
+        _ => {}
+    }
+}
+
+/// Push single-variable WHERE conjuncts into the matching scan's predicate.
+///
+/// A conjunct (e.g. `b.id >= 0`) that references exactly one variable is folded
+/// into the `ScanNode` whose `alias` matches that variable, allowing the scan to
+/// prune rows before the join. The conjunct is AND-combined with any existing
+/// scan predicate. Conjuncts referencing multiple variables (join conditions)
+/// or variables with no backing scan are left untouched for the top-level Filter.
+fn push_single_var_predicates(scans: &mut [LogicalOperator], filter_expr: &Expression) {
+    let conjuncts = split_and_conjuncts(filter_expr);
+
+    for scan in scans.iter_mut() {
+        let LogicalOperator::ScanNode(node) = scan else { continue };
+        let Some(alias) = node.alias.clone() else { continue };
+
+        let mut pushable: Vec<Expression> = Vec::new();
+        for c in &conjuncts {
+            let mut vars = HashSet::new();
+            collect_variables(c, &mut vars);
+            if vars.len() == 1 && vars.contains(&alias) {
+                pushable.push(c.clone());
+            }
+        }
+        if pushable.is_empty() {
+            continue;
+        }
+
+        let mut combined = pushable.remove(0);
+        for c in pushable {
+            combined = Expression::BinaryOp(BinaryOp::And, Box::new(combined), Box::new(c));
+        }
+        node.predicate = Some(match node.predicate.take() {
+            Some(existing) => Expression::BinaryOp(BinaryOp::And, Box::new(existing), Box::new(combined)),
+            None => combined,
+        });
+    }
 }
 
 /// Detect a WCOJ star (`MATCH (a)-[:r1]->(b), (a)-[:r2]->(c), ...`) and build an
@@ -572,8 +684,90 @@ mod tests {
     }
 
     #[test]
-    fn test_flatten_cross_product() {
-        let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
+    fn test_single_var_predicate_pushdown() {
+        use akar_parser::ast::Constant;
+        // MATCH (a:Person), (b:Person) WHERE b.id >= 0 AND b.id <= 100
+        // The conjuncts referencing only `b` should be folded into scan b's
+        // predicate; scan a's predicate stays empty. The `a.id = b.id` join
+        // condition references two variables so it must NOT be pushed.
+        let scan_a = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+            predicate: None,
+        });
+        let scan_b = LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("b".into()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+            predicate: None,
+        });
+        let filter = Expression::BinaryOp(
+            BinaryOp::And,
+            Box::new(Expression::BinaryOp(
+                BinaryOp::And,
+                Box::new(Expression::BinaryOp(
+                    BinaryOp::GreaterThanOrEqual,
+                    Box::new(Expression::PropertyAccess(
+                        Box::new(Expression::Variable("b".into())),
+                        "id".into(),
+                    )),
+                    Box::new(Expression::Constant(Constant::Integer(0))),
+                )),
+                Box::new(Expression::BinaryOp(
+                    BinaryOp::LessThanOrEqual,
+                    Box::new(Expression::PropertyAccess(
+                        Box::new(Expression::Variable("b".into())),
+                        "id".into(),
+                    )),
+                    Box::new(Expression::Constant(Constant::Integer(100))),
+                )),
+            )),
+            Box::new(Expression::BinaryOp(
+                BinaryOp::Equal,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable("a".into())),
+                    "id".into(),
+                )),
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable("b".into())),
+                    "id".into(),
+                )),
+            )),
+        );
+
+        let mut scans = vec![scan_a, scan_b];
+        push_single_var_predicates(&mut scans, &filter);
+
+        match &scans[0] {
+            LogicalOperator::ScanNode(s) => assert!(
+                s.predicate.is_none(),
+                "scan a must not receive b-only conjuncts, got: {:?}",
+                s.predicate
+            ),
+            _ => panic!("expected ScanNode"),
+        }
+        match &scans[1] {
+            LogicalOperator::ScanNode(s) => {
+                let pred = s.predicate.as_ref().expect("scan b should have a predicate");
+                // b.id >= 0 AND b.id <= 100 — two conjuncts AND-combined.
+                match pred {
+                    Expression::BinaryOp(BinaryOp::And, _, _) => {}
+                    other => panic!("expected AND-combined predicate, got: {other:?}"),
+                }
+            }
+            _ => panic!("expected ScanNode"),
+        }
+    }
+
+    #[test]
+    fn test_flatten_cross_product() {        let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
             predicate: None,
             table_name: "A".into(),
             table_id: 0,

@@ -427,11 +427,15 @@ impl Connection {
 
                 // Build values from pattern properties, defaulting to Null
                 let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
-                for (prop_name, expr) in &c.properties {
-                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
-                        && let akar_parser::ast::Expression::Constant(con) = expr
-                    {
-                        values[col_idx] = ast_constant_to_value(con);
+                {
+                    let registry = self.database.function_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                    for (prop_name, expr) in &c.properties {
+                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                            values[col_idx] = akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                expr,
+                                &registry,
+                            );
+                        }
                     }
                 }
 

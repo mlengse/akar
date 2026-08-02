@@ -319,6 +319,13 @@ impl ColumnChunk {
                         Value::UInt32(n) => builder.append_value(*n as i64),
                         Value::UInt16(n) => builder.append_value(*n as i64),
                         Value::UInt8(n) => builder.append_value(*n as i64),
+                        Value::Date(n) => builder.append_value(n.0 as i64),
+                        Value::Timestamp(n)
+                        | Value::TimestampNs(n)
+                        | Value::TimestampMs(n)
+                        | Value::TimestampSec(n) => builder.append_value(n.0),
+                        Value::TimestampTz(n) => builder.append_value(n.0),
+                        Value::DTime(n) => builder.append_value(*n),
                         _ => builder.append_null(),
                     }
                 }

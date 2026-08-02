@@ -296,6 +296,25 @@ impl LegacyValueVector {
                 self.set_i64(idx, *v as i64);
                 Ok(())
             }
+            (PhysicalTypeID::Int64, Value::Date(v)) => {
+                self.set_i64(idx, v.0 as i64);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::Timestamp(v))
+            | (PhysicalTypeID::Int64, Value::TimestampNs(v))
+            | (PhysicalTypeID::Int64, Value::TimestampMs(v))
+            | (PhysicalTypeID::Int64, Value::TimestampSec(v)) => {
+                self.set_i64(idx, v.0);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::TimestampTz(v)) => {
+                self.set_i64(idx, v.0);
+                Ok(())
+            }
+            (PhysicalTypeID::Int64, Value::DTime(v)) => {
+                self.set_i64(idx, *v);
+                Ok(())
+            }
             (PhysicalTypeID::Int32, Value::Int32(v)) => {
                 self.set_i32(idx, *v);
                 Ok(())

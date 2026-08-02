@@ -85,6 +85,14 @@ fn main() -> Result<()> {
         }
 
         let table_name = table["name"].as_str().unwrap();
+
+        // Idempotency: skip CREATE + COPY for tables already present in the
+        // destination DB (e.g. re-running migration on an already-migrated DB).
+        if rust_db.get_table_id(table_name).is_some() {
+            println!("Skipping {} (already exists)", table_name);
+            continue;
+        }
+
         let properties = table["properties"].as_array().unwrap();
 
         let mut columns = Vec::new();
@@ -134,6 +142,13 @@ fn main() -> Result<()> {
         }
 
         let table_name = table["name"].as_str().unwrap();
+
+        // Idempotency: skip CREATE + COPY for tables already present in the
+        // destination DB (e.g. re-running migration on an already-migrated DB).
+        if rust_db.get_table_id(table_name).is_some() {
+            println!("Skipping {} (already exists)", table_name);
+            continue;
+        }
 
         // Find connection info
         let mut from_table = "UNKNOWN";
