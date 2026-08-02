@@ -1196,24 +1196,72 @@
     }
 
     #[test]
-    fn test_intersect_empty_build() {
+    fn test_intersect_no_probe() {
         let intersect = PhysicalIntersect {
             num_build_sides: 2,
             probe_key_col: 0,
             build_key_col: 0,
         };
-        let build1 = make_i64_chunk(&[]);
-        let build2 = make_i64_chunk(&[1, 2, 3]);
-        let probe = make_i64_chunk(&[1, 2, 3]);
+        let build1 = make_i64_chunk(&[1, 2, 3]);
+        let build2 = make_i64_chunk(&[2, 3, 4]);
+        let probe = make_i64_chunk(&[]);
         let build_chunks = vec![build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // Empty build side G�� empty result
+        // No probe rows → empty result
         assert!(result.is_empty() || result[0].size == 0);
     }
 
     #[test]
-    fn test_intersect_no_probe() {
+    fn test_intersect_cross_product_multi_match() {
+        // WCOJ: a probe key that matches multiple rows per build side emits the
+        // full cross product (2 rows in side 1 × 3 rows in side 2 = 6 rows).
         let intersect = PhysicalIntersect {
             num_build_sides: 2,
             probe_key_col: 0,
+            build_key_col: 0,
+        };
+        let build1 = make_i64_chunk(&[1, 1, 5]);
+        let build2 = make_i64_chunk(&[1, 1, 1, 7]);
+        let probe = make_i64_chunk(&[1, 2]);
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect
+            .execute_sides(&vec![vec![build_chunks[0].clone()], vec![build_chunks[1].clone()]], &probe_chunks)
+            .unwrap();
+        assert!(!result.is_empty(), "Expected non-empty result");
+        assert_eq!(result[0].size, 6, "expected 2x3 cross product for probe key 1");
+    }
+
+    #[test]
+    fn test_intersect_key_col_resolution() {
+        // Probe/build chunks with field names; key col derived as `a.id` at index 1.
+        let mut probe_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe_v.set_i64(0, 10);
+        probe_v.set_i64(1, 20);
+        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        id_v.set_i64(0, 1);
+        id_v.set_i64(1, 2);
+        let mut probe = DataChunk::new(vec![probe_v, id_v]);
+        probe.field_names = vec!["a.other".into(), "a.id".into()];
+        let mut build_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_v.set_i64(0, 30);
+        build_v.set_i64(1, 40);
+        let mut build_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_id.set_i64(0, 1);
+        build_id.set_i64(1, 1);
+        let mut build = DataChunk::new(vec![build_v, build_id]);
+        build.field_names = vec!["a.other".into(), "a.id".into()];
+
+        let intersect = PhysicalIntersect {
+            num_build_sides: 1,
+            probe_key_col: 1,
+            build_key_col: 1,
+        };
+        let result = intersect
+            .execute_sides(&vec![vec![build]], &vec![probe])
+            .unwrap();
+        assert!(!result.is_empty(), "Expected non-empty result");
+        assert_eq!(result[0].size, 2, "probe id 1 matches build row 0, id 2 matches nothing");
+    }
+}

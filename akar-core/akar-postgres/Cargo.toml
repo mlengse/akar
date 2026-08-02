@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+description = "PostgreSQL extension for the Akar embedded graph database"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
 
 [dependencies]
 akar-function = { path = "../akar-function" }

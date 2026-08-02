@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = true
+description = "Akar — pure Rust embedded graph database for AI agent memory"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
 
 [features]
 default = []
@@ -55,6 +60,8 @@ akar-azure = { path = "../akar-azure", optional = true }
 akar-postgres = { path = "../akar-postgres", optional = true }
 akar-unity-catalog = { path = "../akar-unity-catalog", optional = true }
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 arrow = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
 csv.workspace = true

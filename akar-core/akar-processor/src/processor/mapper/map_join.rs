@@ -2,6 +2,7 @@ use super::ExecutionContext;
 use crate::physical_operator::*;
 use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
+use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
 
 use crate::processor::join_helpers::derive_join_column_indices;
@@ -58,18 +59,27 @@ pub fn map_and_execute_join(
             Ok(result)
         }
         LogicalOperator::Intersect(ic) => {
-            let left_ops = flatten_union_child(&ic.left);
-            let right_ops = flatten_union_child(&ic.right);
+            // Build side is a (possibly nested) Union of per-pattern pipelines,
+            // each executed independently so the intersect has one hash table per
+            // pattern. Probe side is the shared-node scan.
+            let build_sides = collect_union_sides(&ic.left);
+            let probe_ops = flatten_union_child(&ic.right);
 
-            let build_chunks = ctx.execute_children(&left_ops)?;
-            let probe_chunks = ctx.execute_children(&right_ops)?;
+            let build_chunk_sides: Vec<Vec<DataChunk>> = build_sides
+                .iter()
+                .map(|ops| ctx.execute_children(ops))
+                .collect::<Result<_, _>>()?;
+            let probe_chunks = ctx.execute_children(&probe_ops)?;
+
+            let (probe_key_col, build_key_col) =
+                resolve_intersect_key_cols(&ic.build_key_exprs, &probe_chunks, &build_chunk_sides);
 
             let intersect = PhysicalIntersect {
-                num_build_sides: ic.num_build_sides,
-                probe_key_col: 0,
-                build_key_col: 0,
+                num_build_sides: build_chunk_sides.len() as u32,
+                probe_key_col,
+                build_key_col,
             };
-            let result = intersect.execute_binary(&build_chunks, &probe_chunks)?;
+            let result = intersect.execute_sides(&build_chunk_sides, &probe_chunks)?;
             Ok(result)
         }
         LogicalOperator::CrossProduct(cp) => {
@@ -111,4 +121,68 @@ pub fn map_and_execute_join(
         }
         _ => Err(format!("Not a join operator: {:?}", op).into()),
     }
+}
+
+/// Flatten a (possibly nested) `Union` subtree into a list of independent
+/// operator pipelines — one per WCOJ build side.
+fn collect_union_sides(op: &LogicalOperator) -> Vec<Vec<LogicalOperator>> {
+    match op {
+        LogicalOperator::Union(u) => {
+            let mut sides = collect_union_sides(&u.left);
+            sides.extend(collect_union_sides(&u.right));
+            sides
+        }
+        other => vec![flatten_union_child(other)],
+    }
+}
+
+/// Resolve the shared-node key column index on the probe and build sides.
+///
+/// The key is derived from the first build key expression (a reference to the
+/// shared variable, e.g. `a`), resolved against `field_names` as `a.id`.
+fn resolve_intersect_key_cols(
+    build_key_exprs: &[Expression],
+    probe_chunks: &[DataChunk],
+    build_sides: &[Vec<DataChunk>],
+) -> (u32, u32) {
+    let var = build_key_exprs.first().and_then(|e| match e {
+        Expression::Variable(v) => Some(v.clone()),
+        Expression::PropertyAccess(obj, _) => {
+            if let Expression::Variable(v) = &**obj {
+                Some(v.clone())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    });
+
+    let probe_names: Vec<&str> = probe_chunks
+        .first()
+        .map(|c| c.field_names.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+    let build_names: Vec<&str> = build_sides
+        .first()
+        .and_then(|s| s.first())
+        .map(|c| c.field_names.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+
+    let mut probe_col = 0u32;
+    let mut build_col = 0u32;
+    if let Some(var) = var {
+        let candidates = [format!("{var}._id"), format!("{var}.id"), var];
+        for c in &candidates {
+            if let Some(idx) = probe_names.iter().position(|n| n == c) {
+                probe_col = idx as u32;
+                break;
+            }
+        }
+        for c in &candidates {
+            if let Some(idx) = build_names.iter().position(|n| n == c) {
+                build_col = idx as u32;
+                break;
+            }
+        }
+    }
+    (probe_col, build_col)
 }

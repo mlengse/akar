@@ -364,7 +364,7 @@ not_expr = { (not_kw)? ~ comparison_expr }
 comparison_expr = {
     additive_expr ~ (is_check_op | not_in_op | in_op | not_starts_with_op | starts_with_op | not_ends_with_op | ends_with_op | not_contains_op | contains_op | like_op | between_op | (comparison_op ~ additive_expr))?
 }
-comparison_op   = { "=" | "<>" | "<" | ">" | "<=" | ">=" }
+comparison_op   = { "=" | "<>" | "<=" | ">=" | "<" | ">" }
 
 is_check_op = { "IS" ~ ("NOT" ~ "NULL" | "NULL") }
 in_kw              = @{ "IN" ~ !(ASCII_ALPHANUMERIC | "_") }

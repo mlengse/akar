@@ -6,7 +6,7 @@
 //! - WHERE → Filter (applied after joins)
 //! - RETURN → Projection (topmost operator)
 
-use crate::join_order::{build_join_tree, flatten_join_plan};
+use crate::join_order::{build_join_tree, build_wcoj_intersect, flatten_join_plan};
 use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
 use akar_common::error::PlannerError;
@@ -316,7 +316,7 @@ impl QueryPlanner {
 
         for clause in query.clauses {
             match clause {
-                BoundClause::BoundMatch(m) => {
+                BoundClause::BoundMatch(mut m) => {
                     let mut fts_to_assign = m.fts_query.as_ref().map(|fq| LogicalFtsScan {
                         index_name: fq.index_name.clone(),
                         query_string: fq.query_string.clone(),
@@ -325,7 +325,16 @@ impl QueryPlanner {
                         posting_table: fq.posting_table.clone(),
                         cardinality: 0,
                     });
-                    let mut patterns_iter = m.patterns.into_iter().peekable();
+                    let patterns: Vec<BoundPattern> = std::mem::take(&mut m.patterns);
+
+                    // WCOJ pass: `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` becomes a single
+                    // Intersect that probes the shared node once across all build sides.
+                    // Triangle queries additionally get closure-edge Extend+Filter ops.
+                    if let Some((wcoj_op, wcoj_trailing)) = build_wcoj_intersect(&patterns) {
+                        scan_ops.push(wcoj_op);
+                        extend_ops.extend(wcoj_trailing);
+                    } else {
+                        let mut patterns_iter = patterns.into_iter().peekable();
                     let _skip_next_node = false;
                     while let Some(pattern) = patterns_iter.next() {
                         // If the previous pattern consumed this dest node, skip the node scan
@@ -448,6 +457,7 @@ impl QueryPlanner {
                             }
                         }
                     }
+                    } // end else (regular pattern loop)
                 }
 
                 BoundClause::BoundWhere(w) => {

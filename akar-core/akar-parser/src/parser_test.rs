@@ -128,6 +128,18 @@ mod tests {
     }
 
     #[test]
+    fn test_comparison_ops() {
+        for sql in [
+            "MATCH (a) WHERE a.age <= 30 RETURN a",
+            "MATCH (a) WHERE a.age >= 30 RETURN a",
+            "MATCH (a) WHERE a.age > 30 RETURN a",
+            "MATCH (a) WHERE a.age < 30 RETURN a",
+        ] {
+            assert!(parse(sql).is_ok(), "should parse: {sql}");
+        }
+    }
+
+    #[test]
     fn test_list_literal() {
         let sql = "MATCH (a) WHERE a.age IN [1, 2, 3] RETURN a";
         assert!(parse(sql).is_ok());

@@ -198,13 +198,20 @@ impl Binder {
             // Check for duplicate variable names
             if let Some(ref v) = var {
                 if let Some(existing) = existing_vars.iter().find(|bv| bv.name == *v) {
-                    if allow_existing {
-                        // Reference to already-bound variable (e.g. in CREATE after MATCH)
+                    // Reusing a variable is allowed when it refers to the same node table
+                    // (e.g. `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` — `a` is the shared node).
+                    let same_node = allow_existing
+                        || (existing.is_node
+                            && node_table_id.is_some()
+                            && existing.table_id == node_table_id.unwrap_or(0));
+                    if same_node {
+                        // Reference to already-bound variable (e.g. in CREATE after MATCH,
+                        // or the shared node of a multi-pattern MATCH).
                         // Use the existing variable's table_id if we didn't resolve one
                         if node_table_id.is_none() {
                             node_table_id = Some(existing.table_id);
                         }
-                        // Don't add to new_vars ΓÇö it's a reference, not a new binding
+                        // Don't add to new_vars — it's a reference, not a new binding
                     } else {
                         return Err(format!("Variable '{}' already defined", v));
                     }

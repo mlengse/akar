@@ -54,6 +54,8 @@ version = "0.1.0"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -870,6 +872,8 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

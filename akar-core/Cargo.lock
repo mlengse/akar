@@ -267,6 +267,8 @@ dependencies = [
  "csv",
  "parquet",
  "proptest",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
 ]
@@ -353,6 +355,19 @@ dependencies = [
  "criterion",
  "hashbrown 0.17.1",
  "rayon",
+ "tracing",
+]
+
+[[package]]
+name = "akar-server"
+version = "0.1.0"
+dependencies = [
+ "akar-common",
+ "akar-main",
+ "arrow 59.1.0",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tracing",
 ]
 

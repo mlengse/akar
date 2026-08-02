@@ -378,6 +378,20 @@ impl Database {
         self.storage_manager.db_path().join(CATALOG_FILE_NAME)
     }
 
+    /// Connect to a remote Akar server (embedded server mode, P47).
+    ///
+    /// The server process owns the [`Database`] instance and its exclusive file
+    /// lock; remote clients only talk to the server over TCP and never open the
+    /// database directory themselves. Multiple processes can therefore access
+    /// the same database concurrently: one writer via the server plus any
+    /// number of read-only clients (and additional writers when
+    /// `concurrent_writes` is enabled).
+    ///
+    /// See [`crate::remote::RemoteDatabase`] for the returned handle's API.
+    pub fn connect_tcp(addr: impl Into<String>) -> Result<crate::remote::RemoteDatabase, String> {
+        crate::remote::RemoteDatabase::connect_tcp(addr)
+    }
+
     /// Returns `true` when the database runs fully in-memory (`:memory:`),
     /// in which case catalog persistence is skipped.
     pub fn is_in_memory(&self) -> bool {

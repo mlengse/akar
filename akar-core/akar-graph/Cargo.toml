@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+description = "Graph data structures for the Akar embedded graph database"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
 
 [dependencies]
 akar-common = { path = "../akar-common" }

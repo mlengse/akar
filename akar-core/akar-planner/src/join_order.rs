@@ -3,8 +3,8 @@
 //! Uses a simple greedy heuristic: join the smallest tables first.
 
 use crate::logical_operator::*;
-use akar_binder::bound_statement::BoundExpression;
-use akar_parser::ast::{BinaryOp, Expression};
+use akar_binder::bound_statement::{BoundExpression, BoundPattern};
+use akar_parser::ast::{BinaryOp, EdgeDirection, Expression};
 
 /// A join plan tree representing how to combine scan operators.
 #[derive(Debug, Clone)]
@@ -82,6 +82,229 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
     }
 
     result
+}
+
+/// Detect a WCOJ star (`MATCH (a)-[:r1]->(b), (a)-[:r2]->(c), ...`) and build an
+/// `Intersect` operator whose build sides enumerate each edge pattern from the
+/// shared node.
+///
+/// Ports Kuzu's `planWCOJoin` semantics: the shared node is probed once and its
+/// key value is intersected across N build hash tables (one per pattern), instead
+/// of cross-joining duplicated scans of the shared node.
+///
+/// Triangle/cycle patterns (`MATCH (a)-[:r1]->(b), (a)-[:r2]->(c), (b)-[:r3]->(c)`)
+/// additionally produce closure-edge `Extend` + `Filter` operators (returned as
+/// the trailing ops) that verify the edges connecting the star's leaves.
+///
+/// Returns `None` when the patterns do not form a clean star (chains, var-length
+/// edges, backward edges, or any leftover patterns) — callers fall back to the
+/// regular join ordering.
+pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperator, Vec<LogicalOperator>)> {
+    let rel_indices: Vec<usize> = patterns
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.edge.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if rel_indices.len() < 2 {
+        return None;
+    }
+
+    // Categorize each rel pattern: source var, and whether it is a simple LTR
+    // edge with a valid destination pattern.
+    let mut src_of: Vec<Option<String>> = Vec::with_capacity(rel_indices.len());
+    let mut star_dst_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for &i in &rel_indices {
+        let pattern = &patterns[i];
+        let edge = pattern.edge.as_ref()?;
+        let is_simple_edge = edge.lower_bound.is_none() && edge.upper_bound.is_none();
+        let is_fwd = matches!(edge.direction, EdgeDirection::LeftToRight);
+        if !is_simple_edge || !is_fwd {
+            return None;
+        }
+        let dst = patterns.get(i + 1)?;
+        if dst.node_variable.as_ref()? == pattern.node_variable.as_ref()? {
+            // Self-loop — not a supported edge.
+            return None;
+        }
+        src_of.push(pattern.node_variable.clone());
+    }
+
+    // Find the shared source variable with the most star edges (≥ 2).
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for s in src_of.iter().flatten() {
+        *counts.entry(s).or_insert(0) += 1;
+    }
+    let shared_var = counts.iter().filter(|(_, c)| **c >= 2).max_by_key(|(_, c)| **c)?.0.to_string();
+
+    // Split rel patterns into star (shared source) vs closure (source is a star leaf).
+    let mut star_idxs: Vec<usize> = Vec::new();
+    let mut closure_idxs: Vec<usize> = Vec::new();
+    for (k, &i) in rel_indices.iter().enumerate() {
+        if src_of[k].as_deref() == Some(shared_var.as_str()) {
+            star_idxs.push(i);
+        } else {
+            closure_idxs.push(i);
+        }
+    }
+
+    let mut consumed: Vec<usize> = Vec::with_capacity(patterns.len());
+    let mut build_sides: Vec<Vec<LogicalOperator>> = Vec::with_capacity(star_idxs.len());
+    let mut shared_label: Option<&str> = None;
+    let mut shared_table_id = 0u64;
+
+    for &i in &star_idxs {
+        let pattern = &patterns[i];
+        let edge = pattern.edge.as_ref()?;
+        let node_var = pattern.node_variable.as_ref()?;
+        let node_label = pattern.node_label.as_ref()?;
+        let node_table_id = pattern.node_table_id?;
+        let rel_label = edge.label.as_ref()?;
+        let rel_table_id = edge.rel_table_id?;
+
+        if shared_label.is_none() {
+            shared_label = Some(node_label);
+            shared_table_id = node_table_id;
+        } else if shared_label != Some(node_label) || shared_table_id != node_table_id {
+            return None;
+        }
+
+        let dst = patterns.get(i + 1)?;
+        let dst_var = dst.node_variable.as_ref()?.clone();
+        let dst_label = dst.node_label.as_ref()?.clone();
+        let dst_table_id = dst.node_table_id?;
+        star_dst_vars.insert(dst_var.clone());
+        consumed.push(i);
+        consumed.push(i + 1);
+
+        let mut pipeline: Vec<LogicalOperator> = Vec::with_capacity(2);
+        pipeline.push(LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: node_label.clone(),
+            table_id: node_table_id,
+            alias: Some(node_var.clone()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+            predicate: None,
+        }));
+        pipeline.push(LogicalOperator::Extend(LogicalExtend {
+            rel_table_name: rel_label.clone(),
+            rel_table_id,
+            bound_node_var: node_var.clone(),
+            direction: edge.direction.clone(),
+            dst_node_var: dst_var,
+            dst_table_name: dst_label,
+            dst_table_id,
+            cardinality: 0,
+        }));
+        build_sides.push(pipeline);
+    }
+
+    // Closure edges: each must connect two distinct star leaves and be the only
+    // remaining rel patterns (no leftover chains).
+    let mut trailing: Vec<LogicalOperator> = Vec::new();
+    for &i in &closure_idxs {
+        let pattern = &patterns[i];
+        let edge = pattern.edge.as_ref()?;
+        let src_var = pattern.node_variable.as_ref()?;
+        let dst = patterns.get(i + 1)?;
+        let dst_var = dst.node_variable.as_ref()?;
+        if !star_dst_vars.contains(src_var) || !star_dst_vars.contains(dst_var) {
+            return None;
+        }
+        consumed.push(i);
+        consumed.push(i + 1);
+
+        let rel_label = edge.label.as_ref()?;
+        let rel_table_id = edge.rel_table_id?;
+        let dst_label = dst.node_label.as_ref()?;
+        let dst_table_id = dst.node_table_id?;
+
+        // Rename the closure destination so the filter can compare it against
+        // the star's copy of the same variable.
+        let closure_var = format!("__wcoj_closure_{rel_label}_{dst_var}");
+        trailing.push(LogicalOperator::Extend(LogicalExtend {
+            rel_table_name: rel_label.clone(),
+            rel_table_id,
+            bound_node_var: src_var.clone(),
+            direction: edge.direction.clone(),
+            dst_node_var: closure_var.clone(),
+            dst_table_name: dst_label.clone(),
+            dst_table_id,
+            cardinality: 0,
+        }));
+        trailing.push(LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                BinaryOp::Equal,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(closure_var)),
+                    "id".into(),
+                )),
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(dst_var.clone())),
+                    "id".into(),
+                )),
+            ),
+            children: Vec::new(),
+            cardinality: 0,
+        }));
+    }
+
+    // Only enumerate when the whole MATCH is the star + its closures — no
+    // leftover patterns for the regular loop to process.
+    consumed.sort_unstable();
+    consumed.dedup();
+    if consumed.len() != patterns.len() {
+        return None;
+    }
+
+    let shared_label = shared_label?;
+
+    // Probe side: scan the shared node once.
+    let probe = LogicalOperator::ScanNode(LogicalScanNode {
+        table_name: shared_label.to_string(),
+        table_id: shared_table_id,
+        alias: Some(shared_var.clone()),
+        columns: Vec::new(),
+        cardinality: 0,
+        fts_query: None,
+        predicate: None,
+    });
+
+    let wrap_side = |pipeline: Vec<LogicalOperator>| {
+        LogicalOperator::Projection(LogicalProjection {
+            expressions: Vec::new(),
+            children: pipeline,
+            cardinality: 0,
+        })
+    };
+
+    // Build side: union of per-pattern pipelines (ScanNode(shared) → Extend).
+    let mut sides = build_sides.into_iter();
+    let mut left = wrap_side(sides.next()?);
+    for side in sides {
+        left = LogicalOperator::Union(LogicalUnion {
+            left: Box::new(left),
+            right: Box::new(wrap_side(side)),
+            all: true,
+            cardinality: 0,
+        });
+    }
+
+    let key_exprs: Vec<Expression> = star_idxs
+        .iter()
+        .map(|_| Expression::Variable(shared_var.clone()))
+        .collect();
+
+    let root = LogicalOperator::Intersect(LogicalIntersect {
+        num_build_sides: star_idxs.len() as u32,
+        build_key_exprs: key_exprs,
+        left: Box::new(left),
+        right: Box::new(probe),
+        cardinality: 0,
+    });
+
+    Some((root, trailing))
 }
 
 /// Extract table alias from a logical operator.
@@ -209,6 +432,7 @@ fn flatten_plan(plan: &JoinPlan, ops: &mut Vec<LogicalOperator>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use akar_binder::bound_statement::BoundEdgePattern;
 
     #[test]
     fn test_single_scan_leaf() {
@@ -374,5 +598,81 @@ mod tests {
         let flat = flatten_join_plan(&plan);
         assert_eq!(flat.len(), 1); // 1 cross product root
         assert!(matches!(flat[0], LogicalOperator::CrossProduct(_)));
+    }
+
+    fn mk_pattern(
+        var: &str,
+        label: &str,
+        tid: u64,
+        rel: Option<(&str, u64)>,
+    ) -> BoundPattern {
+        BoundPattern {
+            node_variable: Some(var.into()),
+            node_label: Some(label.into()),
+            node_table_id: Some(tid),
+            properties: Vec::new(),
+            edge: rel.map(|(l, id)| BoundEdgePattern {
+                variable: None,
+                label: Some(l.into()),
+                rel_table_id: Some(id),
+                direction: EdgeDirection::LeftToRight,
+                properties: Vec::new(),
+                lower_bound: None,
+                upper_bound: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_wcoj_star_detection() {
+        // (a)-[:r1]->(b), (a)-[:r2]->(c)
+        let patterns = vec![
+            mk_pattern("a", "N", 1, Some(("r1", 10))),
+            mk_pattern("b", "N", 1, None),
+            mk_pattern("a", "N", 1, Some(("r2", 11))),
+            mk_pattern("c", "N", 1, None),
+        ];
+        let (root, trailing) = build_wcoj_intersect(&patterns).expect("expected WCOJ intersect");
+        assert!(matches!(&root, LogicalOperator::Intersect(i) if i.num_build_sides == 2));
+        assert_eq!(root.cardinality(), 0);
+        assert!(trailing.is_empty(), "no closure edges for a fan-out");
+    }
+
+    #[test]
+    fn test_wcoj_triangle_detection() {
+        // (a)-[:r1]->(b), (a)-[:r2]->(c), (b)-[:r3]->(c)
+        let patterns = vec![
+            mk_pattern("a", "N", 1, Some(("r1", 10))),
+            mk_pattern("b", "N", 1, None),
+            mk_pattern("a", "N", 1, Some(("r2", 11))),
+            mk_pattern("c", "N", 1, None),
+            mk_pattern("b", "N", 1, Some(("r3", 12))),
+            mk_pattern("c", "N", 1, None),
+        ];
+        let (root, trailing) = build_wcoj_intersect(&patterns).expect("expected triangle WCOJ");
+        assert!(matches!(&root, LogicalOperator::Intersect(i) if i.num_build_sides == 2));
+        assert_eq!(trailing.len(), 2, "closure Extend + Filter expected");
+    }
+
+    #[test]
+    fn test_wcoj_chain_falls_back() {
+        // (a)-[:r1]->(b), (b)-[:r2]->(c) — a chain, not a star
+        let patterns = vec![
+            mk_pattern("a", "N", 1, Some(("r1", 10))),
+            mk_pattern("b", "N", 1, None),
+            mk_pattern("b", "N", 1, Some(("r2", 11))),
+            mk_pattern("c", "N", 1, None),
+        ];
+        assert!(build_wcoj_intersect(&patterns).is_none());
+    }
+
+    #[test]
+    fn test_wcoj_single_edge_falls_back() {
+        // A single edge is not a WCOJ star.
+        let patterns = vec![
+            mk_pattern("a", "N", 1, Some(("r1", 10))),
+            mk_pattern("b", "N", 1, None),
+        ];
+        assert!(build_wcoj_intersect(&patterns).is_none());
     }
 }

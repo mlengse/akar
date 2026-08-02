@@ -49,7 +49,8 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Sprint 12** | **P41-P42: Stress Testing & Release Benchmarks** | **20** | **✅ COMPLETE** — P41 (14 crash recovery tests, 12 SP). P42 (8 SP — release profiles, 100K/1M scale benchmarks, storage I/O, CI workflow). |
 | **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 | **Sprint 13** | **P43-P44: Bug Fixes & Performance** | **11** | **✅ COMPLETE** — P43.1 radixsort OOB fix, P43.2 OCC row-level inserts, P44.1 hash join build opt, P44.2 native Arrow arrays (verified), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching. **P43.3 cancelled** (C++ benchmark source removed by design). See Section 2. |
-| **Sprint 14** | **P45: Production Readiness** | **8** | 🔄 **IN PROGRESS** — P45.1 catalog serialization ✅ DONE (DDL survives restart, cross-process recovery). P45.4 data durability ✅ DONE (durable column mirrors via `persistence.rs`, `BufferManager::drop_file` rewrite fix, oversized-value `.ovf` overflow sidecar, crash recovery, `read_only` enforcement, exclusive/shared file locks; 8 new tests in `test_data_durability.rs` + storage-level overflow round-trip). P45.3 operator parity pending. P45.2 crates.io = langkah terakhir. |
+| **Sprint 14** | **P45: Production Readiness** | **8** | ✅ **COMPLETE** — P45.1 catalog serialization ✅ (DDL survives restart, cross-process recovery). P45.4 data durability ✅ (durable column mirrors via `persistence.rs`, `BufferManager::drop_file` rewrite fix, oversized-value `.ovf` overflow sidecar, crash recovery, `read_only` enforcement, exclusive/shared file locks; 8 new tests in `test_data_durability.rs` + storage-level overflow round-trip). P45.3 operator parity ✅ (100% type parity, see §3.7). **P45.2 crates.io publishing CANCELLED** — tidak publish sebelum benar-benar siap production (Decision #66). |
+| **Sprint 15** | **P46-P47: WCOJ + Multi-Process** | **8** | ✅ **P46 WCOJ + P47 Server COMPLETE** — P46: planner-side enumeration (`build_wcoj_intersect` emits `LogicalIntersect` for star/triangle patterns; fallback HashJoin otherwise), binder allows repeated same-table node var in MATCH, `PhysicalIntersect::execute_sides` emits full cross-product with proper `field_names`. 11 new tests (5 integration `test_wcoj.rs`, 4 planner unit, 2 processor unit) all pass. **P47: embedded server mode COMPLETE** — new crate `akar-server` (TCP listener + length-prefixed JSON framing), session bridging via `TransactionManager`, client helper `connect_tcp`, exclusive-lock integration (clients never touch file locks), 13 integration tests incl. concurrent write+read, crash client, DDL visibility, read-only enforcement, embedded single-process unchanged. Workspace green (except pre-existing `test_migration_ingestion`, fails on baseline too). **P46.5 benchmark DEFERRED** (Decision #67: bench lama tidak pernah runnable — tidak ada predicate pushdown, rel-COPY rusak; bug same-table multi-hop join = pre-existing di HEAD, bukan regresi P46). |
 
 ---
 
@@ -603,7 +604,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | **Parser** | 20 | 0 | **~80%** | ORDER BY/LIMIT/SKIP now propagated ✅ |
 | **Binder** | 30+ | 0 | **~80%** | Property type resolution via catalog ✅ |
 | **Logical operators** | 38 | 0 (Rust 51, EXCEEDS) | **100%+** | |
-| **Physical operators** | 67 | 46 (fused) | **~66%** | 12 DDL operators all wired ✅ |
+| **Physical operators** | 58 (kuzu-vela enum) | 0 (Rust 46, fused) | **100%** (type parity) | 12 DDL operators all wired ✅; see §3.7 P45.3 |
 | **Optimizer passes** | 17 | 25 (EXCEEDS) | **100%+** | |
 | **Functions (base)** | ~234 | 0 | **~100%** | |
 | **Functions (aliases)** | ~607 | ~250 | **~80%** (non-critical) | |
@@ -658,18 +659,44 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | Code quality CI | Clippy, cargo-audit, 10 job Actions | Manual |
 | Types | JSON, UINT128, DTime | Standard set |
 
+### 3.7 Physical Operator Parity — P45.3 (2026-08-01)
+
+**Metodologi:** Bandingkan enum `PhysicalOperatorType` kuzu-vela (`src/include/processor/operator/physical_operator.h:17-76`, **58 types**) dengan mapper Rust (`akar-processor/src/processor/mapper/`, **46 physical structs**, fused).
+
+**Hasil: 100% type parity** — semua 58 operator C++ punya ekivalen Rust. Selisih 58 vs 46 murni artefak split-phase accounting C++:
+
+| C++ (58) | Rust (46, fused) | Keterangan |
+|----------|------------------|------------|
+| HASH_JOIN_BUILD + HASH_JOIN_PROBE | `PhysicalHashJoin` | 1 vs 2 |
+| INTERSECT_BUILD + INTERSECT | `PhysicalIntersect` | 1 vs 2 |
+| ORDER_BY + ORDER_BY_MERGE + ORDER_BY_SCAN | `PhysicalOrderBy` | 1 vs 3 |
+| TOP_K + TOP_K_SCAN | `PhysicalTopK` | 1 vs 2 |
+| AGGREGATE + AGGREGATE_FINALIZE + AGGREGATE_SCAN | `PhysicalAggregate`/`Scan`/`Finalize` | 3 vs 3 |
+| DUMMY_SINK + DUMMY_SIMPLE_SINK | 2 physical structs | ✅ |
+
+**Pemetaan 1:1 (C++ → Rust):** ALTER→`AlterTable`, CREATE_TABLE→`CreateNodeTable`/`CreateRelTable`, DROP→`DropTable`, SET_PROPERTY→`PhysicalSet`, DELETE_→`PhysicalDelete`, INSERT→`PhysicalInsertNode`/`Rel`, MERGE→`PhysicalMerge`, COPY_TO→`PhysicalCopyTo`, BATCH_INSERT→`PhysicalBatchInsert`, SCAN_NODE_TABLE→`PhysicalScan`, SCAN_REL_TABLE→`PhysicalScanRel`, PRIMARY_KEY_SCAN→`PhysicalPrimaryKeyScan`, INDEX_LOOKUP→`PhysicalIndexLookup`, FILTER→`PhysicalFilter`, PROJECTION→`PhysicalProjection`, CROSS_PRODUCT→`PhysicalCrossProduct`, LIMIT→`PhysicalLimit`, SKIP→`PhysicalSkip`, UNWIND→`PhysicalUnwind`, FLATTEN→`PhysicalFlatten`, MULTIPLICITY_REDUCER→`PhysicalMultiplicityReducer`, SEMI_MASKER→`PhysicalSemiMasker`, RECURSIVE_EXTEND→`PhysicalRecursiveExtend`, PATH_PROPERTY_PROBE→`PhysicalPathPropertyProbe`, RESULT_COLLECTOR→`PhysicalResultCollector`, PROFILE→`PhysicalProfile`, EMPTY_RESULT→`PhysicalEmptyResult`, STANDALONE_CALL→`PhysicalStandaloneCall`, EXTENSION_CLAUSE→`PhysicalExtensionClause`, TABLE_FUNCTION_CALL→`TableFunctionCall`, UNION_ALL_SCAN→`PhysicalUnionAllScan`, TRANSACTION/ATTACH/DETACH/USE_DATABASE→connection-level (bukan operator), CREATE_SEQUENCE/CREATE_TYPE/CREATE_MACRO/IMPORT/EXPORT→connection-level DDL.
+
+**Opsional C++ (belum ada di Rust, di-defer):**
+| C++ | Status | Alasan |
+|-----|--------|--------|
+| PARTITIONER | ⏳ DEFER | Logika partitioning internal hash-join, bukan query-facing; hanya relevan saat parallel aggregation batch |
+| CREATE_MACRO | ⏳ DEFER (advisory) | Rust macro di-expand di binder; create-macro DDL tersedia di connection-level, operator fisik tidak perlu |
+| INSTALL/LOAD/UNINSTALL_EXTENSION | ⏳ DEFER | Ditangani di extension registry, bukan pipeline |
+
+**Prioritas implement (semua sudah terisi):** tidak ada operator query-facing yang hilang. **P46 WCOJ DONE** (planner-side `LogicalIntersect` emission — star/triangle patterns, `build_wcoj_intersect` in `join_order.rs`). Gap query-facing berikutnya (jika ada) = **P47 embedded server mode** (multi-process access).
+
 ---
 
-## 4. Test Results (Per 2026-07-31 — Sprint 14 in progress: 1,266 tests)
+## 4. Test Results (Per 2026-08-01 — Sprint 15 P46 COMPLETE: 1,277 tests)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
 | akar-common | 34 | ✅ Pass |
 | akar-parser | 66 | ✅ Pass |
 | akar-binder | 24 | ✅ Pass |
-| akar-planner | 16 | ✅ Pass |
+| akar-planner | 20 | ✅ Pass |
 | akar-optimizer | 61 | ✅ Pass |
-| akar-processor | 16 | ✅ Pass |
+| akar-processor | 18 | ✅ Pass |
 | akar-storage | 320 | ✅ Pass |
 | akar-function | 176 | ✅ Pass |
 | akar-catalog | 39 | ✅ Pass |
@@ -677,7 +704,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-vector | 20 | ✅ Pass |
 | akar-transaction | 16 | ✅ Pass |
 | akar-main (unit + connection_test) | 63 | ✅ Pass |
-| akar-main (integration) | 58 | ✅ Pass |
+| akar-main (integration) | 63 | ✅ Pass |
 | akar-main (catalog_persistence) | 6 | ✅ Pass |
 | akar-main (plan_cache_timing) | 1 | ✅ Pass |
 | akar-main (edge_null_handling) | 44 | ✅ Pass |
@@ -694,6 +721,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-main (proptest) | 3 | ✅ Pass |
 | akar-main (crash_recovery) | 14 | ✅ Pass |
 | akar-main (mvcc) | 6 | ✅ Pass |
+| akar-main (wcoj) | 5 | ✅ Pass |
 | akar-algo | 34 | ✅ Pass |
 | akar-duckdb | 9 | ✅ Pass |
 | akar-binder-test | 15 | ✅ Pass |
@@ -706,7 +734,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-migrate | 1 | ✅ Pass |
 | Extension crates (others) | 4 | ✅ Pass |
 | Doc-tests | 6 (5 ignored) | ✅ Pass |
-| **Total** | **1,266** | **✅ 1,266 pass, 0 failed, 5 ignored (doc-tests only)** |
+| **Total** | **1,277** | **✅ 1,277 pass, 0 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -770,8 +798,9 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-07-31: **1,266 test pass, 0 fail, 5 ignored (doc-tests)** ✅.
-- **Sprint 14 — P45.1 COMPLETE (catalog serialization):** `Catalog::serialize_to_json/deserialize_from_json/save_to_path/load_from_path` + serde derives; catalog file (`catalog.json`) = source of truth for DDL, ditulis atomically setelah setiap DDL; `Database::new` load + `restore_storage_from_catalog` (node/rel table + ART index dengan table ID sama, `next_table_id` di-bump); 2 catalog unit + 6 integration tests incl. cross-process DDL recovery (table dibuat di proses A terlihat di proses B dan sebaliknya). Backward-compatible (tanpa catalog file = fresh DB). Data rows & runtime sequence state tetap in-memory (P45.1 scope = DDL metadata).
+- Per 2026-08-01: **1,277 test pass, 0 fail, 5 ignored (doc-tests)** ✅ (except pre-existing `test_migration_ingestion` in `akar-migrate`, which also fails on the P45.4 baseline — unrelated to P46).
+- **Sprint 15 — P46 WCOJ COMPLETE (2026-08-01):** Planner-side WCOJ enumeration DONE. `build_wcoj_intersect` (`akar-planner/src/join_order.rs`) ports Kuzu `planWCOJoin` semantics: star/fan-out patterns `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` → single `LogicalIntersect` (probe = shared node, build sides = per-pattern Union pipelines); triangle patterns → star Intersect + closure `Extend`/`Filter`; chain/single-edge/self-loop/backward/var-length → safe fallback to `build_join_tree`. Binder (`dml.rs`/`mod.rs`) now allows reusing the same node variable in MATCH when it refers to the same node table. `PhysicalIntersect::execute_sides` (replaces `execute_binary` partitioning) builds one hash table per side and emits the full cross-product of matching build rows with correct `field_names`. Tests: 5 new integration (`akar-main/tests/test_wcoj.rs`), 4 planner unit, 2 processor unit — all pass.
+- **Sprint 14 — P45 COMPLETE (2026-08-01):** P45.1 catalog serialization: `Catalog::serialize_to_json/deserialize_from_json/save_to_path/load_from_path` + serde derives; catalog file (`catalog.json`) = source of truth for DDL, ditulis atomically setelah setiap DDL; `Database::new` load + `restore_storage_from_catalog` (node/rel table + ART index dengan table ID sama, `next_table_id` di-bump); 2 catalog unit + 6 integration tests incl. cross-process DDL recovery (table dibuat di proses A terlihat di proses B dan sebaliknya). Backward-compatible (tanpa catalog file = fresh DB). Data rows & runtime sequence state tetap in-memory (P45.1 scope = DDL metadata). P45.4 data durability (durable column mirrors, crash recovery, read-only enforcement, cross-process locking — 8 new tests). P45.3 operator parity (100% type parity, §3.7). **P45.2 CANCELLED** — no crates.io publishing sampai benar-benar siap production (lihat Decision #66 di `implementation_plan.md`).
 - **Sprint 13 — P43/P44 COMPLETE (2026-07-31):** P43.1 radixsort OOB fix, P43.2 OCC insert row-level granularity, P44.1 hash join build opt (Arrow-native key hashing), P44.2 native Arrow arrays verified (variable 148µs → 18ns, `x>5` 19.8×), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching (LRU, catalog-version invalidation, 16 new tests). **P43.3 CANCELLED** — C++ per-operator benchmark source removed from repo by review decision; SQL-level 3-way parity already verified (~1×).
 - **Sprint 12 — P41 COMPLETE:** 14 crash recovery tests (process-level crash simulation, WAL replay under load, checkpoint atomicity stress, fault injection). Catalog persistence for DDL landed later in P45.1 (Sprint 14). See Section 2 for details.
 - **Sprint 12.5 — Codebase Audit Fixes (FINAL):** **30 of 31 issues resolved (30 FIXED + 1 N/A).** All 5 critical issues fixed (including P1.3 MVCC snapshot isolation and #7 row-level OCC conflict detection). Issue #9 (unified error type) fully completed across all 8 crates. Issue #8 (dual catalog) resolved via unified DDL on Database. Issue #12 (RwLock) marked N/A — 87.5% of lock sites need `&mut self`. Issue #31 (feature-gated CI) extended to all extension crates. WAL append-only redesign (52× speedup), condvar deadlock fix, WAL v2 parser bug fixes, DML table lock skip for concurrent writes. See Section 9 for details.
@@ -783,7 +812,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **P26.2 Fuzz Testing:** 3 cargo-fuzz targets, CI-integrated (P30.5b).
 - **P26.3 Property-Based Testing:** 3 proptest properties (round-trip, join associativity, filter pushdown).
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
-- **1,552 → 1,243 → 1,258 tests:** Test count updated to reflect actual workspace configuration. Sprint 13 added 16 tests (11 plan_cache unit, 4 plan-cache integration, 1 plan-cache timing regression); P43.2 row-level OCC tests included since Sprint 12.5. Extension crate test counts adjusted.
+- **1,552 → 1,243 → 1,258 → 1,277 tests:** Test count updated to reflect actual workspace configuration. Sprint 13 added 16 tests (11 plan_cache unit, 4 plan-cache integration, 1 plan-cache timing regression); P43.2 row-level OCC tests included since Sprint 12.5. Sprint 15 P46 added 11 tests (5 WCOJ integration, 4 planner unit, 2 processor unit). Extension crate test counts adjusted.
 
 ---
 

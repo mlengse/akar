@@ -29,6 +29,7 @@ members = [
     "akar-unity-catalog",
     "akar-main",
     "akar-cli", "akar-wasm", "akar-migrate", "akar-c",
+    "akar-server",
 ]
 
 [workspace.package]

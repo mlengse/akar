@@ -423,133 +423,143 @@ impl PhysicalIntersect {
             return Ok(vec![]);
         }
 
-        // For each build side, build a hash table: key_hash → (key_value, Vec<(ci, row)>)
-        let build_col = self.build_key_col as usize;
-        let probe_col = self.probe_key_col as usize;
+        // Partition the flat build chunk list into per-side groups. Each build
+        // side in the plan produces the same number of chunks, so we split evenly.
         let chunk_group_size = (build_chunks.len() / num_builds).max(1);
-
-        let mut build_tables: Vec<HashJoinTable> = Vec::with_capacity(num_builds);
-
+        let mut sides: Vec<Vec<DataChunk>> = Vec::with_capacity(num_builds);
         for side in 0..num_builds {
             let start = side * chunk_group_size;
             let end = (start + chunk_group_size).min(build_chunks.len());
-            let chunks = &build_chunks[start..end];
-
-            let mut ht: HashJoinTable = HashMap::new();
-
-            for (ci, chunk) in chunks.iter().enumerate() {
-                for row in 0..chunk.size {
-                    if let Some(_field) = chunk.fields.get(build_col) {
-                        let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
-                        if matches!(key, Value::Null) {
-                            continue;
-                        }
-                        let hash = value_hash(&key);
-                        ht.entry(hash).or_default().push((key, vec![(ci, row)]));
-                    }
-                }
-            }
-            build_tables.push(ht);
+            sides.push(build_chunks[start..end].to_vec());
         }
 
-        if build_tables.is_empty() || build_tables.iter().any(|t| t.is_empty()) {
-            // No build data — empty result
+        self.execute_sides(&sides, probe_chunks)
+    }
+
+    /// Execute the intersect against independently-produced build sides.
+    ///
+    /// Each build side is hashed into its own table keyed on the shared node ID.
+    /// A probe row passes only when its key is present in EVERY build table, and
+    /// the output is the full cross product of the matching build rows (so a
+    /// shared node with `k` neighbors per side produces `k1 * k2 * ...` rows).
+    ///
+    /// Output column layout: `[probe columns] + [build side 1 columns] + ...`.
+    pub fn execute_sides(&self, build_sides: &[Vec<DataChunk>], probe_chunks: &[DataChunk]) -> OperatorResult {
+        let num_builds = build_sides.len().max(1);
+        if probe_chunks.is_empty() {
             return Ok(vec![]);
         }
 
-        // For each probe row, probe all build tables, find intersecting keys
-        let total_probe_rows: usize = probe_chunks.iter().map(|c| c.size).sum();
-        let mut output_rows: Vec<Vec<Value>> = Vec::with_capacity(total_probe_rows);
-        let mut probe_field_count = 0usize;
+        let build_col = self.build_key_col as usize;
+        let probe_col = self.probe_key_col as usize;
 
-        // Pre-compute build side column counts for row_values allocation
-        let build_col_counts: Vec<usize> = (0..num_builds)
-            .map(|side| {
-                let start = side * chunk_group_size;
-                let end = (start + chunk_group_size).min(build_chunks.len());
-                if start < end {
-                    build_chunks[start].fields.len()
-                } else {
-                    0
+        // Build one hash table per side: key_hash → (key_value, Vec<(ci, row)>)
+        let mut build_tables: Vec<HashJoinTable> = Vec::with_capacity(num_builds);
+        let mut side_field_names: Vec<Vec<String>> = Vec::with_capacity(num_builds);
+        let mut side_field_counts: Vec<usize> = Vec::with_capacity(num_builds);
+
+        for side in build_sides {
+            let mut ht: HashJoinTable = HashMap::new();
+            let mut names: Vec<String> = Vec::new();
+            let mut count = 0usize;
+
+            for (ci, chunk) in side.iter().enumerate() {
+                if ci == 0 {
+                    names = chunk.field_names.clone();
+                    count = chunk.fields.len();
                 }
-            })
-            .collect();
-        let total_build_cols: usize = build_col_counts.iter().sum();
+                for row in 0..chunk.size {
+                    if chunk.fields.get(build_col).is_none() {
+                        continue;
+                    }
+                    let key = chunk.get_value(build_col, row).unwrap_or(Value::Null);
+                    if matches!(key, Value::Null) {
+                        continue;
+                    }
+                    let hash = value_hash(&key);
+                    ht.entry(hash).or_default().push((key, vec![(ci, row)]));
+                }
+            }
+
+            side_field_names.push(names);
+            side_field_counts.push(count);
+            build_tables.push(ht);
+        }
+
+        if build_tables.iter().any(|t| t.is_empty()) {
+            // A build side without data → no key can be in all sides → empty result
+            return Ok(vec![]);
+        }
+
+        let probe_field_names = probe_chunks
+            .first()
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default();
+        let probe_field_count = probe_chunks.first().map(|c| c.fields.len()).unwrap_or(0);
+        let mut output_rows: Vec<Vec<Value>> = Vec::new();
 
         for (ci, chunk) in probe_chunks.iter().enumerate() {
-            if ci == 0 {
-                probe_field_count = chunk.fields.len();
-            }
+            let _ = ci;
             for row in 0..chunk.size {
-                let probe_key = chunk
-                    .fields
-                    .get(probe_col)
-                    .map(|_| chunk.get_value(probe_col, row))
-                    .unwrap_or(Some(Value::Null))
-                    .unwrap_or(Value::Null);
+                let probe_key = chunk.get_value(probe_col, row).unwrap_or(Value::Null);
                 if matches!(probe_key, Value::Null) {
                     continue;
                 }
                 let probe_hash = value_hash(&probe_key);
 
-                // Check if the probe key appears in ALL build tables
+                // Collect matching (chunk_idx, row_idx) per build side.
+                let mut matches_per_side: Vec<Vec<(usize, usize)>> = Vec::with_capacity(num_builds);
                 let mut all_match = true;
-                let mut matched_build_rows: Vec<Vec<(usize, usize)>> = Vec::with_capacity(num_builds);
-
                 for ht in &build_tables {
+                    let mut side_matches: Vec<(usize, usize)> = Vec::new();
                     if let Some(bucket) = ht.get(&probe_hash) {
-                        let mut side_matches = Vec::with_capacity(bucket.len());
                         for (stored_key, locations) in bucket {
                             if stored_key == &probe_key {
                                 side_matches.extend(locations.iter().cloned());
                             }
                         }
-                        if side_matches.is_empty() {
-                            all_match = false;
-                            break;
-                        }
-                        matched_build_rows.push(side_matches);
-                    } else {
+                    }
+                    if side_matches.is_empty() {
                         all_match = false;
                         break;
                     }
+                    matches_per_side.push(side_matches);
                 }
-
-                if !all_match || matched_build_rows.is_empty() {
+                if !all_match {
                     continue;
                 }
 
-                let per_row_cols = probe_field_count + total_build_cols;
-                let mut row_values: Vec<Value> = Vec::with_capacity(per_row_cols);
-
-                // Collect probe side values (all columns from probe chunk)
-                for col_in_probe in 0..probe_field_count {
-                    let val = chunk
-                        .fields
-                        .get(col_in_probe)
-                        .map(|_| chunk.get_value(probe_col, row))
-                        .unwrap_or(Some(Value::Null))
-                        .unwrap_or(Value::Null);
-                    row_values.push(val);
-                }
-
-                // For each build side, emit the first matching row's payload values
-                for matches in matched_build_rows.iter() {
-                    if let Some(&(b_ci, b_row)) = matches.first()
-                        && let Some(chunk) = build_chunks.get(b_ci)
-                    {
-                        for col in 0..chunk.fields.len() {
-                            let val = chunk
-                                .fields
-                                .get(col)
-                                .map(|_| chunk.get_value(col, b_row))
-                                .unwrap_or(Some(Value::Null))
-                                .unwrap_or(Value::Null);
-                            row_values.push(val);
+                // Cross product across build sides.
+                let mut combos: Vec<Vec<(usize, usize)>> = vec![vec![]];
+                for side_matches in &matches_per_side {
+                    let mut next = Vec::with_capacity(combos.len() * side_matches.len());
+                    for combo in &combos {
+                        for m in side_matches {
+                            let mut c = combo.clone();
+                            c.push(*m);
+                            next.push(c);
                         }
                     }
+                    combos = next;
                 }
-                output_rows.push(row_values);
+
+                let per_row_cols = probe_field_count + side_field_counts.iter().sum::<usize>();
+                for combo in combos {
+                    let mut row_values: Vec<Value> = Vec::with_capacity(per_row_cols);
+                    // Probe side values — all columns of the probe row.
+                    for col_in_probe in 0..probe_field_count {
+                        row_values.push(chunk.get_value(col_in_probe, row).unwrap_or(Value::Null));
+                    }
+                    // One build side's payload per combo entry.
+                    for (side_idx, &(b_ci, b_row)) in combo.iter().enumerate() {
+                        if let Some(side_chunk) = build_sides.get(side_idx).and_then(|s| s.get(b_ci)) {
+                            for col in 0..side_chunk.fields.len() {
+                                row_values.push(side_chunk.get_value(col, b_row).unwrap_or(Value::Null));
+                            }
+                        }
+                    }
+                    output_rows.push(row_values);
+                }
             }
         }
 
@@ -558,11 +568,10 @@ impl PhysicalIntersect {
         }
 
         // Build output DataChunk (one row per field group)
-        // Output format: [probe_field_1, ..., probe_field_N, build_1_field_1, ..., build_N_field_M]
         let output_size = output_rows.len();
-        let mut output_fields: Vec<ValueVector> = Vec::with_capacity(output_rows.first().map(|r| r.len()).unwrap_or(0));
+        let mut output_fields: Vec<ValueVector> =
+            Vec::with_capacity(output_rows.first().map(|r| r.len()).unwrap_or(0));
 
-        // Determine physical types from first row
         if let Some(first_row) = output_rows.first() {
             for val in first_row {
                 let ptype = val.physical_type();
@@ -572,7 +581,6 @@ impl PhysicalIntersect {
             }
         }
 
-        // Fill output
         for (out_idx, row_values) in output_rows.iter().enumerate() {
             for (col, val) in row_values.iter().enumerate() {
                 if let Some(field) = output_fields.get_mut(col) {
@@ -586,10 +594,16 @@ impl PhysicalIntersect {
             .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
             .collect::<Vec<_>>();
         let arrow_field_types = output_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+
+        let mut field_names: Vec<String> = probe_field_names;
+        for names in &side_field_names {
+            field_names.extend(names.iter().cloned());
+        }
+
         Ok(vec![DataChunk {
             fields: arrow_fields,
             field_types: arrow_field_types,
-            field_names: vec![],
+            field_names,
             size: output_size,
             sel_vector: None,
         }])
@@ -869,5 +883,78 @@ impl PhysicalHashJoin {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_i64_chunk(values: &[i64]) -> DataChunk {
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, values.len().max(1));
+        for (i, val) in values.iter().enumerate() {
+            v.set_i64(i, *val);
+        }
+        v.resize(values.len());
+        let ptype = v.physical_type();
+        let fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&v).array];
+        DataChunk::new(fields, vec![ptype])
+    }
+
+    #[test]
+    fn test_intersect_execute_sides_cross_product() {
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
+        let build1 = make_i64_chunk(&[1, 1, 5]);
+        let build2 = make_i64_chunk(&[1, 1, 1, 7]);
+        let probe = make_i64_chunk(&[1, 2]);
+        let sides = vec![vec![build1], vec![build2]];
+        let result = intersect.execute_sides(&sides, &[probe]).unwrap();
+        assert!(!result.is_empty(), "expected non-empty result");
+        assert_eq!(result[0].size, 6, "expected 2x3 cross product for probe key 1");
+        assert_eq!(result[0].fields.len(), 3, "probe + 2 build columns");
+    }
+
+    #[test]
+    fn test_intersect_execute_sides_key_resolution() {
+        let mut probe_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe_v.set_i64(0, 10);
+        probe_v.set_i64(1, 20);
+        let mut probe_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe_id.set_i64(0, 1);
+        probe_id.set_i64(1, 2);
+        let ptype = probe_v.physical_type();
+        let probe_fields = vec![
+            akar_common::arrow_vector::ArrowVector::from_legacy(&probe_v).array,
+            akar_common::arrow_vector::ArrowVector::from_legacy(&probe_id).array,
+        ];
+        let mut probe = DataChunk::new(probe_fields, vec![ptype, ptype]);
+        probe.field_names = vec!["a.other".into(), "a.id".into()];
+
+        let mut build_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_v.set_i64(0, 30);
+        build_v.set_i64(1, 40);
+        let mut build_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_id.set_i64(0, 1);
+        build_id.set_i64(1, 1);
+        let build_fields = vec![
+            akar_common::arrow_vector::ArrowVector::from_legacy(&build_v).array,
+            akar_common::arrow_vector::ArrowVector::from_legacy(&build_id).array,
+        ];
+        let mut build = DataChunk::new(build_fields, vec![ptype, ptype]);
+        build.field_names = vec!["a.other".into(), "a.id".into()];
+
+        let intersect = PhysicalIntersect {
+            num_build_sides: 1,
+            probe_key_col: 1,
+            build_key_col: 1,
+        };
+        let result = intersect.execute_sides(&vec![vec![build]], &vec![probe]).unwrap();
+        assert!(!result.is_empty(), "expected non-empty result");
+        assert_eq!(result[0].size, 2, "probe id 1 matches both build rows; id 2 matches nothing");
+        assert_eq!(result[0].field_names, vec!["a.other".to_string(), "a.id".to_string(), "a.other".to_string(), "a.id".to_string()]);
     }
 }

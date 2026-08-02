@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+publish = true
+description = "Function registry and expression evaluation for the Akar embedded graph database"
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
 
 [dependencies]
 akar-common = { path = "../akar-common" }
