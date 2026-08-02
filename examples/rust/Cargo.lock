@@ -129,6 +129,8 @@ dependencies = [
  "akar-storage",
  "akar-transaction",
  "csv",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
 ]
