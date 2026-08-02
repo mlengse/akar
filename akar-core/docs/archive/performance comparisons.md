@@ -1,3 +1,7 @@
+> **SUPERSEDED** per 2026-08-02 - Hasil pencarian benchmark C++ digantikan oleh perbandingan performa di `akar-core\BENCHMARK_COMPARISON.md`.
+
+---
+
 # Search for performance comparisons 17/07/2026
 
 ## Comprehensive Search Results Report

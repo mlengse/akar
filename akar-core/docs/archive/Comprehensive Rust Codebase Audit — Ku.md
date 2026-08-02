@@ -1,3 +1,7 @@
+> **SUPERSEDED** - Arsip per 2026-08-02. Dokumen snapshot audit/eksplorasi kondisi 17-19 Juli 2026; codebase sudah berubah signifikan (per 2026-08-02: 32 crate, ~86K LOC, 1,311 test, 25 optimizer passes). Untuk state saat ini lihat `akar-core\STATUS.md`, `akar-core\SPEC.md`, `akar-core\implementation_plan.md`, dan README per crate.
+
+---
+
 # Comprehensive Rust Codebase Audit — Kuzu Repository 19/07/2026
 
 ## 1. Rust Source File Inventory and Module Categorization

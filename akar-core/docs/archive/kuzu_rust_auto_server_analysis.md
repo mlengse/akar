@@ -1,3 +1,7 @@
+> **SUPERSEDED** per 2026-08-02 - Analisis kelayakan ini sudah diimplementasikan sebagai crate `akar-server` (P47). Lihat `akar-core\akar-server\README.md` dan `akar-core\implementation_plan.md`.
+
+---
+
 # Evaluasi Implementasi "Auto-Server" untuk Kuzu Rust 17/07/2026
 
 Berdasarkan analisis pada *codebase* `akar-core` dan direktori *bindings* Rust (`tools/rust_api`), implementasi mode "Auto-Server" atau "Micro-Server" untuk Kuzu di lingkungan Rust adalah **sangat mungkin dan layak dilakukan**.

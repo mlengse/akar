@@ -1,3 +1,7 @@
+> **SUPERSEDED** - Arsip per 2026-08-02. Dokumen snapshot audit/eksplorasi kondisi 17-19 Juli 2026; codebase sudah berubah signifikan (per 2026-08-02: 32 crate, ~86K LOC, 1,311 test, 25 optimizer passes). Untuk state saat ini lihat `akar-core\STATUS.md`, `akar-core\SPEC.md`, `akar-core\implementation_plan.md`, dan README per crate.
+
+---
+
 # Comprehensive Repository Analysis: Vela-Engineering/kuzu 17/07/2026
 
 ## 1. What Is This Project?
@@ -15,7 +19,7 @@ This is **KuzuDB** -- an **embedded property graph database** that uses the **op
 |---|---|---|
 | **C++ (Original)** | `src/` | Legacy, being superseded by Rust |
 | **C++ (LadybugDB fork)** | `ladybug/` (git submodule) | Active C++ fork by LadybugDB |
-| **Rust (Pure port)** | `akar-core/` | **Active development** -- 29 crates, ~66k LOC |
+| **Rust (Pure port)** | `akar-core/` | **Active development** -- 32 crates, ~86k LOC |
 
 ---
 
@@ -24,7 +28,7 @@ This is **KuzuDB** -- an **embedded property graph database** that uses the **op
 ### Primary Languages
 | Language | Where | Purpose |
 |---|---|---|
-| **Rust** | `akar-core/` (29 crates) | **Pure Rust reimplementation** (no FFI/cxx) of the entire database engine |
+| **Rust** | `akar-core/` (32 crates) | **Pure Rust reimplementation** (no FFI/cxx) of the entire database engine |
 | **C++20** | `src/`, `ladybug/`, `extension/` | Original database engine + extensions |
 | **C** | `src/c_api/`, `akar-core/akar-c/` | C bindings for both implementations |
 | **Python** | `tools/python_api/` | Python bindings (via pybind11 for C++; native for Rust) |
@@ -36,7 +40,7 @@ This is **KuzuDB** -- an **embedded property graph database** that uses the **op
 | System | For | Description |
 |---|---|---|
 | **CMake 3.15+** | C++ builds | Root `CMakeLists.txt` builds the C++ engine, tests, tools, extensions |
-| **Cargo** | Rust builds | `akar-core/Cargo.toml` is a workspace of 29 Rust crates |
+| **Cargo** | Rust builds | `akar-core/Cargo.toml` is a workspace of 32 Rust crates |
 | **Make** | Both | `Makefile` wraps CMake targets with convenience commands |
 | **setuptools** | Python | `tools/python_api/pyproject.toml` |
 
@@ -65,17 +69,17 @@ This is **KuzuDB** -- an **embedded property graph database** that uses the **op
 ### Top-Level Structure
 ```
 kuzu/
-├── akar-core/          # PURE RUST IMPLEMENTATION (29 crates)
+├── akar-core/          # PURE RUST IMPLEMENTATION (32 crates)
 │   ├── akar-common/       # Type system, memory, serialization
 │   ├── akar-storage/      # BufferManager, WAL, compression, CSR
 │   ├── akar-transaction/  # MVCC, concurrency control
 │   ├── akar-catalog/      # System catalog (schemas, tables)
 │   ├── akar-parser/       # pest.rs PEG Cypher parser
 │   ├── akar-binder/       # Semantic analysis, type inference
-│   ├── akar-planner/      # Logical query plans (34 operators)
-│   ├── akar-optimizer/    # 22 optimizer passes (exceeds C++)
+│   ├── akar-planner/      # Logical query plans (58 operators)
+│   ├── akar-optimizer/    # 25 optimizer passes (exceeds C++)
 │   ├── akar-processor/    # Physical operator execution
-│   ├── akar-function/     # 234 registered functions
+│   ├── akar-function/     # 259 registered functions
 │   ├── akar-graph/        # CSR adjacency, GDS algorithms
 │   ├── akar-extension/    # Extension framework trait
 │   ├── akar-json/         # JSON extension
@@ -204,10 +208,10 @@ kuzu/
 
 The Rust port is a **from-scratch pure Rust rewrite** (no FFI, no `cxx` bridge) of the Kuzu C++ engine. Key characteristics:
 
-- **29 crate workspace** with explicit dependency graph
+- **32 crate workspace** with explicit dependency graph
 - **Edition 2024 Rust**
-- **~66k lines of Rust code**
-- **1099+ tests passing** (as of July 2026)
+- **~86k lines of Rust code** (git-tracked, incl. tests)
+- **1,311 tests** (1,310 passing + 1 pre-existing failure, as of August 2026)
 - **Arrow-native execution** -- data is stored and processed as Apache Arrow arrays, enabling vectorized compute kernels
 - **Feature-gated extensions** -- all 15 extension crates are optional Cargo features
 - **C++ parity achieved** -- `MATCH ... WHERE ... RETURN COUNT(*)` benchmark: 397 µs Rust vs 400 µs C++
@@ -427,7 +431,7 @@ This repository contains **two parallel graph database implementations** of Kuzu
 
 1. **C++ Original** (`src/`) + **LadybugDB fork** (`ladybug/` submodule) -- the traditional C++ implementation with 28 vendored C/C++ libraries, CMake build, ANTLR4 grammar, and broad ecosystem support.
 
-2. **Pure Rust Port** (`akar-core/`) -- a complete from-scratch rewrite in Rust 2024 with 29 crates, Arrow-native execution (10-24x faster filters), 15+ extensions, 22 optimizer passes, 234 registered functions, 1099+ tests, and performance at parity with C++ (397 µs vs 400 µs for a representative query). This is the **primary active development focus**.
+2. **Pure Rust Port** (`akar-core/`) -- a complete from-scratch rewrite in Rust 2024 with 32 crates, Arrow-native execution (10-24x faster filters), 15 extensions, 25 optimizer passes, 259 registered functions (244 scalar + 14 aggregate + 1 table), 1,311 tests, and performance at parity with C++ (397 µs vs 400 µs for a representative query). This is the **primary active development focus**.
 
 The unique value proposition of this Vela-Engineering fork is **concurrent multi-writer support** for multi-agent AI systems, which was a limitation of the original single-writer KuzuDB. The Rust port is explicitly designed as a **drop-in replacement** for the C++ version, with a dedicated migration tool (`akar-migrate`) that exports C++ databases via Parquet and re-imports them into the Rust engine.
 
