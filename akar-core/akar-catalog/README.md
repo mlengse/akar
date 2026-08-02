@@ -10,4 +10,4 @@ System catalog managing schema metadata — node tables, relationship tables, an
 - Thread-safe via `Arc<Mutex<Catalog>>`
 - Integration with Binder for semantic analysis
 
-**Tests:** 14
+**Tests:** 39

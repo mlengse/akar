@@ -24,4 +24,4 @@ Page-based columnar storage engine with buffer management, WAL, compression, ind
 
 **Index:** Generic hash index with collision resolution.
 
-**Tests:** 129
+**Tests:** 326

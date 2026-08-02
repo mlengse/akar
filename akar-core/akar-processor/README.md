@@ -2,7 +2,7 @@
 
 Physical operator execution pipeline — the runtime that executes query plans.
 
-**Physical operators (9+):**
+**Physical operators (49 structs):**
 - `PhysicalScan` — reads column-major table data into DataChunks
 - `PhysicalFilter` — evaluates expressions, produces selection vectors
 - `PhysicalProjection` — selects/orders columns
@@ -14,11 +14,18 @@ Physical operator execution pipeline — the runtime that executes query plans.
 - `PhysicalDelete` — row deletion from node tables
 - `PhysicalSet` — property updates on matched rows
 - `PhysicalUnwind` — list expression expansion into rows
+- `PhysicalIntersect` — WCOJ intersect execution
+- `PhysicalSemiMasker` — SIP sideways information passing
+- `PhysicalRecursiveExtend` — recursive path traversal
+- `PhysicalCountRelTable` — CSR metadata COUNT
 
 **Expression evaluation:**
-- `ExpressionEvaluator` module with scalar function dispatch
-- Type coercion and null propagation
+- Arrow-native evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`)
+- Parallel aggregation via `AggregateHashTable`
+- Parallel hash join via `JoinHashTable`
+- `BlockMergeSort` + `RadixSort` for ORDER BY
+- `BinaryHeap` O(n log k) TopK
 
 **Pipeline:** `QueryProcessor::execute(&[LogicalOperator])` → flattens plan → runs physical operators → returns `Vec<DataChunk>`.
 
-**Tests:** 28
+**Tests:** 18

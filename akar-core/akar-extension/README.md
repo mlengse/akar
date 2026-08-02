@@ -9,4 +9,4 @@ Extension trait (CustomScalar/CustomTable) and registry for loading and dispatch
 - `CustomTable` — closure-based table functions (`Arc<dyn Fn(&[Value], &mut DataChunk) -> Result<(), String>>`)
 - `ExtensionContext` — shared context with function registry access
 
-**Tests:** 0 (extension integration tested via individual extension crates)
+**Tests:** 15 (extension framework registry)

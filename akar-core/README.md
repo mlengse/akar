@@ -14,10 +14,10 @@ akar-core/
 ├── akar-catalog/       # System catalog (schemas, tables, types, columns)
 ├── akar-parser/        # PEG grammar (pest.rs) for full Cypher clause set
 ├── akar-binder/        # Semantic analysis, symbol resolution, type inference
-├── akar-planner/       # Logical query plan construction (34 LogicalOperator variants)
-├── akar-optimizer/     # 14 flat passes + 7 tree passes (21 total) — melebihi C++ Ladybug
-├── akar-processor/     # Physical operator execution (22+ operator types: AggregateHashTable, JoinHashTable, BlockMergeSorter, etc.)
-├── akar-function/      # Built-in function registry (110+ functions)
+├── akar-planner/       # Logical query plan construction (58 LogicalOperator variants)
+├── akar-optimizer/     # 18 flat passes + 7 tree passes (25 total) — melebihi C++ Ladybug
+├── akar-processor/     # Physical operator execution (49 operator structs: AggregateHashTable, JoinHashTable, BlockMergeSorter, etc.)
+├── akar-function/      # Built-in function registry (259 functions: 244 scalar + 14 aggregate + 1 table)
 ├── akar-graph/         # CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain)
 ├── akar-extension/     # Extension framework trait + registry
 ├── akar-json/          # JSON extension (extract, validate, type, structure, contains)
@@ -35,7 +35,11 @@ akar-core/
 ├── akar-llm/           # LLM integration functions
 ├── akar-vector/        # Vector similarity search extension
 ├── akar-main/          # Public API: Database, Connection, QueryResult, PreparedStatement
-└── akar-cli/           # Interactive Cypher shell (REPL)
+├── akar-cli/           # Interactive Cypher shell (REPL)
+├── akar-c/             # C FFI API (extern "C")
+├── akar-wasm/          # WebAssembly bindings
+├── akar-server/        # Embedded TCP server mode (multi-process access)
+└── akar-migrate/       # C++ → Rust migration tool
 ```
 
 ## Quick Start
@@ -74,8 +78,8 @@ Cypher text
     ▼
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
-│ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (11 flat + 7 │    │ (physical)   │
-│ COPY, MATCH │    │(types)   │    │34 ops    │    │  tree passes)│    │22+ operators │
+│ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (18 flat + 7 │    │ (physical)   │
+│ COPY, MATCH │    │(types)   │    │58 ops    │    │  tree passes)│    │49 operators  │
 │ DELETE, SET │    │(symbols) │    │          │    │ FilterPush   │    │ Scan, Filter │
 │ WITH, UNION │    │          │    │          │    │ JoinReorder  │    │ HashJoin, etc│
 │ UNWIND, etc │    │          │    │          │    │ SIP, CSU,    │    │ SemiMasker,  │
@@ -135,34 +139,41 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 954 tests — all passing ✅ (61 integration tests)
+Total: 1,311 tests — 1,310 passing ✅, 1 pre-existing failure (akar-migrate test_migration_ingestion), 5 ignored (doc-tests)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
-| `akar-common` | 21 | ✅ | Types (37 LogicalTypes, 17 PhysicalTypes, Value), Vectors, Memory, Serialization |
-| `akar-parser` | 63 | ✅ | Cypher PEG grammar, 35+ Statement variants (incl. ANALYZE), operator precedence |
-| `akar-binder` | 14 | ✅ | Semantic analysis, type inference, symbol resolution |
-| `akar-planner` | 16 | ✅ | Logical plan construction (34 LogicalOperator variants) |
-| `akar-optimizer` | 49 | ✅ | 14 flat passes + 7 tree passes (21 total, exceeds C++ Ladybug) |
-| `akar-processor` | 77 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
-| `akar-function` | 159 | ✅ | 110+ registered functions (incl. PERCENTILE_DISC/CONT), scalar/aggregate/table dispatch |
-| `akar-storage` | 242 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
-| `akar-main` (unit) | 64 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
-| `akar-main` (integration) | 44 | ✅ | RETURN *, FOREACH, MERGE, subqueries |
-| `akar-catalog` | 37 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
-| `akar-transaction` | 12 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
-| `akar-graph` | 31 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
+| `akar-common` | 21 | ✅ | Types (37 LogicalTypes, 19 PhysicalTypes, Value), Vectors, Memory, Serialization |
+| `akar-parser` | 67 | ✅ | Cypher PEG grammar, 33 Statement variants (+ 10 Clause), operator precedence |
+| `akar-binder` | 24 | ✅ | Semantic analysis, type inference, symbol resolution |
+| `akar-planner` | 20 | ✅ | Logical plan construction (58 LogicalOperator variants) |
+| `akar-optimizer` | 61 | ✅ | 18 flat passes + 7 tree passes (25 total, exceeds C++ Ladybug) |
+| `akar-processor` | 18 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
+| `akar-function` | 176 | ✅ | 259 registered functions (244 scalar + 14 aggregate + 1 table, incl. PERCENTILE_DISC/CONT) |
+| `akar-storage` | 326 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
+| `akar-main` (unit) | 68 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
+| `akar-main` (integration) | 260 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode |
+| `akar-catalog` | 39 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
+| `akar-transaction` | 18 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
+| `akar-graph` | 34 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
 | `akar-vector` | 20 | ✅ | Vector similarity search |
 | `akar-json` | 12 | ✅ | extract, valid, type, structure, contains, keys, array_length |
 | `akar-fts` | 14 | ✅ | Stemmer, Tokenizer, TF-IDF, BM25, stop words |
-| `akar-algo` | 19 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest, shortest path algorithms |
+| `akar-algo` | 34 | ✅ | PageRank, WCC, SCC×2, K-Core, Louvain, spanning forest, shortest path algorithms |
+| `akar-extension` | 15 | ✅ | Extension framework registry |
+| `akar-c` (FFI) | 14 | ✅ | `extern "C"` binding tests |
+| `akar-server` | 12 | ✅ | TCP framing, session bridging, concurrency |
 | `akar-llm` | 9 | ✅ | LLM function integration |
 | `akar-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `akar-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
+| `akar-postgres` | 7 | ✅ | PostgreSQL integration |
 | `akar-neo4j` | 12 | ✅ | Bolt protocol integration |
-| `akar-wasm` | - | ✅ | AkarDatabase, AkarConnection, AkarPreparedStatement wrappers untuk NodeJS |
-| Extension crates | 6 | ✅ | Azure(1), Delta(1), Iceberg(1), Postgres(1), SQLite(1), Unity(1) |
+| `akar-wasm` | 0* | ✅ | AkarDatabase, AkarConnection, AkarPreparedStatement wrappers untuk NodeJS (*3 via `wasm-pack test --node` on CI) |
+| Small ext (azure/delta/iceberg/sqlite/unity) | 5 | ✅ | 1 each |
+| `akar-migrate` | 1 | ❌ | Pre-existing failure: `test_migration_ingestion` ("Table 'User' already exists") |
+| Doc-tests | 8 (5 ignored) | ⚠️ | Doc-tests across all crates |
+| **Total** | **1,311** | **1,310 ✅ / 1 ❌ / 5 ignored** | |
 
 ## Storage Engine Features
 
@@ -193,10 +204,15 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 | All Weighted Shortest Paths (AWSP) | ✅ | All weighted shortest paths |
 | PageRank | ✅ | Iterative PageRank computation |
 | WCC | ✅ | Weakly Connected Components |
-| SCC | ✅ | Strongly Connected Components (Kosaraju) |
+| SCC (Tarjan) | ✅ | Strongly Connected Components (Tarjan) |
+| SCC (Kosaraju) | ✅ | Strongly Connected Components (Kosaraju) |
 | K-Core Decomposition | ✅ | K-core decomposition |
 | Louvain | ✅ | Community detection via Louvain method |
 | Spanning Forest | ✅ | Minimum spanning forest |
+| LPA | ✅ | Label Propagation |
+| Betweenness Centrality | ✅ | Node betweenness centrality |
+| Closeness Centrality | ✅ | Node closeness centrality |
+| Triangle Counting | ✅ | Count triangles in graph |
 
 ## SIP (Sideways Information Passing)
 
@@ -217,25 +233,29 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 | Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Akar type mapping, projection pushdown |
 | HTTP(S)/S3 | `akar-httpfs` extension | ✅ |
 
-## Optimizer Passes — 21 Total (14 Flat + 7 Tree)
+## Optimizer Passes — 25 Total (18 Flat + 7 Tree)
 
 ### Flat Passes
 | # | Pass | Description |
 |---|------|-------------|
 | 1 | RemoveUnnecessaryOperators | Eliminates redundant operators |
 | 2 | FilterPushDown | Pushes filters closer to scans |
-| 3 | ProjectionPushDown | Eliminates unused columns early |
-| 4 | ConstantFolding | Evaluates constant expressions at plan time |
-| 5 | AggregateDetection | Detects and marks aggregation boundaries |
-| 6 | JoinOptimization | Greedy cardinality-aware join reordering |
-| 7 | TopKOptimization | Converts OrderBy + Limit to TopK scan |
-| 8 | VectorSimilarityDetection | Detects vector similarity patterns |
-| 9 | ArtRangeScanDetection | Detects ART index range scan patterns |
-| 10 | LimitPushDown | Pushes limits closer to scans |
-| 11 | CommonSubexpressionElimination | Eliminates duplicate expressions |
-| 12 | **OrderByPushDown** | Pushes ORDER BY below UNION ALL (Ladybug) |
-| 13 | **UnwindDedup** | Deduplicates consecutive UNWIND (Ladybug) |
-| 14 | **CountRelTable** | Replaces ScanRel+COUNT with CSR metadata (Ladybug) |
+| 3 | PredicatePushDown | Pushes predicates below joins |
+| 4 | ProjectionPushDown | Eliminates unused columns early |
+| 5 | ConstantFolding | Evaluates constant expressions at plan time |
+| 6 | AggregateDetection | Detects and marks aggregation boundaries |
+| 7 | JoinOptimization | Greedy cardinality-aware join reordering |
+| 8 | TopKOptimization | Converts OrderBy + Limit to TopK scan |
+| 9 | VectorSimilarityDetection | Detects vector similarity patterns |
+| 10 | ArtRangeScanDetection | Detects ART index range scan patterns |
+| 11 | LimitPushDown | Pushes limits closer to scans |
+| 12 | CommonSubexpressionElimination | Eliminates duplicate expressions |
+| 13 | **OrderByPushDown** | Pushes ORDER BY below UNION ALL (Ladybug) |
+| 14 | **UnwindDedup** | Deduplicates consecutive UNWIND (Ladybug) |
+| 15 | **CountRelTable** | Replaces ScanRel+COUNT with CSR metadata (Ladybug) |
+| 16 | **AggregateFusion** | Fuses aggregate operations (Ladybug) |
+| 17 | **SortElision** | Eliminates redundant sorts (Ladybug) |
+| 18 | **ExpressionInline** | Inlines trivial expressions (Ladybug) |
 
 ### Tree Passes
 | # | Pass | Description |
@@ -254,7 +274,7 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 |-----------|------|-----------|
 | **JSON** | Native Rust | `json_extract`, `json_valid`, `json_type`, `json_structure`, `json_contains`, `json_keys`, `json_array_length`, etc. |
 | **FTS** | Native Rust | `stemmer`, `tokenizer`, `tf_idf`, `bm25`, `query`, `stop_words` |
-| **ALGO** | Native Rust | `page_rank`, `wcc`, `scc`, `scc_kosaraju`, `k_core_decomposition`, `louvain`, `spanning_forest` |
+| **ALGO** | Native Rust | `page_rank`, `wcc`, `scc`, `scc_kosaraju`, `k_core_decomposition`, `louvain`, `spanning_forest`, `label_propagation`, `betweenness_centrality`, `closeness_centrality`, `triangle_count` |
 | **HTTPFS** | Native Rust | HTTP/HTTPS/S3 file reads |
 | **Vector** | Native Rust | Vector similarity search |
 | **Neo4j** | Native Rust | Bolt protocol |
@@ -279,7 +299,7 @@ Total: 954 tests — all passing ✅ (61 integration tests)
 | Sort throughput | Single/multi-key, ascending/descending, 100/1K/10K | criterion (akar-processor) |
 | Aggregate throughput | COUNT, SUM, AVG, multi-func, GROUP BY (int/string/multi-key) | criterion (akar-processor) |
 
-See [BENCHMARK_RUST.md](./BENCHMARK_RUST.md) for baseline numbers and [BENCHMARK_COMPARISON.md](./BENCHMARK_COMPARISON.md) for Rust vs C++ comparison.
+See [BENCHMARK_COMPARISON.md](./BENCHMARK_COMPARISON.md) for baseline numbers and the Rust vs C++ comparison.
 
 ## Building
 

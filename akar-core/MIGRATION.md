@@ -2,7 +2,7 @@
 
 Welcome to **Akar**! This guide details how to transition your application from the legacy C++ implementation (KuzuDB Vela/LadybugDB) to the pure Rust Akar database.
 
-As of July 2026, the Rust port has achieved **~100% functional parity** with the C++ version — all **1175 tests pass**, all 15 GDS algorithms, **25 optimizer passes**, and 58 parser statement variants are implemented.
+As of August 2026, the Rust port has achieved **~100% functional parity** with the C++ version — **1,311 tests** (1,310 passing + 1 pre-existing failure), all 15 GDS algorithms, **25 optimizer passes**, and 33 parser statement variants (+ 10 clause sub-variants) are implemented.
 
 ## 1. Quick Migration (Data)
 
@@ -55,7 +55,7 @@ pip install akar-rust  # or build from source with `make python`
 
 ### Node.js API
 ```bash
-npm install @vela-engineering/kuzu
+npm install @vela-engineering/kuzu  # or use the akar-wasm bindings (AkarDatabase wrapper)
 ```
 
 ### CLI
@@ -64,7 +64,7 @@ cargo install akar-cli
 akar-cli /path/to/db
 ```
 
-Or download the prebuilt binary from [GitHub Releases](https://github.com/kuzudb/kuzu/releases).
+Or download the prebuilt binary from [GitHub Releases](https://github.com/anjangkusumanetra/akar/releases).
 
 ## 3. Architecture Changes
 

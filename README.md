@@ -57,7 +57,7 @@ No server. No Docker. Just `cargo add akar` and query.
 
 ## Architecture
 
-Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`) contains 31 crates and ~55K lines of pure Rust code:
+Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`) contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
 
 | Crate | Purpose |
 |-------|---------|
@@ -66,13 +66,16 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 | `akar-optimizer` | 25+ query optimization passes |
 | `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
 | `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
-| `akar-function` | 58+ SQL/Cypher functions |
-| `akar-algo` | 15 graph algorithms (BFS, DFS, PageRank, SCC, etc.) |
+| `akar-function` | 259 SQL/Cypher functions (244 scalar + 14 aggregate + 1 table) |
+| `akar-algo` | 15 graph algorithms (BFS, Dijkstra, PageRank, SCC, etc.) |
 | `akar-fts` | Full-text search (BM25) |
 | `akar-vector` | Vector similarity search |
+| `akar-server` | Embedded TCP server mode (multi-process access) |
 | `akar-c` | C FFI API (`extern "C"`) |
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
+
+**Test suite:** **1,311 tests** (1,310 passing + 1 pre-existing failure in `akar-migrate` `test_migration_ingestion`, 5 ignored doc-tests). **25 optimizer passes**, **37 logical types**, **58 logical operators**, **49 physical operator structs**.
 
 ## Benchmarks
 

@@ -12,4 +12,6 @@ Public API for the Akar database engine.
 
 **`SystemConfig`** — Configuration (buffer pool size, threads, compression, auto-checkpoint, read-only mode).
 
-**Tests:** 15 unit + 28 integration
+**`Database::connect_tcp`** — Remote client for embedded server mode (length-prefixed JSON framing).
+
+**Tests:** 68 unit + 260 integration

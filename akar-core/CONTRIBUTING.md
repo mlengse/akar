@@ -29,14 +29,15 @@ akar-core/
 ├── akar-catalog/       # Schema management
 ├── akar-parser/        # Cypher PEG grammar (pest.rs)
 ├── akar-binder/        # Semantic analysis
-├── akar-planner/       # Logical plan (34 operators)
-├── akar-optimizer/     # 21 optimization passes
+├── akar-planner/       # Logical plan (58 operators)
+├── akar-optimizer/     # 25 optimization passes
 ├── akar-processor/     # Physical execution engine
-├── akar-function/      # 150+ built-in functions
+├── akar-function/      # 259 built-in functions
 ├── akar-graph/         # GDS framework + CSR
 ├── akar-main/          # Database, Connection, QueryResult
 ├── akar-cli/           # Interactive Cypher shell
-└── akar-{extension}/   # 14 extension crates
+├── akar-server/        # Embedded TCP server mode
+└── akar-{extension}/   # 15 extension crates
 ```
 
 ## Development Workflow
@@ -52,7 +53,7 @@ cargo check --workspace                     # Fast compile check (no codegen)
 ### Test
 
 ```bash
-cargo test --workspace                      # All 954 tests
+cargo test --workspace                      # All 1,311 tests
 cargo test -p akar-processor               # Single crate
 cargo test --test test_fts -p akar-main     # Single integration test
 ```

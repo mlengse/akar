@@ -4,4 +4,4 @@ Vector similarity search for the Akar database engine.
 
 **Functions:** Vector similarity search operations
 
-**Tests:** 10
+**Tests:** 20

@@ -19,6 +19,6 @@ Cypher query parser using pest.rs PEG grammar.
 - Function calls with arguments
 - Property access (`a.name`)
 
-**AST types:** 4 Statement variants, 13 Clause variants, Expression enum with 10 variants, Constant with 7 variants.
+**AST types:** 33 Statement variants, 10 Clause variants, Expression enum with 10 variants, Constant with 7 variants.
 
-**Tests:** 20
+**Tests:** 67
