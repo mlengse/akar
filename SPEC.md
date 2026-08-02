@@ -688,6 +688,6 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 - **Research paper:** [Kuzu GDBMS, CIDR 2023](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf) (original architecture)
 - **Benchmark comparison:** [BENCHMARK_COMPARISON.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/BENCHMARK_COMPARISON.md)
-- **Status document:** [STATUS.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/STATUS.md) (detailed sprint-by-sprint progress)
+- **Implemented detail archive:** [implemented-context.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/docs/archive/implemented-context.md) (historical task tables, audit findings, design decisions)
 - **Migration guide:** [MIGRATION.md](file:///c:/Users/anjan/dev/memory/akar/MIGRATION.md)
 - **Release process:** [RELEASE.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/RELEASE.md)
