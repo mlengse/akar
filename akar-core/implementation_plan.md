@@ -1,8 +1,8 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-08-01 (Sprint 14 COMPLETE — P45.1/P45.3/P45.4 DONE; **P45.2 CANCELLED** — no crates.io publishing until production-ready; **P46 WCOJ DONE (Sprint 15)**; **P47 Multi-Process still PLANNED**)
+> **Revision:** 2026-08-02 (Sprint 15 COMPLETE — **P46 WCOJ + P47 Server Mode DONE**; **P45.2 CANCELLED** — no crates.io publishing until production-ready; **Sprint 16 PLANNED — P48 correctness fixes**, see §Sprint 16)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Baseline:** `cargo test --workspace` → **1,258 passed, 0 failed, 5 ignored (doc-tests only)**, 31 crates, ~55K LOC.
+> **Baseline:** `cargo test --workspace` → **1,310 passed, 1 failed (pre-existing `test_migration_ingestion`), 5 ignored (doc-tests only)**, 32 crates, ~86K LOC (git-tracked).
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 > **For completed phases (P1-P44) and LadybugDB functional parity:** see [`STATUS.md`](STATUS.md)
 
@@ -35,14 +35,14 @@
 | **P44** | **Performance Optimization** | ✅ **DONE** | **8** | ✅ Complete |
 | **P45** | **Production Readiness** | ✅ **DONE** | **8** | ✅ Complete (P45.2 CANCELLED) |
 | **P46** | **Worst-Case Optimal Joins (WCOJ)** | ✅ **DONE** | **4** | ✅ Sprint 15 |
-| **P47** | **Multi-Process Access (Embedded Server Mode)** | 🔜 **PLANNED** | **4** | Sprint 15 |
+| **P47** | **Multi-Process Access (Embedded Server Mode)** | ✅ **DONE** | **4** | ✅ Sprint 15 |
 
 > [!IMPORTANT]
-> **P1-P44 + AUDIT: ALL COMPLETE** — 1,258 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed.
+> **P1-P44 + AUDIT: ALL COMPLETE** — 1,310 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed.
 > **P43.3: CANCELLED** — C++ per-operator benchmark source was removed from the repo by review decision (2026-07-31); not needed — SQL-level E2E 3-way parity already verified (~1×).
-> **P45: COMPLETE (Sprint 14)** — P45.1 catalog serialization DONE (DDL + cross-process recovery); P45.4 data durability DONE (durable column mirrors, crash recovery, read-only enforcement, cross-process locking — 8 new integration tests); P45.3 operator parity DONE (100% type parity, 58 C++ → 46 Rust fused, see STATUS.md §3.7); **P45.2 crates.io publishing CANCELLED** — tidak publish ke crates.io sebelum benar-benar siap production.
+> **P45: COMPLETE (Sprint 14)** — P45.1 catalog serialization DONE (DDL + cross-process recovery); P45.4 data durability DONE (durable column mirrors, crash recovery, read-only enforcement, cross-process locking — 8 new integration tests); P45.3 operator parity DONE (100% type parity, 58 C++ → 49 Rust fused, see STATUS.md §3.7); **P45.2 crates.io publishing CANCELLED** — tidak publish ke crates.io sebelum benar-benar siap production.
 > **P46: COMPLETE (Sprint 15)** — planner-side WCOJ enumeration DONE: `build_wcoj_intersect` emits `LogicalIntersect` for star/fan-out patterns (shared probe node, per-edge build sides) and triangle patterns (star Intersect + closure Extend/Filter); fallback to HashJoin chain otherwise. Binder now allows reusing the same node variable in MATCH when it refers to the same node table. `PhysicalIntersect::execute_sides` emits the full cross-product of matching build rows with proper `field_names`. 5 new integration tests (`akar-main/tests/test_wcoj.rs`) + 4 planner unit tests + 2 processor unit tests; all pass.
-> **P47: PLANNED (Sprint 15)** — multi-process access = embedded server mode; true shared-storage multi-process writers di-design-out (butuh distributed buffer-pool protocol, tak cocok untuk embedded).
+> **P47: COMPLETE (Sprint 15)** — embedded server mode DONE: crate `akar-server` (TCP + length-prefixed JSON framing, `Server::bind`/`start`/`shutdown`, non-blocking accept loop), session bridging via `TransactionManager` (satu `Connection` per client), client helper `Database::connect_tcp` di `akar-main/src/remote.rs` (client tidak pernah membuka file lock — server yang memegangnya), exclusive-lock integration. 12 integration tests (`akar-server/tests/server_tests.rs`: concurrent write+read, crash client, DDL visibility, read-only enforcement, embedded unchanged) + 5 frame/response unit tests (`remote.rs`); all pass. True shared-storage multi-process writers di-design-out (butuh distributed buffer-pool protocol, tak cocok untuk embedded).
 
 ---
 
@@ -106,7 +106,7 @@
 
 #### P45.3 — Physical Operator Parity Gap Analysis (1 SP) ✅ DONE
 
-**Goal:** Document gap antara Rust (46 operators) dan C++ (67 operators). Identifikasi mana yang worth implementing.
+**Goal:** Document gap antara Rust (49 operators) dan C++ (67 operators). Identifikasi mana yang worth implementing.
 
 **Result (2026-08-01):** Enumerated kuzu-vela `PhysicalOperatorType` enum (`physical_operator.h:17-76`) = **58 types**. **100% type parity** — semua punya ekivalen Rust. Selisih 46 vs 58 murni split-phase fusion (HASH_JOIN_BUILD+PROBE, INTERSECT_BUILD, ORDER_BY_MERGE/SCAN, TOP_K_SCAN). Defer: PARTITIONER, CREATE_MACRO, INSTALL/LOAD/UNINSTALL_EXTENSION (bukan query-facing). Gap query-facing berikutnya = P46 WCOJ (planner-side `LogicalIntersect` emission; operator fisik sudah ada & teruji).
 
@@ -114,7 +114,7 @@
 
 ---
 
-## ✅ SPRINT 15: WCOJ + MULTI-PROCESS (P46 DONE; P47 PLANNED)
+## ✅ SPRINT 15: WCOJ + MULTI-PROCESS (P46, P47 DONE)
 
 ### P46: Worst-Case Optimal Joins (WCOJ) (4 SP) ✅ DONE
 
@@ -143,7 +143,7 @@
 
 **P46.4 detail:** `akar-main/tests/test_wcoj.rs` (5 tests: fan-out ≡ two single-hop queries, triangle `(0,1,2)` only, EXPLAIN "Intersect", isolated node → 0 rows, cross-product fan-out 2×2=4 rows); `join_order.rs` 4 new planner unit tests (`test_wcoj_star_detection`, `test_wcoj_triangle_detection`, `test_wcoj_chain_falls_back`, `test_wcoj_single_edge_falls_back`); `join_ops.rs` 2 new processor unit tests (`test_intersect_execute_sides_cross_product`, `test_intersect_execute_sides_key_resolution`).
 
-### P47: Multi-Process Access — Embedded Server Mode (4 SP) 🔜 PLANNED
+### P47: Multi-Process Access — Embedded Server Mode (4 SP) ✅ DONE
 
 **Goal:** Izinkan beberapa proses bekerja dengan satu database. Saat ini hanya satu proses writer (P45.4e exclusive file lock, `database.rs:454-487`); Kuzu identik (single-process writer). Keputusan desain: **true concurrent multi-process writers atas file yang sama TIDAK feasible** — implementasi server mode sebagai solusi multi-process *access*.
 
@@ -160,11 +160,33 @@
 | P47.4 | **Lock integration** — server ambil exclusive lock saat open; klien tidak pernah membuka file DB | `akar-server/src/lib.rs`, `akar-main/src/database.rs` |
 | P47.5 | **Tests** — dua proses lewat server: concurrent write + read, crash client, DDL visibility antar proses, read-only enforcement, single-process embedded (tanpa server) tetap berfungsi | `akar-server/tests/`, `akar-main/tests/test_data_durability.rs` |
 
-**Acceptance criteria:**
-- N proses dapat query DB yang sama melalui server (satu writer, banyak reader); write contention ditangani `WriteConflict` yang jelas
-- Embedded single-process (zero infra, tanpa server) tidak berubah perilakunya
-- README diperbarui: "multi-writer" = multi-thread in-process (sudah ada) + multi-process via optional server mode
-- `cargo test --workspace` passes
+**Acceptance criteria — VERIFIED 2026-08-02:**
+- ✅ N proses dapat query DB yang sama melalui server (satu writer, banyak reader); write contention ditangani `WriteConflict` yang jelas
+- ✅ Embedded single-process (zero infra, tanpa server) tidak berubah perilakunya
+- ⏳ README diperbarui: "multi-writer" = multi-thread in-process (sudah ada) + multi-process via optional server mode — **belum dilakukan**, masuk backlog Sprint 16
+- ✅ `cargo test --workspace` passes (except pre-existing `test_migration_ingestion`)
+
+**Result (2026-08-02):** `akar-server/` crate (lib.rs + session.rs + `server_tests.rs`) + `Database::connect_tcp` remote client di `akar-main/src/remote.rs` (length-prefixed JSON framing, `MAX_FRAME_SIZE` guard, partial-frame state machine); commit `6561726`.
+
+---
+
+## 🔜 SPRINT 16: RECOMMENDED — CORRECTNESS & BENCHMARK UNBLOCK (P48)
+
+> **Rekomendasi 2026-08-02** (hasil investigasi P46.5): 3 bug nyata ditemukan saat mencoba menjalankan benchmark. Prioritas: **correctness dulu**, pushdown adalah prasyarat untuk re-open P46.5. Semua sudah punya repro.
+>
+> **Ringkasan eksekutif:** Sprint 15 menutup fase fitur utama (P0–P47). Sebelum sprint baru yang besar, tutup 3 lubang correctness + 1 gap perf yang mem-blocking benchmark + 1 test failure pre-existing.
+
+| Task | Description | Files | Status |
+|------|-------------|-------|--------|
+| P48.1 | **Fix same-table multi-hop join cross-product** — `MATCH (a {id:0})-[:r1]->(b)-[:r3]->(c)` mengembalikan **110 rows, harusnya 10**: node `b` dari hop pertama di-join silang ke seluruh node di hop kedua (cross product), bukan hanya pasangan edge yang valid. **Pre-existing** (terbukti di HEAD d0450ba, bukan regresi P46); star/cycle justru sudah benar setelah P46. Repro probe tersedia. | `akar-planner/src/join_order.rs`, `akar-processor/src/physical/join_ops.rs` | 🔜 PLANNED |
+| P48.2 | **Fix rel-table `COPY`** — `COPY r1 FROM …` gagal `"Column count mismatch: expected 0 columns, got 2"` karena path COPY melihat rel table punya 0 catalog columns. Memutus ability untuk load edge data massal (juga blocker setup benchmark). | `akar-catalog/src/lib.rs`, `akar-main/src/database.rs` | 🔜 PLANNED |
+| P48.3 | **Predicate pushdown** — dorong filter WHERE komparasi (mis. `b.id > 0 AND b.id <= 100`) ke scan node/rel agar tidak membangun cross product penuh. Tanpa ini: 1 query bulk CREATE di 10k node = 10k×10k → **794 s**. Setelah ini, P46.5 bisa di-reopen. | `akar-optimizer/src/passes/` (FilterPushDown), `akar-processor/src/physical/` (scan filters) | 🔜 PLANNED |
+| P48.4 | **Re-open P46.5 benchmark (WCOJ vs HashJoin)** — setelah P48.3, pakai desain kecil yang sudah divalidasi: fan DB (Person 151 / Tag 101, bulk WHERE-comparison CREATE, setup ≈ 4 s; star 10k rows + `Intersect`, chain via rel `r3t` 10k rows tanpa `Intersect`) dan triangle DB (N=41, 6 bulk single-edge CREATE `WHERE c.id > b.id AND b.id > a.id`, setup ≈ 8 s; expected `C(41,3)=10,660`). Assert lama salah (mengharapkan 10k rows dari setup cross product 10k×10k) — sudah dikoreksi ke desain kecil. Jalankan via `--test` mode (criterion hang di mesin ini, Decision #62). | `akar-main/benches/ladybug_suite.rs` | 🔜 PLANNED |
+| P48.5 | **Tutup `test_migration_ingestion`** — pre-existing failure di `akar-migrate` (`"Table 'User' already exists"`); selidiki apakah proses migrasi tidak idempotent (double-run terhadap DB yang sudah dimigrasi). | `akar-migrate/` | 🔜 PLANNED |
+| P48.6 | **README server-mode note** — acceptance criteria P47 yang belum tuntas: dokumentasikan "multi-writer" = multi-thread in-process + multi-process via optional `akar-server`. | `README.md` | 🔜 PLANNED |
+
+**Urutan kerja:** P48.1 → P48.2 → P48.3 → P48.4 → P48.5 → P48.6.
+**Gate:** `cargo test --workspace` hijau (kecuali pre-existing yang sedang ditutup).
 
 ---
 
@@ -175,7 +197,8 @@
 | Sprint 1-12 | P0-P42 + AUDIT | ~298 | ✅ ALL COMPLETE — see `STATUS.md` |
 | **Sprint 13** | **P43 Bug Fixes + P44 Performance** | **11** | ✅ COMPLETE (P43.3 cancelled — C++ source removed by design): radixsort fix, OCC row-level inserts, hash join optimization, Arrow native arrays, sort optimization, GROUP BY hasher, plan caching |
 | **Sprint 14** | **P45 Production Readiness** | **5** | Catalog serialization, data durability, operator parity analysis (crates.io publishing CANCELLED — belum siap production) |
-| **Sprint 15** | **P46 WCOJ + P47 Multi-Process** | **8** | ✅ P46 planner-side WCOJ DONE (Intersect emission); P47 embedded server mode — PLANNED |
+| **Sprint 15** | **P46 WCOJ + P47 Multi-Process** | **8** | ✅ COMPLETE — P46 planner-side WCOJ DONE (Intersect emission); P47 embedded server mode DONE (akar-server + connect_tcp, 12 integration + 5 unit tests) |
+| **Sprint 16** | **P48 Correctness & Benchmark Unblock** | **~8** | 🔜 PLANNED — fix same-table multi-hop join, rel-COPY, predicate pushdown; re-open P46.5; close `test_migration_ingestion`; README note |
 
 ---
 
@@ -203,7 +226,8 @@ graph TD
     P45 --> P45_3["P45.3: Operator Parity Analysis"]
 
     P45 --> P46["✅ P46: WCOJ (DONE)"]
-    P46 --> P47["📋 P47: Multi-Process Server"]
+    P46 --> P47["✅ P47: Embedded Server Mode (DONE)"]
+    P47 --> P48["🔜 P48: Correctness & Benchmark Unblock"]
 
     P46 --> P46_1["P46.1: Planner WCOJ pass (DONE)"]
     P46 --> P46_2["P46.2: Build-side ordering (DONE)"]
@@ -306,3 +330,4 @@ graph TD
 | 65 | P47 vs P45.4e lock | Exclusive file lock tetap default untuk single-process; server mode adalah opt-in | Embedded single-process tetap zero-infra; server bersifat additive, tidak mengubah perilaku embedded |
 | 66 | **P45.2 crates.io publishing fate** | **CANCELLED (2026-08-01)** — tidak publish ke crates.io sebelum benar-benar siap production | Publishing is one-shot (crate name & versions can't be retracted); GitHub releases (Decision #11) cukup sampai API & engine stabil. Re-open hanya bila production-grade |
 | 67 | **P46.5 benchmark fate (2026-08-02)** | **DEFERRED, dan bench lama tidak pernah runnable.** Investigasi membuktikan: (1) tidak ada predicate pushdown — filter WHERE tidak didorong ke scan, `MATCH (a {id:0}), (b:Person) WHERE b.id>0 AND b.id<=100 CREATE` = cross product 10k×10k → 794 s di 10k node; (2) rel-table `COPY` rusak ("expected 0 columns, got 2"); (3) multi-edge comma CREATE & WHERE aritmetik tidak ter-parse (hanya WHERE komparasi). Setup lama mengandalkan bulk CREATE → impractical di skala benchmark. Di samping itu bug join same-table multi-hop (`(a)-[:r1]->(b)-[:r3]->(c)` = 110 rows, harusnya 10) **terbukti pre-existing di HEAD d0450ba** (bukan regresi P46); star/cycle di HEAD bind error "Variable already defined" — P46 yang memperbaikinya. Fix parser `<=`/`>=` (`cypher.pest` `comparison_op`) ikut dikomit (bug pre-existing). | Correctness ≥ perf. Ketika pushdown & rel-COPY benar, P46.5 bisa di-reopen dengan desain kecil yang sudah divalidasi (fan: Person 151/Tag 101 setup ≈ 4 s; triangle: N=41 setup ≈ 8 s) |
+| 68 | **Sprint 16 focus (2026-08-02)** | **P48: correctness first** — P48.1 fix same-table multi-hop join cross-product, P48.2 rel-table `COPY`, P48.3 predicate pushdown, P48.4 re-open P46.5 (desain kecil tervalidasi), P48.5 `test_migration_ingestion`, P48.6 README note | Bugs ditemukan saat investigasi P46.5; konsisten dengan Decision #67 (correctness ≥ perf). Pushdown (P48.3) adalah prasyarat benchmark realistis |

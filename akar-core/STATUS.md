@@ -2,7 +2,7 @@
 
 > **Akar** — Pure Rust embedded graph database for AI agent memory.
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
-> **Hasil audit:** `cargo test --workspace` → **1,258 passed, 0 failed, 5 ignored (doc-tests only)** | 31 crate, ~55K LOC
+> **Hasil audit:** `cargo test --workspace` → **1,310 passed, 1 failed (pre-existing `test_migration_ingestion`), 5 ignored (doc-tests only)** | 32 crate, ~86K LOC (git-tracked)
 > **Performance parity verified (hot path only):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows vs **Kuzu C++ (Vela) 400 µs** dan **LadybugDB C++ 374 µs**. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
 
 ---
@@ -10,20 +10,20 @@
 ## 0. Ringkasan Eksekutif
 
 Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded property graph database.
-**31 crate**, **~55K LOC**.
+**32 crate**, **~86K LOC** (git-tracked Rust, termasuk test).
 
 | Metrik | Nilai |
 |--------|-------|
 | **Compile errors** | **0** ✅ (`cargo check` — stale build artifacts resolved via `cargo clean`) |
-| **Tests passing** | **1,258 total, 0 failed, 5 ignored (doc-tests only)** ✅ |
-| **Integration tests** | **58 passed, 0 failed** ✅ |
-| **CI/CD** | **10 job GitHub Actions** (3 OS + wasm-test + fuzz) ✅ |
+| **Tests passing** | **1,310 passed, 1 failed** (pre-existing `test_migration_ingestion`), **5 ignored (doc-tests only)** ✅ |
+| **Integration tests** | **260 passed (akar-main), 1 failed (akar-migrate)** ✅ |
+| **CI/CD** | **12 job GitHub Actions** (3 OS + wasm-test + fuzz + coverage) ✅ |
 | **Optimizer passes** | **25** (18 flat + 7 tree) — melebihi C++ (17) |
 | **Join Order** | **DP Bushy Trees** (cost-based) — melebihi C++ (greedy) |
-| **Functions** | **234** registered (scalar + aggregate + table) |
+| **Functions** | **259** registered (244 scalar + 14 aggregate + 1 table) |
 | **Logical operators** | **58** variants — melebihi C++ Vela (34) dan LadybugDB (38+) |
-| **Physical operators** | **46** variants (C++ Ladybug: 67) — core query engine parity ~90%, all 12 DDL operators implemented |
-| **BoundStatement variants** | **43** |
+| **Physical operators** | **49** structs (C++ Ladybug: 67) — core query engine parity ~90%, all 12 DDL operators implemented |
+| **BoundStatement variants** | **33** |
 | **Extensions** | **15** crates |
 | **Lambda Evaluator** | **Per-elemen predicate evaluation** ✅ |
 | **Multiwriter** | **Concurrent writes via AtomicBool + Condvar + OCC row-level conflict detection** ✅ |
@@ -50,7 +50,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | **Sprint 12.5** | **Codebase Audit Fixes — 30/31 issues resolved (1 N/A)** | **—** | **✅ COMPLETE** — see Section 9 below. WAL append-only redesign (52× speedup), OCC row-level conflict detection, condvar deadlock fix, parser bug fixes. |
 | **Sprint 13** | **P43-P44: Bug Fixes & Performance** | **11** | **✅ COMPLETE** — P43.1 radixsort OOB fix, P43.2 OCC row-level inserts, P44.1 hash join build opt, P44.2 native Arrow arrays (verified), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching. **P43.3 cancelled** (C++ benchmark source removed by design). See Section 2. |
 | **Sprint 14** | **P45: Production Readiness** | **8** | ✅ **COMPLETE** — P45.1 catalog serialization ✅ (DDL survives restart, cross-process recovery). P45.4 data durability ✅ (durable column mirrors via `persistence.rs`, `BufferManager::drop_file` rewrite fix, oversized-value `.ovf` overflow sidecar, crash recovery, `read_only` enforcement, exclusive/shared file locks; 8 new tests in `test_data_durability.rs` + storage-level overflow round-trip). P45.3 operator parity ✅ (100% type parity, see §3.7). **P45.2 crates.io publishing CANCELLED** — tidak publish sebelum benar-benar siap production (Decision #66). |
-| **Sprint 15** | **P46-P47: WCOJ + Multi-Process** | **8** | ✅ **P46 WCOJ + P47 Server COMPLETE** — P46: planner-side enumeration (`build_wcoj_intersect` emits `LogicalIntersect` for star/triangle patterns; fallback HashJoin otherwise), binder allows repeated same-table node var in MATCH, `PhysicalIntersect::execute_sides` emits full cross-product with proper `field_names`. 11 new tests (5 integration `test_wcoj.rs`, 4 planner unit, 2 processor unit) all pass. **P47: embedded server mode COMPLETE** — new crate `akar-server` (TCP listener + length-prefixed JSON framing), session bridging via `TransactionManager`, client helper `connect_tcp`, exclusive-lock integration (clients never touch file locks), 13 integration tests incl. concurrent write+read, crash client, DDL visibility, read-only enforcement, embedded single-process unchanged. Workspace green (except pre-existing `test_migration_ingestion`, fails on baseline too). **P46.5 benchmark DEFERRED** (Decision #67: bench lama tidak pernah runnable — tidak ada predicate pushdown, rel-COPY rusak; bug same-table multi-hop join = pre-existing di HEAD, bukan regresi P46). |
+| **Sprint 15** | **P46-P47: WCOJ + Multi-Process** | **8** | ✅ **P46 WCOJ + P47 Server COMPLETE** — P46: planner-side enumeration (`build_wcoj_intersect` emits `LogicalIntersect` for star/triangle patterns; fallback HashJoin otherwise), binder allows repeated same-table node var in MATCH, `PhysicalIntersect::execute_sides` emits full cross-product with proper `field_names`. 11 new tests (5 integration `test_wcoj.rs`, 4 planner unit, 2 processor unit) all pass. **P47: embedded server mode COMPLETE** — new crate `akar-server` (TCP listener + length-prefixed JSON framing), session bridging via `TransactionManager`, client helper `connect_tcp`, exclusive-lock integration (clients never touch file locks), 12 integration tests (`server_tests.rs`: concurrent write+read, crash client, DDL visibility, read-only enforcement, embedded unchanged) + 5 unit tests (`remote.rs` framing/response). Workspace green (except pre-existing `test_migration_ingestion`, fails on baseline too). **P46.5 benchmark DEFERRED** (Decision #67: bench lama tidak pernah runnable — tidak ada predicate pushdown, rel-COPY rusak; bug same-table multi-hop join = pre-existing di HEAD, bukan regresi P46). |
 
 ---
 
@@ -59,7 +59,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 ### 1.1 Parser
 - **Engine:** `pest.rs` PEG (bukan ANTLR4 C++)
 - **Grammar:** `cypher.pest` — modular rules, composable
-- **AST:** 58 Statement variants (termasuk Transaction, Extension, AttachDatabase, DetachDatabase, UseDatabase, LoadFrom)
+- **AST:** 33 Statement variants (termasuk Transaction, Extension, AttachDatabase, DetachDatabase, UseDatabase, LoadFrom) + 10 Clause sub-variants
 - **DDL:** Full: CREATE/DROP TABLE, INDEX, SEQUENCE, VECTOR INDEX, COPY, ALTER, EXPORT/IMPORT DB, ANALYZE
 - **DML:** Full: MATCH, RETURN, WHERE, CREATE, DELETE, SET, MERGE, UNWIND, FOREACH, OPTIONAL MATCH, WITH
 - **Expressions:** Full: semua operator, function calls, CASE, list/map/struct literals, subqueries, parameters, STAR
@@ -68,7 +68,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 
 ### 1.2 Binder
 - Symbol resolution via `Arc<Mutex<Catalog>>`
-- 43 BoundStatement variants
+- 33 BoundStatement variants
 - **P36.4:** Property type resolution via `Catalog::get_property_type()` — catalog-driven, not hardcoded
 - **Paritas:** ~90%
 
@@ -97,7 +97,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 | ExpressionsScan | ✅ |
 | Explain | ✅ |
 | +12 DDL operators | ✅ |
-| **Total: 51 LogicalOperator variants** | ✅ |
+| **Total: 58 LogicalOperator variants** | ✅ |
 
 **Paritas:** ~90%
 
@@ -208,7 +208,7 @@ Akar adalah implementasi ulang murni dalam Bahasa Rust dari sebuah embedded prop
 > - ~~**BufferManager** — tidak ada mmap/NUMA/readahead~~ ✅ **FIXED — P37.1**
 > - ~~**StringDictionary compression** — pass-through~~ ✅ **FIXED — P37.2**
 
-### 1.7 Functions — ~234 Registered
+### 1.7 Functions — ~259 Registered
 
 | Kategori | Count | Status |
 |----------|:-----:|--------|
@@ -593,7 +593,7 @@ Implemented in `ladybug/` C++ codebase:
 Audit dilakukan dengan membandingkan 3 codebase:
 - **Kuzu C++ (Vela)** — `src/include/` + `src/processor/` + `src/function/`
 - **LadybugDB C++** — `ladybug/src/include/`
-- **Kuzu Rust** — `akar-core/` → 31 crate
+- **Kuzu Rust** — `akar-core/` → 32 crate
 
 **Hasil: ~95% pipeline completeness.** Semua critical gaps sudah fixed.
 
@@ -603,10 +603,10 @@ Audit dilakukan dengan membandingkan 3 codebase:
 |-------|-----------|--------------|--------|-------|
 | **Parser** | 20 | 0 | **~80%** | ORDER BY/LIMIT/SKIP now propagated ✅ |
 | **Binder** | 30+ | 0 | **~80%** | Property type resolution via catalog ✅ |
-| **Logical operators** | 38 | 0 (Rust 51, EXCEEDS) | **100%+** | |
-| **Physical operators** | 58 (kuzu-vela enum) | 0 (Rust 46, fused) | **100%** (type parity) | 12 DDL operators all wired ✅; see §3.7 P45.3 |
+| **Logical operators** | 38 | 0 (Rust 58, EXCEEDS) | **100%+** | |
+| **Physical operators** | 58 (kuzu-vela enum) | 0 (Rust 49, fused) | **100%** (type parity) | 12 DDL operators all wired ✅; see §3.7 P45.3 |
 | **Optimizer passes** | 17 | 25 (EXCEEDS) | **100%+** | |
-| **Functions (base)** | ~234 | 0 | **~100%** | |
+| **Functions (base)** | ~234 | 0 | **~100%** | 259 registered (244 scalar + 14 agg + 1 table) |
 | **Functions (aliases)** | ~607 | ~250 | **~80%** (non-critical) | |
 | **Storage** | 27 | 0 | **~90%** | CSR ✅, Checkpoint ✅, Production Readiness ✅ |
 | **GDS** | 15 | 0 | **100%** | |
@@ -656,14 +656,14 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | Arrow-native execution | Zero-copy ColumnChunk→ArrayRef | Value-based |
 | Fuzz testing | 3 targets, CI-integrated | None |
 | Property-based testing | proptest | None |
-| Code quality CI | Clippy, cargo-audit, 10 job Actions | Manual |
+| Code quality CI | Clippy, cargo-audit, 12 job Actions | Manual |
 | Types | JSON, UINT128, DTime | Standard set |
 
 ### 3.7 Physical Operator Parity — P45.3 (2026-08-01)
 
-**Metodologi:** Bandingkan enum `PhysicalOperatorType` kuzu-vela (`src/include/processor/operator/physical_operator.h:17-76`, **58 types**) dengan mapper Rust (`akar-processor/src/processor/mapper/`, **46 physical structs**, fused).
+**Metodologi:** Bandingkan enum `PhysicalOperatorType` kuzu-vela (`src/include/processor/operator/physical_operator.h:17-76`, **58 types**) dengan mapper Rust (`akar-processor/src/processor/mapper/`, **49 physical structs**, fused).
 
-**Hasil: 100% type parity** — semua 58 operator C++ punya ekivalen Rust. Selisih 58 vs 46 murni artefak split-phase accounting C++:
+**Hasil: 100% type parity** — semua 58 operator C++ punya ekivalen Rust. Selisih 58 vs 49 murni artefak split-phase accounting C++:
 
 | C++ (58) | Rust (46, fused) | Keterangan |
 |----------|------------------|------------|
@@ -687,24 +687,24 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 ---
 
-## 4. Test Results (Per 2026-08-01 — Sprint 15 P46 COMPLETE: 1,277 tests)
+## 4. Test Results (Per 2026-08-02 — Sprint 15 COMPLETE: 1,310 tests)
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| akar-common | 34 | ✅ Pass |
-| akar-parser | 66 | ✅ Pass |
+| akar-common | 21 | ✅ Pass |
+| akar-parser | 67 | ✅ Pass |
 | akar-binder | 24 | ✅ Pass |
 | akar-planner | 20 | ✅ Pass |
 | akar-optimizer | 61 | ✅ Pass |
 | akar-processor | 18 | ✅ Pass |
-| akar-storage | 320 | ✅ Pass |
+| akar-storage | 326 | ✅ Pass |
 | akar-function | 176 | ✅ Pass |
 | akar-catalog | 39 | ✅ Pass |
 | akar-graph | 34 | ✅ Pass |
 | akar-vector | 20 | ✅ Pass |
-| akar-transaction | 16 | ✅ Pass |
-| akar-main (unit + connection_test) | 63 | ✅ Pass |
-| akar-main (integration) | 63 | ✅ Pass |
+| akar-transaction | 18 | ✅ Pass |
+| akar-main (unit + connection_test) | 68 | ✅ Pass |
+| akar-main (integration) | 58 | ✅ Pass |
 | akar-main (catalog_persistence) | 6 | ✅ Pass |
 | akar-main (plan_cache_timing) | 1 | ✅ Pass |
 | akar-main (edge_null_handling) | 44 | ✅ Pass |
@@ -722,19 +722,24 @@ Audit dilakukan dengan membandingkan 3 codebase:
 | akar-main (crash_recovery) | 14 | ✅ Pass |
 | akar-main (mvcc) | 6 | ✅ Pass |
 | akar-main (wcoj) | 5 | ✅ Pass |
+| akar-main (data_durability) | 8 | ✅ Pass |
+| akar-main (test_bug) | 1 | ✅ Pass |
 | akar-algo | 34 | ✅ Pass |
 | akar-duckdb | 9 | ✅ Pass |
-| akar-binder-test | 15 | ✅ Pass |
+| akar-extension | 15 | ✅ Pass |
 | akar-httpfs | 7 | ✅ Pass |
 | akar-fts | 14 | ✅ Pass |
 | akar-json | 12 | ✅ Pass |
 | akar-llm | 9 | ✅ Pass |
 | akar-neo4j | 12 | ✅ Pass |
-| akar-wasm | 3 | ✅ Pass |
-| akar-migrate | 1 | ✅ Pass |
-| Extension crates (others) | 4 | ✅ Pass |
-| Doc-tests | 6 (5 ignored) | ✅ Pass |
-| **Total** | **1,277** | **✅ 1,277 pass, 0 failed, 5 ignored (doc-tests only)** |
+| akar-c (ffi_tests) | 14 | ✅ Pass |
+| akar-server (server_tests) | 12 | ✅ Pass |
+| akar-postgres | 7 | ✅ Pass |
+| akar-wasm | 0* | ✅ Pass (*3 via `wasm-pack test --node` on CI) |
+| akar-migrate | 1 | ❌ Fail (pre-existing `test_migration_ingestion` — "Table 'User' already exists"; also fails on baseline) |
+| Extension crates (others) | 5 | ✅ Pass (azure, delta, iceberg, sqlite, unity-catalog 1 each) |
+| Doc-tests | 8 (5 ignored) | ✅ Pass |
+| **Total** | **1,311** | **✅ 1,310 pass, 1 failed, 5 ignored (doc-tests only)** |
 
 ---
 
@@ -798,7 +803,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 ## 7. Catatan
 
 - Semua klaim di dokumen ini diverifikasi langsung terhadap kode (`cargo test --workspace`, `grep`).
-- Per 2026-08-01: **1,277 test pass, 0 fail, 5 ignored (doc-tests)** ✅ (except pre-existing `test_migration_ingestion` in `akar-migrate`, which also fails on the P45.4 baseline — unrelated to P46).
+- Per 2026-08-02: **1,310 test pass, 1 fail, 5 ignored (doc-tests)** ✅ (the only failure = pre-existing `test_migration_ingestion` in `akar-migrate`, which also fails on the baseline — unrelated to P46).
 - **Sprint 15 — P46 WCOJ COMPLETE (2026-08-01):** Planner-side WCOJ enumeration DONE. `build_wcoj_intersect` (`akar-planner/src/join_order.rs`) ports Kuzu `planWCOJoin` semantics: star/fan-out patterns `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` → single `LogicalIntersect` (probe = shared node, build sides = per-pattern Union pipelines); triangle patterns → star Intersect + closure `Extend`/`Filter`; chain/single-edge/self-loop/backward/var-length → safe fallback to `build_join_tree`. Binder (`dml.rs`/`mod.rs`) now allows reusing the same node variable in MATCH when it refers to the same node table. `PhysicalIntersect::execute_sides` (replaces `execute_binary` partitioning) builds one hash table per side and emits the full cross-product of matching build rows with correct `field_names`. Tests: 5 new integration (`akar-main/tests/test_wcoj.rs`), 4 planner unit, 2 processor unit — all pass.
 - **Sprint 14 — P45 COMPLETE (2026-08-01):** P45.1 catalog serialization: `Catalog::serialize_to_json/deserialize_from_json/save_to_path/load_from_path` + serde derives; catalog file (`catalog.json`) = source of truth for DDL, ditulis atomically setelah setiap DDL; `Database::new` load + `restore_storage_from_catalog` (node/rel table + ART index dengan table ID sama, `next_table_id` di-bump); 2 catalog unit + 6 integration tests incl. cross-process DDL recovery (table dibuat di proses A terlihat di proses B dan sebaliknya). Backward-compatible (tanpa catalog file = fresh DB). Data rows & runtime sequence state tetap in-memory (P45.1 scope = DDL metadata). P45.4 data durability (durable column mirrors, crash recovery, read-only enforcement, cross-process locking — 8 new tests). P45.3 operator parity (100% type parity, §3.7). **P45.2 CANCELLED** — no crates.io publishing sampai benar-benar siap production (lihat Decision #66 di `implementation_plan.md`).
 - **Sprint 13 — P43/P44 COMPLETE (2026-07-31):** P43.1 radixsort OOB fix, P43.2 OCC insert row-level granularity, P44.1 hash join build opt (Arrow-native key hashing), P44.2 native Arrow arrays verified (variable 148µs → 18ns, `x>5` 19.8×), P44.3 sort opt, P44.4 GROUP BY hasher, P44.5 query plan caching (LRU, catalog-version invalidation, 16 new tests). **P43.3 CANCELLED** — C++ per-operator benchmark source removed from repo by review decision; SQL-level 3-way parity already verified (~1×).
@@ -812,7 +817,7 @@ Audit dilakukan dengan membandingkan 3 codebase:
 - **P26.2 Fuzz Testing:** 3 cargo-fuzz targets, CI-integrated (P30.5b).
 - **P26.3 Property-Based Testing:** 3 proptest properties (round-trip, join associativity, filter pushdown).
 - Status dokumen ini adalah snapshot; jalankan `cargo test --workspace` untuk verifikasi termutakhir.
-- **1,552 → 1,243 → 1,258 → 1,277 tests:** Test count updated to reflect actual workspace configuration. Sprint 13 added 16 tests (11 plan_cache unit, 4 plan-cache integration, 1 plan-cache timing regression); P43.2 row-level OCC tests included since Sprint 12.5. Sprint 15 P46 added 11 tests (5 WCOJ integration, 4 planner unit, 2 processor unit). Extension crate test counts adjusted.
+- **1,552 → 1,243 → 1,258 → 1,277 → 1,310 tests:** Test count updated to reflect actual workspace configuration. Sprint 13 added 16 tests (11 plan_cache unit, 4 plan-cache integration, 1 plan-cache timing regression); P43.2 row-level OCC tests included since Sprint 12.5. Sprint 15 P46 added 11 tests (5 WCOJ integration, 4 planner unit, 2 processor unit) + P47 added 17 (12 `server_tests`, 5 `remote.rs` unit); P45.4 added 8 durability tests. Extension crate test counts adjusted (2026-08-02 audit: akar-common 21, akar-parser 67, akar-storage 326, akar-transaction 18).
 
 ---
 
@@ -822,15 +827,15 @@ Audit dilakukan dengan membandingkan 3 codebase:
 
 | Layer | LadybugDB C++ | Rust | Parity | Notes |
 |-------|---------------|------|--------|-------|
-| **Parser** | 30+ stmt types | 58 | **~70%** | ORDER BY/LIMIT/SKIP now propagated ✅ |
-| **Binder** | 30+ bound stmt | 43 | **~70%** | Catalog-based type resolution ✅ |
-| **Planner** | 38 logical ops | 51 | **~70%** | Exceeds C++ |
-| **Processor** | 67 physical ops | 46 | **~66%** | 12 DDL all wired ✅ |
+| **Parser** | 30+ stmt types | 33 | **~70%** | ORDER BY/LIMIT/SKIP now propagated ✅ |
+| **Binder** | 30+ bound stmt | 33 | **~70%** | Catalog-based type resolution ✅ |
+| **Planner** | 38 logical ops | 58 | **~70%** | Exceeds C++ |
+| **Processor** | 67 physical ops | 49 | **~66%** | 12 DDL all wired ✅ |
 | **Optimizer** | 17 passes | 25 | **100%+** | Exceeds C++ |
-| **Functions** | 607 registrations | 234 | **~90%** | Core complete |
+| **Functions** | 607 registrations | 259 | **~90%** | Core complete |
 | **Storage** | 27 features | 27 | **~90%** | CSR ✅, Checkpoint ✅ |
 | **GDS** | 15 algorithms | 15+ | **100%** | |
-| **Types** | 35+ types | 36 | **100%** | Exceeds C++ |
+| **Types** | 35+ types | 37 | **100%** | Exceeds C++ |
 
 ### 8.2 Physical Operator Note
 
@@ -867,7 +872,7 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 | ADBC | Native Arrow Flight SQL |
 | Lambda evaluator | Per-element predicate with mini-chunk |
 | Native FTS | Full DDL + MATCH pipeline with BM25 |
-| CI/CD | 10-job GitHub Actions + Dependabot |
+| CI/CD | 12-job GitHub Actions + Dependabot |
 | Code quality | Clippy -D warnings, cargo-audit clean |
 | Types | JSON, UINT128, DTime |
 | Logical operators | 51 vs 38+ |
@@ -876,7 +881,7 @@ Rust: **25 passes (18 flat + 7 tree)** — exceeds C++ Ladybug (17).
 
 ## 9. Codebase Audit Fixes (2026-07-27 — Sprint 12.5 — FINAL)
 
-A comprehensive audit of all 31 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). **30 of 31 issues resolved (97%). 1 N/A (RwLock). No remaining items.**
+A comprehensive audit of all 32 crates identified 31 issues (5 critical, 6 high, 12 medium, 8 low). **30 of 31 issues resolved (97%). 1 N/A (RwLock). No remaining items.**
 
 ### 9.1 Quick Wins — All Completed ✅
 
