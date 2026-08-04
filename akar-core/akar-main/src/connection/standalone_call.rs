@@ -178,7 +178,7 @@ impl DbStandaloneCallHandler {
             let num_cols = result_rows[0].len();
             let col_names_strings = (0..num_cols).map(|i| format!("col_{}", i)).collect::<Vec<_>>();
             let col_names = col_names_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-            Ok(vec![rows_to_datachunk(result_rows, &col_names)])
+            Ok(vec![rows_to_datachunk(result_rows, &col_names)?])
         }
     }
 }

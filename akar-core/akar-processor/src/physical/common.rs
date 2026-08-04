@@ -4,7 +4,7 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::ValueVector;
 
 #[inline]
-pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
+pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result<(), String> {
     match val {
         Value::Null => {
             v.set_null(row, true);
@@ -44,14 +44,18 @@ pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value
             }
         }
         Value::String(s) => {
-            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(255) as u8;
+            if bytes.len() > 255 {
+                return Err(format!(
+                    "Cannot store string of {} bytes: inline string storage limit is 255 bytes",
+                    bytes.len()
+                ));
+            }
+            let offset = row * 256;
             if offset < v.data().len() {
-                v.data_mut()[offset] = len;
-                let copy_len = bytes.len().min(255);
-                if offset + 1 + copy_len <= v.data().len() {
-                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                v.data_mut()[offset] = bytes.len() as u8;
+                if offset + 1 + bytes.len() <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + bytes.len()].copy_from_slice(bytes);
                 }
                 v.set_null(row, false);
             }
@@ -60,6 +64,7 @@ pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value
             v.set_null(row, true);
         }
     }
+    Ok(())
 }
 
 #[inline(always)]
@@ -134,6 +139,27 @@ pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) 
         }
         Value::Union(_, v) => hash_value_into(v, hasher),
         _ => std::mem::discriminant(val).hash(hasher),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_value_in_vector_string_overflow_returns_error() {
+        let mut v = ValueVector::new(PhysicalTypeID::String, 1);
+        let err = store_value_in_vector(&mut v, 0, &Value::String("a".repeat(256))).unwrap_err();
+        assert!(err.contains("255"), "err: {err}");
+    }
+
+    #[test]
+    fn store_value_in_vector_string_255_round_trips() {
+        let mut v = ValueVector::new(PhysicalTypeID::String, 1);
+        v.resize(1);
+        let s = "b".repeat(255);
+        store_value_in_vector(&mut v, 0, &Value::String(s.clone())).unwrap();
+        assert_eq!(v.get_value(0), Some(Value::String(s)));
     }
 }
 

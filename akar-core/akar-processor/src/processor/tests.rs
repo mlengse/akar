@@ -918,15 +918,15 @@
         left_v1.set_i64(1, 2);
         left_v1.resize(2);
         let mut left_v2 = ValueVector::new(PhysicalTypeID::String, 2);
-        left_v2.push_string("hello");
-        left_v2.push_string("world");
+        left_v2.push_string("hello").unwrap();
+        left_v2.push_string("world").unwrap();
         let left = vec![DataChunk::new(vec![left_v1, left_v2])];
 
         let mut right_v1 = ValueVector::new(PhysicalTypeID::Int64, 1);
         right_v1.set_i64(0, 3);
         right_v1.resize(1);
         let mut right_v2 = ValueVector::new(PhysicalTypeID::String, 1);
-        right_v2.push_string("foo");
+        right_v2.push_string("foo").unwrap();
         let right = vec![DataChunk::new(vec![right_v1, right_v2])];
 
         let result = merge_union_chunks(left, right, true).unwrap();
@@ -997,8 +997,8 @@
         l1.set_i64(1, 2);
         l1.resize(2);
         let mut l2 = ValueVector::new(PhysicalTypeID::String, 2);
-        l2.push_string("a");
-        l2.push_string("b");
+        l2.push_string("a").unwrap();
+        l2.push_string("b").unwrap();
         let left = DataChunk::new(vec![l1, l2]);
 
         let mut r1 = ValueVector::new(PhysicalTypeID::Int64, 2);

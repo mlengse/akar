@@ -16,6 +16,11 @@ fn extract_count(conn: &Connection, query: &str) -> i64 {
 }
 
 proptest! {
+    // Default is 256 cases; each case builds a fresh file-backed WAL DB, so
+    // 256 cases cost ~80s+ per test on this machine. 32 cases keep good
+    // random coverage of the 1..20 ranges at a fraction of the runtime.
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
     #[test]
     fn test_roundtrip_i64(val in 0..i64::MAX) {
         let (_dir, _db, conn) = setup_db_on_disk();

@@ -66,7 +66,7 @@ impl PhysicalOperatorExec for PhysicalLimit {
                         if field.is_null(src_row) {
                             new_v.set_null(i, true);
                         } else if let Some(val) = chunk.get_value(col, src_row) {
-                            store_value_in_vector(&mut new_v, i, &val);
+                            store_value_in_vector(&mut new_v, i, &val)?;
                         }
                     }
                     new_fields.push(new_v);

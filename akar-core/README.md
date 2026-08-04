@@ -70,6 +70,14 @@ conn.query("COPY Person FROM 'data.csv' (HEADER true)")?;
 let result = conn.query("MATCH (p:Person) WHERE p.age > 25 RETURN p.name ORDER BY p.age")?;
 ```
 
+## Concurrency Model
+
+"Multi-writer" support means:
+
+- **Multi-threaded, in-process:** a `Database` handle is `Send` + `Sync`; any number of threads can share it and run concurrent write transactions (OCC conflict detection, `concurrent_writes` config). This is the default embedded mode.
+- **Multi-process:** multiple processes can access the same database **only** through the optional TCP server (`akar-server`). The server process holds the exclusive database file lock; clients connect over TCP and never open the database file directly.
+- **Out of scope:** multiple processes opening the same database file directly (true shared-storage multi-process writers) is designed out — it would require a distributed buffer-pool protocol that does not fit an embedded engine.
+
 ## Query Pipeline
 
 ```

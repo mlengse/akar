@@ -774,7 +774,7 @@ impl PhysicalExtend {
                 let mut v = ValueVector::new(phys_type, total_rows);
                 v.resize(total_rows);
                 for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[col][row]);
+                    store_value_in_vector(&mut v, row, &out_data[col][row])?;
                 }
                 fields.push(v);
                 if col < chunk.field_names.len() {
@@ -794,7 +794,7 @@ impl PhysicalExtend {
                 let mut v = ValueVector::new(phys_type, total_rows);
                 v.resize(total_rows);
                 for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row]);
+                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
                 }
                 fields.push(v);
                 let rel_prefix = &self.rel_table_name;
@@ -812,7 +812,7 @@ impl PhysicalExtend {
                 let mut v = ValueVector::new(phys_type, total_rows);
                 v.resize(total_rows);
                 for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row]);
+                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row])?;
                 }
                 fields.push(v);
                 let prefix = &self.dst_node_var;

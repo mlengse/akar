@@ -66,7 +66,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 let phys_type = PhysicalScan::value_to_physical_type(item);
                 let mut v = ValueVector::new(phys_type, 1);
                 v.resize(1);
-                store_value_in_vector(&mut v, 0, item);
+                store_value_in_vector(&mut v, 0, item)?;
                 let _chunk = DataChunk::new(
                     vec![akar_common::arrow_vector::ArrowVector::from_legacy(&v).array],
                     vec![akar_common::types::PhysicalTypeID::Int64],

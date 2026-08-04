@@ -315,12 +315,8 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                             let buf = &mut vv.data_mut()[row_offset * 8..(row_offset + 1) * 8];
                             buf.copy_from_slice(&x.to_le_bytes());
                         }
-                        Value::String(s) => {
-                            let bytes = s.as_bytes();
-                            let copy_len = bytes.len().min(255);
-                            vv.data_mut()[row_offset * 256] = copy_len as u8;
-                            vv.data_mut()[row_offset * 256 + 1..row_offset * 256 + 1 + copy_len]
-                                .copy_from_slice(&bytes[..copy_len]);
+                        Value::String(_) => {
+                            vv.set_value(row_offset, val)?;
                         }
                         _ => {}
                     }

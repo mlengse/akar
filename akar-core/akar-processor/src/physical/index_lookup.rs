@@ -64,7 +64,7 @@ impl PhysicalOperatorExec for PhysicalIndexLookup {
             if matches!(val, Value::Null) {
                 v.set_null(0, true);
             } else {
-                store_value_in_vector(&mut v, 0, &val);
+                store_value_in_vector(&mut v, 0, &val)?;
             }
             fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
             field_types.push(phys_type);

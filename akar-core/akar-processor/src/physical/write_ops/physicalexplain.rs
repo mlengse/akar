@@ -1,6 +1,8 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use akar_common::types::PhysicalTypeID;
 use akar_common::vector::DataChunk;
+use std::sync::Arc;
 
 // ==================== PhysicalExplain ====================
 
@@ -19,23 +21,14 @@ impl PhysicalOperatorExec for PhysicalExplain {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        use akar_common::types::PhysicalTypeID;
-        use akar_common::vector::{DataChunk, ValueVector};
-
         let plan_str = self.inner_plan.clone();
-        let mut vv = ValueVector::new(PhysicalTypeID::String, 1);
-        vv.resize(1);
-        let bytes = plan_str.as_bytes();
-        let copy_len = bytes.len().min(255);
-        vv.data_mut()[0] = copy_len as u8;
-        if copy_len > 0 {
-            vv.data_mut()[1..1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-        }
-        // For long strings, store the full string in the ValueVector's overflow
-        // We store the original Value for the query result
+        // Build an Arrow string array directly so the plan is never truncated
+        // to the 255-byte inline string limit of the legacy value vector.
+        let array = Arc::new(arrow::array::StringArray::from(vec![plan_str]));
+        let arrow = akar_common::arrow_vector::ArrowVector::new(array, PhysicalTypeID::String);
         let chunk = DataChunk {
-            fields: vec![akar_common::arrow_vector::ArrowVector::from_legacy(&vv).array],
-            field_types: vec![vv.physical_type()],
+            fields: vec![arrow.array],
+            field_types: vec![PhysicalTypeID::String],
             size: 1,
             field_names: vec![],
             sel_vector: None,

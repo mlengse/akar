@@ -134,7 +134,7 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
                         v.set_null(out_idx, true);
                     } else {
                         let val = accessor.get_value(col, src_idx);
-                        store_value_in_vector(&mut v, out_idx, &val);
+                        store_value_in_vector(&mut v, out_idx, &val)?;
                     }
                 }
                 fields.push(v);

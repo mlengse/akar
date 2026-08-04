@@ -102,7 +102,7 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                         if is_null {
                             v.set_null(out_pos, true);
                         } else if let Some(ref val) = val {
-                            crate::physical::common::store_value_in_vector(&mut v, out_pos, val);
+                            crate::physical::common::store_value_in_vector(&mut v, out_pos, val)?;
                         }
                         out_pos += 1;
                     }
@@ -122,7 +122,7 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
                         &mut dst_field,
                         out_pos,
                         &Value::Int64(dst_id as i64),
-                    );
+                    )?;
                     out_pos += 1;
                 }
             }

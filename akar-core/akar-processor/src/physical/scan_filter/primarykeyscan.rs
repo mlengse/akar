@@ -92,7 +92,7 @@ impl PhysicalOperatorExec for PhysicalPrimaryKeyScan {
                 if matches!(val, Value::Null) {
                     v.set_null(out_idx, true);
                 } else {
-                    crate::physical::common::store_value_in_vector(&mut v, out_idx, &val);
+                    crate::physical::common::store_value_in_vector(&mut v, out_idx, &val)?;
                 }
             }
             new_fields.push(v);

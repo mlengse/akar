@@ -38,15 +38,22 @@ fn write_art_varint(buf: &mut Vec<u8>, mut value: u64) {
     }
 }
 
-fn read_art_varint(data: &[u8], pos: &mut usize) -> u64 {
+fn read_art_varint(data: &[u8], pos: &mut usize) -> Result<u64, StorageError> {
     let mut result = 0u64;
     let mut shift = 0u64;
     loop {
-        let byte = data[*pos];
+        if shift > 63 {
+            return Err(StorageError::Index(
+                "ART index data corrupt: varint has too many continuation bytes".into(),
+            ));
+        }
+        let byte = *data.get(*pos).ok_or_else(|| {
+            StorageError::Index("ART index data truncated: varint extends past end of buffer".into())
+        })?;
         *pos += 1;
         result |= ((byte & 0x7F) as u64) << shift;
         if (byte & 0x80) == 0 {
-            return result;
+            return Ok(result);
         }
         shift += 7;
     }
@@ -459,20 +466,25 @@ impl ArtPrimaryKeyIndex {
 
     /// Deserialize a serialized ART tree into a node.
     /// Port of C++ `loadTree()` template.
-    pub fn deserialize_tree(data: &[u8], pos: &mut usize) -> ArtNode {
-        let kind = read_art_varint(data, pos) as u8;
-        let prefix_len = read_art_varint(data, pos) as usize;
+    pub fn deserialize_tree(data: &[u8], pos: &mut usize) -> Result<ArtNode, StorageError> {
+        let kind = read_art_varint(data, pos)? as u8;
+        let prefix_len = read_art_varint(data, pos)? as usize;
+        if prefix_len > data.len().saturating_sub(*pos) {
+            return Err(StorageError::Index(
+                "ART index data corrupt: prefix length exceeds remaining buffer".into(),
+            ));
+        }
         let mut prefix = vec![0u8; prefix_len];
         if prefix_len > 0 {
             prefix.copy_from_slice(&data[*pos..*pos + prefix_len]);
             *pos += prefix_len;
         }
 
-        let num_offsets = read_art_varint(data, pos) as usize;
+        let num_offsets = (read_art_varint(data, pos)? as usize).min(data.len());
         let mut offsets = Vec::with_capacity(num_offsets);
         let mut overflow_offsets = Vec::new();
         for i in 0..num_offsets {
-            let off = read_art_varint(data, pos);
+            let off = read_art_varint(data, pos)?;
             if i == 0 {
                 offsets.push(off);
             } else {
@@ -480,7 +492,15 @@ impl ArtPrimaryKeyIndex {
             }
         }
 
-        let num_children = read_art_varint(data, pos) as usize;
+        let num_children = read_art_varint(data, pos)? as usize;
+
+        let read_child_key = |pos: &mut usize| -> Result<u8, StorageError> {
+            let byte = *data.get(*pos).ok_or_else(|| {
+                StorageError::Index("ART index data truncated: child key extends past end of buffer".into())
+            })?;
+            *pos += 1;
+            Ok(byte)
+        };
 
         match kind {
             0 => {
@@ -489,20 +509,19 @@ impl ArtPrimaryKeyIndex {
                 let mut children: [Option<Box<ArtNode>>; 4] = Default::default();
                 let mut count: u16 = 0;
                 for _ in 0..num_children.min(4) {
-                    let byte = data[*pos];
-                    *pos += 1;
+                    let byte = read_child_key(pos)?;
                     keys[count as usize] = byte;
-                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)));
+                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)?));
                     count += 1;
                 }
-                ArtNode::Node4 {
+                Ok(ArtNode::Node4 {
                     prefix,
                     keys,
                     children,
                     offsets,
                     overflow_offsets,
                     count,
-                }
+                })
             }
             1 => {
                 // Node16
@@ -510,20 +529,19 @@ impl ArtPrimaryKeyIndex {
                 let mut children: [Option<Box<ArtNode>>; 16] = Default::default();
                 let mut count: u16 = 0;
                 for _ in 0..num_children.min(16) {
-                    let byte = data[*pos];
-                    *pos += 1;
+                    let byte = read_child_key(pos)?;
                     keys[count as usize] = byte;
-                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)));
+                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)?));
                     count += 1;
                 }
-                ArtNode::Node16 {
+                Ok(ArtNode::Node16 {
                     prefix,
                     keys,
                     children,
                     offsets,
                     overflow_offsets,
                     count,
-                }
+                })
             }
             2 => {
                 // Node48
@@ -531,40 +549,40 @@ impl ArtPrimaryKeyIndex {
                 let mut children: [Option<Box<ArtNode>>; 48] = std::array::from_fn(|_| None);
                 let mut count: u16 = 0;
                 for _ in 0..num_children.min(48) {
-                    let byte = data[*pos];
-                    *pos += 1;
+                    let byte = read_child_key(pos)?;
                     child_index[byte as usize] = count as u8;
-                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)));
+                    children[count as usize] = Some(Box::new(Self::deserialize_tree(data, pos)?));
                     count += 1;
                 }
-                ArtNode::Node48 {
+                Ok(ArtNode::Node48 {
                     prefix,
                     child_index,
                     children: Box::new(children),
                     offsets,
                     overflow_offsets,
                     count,
-                }
+                })
             }
             3 => {
                 // Node256
                 let mut children: [Option<Box<ArtNode>>; 256] = std::array::from_fn(|_| None);
                 let mut count: u16 = 0;
                 for _ in 0..num_children.min(256) {
-                    let byte = data[*pos];
-                    *pos += 1;
-                    children[byte as usize] = Some(Box::new(Self::deserialize_tree(data, pos)));
+                    let byte = read_child_key(pos)?;
+                    children[byte as usize] = Some(Box::new(Self::deserialize_tree(data, pos)?));
                     count += 1;
                 }
-                ArtNode::Node256 {
+                Ok(ArtNode::Node256 {
                     prefix,
                     children: Box::new(children),
                     offsets,
                     overflow_offsets,
                     count,
-                }
+                })
             }
-            _ => ArtNode::new_node4(),
+            _ => Err(StorageError::Index(format!(
+                "ART index data corrupt: unknown node kind {kind}"
+            ))),
         }
     }
 
@@ -691,7 +709,8 @@ impl ArtPrimaryKeyIndex {
 
             // Deserialize tree
             let mut pos = 0usize;
-            index.root = Self::deserialize_tree(&tree_bytes, &mut pos);
+            index.root = Self::deserialize_tree(&tree_bytes, &mut pos)
+                .map_err(|e| StorageError::Index(format!("Failed to deserialize ART tree: {e}")))?;
         }
 
         index.dirty = false;
@@ -1149,7 +1168,7 @@ mod tests {
         assert!(!serialized.is_empty());
 
         let mut pos = 0;
-        let root = ArtPrimaryKeyIndex::deserialize_tree(&serialized, &mut pos);
+        let root = ArtPrimaryKeyIndex::deserialize_tree(&serialized, &mut pos).unwrap();
         assert!(root.count() > 0 || root.has_offsets());
     }
 
@@ -1215,9 +1234,34 @@ mod tests {
             let mut buf = Vec::new();
             write_art_varint(&mut buf, v);
             let mut pos = 0;
-            let decoded = read_art_varint(&buf, &mut pos);
+            let decoded = read_art_varint(&buf, &mut pos).unwrap();
             assert_eq!(decoded, v, "varint roundtrip failed for {v}");
             assert_eq!(pos, buf.len(), "not all bytes consumed for {v}");
+        }
+    }
+
+    #[test]
+    fn test_read_art_varint_truncated_returns_error() {
+        // A varint whose continuation bit is set but whose bytes run out must
+        // produce an error, not an index-out-of-bounds panic (P48.10).
+        let buf = [0x80u8, 0x80, 0x80];
+        let mut pos = 0;
+        let err = read_art_varint(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {err}");
+    }
+
+    #[test]
+    fn test_deserialize_tree_truncated_returns_error() {
+        // Truncated serialized ART data must produce an error, not a panic.
+        let mut idx = ArtPrimaryKeyIndex::new("test");
+        for i in 0..10u64 {
+            idx.insert(&make_key(i as i64), i);
+        }
+        let serialized = idx.serialize_tree();
+        for cut in [1, 2, 3, serialized.len() / 2, serialized.len().saturating_sub(1)] {
+            let mut pos = 0;
+            let res = ArtPrimaryKeyIndex::deserialize_tree(&serialized[..cut], &mut pos);
+            assert!(res.is_err(), "expected error for truncated data of length {cut}");
         }
     }
 }

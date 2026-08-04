@@ -134,7 +134,7 @@ pub(crate) fn pk_value_to_string(v: &Value) -> String {
 }
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
-pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> akar_common::vector::DataChunk {
+pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> Result<akar_common::vector::DataChunk, String> {
     use akar_common::types::PhysicalTypeID;
     use akar_common::vector::ValueVector;
 
@@ -150,7 +150,7 @@ pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) ->
         let field_types = fields_legacy.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
         let mut chunk = akar_common::vector::DataChunk::new(fields, field_types);
         chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
-        return chunk;
+        return Ok(chunk);
     }
     let num_columns = rows[0].len();
     let num_rows = rows.len();
@@ -169,7 +169,7 @@ pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) ->
                 Value::Bool(b) => b.to_string(),
                 other => format!("{other:?}"),
             };
-            cols[col_idx].push_string(&display);
+            cols[col_idx].push_string(&display)?;
         }
     }
 
@@ -181,7 +181,7 @@ pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) ->
     let mut chunk = akar_common::vector::DataChunk::new(arrow_cols, arrow_col_types);
     chunk.field_names = column_names.iter().map(|s| s.to_string()).collect();
     chunk.size = num_rows;
-    chunk
+    Ok(chunk)
 }
 
 /// Format a byte count into a human-readable string (e.g., "1.2 MB").

@@ -108,13 +108,8 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
                         buf.copy_from_slice(&x.to_le_bytes());
                         v.set_null(i, false);
                     }
-                    Value::String(s) => {
-                        let bytes = s.as_bytes();
-                        let len = bytes.len().min(255) as u8;
-                        v.data_mut()[i * 256] = len;
-                        let copy_len = bytes.len().min(255);
-                        v.data_mut()[i * 256 + 1..i * 256 + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
-                        v.set_null(i, false);
+                    Value::String(_) => {
+                        v.set_value(i, val)?;
                     }
                     Value::Null => {
                         v.set_null(i, true);

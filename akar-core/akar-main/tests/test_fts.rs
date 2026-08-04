@@ -72,3 +72,42 @@ fn test_create_and_query_fts_index() -> Result<(), String> {
 
     Ok(())
 }
+
+#[test]
+fn test_fts_with_where_predicate() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'A fast graph database in Rust'})")?;
+    conn.query(
+        "CREATE (d:Document {id: 2, title: 'Rust Language', content: 'A systems programming language using Rust'})",
+    )?;
+    conn.query("CREATE (d:Document {id: 3, title: 'Python Language', content: 'A slow scripting language'})")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    // FTS matches 'language' on docs 2 & 3 (rows 1 & 2). WHERE title = 'Python Language'
+    // matches the row beyond the FTS-narrowed subset — previously panicked with index OOB
+    // in the Arrow fast path (scan.rs), which indexed rows_to_emit[i] by mask position.
+    // (Non-PK column so the planner uses scan+filter, not a PK point lookup.)
+    let res = conn.query(
+        "MATCH (d:Document) USING FTS INDEX doc_idx('language') WHERE d.title = 'Python Language' RETURN d.id, d.title",
+    )?;
+    let chunk = res.chunks.first().unwrap();
+    assert_eq!(chunk.size, 1, "FTS + WHERE should return exactly 1 row");
+    let id = match chunk.get_value(0, 0).unwrap() {
+        Value::Int64(v) => v,
+        _ => panic!("Expected Int64 id, got {:?}", chunk.get_value(0, 0).unwrap()),
+    };
+    assert_eq!(id, 3, "Only doc id 3 should match 'language' with that title");
+
+    // Also verify the non-matching row is excluded, not just not panicking.
+    let res2 = conn.query(
+        "MATCH (d:Document) USING FTS INDEX doc_idx('language') WHERE d.title <> 'Python Language' RETURN d.id, d.title",
+    )?;
+    let chunk2 = res2.chunks.first().unwrap();
+    assert_eq!(chunk2.size, 1, "FTS + WHERE (title <> 'Python Language') should return only doc 2");
+
+    Ok(())
+}

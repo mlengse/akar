@@ -53,7 +53,7 @@ impl AggregateHashTable {
                 let phys_type = result.physical_type();
                 let mut v = ValueVector::new(phys_type, 1);
                 v.resize(1);
-                store_value_in_vector(&mut v, 0, &result);
+                store_value_in_vector(&mut v, 0, &result)?;
                 fields.push(v);
             }
             return Ok(vec![{
@@ -108,7 +108,7 @@ impl AggregateHashTable {
                     let phys_type = result.physical_type();
                     let mut v = ValueVector::new(phys_type, 1);
                     v.resize(1);
-                    store_value_in_vector(&mut v, 0, &result);
+                    store_value_in_vector(&mut v, 0, &result)?;
                     fields.push(v);
                 }
                 return Ok(vec![{
@@ -139,7 +139,7 @@ impl AggregateHashTable {
                         let phys_type = result_val.physical_type();
                         let mut v = ValueVector::new(phys_type, 1);
                         v.resize(1);
-                        store_value_in_vector(&mut v, 0, &result_val);
+                        store_value_in_vector(&mut v, 0, &result_val)?;
                         fields.push(v);
                     } else {
                         let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
@@ -283,7 +283,7 @@ impl AggregateHashTable {
                 if matches!(key, Value::Null) {
                     v.set_null(row, true);
                 } else {
-                    store_value_in_vector(&mut v, row, key);
+                    store_value_in_vector(&mut v, row, key)?;
                 }
             }
             output.push(v);
@@ -305,7 +305,7 @@ impl AggregateHashTable {
                     if matches!(val, Value::Null) {
                         v.set_null(row, true);
                     } else {
-                        store_value_in_vector(&mut v, row, &val);
+                        store_value_in_vector(&mut v, row, &val)?;
                     }
                 }
                 output.push(v);
@@ -319,7 +319,7 @@ impl AggregateHashTable {
             let mut v = ValueVector::new(phys_type, num_rows);
             v.resize(num_rows);
             for (row, val) in agg_results[i].iter().enumerate() {
-                store_value_in_vector(&mut v, row, val);
+                store_value_in_vector(&mut v, row, val)?;
             }
             output.push(v);
         }
@@ -340,7 +340,7 @@ impl AggregateHashTable {
                     if field.is_null(chunk_start + i) {
                         new_v.set_null(i, true);
                     } else if let Some(val) = field.get_value(chunk_start + i) {
-                        store_value_in_vector(&mut new_v, i, &val);
+                        store_value_in_vector(&mut new_v, i, &val)?;
                     }
                 }
                 chunk_fields.push(new_v);

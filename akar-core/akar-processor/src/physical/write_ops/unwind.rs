@@ -45,7 +45,7 @@ impl PhysicalOperatorExec for PhysicalUnwind {
                     let mut v = ValueVector::new(chunk.field_types[col_idx], items.len());
                     v.resize(items.len());
                     for i in 0..items.len() {
-                        store_value_in_vector(&mut v, i, &val);
+                        store_value_in_vector(&mut v, i, &val)?;
                     }
                     chunk_fields.push(v);
                 }
@@ -53,7 +53,7 @@ impl PhysicalOperatorExec for PhysicalUnwind {
                 let mut uw_v = ValueVector::new(first_type, items.len());
                 uw_v.resize(items.len());
                 for (i, item) in items.iter().enumerate() {
-                    store_value_in_vector(&mut uw_v, i, item);
+                    store_value_in_vector(&mut uw_v, i, item)?;
                 }
                 chunk_fields.push(uw_v);
                 let arrow_fields = chunk_fields
@@ -68,7 +68,7 @@ impl PhysicalOperatorExec for PhysicalUnwind {
             let mut uw_v = ValueVector::new(first_type, items.len());
             uw_v.resize(items.len());
             for (i, item) in items.iter().enumerate() {
-                store_value_in_vector(&mut uw_v, i, item);
+                store_value_in_vector(&mut uw_v, i, item)?;
             }
             let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&uw_v).array;
             result_chunks.push(DataChunk::new(vec![arr], vec![uw_v.physical_type()]));

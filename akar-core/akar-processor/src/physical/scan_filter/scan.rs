@@ -3,6 +3,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::scan_filter::PhysicalFilter;
 use crate::physical::types::{NodeSemiMask, OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::PhysicalFtsScan;
+use akar_common::error::ProcessorError;
 use akar_common::types::{LogicalTypeID, PhysicalTypeID, Value};
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
@@ -352,15 +353,12 @@ impl PhysicalScan {
             let pred_chunk = DataChunk::new(pred_fields, pred_types).with_names(pred_names);
             let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap());
             let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref())
-                .unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
+                .map_err(|e| ProcessorError::Execution(format!("Scan predicate evaluation failed: {e}")))?;
 
-            let mut filtered_rows = Vec::with_capacity(rows_to_emit.len());
-            for (i, &keep) in mask.iter().enumerate() {
-                if keep {
-                    filtered_rows.push(rows_to_emit[i]);
-                }
-            }
-            rows_to_emit = filtered_rows;
+            // `pred_chunk` is built from full column arrays (mask = num_rows entries), while
+            // `rows_to_emit` may be an FTS-narrowed subset. Index the mask by the actual row
+            // (not by position) so FTS + WHERE predicates compose without OOB / misalignment.
+            rows_to_emit = filter_rows_by_mask(&rows_to_emit, &mask);
         }
 
         // Take filtered rows from pre-built Arrow arrays using take kernel
@@ -537,7 +535,7 @@ impl PhysicalScan {
             let pred_chunk = DataChunk::new(pred_chunk_fields, pred_chunk_types).with_names(pred_chunk_names.clone());
             let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap());
             let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref())
-                .unwrap_or_else(|_| vec![true; rows_to_emit.len()]);
+                .map_err(|e| ProcessorError::Execution(format!("Scan predicate evaluation failed: {e}")))?;
 
             let mut filtered_rows = Vec::with_capacity(rows_to_emit.len());
             for (i, &keep) in mask.iter().enumerate() {
@@ -589,5 +587,84 @@ impl PhysicalOperatorExec for PhysicalScan {
 
         // Fallback: no data available — return empty result
         Ok(vec![DataChunk::new(vec![], vec![])])
+    }
+}
+
+/// Apply a full-length boolean mask to a subset of row indices.
+///
+/// The mask is indexed by absolute row. The row subset (e.g. an FTS-narrowed
+/// `rows_to_emit`) may be shorter than the mask, so masking by position would
+/// either go out of bounds or apply the filter to the wrong rows.
+fn filter_rows_by_mask(rows: &[usize], mask: &[bool]) -> Vec<usize> {
+    rows.iter()
+        .copied()
+        .filter(|&r| mask.get(r).copied().unwrap_or(false))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_rows_by_mask;
+
+    #[test]
+    fn test_filter_rows_by_mask_full_length() {
+        // No FTS: rows = full range, mask = full length → identity on true rows.
+        let rows: Vec<usize> = (0..3).collect();
+        let mask = vec![true, false, true];
+        assert_eq!(filter_rows_by_mask(&rows, &mask), vec![0, 2]);
+    }
+
+    #[test]
+    fn test_filter_rows_by_mask_fts_narrowed() {
+        // FTS narrowed rows to [1, 2] (subset of a 3-row table); mask is full-length.
+        // Positional indexing (rows_to_emit[i]) would read rows_to_emit[2] → OOB.
+        let rows: Vec<usize> = vec![1, 2];
+        let mask = vec![false, false, true];
+        assert_eq!(filter_rows_by_mask(&rows, &mask), vec![2]);
+    }
+
+    #[test]
+    fn test_filter_rows_by_mask_out_of_range_row() {
+        // Defensive: row index beyond the mask is treated as not matching.
+        let rows: Vec<usize> = vec![0, 5];
+        let mask = vec![true, false];
+        assert_eq!(filter_rows_by_mask(&rows, &mask), vec![0]);
+    }
+
+    #[test]
+    fn test_scan_predicate_eval_error_propagates() {
+        // P48.9: a predicate that cannot be evaluated on the scan columns must
+        // surface as an error instead of silently passing every row.
+        use crate::expression_evaluator::ExpressionEvaluator;
+        use crate::physical::types::PhysicalOperatorExec;
+        use akar_common::enums::CompressionType;
+        use akar_common::types::{LogicalTypeID, Value};
+        use akar_function::registry::FunctionRegistry;
+        use akar_parser::ast::Expression;
+        use akar_storage::table::ColumnDefinition;
+        use std::sync::{Arc, Mutex};
+
+        let columns = vec![ColumnDefinition {
+            name: "id".to_string(),
+            logical_type: LogicalTypeID::Int64,
+            is_primary_key: true,
+            compression: CompressionType::Uncompressed,
+        }];
+        let data = vec![vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]];
+        let registry = Arc::new(Mutex::new(FunctionRegistry::new()));
+        let evaluator = Arc::new(Mutex::new(ExpressionEvaluator::new(registry)));
+
+        // Predicate references a column that is not in the scan's output columns.
+        let pred = Expression::Variable("missing_col".to_string());
+        let scan = super::PhysicalScan::new("T".to_string(), 0, 3)
+            .with_data(data, columns)
+            .with_predicate(pred)
+            .with_evaluator(evaluator);
+
+        let err = scan.execute(vec![]).unwrap_err().to_string();
+        assert!(
+            err.contains("predicate evaluation failed"),
+            "predicate eval error must propagate, got: {err}"
+        );
     }
 }

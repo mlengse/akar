@@ -364,13 +364,17 @@ impl LegacyValueVector {
                 Ok(())
             }
             (PhysicalTypeID::String, Value::String(s)) => {
+                let bytes = s.as_bytes();
+                if bytes.len() > 255 {
+                    return Err(format!(
+                        "Cannot store string of {} bytes: inline string storage limit is 255 bytes",
+                        bytes.len()
+                    ));
+                }
                 let type_size = physical_type_size(self.physical_type);
                 let offset = idx * type_size;
-                let bytes = s.as_bytes();
-                let len = bytes.len().min(255) as u8;
-                self.data[offset] = len;
-                let copy_len = bytes.len().min(255);
-                self.data[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                self.data[offset] = bytes.len() as u8;
+                self.data[offset + 1..offset + 1 + bytes.len()].copy_from_slice(bytes);
                 self.null_mask[idx] = true;
                 if idx >= self.size {
                     self.size = idx + 1;
@@ -504,17 +508,22 @@ impl LegacyValueVector {
     }
 
     /// Push a string value (stores as inline bytes for now).
+    /// Returns an error if the string exceeds the 255-byte inline storage limit.
     #[inline]
-    pub fn push_string(&mut self, val: &str) {
+    pub fn push_string(&mut self, val: &str) -> Result<(), String> {
         let idx = self.size;
         let bytes = val.as_bytes();
-        // Store string length + data (simplified: just store bytes, max ~255 bytes)
-        let len = bytes.len().min(255) as u8;
-        self.data[idx * 256] = len;
-        let copy_len = bytes.len().min(255);
-        self.data[idx * 256 + 1..idx * 256 + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+        if bytes.len() > 255 {
+            return Err(format!(
+                "Cannot store string of {} bytes: inline string storage limit is 255 bytes",
+                bytes.len()
+            ));
+        }
+        self.data[idx * 256] = bytes.len() as u8;
+        self.data[idx * 256 + 1..idx * 256 + 1 + bytes.len()].copy_from_slice(bytes);
         self.null_mask[idx] = true;
         self.size += 1;
+        Ok(())
     }
 
     /// Append a value from another vector (for DataChunk operations).
@@ -542,3 +551,33 @@ pub type ValueVector = LegacyValueVector;
 
 /// Re-export DataChunk from its own module.
 pub use crate::data_chunk::DataChunk;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Value;
+
+    #[test]
+    fn set_value_string_overflow_returns_error() {
+        let mut v = LegacyValueVector::new(PhysicalTypeID::String, 1);
+        let long = "a".repeat(256);
+        let err = v.set_value(0, &Value::String(long)).unwrap_err();
+        assert!(err.contains("255"), "err: {err}");
+    }
+
+    #[test]
+    fn set_value_string_exact_255_round_trips() {
+        let mut v = LegacyValueVector::new(PhysicalTypeID::String, 1);
+        let s = "a".repeat(255);
+        v.set_value(0, &Value::String(s.clone())).unwrap();
+        assert_eq!(v.get_value(0), Some(Value::String(s)));
+    }
+
+    #[test]
+    fn push_string_overflow_returns_error() {
+        let mut v = LegacyValueVector::new(PhysicalTypeID::String, 1);
+        let err = v.push_string(&"a".repeat(256)).unwrap_err();
+        assert!(err.contains("255"), "err: {err}");
+        assert_eq!(v.size(), 0);
+    }
+}

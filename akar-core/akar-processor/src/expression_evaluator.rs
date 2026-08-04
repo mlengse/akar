@@ -111,7 +111,7 @@ impl ExpressionEvaluator {
                 let mut v = ValueVector::new(akar_common::types::PhysicalTypeID::Bool, chunk.size);
                 v.resize(chunk.size);
                 for i in 0..chunk.size {
-                    store_value_in_vector_simple(&mut v, i, &Value::Bool(exists));
+                    store_value_in_vector_simple(&mut v, i, &Value::Bool(exists))?;
                 }
                 Ok(v)
             }
@@ -548,7 +548,7 @@ impl ExpressionEvaluator {
         let mut v = ValueVector::new(physical_type, size);
         v.resize(size);
         for i in 0..size {
-            store_value_in_vector(&mut v, i, &val);
+            store_value_in_vector(&mut v, i, &val)?;
         }
         Ok(v)
     }
@@ -573,7 +573,7 @@ impl ExpressionEvaluator {
             v.resize(chunk.size);
             for i in 0..chunk.size {
                 if let Some(val) = chunk.get_value(idx, i) {
-                    store_value_in_vector(&mut v, i, &val);
+                    store_value_in_vector(&mut v, i, &val)?;
                 } else {
                     v.set_null(i, true);
                 }
@@ -588,7 +588,7 @@ impl ExpressionEvaluator {
                 v.resize(chunk.size);
                 for i in 0..chunk.size {
                     if let Some(val) = chunk.get_value(idx, i) {
-                        store_value_in_vector(&mut v, i, &val);
+                        store_value_in_vector(&mut v, i, &val)?;
                     } else {
                         v.set_null(i, true);
                     }
@@ -603,7 +603,7 @@ impl ExpressionEvaluator {
             v.resize(chunk.size);
             for i in 0..chunk.size {
                 if let Some(val) = chunk.get_value(0, i) {
-                    store_value_in_vector(&mut v, i, &val);
+                    store_value_in_vector(&mut v, i, &val)?;
                 } else {
                     v.set_null(i, true);
                 }
@@ -639,7 +639,7 @@ impl ExpressionEvaluator {
             v.resize(chunk.size);
             for i in 0..chunk.size {
                 if let Some(val) = chunk.get_value(idx, i) {
-                    store_value_in_vector(&mut v, i, &val);
+                    store_value_in_vector(&mut v, i, &val)?;
                 } else {
                     v.set_null(i, true);
                 }
@@ -766,7 +766,7 @@ impl ExpressionEvaluator {
         let mut result_vec = ValueVector::new(result_type, num_rows);
         result_vec.resize(num_rows);
         for (row, val) in row_results.iter().enumerate() {
-            store_value_in_vector(&mut result_vec, row, val);
+            store_value_in_vector(&mut result_vec, row, val)?;
         }
 
         if row_results.iter().all(|v| matches!(v, Value::Null))
@@ -831,7 +831,7 @@ impl ExpressionEvaluator {
                 result.resize(num_rows);
                 for i in 0..num_rows {
                     let is_null = vec.is_null(i) || matches!(vec.get_value(i), Some(Value::Null) | None);
-                    store_value_in_vector_simple(&mut result, i, &Value::Bool(is_null));
+                    store_value_in_vector_simple(&mut result, i, &Value::Bool(is_null))?;
                 }
                 Ok(result)
             }
@@ -842,7 +842,7 @@ impl ExpressionEvaluator {
                 result.resize(num_rows);
                 for i in 0..num_rows {
                     let is_null = vec.is_null(i) || matches!(vec.get_value(i), Some(Value::Null) | None);
-                    store_value_in_vector_simple(&mut result, i, &Value::Bool(!is_null));
+                    store_value_in_vector_simple(&mut result, i, &Value::Bool(!is_null))?;
                 }
                 Ok(result)
             }
@@ -904,7 +904,7 @@ impl ExpressionEvaluator {
             if !in_list && has_null {
                 result.set_null(row, true);
             } else {
-                store_value_in_vector_simple(&mut result, row, &Value::Bool(result_val));
+                store_value_in_vector_simple(&mut result, row, &Value::Bool(result_val))?;
             }
         }
         Ok(result)
@@ -951,7 +951,7 @@ impl ExpressionEvaluator {
                 if branch_taken {
                     let then_vec = self.evaluate(&alt.then, chunk)?;
                     let then_val = then_vec.get_value(row).unwrap_or(Value::Null);
-                    store_value_in_vector(&mut result, row, &then_val);
+                    store_value_in_vector(&mut result, row, &then_val)?;
                     matched = true;
                     break;
                 }
@@ -961,7 +961,7 @@ impl ExpressionEvaluator {
                 if let Some(else_e) = &case_expr.else_expr {
                     let else_vec = self.evaluate(else_e, chunk)?;
                     let else_val = else_vec.get_value(row).unwrap_or(Value::Null);
-                    store_value_in_vector(&mut result, row, &else_val);
+                    store_value_in_vector(&mut result, row, &else_val)?;
                 } else {
                     result.set_null(row, true);
                 }
@@ -977,7 +977,7 @@ impl ExpressionEvaluator {
             let mut v = ValueVector::new(akar_common::types::PhysicalTypeID::List, chunk.size);
             v.resize(chunk.size);
             for i in 0..chunk.size {
-                store_value_in_vector(&mut v, i, &Value::List(vec![]));
+                store_value_in_vector(&mut v, i, &Value::List(vec![]))?;
             }
             return Ok(v);
         }
@@ -999,7 +999,7 @@ impl ExpressionEvaluator {
                 };
                 list_values.push(val);
             }
-            store_value_in_vector(&mut result_vec, row, &Value::List(list_values));
+            store_value_in_vector(&mut result_vec, row, &Value::List(list_values))?;
         }
 
         Ok(result_vec)
@@ -1022,7 +1022,7 @@ impl ExpressionEvaluator {
                 };
                 map_values.push((Value::String(key.clone()), val));
             }
-            store_value_in_vector(&mut result_vec, row, &Value::Map(map_values));
+            store_value_in_vector(&mut result_vec, row, &Value::Map(map_values))?;
         }
 
         Ok(result_vec)
@@ -1051,7 +1051,7 @@ impl ExpressionEvaluator {
                 Value::List(items) => items.as_slice(),
                 _ => {
                     // Not a list → false for all quantifiers
-                    store_value_in_vector(&mut result, row, &Value::Bool(false));
+                    store_value_in_vector(&mut result, row, &Value::Bool(false))?;
                     continue;
                 }
             };
@@ -1063,7 +1063,7 @@ impl ExpressionEvaluator {
                 // Create a single-row chunk with the variable as first field
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, item);
+                store_value_in_vector(&mut elem_vec, 0, item)?;
                 let mini_chunk = {
                     let arrow_fields = vec![&elem_vec]
                         .into_iter()
@@ -1092,7 +1092,7 @@ impl ExpressionEvaluator {
                 akar_parser::ast::Quantifier::None => true_count == 0,
                 akar_parser::ast::Quantifier::Single => true_count == 1,
             };
-            store_value_in_vector(&mut result, row, &Value::Bool(bool_result));
+            store_value_in_vector(&mut result, row, &Value::Bool(bool_result))?;
         }
 
         Ok(result)
@@ -1130,7 +1130,7 @@ impl ExpressionEvaluator {
             let items = match list_val {
                 Value::List(items) => items,
                 _ => {
-                    store_value_in_vector(&mut result, row, &Value::List(vec![]));
+                    store_value_in_vector(&mut result, row, &Value::List(vec![]))?;
                     continue;
                 }
             };
@@ -1139,7 +1139,7 @@ impl ExpressionEvaluator {
             for item in items {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, &item);
+                store_value_in_vector(&mut elem_vec, 0, &item)?;
                 let mut mini_chunk = {
                     let arrow_fields = vec![&elem_vec]
                         .into_iter()
@@ -1157,7 +1157,7 @@ impl ExpressionEvaluator {
                 let body_val = body_vec.get_value(0).unwrap_or(Value::Null);
                 transformed.push(body_val);
             }
-            store_value_in_vector(&mut result, row, &Value::List(transformed));
+            store_value_in_vector(&mut result, row, &Value::List(transformed))?;
         }
 
         Ok(result)
@@ -1190,7 +1190,7 @@ impl ExpressionEvaluator {
             let items = match list_val {
                 Value::List(items) => items,
                 _ => {
-                    store_value_in_vector(&mut result, row, &Value::List(vec![]));
+                    store_value_in_vector(&mut result, row, &Value::List(vec![]))?;
                     continue;
                 }
             };
@@ -1199,7 +1199,7 @@ impl ExpressionEvaluator {
             for item in items {
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, &item);
+                store_value_in_vector(&mut elem_vec, 0, &item)?;
                 let mut mini_chunk = {
                     let arrow_fields = vec![&elem_vec]
                         .into_iter()
@@ -1224,7 +1224,7 @@ impl ExpressionEvaluator {
                     }
                 }
             }
-            store_value_in_vector(&mut result, row, &Value::List(filtered));
+            store_value_in_vector(&mut result, row, &Value::List(filtered))?;
         }
 
         Ok(result)
@@ -1302,7 +1302,7 @@ impl ExpressionEvaluator {
             let items = match list_val {
                 Value::List(items) => items,
                 _ => {
-                    store_value_in_vector(&mut result, row, &Value::Null);
+                    store_value_in_vector(&mut result, row, &Value::Null)?;
                     continue;
                 }
             };
@@ -1312,10 +1312,10 @@ impl ExpressionEvaluator {
                 // Create mini-chunk with acc as field 0 and item as field 1
                 let mut acc_vec = ValueVector::new(acc.physical_type(), 1);
                 acc_vec.resize(1);
-                store_value_in_vector(&mut acc_vec, 0, &acc);
+                store_value_in_vector(&mut acc_vec, 0, &acc)?;
                 let mut elem_vec = ValueVector::new(item.physical_type(), 1);
                 elem_vec.resize(1);
-                store_value_in_vector(&mut elem_vec, 0, &item);
+                store_value_in_vector(&mut elem_vec, 0, &item)?;
                 let mut mini_chunk = {
                     let arrow_fields = vec![&acc_vec, &elem_vec]
                         .into_iter()
@@ -1332,7 +1332,7 @@ impl ExpressionEvaluator {
                 let body_vec = self.evaluate(body, &mini_chunk)?;
                 acc = body_vec.get_value(0).unwrap_or(Value::Null);
             }
-            store_value_in_vector(&mut result, row, &acc);
+            store_value_in_vector(&mut result, row, &acc)?;
         }
 
         Ok(result)
@@ -1341,7 +1341,7 @@ impl ExpressionEvaluator {
 
 /// Simplified store_value_in_vector that accepts any Value type.
 /// This is a copy adapted from physical_operator.rs.
-fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) {
+fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) -> Result<(), String> {
     match val {
         Value::Null => {
             v.set_null(row, true);
@@ -1367,14 +1367,18 @@ fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) {
             }
         }
         Value::String(s) => {
-            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(255) as u8;
+            if bytes.len() > 255 {
+                return Err(format!(
+                    "Cannot store string of {} bytes: inline string storage limit is 255 bytes",
+                    bytes.len()
+                ));
+            }
+            let offset = row * 256;
             if offset < v.data().len() {
-                v.data_mut()[offset] = len;
-                let copy_len = bytes.len().min(255);
-                if offset + 1 + copy_len <= v.data().len() {
-                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                v.data_mut()[offset] = bytes.len() as u8;
+                if offset + 1 + bytes.len() <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + bytes.len()].copy_from_slice(bytes);
                 }
                 v.set_null(row, false);
             }
@@ -1383,11 +1387,12 @@ fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) {
             v.set_null(row, true);
         }
     }
+    Ok(())
 }
 
 /// Store a Value into a ValueVector at the given row index.
 /// This is a copy of the helper from physical_operator.rs, kept here for independence.
-fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
+fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result<(), String> {
     match val {
         Value::Null => {
             v.set_null(row, true);
@@ -1458,14 +1463,18 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
             }
         }
         Value::String(s) => {
-            let offset = row * 256;
             let bytes = s.as_bytes();
-            let len = bytes.len().min(255) as u8;
+            if bytes.len() > 255 {
+                return Err(format!(
+                    "Cannot store string of {} bytes: inline string storage limit is 255 bytes",
+                    bytes.len()
+                ));
+            }
+            let offset = row * 256;
             if offset < v.data().len() {
-                v.data_mut()[offset] = len;
-                let copy_len = bytes.len().min(255);
-                if offset + 1 + copy_len <= v.data().len() {
-                    v.data_mut()[offset + 1..offset + 1 + copy_len].copy_from_slice(&bytes[..copy_len]);
+                v.data_mut()[offset] = bytes.len() as u8;
+                if offset + 1 + bytes.len() <= v.data().len() {
+                    v.data_mut()[offset + 1..offset + 1 + bytes.len()].copy_from_slice(bytes);
                 }
                 v.set_null(row, false);
             }
@@ -1475,6 +1484,7 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) {
             v.set_null(row, true);
         }
     }
+    Ok(())
 }
 
 /// Build an ArrowVector from a Vec<Value>, using typed builders to
@@ -1605,7 +1615,7 @@ impl ExpressionEvaluator {
 
             match seq_fn(&seq_name, is_nextval) {
                 Ok(val) => {
-                    store_value_in_vector(&mut result_vec, row, &val);
+                    store_value_in_vector(&mut result_vec, row, &val)?;
                 }
                 Err(e) => {
                     result_vec.set_null(row, true);
@@ -1715,12 +1725,12 @@ mod tests {
         // We need two columns: set up chunk with column 0 as bools and column 1 as bools
         let mut v0 = ValueVector::new(PhysicalTypeID::Bool, 2);
         v0.resize(2);
-        store_value_in_vector(&mut v0, 0, &Value::Bool(true));
-        store_value_in_vector(&mut v0, 1, &Value::Bool(false));
+        store_value_in_vector(&mut v0, 0, &Value::Bool(true)).unwrap();
+        store_value_in_vector(&mut v0, 1, &Value::Bool(false)).unwrap();
         let mut v1 = ValueVector::new(PhysicalTypeID::Bool, 2);
         v1.resize(2);
-        store_value_in_vector(&mut v1, 0, &Value::Bool(true));
-        store_value_in_vector(&mut v1, 1, &Value::Bool(true));
+        store_value_in_vector(&mut v1, 0, &Value::Bool(true)).unwrap();
+        store_value_in_vector(&mut v1, 1, &Value::Bool(true)).unwrap();
         let chunk = {
             let arrow_fields = vec![
                 akar_common::arrow_vector::ArrowVector::from_legacy(&v0).array,
@@ -1757,9 +1767,9 @@ mod tests {
         let eval = ExpressionEvaluator::new(make_registry());
         let mut v = ValueVector::new(PhysicalTypeID::Bool, 3);
         v.resize(3);
-        store_value_in_vector(&mut v, 0, &Value::Bool(true));
-        store_value_in_vector(&mut v, 1, &Value::Bool(false));
-        store_value_in_vector(&mut v, 2, &Value::Bool(true));
+        store_value_in_vector(&mut v, 0, &Value::Bool(true)).unwrap();
+        store_value_in_vector(&mut v, 1, &Value::Bool(false)).unwrap();
+        store_value_in_vector(&mut v, 2, &Value::Bool(true)).unwrap();
         let chunk = {
             let arrow_fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&v).array];
             let arrow_field_types = vec![v.physical_type()];

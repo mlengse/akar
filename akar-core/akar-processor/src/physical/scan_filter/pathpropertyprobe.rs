@@ -98,7 +98,7 @@ impl PhysicalOperatorExec for PhysicalPathPropertyProbe {
                                     if matches!(val, Value::Null) {
                                         fv.set_null(row, true);
                                     } else {
-                                        crate::physical::common::store_value_in_vector(&mut fv, row, &val);
+                                        crate::physical::common::store_value_in_vector(&mut fv, row, &val)?;
                                     }
                                 } else {
                                     fv.set_null(row, true);

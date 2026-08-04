@@ -168,7 +168,7 @@ impl PhysicalOperatorExec for PhysicalTopK {
                     if is_null || matches!(val, Value::Null) {
                         v.set_null(out_idx, true);
                     } else {
-                        store_value_in_vector(&mut v, out_idx, val);
+                        store_value_in_vector(&mut v, out_idx, val)?;
                     }
                 }
                 fields.push(v);

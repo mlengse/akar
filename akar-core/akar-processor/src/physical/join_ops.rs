@@ -786,7 +786,7 @@ impl JoinHashTable {
                     if matches!(val, Value::Null) {
                         result_fields[col].set_null(out_row, true);
                     } else {
-                        store_value_in_vector(&mut result_fields[col], out_row, &val);
+                        store_value_in_vector(&mut result_fields[col], out_row, &val)?;
                     }
                 }
             }
@@ -797,7 +797,7 @@ impl JoinHashTable {
                     if matches!(val, Value::Null) {
                         result_fields[num_build_fields + col].set_null(out_row, true);
                     } else {
-                        store_value_in_vector(&mut result_fields[num_build_fields + col], out_row, &val);
+                        store_value_in_vector(&mut result_fields[num_build_fields + col], out_row, &val)?;
                     }
                 }
             }
