@@ -20,6 +20,18 @@ impl OptimizationPass for JoinOptimization {
             return reordered;
         }
 
+        // Only drop equality join-condition filters when the plan contains a
+        // real join (CrossProduct/HashJoin) that consumes them as keys.
+        // A plan WITHOUT a join (single-scan pipelines, WCOJ/Intersect plans)
+        // must keep these filters, otherwise `a.id = b.id` silently passes
+        // every row (P48.4 BUG-B).
+        let has_join = operators.iter().any(|op| {
+            matches!(op, LogicalOperator::CrossProduct(_) | LogicalOperator::HashJoin(_))
+        });
+        if !has_join {
+            return operators.to_vec();
+        }
+
         // Fallback: just remove filter conditions that are join conditions
         let mut result: Vec<LogicalOperator> = Vec::new();
         let mut filters_to_remove: Vec<usize> = Vec::new();

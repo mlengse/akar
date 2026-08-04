@@ -177,3 +177,73 @@ fn test_wcoj_cross_product_fan_out() {
     expected.sort_unstable();
     assert_eq!(rows, expected, "cross product of fan-out neighbors expected");
 }
+
+/// BUG-B regression: `WHERE a.id = b.id` must filter, not silently pass every
+/// row. The optimizer previously dropped equality join-condition filters even
+/// when no join existed to consume them.
+#[test]
+fn test_equality_filter_two_columns() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE r3(FROM Person TO Person)");
+    for i in 0..6 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)] {
+        exec(
+            &conn,
+            &format!("MATCH (x:Person {{id: {a}}}), (y:Person {{id: {b}}}) CREATE (x)-[:r3]->(y)"),
+        );
+    }
+    let eq = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id = b.id RETURN a.id, b.id";
+    assert!(query_rows(&conn, eq).is_empty(), "a.id = b.id must yield 0 rows (no self-edges)");
+
+    let lt = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id < b.id RETURN a.id, b.id";
+    assert_eq!(query_rows(&conn, lt).len(), 5, "a.id < b.id must yield all 5 edges");
+
+    let gt = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id > b.id RETURN a.id, b.id";
+    assert!(query_rows(&conn, gt).is_empty(), "a.id > b.id must yield 0 rows");
+
+    let eq0 = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id = 0 RETURN a.id, b.id";
+    assert_eq!(query_rows(&conn, eq0).len(), 1, "a.id = 0 must yield exactly the edge 0->1");
+}
+
+/// BUG-B regression: the WCOJ closure filter (`__wcoj_closure_*.id = c.id`)
+/// closes the triangle. If the optimizer drops it, the query returns
+/// Σ C(outdegree(c),2)-style overcount with invalid (a,b,c) rows.
+#[test]
+fn test_wcoj_triangle_closure_n6() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE r1(FROM Person TO Person)");
+    exec(&conn, "CREATE REL TABLE r2(FROM Person TO Person)");
+    exec(&conn, "CREATE REL TABLE r3(FROM Person TO Person)");
+    for i in 0..6 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    // Forward-complete graph on 6 nodes → every triple a<b<c is a triangle.
+    for (rel, lo, hi) in [("r1", 0, 2), ("r1", 3, 5), ("r2", 0, 2), ("r2", 3, 5), ("r3", 0, 2), ("r3", 3, 5)] {
+        exec(
+            &conn,
+            &format!(
+                "MATCH (a:Person), (b:Person) WHERE a.id >= {lo} AND a.id <= {hi} AND b.id > a.id CREATE (a)-[:{rel}]->(b)"
+            ),
+        );
+    }
+    let triangle =
+        "MATCH (a:Person)-[:r1]->(b:Person), (a:Person)-[:r2]->(c:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    let rows = query_rows(&conn, triangle);
+    assert_eq!(rows.len(), 20, "expected C(6,3)=20 triangles, got {rows:?}");
+    let distinct: std::collections::HashSet<Vec<String>> = rows.iter().cloned().collect();
+    assert_eq!(distinct.len(), 20, "duplicate or invalid triangle rows");
+    for r in &rows {
+        let parse = |s: &str| {
+            s.trim_start_matches("Int64(")
+                .trim_end_matches(')')
+                .parse::<i64>()
+                .expect("Int64")
+        };
+        let (a, b, c) = (parse(&r[0]), parse(&r[1]), parse(&r[2]));
+        assert!(a < b && b < c, "invalid triangle row: {r:?}");
+    }
+}
