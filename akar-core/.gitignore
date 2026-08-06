@@ -16,3 +16,15 @@ Thumbs.db
 
 # Temp files
 *.log
+
+# Profiling / benchmark artifacts
+flamegraph.svg
+profile.json.gz
+rust_bench.txt
+
+# Loose build artifacts
+*.rlib
+
+# Scratch
+scratch/
+scratch_test.rs
