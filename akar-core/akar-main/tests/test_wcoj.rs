@@ -178,6 +178,103 @@ fn test_wcoj_cross_product_fan_out() {
     assert_eq!(rows, expected, "cross product of fan-out neighbors expected");
 }
 
+/// BUG-A regression: a node-predicate `(a:Person {id: 0})` in MATCH combined
+/// with an explicit `WHERE` clause must BOTH apply. The binder turns the
+/// node-predicate into an implicit `WHERE` (a.id = 0); the planner previously
+/// overwrote `filter_expr` instead of AND-combining, so the node-predicate was
+/// dropped and CREATE built edges from every node.
+#[test]
+fn test_node_predicate_with_where_clause() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE r(FROM Person TO Person)");
+    for i in 0..4 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    exec(
+        &conn,
+        "MATCH (a:Person {id: 0}), (b:Person) WHERE b.id > 0 AND b.id <= 2 CREATE (a)-[:r]->(b)",
+    );
+
+    let rows = query_rows(&conn, "MATCH (a:Person)-[:r]->(b:Person) RETURN a.id, b.id");
+    let mut edges: Vec<(i64, i64)> = rows
+        .iter()
+        .map(|r| {
+            let parse = |s: &str| {
+                s.trim_start_matches("Int64(")
+                    .trim_end_matches(')')
+                    .parse::<i64>()
+                    .expect("Int64")
+            };
+            (parse(&r[0]), parse(&r[1]))
+        })
+        .collect();
+    edges.sort_unstable();
+    assert_eq!(
+        edges,
+        vec![(0, 1), (0, 2)],
+        "node-predicate + WHERE must create edges only from node 0 to nodes 1,2"
+    );
+}
+
+/// BUG-A regression: node-predicate must also survive an explicit WHERE that
+/// references the SAME variable (both filters applied together).
+#[test]
+fn test_node_predicate_with_same_var_where() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE r(FROM Person TO Person)");
+    for i in 0..4 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    exec(
+        &conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 2}) WHERE a.id >= 0 AND b.id <= 3 CREATE (a)-[:r]->(b)",
+    );
+
+    let rows = query_rows(&conn, "MATCH (a:Person)-[:r]->(b:Person) RETURN a.id, b.id");
+    let parse = |s: &str| {
+        s.trim_start_matches("Int64(")
+            .trim_end_matches(')')
+            .parse::<i64>()
+            .expect("Int64")
+    };
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected exactly one edge 0->2, got: {:?}",
+        rows.iter().map(|r| (parse(&r[0]), parse(&r[1]))).collect::<Vec<_>>()
+    );
+}
+
+/// BUG-A regression: multiple node-predicates across patterns must all apply
+/// even without an explicit WHERE clause (implicit WHEREs combine).
+#[test]
+fn test_multiple_node_predicates() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE r(FROM Person TO Person)");
+    for i in 0..4 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    // Two implicit WHEREs (a.id=0, b.id=2) must both apply → only edge 0->2.
+    exec(&conn, "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r]->(b)");
+
+    let rows = query_rows(&conn, "MATCH (a:Person)-[:r]->(b:Person) RETURN a.id, b.id");
+    let parse = |s: &str| {
+        s.trim_start_matches("Int64(")
+            .trim_end_matches(')')
+            .parse::<i64>()
+            .expect("Int64")
+    };
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected exactly one edge 0->2, got: {:?}",
+        rows.iter().map(|r| (parse(&r[0]), parse(&r[1]))).collect::<Vec<_>>()
+    );
+}
+
 /// BUG-B regression: `WHERE a.id = b.id` must filter, not silently pass every
 /// row. The optimizer previously dropped equality join-condition filters even
 /// when no join existed to consume them.

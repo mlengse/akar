@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,351 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, 2026-08-07), 5 ignored (doc-tests) |
+| Tests passing | **1,354 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined, 2026-08-07), 5 ignored (doc-tests) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -503,7 +503,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,351** | **1,351 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed), 5 ignored (doc-tests)** |
+| **Total** | **1,354** | **1,354 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined), 5 ignored (doc-tests)** |
 
 ### 11.2 Test Datasets
 
