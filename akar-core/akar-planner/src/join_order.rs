@@ -200,7 +200,7 @@ fn push_single_var_predicates(scans: &mut [LogicalOperator], filter_expr: &Expre
 /// `Intersect` operator whose build sides enumerate each edge pattern from the
 /// shared node.
 ///
-/// Ports Kuzu's `planWCOJoin` semantics: the shared node is probed once and its
+/// Ports the `planWCOJoin` semantics: the shared node is probed once and its
 /// key value is intersected across N build hash tables (one per pattern), instead
 /// of cross-joining duplicated scans of the shared node.
 ///
