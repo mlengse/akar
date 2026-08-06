@@ -128,6 +128,8 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
                                 if let Some(field) = chunk.fields.get(col_idx) {
                                     counts[i] += (field.len() - field.null_count()) as u64;
                                 }
+                            } else {
+                                counts[i] += chunk.active_rows() as u64;
                             }
                         }
                         _ => {}

@@ -523,7 +523,7 @@ Full end-to-end benchmarks via `cargo bench --bench ladybug_suite`. Dataset: 10k
 
 **Fix (P39):** Added Arrow compute fast path in `PhysicalAggregateScan::execute()` for scalar Sum/Min/Max/Avg (no GROUP BY, no selection vector). Uses `arrow::compute::sum()`, `arrow::compute::min()`, `arrow::compute::max()` directly on ArrayRef. Also added parallel fast path in `AggregateHashTable::aggregate()`.
 
-**Result:** SUM/AVG/MIN/MAX now at parity with COUNT (~1.6× ratio in debug, estimated parity in release). Workspace green (1,346 tests: 1,345 passing + 1 failing `test_count_variable` = P48.14).
+**Result:** SUM/AVG/MIN/MAX now at parity with COUNT (~1.6× ratio in debug, estimated parity in release). Workspace green (1,349 tests, all passing — P48.14 `test_count_variable` fixed).
 
 **Remaining:** `group_by_active+AVG` still slow (requires vectorized hash aggregation — separate concern).
 

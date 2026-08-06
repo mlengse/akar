@@ -1,5 +1,5 @@
 mod common;
-use common::{exec, query_values, setup_db};
+use common::{exec, query_rows, query_values, setup_db};
 
 #[test]
 fn test_null_insert_explicit() {
@@ -120,6 +120,47 @@ fn test_null_aggregate_count_col() {
     // COUNT(col) should ignore NULLs
     let res = query_values(&conn, "MATCH (p:Person) RETURN COUNT(p.age)");
     assert_eq!(res.trim(), "Int64(1)");
+}
+
+#[test]
+fn test_count_variable_equals_count_star() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    for i in 0..5 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    let res = query_values(&conn, "MATCH (a:Person) RETURN COUNT(a)");
+    assert_eq!(res.trim(), "Int64(5)");
+    let res = query_values(&conn, "MATCH (a:Person) RETURN COUNT(*)");
+    assert_eq!(res.trim(), "Int64(5)");
+}
+
+#[test]
+fn test_count_variable_respects_filter() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    for i in 0..5 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    let res = query_values(&conn, "MATCH (a:Person) WHERE a.id >= 2 RETURN COUNT(a)");
+    assert_eq!(res.trim(), "Int64(3)");
+}
+
+#[test]
+fn test_count_variable_group_by() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, grp STRING, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (p:Person {id: 1, grp: 'x'})");
+    exec(&conn, "CREATE (p:Person {id: 2, grp: 'x'})");
+    exec(&conn, "CREATE (p:Person {id: 3, grp: 'y'})");
+    let rows = query_rows(&conn, "MATCH (a:Person) RETURN a.grp, COUNT(a) ORDER BY a.grp");
+    assert_eq!(
+        rows,
+        vec![
+            vec!["String(\"x\")".to_string(), "Int64(2)".to_string()],
+            vec!["String(\"y\")".to_string(), "Int64(1)".to_string()],
+        ]
+    );
 }
 
 #[test]

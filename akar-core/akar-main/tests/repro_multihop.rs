@@ -233,7 +233,7 @@ fn test_count_variable() {
     assert_eq!(rows[0][0], "Int64(5)", "unexpected COUNT(*): {rows:?}");
     let rows = query_rows(&conn, "MATCH (a:Person) RETURN COUNT(a)");
     println!("COUNT(a) = {rows:?}");
-    // BUG? COUNT(variable) returns 0 instead of 5.
+    // P48.14 FIXED: COUNT(variable) counts non-null rows (node bindings are never null), so == COUNT(*).
     assert_eq!(rows[0][0], "Int64(5)", "unexpected COUNT(a): {rows:?}");
 }
 

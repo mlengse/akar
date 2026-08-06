@@ -98,6 +98,8 @@ impl AggregateHashTable {
                                             total += (field.len() - field.null_count()) as u64;
                                         }
                                     }
+                                } else {
+                                    total += chunk.active_rows() as u64;
                                 }
                             }
                             _ => {}
@@ -573,6 +575,12 @@ pub fn update_states_row(
 ) {
     for (i, state) in states.iter_mut().enumerate() {
         if matches!(funcs[i], AggregateFunction::CountStar) {
+            if let AggValueState::Count(n) = state {
+                *n += 1;
+            }
+            continue;
+        }
+        if col_indices.get(i).copied().flatten().is_none() && matches!(funcs[i], AggregateFunction::Count) {
             if let AggValueState::Count(n) = state {
                 *n += 1;
             }
