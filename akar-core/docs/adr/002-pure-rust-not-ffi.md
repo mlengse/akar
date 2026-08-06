@@ -26,6 +26,6 @@ Kùzu C++ memiliki ~200K LOC. Porting bisa dilakukan via:
 ## Consequences
 
 - ~86.000 LOC Rust ditulis dari nol (setara ~200K LOC C++)
-- 32 crate, 1,311 test (1,310 passing + 1 pre-existing failure, per 2026-08-02), 25 optimizer passes
+- 32 crate, 1,343 test (1,342 passing + 1 failing `test_count_variable` = P48.14, per 2026-08-06), 25 optimizer passes
 - Tidak ada ketergantungan pada C++ compiler
 - WASM target didukung penuh (kecuali crate native: duckdb, postgres, dll)

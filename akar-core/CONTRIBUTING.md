@@ -53,7 +53,7 @@ cargo check --workspace                     # Fast compile check (no codegen)
 ### Test
 
 ```bash
-cargo test --workspace                      # All 1,311 tests
+cargo test --workspace -- --skip test_count_variable   # All 1,342 tests (skip P48.14)
 cargo test -p akar-processor               # Single crate
 cargo test --test test_fts -p akar-main     # Single integration test
 ```

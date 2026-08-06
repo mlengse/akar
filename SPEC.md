@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,311 total, 1,310 passed, 1 failed** (pre-existing `test_migration_ingestion`), 5 ignored (doc-tests) |
+| Tests passing | **1,343 total, 1,342 passed, 1 failed** (`test_count_variable` = P48.14), 5 ignored (doc-tests) |
 | Optimizer passes | **25** (18 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -475,16 +475,16 @@ Triggered by pushing a version tag (`v*`):
 
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
-| `akar-common` | 21 | Types (37 LogicalTypes, Value), Vectors, Memory |
+| `akar-common` | 24 | Types (37 LogicalTypes, Value), Vectors, Memory |
 | `akar-parser` | 67 | PEG grammar, 33 Statement variants, operator precedence |
 | `akar-binder` | 24 | Semantic analysis, type inference, symbol resolution |
-| `akar-planner` | 20 | Logical plan construction |
+| `akar-planner` | 21 | Logical plan construction |
 | `akar-optimizer` | 61 | 25 optimization passes |
-| `akar-processor` | 18 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
+| `akar-processor` | 24 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 176 | 259 registered functions |
-| `akar-storage` | 326 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
+| `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 68 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 260 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
+| `akar-main` (integration) | 281 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability (1 failing `test_count_variable` = P48.14) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -502,9 +502,9 @@ Triggered by pushing a version tag (`v*`):
 | `akar-llm` | 9 | LLM functions |
 | `akar-sqlite` / `akar-azure` / `akar-delta` / `akar-iceberg` / `akar-unity-catalog` | 5 | Integration extensions (1 each) |
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
-| `akar-migrate` | 1 | Migration tool (1 pre-existing failure) |
+| `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,311** | **1,310 passed, 1 failed (pre-existing `test_migration_ingestion`), 5 ignored (doc-tests)** |
+| **Total** | **1,343** | **1,342 passed, 1 failed (`test_count_variable` = P48.14), 5 ignored (doc-tests)** |
 
 ### 11.2 Test Datasets
 

@@ -147,21 +147,21 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 1,311 tests — 1,310 passing ✅, 1 pre-existing failure (akar-migrate test_migration_ingestion), 5 ignored (doc-tests)
+Total: 1,343 tests — 1,342 passing ✅, 1 failing (test_count_variable = P48.14), 5 ignored (doc-tests)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
-| `akar-common` | 21 | ✅ | Types (37 LogicalTypes, 19 PhysicalTypes, Value), Vectors, Memory, Serialization |
+| `akar-common` | 24 | ✅ | Types (37 LogicalTypes, 19 PhysicalTypes, Value), Vectors, Memory, Serialization |
 | `akar-parser` | 67 | ✅ | Cypher PEG grammar, 33 Statement variants (+ 10 Clause), operator precedence |
 | `akar-binder` | 24 | ✅ | Semantic analysis, type inference, symbol resolution |
-| `akar-planner` | 20 | ✅ | Logical plan construction (58 LogicalOperator variants) |
+| `akar-planner` | 21 | ✅ | Logical plan construction (58 LogicalOperator variants) |
 | `akar-optimizer` | 61 | ✅ | 18 flat passes + 7 tree passes (25 total, exceeds C++ Ladybug) |
-| `akar-processor` | 18 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
+| `akar-processor` | 24 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
 | `akar-function` | 176 | ✅ | 259 registered functions (244 scalar + 14 aggregate + 1 table, incl. PERCENTILE_DISC/CONT) |
-| `akar-storage` | 326 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
+| `akar-storage` | 328 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `akar-main` (unit) | 68 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
-| `akar-main` (integration) | 260 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode |
+| `akar-main` (integration) | 281 | ⚠️ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode (1 failing: `test_count_variable` = P48.14) |
 | `akar-catalog` | 39 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `akar-transaction` | 18 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
 | `akar-graph` | 34 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
@@ -179,9 +179,9 @@ Total: 1,311 tests — 1,310 passing ✅, 1 pre-existing failure (akar-migrate t
 | `akar-neo4j` | 12 | ✅ | Bolt protocol integration |
 | `akar-wasm` | 0* | ✅ | AkarDatabase, AkarConnection, AkarPreparedStatement wrappers untuk NodeJS (*3 via `wasm-pack test --node` on CI) |
 | Small ext (azure/delta/iceberg/sqlite/unity) | 5 | ✅ | 1 each |
-| `akar-migrate` | 1 | ❌ | Pre-existing failure: `test_migration_ingestion` ("Table 'User' already exists") |
+| `akar-migrate` | 1 | ✅ | Idempotent re-migration (fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | ⚠️ | Doc-tests across all crates |
-| **Total** | **1,311** | **1,310 ✅ / 1 ❌ / 5 ignored** | |
+| **Total** | **1,343** | **1,342 ✅ / 1 ❌ (`test_count_variable` = P48.14) / 5 ignored** | |
 
 ## Storage Engine Features
 
