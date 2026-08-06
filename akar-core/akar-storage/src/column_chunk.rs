@@ -17,7 +17,7 @@ use akar_common::error::StorageError;
 use akar_common::types::{PhysicalTypeID, Value};
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int8Builder, Int16Builder, Int32Builder, Int64Builder,
-    StringBuilder,
+    StringBuilder, UInt64Builder,
 };
 
 /// Default number of rows per column chunk (matches C++ Akar default).
@@ -326,6 +326,20 @@ impl ColumnChunk {
                         | Value::TimestampSec(n) => builder.append_value(n.0),
                         Value::TimestampTz(n) => builder.append_value(n.0),
                         Value::DTime(n) => builder.append_value(*n),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::UInt64 => {
+                let mut builder = UInt64Builder::with_capacity(size);
+                for v in &self.values {
+                    match v {
+                        Value::UInt64(n) => builder.append_value(*n),
+                        Value::UInt32(n) => builder.append_value(*n as u64),
+                        Value::UInt16(n) => builder.append_value(*n as u64),
+                        Value::UInt8(n) => builder.append_value(*n as u64),
+                        Value::Int64(n) if *n >= 0 => builder.append_value(*n as u64),
                         _ => builder.append_null(),
                     }
                 }

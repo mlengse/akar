@@ -3,7 +3,7 @@ use crate::types::{PhysicalTypeID, Value};
 use crate::vector::ValueVector;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array, ListArray, StringArray,
-    StructArray,
+    StructArray, UInt64Array,
 };
 use arrow::datatypes::DataType;
 use std::sync::Arc;
@@ -107,6 +107,7 @@ impl ArrowVector {
                 Arc::new(builder.finish())
             }
             PhysicalTypeID::Int64 => build_primitive_array(arrow::datatypes::DataType::Int64, 8),
+            PhysicalTypeID::UInt64 => build_primitive_array(arrow::datatypes::DataType::UInt64, 8),
             PhysicalTypeID::Int32 => build_primitive_array(arrow::datatypes::DataType::Int32, 4),
             PhysicalTypeID::Double => build_primitive_array(arrow::datatypes::DataType::Float64, 8),
             PhysicalTypeID::Float => build_primitive_array(arrow::datatypes::DataType::Float32, 4),
@@ -237,6 +238,10 @@ impl VectorAccess for ArrowVector {
         match self.physical_type {
             PhysicalTypeID::Bool => self.get_bool(row).map(Value::Bool),
             PhysicalTypeID::Int64 => self.get_i64(row).map(Value::Int64),
+            PhysicalTypeID::UInt64 => {
+                let array = self.array.as_any().downcast_ref::<UInt64Array>()?;
+                Some(Value::UInt64(array.value(row)))
+            }
             PhysicalTypeID::Int32 => self.get_i32(row).map(Value::Int32),
             PhysicalTypeID::Double => self.get_f64(row).map(Value::Double),
             PhysicalTypeID::Float => self.get_f32(row).map(Value::Float),

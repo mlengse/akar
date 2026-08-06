@@ -10,6 +10,7 @@ use akar_parser::ast::Expression;
 use akar_storage::table::ColumnDefinition;
 use arrow::array::{
     Array, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder, StringBuilder, UInt64Array,
+    UInt64Builder,
 };
 use arrow::compute;
 use std::sync::{Arc, Mutex};
@@ -107,7 +108,8 @@ impl PhysicalScan {
         match val {
             Value::Null => PhysicalTypeID::Int64,
             Value::Bool(_) => PhysicalTypeID::Bool,
-            Value::Int64(_) | Value::UInt64(_) | Value::Int128(_) => PhysicalTypeID::Int64,
+            Value::Int64(_) | Value::Int128(_) => PhysicalTypeID::Int64,
+            Value::UInt64(_) => PhysicalTypeID::UInt64,
             Value::Int32(_) | Value::UInt32(_) => PhysicalTypeID::Int32,
             Value::Int16(_) | Value::UInt16(_) => PhysicalTypeID::Int16,
             Value::Int8(_) | Value::UInt8(_) => PhysicalTypeID::Int8,
@@ -135,10 +137,10 @@ impl PhysicalScan {
         match logical {
             LogicalTypeID::Bool => PhysicalTypeID::Bool,
             LogicalTypeID::Int64
-            | LogicalTypeID::UInt64
             | LogicalTypeID::Int128
             | LogicalTypeID::Serial
             | LogicalTypeID::UInt128 => PhysicalTypeID::Int64,
+            LogicalTypeID::UInt64 => PhysicalTypeID::UInt64,
             LogicalTypeID::Int32 | LogicalTypeID::UInt32 => PhysicalTypeID::Int32,
             LogicalTypeID::Int16 | LogicalTypeID::UInt16 => PhysicalTypeID::Int16,
             LogicalTypeID::Int8 | LogicalTypeID::UInt8 => PhysicalTypeID::Int8,
@@ -202,6 +204,20 @@ impl PhysicalScan {
                         | Some(Value::TimestampSec(v)) => builder.append_value(v.0),
                         Some(Value::TimestampTz(v)) => builder.append_value(v.0),
                         Some(Value::DTime(v)) => builder.append_value(*v),
+                        _ => builder.append_null(),
+                    }
+                }
+                std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::UInt64 => {
+                let mut builder = UInt64Builder::with_capacity(size);
+                for &r in rows {
+                    match col_data.get(r) {
+                        Some(Value::UInt64(v)) => builder.append_value(*v),
+                        Some(Value::UInt32(v)) => builder.append_value(*v as u64),
+                        Some(Value::UInt16(v)) => builder.append_value(*v as u64),
+                        Some(Value::UInt8(v)) => builder.append_value(*v as u64),
+                        Some(Value::Int64(v)) if *v >= 0 => builder.append_value(*v as u64),
                         _ => builder.append_null(),
                     }
                 }

@@ -1359,6 +1359,13 @@ fn store_value_in_vector_simple(v: &mut ValueVector, row: usize, val: &Value) ->
                 v.set_null(row, false);
             }
         }
+        Value::UInt64(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
         Value::Double(x) => {
             let offset = row * 8;
             if offset + 8 <= v.data().len() {
@@ -1404,6 +1411,13 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result
             }
         }
         Value::Int64(x) => {
+            let offset = row * 8;
+            if offset + 8 <= v.data().len() {
+                v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());
+                v.set_null(row, false);
+            }
+        }
+        Value::UInt64(x) => {
             let offset = row * 8;
             if offset + 8 <= v.data().len() {
                 v.data_mut()[offset..offset + 8].copy_from_slice(&x.to_le_bytes());

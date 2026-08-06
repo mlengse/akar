@@ -144,12 +144,31 @@ impl DataChunk {
     }
 
     /// Read an `i64` value from column `field_idx` at `row_idx`, or `None` if null.
+    ///
+    /// Returns `None` if the column is not physically an `Int64` array (e.g. a
+    /// `UInt64` column) — callers reading `UInt64` columns must use `get_u64`.
     #[inline]
     pub fn get_i64(&self, field_idx: usize, row_idx: usize) -> Option<i64> {
         if self.is_null(field_idx, row_idx) {
             return None;
         }
+        if self.fields[field_idx].data_type() != &DataType::Int64 {
+            return None;
+        }
         let arr = self.fields[field_idx].as_primitive::<Int64Type>();
+        Some(arr.value(row_idx))
+    }
+
+    /// Read a `u64` value from column `field_idx` at `row_idx`, or `None` if null.
+    #[inline]
+    pub fn get_u64(&self, field_idx: usize, row_idx: usize) -> Option<u64> {
+        if self.is_null(field_idx, row_idx) {
+            return None;
+        }
+        if self.fields[field_idx].data_type() != &DataType::UInt64 {
+            return None;
+        }
+        let arr = self.fields[field_idx].as_primitive::<UInt64Type>();
         Some(arr.value(row_idx))
     }
 
@@ -203,6 +222,7 @@ impl DataChunk {
         }
         match self.field_types[field_idx] {
             PhysicalTypeID::Int64 => self.get_i64(field_idx, row_idx).map(Value::Int64),
+            PhysicalTypeID::UInt64 => self.get_u64(field_idx, row_idx).map(Value::UInt64),
             PhysicalTypeID::Int32 => self.get_i32(field_idx, row_idx).map(Value::Int32),
             PhysicalTypeID::Double => self.get_f64(field_idx, row_idx).map(Value::Double),
             PhysicalTypeID::Bool => self.get_bool(field_idx, row_idx).map(Value::Bool),

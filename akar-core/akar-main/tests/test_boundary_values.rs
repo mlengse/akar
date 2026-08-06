@@ -1,5 +1,52 @@
 mod common;
-use common::{exec, query_values, setup_db};
+use common::{exec, query_column, query_values, setup_db, Value};
+
+#[test]
+fn test_boundary_uint64_max_roundtrip_copy() {
+    // P48.12: u64::MAX must scan back as UInt64(18446744073709551615), not wrap to Int64(-1).
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE UIntTab(id UINT64, PRIMARY KEY(id))");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("u.csv");
+    std::fs::write(&path, "id\n100000\n18446744073709551615\n").unwrap();
+    let path = path.to_str().unwrap().replace('\\', "/");
+    exec(&conn, &format!("COPY UIntTab FROM '{path}' (HEADER true)"));
+    let vals = query_column(&conn, "MATCH (u:UIntTab) RETURN u.id");
+    assert!(vals.contains(&Value::UInt64(18446744073709551615)));
+    assert!(vals.contains(&Value::UInt64(100000)));
+    assert!(!vals.contains(&Value::Int64(-1)));
+}
+
+#[test]
+fn test_boundary_uint64_where_eq_gt() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE UIntTab(id UINT64, PRIMARY KEY(id))");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("u.csv");
+    // The parser only accepts i64-range integer literals, so u64::MAX must be loaded via COPY.
+    std::fs::write(&path, "id\n100000\n18446744073709551615\n").unwrap();
+    let path = path.to_str().unwrap().replace('\\', "/");
+    exec(&conn, &format!("COPY UIntTab FROM '{path}' (HEADER true)"));
+
+    // UInt64 column compared against an Int64 literal (cross-type equality/comparison).
+    let vals = query_column(&conn, "MATCH (u:UIntTab) WHERE u.id = 100000 RETURN u.id");
+    assert_eq!(vals, vec![Value::UInt64(100000)]);
+
+    let vals = query_column(&conn, "MATCH (u:UIntTab) WHERE u.id > 100000 RETURN u.id");
+    assert_eq!(vals, vec![Value::UInt64(18446744073709551615)]);
+
+    let vals = query_column(&conn, "MATCH (u:UIntTab) WHERE u.id < 100000 RETURN u.id");
+    assert!(vals.is_empty());
+}
+
+#[test]
+fn test_boundary_uint64_arithmetic() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE UIntTab(id UINT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE (u:UIntTab {id: 41})");
+    let res = query_values(&conn, "MATCH (u:UIntTab) RETURN u.id + 1");
+    assert_eq!(res.trim(), "UInt64(42)");
+}
 
 #[test]
 fn test_boundary_int64_max() {

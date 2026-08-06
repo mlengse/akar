@@ -41,6 +41,7 @@ pub(crate) fn evaluate_arithmetic(op: ArithmeticOp, args: &[Value]) -> Result<Va
             let v = args[0].clone();
             match v {
                 Value::Int64(x) => Ok(Value::Int64(x.checked_abs().unwrap_or(i64::MAX))),
+                Value::UInt64(x) => Ok(Value::UInt64(x)),
                 Value::Double(x) => Ok(Value::Double(x.abs())),
                 _ => Err("Abs requires numeric".into()),
             }
@@ -301,6 +302,10 @@ pub(crate) fn numeric_to_f64(v: &Value) -> Result<f64, String> {
         Value::Double(x) => Ok(*x),
         Value::Float(x) => Ok(*x as f64),
         Value::Int32(x) => Ok(*x as f64),
+        Value::UInt64(x) => Ok(*x as f64),
+        Value::UInt32(x) => Ok(*x as f64),
+        Value::UInt16(x) => Ok(*x as f64),
+        Value::UInt8(x) => Ok(*x as f64),
         _ => Err("Expected numeric value".into()),
     }
 }
@@ -312,6 +317,18 @@ fn add_values(a: Value, b: Value) -> Result<Value, String> {
         (Value::Int64(x), Value::Double(y)) => Ok(Value::Double(*x as f64 + y)),
         (Value::Double(x), Value::Int64(y)) => Ok(Value::Double(x + *y as f64)),
         (Value::String(x), Value::String(y)) => Ok(Value::String(format!("{}{}", x, y))),
+        (Value::UInt64(x), Value::UInt64(y)) => x
+            .checked_add(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 addition overflow".into()),
+        (Value::UInt64(x), Value::Int64(y)) if *y >= 0 => x
+            .checked_add(*y as u64)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 addition overflow".into()),
+        (Value::Int64(x), Value::UInt64(y)) if *x >= 0 => (*x as u64)
+            .checked_add(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 addition overflow".into()),
         _ => Err(format!("Cannot add {:?} and {:?}", a.logical_type(), b.logical_type())),
     }
 }
@@ -320,6 +337,22 @@ fn sub_values(a: Value, b: Value) -> Result<Value, String> {
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x - y)),
         (Value::Double(x), Value::Double(y)) => Ok(Value::Double(x - y)),
+        (Value::UInt64(x), Value::UInt64(y)) => x
+            .checked_sub(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 subtraction underflow".into()),
+        (Value::UInt64(x), Value::Int64(y)) if *y >= 0 => x
+            .checked_sub(*y as u64)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 subtraction underflow".into()),
+        (Value::UInt64(x), Value::Int64(y)) if *y < 0 => x
+            .checked_add(y.unsigned_abs())
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 subtraction overflow".into()),
+        (Value::Int64(x), Value::UInt64(y)) if *x >= 0 => (*x as u64)
+            .checked_sub(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 subtraction underflow".into()),
         _ => Err("Cannot subtract non-numeric".into()),
     }
 }
@@ -328,6 +361,18 @@ fn mul_values(a: Value, b: Value) -> Result<Value, String> {
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x * y)),
         (Value::Double(x), Value::Double(y)) => Ok(Value::Double(x * y)),
+        (Value::UInt64(x), Value::UInt64(y)) => x
+            .checked_mul(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 multiplication overflow".into()),
+        (Value::UInt64(x), Value::Int64(y)) if *y >= 0 => x
+            .checked_mul(*y as u64)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 multiplication overflow".into()),
+        (Value::Int64(x), Value::UInt64(y)) if *x >= 0 => (*x as u64)
+            .checked_mul(*y)
+            .map(Value::UInt64)
+            .ok_or_else(|| "UInt64 multiplication overflow".into()),
         _ => Err("Cannot multiply non-numeric".into()),
     }
 }
@@ -346,6 +391,14 @@ fn div_values(a: Value, b: Value) -> Result<Value, String> {
             }
             Ok(Value::Double(x / y))
         }
+        (Value::UInt64(x), Value::UInt64(y)) => {
+            if *y == 0 {
+                return Err("Division by zero".into());
+            }
+            Ok(Value::UInt64(x / y))
+        }
+        (Value::UInt64(x), Value::Int64(y)) if *y > 0 => Ok(Value::UInt64(x / *y as u64)),
+        (Value::Int64(x), Value::UInt64(y)) if *x >= 0 && *y > 0 => Ok(Value::UInt64(*x as u64 / y)),
         _ => Err("Cannot divide non-numeric".into()),
     }
 }
@@ -358,6 +411,14 @@ fn mod_values(a: Value, b: Value) -> Result<Value, String> {
             }
             Ok(Value::Int64(x % y))
         }
+        (Value::UInt64(x), Value::UInt64(y)) => {
+            if *y == 0 {
+                return Err("Modulo by zero".into());
+            }
+            Ok(Value::UInt64(x % y))
+        }
+        (Value::UInt64(x), Value::Int64(y)) if *y > 0 => Ok(Value::UInt64(x % *y as u64)),
+        (Value::Int64(x), Value::UInt64(y)) if *x >= 0 && *y > 0 => Ok(Value::UInt64(*x as u64 % y)),
         _ => Err("Cannot modulo non-integer".into()),
     }
 }

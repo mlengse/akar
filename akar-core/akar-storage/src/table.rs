@@ -87,7 +87,7 @@ impl NodeTable {
     }
 
     /// Insert a row with an optional transaction ID for MVCC tracking.
-    pub fn insert_row_with_txn(&mut self, values: Vec<Value>, txn_id: Option<u64>) -> Result<u64, StorageError> {
+    pub fn insert_row_with_txn(&mut self, mut values: Vec<Value>, txn_id: Option<u64>) -> Result<u64, StorageError> {
         if values.len() != self.columns.len() {
             return Err(StorageError::Page(format!(
                 "Column count mismatch: expected {} values, got {}",
@@ -106,6 +106,12 @@ impl NodeTable {
                 )));
             }
         }
+
+        // Coerce literal values to the declared column types (P48.12): constant
+        // evaluation (e.g. CREATE `{id: 41}`) produces Int64 literals regardless
+        // of the target column, and a UINT64 column must store Value::UInt64 so
+        // the scan builds the correct Arrow type instead of dropping the value.
+        coerce_values_to_columns(&mut values, &self.columns)?;
 
         // Check primary key uniqueness
         if self.primary_key_column < self.columns.len() {
@@ -204,6 +210,15 @@ impl NodeTable {
 
         let start_offset = self.num_rows;
         let total_new = rows.len();
+
+        // Coerce literal values to the declared column types (P48.12), mirroring
+        // `insert_row_with_txn`. This must happen before appending and index
+        // updates so PK hash/ART keys use the coerced (UInt64) encoding.
+        let mut coerced_rows = rows.to_vec();
+        for row in &mut coerced_rows {
+            coerce_values_to_columns(row, &self.columns)?;
+        }
+        let rows: &[Vec<Value>] = &coerced_rows;
 
         // Ensure we have a node group with enough capacity
         if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
@@ -652,6 +667,41 @@ fn pk_value_to_string(v: &Value) -> String {
         Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
         other => format!("{other:?}"),
     }
+}
+
+/// Coerce a row's values to the table's declared column logical types.
+///
+/// Constant evaluation (e.g. CREATE `{id: 41}`) produces `Value::Int64`
+/// literals regardless of the target column type. A UINT64 column must store
+/// `Value::UInt64`: the scan builds its Arrow type from the physical type of
+/// the column, and the ART primary-key index encodes signed and unsigned keys
+/// differently. Mixed signed/unsigned keys would corrupt range scans.
+fn coerce_values_to_columns(values: &mut [Value], columns: &[ColumnDefinition]) -> Result<(), StorageError> {
+    for (i, col) in columns.iter().enumerate() {
+        let coerced = match (col.logical_type, &values[i]) {
+            (LogicalTypeID::UInt64, Value::Int64(x)) if *x >= 0 => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::Int32(x)) if *x >= 0 => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::Int16(x)) if *x >= 0 => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::Int8(x)) if *x >= 0 => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::UInt32(x)) => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::UInt16(x)) => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::UInt8(x)) => Some(Value::UInt64(*x as u64)),
+            (LogicalTypeID::UInt64, Value::Int64(_))
+            | (LogicalTypeID::UInt64, Value::Int32(_))
+            | (LogicalTypeID::UInt64, Value::Int16(_))
+            | (LogicalTypeID::UInt64, Value::Int8(_)) => {
+                return Err(StorageError::Page(format!(
+                    "Cannot store negative value in UINT64 column '{}'",
+                    col.name
+                )));
+            }
+            _ => None,
+        };
+        if let Some(c) = coerced {
+            values[i] = c;
+        }
+    }
+    Ok(())
 }
 
 /// A relationship (edge) table with CSR (Compressed Sparse Row) adjacency storage.
