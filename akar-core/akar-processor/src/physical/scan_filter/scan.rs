@@ -1,7 +1,7 @@
 //! Auto-extracted from physical_operator.rs
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::scan_filter::PhysicalFilter;
-use crate::physical::types::{NodeSemiMask, OperatorResult, PhysicalOperatorExec};
+use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::PhysicalFtsScan;
 use akar_common::error::ProcessorError;
 use akar_common::types::{LogicalTypeID, PhysicalTypeID, Value};
@@ -31,12 +31,6 @@ pub struct PhysicalScan {
     pub table_arrow_data: Option<Vec<arrow::array::ArrayRef>>,
     /// Column definitions to map column names to physical types.
     pub table_columns: Vec<ColumnDefinition>,
-    /// Optional semi-mask for SIP optimization. If present, only rows whose
-    /// internal node ID offset is in the mask will be emitted.
-    pub semi_mask: Option<NodeSemiMask>,
-    /// Column index of the internal ID field to test against the mask.
-    /// Only used when `semi_mask` is `Some`.
-    pub mask_id_column: usize,
     pub fts_query: Option<PhysicalFtsScan>,
     pub predicate: Option<Expression>,
     pub evaluator: Option<Arc<Mutex<ExpressionEvaluator>>>,
@@ -52,8 +46,6 @@ impl PhysicalScan {
             table_data: None,
             table_arrow_data: None,
             table_columns: Vec::new(),
-            semi_mask: None,
-            mask_id_column: 0,
             fts_query: None,
             predicate: None,
             evaluator: None,
@@ -77,14 +69,6 @@ impl PhysicalScan {
     pub fn with_arrow_data(mut self, arrays: Vec<arrow::array::ArrayRef>, columns: Vec<ColumnDefinition>) -> Self {
         self.table_arrow_data = Some(arrays);
         self.table_columns = columns;
-        self
-    }
-
-    /// Attach a semi-mask for SIP optimization.
-    /// When set, only rows whose internal node ID at `mask_id_column` is in the mask will be emitted.
-    pub fn with_semi_mask(mut self, mask: NodeSemiMask, mask_id_column: usize) -> Self {
-        self.semi_mask = Some(mask);
-        self.mask_id_column = mask_id_column;
         self
     }
 
@@ -430,44 +414,18 @@ impl PhysicalScan {
             fts_doc_ids = Some(doc_ids);
         }
 
-        let row_filter: Option<Vec<bool>> = if let Some(ref mask) = self.semi_mask {
-            if self.mask_id_column < data.len() {
-                Some(
-                    (0..num_rows)
-                        .map(|row| {
-                            if let Value::InternalID(id) = &data[self.mask_id_column][row] {
-                                mask.is_masked(id.offset)
-                            } else {
-                                true
-                            }
-                        })
-                        .collect(),
-                )
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let rows_to_emit: Vec<usize> = if let Some(doc_ids) = fts_doc_ids {
             doc_ids
                 .into_iter()
                 .filter_map(|doc_id| {
                     let row_idx = doc_id as usize;
                     if row_idx < num_rows {
-                        if let Some(ref filter) = row_filter {
-                            if filter[row_idx] { Some(row_idx) } else { None }
-                        } else {
-                            Some(row_idx)
-                        }
+                        Some(row_idx)
                     } else {
                         None
                     }
                 })
                 .collect()
-        } else if let Some(ref filter) = row_filter {
-            (0..num_rows).filter(|&r| filter[r]).collect()
         } else {
             (0..num_rows).collect()
         };

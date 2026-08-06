@@ -2,7 +2,7 @@
 
 Physical operator execution pipeline — the runtime that executes query plans.
 
-**Physical operators (49 structs):**
+**Physical operators (48 structs):**
 - `PhysicalScan` — reads column-major table data into DataChunks
 - `PhysicalFilter` — evaluates expressions, produces selection vectors
 - `PhysicalProjection` — selects/orders columns
@@ -15,7 +15,6 @@ Physical operator execution pipeline — the runtime that executes query plans.
 - `PhysicalSet` — property updates on matched rows
 - `PhysicalUnwind` — list expression expansion into rows
 - `PhysicalIntersect` — WCOJ intersect execution
-- `PhysicalSemiMasker` — SIP sideways information passing
 - `PhysicalRecursiveExtend` — recursive path traversal
 - `PhysicalCountRelTable` — CSR metadata COUNT
 

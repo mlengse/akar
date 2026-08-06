@@ -26,11 +26,11 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,354 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed 2026-08-07), 5 ignored (doc-tests) |
-| Optimizer passes | **25** (18 flat + 7 tree) — exceeds C++ (17) |
+| Tests passing | **1,351 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, 2026-08-07), 5 ignored (doc-tests) |
+| Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
-| Physical operators | **49** structs |
+| Physical operators | **48** structs |
 | Extensions | **15** crates |
 | Graph algorithms | **15** |
 
@@ -64,7 +64,7 @@ akar/
 │   ├── akar-parser/             # PEG grammar (pest.rs) for Cypher
 │   ├── akar-binder/             # Semantic analysis, symbol resolution
 │   ├── akar-planner/            # Logical plan construction
-│   ├── akar-optimizer/          # 25 optimization passes
+│   ├── akar-optimizer/          # 24 optimization passes
 │   ├── akar-processor/          # Physical operator execution
 │   ├── akar-function/           # 259 built-in functions
 │   ├── akar-graph/              # CSR adjacency, GDS framework
@@ -120,9 +120,9 @@ Cypher text
     ▼
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
-│ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (25 passes)  │    │ (physical)   │
-│ 33 stmt     │    │33 bound  │    │58 ops    │    │ 18 flat +    │    │ 49 operators │
-│ variants    │    │variants  │    │          │    │ 7 tree       │    │              │
+│ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (24 passes)  │    │ (physical)   │
+│ 33 stmt     │    │33 bound  │    │58 ops    │    │ 18 flat +    │    │ 48 operators │
+│ variants    │    │variants  │    │          │    │ 6 tree       │    │              │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
                                                                              │
                                                                              ▼
@@ -196,15 +196,14 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 1 | FactorizationRewriting | Inserts Flatten operators for hash joins |
 | 2 | ForeignJoinPushDown | Pushes foreign joins through operators |
 | 3 | AccHashJoinOptimization | Optimizes accumulated hash joins |
-| 4 | SIPOptimization | Sideways Information Passing via SemiMasker |
-| 5 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
-| 6 | AggKeyDependency | Removes redundant grouping keys |
-| 7 | CardinalityEstimation | Annotates with estimated row counts |
+| 4 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
+| 5 | AggKeyDependency | Removes redundant grouping keys |
+| 6 | CardinalityEstimation | Annotates with estimated row counts |
 
 **Parity:** ~95% (exceeds C++ with 17 passes)
 
 #### Processor ([akar-processor](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-processor))
-- 49 physical operator structs (no single enum; DDL ops wired via mapper)
+- 48 physical operator structs (no single enum; DDL ops wired via mapper)
 - Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`)
 - Parallel aggregation via `AggregateHashTable`
 - Parallel hash join via `JoinHashTable`
@@ -479,12 +478,12 @@ Triggered by pushing a version tag (`v*`):
 | `akar-parser` | 67 | PEG grammar, 33 Statement variants, operator precedence |
 | `akar-binder` | 24 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | Logical plan construction |
-| `akar-optimizer` | 61 | 25 optimization passes |
+| `akar-optimizer` | 59 | 24 optimization passes |
 | `akar-processor` | 24 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 68 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 291 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
+| `akar-main` (integration) | 290 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -504,7 +503,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,354** | **1,354 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed), 5 ignored (doc-tests)** |
+| **Total** | **1,351** | **1,351 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed), 5 ignored (doc-tests)** |
 
 ### 11.2 Test Datasets
 
@@ -678,7 +677,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 ## 18. Known Limitations
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
-2. **Physical operator count** — 49 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
+2. **Physical operator count** — 48 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
 3. **crates.io not published** — install via git dependency or prebuilt binaries only
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
 

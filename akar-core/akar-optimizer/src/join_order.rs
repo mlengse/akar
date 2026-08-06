@@ -94,11 +94,6 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
             collect_scans_recursive(&aj.left, scans);
             collect_scans_recursive(&aj.right, scans);
         }
-        LogicalOperator::SemiMasker(s) => {
-            for child in &s.children {
-                collect_scans_recursive(child, scans);
-            }
-        }
         LogicalOperator::Partitioner(p) => {
             for child in &p.children {
                 collect_scans_recursive(child, scans);

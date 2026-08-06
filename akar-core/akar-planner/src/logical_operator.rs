@@ -40,25 +40,6 @@ pub struct LogicalAccumulate {
     pub cardinality: u64,
 }
 
-/// A logical semi-masker operator for Sideways Information Passing (SIP).
-///
-/// SIP is an optimization where the build-side keys of a hash join are
-/// collected into a mask, which is then pushed down to the probe-side
-/// scan to filter out irrelevant rows early.
-///
-/// Simplified Rust port of C++ `LogicalSemiMasker`.
-#[derive(Debug, Clone)]
-pub struct LogicalSemiMasker {
-    /// The table ID that this mask applies to.
-    pub table_id: u64,
-    /// Column index of the key (node ID) to collect.
-    pub key_column: usize,
-    /// Children (the build-side pipeline).
-    pub children: Vec<LogicalOperator>,
-    /// Estimated cardinality.
-    pub cardinality: u64,
-}
-
 /// Logical COUNT on a rel table — optimized via CSR metadata (Ladybug).
 #[derive(Debug, Clone)]
 pub struct LogicalCountRelTable {
@@ -113,7 +94,6 @@ pub enum LogicalOperator {
     Intersect(LogicalIntersect),
     Explain(LogicalExplain),
     RecursiveExtend(LogicalRecursiveExtend),
-    SemiMasker(LogicalSemiMasker),
     Accumulate(LogicalAccumulate),
     ExpressionsScan(LogicalExpressionsScan),
     CountRelTable(LogicalCountRelTable),
@@ -178,7 +158,6 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality,
             LogicalOperator::Explain(s) => s.cardinality,
             LogicalOperator::RecursiveExtend(s) => s.cardinality,
-            LogicalOperator::SemiMasker(s) => s.cardinality,
             LogicalOperator::Accumulate(s) => s.cardinality,
             LogicalOperator::ExpressionsScan(s) => s.cardinality,
             LogicalOperator::CountRelTable(_) => 1,
@@ -243,7 +222,6 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => s.cardinality = card,
             LogicalOperator::Explain(s) => s.cardinality = card,
             LogicalOperator::RecursiveExtend(s) => s.cardinality = card,
-            LogicalOperator::SemiMasker(s) => s.cardinality = card,
             LogicalOperator::Accumulate(s) => s.cardinality = card,
             LogicalOperator::ExpressionsScan(s) => s.cardinality = card,
             LogicalOperator::CountRelTable(_) => {}
@@ -303,7 +281,6 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Explain(s) => vec![&mut *s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
-            LogicalOperator::SemiMasker(s) => s.children.iter_mut().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter_mut().collect(),
             LogicalOperator::Partitioner(s) => s.children.iter_mut().collect(),
             LogicalOperator::PathPropertyProbe(s) => s.children.iter_mut().collect(),
@@ -368,7 +345,6 @@ impl LogicalOperator {
             LogicalOperator::Intersect(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Explain(s) => vec![&*s.inner],
             LogicalOperator::RecursiveExtend(_) => vec![],
-            LogicalOperator::SemiMasker(s) => s.children.iter().collect(),
             LogicalOperator::Accumulate(s) => s.children.iter().collect(),
             LogicalOperator::Partitioner(s) => s.children.iter().collect(),
             LogicalOperator::PathPropertyProbe(s) => s.children.iter().collect(),

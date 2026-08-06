@@ -6,7 +6,6 @@ pub mod map_scan;
 pub mod map_update;
 
 use crate::physical::types::PhysicalOperatorExec;
-use crate::physical_operator::NodeSemiMask;
 use crate::processor::QueryProcessor;
 use akar_common::error::ProcessorError;
 use akar_common::types::physical_type_from_logical;
@@ -15,15 +14,13 @@ use akar_function::registry::FunctionRegistry;
 use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
 use arrow::array::ArrayRef;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::{SchemaDdlFn, SequenceFn, StandaloneCallHandler, SubqueryFn};
 
 /// Shared state threaded through the mapper functions
-pub struct ExecutionContext<'a, 'p> {
+pub struct ExecutionContext<'p> {
     pub processor: &'p QueryProcessor,
-    pub sip_masks: &'a mut HashMap<u64, NodeSemiMask>,
     pub function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     pub table_catalog: Option<Arc<TableCatalog>>,
     pub vfs: Option<Arc<akar_common::file_system::VirtualFileSystemRegistry>>,
@@ -42,9 +39,9 @@ pub struct ExecutionContext<'a, 'p> {
     pub written_rows: Vec<(u64, u64)>,
 }
 
-impl<'a, 'p> ExecutionContext<'a, 'p> {
+impl<'p> ExecutionContext<'p> {
     pub fn execute_children(&mut self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
-        self.processor.execute_internal(operators, self.sip_masks)
+        self.processor.execute_internal(operators)
     }
 
     /// Resolve table data and column definitions for a scan node.
@@ -206,7 +203,6 @@ impl PlanMapper {
             | LogicalOperator::OrderBy(_)
             | LogicalOperator::Limit(_)
             | LogicalOperator::Flatten(_)
-            | LogicalOperator::SemiMasker(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Partitioner(_) => map_projection::map_and_execute_projection(op, current_input, ctx),
 

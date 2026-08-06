@@ -100,11 +100,6 @@ impl TreeOptimizationPass for FactorizationRewriting {
                         Self::append_flattens(child, &[0]);
                     }
                 }
-                LogicalOperator::SemiMasker(s) => {
-                    for child in &mut s.children {
-                        Self::append_flattens(child, &[0]);
-                    }
-                }
                 LogicalOperator::Skip(s) => {
                     if let Some(first) = s.children.first_mut() {
                         Self::append_flattens(first, &[0]);

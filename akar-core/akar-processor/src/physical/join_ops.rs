@@ -1,6 +1,6 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::common::{hash_value_into, store_value_in_vector, value_hash};
-use crate::physical::types::{HashJoinTable, NodeSemiMask, OperatorResult};
+use crate::physical::types::{HashJoinTable, OperatorResult};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use std::collections::HashMap;
@@ -823,10 +823,6 @@ impl JoinHashTable {
 pub struct PhysicalHashJoin {
     pub build_columns: Vec<u32>,
     pub probe_columns: Vec<u32>,
-    /// Optional semi-mask for SIP optimization.
-    /// When populated, the build-side keys are collected into this mask
-    /// and can be used by downstream scan operators to filter nodes.
-    pub semi_mask: Option<NodeSemiMask>,
 }
 
 impl PhysicalHashJoin {
@@ -834,14 +830,7 @@ impl PhysicalHashJoin {
         Self {
             build_columns,
             probe_columns,
-            semi_mask: None,
         }
-    }
-
-    /// Attach a semi-mask for SIP optimization.
-    pub fn with_semi_mask(mut self, mask: NodeSemiMask) -> Self {
-        self.semi_mask = Some(mask);
-        self
     }
 }
 
@@ -849,25 +838,6 @@ impl PhysicalHashJoin {
     pub fn execute_binary(&self, build_chunks: &[DataChunk], probe_chunks: &[DataChunk]) -> OperatorResult {
         if build_chunks.is_empty() || probe_chunks.is_empty() {
             return Ok(vec![]);
-        }
-
-        let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
-
-        // Collect semi-mask keys from build side
-        if let Some(mask) = &self.semi_mask {
-            for chunk in build_chunks {
-                for row in 0..chunk.size {
-                    if chunk.fields.get(build_col).is_some()
-                        && let Some(val) = chunk.get_value(build_col, row)
-                    {
-                        if let Value::InternalID(id) = val {
-                            mask.mask(id.offset);
-                        } else if let Value::Int64(offset) = val {
-                            mask.mask(offset as u64);
-                        }
-                    }
-                }
-            }
         }
 
         // Use JoinHashTable for parallel build

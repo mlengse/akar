@@ -46,7 +46,6 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         }
         LogicalOperator::Accumulate(ac) => format!("Accumulate({:?})", ac.accumulate_type),
         LogicalOperator::ExpressionsScan(es) => format!("ExpressionsScan({} vars)", es.expressions.len()),
-        LogicalOperator::SemiMasker(sm) => format!("SemiMasker(table={}, col={})", sm.table_id, sm.key_column),
         LogicalOperator::CountRelTable(crt) => format!("CountRelTable({})", crt.table_name),
         LogicalOperator::CreateNodeTable(ct) => format!("CreateNodeTable({})", ct.name),
         LogicalOperator::CreateRelTable(ct) => format!("CreateRelTable({})", ct.name),

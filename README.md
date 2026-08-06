@@ -63,7 +63,7 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 |-------|---------|
 | `akar-parser` | Cypher query parser (pest-based) |
 | `akar-binder` | Semantic analysis and type resolution |
-| `akar-optimizer` | 25+ query optimization passes |
+| `akar-optimizer` | 24 query optimization passes |
 | `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
 | `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
 | `akar-function` | 259 SQL/Cypher functions (244 scalar + 14 aggregate + 1 table) |
@@ -75,7 +75,7 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **1,354 tests, all passing** (incl. `test_count_variable` = P48.14 + P48.15 NaN ordering now fixed, 5 ignored doc-tests). **25 optimizer passes**, **37 logical types**, **58 logical operators**, **49 physical operator structs**.
+**Test suite:** **1,351 tests, all passing** (incl. `test_count_variable` = P48.14 + P48.15 NaN ordering + P48.16 dead SIP semi-masker removed, 5 ignored doc-tests). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
 
 ## Benchmarks
 

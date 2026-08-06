@@ -1,10 +1,10 @@
 # ADR 003: Optimizer Pass Ordering
 
-> **Status:** Accepted | **Date:** 2026-07-07 | **Last Updated:** 2026-07-19
+> **Status:** Accepted | **Date:** 2026-07-07 | **Last Updated:** 2026-08-07
 
 ## Context
 
-Query optimizer memiliki 22 pass (15 flat + 7 tree). Urutan eksekusi pass mempengaruhi kualitas final plan.
+Query optimizer memiliki 22 pass (15 flat + 7 tree) saat ADR ditulis. Urutan eksekusi pass mempengaruhi kualitas final plan. **Update 2026-08-07:** saat ini 24 pass (18 flat + 6 tree) — `SIPOptimization` (tree pass) **dihapus di P48.16** karena semi-mask yang di-inject-nya tidak pernah diterapkan saat eksekusi (fast path Arrow scan tak membaca `semi_mask`; jalur legacy cek kolom yang salah; mask baru di-insert setelah scan build berjalan). `AggregateFusion`, `SortElision`, `ExpressionInline` (flat) ditambahkan setelah ADR ini. Urutan prinsip (flat dulu, tree terakhir) tetap berlaku.
 
 ## Decision
 
@@ -33,10 +33,9 @@ Query optimizer memiliki 22 pass (15 flat + 7 tree). Urutan eksekusi pass mempen
 1. `FactorizationRewriting` — sisipkan Flatten untuk hash join
 2. `ForeignJoinPushDown` — push foreign join
 3. `AccHashJoinOptimization` — optimasi accumulated hash join
-4. `SIPOptimization` — Sideways Information Passing
-5. `CorrelatedSubqueryUnnesting` — unnest correlated subquery
-6. `AggKeyDependency` — hapus grouping key redundant
-7. `CardinalityEstimation` — annotate row count estimates
+4. `CorrelatedSubqueryUnnesting` — unnest correlated subquery
+5. `AggKeyDependency` — hapus grouping key redundant
+6. `CardinalityEstimation` — annotate row count estimates
 
 ## Rationale
 

@@ -22,11 +22,7 @@ pub fn map_and_execute_join(
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
             let (build_cols, probe_cols) = derive_join_column_indices(&h.join_keys, &build_chunks, &probe_chunks);
-            let join = PhysicalHashJoin {
-                build_columns: build_cols,
-                probe_columns: probe_cols,
-                semi_mask: None,
-            };
+            let join = PhysicalHashJoin::new(build_cols, probe_cols);
             let result = join.execute_binary(&build_chunks, &probe_chunks)?;
             Ok(result)
         }

@@ -15,8 +15,8 @@ akar-core/
 ├── akar-parser/        # PEG grammar (pest.rs) for full Cypher clause set
 ├── akar-binder/        # Semantic analysis, symbol resolution, type inference
 ├── akar-planner/       # Logical query plan construction (58 LogicalOperator variants)
-├── akar-optimizer/     # 18 flat passes + 7 tree passes (25 total) — melebihi C++ Ladybug
-├── akar-processor/     # Physical operator execution (49 operator structs: AggregateHashTable, JoinHashTable, BlockMergeSorter, etc.)
+├── akar-optimizer/     # 18 flat passes + 6 tree passes (24 total) — melebihi C++ Ladybug
+├── akar-processor/     # Physical operator execution (48 operator structs: AggregateHashTable, JoinHashTable, BlockMergeSorter, etc.)
 ├── akar-function/      # Built-in function registry (259 functions: 244 scalar + 14 aggregate + 1 table)
 ├── akar-graph/         # CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain)
 ├── akar-extension/     # Extension framework trait + registry
@@ -86,14 +86,14 @@ Cypher text
     ▼
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
-│ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (18 flat + 7 │    │ (physical)   │
-│ COPY, MATCH │    │(types)   │    │58 ops    │    │  tree passes)│    │49 operators  │
+│ (pest.rs)   │    │(Catalog)   │    │(logical) │    │ (18 flat + 6 │    │ (physical)   │
+│ COPY, MATCH │    │(types)   │    │58 ops    │    │  tree passes)│    │48 operators  │
 │ DELETE, SET │    │(symbols) │    │          │    │ FilterPush   │    │ Scan, Filter │
 │ WITH, UNION │    │          │    │          │    │ JoinReorder  │    │ HashJoin, etc│
-│ UNWIND, etc │    │          │    │          │    │ SIP, CSU,    │    │ SemiMasker,  │
-│ FOREACH,    │    │          │    │          │    │ AccHashJoin, │    │ RecursiveExt,│
-│ MERGE       │    │          │    │          │    │ AggKeyDep,   │    │ Intersect,   │
-│ ANALYZE     │    │          │    │          │    │ OrderByPush, │    │ CountRelTbl  │
+│ UNWIND, etc │    │          │    │          │    │ CSU,        │    │ RecursiveExt,│
+│ FOREACH,    │    │          │    │          │    │ AccHashJoin, │    │ Intersect,   │
+│ MERGE       │    │          │    │          │    │ AggKeyDep,   │    │ CountRelTbl  │
+│ ANALYZE     │    │          │    │          │    │ OrderByPush, │    │              │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
                                                                              │
                                                                              ▼
@@ -147,7 +147,7 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
+Total: 1,351 tests — all passing ✅, 5 ignored (doc-tests)
 ```
 
 | Crate | Tests | Status | Coverage |
@@ -156,12 +156,12 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 | `akar-parser` | 67 | ✅ | Cypher PEG grammar, 33 Statement variants (+ 10 Clause), operator precedence |
 | `akar-binder` | 24 | ✅ | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | ✅ | Logical plan construction (58 LogicalOperator variants) |
-| `akar-optimizer` | 61 | ✅ | 18 flat passes + 7 tree passes (25 total, exceeds C++ Ladybug) |
-| `akar-processor` | 24 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, SemiMasker, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
+| `akar-optimizer` | 59 | ✅ | 18 flat passes + 6 tree passes (24 total, exceeds C++ Ladybug) |
+| `akar-processor` | 24 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
 | `akar-function` | 176 | ✅ | 259 registered functions (244 scalar + 14 aggregate + 1 table, incl. PERCENTILE_DISC/CONT) |
 | `akar-storage` | 328 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `akar-main` (unit) | 68 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
-| `akar-main` (integration) | 291 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode (P48.14 `test_count_variable` fixed; P48.15 NaN ordering tests) |
+| `akar-main` (integration) | 290 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode (P48.14 `test_count_variable` fixed; P48.15 NaN ordering tests; P48.16 dead SIP test removed) |
 | `akar-catalog` | 39 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `akar-transaction` | 18 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
 | `akar-graph` | 34 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
@@ -181,7 +181,7 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 | Small ext (azure/delta/iceberg/sqlite/unity) | 5 | ✅ | 1 each |
 | `akar-migrate` | 1 | ✅ | Idempotent re-migration (fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | ⚠️ | Doc-tests across all crates |
-| **Total** | **1,354** | **1,354 ✅ / 0 ❌ / 5 ignored** | |
+| **Total** | **1,351** | **1,351 ✅ / 0 ❌ / 5 ignored** | |
 
 ## Storage Engine Features
 
@@ -224,13 +224,7 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 
 ## SIP (Sideways Information Passing)
 
-| Component | Status |
-|-----------|--------|
-| LogicalSemiMasker operator | ✅ |
-| PhysicalSemiMasker | ✅ |
-| NodeSemiMask (Arc<AtomicBool>) | ✅ |
-| ScanNode semi_mask integration | ✅ |
-| SIPOptimization tree pass | ✅ |
+> **P48.16 (2026-08-07): pipeline dihapus** — semi-mask yang di-inject `SIPOptimization` tidak pernah diterapkan saat eksekusi (fast path Arrow tak membaca `semi_mask`; jalur legacy cek kolom yang salah; mask baru di-insert setelah scan build berjalan). `PhysicalSemiMasker`, `LogicalSemiMasker`, `ScanNode semi_mask integration`, dan pass `SIPOptimization` **dihapus**. Kernel `NodeSemiMask` dipertahankan untuk pipeline SIP yang benar di masa depan.
 
 ## Data Loading
 
@@ -241,7 +235,8 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 | Parquet | `ParquetReader` (arrow/parquet crates) | ✅ Row group reading, Arrow→Akar type mapping, projection pushdown |
 | HTTP(S)/S3 | `akar-httpfs` extension | ✅ |
 
-## Optimizer Passes — 25 Total (18 Flat + 7 Tree)
+## Optimizer Passes — 24 Total (18 Flat + 6 Tree)
+> P48.16 (2026-08-07): `SIPOptimization` removed — the SemiMasker it injected was never applied at execution time (Arrow fast path never reads a scan-side semi-mask; legacy path checks the wrong column; mask inserted after build-side scan already ran). See `implementation_plan.md` P48.16.
 
 ### Flat Passes
 | # | Pass | Description |
@@ -271,10 +266,9 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 | 1 | FactorizationRewriting | Inserts Flatten operators for hash joins |
 | 2 | ForeignJoinPushDown | Pushes foreign joins through operators |
 | 3 | AccHashJoinOptimization | Optimizes accumulated hash joins |
-| 4 | SIPOptimization | Sideways Information Passing via SemiMasker |
-| 5 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
-| 6 | AggKeyDependency | Removes redundant grouping keys |
-| 7 | CardinalityEstimation | Annotates operators with estimated row counts (StatsStore) |
+| 4 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
+| 5 | AggKeyDependency | Removes redundant grouping keys |
+| 6 | CardinalityEstimation | Annotates operators with estimated row counts (StatsStore) |
 
 ## Extensions
 

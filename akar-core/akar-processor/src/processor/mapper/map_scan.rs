@@ -67,9 +67,6 @@ pub fn map_and_execute_scan_node(
         }
         s
     };
-    if let Some(mask) = ctx.sip_masks.get(&s.table_id) {
-        scan = scan.with_semi_mask(mask.clone(), 0);
-    }
     if let Some(ref fq) = s.fts_query {
         scan = scan.with_fts_query(PhysicalFtsScan {
             index_name: fq.index_name.clone(),

@@ -151,10 +151,6 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 }
                 LogicalOperator::Accumulate(ac) => ac.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::ExpressionsScan(_) => 1,
-                LogicalOperator::SemiMasker(sm) => {
-                    // SemiMasker passes through cardinality from its child
-                    sm.children.first().map(|c| c.cardinality()).unwrap_or(1)
-                }
                 LogicalOperator::Partitioner(p) => p.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::Skip(s) => s.children.first().map(|c| c.cardinality()).unwrap_or(1),
                 LogicalOperator::MultiplicityReducer(mr) => mr.children.first().map(|c| c.cardinality()).unwrap_or(1),

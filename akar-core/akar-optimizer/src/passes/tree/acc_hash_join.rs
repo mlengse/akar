@@ -2,9 +2,8 @@
 // Pass: Acc Hash Join Optimization
 //
 // When a hash join's probe side is selective (has filters), this pass:
-// 1. Collects build-side keys as a semi-mask (reuses PhysicalHashJoin.semi_mask)
-// 2. Wraps the probe side in an Accumulate operator
-// 3. The semi-mask filters probe-side scan nodes at execution time
+// 1. Wraps the probe side in an Accumulate operator
+// 2. The accumulated result flows through the hash join at execution time
 //
 // This reduces the amount of data that flows through the hash join probe.
 // Ported from C++ `acc_hash_join_optimizer.cpp`.

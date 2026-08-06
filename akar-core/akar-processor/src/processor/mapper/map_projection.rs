@@ -161,16 +161,6 @@ pub fn map_and_execute_projection(
             let flatten = PhysicalFlatten::new(f.group_pos);
             flatten.execute(input)
         }
-        LogicalOperator::SemiMasker(s) => {
-            let mask = NodeSemiMask::new(s.table_id);
-            let masker = PhysicalSemiMasker {
-                key_column: s.key_column,
-                mask: mask.clone(),
-            };
-            let result = masker.execute(current_input)?;
-            ctx.sip_masks.insert(s.table_id, mask);
-            Ok(result)
-        }
         LogicalOperator::Unwind(uw) => {
             let unwind = PhysicalUnwind {
                 expression: uw.expression.clone(),

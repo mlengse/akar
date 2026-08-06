@@ -19,6 +19,6 @@ pub use missing_ops::*;
 pub use order_aggregate::*;
 pub use scan_filter::*;
 pub use types::{
-    HashJoinBucket, HashJoinTable, NodeSemiMask, OperatorResult, PhysicalOperatorExec, PhysicalSemiMasker,
+    HashJoinBucket, HashJoinTable, OperatorResult, PhysicalOperatorExec,
 };
 pub use write_ops::*;

@@ -205,15 +205,10 @@ impl QueryProcessor {
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
     pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
-        let mut sip_masks = std::collections::HashMap::new();
-        self.execute_internal(operators, &mut sip_masks)
+        self.execute_internal(operators)
     }
 
-    pub fn execute_internal(
-        &self,
-        operators: &[LogicalOperator],
-        sip_masks: &mut std::collections::HashMap<u64, NodeSemiMask>,
-    ) -> Result<Vec<DataChunk>, ProcessorError> {
+    pub fn execute_internal(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
@@ -236,7 +231,6 @@ impl QueryProcessor {
 
             let mut ctx = mapper::ExecutionContext {
                 processor: self,
-                sip_masks,
                 function_registry: self.function_registry.clone(),
                 table_catalog: self.table_catalog.clone(),
                 vfs: self.vfs.clone(),

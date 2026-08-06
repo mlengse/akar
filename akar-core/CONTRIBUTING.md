@@ -30,7 +30,7 @@ akar-core/
 ├── akar-parser/        # Cypher PEG grammar (pest.rs)
 ├── akar-binder/        # Semantic analysis
 ├── akar-planner/       # Logical plan (58 operators)
-├── akar-optimizer/     # 25 optimization passes
+├── akar-optimizer/     # 24 optimization passes
 ├── akar-processor/     # Physical execution engine
 ├── akar-function/      # 259 built-in functions
 ├── akar-graph/         # GDS framework + CSR
@@ -53,7 +53,7 @@ cargo check --workspace                     # Fast compile check (no codegen)
 ### Test
 
 ```bash
-cargo test --workspace              # All 1,354 tests (P48.14/P48.15 fixed — no skip needed)
+cargo test --workspace              # All 1,351 tests (P48.14/P48.15/P48.16 — no skip needed)
 cargo test -p akar-processor               # Single crate
 cargo test --test test_fts -p akar-main     # Single integration test
 ```
