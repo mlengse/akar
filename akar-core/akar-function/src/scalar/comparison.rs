@@ -25,15 +25,38 @@ pub(crate) fn evaluate_comparison(op: ComparisonOp, args: &[Value]) -> Result<Va
 /// `Value::UInt64` and `Value::Int64` derive-distinct `PartialEq` instances
 /// (e.g. `UInt64(5) == Int64(5)` is `false`), so `WHERE uint64_col = 5` would
 /// silently return zero rows. Mixed integer operands are compared via `i128`
-/// promotion instead.
+/// promotion instead. Floats follow the NaN convention: NaN = NaN is true.
 fn values_equal(a: &Value, b: &Value) -> bool {
     if a == b {
         return true;
+    }
+    if let (Value::Double(x), Value::Double(y)) = (a, b) {
+        return x.is_nan() && y.is_nan();
+    }
+    if let (Value::Float(x), Value::Float(y)) = (a, b) {
+        return x.is_nan() && y.is_nan();
     }
     if let (Some(x), Some(y)) = (integer_to_i128(a), integer_to_i128(b)) {
         return x == y;
     }
     false
+}
+
+/// Total-order comparison for floats with a NaN convention: NaN sorts greater
+/// than every finite value, and NaN == NaN.
+#[inline]
+pub(crate) fn double_cmp(a: f64, b: f64) -> std::cmp::Ordering {
+    if a.is_nan() {
+        if b.is_nan() {
+            std::cmp::Ordering::Equal
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    } else if b.is_nan() {
+        std::cmp::Ordering::Less
+    } else {
+        a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+    }
 }
 
 /// Widened representation of any integer `Value` variant (exact, no overflow).
@@ -61,20 +84,15 @@ pub(crate) fn compare_values(a: &Value, b: &Value) -> Result<std::cmp::Ordering,
         (Value::UInt32(x), Value::UInt32(y)) => Ok(x.cmp(y)),
         (Value::UInt16(x), Value::UInt16(y)) => Ok(x.cmp(y)),
         (Value::UInt8(x), Value::UInt8(y)) => Ok(x.cmp(y)),
-        (Value::Double(x), Value::Double(y)) => Ok(x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)),
-        (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)),
+        (Value::Double(x), Value::Double(y)) => Ok(double_cmp(*x, *y)),
+        (Value::Float(x), Value::Float(y)) => Ok(double_cmp(*x as f64, *y as f64)),
         (Value::String(x), Value::String(y)) => Ok(x.cmp(y)),
         (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
         (Value::Date(x), Value::Date(y)) => Ok(x.cmp(y)),
         (Value::Timestamp(x), Value::Timestamp(y)) => Ok(x.cmp(y)),
-        // Cross-type numeric promotion (int → float)
-        (Value::Int64(x), Value::Double(y)) => x
-            .partial_cmp(&(*y as i64))
-            .map(|o| o.reverse())
-            .ok_or_else(|| "Cannot compare Int64 with Double".into()),
-        (Value::Double(x), Value::Int64(y)) => x
-            .partial_cmp(&(*y as f64))
-            .ok_or_else(|| "Cannot compare Double with Int64".into()),
+        // Cross-type numeric promotion (int ↔ float)
+        (Value::Int64(x), Value::Double(y)) => Ok(double_cmp(*x as f64, *y)),
+        (Value::Double(x), Value::Int64(y)) => Ok(double_cmp(*x, *y as f64)),
         // Mixed signed/unsigned integer promotion (exact via i128). A UInt64
         // column compared against an Int64 literal (e.g. `WHERE id > 5`) would
         // otherwise hit the generic "Cannot compare types" error below.

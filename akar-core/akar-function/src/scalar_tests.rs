@@ -538,6 +538,57 @@ mod tests {
     }
 
     #[test]
+    fn test_comparison_nan_equality() {
+        let eq = ScalarFunction::Comparison { op: ComparisonOp::Eq };
+        let neq = ScalarFunction::Comparison { op: ComparisonOp::NotEq };
+        assert_eq!(
+            evaluate_scalar(&eq, &[Value::Double(f64::NAN), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&neq, &[Value::Double(f64::NAN), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            evaluate_scalar(&eq, &[Value::Double(f64::NAN), Value::Double(1.0)]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_comparison_nan_order() {
+        let gt = ScalarFunction::Comparison { op: ComparisonOp::Gt };
+        let lt = ScalarFunction::Comparison { op: ComparisonOp::Lt };
+        // NaN > every finite value
+        assert_eq!(
+            evaluate_scalar(&gt, &[Value::Double(f64::NAN), Value::Double(1.0)]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&lt, &[Value::Double(f64::NAN), Value::Double(1.0)]).unwrap(),
+            Value::Bool(false)
+        );
+        // NaN == NaN is neither greater nor less
+        assert_eq!(
+            evaluate_scalar(&gt, &[Value::Double(f64::NAN), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            evaluate_scalar(&lt, &[Value::Double(f64::NAN), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(false)
+        );
+        // Cross-type: Int64(1) < NaN
+        assert_eq!(
+            evaluate_scalar(&lt, &[Value::Int64(1), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            evaluate_scalar(&gt, &[Value::Int64(1), Value::Double(f64::NAN)]).unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
     fn test_string_concat() {
         let func = ScalarFunction::String { op: StringOp::Concat };
         assert_eq!(

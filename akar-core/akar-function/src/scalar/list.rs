@@ -1,3 +1,4 @@
+use super::comparison::double_cmp;
 use super::get_string;
 use crate::registry::*;
 use akar_common::types::Value;
@@ -437,18 +438,15 @@ pub(crate) fn compare_values_for_sort(a: &Value, b: &Value) -> Result<std::cmp::
         (Value::UInt32(x), Value::UInt32(y)) => Ok(x.cmp(y)),
         (Value::UInt16(x), Value::UInt16(y)) => Ok(x.cmp(y)),
         (Value::UInt8(x), Value::UInt8(y)) => Ok(x.cmp(y)),
-        (Value::Double(x), Value::Double(y)) => Ok(x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)),
-        (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)),
+        (Value::Double(x), Value::Double(y)) => Ok(double_cmp(*x, *y)),
+        (Value::Float(x), Value::Float(y)) => Ok(double_cmp(*x as f64, *y as f64)),
         (Value::String(x), Value::String(y)) => Ok(x.cmp(y)),
         (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
         (Value::Date(x), Value::Date(y)) => Ok(x.cmp(y)),
         (Value::Timestamp(x), Value::Timestamp(y)) => Ok(x.cmp(y)),
         // Cross-type numeric promotion
-        (Value::Int64(x), Value::Double(y)) => Ok(x
-            .partial_cmp(&(*y as i64))
-            .map(|o| o.reverse())
-            .unwrap_or(std::cmp::Ordering::Equal)),
-        (Value::Double(x), Value::Int64(y)) => Ok(x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal)),
+        (Value::Int64(x), Value::Double(y)) => Ok(double_cmp(*x as f64, *y)),
+        (Value::Double(x), Value::Int64(y)) => Ok(double_cmp(*x, *y as f64)),
         _ => Err("Cannot compare types for sort".into()),
     }
 }

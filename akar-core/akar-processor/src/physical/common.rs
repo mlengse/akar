@@ -87,12 +87,30 @@ pub(crate) fn value_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Int8(x), Value::Int8(y)) => (*x as i64).cmp(&(*y as i64)),
         (Value::UInt64(x), Value::UInt64(y)) => x.cmp(y),
         (Value::UInt32(x), Value::UInt32(y)) => (*x as u64).cmp(&(*y as u64)),
-        (Value::Double(x), Value::Double(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Double(x), Value::Double(y)) => double_cmp(*x, *y),
+        (Value::Float(x), Value::Float(y)) => double_cmp(*x as f64, *y as f64),
         (Value::String(x), Value::String(y)) => x.cmp(y),
         (Value::Date(x), Value::Date(y)) => x.0.cmp(&y.0),
         (Value::Timestamp(x), Value::Timestamp(y)) => x.0.cmp(&y.0),
         _ => std::cmp::Ordering::Equal,
+    }
+}
+
+/// Total-order comparison for floats with a NaN convention: NaN sorts greater
+/// than every finite value, and NaN == NaN. `partial_cmp(...).unwrap_or(Equal)`
+/// would treat NaN as equal to everything, breaking ORDER BY / TOP-K sort order.
+#[inline(always)]
+pub(crate) fn double_cmp(a: f64, b: f64) -> std::cmp::Ordering {
+    if a.is_nan() {
+        if b.is_nan() {
+            std::cmp::Ordering::Equal
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    } else if b.is_nan() {
+        std::cmp::Ordering::Less
+    } else {
+        a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 

@@ -232,6 +232,72 @@ fn test_boundary_double_negative() {
 }
 
 #[test]
+fn test_boundary_nan_order_by_sorts_last_ascending() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, val DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, val: 5.0})");
+    exec(&conn, "CREATE (t:T {id: 2, val: float('NaN')})");
+    exec(&conn, "CREATE (t:T {id: 3, val: 1.0})");
+    let res = query_values(&conn, "MATCH (t:T) RETURN t.val ORDER BY t.val");
+    let lines: Vec<&str> = res.lines().map(|l| l.trim()).collect();
+    assert_eq!(lines[0], "Double(1.0)");
+    assert_eq!(lines[1], "Double(5.0)");
+    assert_eq!(lines[2], "Double(NaN)");
+}
+
+#[test]
+fn test_boundary_nan_order_by_sorts_first_descending() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, val DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, val: 5.0})");
+    exec(&conn, "CREATE (t:T {id: 2, val: float('NaN')})");
+    exec(&conn, "CREATE (t:T {id: 3, val: 1.0})");
+    let res = query_values(&conn, "MATCH (t:T) RETURN t.val ORDER BY t.val DESC");
+    let lines: Vec<&str> = res.lines().map(|l| l.trim()).collect();
+    assert_eq!(lines[0], "Double(NaN)");
+    assert_eq!(lines[1], "Double(5.0)");
+    assert_eq!(lines[2], "Double(1.0)");
+}
+
+#[test]
+fn test_boundary_nan_where_gt_is_true() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, val DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, val: 10.0})");
+    exec(&conn, "CREATE (t:T {id: 2, val: float('NaN')})");
+    let vals = query_column(&conn, "MATCH (t:T) WHERE t.val > 5.0 RETURN t.id");
+    let mut ids: Vec<i64> = vals
+        .iter()
+        .map(|v| match v {
+            Value::Int64(x) => *x,
+            _ => 0,
+        })
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec![1, 2]);
+}
+
+#[test]
+fn test_boundary_nan_where_lt_is_false() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, val DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, val: 10.0})");
+    exec(&conn, "CREATE (t:T {id: 2, val: float('NaN')})");
+    let vals = query_column(&conn, "MATCH (t:T) WHERE t.val < 5.0 RETURN t.id");
+    assert!(vals.is_empty());
+}
+
+#[test]
+fn test_boundary_nan_where_eq_nan_is_true() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, val DOUBLE, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, val: 10.0})");
+    exec(&conn, "CREATE (t:T {id: 2, val: float('NaN')})");
+    let vals = query_column(&conn, "MATCH (t:T) WHERE t.val = float('NaN') RETURN t.id");
+    assert_eq!(vals, vec![Value::Int64(2)]);
+}
+
+#[test]
 fn test_boundary_bool_true() {
     let (_db, conn) = setup_db();
     let res = query_values(&conn, "RETURN true");

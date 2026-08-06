@@ -1,4 +1,5 @@
 use crate::registry::*;
+use crate::scalar::comparison::double_cmp;
 use crate::scalar::{evaluate_scalar, numeric_to_f64};
 use akar_common::types::Value;
 use arrow::array::{
@@ -200,7 +201,7 @@ impl AggValueState {
                     return Value::Null;
                 }
                 let mut sorted = values.clone();
-                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                sorted.sort_by(|a, b| double_cmp(*a, *b));
                 let n = sorted.len();
                 let p = *percentile;
                 // Discrete percentile: pick the value at ceil(p * n) - 1 index

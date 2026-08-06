@@ -147,7 +147,7 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 1,349 tests — all passing ✅, 5 ignored (doc-tests)
+Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 ```
 
 | Crate | Tests | Status | Coverage |
@@ -161,7 +161,7 @@ Total: 1,349 tests — all passing ✅, 5 ignored (doc-tests)
 | `akar-function` | 176 | ✅ | 259 registered functions (244 scalar + 14 aggregate + 1 table, incl. PERCENTILE_DISC/CONT) |
 | `akar-storage` | 328 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `akar-main` (unit) | 68 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
-| `akar-main` (integration) | 287 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode (P48.14 `test_count_variable` fixed) |
+| `akar-main` (integration) | 291 | ✅ | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability, server mode (P48.14 `test_count_variable` fixed; P48.15 NaN ordering tests) |
 | `akar-catalog` | 39 | ✅ | Catalog CRUD, lookup by name/id, schema management, sequences |
 | `akar-transaction` | 18 | ✅ | MVCC, begin/commit/rollback, AUTO/MANUAL modes, checkpoint worker, conflict detection |
 | `akar-graph` | 34 | ✅ | CSR adjacency, GDS framework (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, Shortest Path) |
@@ -181,7 +181,7 @@ Total: 1,349 tests — all passing ✅, 5 ignored (doc-tests)
 | Small ext (azure/delta/iceberg/sqlite/unity) | 5 | ✅ | 1 each |
 | `akar-migrate` | 1 | ✅ | Idempotent re-migration (fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | ⚠️ | Doc-tests across all crates |
-| **Total** | **1,349** | **1,349 ✅ / 0 ❌ / 5 ignored** | |
+| **Total** | **1,354** | **1,354 ✅ / 0 ❌ / 5 ignored** | |
 
 ## Storage Engine Features
 
