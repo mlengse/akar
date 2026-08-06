@@ -211,9 +211,9 @@ impl Database {
         // 3. Auto-create ART index for primary key
         if columns.iter().any(|c| c.is_primary_key) {
             let index_name = format!("{name}_pk_idx");
-            if let Err(e) = self.storage_manager.create_art_index(&name, &index_name) {
-                tracing::warn!("Failed to create ART index for table {name}: {e}");
-            }
+            self.storage_manager
+                .create_art_index(&name, &index_name)
+                .map_err(|e| format!("Failed to create ART PK index for table '{name}': {e}"))?;
         }
 
         tracing::info!("Created node table '{name}'");

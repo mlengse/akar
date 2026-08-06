@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,343 total, 1,342 passed, 1 failed** (`test_count_variable` = P48.14), 5 ignored (doc-tests) |
+| Tests passing | **1,346 total, 1,345 passed, 1 failed** (`test_count_variable` = P48.14), 5 ignored (doc-tests) |
 | Optimizer passes | **25** (18 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -484,7 +484,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 68 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 281 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability (1 failing `test_count_variable` = P48.14) |
+| `akar-main` (integration) | 284 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability (1 failing `test_count_variable` = P48.14) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -504,7 +504,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,343** | **1,342 passed, 1 failed (`test_count_variable` = P48.14), 5 ignored (doc-tests)** |
+| **Total** | **1,346** | **1,345 passed, 1 failed (`test_count_variable` = P48.14), 5 ignored (doc-tests)** |
 
 ### 11.2 Test Datasets
 

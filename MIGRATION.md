@@ -5,7 +5,7 @@ This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-
 ## Why Migrate?
 
 The Rust port offers:
-- **~100% functional parity** with C++ (1,343 workspace tests: 1,342 passing, 1 failing `test_count_variable` = P48.14)
+- **~100% functional parity** with C++ (1,346 workspace tests: 1,345 passing, 1 failing `test_count_variable` = P48.14)
 - **Memory safety** via Rust's ownership model
 - **Arrow-native execution** — up to 24x faster filtering/numeric expressions
 - **Operator fusing** — fewer physical nodes, less overhead

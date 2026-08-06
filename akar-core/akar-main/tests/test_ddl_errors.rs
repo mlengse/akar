@@ -1,5 +1,5 @@
 mod common;
-use common::{exec, exec_err, setup_db};
+use common::{exec, exec_err, query_column, setup_db, Value};
 
 #[test]
 fn test_create_table_already_exists() {
@@ -176,4 +176,35 @@ fn test_create_sequence_no_name() {
     let (_db, conn) = setup_db();
     let err = exec_err(&conn, "CREATE SEQUENCE");
     assert!(err.contains("Parse error") || err.contains("Error"));
+}
+
+#[test]
+fn test_create_node_table_with_pk_creates_art_index() {
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    assert!(
+        db.table_catalog().has_art_index("Person"),
+        "CREATE NODE TABLE with a PRIMARY KEY must auto-create the ART PK index"
+    );
+}
+
+#[test]
+fn test_create_node_table_with_pk_creates_art_index_for_numeric_type() {
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE UIntTab(id UINT64, PRIMARY KEY (id))");
+    assert!(db.table_catalog().has_art_index("UIntTab"));
+    exec(&conn, "CREATE (u:UIntTab {id: 41})");
+    let vals = query_column(&conn, "MATCH (u:UIntTab) RETURN u.id");
+    assert_eq!(vals, vec![Value::UInt64(41)]);
+}
+
+#[test]
+fn test_duplicate_art_index_creation_is_not_silent() {
+    let (db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
+    let err = db.create_art_index("Person", "second_idx").unwrap_err();
+    assert!(
+        err.contains("already has an ART index"),
+        "second ART index creation on an already-indexed table must error, got: {err}"
+    );
 }

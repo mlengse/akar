@@ -66,9 +66,9 @@ pub fn map_and_execute_ddl(
             // Auto-create ART index for primary key (matches connection/ddl.rs behavior)
             if c.columns.iter().any(|col| col.is_primary_key) {
                 let index_name = format!("{}_pk_idx", c.name);
-                if let Err(e) = tc.create_art_index(&c.name, &index_name) {
-                    tracing::warn!("Failed to auto-create ART index for table '{}': {}", c.name, e);
-                }
+                tc.create_art_index(&c.name, &index_name).map_err(|e| {
+                    format!("Failed to auto-create ART PK index for table '{}': {e}", c.name)
+                })?;
             }
 
             tracing::info!("Pipeline: Created node table '{}'", c.name);

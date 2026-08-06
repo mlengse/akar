@@ -2,7 +2,7 @@
 
 Welcome to **Akar**! This guide details how to transition your application from the legacy C++ implementation (KuzuDB Vela/LadybugDB) to the pure Rust Akar database.
 
-As of August 2026, the Rust port has achieved **~100% functional parity** with the C++ version — **1,343 tests** (1,342 passing + 1 failing `test_count_variable` = P48.14), all 15 GDS algorithms, **25 optimizer passes**, and 33 parser statement variants (+ 10 clause sub-variants) are implemented.
+As of August 2026, the Rust port has achieved **~100% functional parity** with the C++ version — **1,346 tests** (1,345 passing + 1 failing `test_count_variable` = P48.14), all 15 GDS algorithms, **25 optimizer passes**, and 33 parser statement variants (+ 10 clause sub-variants) are implemented.
 
 ## 1. Quick Migration (Data)
 
