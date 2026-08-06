@@ -2,7 +2,7 @@
 
 > **Akar** — Pure Rust embedded graph database for AI agent memory.
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3 | **Edition:** Rust 2024
-> **Repository:** `https://github.com/anjangkusumanetra/akar`
+> **Repository:** `https://github.com/mlengse/akar`
 
 ---
 

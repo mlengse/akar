@@ -13,7 +13,7 @@ Thanks for your interest in contributing to Akar!
 ### Setup
 
 ```bash
-git clone https://github.com/anjangkusumanetra/akar.git
+git clone https://github.com/mlengse/akar.git
 cd akar/akar-core
 cargo build --workspace
 cargo test --workspace

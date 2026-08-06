@@ -1,6 +1,6 @@
 # Akar Core — Pure Rust Graph Database
 
-[![Rust CI](https://github.com/anjangkusumanetra/akar/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/anjangkusumanetra/akar/actions/workflows/rust-ci.yml)
+[![Rust CI](https://github.com/mlengse/akar/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/mlengse/akar/actions/workflows/rust-ci.yml)
 
 Akar is a from-scratch pure Rust implementation of an embedded property graph database management system (GDBMS) with openCypher query support.
 

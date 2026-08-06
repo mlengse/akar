@@ -98,7 +98,7 @@ Once the PR is merged and the tag is pushed to `main`, the `rust-release.yml` wo
 
 ```bash
 # Download and test the binary
-curl -LO https://github.com/anjangkusumanetra/akar/releases/download/v0.1.0/akar-cli-linux-amd64
+curl -LO https://github.com/mlengse/akar/releases/download/v0.1.0/akar-cli-linux-amd64
 chmod +x akar-cli-linux-amd64
 ./akar-cli-linux-amd64 --version
 ```

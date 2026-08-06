@@ -30,7 +30,7 @@ cargo run --bin akar-migrate -- --from /path/to/export-dir --to /path/to/new/rus
 Update your `Cargo.toml`:
 ```toml
 [dependencies]
-akar = { git = "https://github.com/anjangkusumanetra/akar", branch = "main" }
+akar = { git = "https://github.com/mlengse/akar", branch = "main" }
 ```
 
 ### Basic Connection
@@ -64,7 +64,7 @@ cargo install akar-cli
 akar-cli /path/to/db
 ```
 
-Or download the prebuilt binary from [GitHub Releases](https://github.com/anjangkusumanetra/akar/releases).
+Or download the prebuilt binary from [GitHub Releases](https://github.com/mlengse/akar/releases).
 
 ## 3. Architecture Changes
 
