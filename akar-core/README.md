@@ -147,17 +147,17 @@ Cypher text
 ## Test Suite Status
 
 ```
-Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
+Total: 1,535 tests — all passing ✅, 5 ignored (doc-tests)
 ```
 
 | Crate | Tests | Status | Coverage |
 |-------|-------|--------|----------|
 | `akar-common` | 24 | ✅ | Types (37 LogicalTypes, 19 PhysicalTypes, Value), Vectors, Memory, Serialization |
 | `akar-parser` | 67 | ✅ | Cypher PEG grammar, 33 Statement variants (+ 10 Clause), operator precedence |
-| `akar-binder` | 24 | ✅ | Semantic analysis, type inference, symbol resolution |
+| `akar-binder` | 87 | ✅ | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | ✅ | Logical plan construction (58 LogicalOperator variants) |
 | `akar-optimizer` | 59 | ✅ | 18 flat passes + 6 tree passes (24 total, exceeds C++ Ladybug) |
-| `akar-processor` | 24 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
+| `akar-processor` | 142 | ✅ | PhysicalScan, Filter, Projection, Limit, OrderBy (RadixSort+BlockMergeSorter), Aggregate (parallel AggregateHashTable), HashJoin (parallel JoinHashTable), Intersect, SemiJoin, AntiJoin, RecursiveExtend, CopyFrom (batch insert), CountRelTable, Delete, Set |
 | `akar-function` | 176 | ✅ | 259 registered functions (244 scalar + 14 aggregate + 1 table, incl. PERCENTILE_DISC/CONT) |
 | `akar-storage` | 328 | ✅ | BufferManager, Column*Chunk, NodeGroup, Table, Compression, WAL+Replayer, Checkpoint, CSV/Parquet readers, Index, FSM, Zone Map, UndoBuffer, PageManager |
 | `akar-main` (unit) | 68 | ✅ | Database, Connection, QueryResult, DDL/DML, COPY FROM, CALL functions |
@@ -175,13 +175,13 @@ Total: 1,354 tests — all passing ✅, 5 ignored (doc-tests)
 | `akar-llm` | 9 | ✅ | LLM function integration |
 | `akar-duckdb` | 9 | ✅ | In-memory/file/local modes |
 | `akar-httpfs` | 7 | ✅ | HTTP/HTTPS/S3 read support |
-| `akar-postgres` | 7 | ✅ | PostgreSQL integration |
+| `akar-postgres` | 7 | ✅ | PostgreSQL integration (1 lib + 6 integration) |
 | `akar-neo4j` | 12 | ✅ | Bolt protocol integration |
 | `akar-wasm` | 0* | ✅ | AkarDatabase, AkarConnection, AkarPreparedStatement wrappers untuk NodeJS (*3 via `wasm-pack test --node` on CI) |
 | Small ext (azure/delta/iceberg/sqlite/unity) | 5 | ✅ | 1 each |
 | `akar-migrate` | 1 | ✅ | Idempotent re-migration (fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | ⚠️ | Doc-tests across all crates |
-| **Total** | **1,354** | **1,354 ✅ / 0 ❌ / 5 ignored** | |
+| **Total** | **1,535** | **1,535 ✅ / 0 ❌ / 5 ignored** | |
 
 ## Storage Engine Features
 

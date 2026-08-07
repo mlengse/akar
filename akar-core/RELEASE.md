@@ -2,7 +2,7 @@
 
 This document describes how to cut a release of Akar (`akar-core/`).
 
-> **crates.io publishing is deferred** (Design Decision #11). Only GitHub Releases with prebuilt CLI binaries are produced at this stage. See [implementation_plan.md §DD11](implementation_plan.md) for rationale.
+> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** 31/31 publishable crates are versioned `0.1.0` and published bottom-up to crates.io. GitHub Releases with prebuilt CLI binaries are produced as well. See [implementation_plan.md §P50.4](implementation_plan.md) for the publish log and pacing notes (crates.io rate limit: 1 new crate per 10 min).
 
 ---
 
@@ -117,14 +117,14 @@ This runs tests and a release build to verify everything compiles, without creat
 
 ---
 
-## Future: crates.io Publishing
+## crates.io Publishing
 
-When the API stabilises and we are ready to publish to crates.io, the following steps are needed:
+Publishing to crates.io is **active** (Sprint 18/P50, 2026-08-08). The full process:
 
-1. Remove `publish = false` from all internal crates
-2. Publish internal crates in dependency order (see graph below)
-3. Update `akar-main`'s path dependencies to `{ version = "...", path = "..." }`
-4. Re-enable `cargo publish -p akar-main` and `cargo publish -p akar-cli` in the release workflow
+1. All internal crates have `publish = true` (only `akar-c` remains `publish = false` — FFI cdylib, local builds only).
+2. Publish internal crates bottom-up in dependency order (see graph below), 1 crate per 10 min due to the crates.io rate limit.
+3. `akar-main`'s path dependencies ship with `version = "0.1.0"` so they resolve to the registry copies after publish.
+4. Publish `akar-main`, then `akar-server`, `akar-wasm`, `akar-cli`, `akar-migrate`.
 
 ### Dependency Publication Order
 
@@ -142,3 +142,7 @@ akar-common
 ```
 
 Extension crates (akar-json, akar-fts, etc.) can be published in any order after their core dependencies are available.
+
+### Status
+
+As of 2026-08-08: **18/31 published** (all `0.1.0`). See [implementation_plan.md §P50.4](implementation_plan.md) for the live checkpoint schedule.

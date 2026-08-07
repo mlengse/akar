@@ -5,12 +5,12 @@
 # 2. Builds CLI binaries for Linux, macOS, Windows
 # 3. Creates GitHub Release with binaries + auto-generated changelog
 #
-# NOTE: crates.io publishing is DEFERRED per Design Decision #11
-# (akar-core/implementation_plan.md). All internal crates have
-# `publish = false` and are path dependencies of akar-main/akar-cli.
-# Publishing to crates.io requires either publishing all internal
-# crates first or consolidating into a single crate — deferred until
-# API stabilises.
+# NOTE: crates.io publishing is ACTIVE since 2026-08-08 (P50) — 31/31
+# publishable crates are published bottom-up at 0.1.0 (only akar-c is
+# intentionally `publish = false`, FFI cdylib). Internal crates now use
+# registry version deps after publish. The rate limit is 1 new crate per
+# 10 min, so publish is paced per the checkpoint schedule in
+# akar-core/implementation_plan.md §P50.4.
 
 name: Rust Release
 

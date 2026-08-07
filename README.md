@@ -19,27 +19,29 @@ Performance is validated against two independent C++ implementations of the same
 ## Quick Start
 
 ```rust
-use akar::{Database, Connection};
+use akar_main::database::{Database, SystemConfig};
+use akar_main::connection::Connection;
+use std::sync::Arc;
 
-let db = Database::new("./agent_memory")?;
-let conn = Connection::new(&db)?;
+let db = Arc::new(Database::new("./agent_memory", SystemConfig::default())?);
+let conn = Connection::new(&db);
 
 // Create schema
-conn.execute("CREATE NODE TABLE Entity(name STRING, type STRING, PRIMARY KEY(name))")?;
-conn.execute("CREATE REL TABLE RELATES_TO(FROM Entity TO Entity, relation STRING)")?;
+conn.query("CREATE NODE TABLE Entity(name STRING, type STRING, PRIMARY KEY(name))")?;
+conn.query("CREATE REL TABLE RELATES_TO(FROM Entity TO Entity, relation STRING)")?;
 
 // Add knowledge
-conn.execute("CREATE (e:Entity {name: 'Acme AI', type: 'company'})")?;
-conn.execute("CREATE (e:Entity {name: 'Jane Smith', type: 'founder'})")?;
+conn.query("CREATE (:Entity {name: 'Acme AI', type: 'company'})")?;
+conn.query("CREATE (:Entity {name: 'Jane Smith', type: 'founder'})")?;
 
 // Query: who founded what?
-let result = conn.execute("
+let result = conn.query("
     MATCH (f:Entity)-[r:RELATES_TO {relation: 'founded'}]->(c:Entity)
     RETURN f.name, c.name
 ")?;
 ```
 
-No server. No Docker. Just `cargo add akar` and query.
+No server. No Docker. Just `cargo add akar-main` and query.
 
 ## Core Features
 
@@ -75,7 +77,7 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **1,354 tests, all passing** (incl. `test_count_variable` = P48.14 + P48.15 NaN ordering + P48.16 dead SIP semi-masker removed + P48.17 node-predicate + WHERE AND-combined, 5 ignored doc-tests). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
+**Test suite:** **1,535 tests, all passing** (incl. `test_count_variable` = P48.14 + P48.15 NaN ordering + P48.16 dead SIP semi-masker removed + P48.17 node-predicate + WHERE AND-combined, 5 ignored doc-tests). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
 
 ## Benchmarks
 

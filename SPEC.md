@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,354 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined, 2026-08-07), 5 ignored (doc-tests) |
+| Tests passing | **1,535 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined, 2026-08-07/08), 5 ignored (doc-tests) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -464,7 +464,7 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **deferred** (Design Decision #11). Only GitHub Releases with prebuilt CLI binaries are produced.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0`; GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -503,7 +503,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,354** | **1,354 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined), 5 ignored (doc-tests)** |
+| **Total** | **1,535** | **1,535 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined), 5 ignored (doc-tests)** |
 
 ### 11.2 Test Datasets
 
@@ -668,8 +668,8 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| #11 | crates.io publishing deferred | API not yet stable for public consumption |
-| #66 | No premature production publish | Don't publish before truly production-ready |
+| #11 | crates.io publishing deferred | API not yet stable for public consumption — **superseded 2026-08-08 (P50): publishing active**, 31/31 crates at 0.1.0 |
+| #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,535 tests, audits CLEAN) |
 | #67 | WCOJ benchmark deferred | Legacy bench never runnable; pre-existing bugs |
 
 ---
@@ -678,7 +678,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
 2. **Physical operator count** — 48 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
-3. **crates.io not published** — install via git dependency or prebuilt binaries only
+3. **`akar-main` is the primary published crate** — install via `cargo add akar-main`; `akar-c` (C FFI) is intentionally not published (build locally)
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
 
 ---

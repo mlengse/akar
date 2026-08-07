@@ -1,11 +1,11 @@
-# Migrating to Akar Rust (v1.0.0)
+# Migrating to Akar Rust (v0.1.0)
 
 This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-core`.
 
 ## Why Migrate?
 
 The Rust port offers:
-- **~100% functional parity** with C++ (1,354 workspace tests, all passing)
+- **~100% functional parity** with C++ (1,535 workspace tests, all passing)
 - **Memory safety** via Rust's ownership model
 - **Arrow-native execution** — up to 24x faster filtering/numeric expressions
 - **Operator fusing** — fewer physical nodes, less overhead
@@ -56,8 +56,9 @@ auto db = std::make_unique<kuzu::main::Database>("path/to/db", systemConfig);
 **Rust:**
 ```rust
 use akar_main::{Database, SystemConfig};
+use std::sync::Arc;
 let config = SystemConfig::default();
-let db = Database::new("path/to/db", config)?;
+let db = Arc::new(Database::new("path/to/db", config)?);
 ```
 
 ### 2. Connection Management
@@ -86,9 +87,11 @@ while (result->hasNext()) {
 ```rust
 let result = conn.query("MATCH (a:person) RETURN a.name")?;
 for chunk in &result.chunks {
-    for row in chunk.iter_rows() {
-        if let Some(val) = chunk.fields[0].get_value(row) {
-            println!("{:?}", val);
+    for field_idx in 0..chunk.fields.len() {
+        for row in 0..chunk.size {
+            if let Some(val) = chunk.get_value(field_idx, row) {
+                println!("{:?}", val);
+            }
         }
     }
 }
@@ -118,7 +121,7 @@ conn.query("...").map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
 Extensions in Rust are compiled statically via Cargo features:
 ```toml
 [dependencies]
-akar-main = { git = "...", features = ["json-extension", "httpfs-extension"] }
+akar-main = { version = "0.1.0", features = ["json-extension", "httpfs-extension"] }
 ```
 
 This replaces the C++ `LOAD 'extensions/JSON'` runtime loading model.
