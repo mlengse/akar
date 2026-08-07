@@ -219,7 +219,7 @@ fn get_1m_db() -> Connection {
 /// P48.4 fan DB — WCOJ star vs HashJoin chain on the same tables.
 ///
 /// Person 151 (id 0..=150), Tag 101 (id 0..=100). Edges built with bulk
-/// WHERE-comparison CREATE:
+/// CREATE; the r1 center is pinned via a node-predicate (P49.1):
 ///   - `r1`: Person -> Person. For each center `a` in 0..100, edges to the 10
 ///     Persons `(a, a+10]` (1000 edges).
 ///   - `r2`: Person -> Tag. For each center `a` in 0..100, edges to Tags `[0,9]`
@@ -245,12 +245,13 @@ fn setup_wcoj_fan_db(dir: &TempDir) -> Arc<Database> {
         conn.query(&format!("CREATE (t:Tag {{id: {i}}})")).unwrap();
     }
 
-    // Bulk WHERE-comparison CREATE (P48.3 pushdown keeps this fast).
-    // Node predicates (`{id: {a}}`) are ignored in CREATE (BUG-A), so the
-    // range form `a.id >= {a} AND a.id <= {a}` is used to pin the center.
+    // Bulk CREATE with node-predicate center (P49.1). Node predicates
+    // (`{id: {a}}`) were ignored in CREATE before P48.17 (BUG-A), so the range
+    // form `a.id >= {a} AND a.id <= {a}` was used to pin the center. Now the
+    // correct node-predicate syntax works end-to-end; the b range stays WHERE.
     for a in 0..100 {
         conn.query(&format!(
-            "MATCH (a:Person), (b:Person) WHERE a.id >= {a} AND a.id <= {a} AND b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)"
+            "MATCH (a:Person {{id: {a}}}), (b:Person) WHERE b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)"
         ))
         .unwrap();
     }

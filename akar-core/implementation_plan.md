@@ -1,6 +1,6 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-08-07 (Sprint 16 **COMPLETE** — P48.1..P48.18 all DONE; gate hijau **1,354 passed / 0 failed**, tak ada lagi test failure pre-existing; **Sprint 17 = P49** ADDED — post-benchmark hardening & cleanup; **P45.2 CANCELLED** — no crates.io publishing until production-ready)
+> **Revision:** 2026-08-07 (Sprint 17 **COMPLETE** — P49.1..P49.3 all DONE; gate hijau **1,354 passed / 0 failed**; bench BUG-A workaround dibersihkan, `pk_col` default footgun dihapus, benchmark di-re-run & docs disinkronkan; **P45.2 CANCELLED** — no crates.io publishing until production-ready)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 > **Baseline (sekarang):** `cargo test --workspace` → **1,354 passed, 0 failed, 5 ignored (doc-tests only)**, 32 crates, ~86K LOC (git-tracked). (Baseline historis di header lama = 1,310 + 1 fail `test_migration_ingestion` — sudah ditutup P48.5.)
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
@@ -37,30 +37,33 @@
 | **P46** | **Worst-Case Optimal Joins (WCOJ)** | ✅ **DONE** | **4** | ✅ Sprint 15 |
 | **P47** | **Multi-Process Access (Embedded Server Mode)** | ✅ **DONE** | **4** | ✅ Sprint 15 |
 | **P48** | **Correctness & Benchmark Unblock** | ✅ **DONE** | **~10** | ✅ **Sprint 16 — COMPLETE** (semua P48.1–P48.18 DONE, gate 1,354 hijau) |
-| **P49** | **Post-Benchmark Hardening & Cleanup** | 🔜 **HIGH** | **~3** | 🔜 Sprint 17 (lihat detail di bawah) |
+| **P49** | **Post-Benchmark Hardening & Cleanup** | ✅ **DONE** | **~3** | ✅ **Sprint 17 — COMPLETE** (P49.1–P49.3 DONE — bench syntax bersih, `pk_col` guard, benchmark re-run) |
 
 > [!IMPORTANT]
-> **P1-P48 + AUDIT: ALL COMPLETE** — 1,354 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed, WCOJ planner-side + embedded server mode (Sprint 15), dan 18 item correctness/benchmark unblock (Sprint 16: predicate pushdown multi-scan ~12.6×, rel-table COPY, Date/Timestamp write path, FTS+WHERE OOB, UInt64 narrowing, ART fail-fast, COUNT(var), NaN ordering, SIP semi-mask removal, node-predicate+WHERE AND-combine, equality 2-kolom guard).
+> **P1-P49 + AUDIT: ALL COMPLETE** — 1,354 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed, WCOJ planner-side + embedded server mode (Sprint 15), 18 item correctness/benchmark unblock (Sprint 16), dan 3 item post-benchmark hardening (Sprint 17: bench BUG-A workaround → node-predicate syntax, `pk_col` default footgun dihapus, benchmark re-run & docs sync).
 > **P43.3: CANCELLED** — C++ per-operator benchmark source was removed from the repo by review decision (2026-07-31); not needed — SQL-level E2E 3-way parity already verified (~1×).
 > **P45.2: CANCELLED** — tidak publish ke crates.io sebelum benar-benar siap production.
 > **P48.18 (BUG-B):** equality 2-kolom (`a.id = b.id`) silent all-pass — root cause `JoinOptimization` fallback menghapus join-condition filter saat tak ada join nyata; FIXED dengan guard (plan tanpa join mempertahankan filter).
-> **P48.17 (BUG-A):** node-predicate `(a:Person {id:X})` diabaikan saat dikombinasikan dengan WHERE eksplisit — planner kini AND-combine BoundWhere implisit + eksplisit; engine fix selesai. **Sisa kerja terkait ada di P49.1** (bersihkan workaround bench).
+> **P48.17 (BUG-A):** node-predicate `(a:Person {id:X})` diabaikan saat dikombinasikan dengan WHERE eksplisit — planner kini AND-combine BoundWhere implisit + eksplisit; engine fix selesai.
+> **P49.1:** workaround BUG-A di bench (variable-comparison `WHERE a.id >= {a} AND a.id <= {a}`) diganti ke syntax node-predicate `MATCH (a:Person {id: {a}}) ...` — hasil identik (star 10,000 / chain 10,000 / triangle 10,660 rows), validasi end-to-end P48.17 di jalur bench PASS.
+> **P49.2:** default `pk_col = 0` dihapus (footgun laten) — `catalog.rs`/`table.rs` kini memakai sentinel `usize::MAX` (no-PK eksplisit); SQL tak berubah (binder tetap memaksa PK).
+> **P49.3:** benchmark di-re-run — gate 1,354 hijau; setup fan DB 2.07 s / triangle 540 ms (debug, vs 1.45 s baseline — variasi timing, tak ada delta correctness).
 
 ---
 
-## 🔜 SPRINT 17: RECOMMENDED — POST-BENCHMARK HARDENING & CLEANUP (P49)
+## ✅ SPRINT 17 (COMPLETE): POST-BENCHMARK HARDENING & CLEANUP (P49)
 
 > **Rekomendasi 2026-08-07:** Sprint 16 menutup semua lubang correctness yang mem-blocking benchmark. Sprint 17 = **bersihkan workaround BUG-A di bench** (sekaligus validasi end-to-end P48.17 di jalur bench) + **hapus footgun `pk_col` default** + **re-run benchmark & sinkronisasi angka docs**. Semua item punya bukti konkret; tak ada spekulasi.
 > **Koreksi audit 2026-08-07:** item audit `LogicalMultiplicityReducer` dead code ternyata **SALAH** — tipe ini di-instantiate di `map_ddl.rs:404-405` (DISTINCT dedup); **bukan task**.
 
 | Task | Description | Files | Status |
 |------|-------------|-------|--------|
-| P49.1 | **Bersihkan workaround BUG-A di bench → node-predicate syntax** — Saat P48.4, node-predicate `(a:Person {id:X})` diabaikan di CREATE, jadi setup bench memakai pola variable-comparison `WHERE a.id >= {a} AND a.id <= {a}` untuk pin center. P48.17 sudah fix engine → ganti ke syntax yang benar `MATCH (a:Person {id: {a}}), (b:Person) WHERE b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)`. Sekaligus **validasi end-to-end P48.17 di jalur bench** (bukan hanya unit test): hasil star/triangle harus tetap identik (10,000 / 10,660 rows). Catatan: pola **range** (`a.id >= 0 AND a.id <= 99`) tetap WHERE — node-predicate hanya mendukung equality. | `akar-main/tests/test_wcoj_bench.rs` (`:37`), `akar-main/benches/ladybug_suite.rs` (`:253`) | 🔜 PLANNED |
-| P49.2 | **Hilangkan default `pk_col = 0`** — `catalog.rs:443`/`table.rs:57`: audit terkonfirmasi **unreachable via SQL** (binder memaksa PK ada, `binder/mod.rs:861` error bila tak ada), tapi default 0 adalah footgun laten. Cleanup opsional: ubah jadi wajib-eksplisit atau dokumentasikan guard; tak mengubah perilaku SQL. | `akar-core/akar-catalog/src/lib.rs`, `akar-storage/src/table.rs` | 🔜 PLANNED |
-| P49.3 | **Re-run benchmark suite & sinkronisasi docs** — Setelah P49.1 (syntax bench bersih), jalankan ulang `test_wcoj_bench.rs` + `ladybug_suite.rs` + `cargo test --workspace`; pastikan angka (star 10,000, triangle 10,660, setup 1.45 s, chain) identik; update `BENCHMARK_COMPARISON.md` / `SPEC.md` bila ada delta. | `akar-main/tests/test_wcoj_bench.rs`, `akar-main/benches/ladybug_suite.rs`, docs benchmark | 🔜 PLANNED |
+| P49.1 | **Bersihkan workaround BUG-A di bench → node-predicate syntax** — workaround variable-comparison `WHERE a.id >= {a} AND a.id <= {a}` untuk pin center (P48.4) diganti ke syntax node-predicate yang benar `MATCH (a:Person {id: {a}}), (b:Person) WHERE b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)`. Validasi end-to-end P48.17 di jalur bench (bukan hanya unit test) PASS: star 10,000 / chain 10,000 / triangle 10,660 rows identik. Pola **range** (`a.id >= 0 AND a.id <= 99`) tetap WHERE — node-predicate hanya mendukung equality. | `akar-main/tests/test_wcoj_bench.rs`, `akar-main/benches/ladybug_suite.rs` | ✅ DONE |
+| P49.2 | **Hilangkan default `pk_col = 0`** — `catalog.rs`/`table.rs`: default 0 adalah footgun laten (SQL path tak terjangkau — binder memaksa PK ada, `binder/mod.rs:861`), kini diganti sentinel eksplisit `usize::MAX` (no-PK) dengan guard terdokumentasi; `copyfrom.rs` dibuat defensif (`get`/`and_then`). Perilaku SQL tak berubah. | `akar-core/akar-catalog/src/lib.rs`, `akar-storage/src/table.rs`, `akar-processor/src/physical/write_ops/copyfrom.rs` | ✅ DONE |
+| P49.3 | **Re-run benchmark suite & sinkronisasi docs** — `test_wcoj_bench.rs` + `cargo test --workspace` dijalankan ulang: gate **1,354 passed / 0 failed / 5 ignored** (tiada penurunan); star 10,000 / chain 10,000 / triangle 10,660 rows identik; setup fan DB 2.07 s / triangle 540 ms (debug, baseline 1.45 s — variasi timing, tak ada delta correctness). Angka benchmark WCOJ hanya ada di `implementation_plan.md` (bukan `BENCHMARK_COMPARISON.md`/`SPEC.md` — keduanya tidak memuat setup WCOJ), jadi tak ada dokumen lain yang perlu diubah. | `akar-main/tests/test_wcoj_bench.rs`, `akar-main/benches/ladybug_suite.rs`, docs | ✅ DONE |
 
 **Urutan kerja:** P49.1 → P49.2 → P49.3 (bench cleanup dulu — sekali jalan dengan gate).
-**Gate:** `cargo test --workspace` hijau (1,354 passed / 0 failed / 5 ignored sejak P48.17 — tak boleh ada penurunan; P49.1/2 tidak menambah test, P49.3 hanya sinkronisasi docs).
+**Gate:** `cargo test --workspace` hijau = **1,354 passed / 0 failed / 5 ignored** (tiada penurunan dari P48.17; P49.1/2 tidak menambah test, P49.3 hanya sinkronisasi docs).
 
 ---
 
@@ -103,10 +106,10 @@
 | **Sprint 14** | **P45 Production Readiness** | **5** | ✅ COMPLETE — catalog serialization, data durability, operator parity (crates.io publishing CANCELLED) |
 | **Sprint 15** | **P46 WCOJ + P47 Multi-Process** | **8** | ✅ COMPLETE — planner-side WCOJ (Intersect), embedded server mode (akar-server + connect_tcp, 12+5 tests) |
 | **Sprint 16** | **P48 Correctness & Benchmark Unblock** | **~10** | ✅ **COMPLETE 2026-08-07** — 18 item correctness/perf unblock (lihat tabel Sprint 16), gate 1,354 hijau tanpa skip |
-| **Sprint 17** | **P49 Post-Benchmark Hardening & Cleanup** | **~3** | 🔜 IN PROGRESS — bench BUG-A workaround cleanup, pk_col default guard, benchmark re-run + docs sync |
+| **Sprint 17** | **P49 Post-Benchmark Hardening & Cleanup** | **~3** | ✅ **COMPLETE 2026-08-07** — bench BUG-A workaround → node-predicate syntax, `pk_col` default guard dihapus, benchmark re-run (gate 1,354 hijau) + docs sync |
 
 ---
 
 ## Detail yang Sudah Diimplementasikan
 
-Detail Sprint 12-15 (P41-P47), dependency graph, audit fixes summary (30/31, 1 N/A), dan design decisions log (#1-#68) dipindahkan ke [`docs/archive/implemented-context.md`](docs/archive/implemented-context.md). Detail Sprint 16 (P48) tersimpan di commit history (satu commit per P48: `2fe874c`=P48.14, `dc023bc`=P48.15, `5bb6e74`=P48.16, `b8b51db`=P48.17, `fbd1681`=cleanup naming).
+Detail Sprint 12-15 (P41-P47), dependency graph, audit fixes summary (30/31, 1 N/A), dan design decisions log (#1-#68) dipindahkan ke [`docs/archive/implemented-context.md`](docs/archive/implemented-context.md). Detail Sprint 16 (P48) tersimpan di commit history (satu commit per P48: `2fe874c`=P48.14, `dc023bc`=P48.15, `5bb6e74`=P48.16, `b8b51db`=P48.17, `fbd1681`=cleanup naming). Detail Sprint 17 (P49) tersimpan di commit P49 (bench cleanup, `pk_col` guard, docs sync).

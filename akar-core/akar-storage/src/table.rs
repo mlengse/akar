@@ -52,9 +52,23 @@ pub struct NodeTable {
     pub persistence_dirty: bool,
 }
 
+/// Sentinel for `NodeTable::primary_key_column` when a node table has no PK
+/// column. SQL always requires a PK (binder rejects `CREATE NODE TABLE` without
+/// one), so via the SQL path this is unreachable; the sentinel only covers
+/// internally/test-constructed tables and keeps "no PK" explicit instead of
+/// silently defaulting to column 0 (P49.2).
+pub const NO_PRIMARY_KEY: usize = usize::MAX;
+
 impl NodeTable {
     pub fn new(table_id: u64, name: String, columns: Vec<ColumnDefinition>) -> Self {
-        let primary_key_column = columns.iter().position(|c| c.is_primary_key).unwrap_or(0);
+        // SQL guarantees a PK exists (binder/mod.rs:861 rejects tables without
+        // one), so the fallback is unreachable in production. Use an explicit
+        // sentinel instead of a silent 0 so a table with no PK column never
+        // accidentally dedups on column 0 (P49.2).
+        let primary_key_column = columns
+            .iter()
+            .position(|c| c.is_primary_key)
+            .unwrap_or(NO_PRIMARY_KEY);
         Self {
             table_id,
             name,

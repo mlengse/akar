@@ -440,7 +440,15 @@ impl Catalog {
         }
         let table_id = self.next_id;
         self.next_id += 1;
-        let pk_col = columns.iter().position(|c| c.is_primary_key).unwrap_or(0);
+        // SQL always requires a PK (binder/mod.rs:861 rejects node tables
+        // without one), so this position is present in production. Use an
+        // explicit sentinel instead of silently defaulting to column 0 so a
+        // table with no PK column never falsely reports column 0 as the PK
+        // (P49.2). `primary_key_column()` returns None for the sentinel.
+        let pk_col = columns
+            .iter()
+            .position(|c| c.is_primary_key)
+            .unwrap_or(usize::MAX);
         let entry = NodeTableEntry {
             table_id,
             name: name.clone(),

@@ -29,12 +29,13 @@ fn build_fan_db() -> (std::sync::Arc<Database>, Connection) {
 
     let t0 = Instant::now();
     // r1: centers 0..99, each -> 10 Persons (a, a+10]. 1000 edges total.
-    // P48.3 variable-comparison shape (node predicates are ignored in CREATE — BUG-A).
+    // P49.1: node-predicate syntax (P48.17 fixes the old BUG-A where `{id: X}`
+    // was ignored in CREATE) — pins the center a while keeping the b range as WHERE.
     for a in 0..100 {
         exec(
             &conn,
             &format!(
-                "MATCH (a:Person), (b:Person) WHERE a.id >= {a} AND a.id <= {a} AND b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)"
+                "MATCH (a:Person {{id: {a}}}), (b:Person) WHERE b.id > a.id AND b.id <= a.id + 10 CREATE (a)-[:r1]->(b)"
             ),
         );
     }

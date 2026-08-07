@@ -59,12 +59,12 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 let src_pk_type = self
                     .table_catalog
                     .get_node_table(rel.src_table_id)
-                    .map(|n| n.columns[n.primary_key_column].logical_type)
+                    .and_then(|n| n.columns.get(n.primary_key_column).map(|c| c.logical_type))
                     .unwrap_or(akar_common::types::LogicalTypeID::Int64);
                 let dst_pk_type = self
                     .table_catalog
                     .get_node_table(rel.dst_table_id)
-                    .map(|n| n.columns[n.primary_key_column].logical_type)
+                    .and_then(|n| n.columns.get(n.primary_key_column).map(|c| c.logical_type))
                     .unwrap_or(akar_common::types::LogicalTypeID::Int64);
                 let synthetic = |name: &str, logical_type: akar_common::types::LogicalTypeID| {
                     akar_catalog::CatalogColumn {
