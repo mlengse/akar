@@ -15,14 +15,14 @@ default = ["parquet"]
 parquet = ["akar-storage/parquet"]
 
 [dependencies]
-akar-common = { path = "../akar-common" }
-akar-catalog = { path = "../akar-catalog" }
-akar-planner = { path = "../akar-planner" }
-akar-function = { path = "../akar-function" }
-akar-storage = { path = "../akar-storage" }
-akar-parser = { path = "../akar-parser" }
-akar-fts = { path = "../akar-fts" }
-akar-vector = { path = "../akar-vector" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
+akar-planner = { path = "../akar-planner", version = "0.1.0" }
+akar-function = { path = "../akar-function", version = "0.1.0" }
+akar-storage = { path = "../akar-storage", version = "0.1.0" }
+akar-parser = { path = "../akar-parser", version = "0.1.0" }
+akar-fts = { path = "../akar-fts", version = "0.1.0" }
+akar-vector = { path = "../akar-vector", version = "0.1.0" }
 tracing.workspace = true
 hashbrown.workspace = true
 ahash.workspace = true

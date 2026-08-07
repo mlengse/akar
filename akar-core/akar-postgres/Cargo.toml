@@ -11,8 +11,8 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-function = { path = "../akar-function" }
-akar-extension = { path = "../akar-extension" }
+akar-function = { path = "../akar-function", version = "0.1.0" }
+akar-extension = { path = "../akar-extension", version = "0.1.0" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"], optional = true }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"], optional = true }
 tracing.workspace = true
@@ -22,9 +22,9 @@ default = []
 native = ["tokio", "tokio-postgres"]
 
 [dev-dependencies]
-akar-catalog = { path = "../akar-catalog" }
-akar-common = { path = "../akar-common" }
-akar-extension = { path = "../akar-extension" }
+akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-extension = { path = "../akar-extension", version = "0.1.0" }
 
 [lints]
 workspace = true

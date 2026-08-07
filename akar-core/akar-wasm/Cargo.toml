@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = true
-description = "WASM bindings for Akar — embedded graph database"
+description = "WASM bindings for Akar â€” embedded graph database"
 keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
@@ -14,8 +14,8 @@ authors.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-akar-main = { path = "../akar-main", default-features = false }
-akar-common = { path = "../akar-common" }
+akar-main = { path = "../akar-main", version = "0.1.0", default-features = false }
+akar-common = { path = "../akar-common", version = "0.1.0" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde-wasm-bindgen = "0.6"

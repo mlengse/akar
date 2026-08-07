@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-main = { path = "../akar-main", features = ["parquet-export"] }
-akar-storage = { path = "../akar-storage" }
-akar-common = { path = "../akar-common" }
+akar-main = { path = "../akar-main", version = "0.1.0", features = ["parquet-export"] }
+akar-storage = { path = "../akar-storage", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0.103"
 serde_json = "1.0"

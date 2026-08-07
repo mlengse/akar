@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common" }
-akar-function = { path = "../akar-function" }
-akar-extension = { path = "../akar-extension" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-function = { path = "../akar-function", version = "0.1.0" }
+akar-extension = { path = "../akar-extension", version = "0.1.0" }
 serde_json.workspace = true
 tracing.workspace = true
 ureq.workspace = true

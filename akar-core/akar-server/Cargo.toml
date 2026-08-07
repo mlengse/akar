@@ -5,14 +5,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = true
-description = "Akar embedded server — multi-process access over TCP (P47)"
+description = "Akar embedded server â€” multi-process access over TCP (P47)"
 keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-main = { path = "../akar-main" }
-akar-common = { path = "../akar-common" }
+akar-main = { path = "../akar-main", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
 arrow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -11,15 +11,15 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common" }
-akar-planner = { path = "../akar-planner" }
-akar-storage = { path = "../akar-storage" }
-akar-binder = { path = "../akar-binder" }
-akar-parser = { path = "../akar-parser" }
+akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-planner = { path = "../akar-planner", version = "0.1.0" }
+akar-storage = { path = "../akar-storage", version = "0.1.0" }
+akar-binder = { path = "../akar-binder", version = "0.1.0" }
+akar-parser = { path = "../akar-parser", version = "0.1.0" }
 tracing.workspace = true
 
 [dev-dependencies]
-akar-parser = { path = "../akar-parser" }
+akar-parser = { path = "../akar-parser", version = "0.1.0" }
 
 [lints]
 workspace = true
