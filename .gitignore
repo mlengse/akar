@@ -43,7 +43,7 @@ tools/wasm/package/
 *.zip
 *.tar.gz
 
-# Historical audit archive (moved out of repo: C:\Users\anjan\dev\memory\akar-archive)
+# Historical audit archive
 akar-core/docs/archive/
 
 # Generated datasets
