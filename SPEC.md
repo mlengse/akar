@@ -149,23 +149,23 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 
 ### 3.3 Core Subsystem Details
 
-#### Parser ([akar-parser](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-parser))
+#### Parser ([akar-parser](akar-core/akar-parser))
 - **Engine:** `pest.rs` PEG (replaces ANTLR4 C++)
 - **Grammar:** `cypher.pest` — modular, composable rules
 - **AST:** 33 Statement variants (DDL, DML, Transaction, Extension, Attach/Detach/Use DB) + 10 Clause sub-variants
 - **Parity:** ~95%
 
-#### Binder ([akar-binder](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-binder))
+#### Binder ([akar-binder](akar-core/akar-binder))
 - Symbol resolution via `Arc<Mutex<Catalog>>`
 - 33 BoundStatement variants
 - Property type resolution via catalog (not hardcoded)
 - **Parity:** ~90%
 
-#### Planner ([akar-planner](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-planner))
+#### Planner ([akar-planner](akar-core/akar-planner))
 - 58 LogicalOperator variants (ScanNode, ScanRel, HashJoin, CrossProduct, TopK, Intersect, SemiJoin, RecursiveExtend, +12 DDL operators)
 - **Parity:** ~90%
 
-#### Optimizer ([akar-optimizer](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-optimizer))
+#### Optimizer ([akar-optimizer](akar-core/akar-optimizer))
 **18 Flat Passes:**
 
 | # | Pass | Description |
@@ -202,7 +202,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 
 **Parity:** ~95% (exceeds C++ with 17 passes)
 
-#### Processor ([akar-processor](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-processor))
+#### Processor ([akar-processor](akar-core/akar-processor))
 - 48 physical operator structs (no single enum; DDL ops wired via mapper)
 - Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`)
 - Parallel aggregation via `AggregateHashTable`
@@ -211,7 +211,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 - `BinaryHeap` O(n log k) TopK
 - **Parity:** ~90% essential, ~66% total count (split-phase accounting)
 
-#### Storage ([akar-storage](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-storage))
+#### Storage ([akar-storage](akar-core/akar-storage))
 
 | Component | Description |
 |-----------|-------------|
@@ -227,7 +227,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | Overflow pages | `.ovf` sidecar for oversized values |
 | CSV/Parquet readers | Native readers with Arrow type mapping |
 
-#### Transaction ([akar-transaction](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-transaction))
+#### Transaction ([akar-transaction](akar-core/akar-transaction))
 - MVCC with AUTO/MANUAL modes
 - OCC row-level conflict detection (`RowConflictTracker`)
 - Concurrent multi-writer via `AtomicBool` + `Condvar`
@@ -294,21 +294,21 @@ Special: `ANY`, `NULL`, `RDF_VARIANT`
 
 | Extension | Type | Crate | Description |
 |-----------|------|-------|-------------|
-| JSON | Native Rust | [akar-json](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-json) | `json_extract`, `json_valid`, `json_type`, `json_structure`, `json_contains` |
-| Full-Text Search | Native Rust | [akar-fts](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-fts) | Stemmer, tokenizer, TF-IDF, BM25, stop words |
-| Vector | Native Rust | [akar-vector](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-vector) | HNSW index, vector similarity search |
-| Graph Algorithms | Native Rust | [akar-algo](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-algo) | PageRank, WCC, SCC, K-Core, Louvain, spanning forest |
-| HTTP/S3 | Native Rust | [akar-httpfs](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-httpfs) | HTTP/HTTPS/S3 file reads |
-| DuckDB | Rust crate | [akar-duckdb](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-duckdb) | `duckdb_query`, `duckdb_scan` |
-| SQLite | Native rusqlite | [akar-sqlite](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-sqlite) | `sqlite_query`, `sqlite_scan` |
-| PostgreSQL | tokio-postgres | [akar-postgres](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-postgres) | `sql_query` |
-| Neo4j | Native Rust | [akar-neo4j](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-neo4j) | Bolt protocol integration |
-| LLM | Native Rust | [akar-llm](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-llm) | LLM function integration |
-| Delta Lake | DuckDB delegation | [akar-delta](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-delta) | `delta_scan` |
-| Iceberg | DuckDB delegation | [akar-iceberg](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-iceberg) | `iceberg_scan`, `iceberg_metadata` |
-| Azure | DuckDB delegation | [akar-azure](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-azure) | `azure_scan` (abfss:// URI) |
-| Unity Catalog | DuckDB delegation | [akar-unity-catalog](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-unity-catalog) | `uc_scan` |
-| Server | Native Rust | [akar-server](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-server) | TCP listener + JSON framing |
+| JSON | Native Rust | [akar-json](akar-core/akar-json) | `json_extract`, `json_valid`, `json_type`, `json_structure`, `json_contains` |
+| Full-Text Search | Native Rust | [akar-fts](akar-core/akar-fts) | Stemmer, tokenizer, TF-IDF, BM25, stop words |
+| Vector | Native Rust | [akar-vector](akar-core/akar-vector) | HNSW index, vector similarity search |
+| Graph Algorithms | Native Rust | [akar-algo](akar-core/akar-algo) | PageRank, WCC, SCC, K-Core, Louvain, spanning forest |
+| HTTP/S3 | Native Rust | [akar-httpfs](akar-core/akar-httpfs) | HTTP/HTTPS/S3 file reads |
+| DuckDB | Rust crate | [akar-duckdb](akar-core/akar-duckdb) | `duckdb_query`, `duckdb_scan` |
+| SQLite | Native rusqlite | [akar-sqlite](akar-core/akar-sqlite) | `sqlite_query`, `sqlite_scan` |
+| PostgreSQL | tokio-postgres | [akar-postgres](akar-core/akar-postgres) | `sql_query` |
+| Neo4j | Native Rust | [akar-neo4j](akar-core/akar-neo4j) | Bolt protocol integration |
+| LLM | Native Rust | [akar-llm](akar-core/akar-llm) | LLM function integration |
+| Delta Lake | DuckDB delegation | [akar-delta](akar-core/akar-delta) | `delta_scan` |
+| Iceberg | DuckDB delegation | [akar-iceberg](akar-core/akar-iceberg) | `iceberg_scan`, `iceberg_metadata` |
+| Azure | DuckDB delegation | [akar-azure](akar-core/akar-azure) | `azure_scan` (abfss:// URI) |
+| Unity Catalog | DuckDB delegation | [akar-unity-catalog](akar-core/akar-unity-catalog) | `uc_scan` |
+| Server | Native Rust | [akar-server](akar-core/akar-server) | TCP listener + JSON framing |
 
 Extensions are compiled statically via Cargo feature flags:
 
@@ -321,7 +321,7 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 
 ## 8. Graph Data Science (GDS) Framework
 
-15 algorithms implemented in [akar-graph](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-graph) + [akar-algo](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-algo):
+15 algorithms implemented in [akar-graph](akar-core/akar-graph) + [akar-algo](akar-core/akar-algo):
 
 | Algorithm | Description |
 |-----------|-------------|
@@ -349,7 +349,7 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 
 ### 9.1 Workspace Configuration
 
-[Cargo.toml](file:///c:/Users/anjan/dev/memory/akar/akar-core/Cargo.toml):
+[Cargo.toml](akar-core/Cargo.toml):
 
 ```toml
 [workspace]
@@ -432,10 +432,10 @@ strip = false
 
 | Workflow | File | Jobs |
 |----------|------|------|
-| **Rust CI** | [rust-ci.yml](file:///c:/Users/anjan/dev/memory/akar/.github/workflows/rust-ci.yml) | 12 jobs (see below) |
-| **Rust Release** | [rust-release.yml](file:///c:/Users/anjan/dev/memory/akar/.github/workflows/rust-release.yml) | Build + publish GitHub Release |
-| **Bench CI** | [bench-ci.yml](file:///c:/Users/anjan/dev/memory/akar/.github/workflows/bench-ci.yml) | Benchmark compilation check |
-| **Fuzz CI** | [fuzz-ci.yml](file:///c:/Users/anjan/dev/memory/akar/.github/workflows/fuzz-ci.yml) | Fuzz testing |
+| **Rust CI** | [rust-ci.yml](.github/workflows/rust-ci.yml) | 12 jobs (see below) |
+| **Rust Release** | [rust-release.yml](.github/workflows/rust-release.yml) | Build + publish GitHub Release |
+| **Bench CI** | [bench-ci.yml](.github/workflows/bench-ci.yml) | Benchmark compilation check |
+| **Fuzz CI** | [fuzz-ci.yml](.github/workflows/fuzz-ci.yml) | Fuzz testing |
 
 ### 10.2 Rust CI Jobs (12)
 
@@ -507,7 +507,7 @@ Triggered by pushing a version tag (`v*`):
 
 ### 11.2 Test Datasets
 
-68 test dataset directories under [dataset/](file:///c:/Users/anjan/dev/memory/akar/dataset) including:
+68 test dataset directories under [dataset/](dataset) including:
 - `tinysnb` — core small-dataset tests
 - `ldbc-sf01` / `lsqb-sf01` — LDBC Social Network Benchmark
 - `fts-*` — Full-text search datasets
@@ -583,7 +583,7 @@ cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M rows
 
 ## 13. Public API
 
-### 13.1 Core API ([akar-main](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-main))
+### 13.1 Core API ([akar-main](akar-core/akar-main))
 
 ```rust
 use akar_main::{Database, Connection, SystemConfig};
@@ -610,13 +610,13 @@ conn.query("CREATE (:Person {name: 'Bob', age: 30})")?;
 conn.query("COMMIT")?;
 ```
 
-### 13.2 C FFI ([akar-c](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-c))
+### 13.2 C FFI ([akar-c](akar-core/akar-c))
 - `extern "C"` API for language bindings
 
-### 13.3 WebAssembly ([akar-wasm](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-wasm))
+### 13.3 WebAssembly ([akar-wasm](akar-core/akar-wasm))
 - `AkarDatabase`, `AkarConnection`, `AkarPreparedStatement` wrappers for Node.js
 
-### 13.4 TCP Server ([akar-server](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-server))
+### 13.4 TCP Server ([akar-server](akar-core/akar-server))
 - Length-prefixed JSON framing over TCP
 - Session bridging via `TransactionManager`
 - Supports concurrent read/write clients
@@ -625,7 +625,7 @@ conn.query("COMMIT")?;
 
 ## 14. Error Handling
 
-Unified error type hierarchy defined in [akar-common](file:///c:/Users/anjan/dev/memory/akar/akar-core/akar-common):
+Unified error type hierarchy defined in [akar-common](akar-core/akar-common):
 
 ```
 AkarError
@@ -686,7 +686,6 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 ## 19. References
 
 - **Research paper:** [Kuzu GDBMS, CIDR 2023](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf) (original architecture)
-- **Benchmark comparison:** [BENCHMARK_COMPARISON.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/BENCHMARK_COMPARISON.md)
-- **Implemented detail archive:** [implemented-context.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/docs/archive/implemented-context.md) (historical task tables, audit findings, design decisions)
-- **Migration guide:** [MIGRATION.md](file:///c:/Users/anjan/dev/memory/akar/MIGRATION.md)
-- **Release process:** [RELEASE.md](file:///c:/Users/anjan/dev/memory/akar/akar-core/RELEASE.md)
+- **Benchmark comparison:** [BENCHMARK_COMPARISON.md](akar-core/BENCHMARK_COMPARISON.md)
+- **Migration guide:** [MIGRATION.md](MIGRATION.md)
+- **Release process:** [RELEASE.md](akar-core/RELEASE.md)

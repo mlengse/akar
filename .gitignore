@@ -43,6 +43,9 @@ tools/wasm/package/
 *.zip
 *.tar.gz
 
+# Historical audit archive (moved out of repo: C:\Users\anjan\dev\memory\akar-archive)
+akar-core/docs/archive/
+
 # Generated datasets
 dataset/binary-demo
 dataset/databases/tinysnb
