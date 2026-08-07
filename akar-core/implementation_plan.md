@@ -1,6 +1,6 @@
 # Akar — Forward Implementation Plan
 
-> **Revision:** 2026-08-08 (Sprint 18 **IN PROGRESS** — P50.1/P50.2 DONE, P50.3/P50.4 via publish nyata: **18/31 published**; **31/31 publishable** (hanya `akar-c` `publish = false`); audit keamanan & lisensi **CLEAN**; rate-limit crates.io = burst 5 lalu 1 crate/10 menit → pacing bottom-up; gate hijau **1,535 passed / 0 failed**; worktree committed d4b3035/deb9494/004b6c1 & pushed; detail di tabel P50)
+> **Revision:** 2026-08-08 (Sprint 18 **IN PROGRESS** — P50.1/P50.2 DONE, P50.3/P50.4 via publish nyata: **18/31 published**; **31/31 publishable** (hanya `akar-c` `publish = false`); audit keamanan & lisensi **CLEAN**; rate-limit crates.io = burst 5 lalu 1 crate/10 menit → pacing bottom-up; gate hijau **1,535 passed / 0 failed**; worktree committed d4b3035/deb9494/004b6c1/9af7995 & pushed; **audit markdown BERES (batch 1)** — semua doc sync ke state 2026-08-08 (1,535 tests, publishing aktif, `akar-main` bukan `akar`), mojibake Cargo.toml fixed; **sisa = audit 32 crate README (batch 2) + lanjut publish checkpoint**; detail di tabel P50)
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 > **Baseline (sekarang):** `cargo test --workspace` → **1,535 passed, 0 failed, 0 ignored**, 32 crates, ~86K LOC (git-tracked), diukur pada worktree saat ini (82 file uncommitted). (Baseline historis di header lama = 1,354 — selisih karena perubahan worktree pasca-P49.3: migrasi test `akar-processor` ke API post-Arrow & sinkronisasi `tests.rs`/`tests_only.rs` (142 test tiap file), plus perbaikan panic `col_indices` kosong di `aggregatehashtable.rs`; baseline lebih lama = 1,310 + 1 fail `test_migration_ingestion` — sudah ditutup P48.5.)
 > **Performance verified (hot path):** Rust 397 µs for `MATCH ... WHERE age > 30 RETURN COUNT(p)` on 10k rows. See [`BENCHMARK_COMPARISON.md`](BENCHMARK_COMPARISON.md).
@@ -38,7 +38,7 @@
 | **P47** | **Multi-Process Access (Embedded Server Mode)** | ✅ **DONE** | **4** | ✅ Sprint 15 |
 | **P48** | **Correctness & Benchmark Unblock** | ✅ **DONE** | **~10** | ✅ **Sprint 16 — COMPLETE** (semua P48.1–P48.18 DONE, gate 1,354 hijau) |
 | **P49** | **Post-Benchmark Hardening & Cleanup** | ✅ **DONE** | **~3** | ✅ **Sprint 17 — COMPLETE** (P49.1–P49.3 DONE — bench syntax bersih, `pk_col` guard, benchmark re-run) |
-| **P50** | **Release Readiness & Publishing** | 🔜 **HIGH** | **~5** | 🔜 Sprint 18 (lihat detail di bawah) — 15/31 published, rate-limit 1/10min |
+| **P50** | **Release Readiness & Publishing** | 🔜 **HIGH** | **~5** | 🔜 Sprint 18 (lihat detail di bawah) — 18/31 published, rate-limit 1/10min |
 
 > [!IMPORTANT]
 > **P1-P49 + AUDIT: ALL COMPLETE** — 1,354 tests passing, 3-way C++ parity verified, 100K/1M scalability measured, WAL append-only redesign (52× speedup), crash recovery stress-tested, release profiles optimized, radixsort OOB fixed, 5 perf optimizations landed, WCOJ planner-side + embedded server mode (Sprint 15), 18 item correctness/benchmark unblock (Sprint 16), dan 3 item post-benchmark hardening (Sprint 17: bench BUG-A workaround → node-predicate syntax, `pk_col` default footgun dihapus, benchmark re-run & docs sync).
@@ -107,7 +107,21 @@
 
 **Urutan kerja:** P50.1 → P50.2 → P50.3 → P50.4 → P50.5 (audit & verifikasi dulu sebelum publish nyata).
 **Gate:** `cargo test --workspace` tetap hijau (1,535 passed / 0 failed) setelah setiap publish; `cargo publish --dry-run` bersih untuk semua 31 crate; tag v0.1.0 terverifikasi build dari source yang dipublish.
-**Prereq publish berikutnya (2026-08-08):** commit worktree (DONE: d4b3035, deb9494, 004b6c1 — pushed ke origin/main); lanjut publish `akar-json` setelah window rate-limit 17:33:24Z, lalu satu-per-10-menit; repo GitHub di-set public oleh user sebelum tag v0.1.0.
+**Prereq publish berikutnya (2026-08-08):** commit worktree (DONE: d4b3035, deb9494, 004b6c1, 9af7995 — pushed ke origin/main); lanjut publish `akar-sqlite` pada window 18:05Z, lalu satu-per-10-menit per tabel checkpoint; repo GitHub di-set public oleh user sebelum tag v0.1.0.
+
+---
+
+## 🗒 NEXT ACTIONS — Sesi Berikutnya (2026-08-08, Sprint 18/P50)
+
+> **Status sesi terakhir (ditutup user ~18:00Z):** publish naik ke **18/31** (`akar-httpfs` ✅ 17:48:53Z, `akar-duckdb` ✅ 17:55Z); audit markdown **batch 1 selesai & committed** (`9af7995`, pushed). Per-crate test counts terverifikasi via `cargo test -p` untuk tabel README (binder 87, processor 142, httpfs 7, postgres 7, dst.). Mojibake `description` di `akar-main`/`akar-server`/`akar-wasm` Cargo.toml diperbaiki (em-dash double-encoded → plain `-`).
+
+**Lanjutkan dari sini (urut):**
+
+1. **Lanjut publish per checkpoint (P50.4)** — jadwal tabel di atas; berikutnya: `akar-sqlite` (18:05Z) → `akar-postgres` (18:15Z) → `akar-neo4j` (18:25Z) → `akar-llm` (18:35Z) → `akar-delta` (18:45Z) → `akar-iceberg` (18:55Z) → `akar-azure` (19:05Z) → `akar-unity-catalog` (19:15Z) → `akar-main` (19:25Z) → `akar-server` (19:35Z) → `akar-wasm` (19:45Z) → `akar-cli` (19:55Z) → `akar-migrate` (20:05Z). Cara: rustrover `execute_terminal_command --command "cargo publish --manifest-path akar-core\<crate>\Cargo.toml -p <crate>"`; verifikasi via crates.io API; update baris ✅ di tabel + angka `18/31` di header/p50.4/Sprint 18.
+2. **Audit markdown batch 2 — 32 crate README** (`akar-core/akar-*/README.md`): cek mojibake (U+FFFD/`â€`), test-count basi, `cargo add akar`/`use akar::` (harus `akar-main`/`akar_main`), klaim "deferred"/"publish = false", contoh API salah (`Database::new` 1-arg, `Connection::new(&db)`, `conn.execute`, `result.iter_rows()`), ref `v1.0.0`. Delegasi agent explore (task cancelled di sesi ini — belum jalan). Cek juga `CLA.md`, root `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `examples/README.md`, `.github/copilot-instructions.md`, template PR, dataset README, ADR 001/003/004/005.
+3. **Publish `akar-main` (19:25Z) — perhatikan catatan P50.3:** optional deps ke crate lain → publish harus jalan dengan default features (tanpa `--all-features`); jika verify gagal karena dep belum publish, batasi feature aktif saat publish.
+4. **P50.5 (setelah 20:05Z + semua publish ✅):** minta user set repo GitHub **public**, lalu tag `v0.1.0` + GitHub Release (release notes: 3-way parity, WAL 52×, crash recovery, WCOJ, embedded server, 1,535 tests, 31 crates di crates.io).
+5. **Verifikasi akhir:** `cargo test --workspace` hijau; `cargo add akar-main` di project kosong berhasil build; README Quick Start contoh (sudah di-fix pakai `Arc::new(Database::new(.., SystemConfig::default()))` + `Connection::new(&db)`) ter-compile.
 
 ---
 
@@ -151,7 +165,7 @@
 | **Sprint 15** | **P46 WCOJ + P47 Multi-Process** | **8** | ✅ COMPLETE — planner-side WCOJ (Intersect), embedded server mode (akar-server + connect_tcp, 12+5 tests) |
 | **Sprint 16** | **P48 Correctness & Benchmark Unblock** | **~10** | ✅ **COMPLETE 2026-08-07** — 18 item correctness/perf unblock (lihat tabel Sprint 16), gate 1,354 hijau tanpa skip |
 | **Sprint 17** | **P49 Post-Benchmark Hardening & Cleanup** | **~3** | ✅ **COMPLETE 2026-08-07** — bench BUG-A workaround → node-predicate syntax, `pk_col` default guard dihapus, benchmark re-run (gate 1,354 hijau) + docs sync |
-| **Sprint 18** | **P50 Release Readiness & Publishing** | **~5** | 🔜 IN PROGRESS — audit metadata/license, version baseline 0.1.0, publish nyata (bottom-up, **15/31 published**), rate-limit 1 crate/10 menit, 31/31 publishable, audit keamanan & lisensi CLEAN, repo GitHub private → public (user), tag v0.1.0 + release notes |
+| **Sprint 18** | **P50 Release Readiness & Publishing** | **~5** | 🔜 IN PROGRESS — audit metadata/license, version baseline 0.1.0, publish nyata (bottom-up, **18/31 published**), rate-limit 1 crate/10 menit, 31/31 publishable, audit keamanan & lisensi CLEAN, **audit markdown batch 1 BERES (commit 9af7995)** — RELEASE/README root+core/MIGRATION root+core/SPEC/CONTRIBUTING/BENCHMARK/adr-002/workflow sync ke 1,535 + publishing aktif + `akar-main`; mojibake `description` fixed di akar-main/server/wasm Cargo.toml; repo GitHub private → public (user), tag v0.1.0 + release notes |
 
 ---
 
