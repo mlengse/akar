@@ -39,8 +39,10 @@ fn test_ddl_schema_survives_restart() {
             .expect("Failed to create sequence");
 
         // Insert rows; the restored table must accept future writes.
-        conn.query("CREATE (:Person {name: 'alice', age: 30})").expect("insert failed");
-        conn.query("CREATE (:Person {name: 'bob', age: 25})").expect("insert failed");
+        conn.query("CREATE (:Person {name: 'alice', age: 30})")
+            .expect("insert failed");
+        conn.query("CREATE (:Person {name: 'bob', age: 25})")
+            .expect("insert failed");
         assert_eq!(db.table_num_rows("Person"), 2);
     }
 
@@ -66,7 +68,8 @@ fn test_ddl_schema_survives_restart() {
 
     // The restored table must accept new writes on top of the durable rows.
     let conn = akar_main::Connection::new(&db);
-    conn.query("CREATE (:Person {name: 'carol', age: 40})").expect("post-restart insert failed");
+    conn.query("CREATE (:Person {name: 'carol', age: 40})")
+        .expect("post-restart insert failed");
     assert_eq!(db.table_num_rows("Person"), 3);
 }
 
@@ -113,9 +116,12 @@ fn test_drop_table_survives_restart() {
 
     let db = Arc::new(akar_main::Database::new(&db_path, config(-1)).expect("Failed to reopen DB"));
     let catalog_arc = db.catalog();
-        let catalog = catalog_arc.lock().expect("lock");
+    let catalog = catalog_arc.lock().expect("lock");
     assert!(catalog.contains("Keep"), "Keep table should survive restart");
-    assert!(!catalog.contains("Drop"), "dropped table should not reappear after restart");
+    assert!(
+        !catalog.contains("Drop"),
+        "dropped table should not reappear after restart"
+    );
 }
 
 #[test]
@@ -183,7 +189,10 @@ fn test_cross_process_ddl_recovery() {
     let db = Arc::new(akar_main::Database::new(&db_path, config(-1)).expect("Failed to reopen DB"));
     let catalog_arc = db.catalog();
     let catalog = catalog_arc.lock().expect("lock");
-    assert!(catalog.contains("Person"), "table created in process A should be visible in process B");
+    assert!(
+        catalog.contains("Person"),
+        "table created in process A should be visible in process B"
+    );
     assert!(
         catalog.contains("Person2"),
         "table created in process B should be visible in process A"

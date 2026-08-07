@@ -47,9 +47,9 @@ fn read_art_varint(data: &[u8], pos: &mut usize) -> Result<u64, StorageError> {
                 "ART index data corrupt: varint has too many continuation bytes".into(),
             ));
         }
-        let byte = *data.get(*pos).ok_or_else(|| {
-            StorageError::Index("ART index data truncated: varint extends past end of buffer".into())
-        })?;
+        let byte = *data
+            .get(*pos)
+            .ok_or_else(|| StorageError::Index("ART index data truncated: varint extends past end of buffer".into()))?;
         *pos += 1;
         result |= ((byte & 0x7F) as u64) << shift;
         if (byte & 0x80) == 0 {
@@ -654,7 +654,8 @@ impl ArtPrimaryKeyIndex {
         }
 
         self.dirty = false;
-        bm.flush_all().map_err(|e| StorageError::Index(format!("Failed to flush ART index: {e}")))
+        bm.flush_all()
+            .map_err(|e| StorageError::Index(format!("Failed to flush ART index: {e}")))
     }
 
     /// Load the ART index from BufferManager-backed pages.

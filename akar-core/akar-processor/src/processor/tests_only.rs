@@ -1,14 +1,23 @@
+use crate::physical_operator::*;
+use crate::processor::QueryProcessor;
+use crate::processor::merge_union_chunks;
+use akar_binder::bound_statement::BoundExpression;
+use akar_common::types::{LogicalTypeID, PhysicalTypeID, Value};
+use akar_common::vector::{DataChunk, ValueVector};
+use akar_function::registry::FunctionRegistry;
+use akar_parser::ast::{Constant, Expression};
+use akar_planner::logical_operator::LogicalOperator;
+use akar_storage::table::{ColumnDefinition, TableCatalog};
+use hashbrown::HashMap;
+use std::sync::{Arc, Mutex};
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hashbrown::HashMap;
-    use akar_binder::bound_statement::BoundExpression;
-    use akar_common::types::{LogicalTypeID, Value};
-    use akar_parser::ast::{Constant, Expression};
-    use akar_storage::table::ColumnDefinition;
 
     fn make_scan_op() -> LogicalOperator {
-        LogicalOperator::ScanNode(akar_planner::logical_operator::LogicalScanNode { predicate: None,
+        LogicalOperator::ScanNode(akar_planner::logical_operator::LogicalScanNode {
+            predicate: None,
             table_name: "Person".into(),
             table_id: 0,
             alias: Some("a".into()),
@@ -54,12 +63,14 @@ mod tests {
             catalog.create_node_table(
                 "Person".into(),
                 vec![
-                    ColumnDefinition { compression: akar_common::enums::CompressionType::Uncompressed,
+                    ColumnDefinition {
+                        compression: akar_common::enums::CompressionType::Uncompressed,
                         name: "name".into(),
                         logical_type: LogicalTypeID::String,
                         is_primary_key: true,
                     },
-                    ColumnDefinition { compression: akar_common::enums::CompressionType::Uncompressed,
+                    ColumnDefinition {
+                        compression: akar_common::enums::CompressionType::Uncompressed,
                         name: "age".into(),
                         logical_type: LogicalTypeID::Int64,
                         is_primary_key: false,
@@ -123,7 +134,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = filter.execute(input).unwrap();
         assert!(!result.is_empty());
         assert_eq!(result[0].size, 5); // All rows pass through
@@ -137,7 +148,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = filter.execute(input).unwrap();
         assert!(result.is_empty());
     }
@@ -150,7 +161,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(10);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = limit.execute(input).unwrap();
         assert_eq!(result[0].size, 3);
     }
@@ -163,7 +174,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(10);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = limit.execute(input).unwrap();
         assert!(!result.is_empty());
     }
@@ -181,7 +192,7 @@ mod tests {
         }
         v1.resize(5);
         v2.resize(5);
-        let input = vec![DataChunk::new(vec![v1, v2])];
+        let input = vec![DataChunk::from_legacy(vec![v1, v2])];
         let result = proj.execute(input).unwrap();
         assert_eq!(result[0].num_fields(), 1); // Only first column
     }
@@ -227,7 +238,7 @@ mod tests {
         let result = proc.execute(&plan).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 1);
-        assert_eq!(result[0].fields[0].get_value(0), Some(Value::Int64(1)));
+        assert_eq!(result[0].get_value(0, 0), Some(Value::Int64(1)));
     }
 
     #[test]
@@ -269,10 +280,10 @@ mod tests {
             v.set_i64(i, vals[i]);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = order.execute(input).unwrap();
         assert!(!result.is_empty());
-        let sorted = result[0].fields[0].get_i64(0).unwrap();
+        let sorted = result[0].get_i64(0, 0).unwrap();
         assert_eq!(sorted, 1); // Min should be first
     }
 
@@ -287,10 +298,10 @@ mod tests {
             v.set_i64(i, vals[i]);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = order.execute(input).unwrap();
         assert!(!result.is_empty());
-        let sorted = result[0].fields[0].get_i64(0).unwrap();
+        let sorted = result[0].get_i64(0, 0).unwrap();
         assert_eq!(sorted, 5); // Max should be first
     }
 
@@ -316,9 +327,9 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(5)); // COUNT = 5
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(5)); // COUNT = 5
     }
 
     #[test]
@@ -332,9 +343,9 @@ mod tests {
             v.set_i64(i, (i + 1) as i64);
         }
         v.resize(4);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(10)); // 1+2+3+4 = 10
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(10)); // 1+2+3+4 = 10
     }
 
     #[test]
@@ -349,10 +360,10 @@ mod tests {
             v.set_i64(i, vals[i]);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3)); // MIN = 3
-        assert_eq!(result[0].fields[1].get_value(0).unwrap(), Value::Int64(99)); // MAX = 99
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(3)); // MIN = 3
+        assert_eq!(result[0].get_value(1, 0).unwrap(), Value::Int64(99)); // MAX = 99
     }
 
     #[test]
@@ -366,10 +377,10 @@ mod tests {
             v.set_i64(i, (i + 1) as i64);
         }
         v.resize(4);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
         // AVG now returns Double (Value::Double)
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Double(2.5)); // (1+2+3+4)/4 = 2.5
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Double(2.5)); // (1+2+3+4)/4 = 2.5
     }
 
     #[test]
@@ -379,7 +390,7 @@ mod tests {
             aggregate_functions: vec!["COUNT".into()],
         };
         let result = agg.execute(vec![]).unwrap();
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(0)); // COUNT of empty = 0
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(0)); // COUNT of empty = 0
     }
 
     // ==================== HashJoin Tests ====================
@@ -389,7 +400,6 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
-            semi_mask: None,
         };
         // Build side: keys [1, 2, 3]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -403,8 +413,8 @@ mod tests {
         probe.set_i64(1, 3);
         probe.set_i64(2, 4);
         probe.resize(3);
-        let build_chunk = DataChunk::new(vec![build]);
-        let probe_chunk = DataChunk::new(vec![probe]);
+        let build_chunk = DataChunk::from_legacy(vec![build]);
+        let probe_chunk = DataChunk::from_legacy(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Should match 2 and 3 (2 rows)
         assert!(!result.is_empty());
@@ -415,7 +425,6 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
-            semi_mask: None,
         };
         // Build: [1, 2]
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 2);
@@ -427,8 +436,8 @@ mod tests {
         probe.set_i64(0, 3);
         probe.set_i64(1, 4);
         probe.resize(2);
-        let build_chunk = DataChunk::new(vec![build]);
-        let probe_chunk = DataChunk::new(vec![probe]);
+        let build_chunk = DataChunk::from_legacy(vec![build]);
+        let probe_chunk = DataChunk::from_legacy(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         assert!(result.is_empty()); // No matches
     }
@@ -438,7 +447,6 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
-            semi_mask: None,
         };
         let build = ValueVector::new(PhysicalTypeID::Int64, 0);
         let mut probe = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -446,8 +454,8 @@ mod tests {
         probe.set_i64(1, 2);
         probe.set_i64(2, 3);
         probe.resize(3);
-        let build_chunk = DataChunk::new(vec![build]);
-        let probe_chunk = DataChunk::new(vec![probe]);
+        let build_chunk = DataChunk::from_legacy(vec![build]);
+        let probe_chunk = DataChunk::from_legacy(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         assert!(result.is_empty()); // Empty build G�� no matches
     }
@@ -460,7 +468,6 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
-            semi_mask: None,
         };
         // Build side with NULLs mixed with real values
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
@@ -474,8 +481,8 @@ mod tests {
         probe.set_i64(1, 3);
         // Row 2 stays NULL
         probe.resize(3);
-        let build_chunk = DataChunk::new(vec![build]);
-        let probe_chunk = DataChunk::new(vec![probe]);
+        let build_chunk = DataChunk::from_legacy(vec![build]);
+        let probe_chunk = DataChunk::from_legacy(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // Should match 1G��1 (1 row) and 3G��3 (1 row)
         // NULLs should NOT match each other
@@ -488,7 +495,6 @@ mod tests {
         let join = PhysicalHashJoin {
             build_columns: vec![0],
             probe_columns: vec![0],
-            semi_mask: None,
         };
         let mut build = ValueVector::new(PhysicalTypeID::Int64, 3);
         build.resize(3);
@@ -502,136 +508,11 @@ mod tests {
         probe.set_null(1, true);
         probe.set_null(2, true);
 
-        let build_chunk = DataChunk::new(vec![build]);
-        let probe_chunk = DataChunk::new(vec![probe]);
+        let build_chunk = DataChunk::from_legacy(vec![build]);
+        let probe_chunk = DataChunk::from_legacy(vec![probe]);
         let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
         // NULL = NULL is unknown in SQL, so no matches
         assert!(result.is_empty());
-    }
-
-    // ==================== SemiMasker (SIP) Tests ====================
-
-    #[test]
-    fn test_semi_masker_basic() {
-        // Create a semi-masker that collects Int64 values (node offsets)
-        let mask = NodeSemiMask::new(0);
-        let masker = PhysicalSemiMasker {
-            key_column: 0,
-            mask: mask.clone(),
-        };
-
-        // Input: chunk with Int64 values representing node offsets
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 3);
-        v.resize(3);
-        v.set_i64(0, 10);
-        v.set_i64(1, 20);
-        v.set_i64(2, 30);
-        let input = vec![DataChunk::new(vec![v])];
-        let result = masker.execute(input).unwrap();
-        assert_eq!(result.len(), 1, "SemiMasker should pass through input");
-
-        // Verify mask collected offsets by checking the underlying shared set
-        let collected = mask.masked_offsets.lock().unwrap();
-        assert!(collected.contains(&10), "Offset 10 should be masked");
-        assert!(collected.contains(&20), "Offset 20 should be masked");
-        assert!(collected.contains(&30), "Offset 30 should be masked");
-        assert!(!collected.contains(&40), "Offset 40 should NOT be masked");
-    }
-
-    #[test]
-    fn test_scan_with_semi_mask() {
-        // Create a semi-mask with offsets 1, 3 (only allow these)
-        let mask = NodeSemiMask::new(0);
-        mask.mask(1);
-        mask.mask(3);
-        mask.finalize();
-
-        // Create scan with 4 rows: offsets 0..3
-        let mut scan = PhysicalScan::new("test".into(), 0, 10);
-        let data = vec![
-            vec![
-                Value::InternalID(akar_common::types::InternalID { offset: 0, table_id: 0 }),
-                Value::InternalID(akar_common::types::InternalID { offset: 1, table_id: 0 }),
-                Value::InternalID(akar_common::types::InternalID { offset: 2, table_id: 0 }),
-                Value::InternalID(akar_common::types::InternalID { offset: 3, table_id: 0 }),
-            ],
-            vec![
-                Value::Int64(100),
-                Value::Int64(200),
-                Value::Int64(300),
-                Value::Int64(400),
-            ],
-        ];
-        let columns = vec![
-            ColumnDefinition { compression: akar_common::enums::CompressionType::Uncompressed,
-                name: "id".into(),
-                logical_type: LogicalTypeID::InternalID,
-                is_primary_key: false,
-            },
-            ColumnDefinition { compression: akar_common::enums::CompressionType::Uncompressed,
-                name: "val".into(),
-                logical_type: LogicalTypeID::Int64,
-                is_primary_key: false,
-            },
-        ];
-        scan = scan.with_data(data, columns);
-        scan = scan.with_semi_mask(mask, 0); // mask on column 0 (InternalID)
-
-        let result = scan.execute(vec![]).unwrap();
-        assert_eq!(result.len(), 1, "Should produce one chunk");
-        assert_eq!(result[0].size, 2, "Should have 2 rows (offsets 1 and 3)");
-
-        // Verify the values
-        let val_field = &result[0].fields[1];
-        assert_eq!(val_field.get_value(0), Some(Value::Int64(200)));
-        assert_eq!(val_field.get_value(1), Some(Value::Int64(400)));
-    }
-
-    #[test]
-    fn test_semi_mask_uninitialized_passes_all() {
-        // An uninitialized mask should pass all rows (initialized = false)
-        let mask = NodeSemiMask::new(0);
-        // Don't call finalize G�� mask is not initialized
-
-        assert!(mask.is_masked(999), "Uninitialized mask should pass all offsets");
-    }
-
-    #[test]
-    fn test_hash_join_with_semi_mask_collects_build_keys() {
-        // When a PhysicalHashJoin has a semi_mask, build-side keys are collected
-        let mask = NodeSemiMask::new(0);
-        let join = PhysicalHashJoin {
-            build_columns: vec![0],
-            probe_columns: vec![0],
-            semi_mask: Some(mask.clone()),
-        };
-
-        // Build side with Int64 keys
-        let mut build_v = ValueVector::new(PhysicalTypeID::Int64, 3);
-        build_v.set_i64(0, 5);
-        build_v.set_i64(1, 15);
-        build_v.set_i64(2, 25);
-        build_v.resize(3);
-
-        // Probe side
-        let mut probe_v = ValueVector::new(PhysicalTypeID::Int64, 3);
-        probe_v.set_i64(0, 5);
-        probe_v.set_i64(1, 15);
-        probe_v.set_i64(2, 35);
-        probe_v.resize(3);
-
-        let build_chunk = DataChunk::new(vec![build_v]);
-        let probe_chunk = DataChunk::new(vec![probe_v]);
-        let result = join.execute_binary(&[build_chunk], &[probe_chunk]).unwrap();
-
-        // Should match 5G��5 and 15G��15 (2 rows). 35 has no build match.
-        assert!(!result.is_empty(), "Expected 2 matching rows");
-
-        // Verify mask collected build-side keys via underlying shared set
-        let collected = mask.masked_offsets.lock().unwrap();
-        assert!(collected.contains(&5), "Offset 5 should be in mask");
-        assert!(collected.contains(&15), "Offset 15 should be in mask");
-        assert!(collected.contains(&25), "Offset 25 should be in mask");
     }
 
     #[test]
@@ -647,16 +528,16 @@ mod tests {
         v.set_i64(3, 2);
         v.set_null(4, true); // NULL
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = order.execute(input).unwrap();
         assert!(!result.is_empty());
         // First three should be 1, 2, 3 (sorted ascending)
-        assert_eq!(result[0].fields[0].get_i64(0).unwrap(), 1);
-        assert_eq!(result[0].fields[0].get_i64(1).unwrap(), 2);
-        assert_eq!(result[0].fields[0].get_i64(2).unwrap(), 3);
+        assert_eq!(result[0].get_i64(0, 0).unwrap(), 1);
+        assert_eq!(result[0].get_i64(0, 1).unwrap(), 2);
+        assert_eq!(result[0].get_i64(0, 2).unwrap(), 3);
         // Last two should be NULL
-        assert!(result[0].fields[0].is_null(3));
-        assert!(result[0].fields[0].is_null(4));
+        assert!(result[0].is_null(0, 3));
+        assert!(result[0].is_null(0, 4));
     }
 
     #[test]
@@ -668,7 +549,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = limit.execute(input).unwrap();
         assert!(result.is_empty());
     }
@@ -682,7 +563,7 @@ mod tests {
             v.set_i64(i, i as i64);
         }
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = limit.execute(input).unwrap();
         assert!(result.is_empty());
     }
@@ -701,10 +582,10 @@ mod tests {
         v.set_null(3, true);
         v.set_i64(4, 30);
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
         // COUNT of [10, NULL, 20, NULL, 30] = 3
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(3));
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(3));
     }
 
     #[test]
@@ -721,10 +602,10 @@ mod tests {
         v.set_null(3, true);
         v.set_i64(4, 30);
         v.resize(5);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
         let result = agg.execute(input).unwrap();
         // SUM of [10, NULL, 20, NULL, 30] = 60
-        assert_eq!(result[0].fields[0].get_value(0).unwrap(), Value::Int64(60));
+        assert_eq!(result[0].get_value(0, 0).unwrap(), Value::Int64(60));
     }
 
     #[test]
@@ -748,7 +629,7 @@ mod tests {
             vals.set_i64(i, i as i64);
         }
         vals.resize(n);
-        let input = vec![DataChunk::new(vec![keys, vals])];
+        let input = vec![DataChunk::from_legacy(vec![keys, vals])];
         let result = agg.execute(input).unwrap();
         assert!(!result.is_empty());
         // Result should have 3 groups: key=1 (count=2), key=NULL (count=2), key=2 (count=2)
@@ -764,7 +645,7 @@ mod tests {
         v.set_i64(2, 3);
         v.set_i64(3, 4);
         v.resize(4);
-        let input = vec![DataChunk::new(vec![v])];
+        let input = vec![DataChunk::from_legacy(vec![v])];
 
         // Variable filter on first field: non-null rows pass
         let filter = PhysicalFilter::new(Expression::Variable("a".into()));
@@ -787,7 +668,7 @@ mod tests {
     fn test_empty_input_through_pipeline() {
         // Empty input should produce empty output (no rows to process)
         let filter = PhysicalFilter::new(Expression::Constant(Constant::Bool(true)));
-        let result = filter.execute(vec![DataChunk::new(vec![])]).unwrap();
+        let result = filter.execute(vec![DataChunk::from_legacy(vec![])]).unwrap();
         // Filter with 0 rows produces 0 output chunks (nothing to filter)
         assert!(result.is_empty());
     }
@@ -800,7 +681,7 @@ mod tests {
             v.set_i64(i, *val);
         }
         v.resize(values.len());
-        DataChunk::new(vec![v])
+        DataChunk::from_legacy(vec![v])
     }
 
     #[test]
@@ -811,21 +692,21 @@ mod tests {
         left_v.set_i64(1, 2);
         left_v.set_i64(2, 3);
         left_v.resize(3);
-        let left_data = vec![DataChunk::new(vec![left_v])];
+        let left_data = vec![DataChunk::from_legacy(vec![left_v])];
         let mut right_v = ValueVector::new(PhysicalTypeID::Int64, 2);
         right_v.set_i64(0, 4);
         right_v.set_i64(1, 5);
         right_v.resize(2);
-        let right_data = vec![DataChunk::new(vec![right_v])];
+        let right_data = vec![DataChunk::from_legacy(vec![right_v])];
         let result = merge_union_chunks(left_data, right_data, true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 5);
         // Verify values in order
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
-        assert_eq!(result[0].field(0).get_i64(1), Some(2));
-        assert_eq!(result[0].field(0).get_i64(2), Some(3));
-        assert_eq!(result[0].field(0).get_i64(3), Some(4));
-        assert_eq!(result[0].field(0).get_i64(4), Some(5));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
+        assert_eq!(result[0].get_i64(0, 1), Some(2));
+        assert_eq!(result[0].get_i64(0, 2), Some(3));
+        assert_eq!(result[0].get_i64(0, 3), Some(4));
+        assert_eq!(result[0].get_i64(0, 4), Some(5));
     }
 
     #[test]
@@ -838,17 +719,17 @@ mod tests {
         let mut v2 = ValueVector::new(PhysicalTypeID::Int64, 1);
         v2.set_i64(0, 3);
         v2.resize(1);
-        let left = vec![DataChunk::new(vec![v1]), DataChunk::new(vec![v2])];
+        let left = vec![DataChunk::from_legacy(vec![v1]), DataChunk::from_legacy(vec![v2])];
         let mut rv = ValueVector::new(PhysicalTypeID::Int64, 2);
         rv.set_i64(0, 4);
         rv.set_i64(1, 5);
         rv.resize(2);
-        let right = vec![DataChunk::new(vec![rv])];
+        let right = vec![DataChunk::from_legacy(vec![rv])];
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 5);
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
-        assert_eq!(result[0].field(0).get_i64(4), Some(5));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
+        assert_eq!(result[0].get_i64(0, 4), Some(5));
     }
 
     #[test]
@@ -859,13 +740,13 @@ mod tests {
         lv.set_i64(1, 2);
         lv.set_i64(2, 3);
         lv.resize(3);
-        let left = vec![DataChunk::new(vec![lv])];
+        let left = vec![DataChunk::from_legacy(vec![lv])];
         let mut rv = ValueVector::new(PhysicalTypeID::Int64, 3);
         rv.set_i64(0, 2);
         rv.set_i64(1, 3);
         rv.set_i64(2, 4);
         rv.resize(3);
-        let right = vec![DataChunk::new(vec![rv])];
+        let right = vec![DataChunk::from_legacy(vec![rv])];
         let result = merge_union_chunks(left, right, false).unwrap();
         assert_eq!(result.len(), 1);
         // Distinct values: {1, 2, 3, 4} G�� 4 rows
@@ -875,14 +756,14 @@ mod tests {
     #[test]
     fn test_union_column_mismatch() {
         // Column count mismatch should produce an error
-        let left = vec![DataChunk::new(vec![
+        let left = vec![DataChunk::from_legacy(vec![
             ValueVector::new(PhysicalTypeID::Int64, 1),
             ValueVector::new(PhysicalTypeID::Int64, 1),
         ])];
-        let right = vec![DataChunk::new(vec![ValueVector::new(PhysicalTypeID::Int64, 1)])];
+        let right = vec![DataChunk::from_legacy(vec![ValueVector::new(PhysicalTypeID::Int64, 1)])];
         let result = merge_union_chunks(left, right, true);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("column count mismatch"));
+        assert!(result.unwrap_err().to_string().contains("column count mismatch"));
     }
 
     #[test]
@@ -892,11 +773,11 @@ mod tests {
         rv.set_i64(0, 42);
         rv.set_i64(1, 43);
         rv.resize(2);
-        let right = vec![DataChunk::new(vec![rv])];
+        let right = vec![DataChunk::from_legacy(vec![rv])];
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 2);
-        assert_eq!(result[0].field(0).get_i64(0), Some(42));
+        assert_eq!(result[0].get_i64(0, 0), Some(42));
     }
 
     #[test]
@@ -905,7 +786,7 @@ mod tests {
         lv.set_i64(0, 99);
         lv.set_i64(1, 100);
         lv.resize(2);
-        let left = vec![DataChunk::new(vec![lv])];
+        let left = vec![DataChunk::from_legacy(vec![lv])];
         let right = vec![];
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result.len(), 1);
@@ -922,21 +803,21 @@ mod tests {
         let mut left_v2 = ValueVector::new(PhysicalTypeID::String, 2);
         left_v2.push_string("hello").unwrap();
         left_v2.push_string("world").unwrap();
-        let left = vec![DataChunk::new(vec![left_v1, left_v2])];
+        let left = vec![DataChunk::from_legacy(vec![left_v1, left_v2])];
 
         let mut right_v1 = ValueVector::new(PhysicalTypeID::Int64, 1);
         right_v1.set_i64(0, 3);
         right_v1.resize(1);
         let mut right_v2 = ValueVector::new(PhysicalTypeID::String, 1);
         right_v2.push_string("foo").unwrap();
-        let right = vec![DataChunk::new(vec![right_v1, right_v2])];
+        let right = vec![DataChunk::from_legacy(vec![right_v1, right_v2])];
 
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 3);
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
-        assert_eq!(result[0].field(0).get_i64(1), Some(2));
-        assert_eq!(result[0].field(0).get_i64(2), Some(3));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
+        assert_eq!(result[0].get_i64(0, 1), Some(2));
+        assert_eq!(result[0].get_i64(0, 2), Some(3));
     }
 
     #[test]
@@ -946,29 +827,29 @@ mod tests {
         lv.set_i64(0, 1);
         lv.set_i64(1, 1);
         lv.resize(2);
-        let left = vec![DataChunk::new(vec![lv])];
+        let left = vec![DataChunk::from_legacy(vec![lv])];
         let mut rv = ValueVector::new(PhysicalTypeID::Int64, 2);
         rv.set_i64(0, 1);
         rv.set_i64(1, 1);
         rv.resize(2);
-        let right = vec![DataChunk::new(vec![rv])];
+        let right = vec![DataChunk::from_legacy(vec![rv])];
         let result = merge_union_chunks(left, right, false).unwrap();
         assert_eq!(result[0].size, 1);
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
     }
 
     #[test]
     fn test_union_all_empty_chunks() {
         // Empty DataChunks should be handled gracefully
         let empty = ValueVector::new(PhysicalTypeID::Int64, 0);
-        let left = vec![DataChunk::new(vec![empty])];
+        let left = vec![DataChunk::from_legacy(vec![empty])];
         let mut rv = ValueVector::new(PhysicalTypeID::Int64, 1);
         rv.set_i64(0, 42);
         rv.resize(1);
-        let right = vec![DataChunk::new(vec![rv])];
+        let right = vec![DataChunk::from_legacy(vec![rv])];
         let result = merge_union_chunks(left, right, true).unwrap();
         assert_eq!(result[0].size, 1);
-        assert_eq!(result[0].field(0).get_i64(0), Some(42));
+        assert_eq!(result[0].get_i64(0, 0), Some(42));
     }
 
     // ==================== CrossProduct Tests ====================
@@ -982,12 +863,12 @@ mod tests {
         let result = cross.execute_binary(&left, &right).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 6); // 3 +� 2 = 6
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
-        assert_eq!(result[0].field(0).get_i64(1), Some(1));
-        assert_eq!(result[0].field(0).get_i64(2), Some(2));
-        assert_eq!(result[0].field(0).get_i64(3), Some(2));
-        assert_eq!(result[0].field(0).get_i64(4), Some(3));
-        assert_eq!(result[0].field(0).get_i64(5), Some(3));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
+        assert_eq!(result[0].get_i64(0, 1), Some(1));
+        assert_eq!(result[0].get_i64(0, 2), Some(2));
+        assert_eq!(result[0].get_i64(0, 3), Some(2));
+        assert_eq!(result[0].get_i64(0, 4), Some(3));
+        assert_eq!(result[0].get_i64(0, 5), Some(3));
     }
 
     #[test]
@@ -1001,30 +882,30 @@ mod tests {
         let mut l2 = ValueVector::new(PhysicalTypeID::String, 2);
         l2.push_string("a").unwrap();
         l2.push_string("b").unwrap();
-        let left = DataChunk::new(vec![l1, l2]);
+        let left = DataChunk::from_legacy(vec![l1, l2]);
 
         let mut r1 = ValueVector::new(PhysicalTypeID::Int64, 2);
         r1.set_i64(0, 10);
         r1.set_i64(1, 20);
         r1.resize(2);
-        let right = DataChunk::new(vec![r1]);
+        let right = DataChunk::from_legacy(vec![r1]);
 
         let result = cross.execute_binary(&[left], &[right]).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 4); // 2 +� 2 = 4
         // Row 0: left(1,"a") +� right(10) G�� [1, "a", 10]
-        assert_eq!(result[0].field(0).get_i64(0), Some(1));
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
         // Row 1: left(1,"a") +� right(20) G�� [1, "a", 20]
-        assert_eq!(result[0].field(0).get_i64(1), Some(1));
+        assert_eq!(result[0].get_i64(0, 1), Some(1));
         // Row 2: left(2,"b") +� right(10) G�� [2, "b", 10]
-        assert_eq!(result[0].field(0).get_i64(2), Some(2));
+        assert_eq!(result[0].get_i64(0, 2), Some(2));
         // Row 3: left(2,"b") +� right(20) G�� [2, "b", 20]
-        assert_eq!(result[0].field(0).get_i64(3), Some(2));
+        assert_eq!(result[0].get_i64(0, 3), Some(2));
         // Column 2 should have right-side values: [10, 20, 10, 20]
-        assert_eq!(result[0].field(2).get_i64(0), Some(10));
-        assert_eq!(result[0].field(2).get_i64(1), Some(20));
-        assert_eq!(result[0].field(2).get_i64(2), Some(10));
-        assert_eq!(result[0].field(2).get_i64(3), Some(20));
+        assert_eq!(result[0].get_i64(2, 0), Some(10));
+        assert_eq!(result[0].get_i64(2, 1), Some(20));
+        assert_eq!(result[0].get_i64(2, 2), Some(10));
+        assert_eq!(result[0].get_i64(2, 3), Some(20));
     }
 
     #[test]
@@ -1198,25 +1079,76 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_empty_build() {
-        let intersect = PhysicalIntersect {
-            num_build_sides: 2,
-            probe_key_col: 0,
-            build_key_col: 0,
-        };
-        let build1 = make_i64_chunk(&[]);
-        let build2 = make_i64_chunk(&[1, 2, 3]);
-        let probe = make_i64_chunk(&[1, 2, 3]);
-        let build_chunks = vec![build1, build2];
-        let probe_chunks = vec![probe];
-        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
-        // Empty build side G�� empty result
-        assert!(result.is_empty() || result[0].size == 0);
-    }
-
-    #[test]
     fn test_intersect_no_probe() {
         let intersect = PhysicalIntersect {
             num_build_sides: 2,
             probe_key_col: 0,
             build_key_col: 0,
+        };
+        let build1 = make_i64_chunk(&[1, 2, 3]);
+        let build2 = make_i64_chunk(&[2, 3, 4]);
+        let probe = make_i64_chunk(&[]);
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
+        // No probe rows → empty result
+        assert!(result.is_empty() || result[0].size == 0);
+    }
+
+    #[test]
+    fn test_intersect_cross_product_multi_match() {
+        // WCOJ: a probe key that matches multiple rows per build side emits the
+        // full cross product (2 rows in side 1 × 3 rows in side 2 = 6 rows).
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
+        let build1 = make_i64_chunk(&[1, 1, 5]);
+        let build2 = make_i64_chunk(&[1, 1, 1, 7]);
+        let probe = make_i64_chunk(&[1, 2]);
+        let build_chunks = vec![build1, build2];
+        let probe_chunks = vec![probe];
+        let result = intersect
+            .execute_sides(
+                &vec![vec![build_chunks[0].clone()], vec![build_chunks[1].clone()]],
+                &probe_chunks,
+            )
+            .unwrap();
+        assert!(!result.is_empty(), "Expected non-empty result");
+        assert_eq!(result[0].size, 6, "expected 2x3 cross product for probe key 1");
+    }
+
+    #[test]
+    fn test_intersect_key_col_resolution() {
+        // Probe/build chunks with field names; key col derived as `a.id` at index 1.
+        let mut probe_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        probe_v.set_i64(0, 10);
+        probe_v.set_i64(1, 20);
+        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        id_v.set_i64(0, 1);
+        id_v.set_i64(1, 2);
+        let mut probe = DataChunk::from_legacy(vec![probe_v, id_v]);
+        probe.field_names = vec!["a.other".into(), "a.id".into()];
+        let mut build_v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_v.set_i64(0, 30);
+        build_v.set_i64(1, 40);
+        let mut build_id = ValueVector::new(PhysicalTypeID::Int64, 2);
+        build_id.set_i64(0, 1);
+        build_id.set_i64(1, 1);
+        let mut build = DataChunk::from_legacy(vec![build_v, build_id]);
+        build.field_names = vec!["a.other".into(), "a.id".into()];
+
+        let intersect = PhysicalIntersect {
+            num_build_sides: 1,
+            probe_key_col: 1,
+            build_key_col: 1,
+        };
+        let result = intersect.execute_sides(&vec![vec![build]], &vec![probe]).unwrap();
+        assert!(!result.is_empty(), "Expected non-empty result");
+        assert_eq!(
+            result[0].size, 2,
+            "probe id 1 matches build row 0, id 2 matches nothing"
+        );
+    }
+}

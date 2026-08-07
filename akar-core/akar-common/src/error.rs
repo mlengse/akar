@@ -195,7 +195,11 @@ pub enum TransactionError {
     /// Table already locked by another transaction
     TableLocked { table_id: u64, owner_txn: u64 },
     /// Row-level write conflict: another active transaction modified the same row
-    WriteConflict { table_id: u64, row_id: u64, conflicting_txn: u64 },
+    WriteConflict {
+        table_id: u64,
+        row_id: u64,
+        conflicting_txn: u64,
+    },
     /// Concurrent write not allowed by config
     ConcurrentWriteDisabled,
     /// Transaction manager is shutting down
@@ -212,8 +216,15 @@ impl fmt::Display for TransactionError {
             Self::TableLocked { table_id, owner_txn } => {
                 write!(f, "table {table_id} already locked by txn#{owner_txn}")
             }
-            Self::WriteConflict { table_id, row_id, conflicting_txn } => {
-                write!(f, "write conflict on table {table_id} row {row_id}: txn#{conflicting_txn} also modified this row")
+            Self::WriteConflict {
+                table_id,
+                row_id,
+                conflicting_txn,
+            } => {
+                write!(
+                    f,
+                    "write conflict on table {table_id} row {row_id}: txn#{conflicting_txn} also modified this row"
+                )
             }
             Self::ConcurrentWriteDisabled => write!(f, "concurrent write not allowed"),
             Self::ShuttingDown => write!(f, "transaction manager is shutting down"),
@@ -344,9 +355,7 @@ impl From<CatalogError> for BinderError {
             CatalogError::ColumnAlreadyExists { table, column } => {
                 BinderError::Validation(format!("column '{column}' already exists on table '{table}'"))
             }
-            CatalogError::ColumnNotFound { table, column } => {
-                BinderError::ColumnNotFound { table, column }
-            }
+            CatalogError::ColumnNotFound { table, column } => BinderError::ColumnNotFound { table, column },
             CatalogError::InvalidOperation(s) => BinderError::Validation(s),
         }
     }
@@ -459,5 +468,3 @@ pub fn lock_or_poisoned<T>(mutex: &std::sync::Mutex<T>) -> crate::error::Result<
         .lock()
         .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
 }
-
-

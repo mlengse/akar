@@ -310,11 +310,7 @@ impl WAL {
             return Ok(()); // Nothing new to write
         }
 
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(&self.path)?;
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
 
         // Write header on fresh WAL (after clear() or first ever write).
         if self.needs_header {
@@ -332,10 +328,7 @@ impl WAL {
     }
 
     /// Serialize one WAL record + CRC32 and write it to the file.
-    fn append_records_to_file(
-        file: &mut std::fs::File,
-        records: &[WALRecord],
-    ) -> std::io::Result<()> {
+    fn append_records_to_file(file: &mut std::fs::File, records: &[WALRecord]) -> std::io::Result<()> {
         use akar_common::serialization::Serialize;
         let mut crc_buf = [0u8; 4];
         for record in records {
@@ -459,11 +452,7 @@ impl WAL {
         // Detect format: v2 has "AKAR" magic header
         let (is_v2, cursor_pos) = if buffer.len() >= 6 && &buffer[..4] == WAL_MAGIC {
             let version = u16::from_le_bytes([buffer[4], buffer[5]]);
-            if version >= 2 {
-                (true, 6usize)
-            } else {
-                (false, 0usize)
-            }
+            if version >= 2 { (true, 6usize) } else { (false, 0usize) }
         } else {
             (false, 0usize)
         };
@@ -498,8 +487,7 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len =
-                            u32::from_le_bytes(record_data[9..13].try_into().unwrap()) as usize;
+                        let data_len = u32::from_le_bytes(record_data[9..13].try_into().unwrap()) as usize;
                         1 + 8 + 4 + data_len // tag + u64 + u32 + data
                     }
                     b'D' => 1 + 8 + 8, // tag + table_id + row_id
@@ -509,8 +497,7 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len =
-                            u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
+                        let data_len = u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
                         1 + 8 + 8 + 4 + 4 + data_len
                     }
                     b'F' => 1 + 8 + 1, // tag + page_idx + is_free
@@ -520,8 +507,7 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len =
-                            u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
+                        let data_len = u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
                         1 + 8 + 4 + 8 + 4 + data_len
                     }
                     b'L' => {
@@ -529,8 +515,7 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len =
-                            u32::from_le_bytes(record_data[1..5].try_into().unwrap()) as usize;
+                        let data_len = u32::from_le_bytes(record_data[1..5].try_into().unwrap()) as usize;
                         1 + 4 + data_len
                     }
                     b'C' => 1 + 8, // tag + transaction_id
@@ -587,10 +572,7 @@ impl WAL {
     }
 
     /// Parse a single WAL record from the cursor (v1 format — no checksums).
-    fn parse_record(
-        &mut self,
-        cursor: &mut std::io::Cursor<&[u8]>,
-    ) -> std::io::Result<()> {
+    fn parse_record(&mut self, cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
         use akar_common::serialization::Deserialize;
         let mut tag_buf = [0u8; 1];
         if cursor.read_exact(&mut tag_buf).is_err() {
@@ -648,13 +630,11 @@ impl WAL {
             }
             b'C' => {
                 let transaction_id = u64::deserialize(cursor)?;
-                self.records
-                    .push(WALRecord::Commit { transaction_id });
+                self.records.push(WALRecord::Commit { transaction_id });
             }
             b'R' => {
                 let transaction_id = u64::deserialize(cursor)?;
-                self.records
-                    .push(WALRecord::Rollback { transaction_id });
+                self.records.push(WALRecord::Rollback { transaction_id });
             }
             b'L' => {
                 let data_len = u32::deserialize(cursor)? as usize;
@@ -701,10 +681,7 @@ impl WAL {
     }
 
     /// Parse v1 records (legacy format without checksums).
-    fn parse_v1_records(
-        &mut self,
-        cursor: &mut std::io::Cursor<&[u8]>,
-    ) -> std::io::Result<()> {
+    fn parse_v1_records(&mut self, cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
         while cursor.position() < cursor.get_ref().len() as u64 {
             self.parse_record(cursor)?;
         }
@@ -801,12 +778,12 @@ mod tests {
         ));
         assert!(matches!(
             &wal2.records()[1],
-            WALRecord::Delete { table_id: 7, row_id: 99 }
+            WALRecord::Delete {
+                table_id: 7,
+                row_id: 99
+            }
         ));
-        assert!(matches!(
-            &wal2.records()[2],
-            WALRecord::Commit { transaction_id: 1 }
-        ));
+        assert!(matches!(&wal2.records()[2], WALRecord::Commit { transaction_id: 1 }));
     }
 
     #[test]
@@ -863,14 +840,8 @@ mod tests {
         let mut wal = WAL::new(wal_path);
         wal.load_from_disk().unwrap();
         assert_eq!(wal.len(), 2);
-        assert!(matches!(
-            &wal.records()[0],
-            WALRecord::Insert { table_id: 42, .. }
-        ));
-        assert!(matches!(
-            &wal.records()[1],
-            WALRecord::Commit { transaction_id: 1 }
-        ));
+        assert!(matches!(&wal.records()[0], WALRecord::Insert { table_id: 42, .. }));
+        assert!(matches!(&wal.records()[1], WALRecord::Commit { transaction_id: 1 }));
     }
 
     #[test]
@@ -879,11 +850,27 @@ mod tests {
         let wal_path = dir.path().join("wal.log");
         let mut wal = WAL::new(wal_path.clone());
 
-        wal.append(WALRecord::Insert { table_id: 1, data: vec![1] });
+        wal.append(WALRecord::Insert {
+            table_id: 1,
+            data: vec![1],
+        });
         wal.append(WALRecord::Delete { table_id: 2, row_id: 3 });
-        wal.append(WALRecord::Update { table_id: 4, row_id: 5, column: 6, data: vec![7, 8] });
-        wal.append(WALRecord::UpdateFsm { page_idx: 100, is_free: true });
-        wal.append(WALRecord::ColumnWrite { table_id: 10, col_id: 11, page_id: 12, data: vec![99] });
+        wal.append(WALRecord::Update {
+            table_id: 4,
+            row_id: 5,
+            column: 6,
+            data: vec![7, 8],
+        });
+        wal.append(WALRecord::UpdateFsm {
+            page_idx: 100,
+            is_free: true,
+        });
+        wal.append(WALRecord::ColumnWrite {
+            table_id: 10,
+            col_id: 11,
+            page_id: 12,
+            data: vec![99],
+        });
         wal.append(WALRecord::LocalWALData { data: vec![10, 11, 12] });
         wal.append(WALRecord::Commit { transaction_id: 50 });
         wal.append(WALRecord::Rollback { transaction_id: 51 });

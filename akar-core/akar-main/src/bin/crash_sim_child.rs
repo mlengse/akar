@@ -25,9 +25,7 @@ use std::time::Duration;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
-        eprintln!(
-            "Usage: crash_sim_child <db_path> <mode> <num_rows> <checkpoint_threshold>"
-        );
+        eprintln!("Usage: crash_sim_child <db_path> <mode> <num_rows> <checkpoint_threshold>");
         eprintln!("Modes: write, write-burst, write-and-checkpoint");
         std::process::exit(1);
     }
@@ -35,9 +33,7 @@ fn main() {
     let db_path = PathBuf::from(&args[1]);
     let mode = &args[2];
     let num_rows: usize = args[3].parse().expect("num_rows must be a number");
-    let checkpoint_threshold: i64 = args[4]
-        .parse()
-        .expect("checkpoint_threshold must be a number");
+    let checkpoint_threshold: i64 = args[4].parse().expect("checkpoint_threshold must be a number");
 
     let signal_path = db_path.join("signal");
 
@@ -55,10 +51,8 @@ fn main() {
 
     if mode != "ddl-recovery" {
         // Create the Person table (in-memory catalog, per-process)
-        conn.query(
-            "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))",
-        )
-        .expect("Failed to create Person table");
+        conn.query("CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))")
+            .expect("Failed to create Person table");
     }
 
     match mode.as_str() {
@@ -112,11 +106,7 @@ fn main() {
             // Cross-process DDL recovery: the `Person` table was created by the
             // parent process and persisted to catalog.json. It must be visible
             // here without re-creating it.
-            let person_exists = db
-                .catalog()
-                .lock()
-                .map(|c| c.contains("Person"))
-                .unwrap_or(false);
+            let person_exists = db.catalog().lock().map(|c| c.contains("Person")).unwrap_or(false);
             if !person_exists {
                 eprintln!("DDL-RECOVERY-FAIL: 'Person' table missing after restart");
                 std::process::exit(2);
@@ -125,7 +115,8 @@ fn main() {
             // parent process can see it after we exit.
             conn.query("CREATE NODE TABLE Person2(name STRING, PRIMARY KEY(name))")
                 .expect("Failed to create Person2 table");
-            conn.query("CREATE (:Person2 {name: 'child_row'})").expect("insert failed");
+            conn.query("CREATE (:Person2 {name: 'child_row'})")
+                .expect("insert failed");
             println!("DDL-RECOVERY-OK");
         }
         _ => {

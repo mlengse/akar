@@ -1,13 +1,17 @@
-//! DDL binding 
+//! DDL binding
 
-use crate::binder::helpers::{expr_to_debug_string};
-use crate::bound_statement::*;
-use super::Binder;
-use akar_catalog::{CatalogColumn, CatalogResult, IndexType};
-use akar_common::types::LogicalTypeID;
-use akar_parser::ast::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_parser::ast::*;
+    use akar_parser::parse;
 
-impl Binder {
+    #[test]
+    fn test_create_node_table() {
+        let sql = "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateNodeTable(t) => {
                 assert_eq!(t.columns.len(), 2);
                 assert_eq!(t.primary_key, "name");
                 assert_eq!(t.columns[0].name, "name");
@@ -700,58 +704,4 @@ impl Binder {
             _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
         }
     }
-}
-
-// ==================== FTS Parsing Helpers ====================
-
-fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
-    let mut if_not_exists = false;
-    let mut identifiers: Vec<String> = Vec::new();
-
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::if_not_exists => if_not_exists = true,
-            Rule::identifier => identifiers.push(inner.as_str().to_string()),
-            _ => {}
-        }
-    }
-
-    // identifiers: [index_name, table_name, column_name]
-    if identifiers.len() < 3 {
-        return Err(format!(
-            "CREATE FTS INDEX requires index_name, table_name, and column_name, got {:?}",
-            identifiers
-        ));
-    }
-    Ok(Statement::CreateFtsIndex(CreateFtsIndex {
-        index_name: identifiers[0].clone(),
-        table_name: identifiers[1].clone(),
-        column_name: identifiers[2].clone(),
-        if_not_exists,
-    }))
-}
-
-fn parse_using_fts_clause(pair: pest::iterators::Pair<Rule>) -> Result<FtsQuery, String> {
-    let mut index_name = String::new();
-    let mut query_string = String::new();
-
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::identifier => index_name = inner.as_str().to_string(),
-            Rule::string => {
-                query_string = inner.as_str().trim().trim_matches('\'').to_string();
-            }
-            _ => {}
-        }
-    }
-
-    if index_name.is_empty() {
-        return Err("USING FTS INDEX requires an index name".into());
-    }
-    Ok(FtsQuery {
-        index_name,
-        query_string,
-    })
-}
-
 }

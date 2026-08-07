@@ -41,8 +41,7 @@ impl Connection {
 
         // Step 1: Commit via TransactionManager (assigns commit_ts, releases locks)
         let tm = &self.database.transaction_manager;
-        let commit_result = tm.commit(txn)
-            .map_err(|e| format!("Transaction commit failed: {e}"))?;
+        let commit_result = tm.commit(txn).map_err(|e| format!("Transaction commit failed: {e}"))?;
         let _commit_ts = match commit_result {
             akar_transaction::CommitResult::Committed { commit_ts } => commit_ts,
         };
@@ -61,9 +60,7 @@ impl Connection {
         // LocalStorage flush to tables, ShadowFile apply to BM, auto-checkpoint.
         let sm = &self.database.storage_manager;
         let tm = &self.database.transaction_manager;
-        let drain_fn = |timeout: std::time::Duration| -> bool {
-            tm.stop_new_txns_and_wait_until_all_leave(timeout)
-        };
+        let drain_fn = |timeout: std::time::Duration| -> bool { tm.stop_new_txns_and_wait_until_all_leave(timeout) };
         sm.commit_transaction(
             &resources.local_storage,
             &resources.shadow_file,
@@ -76,7 +73,10 @@ impl Connection {
     }
 
     /// Rollback a write transaction: discard resources.
-    pub(crate) fn rollback_write_txn(&self, txn: &mut Transaction) -> Result<Vec<akar_transaction::UndoRecord>, String> {
+    pub(crate) fn rollback_write_txn(
+        &self,
+        txn: &mut Transaction,
+    ) -> Result<Vec<akar_transaction::UndoRecord>, String> {
         let txn_id = txn.transaction_id;
         // Remove resources (discard them) — try to get them for cleanup
         let resources = self.txn_resources.lock().ok().and_then(|mut map| map.remove(&txn_id));

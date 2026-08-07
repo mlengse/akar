@@ -47,7 +47,8 @@ pub fn write_parquet(path: &str, rows: &[Vec<Value>], column_names: &[String]) -
 
     let arrays: Vec<Arc<dyn Array>> = arrow_cols.into_iter().map(|mut b| b.finish()).collect();
 
-    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| StorageError::Reader(format!("Failed to create RecordBatch: {e}")))?;
+    let batch = RecordBatch::try_new(schema, arrays)
+        .map_err(|e| StorageError::Reader(format!("Failed to create RecordBatch: {e}")))?;
 
     write_batch(path, &batch)
 }
@@ -64,7 +65,8 @@ fn write_empty_parquet(path: &str, column_names: &[String]) -> Result<(), Storag
         .map(|_| Arc::new(StringArray::from(Vec::<&str>::new())) as Arc<dyn Array>)
         .collect();
 
-    let batch = RecordBatch::try_new(schema, arrays).map_err(|e| StorageError::Reader(format!("Failed to create empty RecordBatch: {e}")))?;
+    let batch = RecordBatch::try_new(schema, arrays)
+        .map_err(|e| StorageError::Reader(format!("Failed to create empty RecordBatch: {e}")))?;
 
     write_batch(path, &batch)
 }
@@ -82,7 +84,9 @@ fn write_batch(path: &str, batch: &RecordBatch) -> Result<(), StorageError> {
     let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))
         .map_err(|e| StorageError::Reader(format!("Failed to create Parquet writer: {e}")))?;
 
-    writer.write(batch).map_err(|e| StorageError::Reader(format!("Failed to write batch: {e}")))?;
+    writer
+        .write(batch)
+        .map_err(|e| StorageError::Reader(format!("Failed to write batch: {e}")))?;
 
     writer
         .close()

@@ -43,8 +43,10 @@ fn bench_checkpoint(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let dir = TempDir::new().unwrap();
             let db_path = dir.path().join("bench");
-            let mut config = SystemConfig::default();
-            config.checkpoint_threshold = -1;
+            let config = SystemConfig {
+                checkpoint_threshold: -1,
+                ..Default::default()
+            };
             let database = Arc::new(Database::new(db_path, config).unwrap());
             let conn = Connection::new(&database);
             conn.query("CREATE NODE TABLE Bench(name STRING, val INT64, PRIMARY KEY (name))")
@@ -57,8 +59,7 @@ fn bench_checkpoint(c: &mut Criterion) {
             }
             std::fs::write(&csv_path, &content).unwrap();
             let fp = csv_path.to_string_lossy().replace('\\', "/");
-            conn.query(&format!("COPY Bench FROM '{fp}' (HEADER true)"))
-                .unwrap();
+            conn.query(&format!("COPY Bench FROM '{fp}' (HEADER true)")).unwrap();
 
             let start = std::time::Instant::now();
             for _ in 0..iters {

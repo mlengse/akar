@@ -60,8 +60,7 @@ pub struct Server {
 impl Server {
     /// Bind the server to `addr` without starting it yet.
     pub fn bind<A: ToSocketAddrs>(addr: A, db: Arc<Database>) -> Result<Self, String> {
-        let listener =
-            TcpListener::bind(addr).map_err(|e| format!("Failed to bind Akar server: {e}"))?;
+        let listener = TcpListener::bind(addr).map_err(|e| format!("Failed to bind Akar server: {e}"))?;
         let local_addr = listener
             .local_addr()
             .map_err(|e| format!("Failed to read local address: {e}"))?;
@@ -147,13 +146,11 @@ fn accept_loop(
                 let db = db.clone();
                 let shutdown = shutdown.clone();
                 let handles = client_handles.clone();
-                match thread::Builder::new()
-                    .name("akar-server-client".into())
-                    .spawn(move || {
-                        tracing::debug!("Client connected: {peer}");
-                        session::handle_client(stream, db, &shutdown);
-                        tracing::debug!("Client disconnected: {peer}");
-                    }) {
+                match thread::Builder::new().name("akar-server-client".into()).spawn(move || {
+                    tracing::debug!("Client connected: {peer}");
+                    session::handle_client(stream, db, &shutdown);
+                    tracing::debug!("Client disconnected: {peer}");
+                }) {
                     Ok(handle) => {
                         if let Ok(mut guard) = handles.lock() {
                             guard.push(handle);

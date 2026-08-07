@@ -103,10 +103,7 @@ impl WireResponse {
 
     /// Collect all non-NULL values in a column.
     pub fn column_values(&self, col: usize) -> Vec<Value> {
-        self.rows
-            .iter()
-            .filter_map(|r| r.get(col).cloned().flatten())
-            .collect()
+        self.rows.iter().filter_map(|r| r.get(col).cloned().flatten()).collect()
     }
 
     /// Human-readable summary mirroring [`crate::QueryResult::result_summary`].
@@ -120,7 +117,11 @@ impl WireResponse {
         if self.rows.is_empty() {
             return "(empty result)".into();
         }
-        format!("Returned {} rows in {} columns", self.rows.len(), self.column_names.len())
+        format!(
+            "Returned {} rows in {} columns",
+            self.rows.len(),
+            self.column_names.len()
+        )
     }
 }
 
@@ -164,11 +165,7 @@ pub enum PartialFrame {
     /// 4-byte length header partially read.
     Header([u8; 4], usize),
     /// Payload partially read.
-    Payload {
-        len: usize,
-        buf: Vec<u8>,
-        filled: usize,
-    },
+    Payload { len: usize, buf: Vec<u8>, filled: usize },
 }
 
 /// Write `payload` as a single length-prefixed frame: `[u32 LE len][bytes]`.
@@ -192,12 +189,13 @@ pub fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> std::io::Result<
 /// - `Err(WouldBlock | TimedOut)` — progress was made or not, partial state is
 ///   kept in `partial`, call again later;
 /// - `Err(other)` — protocol or I/O failure.
-pub fn read_frame<R: Read>(
-    reader: &mut R,
-    partial: &mut Option<PartialFrame>,
-) -> std::io::Result<Option<Vec<u8>>> {
+pub fn read_frame<R: Read>(reader: &mut R, partial: &mut Option<PartialFrame>) -> std::io::Result<Option<Vec<u8>>> {
     let mut header: ([u8; 4], usize) = match partial.take() {
-        Some(PartialFrame::Payload { len, mut buf, mut filled }) => {
+        Some(PartialFrame::Payload {
+            len,
+            mut buf,
+            mut filled,
+        }) => {
             if len > MAX_FRAME_SIZE {
                 return Err(std::io::Error::new(ErrorKind::InvalidData, "Frame too large"));
             }
@@ -207,7 +205,7 @@ pub fn read_frame<R: Read>(
                         return Err(std::io::Error::new(
                             ErrorKind::UnexpectedEof,
                             "Unexpected EOF in frame payload",
-                        ))
+                        ));
                     }
                     Ok(n) => {
                         filled += n;
@@ -270,7 +268,7 @@ pub fn read_frame<R: Read>(
                 return Err(std::io::Error::new(
                     ErrorKind::UnexpectedEof,
                     "Unexpected EOF in frame payload",
-                ))
+                ));
             }
             Ok(n) => {
                 filled += n;
@@ -307,8 +305,8 @@ impl RemoteDatabase {
     /// Connect to an Akar server listening at `addr` (e.g. `"127.0.0.1:9876"`).
     pub fn connect_tcp(addr: impl Into<String>) -> Result<Self, String> {
         let addr = addr.into();
-        let stream = TcpStream::connect(&addr)
-            .map_err(|e| format!("Failed to connect to Akar server at '{addr}': {e}"))?;
+        let stream =
+            TcpStream::connect(&addr).map_err(|e| format!("Failed to connect to Akar server at '{addr}': {e}"))?;
         let _ = stream.set_nodelay(true);
         let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -400,7 +398,10 @@ mod tests {
 
     impl<'a> ChunkedReader<'a> {
         fn new(inner: &'a mut &'a [u8]) -> Self {
-            Self { inner, first_read: true }
+            Self {
+                inner,
+                first_read: true,
+            }
         }
     }
 
@@ -475,10 +476,7 @@ mod tests {
         assert_eq!(resp.cell(0, 0), Some(&Value::String("alice".into())));
         assert_eq!(resp.cell(1, 0), None);
         assert_eq!(resp.cell(9, 9), None);
-        assert_eq!(
-            resp.column_values(1),
-            vec![Value::Int64(30), Value::Int64(25)]
-        );
+        assert_eq!(resp.column_values(1), vec![Value::Int64(30), Value::Int64(25)]);
         assert_eq!(resp.result_summary(), "Returned 2 rows in 2 columns");
     }
 }

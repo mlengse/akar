@@ -10,16 +10,15 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_main::connection::Connection;
 use akar_main::database::Database;
 use akar_main::query_result::QueryResult;
-use akar_main::remote::{read_frame, write_frame, PartialFrame, WireRequest, WireResponse};
+use akar_main::remote::{PartialFrame, WireRequest, WireResponse, read_frame, write_frame};
 use arrow::array::{
-    ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int64Array, Int8Array, LargeStringArray, StringArray, UInt16Array, UInt32Array, UInt64Array,
-    UInt8Array,
+    ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    LargeStringArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use std::io::ErrorKind;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// How long the session waits for the next frame before re-checking the server

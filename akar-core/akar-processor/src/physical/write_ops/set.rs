@@ -123,10 +123,7 @@ pub fn evaluate_constant_expr(expr: &Expression, registry: &FunctionRegistry) ->
     match expr {
         Expression::Constant(c) => ast_constant_to_value(c),
         Expression::FunctionCall(name, args) => {
-            let arg_values: Vec<Value> = args
-                .iter()
-                .map(|a| evaluate_constant_expr(a, registry))
-                .collect();
+            let arg_values: Vec<Value> = args.iter().map(|a| evaluate_constant_expr(a, registry)).collect();
             if arg_values.iter().any(|v| matches!(v, Value::Null)) {
                 return Value::Null;
             }

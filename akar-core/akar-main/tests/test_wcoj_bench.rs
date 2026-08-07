@@ -102,7 +102,10 @@ fn test_wcoj_star_vs_hashjoin() {
 
     // EXPLAIN must show Intersect for the star, no Intersect for the chain.
     let star_plan = explain(&conn, star_sql);
-    assert!(star_plan.contains("Intersect"), "star plan missing Intersect:\n{star_plan}");
+    assert!(
+        star_plan.contains("Intersect"),
+        "star plan missing Intersect:\n{star_plan}"
+    );
     let chain_plan = explain(&conn, chain_sql);
     assert!(
         !chain_plan.contains("Intersect"),

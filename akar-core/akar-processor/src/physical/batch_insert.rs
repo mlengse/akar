@@ -85,6 +85,7 @@ impl PhysicalOperatorExec for PhysicalBatchInsert {
         Err(format!(
             "Table '{}' not found in storage catalog for BatchInsert",
             self.table_name
-        ).into())
+        )
+        .into())
     }
 }

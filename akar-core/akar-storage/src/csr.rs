@@ -160,7 +160,9 @@ impl CsrIndex {
     pub fn add_edge(&mut self, _src_id: u64, _dst_id: u64) -> Result<(), StorageError> {
         // CSR is immutable after build — use build() for bulk loading.
         // This is a no-op placeholder for API compatibility.
-        Err(StorageError::Index("CsrIndex is immutable after build(); use build() to construct from edges".into()))
+        Err(StorageError::Index(
+            "CsrIndex is immutable after build(); use build() to construct from edges".into(),
+        ))
     }
 }
 

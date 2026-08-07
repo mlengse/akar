@@ -334,7 +334,12 @@ impl ExpressionEvaluator {
     }
 
     /// Apply an Arrow binary compute kernel.
-    fn apply_arrow_kernel(&self, name: &str, left: &ArrowVector, right: &ArrowVector) -> Result<ArrowVector, ProcessorError> {
+    fn apply_arrow_kernel(
+        &self,
+        name: &str,
+        left: &ArrowVector,
+        right: &ArrowVector,
+    ) -> Result<ArrowVector, ProcessorError> {
         use arrow::compute::kernels::boolean::{and_kleene, or_kleene};
         use arrow::compute::kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
         use arrow::compute::kernels::numeric::{add, div, mul, rem, sub};
@@ -566,7 +571,8 @@ impl ExpressionEvaluator {
                     name,
                     idx,
                     chunk.fields.len()
-                ).into());
+                )
+                .into());
             }
             let phys_type = chunk.field_types[idx];
             let mut v = ValueVector::new(phys_type, chunk.size);
@@ -619,7 +625,12 @@ impl ExpressionEvaluator {
     ///
     /// Falls back to evaluating the object expression (legacy behaviour) if no
     /// `field_names` are available on the chunk.
-    fn evaluate_property_access(&self, obj: &Expression, prop: &str, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
+    fn evaluate_property_access(
+        &self,
+        obj: &Expression,
+        prop: &str,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, ProcessorError> {
         // Build the qualified property name (e.g., "t.name")
         let qualified_prop = if let Expression::Variable(var_name) = obj {
             format!("{}.{}", var_name, prop)
@@ -820,7 +831,12 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a unary operation.
-    fn evaluate_unary_op(&self, op: &UnaryOp, inner: &Expression, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
+    fn evaluate_unary_op(
+        &self,
+        op: &UnaryOp,
+        inner: &Expression,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, ProcessorError> {
         match op {
             UnaryOp::Not => self.evaluate_function_call("NOT", std::slice::from_ref(&inner), chunk),
             UnaryOp::Negate => self.evaluate_function_call("-", std::slice::from_ref(&inner), chunk),
@@ -911,7 +927,11 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a `CASE [subject] WHEN ... THEN ... [ELSE ...] END` expression.
-    fn evaluate_case(&self, case_expr: &akar_parser::ast::CaseExpr, chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
+    fn evaluate_case(
+        &self,
+        case_expr: &akar_parser::ast::CaseExpr,
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, ProcessorError> {
         let num_rows = chunk.size;
         // Evaluate subject (if any)
         let subject_vec = if let Some(subj) = &case_expr.subject {
@@ -1006,7 +1026,11 @@ impl ExpressionEvaluator {
     }
 
     /// Evaluate a map literal expression.
-    fn evaluate_map_literal(&self, items: &[(String, Expression)], chunk: &DataChunk) -> Result<ValueVector, ProcessorError> {
+    fn evaluate_map_literal(
+        &self,
+        items: &[(String, Expression)],
+        chunk: &DataChunk,
+    ) -> Result<ValueVector, ProcessorError> {
         let num_rows = chunk.size;
         let mut result_vec = ValueVector::new(akar_common::types::PhysicalTypeID::Struct, num_rows);
         result_vec.resize(num_rows);
@@ -1431,10 +1455,7 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result
                 v.set_null(row, false);
             }
         }
-        Value::Timestamp(x)
-        | Value::TimestampNs(x)
-        | Value::TimestampMs(x)
-        | Value::TimestampSec(x) => {
+        Value::Timestamp(x) | Value::TimestampNs(x) | Value::TimestampMs(x) | Value::TimestampSec(x) => {
             let offset = row * 8;
             if offset + 8 <= v.data().len() {
                 v.data_mut()[offset..offset + 8].copy_from_slice(&x.0.to_le_bytes());
@@ -1528,10 +1549,9 @@ fn build_arrow_from_values(
                     Value::Int64(n) => builder.append_value(*n),
                     Value::Int32(n) => builder.append_value(*n as i64),
                     Value::Date(n) => builder.append_value(n.0 as i64),
-                    Value::Timestamp(n)
-                    | Value::TimestampNs(n)
-                    | Value::TimestampMs(n)
-                    | Value::TimestampSec(n) => builder.append_value(n.0),
+                    Value::Timestamp(n) | Value::TimestampNs(n) | Value::TimestampMs(n) | Value::TimestampSec(n) => {
+                        builder.append_value(n.0)
+                    }
                     Value::TimestampTz(n) => builder.append_value(n.0),
                     Value::DTime(n) => builder.append_value(*n),
                     _ => builder.append_null(),
@@ -1861,6 +1881,9 @@ mod tests {
 
         let expr = Expression::FunctionCall("nextval".into(), vec![Expression::Constant(Constant::Integer(42))]);
         let err = eval.evaluate(&expr, &make_chunk(&[1])).unwrap_err();
-        assert!(err.to_string().contains("requires a string argument"), "Unexpected error: {err}");
+        assert!(
+            err.to_string().contains("requires a string argument"),
+            "Unexpected error: {err}"
+        );
     }
 }

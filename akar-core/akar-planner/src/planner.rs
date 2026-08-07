@@ -340,155 +340,156 @@ impl QueryPlanner {
                         extend_ops.extend(wcoj_trailing);
                     } else {
                         let mut patterns_iter = patterns.into_iter().peekable();
-                    let _skip_next_node = false;
-                    while let Some(pattern) = patterns_iter.next() {
-                        // If the previous pattern consumed this dest node, skip the node scan
-                        let skip_current_node_scan = skip_next_node;
-                        skip_next_node = false;
+                        let _skip_next_node = false;
+                        while let Some(pattern) = patterns_iter.next() {
+                            // If the previous pattern consumed this dest node, skip the node scan
+                            let skip_current_node_scan = skip_next_node;
+                            skip_next_node = false;
 
-                        // Check if this pattern has a var-length edge → create RecursiveExtend
-                        if let Some(ref edge) = pattern.edge {
-                            let is_var_length = edge.lower_bound.is_some() || edge.upper_bound.is_some();
-                            if is_var_length {
-                                let lb = edge.lower_bound.unwrap_or(0);
-                                let ub = edge.upper_bound.unwrap_or(1);
-                                let direction = match edge.direction {
-                                    akar_parser::ast::EdgeDirection::LeftToRight => {
-                                        akar_common::enums::ExtendDirection::Fwd
-                                    }
-                                    akar_parser::ast::EdgeDirection::RightToLeft => {
-                                        akar_common::enums::ExtendDirection::Bwd
-                                    }
-                                    akar_parser::ast::EdgeDirection::Both => akar_common::enums::ExtendDirection::Both,
-                                };
+                            // Check if this pattern has a var-length edge → create RecursiveExtend
+                            if let Some(ref edge) = pattern.edge {
+                                let is_var_length = edge.lower_bound.is_some() || edge.upper_bound.is_some();
+                                if is_var_length {
+                                    let lb = edge.lower_bound.unwrap_or(0);
+                                    let ub = edge.upper_bound.unwrap_or(1);
+                                    let direction = match edge.direction {
+                                        akar_parser::ast::EdgeDirection::LeftToRight => {
+                                            akar_common::enums::ExtendDirection::Fwd
+                                        }
+                                        akar_parser::ast::EdgeDirection::RightToLeft => {
+                                            akar_common::enums::ExtendDirection::Bwd
+                                        }
+                                        akar_parser::ast::EdgeDirection::Both => {
+                                            akar_common::enums::ExtendDirection::Both
+                                        }
+                                    };
 
-                                // Scan source node
-                                let node_var = &pattern.node_variable;
-                                let var_len_src_bound = node_var
-                                    .as_ref()
-                                    .map_or(false, |v| available_vars.contains(v));
-                                if !skip_current_node_scan && !var_len_src_bound {
-                                    if let Some(label) = pattern.node_label {
+                                    // Scan source node
+                                    let node_var = &pattern.node_variable;
+                                    let var_len_src_bound =
+                                        node_var.as_ref().is_some_and(|v| available_vars.contains(v));
+                                    if !skip_current_node_scan && !var_len_src_bound {
+                                        if let Some(label) = pattern.node_label {
+                                            scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                                table_name: label,
+                                                table_id: pattern.node_table_id.unwrap_or(0),
+                                                alias: node_var.clone(),
+                                                columns: Vec::new(),
+                                                cardinality: 0,
+                                                fts_query: fts_to_assign.take(),
+                                                predicate: None,
+                                            }));
+                                            if let Some(v) = node_var {
+                                                available_vars.insert(v.clone());
+                                            }
+                                        }
+                                    }
+
+                                    // Create RecursiveExtend (consumes destination node pattern)
+                                    let rel_table_ids = edge.rel_table_id.map_or(vec![], |id| vec![id]);
+                                    let rel_labels = edge.label.as_ref().map_or(vec![], |l| vec![l.clone()]);
+                                    let target_var = patterns_iter
+                                        .peek()
+                                        .and_then(|p| p.node_variable.clone())
+                                        .unwrap_or_default();
+                                    scan_ops.push(LogicalOperator::RecursiveExtend(LogicalRecursiveExtend {
+                                        source_var: node_var.clone().unwrap_or_default(),
+                                        source_table_id: pattern.node_table_id.unwrap_or(0),
+                                        edge_var: edge.variable.clone(),
+                                        target_var: target_var.clone(),
+                                        rel_table_ids,
+                                        rel_labels,
+                                        lower_bound: lb,
+                                        upper_bound: ub,
+                                        direction,
+                                        semantic: akar_common::enums::PathSemantic::Walk,
+                                        weight_property: None,
+                                        cost_output_name: None,
+                                        cardinality: 0,
+                                    }));
+                                    // The destination node is produced by the RecursiveExtend (P48.1).
+                                    if !target_var.is_empty() {
+                                        available_vars.insert(target_var);
+                                    }
+                                    // Skip the destination node pattern scan
+                                    skip_next_node = true;
+                                    continue;
+                                }
+
+                                // Regular (non-var-length) edge → create Extend
+                                // Scan the source node (clone what we need before pattern is moved)
+                                let src_node_var = pattern.node_variable.clone();
+                                let src_already_bound =
+                                    src_node_var.as_ref().is_some_and(|v| available_vars.contains(v));
+                                if !skip_current_node_scan && !src_already_bound {
+                                    if let Some(label) = &pattern.node_label {
                                         scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                            table_name: label,
+                                            table_name: label.clone(),
                                             table_id: pattern.node_table_id.unwrap_or(0),
-                                            alias: node_var.clone(),
+                                            alias: src_node_var.clone(),
                                             columns: Vec::new(),
                                             cardinality: 0,
                                             fts_query: fts_to_assign.take(),
                                             predicate: None,
                                         }));
-                                        if let Some(v) = node_var {
+                                        if let Some(v) = &src_node_var {
                                             available_vars.insert(v.clone());
                                         }
                                     }
                                 }
 
-                                // Create RecursiveExtend (consumes destination node pattern)
-                                let rel_table_ids = edge.rel_table_id.map_or(vec![], |id| vec![id]);
-                                let rel_labels = edge.label.as_ref().map_or(vec![], |l| vec![l.clone()]);
-                                let target_var = patterns_iter
-                                    .peek()
-                                    .and_then(|p| p.node_variable.clone())
-                                    .unwrap_or_default();
-                                scan_ops.push(LogicalOperator::RecursiveExtend(LogicalRecursiveExtend {
-                                    source_var: node_var.clone().unwrap_or_default(),
-                                    source_table_id: pattern.node_table_id.unwrap_or(0),
-                                    edge_var: edge.variable.clone(),
-                                    target_var: target_var.clone(),
-                                    rel_table_ids,
-                                    rel_labels,
-                                    lower_bound: lb,
-                                    upper_bound: ub,
-                                    direction,
-                                    semantic: akar_common::enums::PathSemantic::Walk,
-                                    weight_property: None,
-                                    cost_output_name: None,
-                                    cardinality: 0,
-                                }));
-                                // The destination node is produced by the RecursiveExtend (P48.1).
-                                if !target_var.is_empty() {
-                                    available_vars.insert(target_var);
-                                }
-                                // Skip the destination node pattern scan
-                                skip_next_node = true;
-                                continue;
-                            }
+                                // Create Extend which replaces ScanRel + destination ScanNode
+                                if let Some(rel_label) = &edge.label {
+                                    let dest_pattern = patterns_iter.peek();
+                                    let dst_var =
+                                        dest_pattern.and_then(|p| p.node_variable.clone()).unwrap_or_default();
+                                    let dst_table_name =
+                                        dest_pattern.and_then(|p| p.node_label.clone()).unwrap_or_default();
+                                    let dst_table_id = dest_pattern.and_then(|p| p.node_table_id).unwrap_or(0);
 
-                            // Regular (non-var-length) edge → create Extend
-                            // Scan the source node (clone what we need before pattern is moved)
-                            let src_node_var = pattern.node_variable.clone();
-                            let src_already_bound = src_node_var
-                                .as_ref()
-                                .map_or(false, |v| available_vars.contains(v));
-                            if !skip_current_node_scan && !src_already_bound {
-                                if let Some(label) = &pattern.node_label {
-                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                        table_name: label.clone(),
-                                        table_id: pattern.node_table_id.unwrap_or(0),
-                                        alias: src_node_var.clone(),
-                                        columns: Vec::new(),
+                                    extend_ops.push(LogicalOperator::Extend(LogicalExtend {
+                                        rel_table_name: rel_label.clone(),
+                                        rel_table_id: edge.rel_table_id.unwrap_or(0),
+                                        bound_node_var: src_node_var.unwrap_or_default(),
+                                        direction: edge.direction.clone(),
+                                        dst_node_var: dst_var.clone(),
+                                        dst_table_name,
+                                        dst_table_id,
                                         cardinality: 0,
-                                        fts_query: fts_to_assign.take(),
-                                        predicate: None,
                                     }));
-                                    if let Some(v) = &src_node_var {
-                                        available_vars.insert(v.clone());
+                                    // The destination node is produced by this Extend — it becomes
+                                    // available to later patterns without a fresh scan (P48.1).
+                                    if !dst_var.is_empty() {
+                                        available_vars.insert(dst_var);
                                     }
+
+                                    // Skip the destination node pattern scan
+                                    skip_next_node = true;
+                                    continue;
                                 }
                             }
 
-                            // Create Extend which replaces ScanRel + destination ScanNode
-                            if let Some(rel_label) = &edge.label {
-                                let dest_pattern = patterns_iter.peek();
-                                let dst_var = dest_pattern.and_then(|p| p.node_variable.clone()).unwrap_or_default();
-                                let dst_table_name =
-                                    dest_pattern.and_then(|p| p.node_label.clone()).unwrap_or_default();
-                                let dst_table_id = dest_pattern.and_then(|p| p.node_table_id).unwrap_or(0);
-
-                                extend_ops.push(LogicalOperator::Extend(LogicalExtend {
-                                    rel_table_name: rel_label.clone(),
-                                    rel_table_id: edge.rel_table_id.unwrap_or(0),
-                                    bound_node_var: src_node_var.unwrap_or_default(),
-                                    direction: edge.direction.clone(),
-                                    dst_node_var: dst_var.clone(),
-                                    dst_table_name,
-                                    dst_table_id,
-                                    cardinality: 0,
-                                }));
-                                // The destination node is produced by this Extend — it becomes
-                                // available to later patterns without a fresh scan (P48.1).
-                                if !dst_var.is_empty() {
-                                    available_vars.insert(dst_var);
-                                }
-
-                                // Skip the destination node pattern scan
-                                skip_next_node = true;
-                                continue;
-                            }
-                        }
-
-                        // Regular (non-var-length) pattern without edge: Scan node only
-                        if !skip_current_node_scan {
-                            if let Some(label) = pattern.node_label {
-                                let var = pattern.node_variable.clone();
-                                if !var.as_ref().map_or(false, |v| available_vars.contains(v)) {
-                                    scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                        table_name: label,
-                                        table_id: pattern.node_table_id.unwrap_or(0),
-                                        alias: var.clone(),
-                                        columns: Vec::new(),
-                                        cardinality: 0,
-                                        fts_query: fts_to_assign.take(),
-                                        predicate: None,
-                                    }));
-                                    if let Some(v) = var {
-                                        available_vars.insert(v);
+                            // Regular (non-var-length) pattern without edge: Scan node only
+                            if !skip_current_node_scan {
+                                if let Some(label) = pattern.node_label {
+                                    let var = pattern.node_variable.clone();
+                                    if !var.as_ref().is_some_and(|v| available_vars.contains(v)) {
+                                        scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                            table_name: label,
+                                            table_id: pattern.node_table_id.unwrap_or(0),
+                                            alias: var.clone(),
+                                            columns: Vec::new(),
+                                            cardinality: 0,
+                                            fts_query: fts_to_assign.take(),
+                                            predicate: None,
+                                        }));
+                                        if let Some(v) = var {
+                                            available_vars.insert(v);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
                     } // end else (regular pattern loop)
                 }
 

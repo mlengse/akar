@@ -1,5 +1,5 @@
 mod common;
-use common::{exec, query_column, query_values, setup_db, Value};
+use common::{Value, exec, query_column, query_values, setup_db};
 
 #[test]
 fn test_boundary_uint64_max_roundtrip_copy() {

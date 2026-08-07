@@ -65,10 +65,7 @@ impl NodeTable {
         // one), so the fallback is unreachable in production. Use an explicit
         // sentinel instead of a silent 0 so a table with no PK column never
         // accidentally dedups on column 0 (P49.2).
-        let primary_key_column = columns
-            .iter()
-            .position(|c| c.is_primary_key)
-            .unwrap_or(NO_PRIMARY_KEY);
+        let primary_key_column = columns.iter().position(|c| c.is_primary_key).unwrap_or(NO_PRIMARY_KEY);
         Self {
             table_id,
             name,
@@ -184,7 +181,11 @@ impl NodeTable {
     }
 
     /// Batch insert with optional MVCC tracking.
-    pub fn insert_rows_batch_with_txn(&mut self, rows: &[Vec<Value>], txn_id: Option<u64>) -> Result<u64, StorageError> {
+    pub fn insert_rows_batch_with_txn(
+        &mut self,
+        rows: &[Vec<Value>],
+        txn_id: Option<u64>,
+    ) -> Result<u64, StorageError> {
         if rows.is_empty() {
             return Ok(0);
         }
@@ -442,9 +443,7 @@ impl NodeTable {
         }
 
         // Rebuild the ART index if present.
-        if self.art_index.is_some()
-            && self.primary_key_column < num_cols
-        {
+        if self.art_index.is_some() && self.primary_key_column < num_cols {
             if let Some(art) = &mut self.art_index {
                 art.clear();
                 for (row_idx, values) in rows.iter().enumerate() {
@@ -467,7 +466,10 @@ impl NodeTable {
             return Err(StorageError::Page(format!("Column index {col_idx} out of range")));
         }
         if row_idx >= self.num_rows {
-            return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
+            return Err(StorageError::Page(format!(
+                "Row index {row_idx} out of range (num_rows={})",
+                self.num_rows
+            )));
         }
         self.persistence_dirty = true;
 
@@ -482,7 +484,9 @@ impl NodeTable {
             }
             offset += group.num_nodes;
         }
-        Err(StorageError::Page(format!("Row index {row_idx} not found in any node group")))
+        Err(StorageError::Page(format!(
+            "Row index {row_idx} not found in any node group"
+        )))
     }
 
     /// Delete a row by its index. Marks the row as null by setting all its column
@@ -497,7 +501,10 @@ impl NodeTable {
     /// for MVCC snapshot isolation.
     pub fn delete_row_with_txn(&mut self, row_idx: u64, txn_id: Option<u64>) -> Result<(), StorageError> {
         if row_idx >= self.num_rows {
-            return Err(StorageError::Page(format!("Row index {row_idx} out of range (num_rows={})", self.num_rows)));
+            return Err(StorageError::Page(format!(
+                "Row index {row_idx} out of range (num_rows={})",
+                self.num_rows
+            )));
         }
         self.persistence_dirty = true;
 
@@ -520,7 +527,9 @@ impl NodeTable {
             }
             offset += group.num_nodes;
         }
-        Err(StorageError::Page(format!("Row index {row_idx} not found in any node group")))
+        Err(StorageError::Page(format!(
+            "Row index {row_idx} not found in any node group"
+        )))
     }
 
     /// Get a single value at (row, col) by locating the correct `NodeGroup`
@@ -1264,7 +1273,9 @@ impl TableCatalog {
             .ok_or_else(|| StorageError::TableNotFound(format!("Node table '{table_name}' not found")))?;
 
         if table.art_index.is_some() {
-            return Err(StorageError::Index(format!("Table '{table_name}' already has an ART index")));
+            return Err(StorageError::Index(format!(
+                "Table '{table_name}' already has an ART index"
+            )));
         }
 
         let mut art_idx = ArtPrimaryKeyIndex::new(index_name);

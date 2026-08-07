@@ -41,10 +41,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 Value::List(vals)
             }
             _ => {
-                return Err(format!(
-                    "FOREACH requires a list expression, got: {:?}",
-                    self.expression
-                ).into());
+                return Err(format!("FOREACH requires a list expression, got: {:?}", self.expression).into());
             }
         };
 

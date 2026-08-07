@@ -26,8 +26,7 @@ fn bench_recovery_time(c: &mut Criterion) {
                     }
                     std::fs::write(&csv_path, &content).unwrap();
                     let fp = csv_path.to_string_lossy().replace('\\', "/");
-                    conn.query(&format!("COPY Bench FROM '{fp}' (HEADER true)"))
-                        .unwrap();
+                    conn.query(&format!("COPY Bench FROM '{fp}' (HEADER true)")).unwrap();
                 }
 
                 let start = std::time::Instant::now();

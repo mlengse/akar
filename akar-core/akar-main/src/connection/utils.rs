@@ -10,30 +10,31 @@ use std::sync::{Arc, Mutex};
 pub(crate) fn make_sequence_callback(
     catalog: Arc<Mutex<Catalog>>,
 ) -> Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync> {
-    Arc::new(move |seq_name: &str, is_nextval: bool| -> Result<Value, ProcessorError> {
-        let mut cat = catalog.lock().map_err(|e| ProcessorError::Execution(format!("Catalog lock error: {e}")))?;
-        if is_nextval {
-            match cat.get_sequence_mut(seq_name) {
-                Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
-                None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
+    Arc::new(
+        move |seq_name: &str, is_nextval: bool| -> Result<Value, ProcessorError> {
+            let mut cat = catalog
+                .lock()
+                .map_err(|e| ProcessorError::Execution(format!("Catalog lock error: {e}")))?;
+            if is_nextval {
+                match cat.get_sequence_mut(seq_name) {
+                    Some(entry) => Ok(Value::Int64(entry.next_k_val(1))),
+                    None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
+                }
+            } else {
+                match cat.get_sequence(seq_name) {
+                    Some(entry) => Ok(Value::Int64(entry.curr_val())),
+                    None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
+                }
             }
-        } else {
-            match cat.get_sequence(seq_name) {
-                Some(entry) => Ok(Value::Int64(entry.curr_val())),
-                None => Err(ProcessorError::Execution(format!("Sequence '{}' not found", seq_name))),
-            }
-        }
-    })
+        },
+    )
 }
 
 /// Register `currval` and `nextval` as scalar functions in the function registry.
 ///
 /// These are the SQL-callable sequence functions (e.g. `SELECT nextval('my_seq')`).
 /// Deduplicates the logic that was previously inlined in `Database::new`.
-pub(crate) fn register_sequence_scalars(
-    registry: &mut akar_function::FunctionRegistry,
-    catalog: Arc<Mutex<Catalog>>,
-) {
+pub(crate) fn register_sequence_scalars(registry: &mut akar_function::FunctionRegistry, catalog: Arc<Mutex<Catalog>>) {
     use akar_function::registry::ScalarFunction;
 
     let curr_catalog = catalog.clone();
@@ -134,7 +135,10 @@ pub(crate) fn pk_value_to_string(v: &Value) -> String {
 }
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
-pub(crate) fn rows_to_datachunk(rows: Vec<Vec<Value>>, column_names: &[&str]) -> Result<akar_common::vector::DataChunk, String> {
+pub(crate) fn rows_to_datachunk(
+    rows: Vec<Vec<Value>>,
+    column_names: &[&str],
+) -> Result<akar_common::vector::DataChunk, String> {
     use akar_common::types::PhysicalTypeID;
     use akar_common::vector::ValueVector;
 

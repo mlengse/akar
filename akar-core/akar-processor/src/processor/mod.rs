@@ -11,6 +11,10 @@ pub mod join_helpers;
 pub mod mapper;
 pub mod plan_serializer;
 pub mod projection_helper;
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod tests_only;
 pub mod union_helpers;
 
 pub use chunk_helpers::*;
@@ -72,7 +76,10 @@ pub trait StandaloneCallHandler: Send + Sync {
 }
 
 pub trait StandaloneCallFn: Send + Sync {
-    fn execute(&self, args: &[akar_parser::ast::Expression]) -> Result<Vec<Vec<akar_common::types::Value>>, ProcessorError>;
+    fn execute(
+        &self,
+        args: &[akar_parser::ast::Expression],
+    ) -> Result<Vec<Vec<akar_common::types::Value>>, ProcessorError>;
     fn aliases(&self) -> Vec<&'static str>;
 }
 
@@ -302,7 +309,8 @@ impl QueryProcessor {
                     | TableFunction::CurrentSetting { .. } => Err(format!(
                         "Table function '{}' cannot be executed dynamically (no callback)",
                         func_name
-                    ).into()),
+                    )
+                    .into()),
                     TableFunction::Custom { name } if name == "vector_similarity_scan" => {
                         // Evaluate args: [table_name, column_name, query_vector, top_k]
                         // For CALL statement, args are parsed as expressions. We need to evaluate them.
@@ -321,7 +329,8 @@ impl QueryProcessor {
             Err(format!(
                 "Cannot execute table function '{}': no function registry available",
                 func_name
-            ).into())
+            )
+            .into())
         }
     }
 

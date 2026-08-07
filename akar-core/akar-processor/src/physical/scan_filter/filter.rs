@@ -185,7 +185,12 @@ impl PhysicalOperatorExec for PhysicalFilter {
     }
 }
 
-fn evaluate_binary_op_legacy(op: &BinaryOp, left: &[bool], right: &[bool], size: usize) -> Result<Vec<bool>, ProcessorError> {
+fn evaluate_binary_op_legacy(
+    op: &BinaryOp,
+    left: &[bool],
+    right: &[bool],
+    size: usize,
+) -> Result<Vec<bool>, ProcessorError> {
     let len = left.len().min(right.len()).min(size);
     let result: Vec<bool> = (0..len)
         .map(|i| match op {

@@ -171,14 +171,8 @@ mod tests {
 
     #[test]
     fn test_normalize_preserves_string_literals() {
-        assert_eq!(
-            normalize_query("RETURN 'a  b'   AS x"),
-            "RETURN 'a  b' AS x"
-        );
-        assert_eq!(
-            normalize_query("RETURN \"a  b\"   AS x"),
-            "RETURN \"a  b\" AS x"
-        );
+        assert_eq!(normalize_query("RETURN 'a  b'   AS x"), "RETURN 'a  b' AS x");
+        assert_eq!(normalize_query("RETURN \"a  b\"   AS x"), "RETURN \"a  b\" AS x");
         assert_eq!(
             normalize_query("MATCH (`a  b`) RETURN `c d`"),
             "MATCH (`a  b`) RETURN `c d`"
@@ -187,10 +181,7 @@ mod tests {
 
     #[test]
     fn test_normalize_keeps_newlines_for_comments() {
-        assert_eq!(
-            normalize_query("MATCH (p) // c\nRETURN p"),
-            "MATCH (p) // c\nRETURN p"
-        );
+        assert_eq!(normalize_query("MATCH (p) // c\nRETURN p"), "MATCH (p) // c\nRETURN p");
     }
 
     #[test]

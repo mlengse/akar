@@ -23,11 +23,11 @@ pub mod node_group;
 pub mod npy_reader;
 pub mod page;
 pub mod page_manager;
-pub mod persistence;
 #[cfg(feature = "parquet")]
 pub mod parquet_reader;
 #[cfg(feature = "parquet")]
 pub mod parquet_writer;
+pub mod persistence;
 pub mod predicate;
 pub mod roaring_bitmap;
 pub mod shadow_file;
@@ -223,7 +223,8 @@ impl StorageManager {
 
     /// Delete the durable column mirror for a dropped table.
     pub fn drop_table_persistence(&self, table_id: u64) {
-        self.table_persistence.remove(table_id, &self.db_path, &self.buffer_manager);
+        self.table_persistence
+            .remove(table_id, &self.db_path, &self.buffer_manager);
     }
 
     /// Log a column write to the WAL before applying it to the BufferManager.
@@ -550,14 +551,14 @@ impl StorageManager {
 
         // Step 3: Flush local storage buffers to the actual tables
         // Pass txn_id so inserts/deletes are recorded in VersionInfo for MVCC
-        let _commit_undo_records = local_storage
-            .flush_to_tables(&self.table_catalog, Some(txn_id))?;
+        let _commit_undo_records = local_storage.flush_to_tables(&self.table_catalog, Some(txn_id))?;
         // Undo records generated during commit for potential rollback-on-failure.
         // Currently unused since commit is atomic, but stored for future use
         // (e.g., partial-commit recovery).
         tracing::debug!(
             "commit_transaction: generated {} undo records for txn#{}",
-            _commit_undo_records.len(), txn_id
+            _commit_undo_records.len(),
+            txn_id
         );
 
         // Step 4: Apply shadow pages to the BufferManager
@@ -611,7 +612,12 @@ impl StorageManager {
                         if let Some(val) = values.into_iter().next() {
                             table
                                 .update_cell(record.row_id, record.column as usize, val)
-                                .map_err(|e| StorageError::Undo(format!("Undo failed for table {} row {}: {e}", record.table_id, record.row_id)))?;
+                                .map_err(|e| {
+                                    StorageError::Undo(format!(
+                                        "Undo failed for table {} row {}: {e}",
+                                        record.table_id, record.row_id
+                                    ))
+                                })?;
                         }
                     }
                     akar_transaction::UndoType::Insert => {
@@ -1609,8 +1615,14 @@ mod integration_tests {
 
         // Commit via StorageManager
         let shadow = crate::shadow_file::ShadowFile::new();
-        sm.commit_transaction(&local_storage, &shadow, -1 /* checkpoint */, 1 /* txn_id */, None)
-            .unwrap();
+        sm.commit_transaction(
+            &local_storage,
+            &shadow,
+            -1, /* checkpoint */
+            1,  /* txn_id */
+            None,
+        )
+        .unwrap();
 
         // Verify data was flushed to the table
         {

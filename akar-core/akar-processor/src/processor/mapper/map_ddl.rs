@@ -24,10 +24,7 @@ pub fn map_and_execute_ddl(
                 let result = handler.execute_call(&c.function_name, &c.args)?;
                 Ok(result)
             } else {
-                Err(format!(
-                    "No standalone call handler available to execute '{}'",
-                    c.function_name
-                ).into())
+                Err(format!("No standalone call handler available to execute '{}'", c.function_name).into())
             }
         }
         LogicalOperator::TableFunctionCall(tf) => {
@@ -66,9 +63,8 @@ pub fn map_and_execute_ddl(
             // Auto-create ART index for primary key (matches connection/ddl.rs behavior)
             if c.columns.iter().any(|col| col.is_primary_key) {
                 let index_name = format!("{}_pk_idx", c.name);
-                tc.create_art_index(&c.name, &index_name).map_err(|e| {
-                    format!("Failed to auto-create ART PK index for table '{}': {e}", c.name)
-                })?;
+                tc.create_art_index(&c.name, &index_name)
+                    .map_err(|e| format!("Failed to auto-create ART PK index for table '{}': {e}", c.name))?;
             }
 
             tracing::info!("Pipeline: Created node table '{}'", c.name);
@@ -329,8 +325,7 @@ pub fn map_and_execute_ddl(
                 let registry = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
                 for (prop_name, expr) in &c.properties {
                     if let Some(col_idx) = table.columns.iter().position(|col| col.name == *prop_name) {
-                        values[col_idx] =
-                            crate::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
+                        values[col_idx] = crate::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
                     }
                 }
             }

@@ -105,7 +105,11 @@ impl Connection {
             }
             BoundStatement::BoundAttachDatabase(a) => {
                 // Register a foreign table entry in the catalog
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 let table_id = catalog.next_table_id();
                 let entry = akar_catalog::ForeignTableEntry {
                     table_id,
@@ -124,7 +128,11 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundDetachDatabase(d) => {
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 catalog.remove_foreign_entry(&d.alias).map_err(|e| e.to_string())?;
                 Ok(Some(QueryResult::success_message(format!(
                     "Database '{}' detached",
@@ -361,7 +369,11 @@ impl Connection {
             }
             BoundStatement::BoundAlterTable(a) => {
                 tracing::info!("ALTER TABLE '{}'", a.table_name);
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 match &a.action {
                     akar_parser::ast::AlterAction::AddColumn { name, type_name } => {
                         let logical_type =
@@ -428,20 +440,26 @@ impl Connection {
                 // Build values from pattern properties, defaulting to Null
                 let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                 {
-                    let registry = self.database.function_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                    let registry = self
+                        .database
+                        .function_registry
+                        .lock()
+                        .map_err(|e| format!("Lock poisoned: {e}"))?;
                     for (prop_name, expr) in &c.properties {
                         if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
-                            values[col_idx] = akar_processor::physical::write_ops::set::evaluate_constant_expr(
-                                expr,
-                                &registry,
-                            );
+                            values[col_idx] =
+                                akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
                         }
                     }
                 }
 
                 // Auto-generate SERIAL column values for null entries
                 {
-                    let mut sys_catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                    let mut sys_catalog = self
+                        .database
+                        .catalog
+                        .lock()
+                        .map_err(|e| format!("Lock poisoned: {e}"))?;
                     for (col_idx, col) in table.columns.iter().enumerate() {
                         if col.logical_type == akar_common::types::LogicalTypeID::Serial
                             && matches!(values[col_idx], Value::Null)
@@ -575,7 +593,11 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateSequence(s) => {
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 let result = catalog.create_sequence(
                     s.name.clone(),
                     s.start_with,
@@ -606,7 +628,11 @@ impl Connection {
                 }
             }
             BoundStatement::BoundDropSequence(s) => {
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 let result = catalog.drop_sequence(&s.name);
                 match result {
                     akar_catalog::CatalogResult::Dropped { .. } => {
@@ -630,7 +656,11 @@ impl Connection {
                 }
             }
             BoundStatement::BoundCreateMacro(m) => {
-                let mut catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 match catalog.create_macro(
                     m.name.clone(),
                     m.positional_args.clone(),
@@ -662,7 +692,11 @@ impl Connection {
             BoundStatement::BoundCreateFtsIndex(_) => Ok(None),
             BoundStatement::BoundAnalyze(a) => {
                 tracing::info!("ANALYZE {} tables", a.table_ids.len());
-                let mut stats = self.database.stats_store.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let mut stats = self
+                    .database
+                    .stats_store
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                 let catalog = self.database.table_catalog();
 
                 for &table_id in &a.table_ids {

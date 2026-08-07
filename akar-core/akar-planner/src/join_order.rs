@@ -170,7 +170,9 @@ fn push_single_var_predicates(scans: &mut [LogicalOperator], filter_expr: &Expre
     let conjuncts = split_and_conjuncts(filter_expr);
 
     for scan in scans.iter_mut() {
-        let LogicalOperator::ScanNode(node) = scan else { continue };
+        let LogicalOperator::ScanNode(node) = scan else {
+            continue;
+        };
         let Some(alias) = node.alias.clone() else { continue };
 
         let mut pushable: Vec<Expression> = Vec::new();
@@ -247,7 +249,12 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
     for s in src_of.iter().flatten() {
         *counts.entry(s).or_insert(0) += 1;
     }
-    let shared_var = counts.iter().filter(|(_, c)| **c >= 2).max_by_key(|(_, c)| **c)?.0.to_string();
+    let shared_var = counts
+        .iter()
+        .filter(|(_, c)| **c >= 2)
+        .max_by_key(|(_, c)| **c)?
+        .0
+        .to_string();
 
     // Split rel patterns into star (shared source) vs closure (source is a star leaf).
     let mut star_idxs: Vec<usize> = Vec::new();
@@ -289,26 +296,27 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
         consumed.push(i);
         consumed.push(i + 1);
 
-        let mut pipeline: Vec<LogicalOperator> = Vec::with_capacity(2);
-        pipeline.push(LogicalOperator::ScanNode(LogicalScanNode {
-            table_name: node_label.clone(),
-            table_id: node_table_id,
-            alias: Some(node_var.clone()),
-            columns: Vec::new(),
-            cardinality: 0,
-            fts_query: None,
-            predicate: None,
-        }));
-        pipeline.push(LogicalOperator::Extend(LogicalExtend {
-            rel_table_name: rel_label.clone(),
-            rel_table_id,
-            bound_node_var: node_var.clone(),
-            direction: edge.direction.clone(),
-            dst_node_var: dst_var,
-            dst_table_name: dst_label,
-            dst_table_id,
-            cardinality: 0,
-        }));
+        let pipeline: Vec<LogicalOperator> = vec![
+            LogicalOperator::ScanNode(LogicalScanNode {
+                table_name: node_label.clone(),
+                table_id: node_table_id,
+                alias: Some(node_var.clone()),
+                columns: Vec::new(),
+                cardinality: 0,
+                fts_query: None,
+                predicate: None,
+            }),
+            LogicalOperator::Extend(LogicalExtend {
+                rel_table_name: rel_label.clone(),
+                rel_table_id,
+                bound_node_var: node_var.clone(),
+                direction: edge.direction.clone(),
+                dst_node_var: dst_var,
+                dst_table_name: dst_label,
+                dst_table_id,
+                cardinality: 0,
+            }),
+        ];
         build_sides.push(pipeline);
     }
 
@@ -767,7 +775,8 @@ mod tests {
     }
 
     #[test]
-    fn test_flatten_cross_product() {        let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
+    fn test_flatten_cross_product() {
+        let scan1 = LogicalOperator::ScanNode(LogicalScanNode {
             predicate: None,
             table_name: "A".into(),
             table_id: 0,
@@ -794,12 +803,7 @@ mod tests {
         assert!(matches!(flat[0], LogicalOperator::CrossProduct(_)));
     }
 
-    fn mk_pattern(
-        var: &str,
-        label: &str,
-        tid: u64,
-        rel: Option<(&str, u64)>,
-    ) -> BoundPattern {
+    fn mk_pattern(var: &str, label: &str, tid: u64, rel: Option<(&str, u64)>) -> BoundPattern {
         BoundPattern {
             node_variable: Some(var.into()),
             node_label: Some(label.into()),
@@ -863,10 +867,7 @@ mod tests {
     #[test]
     fn test_wcoj_single_edge_falls_back() {
         // A single edge is not a WCOJ star.
-        let patterns = vec![
-            mk_pattern("a", "N", 1, Some(("r1", 10))),
-            mk_pattern("b", "N", 1, None),
-        ];
+        let patterns = vec![mk_pattern("a", "N", 1, Some(("r1", 10))), mk_pattern("b", "N", 1, None)];
         assert!(build_wcoj_intersect(&patterns).is_none());
     }
 }

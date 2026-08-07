@@ -107,7 +107,10 @@ fn test_fts_with_where_predicate() -> Result<(), String> {
         "MATCH (d:Document) USING FTS INDEX doc_idx('language') WHERE d.title <> 'Python Language' RETURN d.id, d.title",
     )?;
     let chunk2 = res2.chunks.first().unwrap();
-    assert_eq!(chunk2.size, 1, "FTS + WHERE (title <> 'Python Language') should return only doc 2");
+    assert_eq!(
+        chunk2.size, 1,
+        "FTS + WHERE (title <> 'Python Language') should return only doc 2"
+    );
 
     Ok(())
 }

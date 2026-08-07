@@ -125,7 +125,11 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
         }
 
         let args_vals: Vec<Value> = args.iter().map(eval_ast_expr_to_value).collect();
-        let registry = self.database.function_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let registry = self
+            .database
+            .function_registry
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         match registry.execute_table_function(name, &args_vals) {
             Ok(rows) => Self::format_result(rows),
             Err(original_err) => {
@@ -164,7 +168,10 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
                     .find(|k| k.contains(&lower) || lower.contains(**k))
                     .map(|k| format!(" Did you mean CALL {}()?", k))
                     .unwrap_or_default();
-                Err(ProcessorError::Execution(format!("CALL '{}' failed: {}.{}", name, original_err, suggestion)))
+                Err(ProcessorError::Execution(format!(
+                    "CALL '{}' failed: {}.{}",
+                    name, original_err, suggestion
+                )))
             }
         }
     }
@@ -189,7 +196,11 @@ struct ShowTablesHandler {
 
 impl StandaloneCallFn for ShowTablesHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let catalog = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let catalog = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let entries: Vec<Vec<Value>> = catalog
             .all_entries()
             .map(|e| {
@@ -219,7 +230,11 @@ struct TableInfoHandler {
 impl StandaloneCallFn for TableInfoHandler {
     fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let entry = cat
             .get_entry_by_name(&table_name)
             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
@@ -249,7 +264,11 @@ struct ShowFunctionsHandler {
 
 impl StandaloneCallFn for ShowFunctionsHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let registry = self.database.function_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let registry = self
+            .database
+            .function_registry
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let funcs = registry.list_all();
         Ok(funcs
             .into_iter()
@@ -268,7 +287,11 @@ struct ShowIndexesHandler {
 
 impl StandaloneCallFn for ShowIndexesHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let indexes = cat.indexes();
         Ok(indexes
             .into_iter()
@@ -294,7 +317,11 @@ struct ShowSequencesHandler {
 
 impl StandaloneCallFn for ShowSequencesHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let seqs = cat.sequences();
         Ok(seqs
             .into_iter()
@@ -313,7 +340,11 @@ struct ShowMacrosHandler {
 
 impl StandaloneCallFn for ShowMacrosHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let macros = cat.macros();
         Ok(macros
             .into_iter()
@@ -344,7 +375,11 @@ struct ShowConnectionHandler {
 impl StandaloneCallFn for ShowConnectionHandler {
     fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let info = cat
             .connection_info(&table_name)
             .ok_or_else(|| format!("Table '{table_name}' not found"))?;
@@ -375,7 +410,11 @@ struct CatalogVersionHandler {
 
 impl StandaloneCallFn for CatalogVersionHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let cat = self
+            .database
+            .catalog
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let ver = cat.version();
         Ok(vec![vec![Value::Int64(ver as i64)]])
     }
@@ -420,11 +459,19 @@ impl StandaloneCallFn for StatsInfoHandler {
     fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let table_name = extract_arg_string(args, 0)?;
         let (row_count, storage_size) = {
-            let cat = self.database.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let cat = self
+                .database
+                .catalog
+                .lock()
+                .map_err(|e| format!("Lock poisoned: {e}"))?;
             let table_id = cat
                 .get_table_id(&table_name)
                 .ok_or_else(|| format!("Table '{table_name}' not found"))?;
-            let stats = self.database.stats_store.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let stats = self
+                .database
+                .stats_store
+                .lock()
+                .map_err(|e| format!("Lock poisoned: {e}"))?;
             stats.table_stats_by_id(table_id)
         };
         Ok(vec![vec![
@@ -575,7 +622,11 @@ struct ShowLoadedExtensionsHandler {
 
 impl StandaloneCallFn for ShowLoadedExtensionsHandler {
     fn execute(&self, _args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
-        let reg = self.database.extension_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let reg = self
+            .database
+            .extension_registry
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
         let names: Vec<Vec<Value>> = reg.names().iter().map(|n| vec![Value::String(n.clone())]).collect();
         Ok(names)
     }
@@ -805,7 +856,9 @@ impl StandaloneCallFn for ProjectedGraphInfoHandler {
                     Value::String(query),
                 ]])
             }
-            other => Err(ProcessorError::Execution(format!("Unknown projected graph type: {other}"))),
+            other => Err(ProcessorError::Execution(format!(
+                "Unknown projected graph type: {other}"
+            ))),
         }
     }
 
@@ -822,7 +875,8 @@ impl StandaloneCallFn for DropProjectedGraphHandler {
     fn execute(&self, args: &[Expression]) -> Result<Vec<Vec<Value>>, ProcessorError> {
         let graph_name = extract_arg_string(args, 0)?;
         let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
-        cat.drop_projected_graph(&graph_name).map_err(|e| ProcessorError::Execution(format!("{e}")))?;
+        cat.drop_projected_graph(&graph_name)
+            .map_err(|e| ProcessorError::Execution(format!("{e}")))?;
         Ok(vec![vec![Value::String(format!(
             "Projected graph '{}' dropped",
             graph_name

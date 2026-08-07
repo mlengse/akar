@@ -187,4 +187,3 @@ mod tests {
         assert_eq!(v.get_value(0), Some(Value::String(s)));
     }
 }
-

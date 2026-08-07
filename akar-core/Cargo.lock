@@ -343,6 +343,7 @@ name = "akar-processor"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "akar-binder",
  "akar-catalog",
  "akar-common",
  "akar-fts",

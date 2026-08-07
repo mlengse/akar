@@ -74,10 +74,7 @@ pub fn exec_err(conn: &Connection, query: &str) -> String {
         Err(e) => e,
         Ok(r) => {
             if r.is_success() {
-                panic!(
-                    "Expected error for query: {query}, got success: {}",
-                    r.result_summary()
-                );
+                panic!("Expected error for query: {query}, got success: {}", r.result_summary());
             }
             r.error_message.unwrap_or_else(|| "Unknown error".into())
         }

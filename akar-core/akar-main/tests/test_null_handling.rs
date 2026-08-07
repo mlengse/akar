@@ -125,7 +125,10 @@ fn test_null_aggregate_count_col() {
 #[test]
 fn test_count_variable_equals_count_star() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))",
+    );
     for i in 0..5 {
         exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
@@ -149,7 +152,10 @@ fn test_count_variable_respects_filter() {
 #[test]
 fn test_count_variable_group_by() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(id INT64, grp STRING, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id INT64, grp STRING, PRIMARY KEY (id))",
+    );
     exec(&conn, "CREATE (p:Person {id: 1, grp: 'x'})");
     exec(&conn, "CREATE (p:Person {id: 2, grp: 'x'})");
     exec(&conn, "CREATE (p:Person {id: 3, grp: 'y'})");

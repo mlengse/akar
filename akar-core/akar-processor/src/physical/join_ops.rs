@@ -68,8 +68,12 @@ fn chunk_cells_equal(
             left.get_i32(left_col, left_row) == right.get_i32(right_col, right_row)
         }
         (PhysicalTypeID::Int64, PhysicalTypeID::Int32) | (PhysicalTypeID::Int32, PhysicalTypeID::Int64) => {
-            let a = left.get_i64(left_col, left_row).or_else(|| left.get_i32(left_col, left_row).map(|v| v as i64));
-            let b = right.get_i64(right_col, right_row).or_else(|| right.get_i32(right_col, right_row).map(|v| v as i64));
+            let a = left
+                .get_i64(left_col, left_row)
+                .or_else(|| left.get_i32(left_col, left_row).map(|v| v as i64));
+            let b = right
+                .get_i64(right_col, right_row)
+                .or_else(|| right.get_i32(right_col, right_row).map(|v| v as i64));
             a == b
         }
         (PhysicalTypeID::Double, PhysicalTypeID::Double) => {
@@ -491,10 +495,7 @@ impl PhysicalIntersect {
             return Ok(vec![]);
         }
 
-        let probe_field_names = probe_chunks
-            .first()
-            .map(|c| c.field_names.clone())
-            .unwrap_or_default();
+        let probe_field_names = probe_chunks.first().map(|c| c.field_names.clone()).unwrap_or_default();
         let probe_field_count = probe_chunks.first().map(|c| c.fields.len()).unwrap_or(0);
         let mut output_rows: Vec<Vec<Value>> = Vec::new();
 
@@ -569,8 +570,7 @@ impl PhysicalIntersect {
 
         // Build output DataChunk (one row per field group)
         let output_size = output_rows.len();
-        let mut output_fields: Vec<ValueVector> =
-            Vec::with_capacity(output_rows.first().map(|r| r.len()).unwrap_or(0));
+        let mut output_fields: Vec<ValueVector> = Vec::with_capacity(output_rows.first().map(|r| r.len()).unwrap_or(0));
 
         if let Some(first_row) = output_rows.first() {
             for val in first_row {
@@ -922,9 +922,20 @@ mod tests {
             probe_key_col: 1,
             build_key_col: 1,
         };
-        let result = intersect.execute_sides(&vec![vec![build]], &vec![probe]).unwrap();
+        let result = intersect.execute_sides(&[vec![build]], &[probe]).unwrap();
         assert!(!result.is_empty(), "expected non-empty result");
-        assert_eq!(result[0].size, 2, "probe id 1 matches both build rows; id 2 matches nothing");
-        assert_eq!(result[0].field_names, vec!["a.other".to_string(), "a.id".to_string(), "a.other".to_string(), "a.id".to_string()]);
+        assert_eq!(
+            result[0].size, 2,
+            "probe id 1 matches both build rows; id 2 matches nothing"
+        );
+        assert_eq!(
+            result[0].field_names,
+            vec![
+                "a.other".to_string(),
+                "a.id".to_string(),
+                "a.other".to_string(),
+                "a.id".to_string()
+            ]
+        );
     }
 }

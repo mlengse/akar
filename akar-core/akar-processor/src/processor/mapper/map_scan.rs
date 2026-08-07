@@ -56,8 +56,7 @@ pub fn map_and_execute_scan_node(
     // Try Arrow fast path first (avoids Vec<Vec<Value>> intermediate)
     let (arrow_data, columns, arrow_num_rows) = ctx.resolve_scan_arrow_data(&s.table_name);
     let mut scan = if let Some(arrays) = arrow_data {
-        PhysicalScan::new(s.table_name.clone(), s.table_id, arrow_num_rows.max(1))
-            .with_arrow_data(arrays, columns)
+        PhysicalScan::new(s.table_name.clone(), s.table_id, arrow_num_rows.max(1)).with_arrow_data(arrays, columns)
     } else {
         // Fallback to legacy Vec<Vec<Value>> data path (MVCC-aware)
         let (data, fallback_columns, fallback_num_rows) = ctx.resolve_scan_data(&s.table_name, pred_ref);
@@ -74,7 +73,10 @@ pub fn map_and_execute_scan_node(
             docs_table: fq.docs_table.clone(),
             terms_table: fq.terms_table.clone(),
             posting_table: fq.posting_table.clone(),
-            table_catalog: ctx.table_catalog.clone().ok_or_else(|| "Table catalog required for FTS scan".to_string())?,
+            table_catalog: ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| "Table catalog required for FTS scan".to_string())?,
         });
     }
     if let Some(ref pred) = s.predicate {

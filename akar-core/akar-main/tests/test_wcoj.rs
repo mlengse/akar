@@ -39,10 +39,22 @@ fn setup(conn: &Connection) {
     for i in 0..4 {
         exec(conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
-    exec(conn, "MATCH (a:Person {id: 0}), (b:Person {id: 1}) CREATE (a)-[:r1]->(b)");
-    exec(conn, "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r1]->(b)");
-    exec(conn, "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r2]->(b)");
-    exec(conn, "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:r3]->(b)");
+    exec(
+        conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 1}) CREATE (a)-[:r1]->(b)",
+    );
+    exec(
+        conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r1]->(b)",
+    );
+    exec(
+        conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r2]->(b)",
+    );
+    exec(
+        conn,
+        "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:r3]->(b)",
+    );
 }
 
 #[test]
@@ -74,8 +86,7 @@ fn test_wcoj_triangle() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    let triangle =
-        "MATCH (a:Person)-[:r1]->(b:Person), (a:Person)-[:r2]->(c:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    let triangle = "MATCH (a:Person)-[:r1]->(b:Person), (a:Person)-[:r2]->(c:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
     // Only (0, 1, 2) forms a triangle: 0->1 (r1), 0->2 (r2), 1->2 (r3).
     assert_rows(&conn, triangle, &[(0, 1, 2)]);
 }
@@ -120,8 +131,7 @@ fn test_comma_pattern_chain_shared_var() {
     let (_db, conn) = setup_db();
     setup(&conn);
     // r1: 0->1, 0->2 ; r3: 1->2. Path through a=0: only (0, 1, 2).
-    let sql =
-        "MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    let sql = "MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
     assert_rows(&conn, sql, &[(0, 1, 2)]);
 }
 
@@ -131,7 +141,9 @@ fn test_comma_pattern_chain_no_cross_product() {
     let (_db, conn) = setup_db();
     setup(&conn);
     let result = conn
-        .query("EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id")
+        .query(
+            "EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id",
+        )
         .unwrap();
     assert!(result.is_success(), "EXPLAIN failed: {:?}", result.error_message);
     let mut plan = String::new();
@@ -146,7 +158,11 @@ fn test_comma_pattern_chain_no_cross_product() {
         !plan.contains("CrossProduct"),
         "expected no CrossProduct (shared variable re-scanned), got:\n{plan}"
     );
-    assert_eq!(plan.matches("ScanNode").count(), 1, "expected a single Person scan, got:\n{plan}");
+    assert_eq!(
+        plan.matches("ScanNode").count(),
+        1,
+        "expected a single Person scan, got:\n{plan}"
+    );
 }
 
 #[test]
@@ -258,7 +274,10 @@ fn test_multiple_node_predicates() {
         exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
     // Two implicit WHEREs (a.id=0, b.id=2) must both apply → only edge 0->2.
-    exec(&conn, "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r]->(b)");
+    exec(
+        &conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 2}) CREATE (a)-[:r]->(b)",
+    );
 
     let rows = query_rows(&conn, "MATCH (a:Person)-[:r]->(b:Person) RETURN a.id, b.id");
     let parse = |s: &str| {
@@ -293,7 +312,10 @@ fn test_equality_filter_two_columns() {
         );
     }
     let eq = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id = b.id RETURN a.id, b.id";
-    assert!(query_rows(&conn, eq).is_empty(), "a.id = b.id must yield 0 rows (no self-edges)");
+    assert!(
+        query_rows(&conn, eq).is_empty(),
+        "a.id = b.id must yield 0 rows (no self-edges)"
+    );
 
     let lt = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id < b.id RETURN a.id, b.id";
     assert_eq!(query_rows(&conn, lt).len(), 5, "a.id < b.id must yield all 5 edges");
@@ -302,7 +324,11 @@ fn test_equality_filter_two_columns() {
     assert!(query_rows(&conn, gt).is_empty(), "a.id > b.id must yield 0 rows");
 
     let eq0 = "MATCH (a:Person)-[:r3]->(b:Person) WHERE a.id = 0 RETURN a.id, b.id";
-    assert_eq!(query_rows(&conn, eq0).len(), 1, "a.id = 0 must yield exactly the edge 0->1");
+    assert_eq!(
+        query_rows(&conn, eq0).len(),
+        1,
+        "a.id = 0 must yield exactly the edge 0->1"
+    );
 }
 
 /// BUG-B regression: the WCOJ closure filter (`__wcoj_closure_*.id = c.id`)
@@ -319,7 +345,14 @@ fn test_wcoj_triangle_closure_n6() {
         exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
     // Forward-complete graph on 6 nodes → every triple a<b<c is a triangle.
-    for (rel, lo, hi) in [("r1", 0, 2), ("r1", 3, 5), ("r2", 0, 2), ("r2", 3, 5), ("r3", 0, 2), ("r3", 3, 5)] {
+    for (rel, lo, hi) in [
+        ("r1", 0, 2),
+        ("r1", 3, 5),
+        ("r2", 0, 2),
+        ("r2", 3, 5),
+        ("r3", 0, 2),
+        ("r3", 3, 5),
+    ] {
         exec(
             &conn,
             &format!(
@@ -327,8 +360,7 @@ fn test_wcoj_triangle_closure_n6() {
             ),
         );
     }
-    let triangle =
-        "MATCH (a:Person)-[:r1]->(b:Person), (a:Person)-[:r2]->(c:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    let triangle = "MATCH (a:Person)-[:r1]->(b:Person), (a:Person)-[:r2]->(c:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
     let rows = query_rows(&conn, triangle);
     assert_eq!(rows.len(), 20, "expected C(6,3)=20 triangles, got {rows:?}");
     let distinct: std::collections::HashSet<Vec<String>> = rows.iter().cloned().collect();

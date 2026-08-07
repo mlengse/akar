@@ -4,7 +4,10 @@ use common::{exec, setup_db};
 #[test]
 fn test_insert_and_read_mvcc() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))",
+    );
     exec(&conn, "CREATE (p:Person {id: 1, name: 'Alice'})");
     exec(&conn, "CREATE (p:Person {id: 2, name: 'Bob'})");
     let res = conn.query("MATCH (p:Person) RETURN p.id").unwrap();
@@ -15,7 +18,10 @@ fn test_insert_and_read_mvcc() {
 #[test]
 fn test_concurrent_read_snapshot() {
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Counter(id INT64, val INT64, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Counter(id INT64, val INT64, PRIMARY KEY (id))",
+    );
     exec(&conn, "CREATE (c:Counter {id: 1, val: 0})");
     let db_clone = std::sync::Arc::clone(&db);
     let handle = std::thread::spawn(move || {

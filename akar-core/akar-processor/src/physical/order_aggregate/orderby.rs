@@ -24,11 +24,18 @@ impl<'a> ChunkAccessor<'a> {
             cum += c.size;
         }
         let num_fields = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
-        Self { chunks, offsets, num_fields }
+        Self {
+            chunks,
+            offsets,
+            num_fields,
+        }
     }
 
     fn total_rows(&self) -> usize {
-        self.offsets.last().map(|&o| o + self.chunks.last().unwrap().size).unwrap_or(0)
+        self.offsets
+            .last()
+            .map(|&o| o + self.chunks.last().unwrap().size)
+            .unwrap_or(0)
     }
 
     fn resolve(&self, global_row: usize) -> (usize, usize) {
@@ -53,7 +60,10 @@ impl<'a> ChunkAccessor<'a> {
 
     fn physical_type(&self, col: usize, global_row: usize) -> akar_common::types::PhysicalTypeID {
         let (ci, local) = self.resolve(global_row);
-        self.chunks[ci].get_value(col, local).map(|v| v.physical_type()).unwrap_or(akar_common::types::PhysicalTypeID::Int64)
+        self.chunks[ci]
+            .get_value(col, local)
+            .map(|v| v.physical_type())
+            .unwrap_or(akar_common::types::PhysicalTypeID::Int64)
     }
 }
 
@@ -87,7 +97,8 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
         let indices = if total_rows > block_size && !self.sort_keys.is_empty() {
             let sorter = BlockMergeSorter::new(block_size, self.sort_keys.clone());
             // Multi-block path still needs collected key values for k-way merge
-            let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
+            let mut all_values: Vec<Vec<(Value, bool)>> =
+                (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
             for global_row in 0..total_rows {
                 for col in 0..num_fields {
                     let val = accessor.get_value(col, global_row);

@@ -66,15 +66,14 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                     .get_node_table(rel.dst_table_id)
                     .and_then(|n| n.columns.get(n.primary_key_column).map(|c| c.logical_type))
                     .unwrap_or(akar_common::types::LogicalTypeID::Int64);
-                let synthetic = |name: &str, logical_type: akar_common::types::LogicalTypeID| {
-                    akar_catalog::CatalogColumn {
+                let synthetic =
+                    |name: &str, logical_type: akar_common::types::LogicalTypeID| akar_catalog::CatalogColumn {
                         name: name.to_string(),
                         logical_type,
                         is_primary_key: false,
                         compression: akar_common::enums::CompressionType::Uncompressed,
                         default_value: None,
-                    }
-                };
+                    };
                 catalog_cols.insert(0, synthetic("from", src_pk_type));
                 catalog_cols.insert(1, synthetic("to", dst_pk_type));
             }
@@ -97,9 +96,7 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             #[cfg(not(feature = "parquet"))]
             "parquet" => return Err("Parquet support not enabled (feature 'parquet' in akar-storage)".into()),
             _ => {
-                return Err(format!(
-                    "Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)"
-                ).into());
+                return Err(format!("Unsupported file type: .{ext} (supported: .csv, .tsv, .parquet)").into());
             }
         };
 
@@ -131,24 +128,18 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             let dst_node = self.table_catalog.get_node_table(table.dst_table_id);
             let mut rels: Vec<(u64, u64, Vec<Value>)> = Vec::with_capacity(rows.len());
             for row in &rows {
-                let from = src_node
-                    .as_ref()
-                    .and_then(|n| n.lookup_by_pk(&row[0]))
-                    .ok_or_else(|| {
-                        format!(
-                            "COPY rel: source node with PK {:?} not found in table '{}'",
-                            row[0], self.table_name
-                        )
-                    })?;
-                let to = dst_node
-                    .as_ref()
-                    .and_then(|n| n.lookup_by_pk(&row[1]))
-                    .ok_or_else(|| {
-                        format!(
-                            "COPY rel: destination node with PK {:?} not found in table '{}'",
-                            row[1], self.table_name
-                        )
-                    })?;
+                let from = src_node.as_ref().and_then(|n| n.lookup_by_pk(&row[0])).ok_or_else(|| {
+                    format!(
+                        "COPY rel: source node with PK {:?} not found in table '{}'",
+                        row[0], self.table_name
+                    )
+                })?;
+                let to = dst_node.as_ref().and_then(|n| n.lookup_by_pk(&row[1])).ok_or_else(|| {
+                    format!(
+                        "COPY rel: destination node with PK {:?} not found in table '{}'",
+                        row[1], self.table_name
+                    )
+                })?;
                 rels.push((from, to, row[2..].to_vec()));
             }
             let count = table

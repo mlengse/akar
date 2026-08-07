@@ -1,5 +1,5 @@
-use super::plan_cache::{normalize_query, CachedPlan};
 use super::Connection;
+use super::plan_cache::{CachedPlan, normalize_query};
 use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
 use akar_binder::Binder;
@@ -213,7 +213,10 @@ impl Connection {
         // For write transactions, use the txn's snapshot_ts.
         // For read-only queries, capture a fresh snapshot from the transaction manager.
         let (snapshot_ts, commit_history) = if let Some(ref txn) = txn_opt {
-            (txn.snapshot_ts, self.database.transaction_manager.commit_history_snapshot())
+            (
+                txn.snapshot_ts,
+                self.database.transaction_manager.commit_history_snapshot(),
+            )
         } else {
             // Read-only query: capture snapshot at current commit point
             let ts = self.database.transaction_manager.current_commit_ts();
@@ -222,8 +225,7 @@ impl Connection {
         };
 
         // Execute
-        let processor = self.create_processor()
-            .with_snapshot(snapshot_ts, commit_history);
+        let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history);
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -346,8 +348,7 @@ impl Connection {
         let history = self.database.transaction_manager.commit_history_snapshot();
 
         // Execute
-        let processor = self.create_processor()
-            .with_snapshot(Some(ts), history);
+        let processor = self.create_processor().with_snapshot(Some(ts), history);
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -399,7 +400,10 @@ impl Connection {
                                     Err(ProcessorError::Execution(format!("Sequence '{}' already exists", name)))
                                 }
                             }
-                            other => Err(ProcessorError::Execution(format!("Failed to create sequence: {:?}", other))),
+                            other => Err(ProcessorError::Execution(format!(
+                                "Failed to create sequence: {:?}",
+                                other
+                            ))),
                         }
                     }
                     akar_processor::processor::SchemaDdlOp::DropSequence { name, if_exists } => {
@@ -413,7 +417,10 @@ impl Connection {
                                     Err(ProcessorError::Execution(format!("Sequence '{}' not found", name)))
                                 }
                             }
-                            other => Err(ProcessorError::Execution(format!("Failed to drop sequence: {:?}", other))),
+                            other => Err(ProcessorError::Execution(format!(
+                                "Failed to drop sequence: {:?}",
+                                other
+                            ))),
                         }
                     }
                     akar_processor::processor::SchemaDdlOp::ExportDatabase {
@@ -547,7 +554,9 @@ impl Connection {
         });
 
         let subquery_fn: Arc<
-            dyn Fn(&akar_parser::ast::Query) -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> + Send + Sync,
+            dyn Fn(&akar_parser::ast::Query) -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError>
+                + Send
+                + Sync,
         > = Arc::new({
             let schema_ddl_sq = schema_ddl_fn.clone();
             move |query: &akar_parser::ast::Query| -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> {
@@ -562,20 +571,17 @@ impl Connection {
                 let catalog_inner = db.catalog.clone();
                 let seq_fn_inner = super::utils::make_sequence_callback(catalog_inner);
 
-                let processor = QueryProcessor::with_catalog(
-                    db.function_registry.clone(),
-                    db.table_catalog(),
-                    db.vfs.clone(),
-                )
-                .with_sequence_fn(seq_fn_inner)
-                .with_schema_ddl_fn(schema_ddl_sq.clone())
-                .with_standalone_call_handler(Arc::new(
-                    crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone()),
-                ))
-                .with_snapshot(
-                    Some(db.transaction_manager.current_commit_ts()),
-                    db.transaction_manager.commit_history_snapshot(),
-                );
+                let processor =
+                    QueryProcessor::with_catalog(db.function_registry.clone(), db.table_catalog(), db.vfs.clone())
+                        .with_sequence_fn(seq_fn_inner)
+                        .with_schema_ddl_fn(schema_ddl_sq.clone())
+                        .with_standalone_call_handler(Arc::new(
+                            crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone()),
+                        ))
+                        .with_snapshot(
+                            Some(db.transaction_manager.current_commit_ts()),
+                            db.transaction_manager.commit_history_snapshot(),
+                        );
 
                 processor
                     .execute(&optimized_plan)
@@ -627,9 +633,7 @@ impl Connection {
     /// Wait for checkpoint to finish (for CHECKPOINT command).
     pub(crate) fn do_sync_checkpoint(&self) -> Result<(), String> {
         let tm = &self.database.transaction_manager;
-        let drain_fn = |timeout: std::time::Duration| -> bool {
-            tm.stop_new_txns_and_wait_until_all_leave(timeout)
-        };
+        let drain_fn = |timeout: std::time::Duration| -> bool { tm.stop_new_txns_and_wait_until_all_leave(timeout) };
         self.database
             .storage_manager
             .checkpoint_with_drain(Some(&drain_fn))

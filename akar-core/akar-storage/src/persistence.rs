@@ -76,11 +76,7 @@ impl TablePersistence {
     }
 
     /// Persist the oversized-value map to the `col_{tid}.ovf` sidecar.
-    fn save_overflow(
-        table_id: u64,
-        oversized: &[HashMap<u64, Vec<u8>>],
-        db_path: &Path,
-    ) -> Result<(), StorageError> {
+    fn save_overflow(table_id: u64, oversized: &[HashMap<u64, Vec<u8>>], db_path: &Path) -> Result<(), StorageError> {
         let path = db_path.join(Self::ovf_file_name(table_id));
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&(oversized.len() as u32).to_le_bytes());
@@ -98,11 +94,7 @@ impl TablePersistence {
     }
 
     /// Load the oversized-value map from the `col_{tid}.ovf` sidecar.
-    fn load_overflow(
-        table_id: u64,
-        num_cols: usize,
-        db_path: &Path,
-    ) -> Vec<HashMap<u64, Vec<u8>>> {
+    fn load_overflow(table_id: u64, num_cols: usize, db_path: &Path) -> Vec<HashMap<u64, Vec<u8>>> {
         let mut result: Vec<HashMap<u64, Vec<u8>>> = (0..num_cols).map(|_| HashMap::new()).collect();
         let path = db_path.join(Self::ovf_file_name(table_id));
         let buf = match std::fs::read(&path) {
@@ -147,7 +139,15 @@ impl TablePersistence {
         bm: &Arc<Mutex<BufferManager>>,
         page_size: usize,
     ) -> Column {
-        Column::with_compression(def.logical_type, table_id, col_idx, db_path, bm.clone(), page_size, def.compression)
+        Column::with_compression(
+            def.logical_type,
+            table_id,
+            col_idx,
+            db_path,
+            bm.clone(),
+            page_size,
+            def.compression,
+        )
     }
 
     /// Delete the mirror files for a dropped table.
@@ -222,9 +222,14 @@ impl TablePersistence {
             // Incremental append of newly inserted rows.
             if entry.columns.is_empty() {
                 for (ci, def) in table.columns.iter().enumerate() {
-                    entry
-                        .columns
-                        .push(Self::build_column(def, table.table_id, ci as u32, db_path, bm, page_size));
+                    entry.columns.push(Self::build_column(
+                        def,
+                        table.table_id,
+                        ci as u32,
+                        db_path,
+                        bm,
+                        page_size,
+                    ));
                 }
                 entry.oversized = (0..num_cols).map(|_| HashMap::new()).collect();
             }
@@ -370,9 +375,14 @@ impl TablePersistence {
                     } else {
                         table.columns[ci - 2].clone()
                     };
-                    entry
-                        .columns
-                        .push(Self::build_column(&def, table.table_id, ci as u32, db_path, bm, page_size));
+                    entry.columns.push(Self::build_column(
+                        &def,
+                        table.table_id,
+                        ci as u32,
+                        db_path,
+                        bm,
+                        page_size,
+                    ));
                 }
                 entry.oversized = (0..num_cols).map(|_| HashMap::new()).collect();
             }
@@ -596,7 +606,9 @@ mod tests {
             .insert_row(vec![Value::String("carol".into()), Value::Int64(40)])
             .unwrap();
 
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
         assert!(!table.persistence_dirty, "sync should clear the dirty flag");
 
         // Fresh table with the same schema must reload the mirrored rows.
@@ -623,13 +635,17 @@ mod tests {
         table
             .insert_row(vec![Value::String("alice".into()), Value::Int64(30)])
             .unwrap();
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
 
         // Insert more rows — the mirror must append incrementally.
         table
             .insert_row(vec![Value::String("bob".into()), Value::Int64(25)])
             .unwrap();
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
 
         let mut restored = NodeTable::new(1, "Person".into(), node_defs());
         persistence
@@ -651,12 +667,16 @@ mod tests {
         table
             .insert_row(vec![Value::String("alice".into()), Value::Int64(30)])
             .unwrap();
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
 
         // UPDATE marks the table dirty → the mirror is rewritten from scratch.
         table.update_cell(0, 1, Value::Int64(31)).unwrap();
         assert!(table.persistence_dirty);
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
         assert!(!table.persistence_dirty);
 
         let mut restored = NodeTable::new(1, "Person".into(), node_defs());
@@ -680,7 +700,9 @@ mod tests {
         table.insert_rel(0, 2, vec![Value::Int64(2015)]).unwrap();
         table.insert_rel(3, 1, vec![Value::Int64(2020)]).unwrap();
 
-        persistence.sync_rel_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_rel_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
         assert!(!table.persistence_dirty);
 
         let mut restored = RelTable::new(2, "LivesIn".into(), 1, 1, rel_defs());
@@ -690,12 +712,12 @@ mod tests {
         assert!(loaded, "rel mirror should exist and be loadable");
         assert_eq!(restored.num_rows, 3);
         assert_eq!(restored.edges, vec![(0, 1), (0, 2), (3, 1)]);
-        assert_eq!(
-            restored.fwd_adj.get(&0).cloned(),
-            Some(vec![(1, 0), (2, 1)])
-        );
+        assert_eq!(restored.fwd_adj.get(&0).cloned(), Some(vec![(1, 0), (2, 1)]));
         assert_eq!(restored.rev_adj.get(&1).cloned(), Some(vec![(0, 0), (3, 2)]));
-        assert_eq!(restored.properties[0], vec![Value::Int64(2010), Value::Int64(2015), Value::Int64(2020)]);
+        assert_eq!(
+            restored.properties[0],
+            vec![Value::Int64(2010), Value::Int64(2015), Value::Int64(2020)]
+        );
     }
 
     #[test]
@@ -718,7 +740,9 @@ mod tests {
             .insert_row(vec![Value::String("carol".into()), Value::Int64(40)])
             .unwrap();
 
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
         assert!(!table.persistence_dirty);
 
         // The oversized string is stored in the overflow sidecar.
@@ -738,7 +762,9 @@ mod tests {
         table
             .insert_row(vec![Value::String("dave".into()), Value::Int64(50)])
             .unwrap();
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
         let mut restored2 = NodeTable::new(1, "Person".into(), node_defs());
         persistence
             .load_node_table(&mut restored2, &db_path, &bm, page_size)
@@ -760,7 +786,9 @@ mod tests {
         table
             .insert_row(vec![Value::String("alice".into()), Value::Int64(30)])
             .unwrap();
-        persistence.sync_node_table(&mut table, &db_path, &bm, page_size).unwrap();
+        persistence
+            .sync_node_table(&mut table, &db_path, &bm, page_size)
+            .unwrap();
 
         let col_file = db_path.join("col_1_0");
         assert!(col_file.exists(), "column data file should exist after sync");

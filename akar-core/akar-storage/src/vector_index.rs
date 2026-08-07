@@ -309,7 +309,8 @@ impl VectorIndexTable {
         if self.dirty {
             self.save(bm)?;
         }
-        bm.flush_all().map_err(|e| StorageError::Index(format!("Failed to flush vector index: {e}")))
+        bm.flush_all()
+            .map_err(|e| StorageError::Index(format!("Failed to flush vector index: {e}")))
     }
 
     /// Register the vector index file with the BufferManager.

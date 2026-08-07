@@ -38,10 +38,17 @@ impl AggregateHashTable {
         let total_rows: usize = chunks.iter().map(|c| c.size).sum();
 
         // Resolve aggregate expression args to column indices
-        let col_indices = resolve_agg_col_indices(
+        let mut col_indices = resolve_agg_col_indices(
             &self.agg_expressions,
             chunks.first().map(|c| c.field_names.as_slice()).unwrap_or(&[]),
         );
+
+        // PhysicalAggregate (simple path) carries no agg expressions, so each
+        // function operates on the first input column. Guard against the empty
+        // vec to keep the fast paths below from indexing out of bounds.
+        if col_indices.is_empty() && !self.funcs.is_empty() {
+            col_indices = vec![Some(0); self.funcs.len()];
+        }
 
         if total_rows == 0 && self.group_by_cols.is_empty() {
             // Scalar aggregates on empty input: produce one row with default values
@@ -365,8 +372,8 @@ impl AggregateHashTable {
 /// For strings, avoids the `to_string()` allocation that `get_value()` would incur.
 /// For primitives, avoids `Value` enum dispatch overhead.
 pub fn hash_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> u64 {
-    use std::hash::Hasher;
     use std::hash::Hash;
+    use std::hash::Hasher;
     let mut hasher = ahash::AHasher::default();
     for &gc in group_cols {
         let col = gc as usize;
@@ -423,11 +430,11 @@ pub fn keys_equal(stored: &Value, chunk: &DataChunk, group_cols: &[u32], row: us
             return *stored == Value::Null;
         }
         return match stored {
-            Value::Int64(v) => chunk.get_i64(col, row).map_or(false, |x| x == *v),
-            Value::Int32(v) => chunk.get_i32(col, row).map_or(false, |x| x == *v),
-            Value::Double(v) => chunk.get_f64(col, row).map_or(false, |x| x == *v),
-            Value::Bool(v) => chunk.get_bool(col, row).map_or(false, |x| x == *v),
-            Value::String(v) => chunk.get_string(col, row).map_or(false, |x| x == *v),
+            Value::Int64(v) => chunk.get_i64(col, row).is_some_and(|x| x == *v),
+            Value::Int32(v) => chunk.get_i32(col, row).is_some_and(|x| x == *v),
+            Value::Double(v) => chunk.get_f64(col, row).is_some_and(|x| x == *v),
+            Value::Bool(v) => chunk.get_bool(col, row).is_some_and(|x| x == *v),
+            Value::String(v) => chunk.get_string(col, row).is_some_and(|x| x == *v),
             _ => {
                 let val = chunk.get_value(col, row).unwrap_or(Value::Null);
                 *stored == val
@@ -444,11 +451,11 @@ pub fn keys_equal(stored: &Value, chunk: &DataChunk, group_cols: &[u32], row: us
                 return *v == Value::Null;
             }
             match v {
-                Value::Int64(expected) => chunk.get_i64(col, row).map_or(false, |x| x == *expected),
-                Value::Int32(expected) => chunk.get_i32(col, row).map_or(false, |x| x == *expected),
-                Value::Double(expected) => chunk.get_f64(col, row).map_or(false, |x| x == *expected),
-                Value::Bool(expected) => chunk.get_bool(col, row).map_or(false, |x| x == *expected),
-                Value::String(expected) => chunk.get_string(col, row).map_or(false, |x| x == *expected),
+                Value::Int64(expected) => chunk.get_i64(col, row).is_some_and(|x| x == *expected),
+                Value::Int32(expected) => chunk.get_i32(col, row).is_some_and(|x| x == *expected),
+                Value::Double(expected) => chunk.get_f64(col, row).is_some_and(|x| x == *expected),
+                Value::Bool(expected) => chunk.get_bool(col, row).is_some_and(|x| x == *expected),
+                Value::String(expected) => chunk.get_string(col, row).is_some_and(|x| x == *expected),
                 _ => {
                     let val = chunk.get_value(col, row).unwrap_or(Value::Null);
                     *v == val

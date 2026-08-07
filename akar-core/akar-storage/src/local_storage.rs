@@ -67,7 +67,12 @@ impl LocalTableData {
     /// `node_table.insert_row_with_txn()`.
     /// When `txn_id` is `Some(...)`, inserts/deletes are recorded in VersionInfo.
     /// Returns undo records so the caller can store them for potential rollback.
-    pub fn flush_to_node_table(&self, table_id: u64, node_table: &mut NodeTable, txn_id: Option<u64>) -> Result<Vec<UndoRecord>, StorageError> {
+    pub fn flush_to_node_table(
+        &self,
+        table_id: u64,
+        node_table: &mut NodeTable,
+        txn_id: Option<u64>,
+    ) -> Result<Vec<UndoRecord>, StorageError> {
         use crate::column::Column;
         let mut undo_records = Vec::new();
 
@@ -83,7 +88,8 @@ impl LocalTableData {
             let num_cols = node_table.columns.len();
             let mut old_row_data = Vec::new();
             for col_idx in 0..num_cols {
-                let val = node_table.get_value(*row_id as usize, col_idx)
+                let val = node_table
+                    .get_value(*row_id as usize, col_idx)
                     .cloned()
                     .unwrap_or(akar_common::types::Value::Null);
                 old_row_data.extend_from_slice(&Column::serialize_value(&val));
@@ -154,7 +160,11 @@ impl LocalStorage {
     /// are visible to subsequent transactions.
     /// When `txn_id` is `Some(...)`, inserts/deletes are recorded in VersionInfo.
     /// Returns undo records for potential rollback.
-    pub fn flush_to_tables(&self, catalog: &Arc<TableCatalog>, txn_id: Option<u64>) -> Result<Vec<UndoRecord>, StorageError> {
+    pub fn flush_to_tables(
+        &self,
+        catalog: &Arc<TableCatalog>,
+        txn_id: Option<u64>,
+    ) -> Result<Vec<UndoRecord>, StorageError> {
         let mut all_undo_records = Vec::new();
         for (&table_id, table_data) in &self.tables {
             if table_data.is_empty() {

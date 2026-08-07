@@ -34,9 +34,7 @@ fn test_plan_cache_no_hit_regression() {
     let (_db, conn) = build_db();
 
     // Warm up: first call populates the cache
-    let r = conn
-        .query("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)")
-        .unwrap();
+    let r = conn.query("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)").unwrap();
     assert!(r.is_success());
 
     const N: u32 = 1000;
@@ -44,9 +42,7 @@ fn test_plan_cache_no_hit_regression() {
     // Cache-hit latency: repeated identical query strings
     let start = Instant::now();
     for _ in 0..N {
-        let r = conn
-            .query("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)")
-            .unwrap();
+        let r = conn.query("MATCH (p:Person) WHERE p.age > 50 RETURN COUNT(p)").unwrap();
         assert!(r.is_success());
     }
     let hit = start.elapsed();
@@ -68,8 +64,5 @@ fn test_plan_cache_no_hit_regression() {
     let hit_ns = hit.as_nanos() as f64;
     let miss_ns = miss.as_nanos() as f64;
     eprintln!("hit/miss ratio: {:.3}", hit_ns / miss_ns);
-    assert!(
-        hit_ns <= miss_ns * 1.5,
-        "Cache hits must not be 50% slower than misses"
-    );
+    assert!(hit_ns <= miss_ns * 1.5, "Cache hits must not be 50% slower than misses");
 }

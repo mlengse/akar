@@ -12,12 +12,24 @@ fn setup(conn: &Connection) {
     }
     // r1: 0->1..9 (10 b nodes)
     for i in 1..=9 {
-        exec(conn, &format!("MATCH (a:Person {{id: 0}}), (b:Person {{id: {i}}}) CREATE (a)-[:r1]->(b)"));
+        exec(
+            conn,
+            &format!("MATCH (a:Person {{id: 0}}), (b:Person {{id: {i}}}) CREATE (a)-[:r1]->(b)"),
+        );
     }
     // r3: each b -> distinct c
-    exec(conn, "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:r3]->(b)");
-    exec(conn, "MATCH (a:Person {id: 2}), (b:Person {id: 3}) CREATE (a)-[:r3]->(b)");
-    exec(conn, "MATCH (a:Person {id: 3}), (b:Person {id: 4}) CREATE (a)-[:r3]->(b)");
+    exec(
+        conn,
+        "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:r3]->(b)",
+    );
+    exec(
+        conn,
+        "MATCH (a:Person {id: 2}), (b:Person {id: 3}) CREATE (a)-[:r3]->(b)",
+    );
+    exec(
+        conn,
+        "MATCH (a:Person {id: 3}), (b:Person {id: 4}) CREATE (a)-[:r3]->(b)",
+    );
 }
 
 #[test]
@@ -36,8 +48,7 @@ fn test_chain_comma_patterns() {
     let (_db, conn) = setup_db();
     setup(&conn);
     // Comma-separated patterns sharing b: (a)-[:r1]->(b), (b)-[:r3]->(c)
-    let sql =
-        "MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
+    let sql = "MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id";
     let rows = query_rows(&conn, sql);
     println!("comma rows: {rows:?}");
     // BUG P48.1: cross-product — 27 rows (9 b × 3 c) instead of 3 valid paths.
@@ -52,7 +63,10 @@ fn test_chain_explain_comma() {
         "EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id",
     );
     println!("EXPLAIN result: {result:?}");
-    let rows = query_rows(&conn, "EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id");
+    let rows = query_rows(
+        &conn,
+        "EXPLAIN MATCH (a:Person {id: 0})-[:r1]->(b:Person), (b:Person)-[:r3]->(c:Person) RETURN a.id, b.id, c.id",
+    );
     println!("EXPLAIN rows: {rows:?}");
 }
 
@@ -191,7 +205,10 @@ fn test_pred_pushdown_multi_scan_timing() {
         exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
     // Warm up / verify counts.
-    let rows = query_rows(&conn, "MATCH (a:Person) WHERE a.id >= 0 AND a.id <= 100 RETURN COUNT(*)");
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person) WHERE a.id >= 0 AND a.id <= 100 RETURN COUNT(*)",
+    );
     assert_eq!(rows[0][0], "Int64(101)", "unexpected single-scan count: {rows:?}");
     let rows = query_rows(
         &conn,
@@ -207,9 +224,7 @@ fn test_pred_pushdown_multi_scan_timing() {
     let single_elapsed = single_start.elapsed();
 
     let multi_start = std::time::Instant::now();
-    let _ = conn.query(
-        "MATCH (a:Person), (b:Person) WHERE b.id >= 0 AND b.id <= 100 RETURN a.id, b.id",
-    );
+    let _ = conn.query("MATCH (a:Person), (b:Person) WHERE b.id >= 0 AND b.id <= 100 RETURN a.id, b.id");
     let multi_elapsed = multi_start.elapsed();
 
     println!("P48.3 timing: single-scan+WHERE = {single_elapsed:?}, multi-scan+WHERE = {multi_elapsed:?}");
@@ -241,7 +256,10 @@ fn test_count_variable() {
 fn test_timestamp_scan_null() {
     // H1 variant: TIMESTAMP column.
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Event(id INT64, ts TIMESTAMP, PRIMARY KEY(id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Event(id INT64, ts TIMESTAMP, PRIMARY KEY(id))",
+    );
     exec(&conn, "CREATE (e:Event {id: 1, ts: TIMESTAMP('2024-01-15 10:00:00')})");
     let rows = query_rows(&conn, "MATCH (e:Event) RETURN e.ts");
     println!("timestamp rows: {rows:?}");

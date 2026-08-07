@@ -1,5 +1,5 @@
 mod common;
-use common::{exec, exec_err, query_column, setup_db, Value};
+use common::{Value, exec, exec_err, query_column, setup_db};
 
 #[test]
 fn test_create_table_already_exists() {
@@ -181,7 +181,10 @@ fn test_create_sequence_no_name() {
 #[test]
 fn test_create_node_table_with_pk_creates_art_index() {
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))",
+    );
     assert!(
         db.table_catalog().has_art_index("Person"),
         "CREATE NODE TABLE with a PRIMARY KEY must auto-create the ART PK index"

@@ -445,10 +445,7 @@ impl Catalog {
         // explicit sentinel instead of silently defaulting to column 0 so a
         // table with no PK column never falsely reports column 0 as the PK
         // (P49.2). `primary_key_column()` returns None for the sentinel.
-        let pk_col = columns
-            .iter()
-            .position(|c| c.is_primary_key)
-            .unwrap_or(usize::MAX);
+        let pk_col = columns.iter().position(|c| c.is_primary_key).unwrap_or(usize::MAX);
         let entry = NodeTableEntry {
             table_id,
             name: name.clone(),
@@ -540,21 +537,31 @@ impl Catalog {
         match entry {
             CatalogEntry::NodeTable(t) => {
                 if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
-                    return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: col_name });
+                    return Err(CatalogError::ColumnAlreadyExists {
+                        table: table_name.to_string(),
+                        column: col_name,
+                    });
                 }
                 t.columns.push(column);
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
                 if t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&col_name)) {
-                    return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: col_name });
+                    return Err(CatalogError::ColumnAlreadyExists {
+                        table: table_name.to_string(),
+                        column: col_name,
+                    });
                 }
                 t.columns.push(column);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot add column to a vector index".into())),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation(
+                "Cannot add column to a vector index".into(),
+            )),
             CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot add column to a sequence".into())),
-            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot add column to a foreign table".into())),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation(
+                "Cannot add column to a foreign table".into(),
+            )),
             CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot add column to a macro".into())),
         }
     }
@@ -566,26 +573,34 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
-                let pos = t
-                    .columns
-                    .iter()
-                    .position(|c| c.name == column_name)
-                    .ok_or_else(|| CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() })?;
+                let pos = t.columns.iter().position(|c| c.name == column_name).ok_or_else(|| {
+                    CatalogError::ColumnNotFound {
+                        table: table_name.to_string(),
+                        column: column_name.to_string(),
+                    }
+                })?;
                 t.columns.remove(pos);
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
-                let pos = t
-                    .columns
-                    .iter()
-                    .position(|c| c.name == column_name)
-                    .ok_or_else(|| CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() })?;
+                let pos = t.columns.iter().position(|c| c.name == column_name).ok_or_else(|| {
+                    CatalogError::ColumnNotFound {
+                        table: table_name.to_string(),
+                        column: column_name.to_string(),
+                    }
+                })?;
                 t.columns.remove(pos);
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a vector index".into())),
-            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a sequence".into())),
-            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a foreign table".into())),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation(
+                "Cannot drop column from a vector index".into(),
+            )),
+            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation(
+                "Cannot drop column from a sequence".into(),
+            )),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation(
+                "Cannot drop column from a foreign table".into(),
+            )),
             CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot drop column from a macro".into())),
         }
     }
@@ -604,7 +619,10 @@ impl Catalog {
         match entry {
             CatalogEntry::NodeTable(t) => {
                 if !t.columns.iter().any(|c| c.name == column_name) {
-                    return Err(CatalogError::ColumnNotFound { table: table_name.to_string(), column: column_name.to_string() });
+                    return Err(CatalogError::ColumnNotFound {
+                        table: table_name.to_string(),
+                        column: column_name.to_string(),
+                    });
                 }
                 let pk_col = t.primary_key_column();
                 if pk_col.map(|c| c.name.as_str()) != Some(column_name) {
@@ -616,7 +634,9 @@ impl Catalog {
                 t.index_name = Some(index_name);
                 Ok(())
             }
-            _ => Err(CatalogError::InvalidOperation(format!("Table '{table_name}' is not a node table"))),
+            _ => Err(CatalogError::InvalidOperation(format!(
+                "Table '{table_name}' is not a node table"
+            ))),
         }
     }
 
@@ -846,13 +866,17 @@ impl Catalog {
         match entry {
             CatalogEntry::NodeTable(t) => {
                 if t.index_name.as_deref() != Some(index_name) {
-                    return Err(CatalogError::NotFound(format!("Index '{index_name}' not found on table '{table_name}'")));
+                    return Err(CatalogError::NotFound(format!(
+                        "Index '{index_name}' not found on table '{table_name}'"
+                    )));
                 }
                 t.index_type = None;
                 t.index_name = None;
                 Ok(())
             }
-            _ => Err(CatalogError::InvalidOperation(format!("Table '{table_name}' is not a node table"))),
+            _ => Err(CatalogError::InvalidOperation(format!(
+                "Table '{table_name}' is not a node table"
+            ))),
         }
     }
 
@@ -881,10 +905,16 @@ impl Catalog {
             .columns()
             .to_vec();
         if !cols.iter().any(|c| c.name == old_name) {
-            return Err(CatalogError::ColumnNotFound { table: table_name.to_string(), column: old_name.to_string() });
+            return Err(CatalogError::ColumnNotFound {
+                table: table_name.to_string(),
+                column: old_name.to_string(),
+            });
         }
         if cols.iter().any(|c| c.name == new_name) {
-            return Err(CatalogError::ColumnAlreadyExists { table: table_name.to_string(), column: new_name.to_string() });
+            return Err(CatalogError::ColumnAlreadyExists {
+                table: table_name.to_string(),
+                column: new_name.to_string(),
+            });
         }
         drop(cols);
 
@@ -900,9 +930,15 @@ impl Catalog {
                 col.name = new_name.to_string();
                 Ok(())
             }
-            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a vector index".into())),
-            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a sequence".into())),
-            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a foreign table".into())),
+            CatalogEntry::VectorIndex(_) => Err(CatalogError::InvalidOperation(
+                "Cannot rename column on a vector index".into(),
+            )),
+            CatalogEntry::Sequence(_) => Err(CatalogError::InvalidOperation(
+                "Cannot rename column on a sequence".into(),
+            )),
+            CatalogEntry::Foreign(_) => Err(CatalogError::InvalidOperation(
+                "Cannot rename column on a foreign table".into(),
+            )),
             CatalogEntry::Macro(_) => Err(CatalogError::InvalidOperation("Cannot rename column on a macro".into())),
         }
     }
@@ -915,13 +951,17 @@ impl Catalog {
             .copied()
             .ok_or_else(|| CatalogError::NotFound(format!("Table '{old_name}' not found")))?;
         if self.name_to_id.contains_key(new_name) {
-            return Err(CatalogError::AlreadyExists(format!("Table '{new_name}' already exists")));
+            return Err(CatalogError::AlreadyExists(format!(
+                "Table '{new_name}' already exists"
+            )));
         }
         match self.entries.get_mut(&id) {
             Some(CatalogEntry::NodeTable(t)) => t.name = new_name.to_string(),
             Some(CatalogEntry::RelTable(t)) => t.name = new_name.to_string(),
             Some(CatalogEntry::VectorIndex(_)) => {
-                return Err(CatalogError::InvalidOperation("Use rename method for vector indexes".into()));
+                return Err(CatalogError::InvalidOperation(
+                    "Use rename method for vector indexes".into(),
+                ));
             }
             Some(CatalogEntry::Sequence(s)) => s.name = new_name.to_string(),
             Some(CatalogEntry::Foreign(f)) => f.name = new_name.to_string(),
@@ -975,7 +1015,10 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound(format!("Attached database '{}' not found", alias)))?;
         if !matches!(self.entries.get(&id), Some(CatalogEntry::Foreign(_))) {
             self.name_to_id.insert(alias.to_string(), id);
-            return Err(CatalogError::InvalidOperation(format!("'{}' is not an attached database", alias)));
+            return Err(CatalogError::InvalidOperation(format!(
+                "'{}' is not an attached database",
+                alias
+            )));
         }
         self.entries.remove(&id);
         Ok(())
@@ -1037,7 +1080,10 @@ impl Catalog {
     pub fn create_projected_graph(&mut self, info: ProjectedGraphInfo) -> Result<(), CatalogError> {
         let name_lower = info.name.to_lowercase();
         if self.projected_graphs.contains_key(&name_lower) {
-            return Err(CatalogError::AlreadyExists(format!("Projected graph '{}' already exists", info.name)));
+            return Err(CatalogError::AlreadyExists(format!(
+                "Projected graph '{}' already exists",
+                info.name
+            )));
         }
         self.projected_graphs.insert(name_lower, info);
         self.bump_version();
@@ -1166,9 +1212,8 @@ impl Catalog {
 
     /// Deserialize a catalog from a JSON byte vector.
     pub fn deserialize_from_json(bytes: &[u8]) -> Result<Self, CatalogError> {
-        serde_json::from_slice(bytes).map_err(|e| {
-            CatalogError::InvalidOperation(format!("catalog deserialization failed: {e}"))
-        })
+        serde_json::from_slice(bytes)
+            .map_err(|e| CatalogError::InvalidOperation(format!("catalog deserialization failed: {e}")))
     }
 
     /// Atomically save the catalog to a file at `path`.
@@ -1178,12 +1223,10 @@ impl Catalog {
     pub fn save_to_path(&self, path: &std::path::Path) -> Result<(), CatalogError> {
         let bytes = self.serialize_to_json()?;
         let tmp_path = path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, bytes).map_err(|e| {
-            CatalogError::InvalidOperation(format!("failed to write catalog to {tmp_path:?}: {e}"))
-        })?;
-        std::fs::rename(&tmp_path, path).map_err(|e| {
-            CatalogError::InvalidOperation(format!("failed to rename catalog to {path:?}: {e}"))
-        })?;
+        std::fs::write(&tmp_path, bytes)
+            .map_err(|e| CatalogError::InvalidOperation(format!("failed to write catalog to {tmp_path:?}: {e}")))?;
+        std::fs::rename(&tmp_path, path)
+            .map_err(|e| CatalogError::InvalidOperation(format!("failed to rename catalog to {path:?}: {e}")))?;
         Ok(())
     }
 
@@ -1196,9 +1239,8 @@ impl Catalog {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = std::fs::read(path).map_err(|e| {
-            CatalogError::InvalidOperation(format!("failed to read catalog from {path:?}: {e}"))
-        })?;
+        let bytes = std::fs::read(path)
+            .map_err(|e| CatalogError::InvalidOperation(format!("failed to read catalog from {path:?}: {e}")))?;
         Self::deserialize_from_json(&bytes).map(Some)
     }
 }

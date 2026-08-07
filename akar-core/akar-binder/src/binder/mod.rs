@@ -2,6 +2,8 @@
 
 #![allow(clippy::collapsible_if, clippy::never_loop)]
 
+mod ddl;
+
 use crate::bound_statement::*;
 use akar_catalog::{Catalog, CatalogColumn, CatalogResult, IndexType};
 use akar_common::error::BinderError;
@@ -519,10 +521,7 @@ impl Binder {
         let resolved = self.resolve_expression(&w.expression, variables)?;
         // WHERE expressions must be boolean
         if resolved.resolved_type != LogicalTypeID::Bool && resolved.resolved_type != LogicalTypeID::Any {
-            return Err(format!(
-                "WHERE clause must be boolean, got {:?}",
-                resolved.resolved_type
-            ).into());
+            return Err(format!("WHERE clause must be boolean, got {:?}", resolved.resolved_type).into());
         }
         Ok(BoundWhereClause { expression: resolved })
     }
@@ -557,7 +556,11 @@ impl Binder {
 
     // ==================== Expression Resolution ====================
 
-    fn resolve_expression(&self, expr: &Expression, variables: &[BoundVariable]) -> Result<BoundExpression, BinderError> {
+    fn resolve_expression(
+        &self,
+        expr: &Expression,
+        variables: &[BoundVariable],
+    ) -> Result<BoundExpression, BinderError> {
         match expr {
             Expression::Constant(c) => {
                 let typ = match c {
@@ -636,7 +639,8 @@ impl Binder {
                                         return Err(format!(
                                             "Property '{}' not found on table '{}'",
                                             prop, table_label
-                                        ).into());
+                                        )
+                                        .into());
                                     }
                                 }
                             } else {
@@ -899,19 +903,14 @@ impl Binder {
         // Validate the referenced column exists in the table
         let col_exists = entry.columns().iter().any(|c| c.name == v.column_name);
         if !col_exists {
-            return Err(format!(
-                "Column '{}' not found in table '{}'",
-                v.column_name, v.table_name
-            ).into());
+            return Err(format!("Column '{}' not found in table '{}'", v.column_name, v.table_name).into());
         }
 
         // Validate metric value
         match v.metric.to_lowercase().as_str() {
             "cosine" | "euclidean" | "l2" | "dot" => {}
             other => {
-                return Err(format!(
-                    "Unknown metric '{other}'. Supported: cosine, euclidean, l2, dot"
-                ).into());
+                return Err(format!("Unknown metric '{other}'. Supported: cosine, euclidean, l2, dot").into());
             }
         }
 
@@ -972,7 +971,8 @@ impl Binder {
                 return Err(format!(
                     "Cannot create index on non-PK column '{}'. Only PK columns are supported.",
                     v.property
-                ).into());
+                )
+                .into());
             }
         }
 
@@ -1157,7 +1157,11 @@ impl Binder {
         ))
     }
 
-    fn bind_set(&self, s: &akar_parser::ast::SetClause, variables: &[BoundVariable]) -> Result<BoundSetClause, BinderError> {
+    fn bind_set(
+        &self,
+        s: &akar_parser::ast::SetClause,
+        variables: &[BoundVariable],
+    ) -> Result<BoundSetClause, BinderError> {
         let mut items = Vec::new();
         for item in &s.items {
             // Property must be of form `variable.property`
@@ -1303,13 +1307,15 @@ impl Binder {
             return Err(format!(
                 "MINVALUE ({}) cannot be greater than MAXVALUE ({})",
                 min_value, max_value
-            ).into());
+            )
+            .into());
         }
         if start_with < min_value || start_with > max_value {
             return Err(format!(
                 "START WITH ({}) must be between MINVALUE ({}) and MAXVALUE ({})",
                 start_with, min_value, max_value
-            ).into());
+            )
+            .into());
         }
 
         Ok(BoundStatement::BoundCreateSequence(BoundCreateSequence {
@@ -1354,9 +1360,7 @@ impl Binder {
             .map(|s| s.to_lowercase())
             .unwrap_or_else(|| "csv".to_string());
         if file_type != "csv" && file_type != "parquet" {
-            return Err(format!(
-                "Unsupported export format '{file_type}'. Supported: csv, parquet"
-            ).into());
+            return Err(format!("Unsupported export format '{file_type}'. Supported: csv, parquet").into());
         }
         let schema_only = e.options.get("SCHEMA_ONLY").map(|s| s == "true").unwrap_or(false);
         Ok(BoundStatement::BoundExportDatabase(BoundExportDatabase {
@@ -1513,10 +1517,7 @@ impl Binder {
                 .ok_or_else(|| format!("Table '{}' not found", f.table_name))?;
             let has_column = entry.columns().iter().any(|c| c.name == f.column_name);
             if !has_column {
-                return Err(format!(
-                    "Column '{}' not found in table '{}'",
-                    f.column_name, f.table_name
-                ).into());
+                return Err(format!("Column '{}' not found in table '{}'", f.column_name, f.table_name).into());
             }
         }
         let index_name = f.index_name.clone();
@@ -1639,10 +1640,7 @@ impl Binder {
                     return Err(format!("Column '{old_name}' not found in table '{}'", a.table_name).into());
                 }
                 if has_name(&col_names, new_name) {
-                    return Err(format!(
-                        "Column '{new_name}' already exists in table '{}'",
-                        a.table_name
-                    ).into());
+                    return Err(format!("Column '{new_name}' already exists in table '{}'", a.table_name).into());
                 }
             }
             akar_parser::ast::AlterAction::RenameTable { new_name: _ } => {
@@ -1739,17 +1737,14 @@ impl Binder {
 
                 let csv_col_count = trimmed.split(delimiter).count();
                 // For rel tables the file has [SRC, DST] plus user properties.
-                let expected_col_count = if is_rel_table {
-                    columns.len() + 2
-                } else {
-                    columns.len()
-                };
+                let expected_col_count = if is_rel_table { columns.len() + 2 } else { columns.len() };
                 if csv_col_count != expected_col_count {
                     return Err(format!(
                         "Column count mismatch: CSV header has {csv_col_count} columns \
                          but table '{}' has {expected_col_count} columns",
                         c.table_name,
-                    ).into());
+                    )
+                    .into());
                 }
             }
         }

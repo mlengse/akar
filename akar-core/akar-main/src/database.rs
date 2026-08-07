@@ -175,11 +175,7 @@ impl Database {
     ///
     /// The schema entry is created by the binder during `bind()`.
     /// This method creates the storage-level table and associated resources.
-    pub fn create_node_table(
-        &self,
-        name: String,
-        columns: Vec<akar_catalog::CatalogColumn>,
-    ) -> Result<u64, String> {
+    pub fn create_node_table(&self, name: String, columns: Vec<akar_catalog::CatalogColumn>) -> Result<u64, String> {
         // 1. Create the data-level table
         let storage_columns: Vec<akar_storage::table::ColumnDefinition> = columns
             .iter()
@@ -190,8 +186,7 @@ impl Database {
                 compression: c.compression,
             })
             .collect();
-        let node_table = self.storage_manager
-            .create_node_table(name.clone(), storage_columns);
+        let node_table = self.storage_manager.create_node_table(name.clone(), storage_columns);
         let table_id = node_table.table_id;
 
         // 2. Auto-create backing sequences for SERIAL columns
@@ -199,9 +194,7 @@ impl Database {
             let mut cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             for col in &columns {
                 if col.logical_type == akar_common::types::LogicalTypeID::Serial {
-                    if let akar_catalog::CatalogResult::Created { .. } =
-                        cat.create_serial_sequence(&name, &col.name)
-                    {
+                    if let akar_catalog::CatalogResult::Created { .. } = cat.create_serial_sequence(&name, &col.name) {
                         tracing::info!("Created serial sequence for {name}.{}", col.name);
                     }
                 }
@@ -241,8 +234,9 @@ impl Database {
                 compression: c.compression,
             })
             .collect();
-        let rel_table = self.storage_manager
-            .create_rel_table(name.clone(), src_table_id, dst_table_id, storage_columns);
+        let rel_table =
+            self.storage_manager
+                .create_rel_table(name.clone(), src_table_id, dst_table_id, storage_columns);
         let table_id = rel_table.table_id;
 
         tracing::info!("Created rel table '{name}'");
@@ -332,21 +326,13 @@ impl Database {
     /// Create an ART index on a node table: data index.
     ///
     /// The schema entry is created by the binder during `bind()`.
-    pub fn create_art_index(
-        &self,
-        table_name: &str,
-        index_name: &str,
-    ) -> Result<(), String> {
+    pub fn create_art_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
         self.storage_manager.create_art_index(table_name, index_name)?;
         Ok(())
     }
 
     /// Drop an ART index from a node table: data index + schema entry.
-    pub fn drop_art_index(
-        &self,
-        table_name: &str,
-        _index_name: &str,
-    ) -> Result<(), String> {
+    pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), String> {
         self.storage_manager.drop_art_index(table_name, _index_name)?;
 
         // Update the schema entry
@@ -407,10 +393,7 @@ impl Database {
         if self.is_in_memory() {
             return Ok(());
         }
-        let catalog = self
-            .catalog
-            .lock()
-            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         catalog
             .save_to_path(&self.catalog_file_path())
             .map_err(|e| format!("Failed to persist catalog: {e}"))
@@ -435,12 +418,8 @@ impl Database {
                     } else {
                         None
                     };
-                    self.storage_manager.restore_node_table(
-                        t.table_id,
-                        t.name.clone(),
-                        columns,
-                        index_name,
-                    );
+                    self.storage_manager
+                        .restore_node_table(t.table_id, t.name.clone(), columns, index_name);
                 }
                 akar_catalog::CatalogEntry::RelTable(t) => {
                     let columns: Vec<_> = t.columns.iter().map(ColumnDefinition::from).collect();
@@ -484,6 +463,7 @@ impl Database {
                 .create(true)
                 .read(true)
                 .write(true)
+                .truncate(false)
                 .open(&lock_path)
                 .map_err(|e| format!("Failed to open lock file '{}': {e}", lock_path.display()))?;
             let result = if config.read_only {
@@ -491,12 +471,7 @@ impl Database {
             } else {
                 file.try_lock()
             };
-            result.map_err(|_| {
-                format!(
-                    "Database '{}' is already open by another process",
-                    db_path.display()
-                )
-            })?;
+            result.map_err(|_| format!("Database '{}' is already open by another process", db_path.display()))?;
             Some(file)
         };
 
@@ -547,7 +522,10 @@ impl Database {
 
         // Load all registered extensions
         {
-            let mut ext_registry = db.extension_registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let mut ext_registry = db
+                .extension_registry
+                .lock()
+                .map_err(|e| format!("Lock poisoned: {e}"))?;
             let context = ExtensionContext::new(db.function_registry.clone(), db.catalog.clone(), db.vfs.clone());
             for result in ext_registry.load_all(&context) {
                 match result {

@@ -101,8 +101,12 @@ fn test_query_roundtrip_via_server() {
         .expect("DDL via server");
     assert!(msg.success);
 
-    client.query("CREATE (:Person {name: 'alice', age: 30})").expect("insert 1");
-    client.query("CREATE (:Person {name: 'bob', age: 25})").expect("insert 2");
+    client
+        .query("CREATE (:Person {name: 'alice', age: 30})")
+        .expect("insert 1");
+    client
+        .query("CREATE (:Person {name: 'bob', age: 25})")
+        .expect("insert 2");
 
     let res = client.query("MATCH (n:Person) RETURN n.name, n.age").expect("query");
     assert_eq!(res.num_columns(), 2);
@@ -122,8 +126,12 @@ fn test_query_roundtrip_via_server() {
     assert_eq!(found, vec![("alice".to_string(), 30), ("bob".to_string(), 25)]);
 
     // Null round-trip.
-    client.query("CREATE (:Person {name: 'carol', age: NULL})").expect("insert null");
-    let res = client.query("MATCH (n:Person {name: 'carol'}) RETURN n.age").expect("query null");
+    client
+        .query("CREATE (:Person {name: 'carol', age: NULL})")
+        .expect("insert null");
+    let res = client
+        .query("MATCH (n:Person {name: 'carol'}) RETURN n.age")
+        .expect("query null");
     assert_eq!(res.num_rows(), 1);
     assert_eq!(res.cell(0, 0), None, "NULL must survive the wire round-trip");
 }
@@ -198,12 +206,14 @@ fn test_concurrent_writes_different_rows_both_succeed() {
     let b = connect(&ts);
     let ha = thread::spawn(move || {
         for i in 0..20 {
-            a.query(&format!("CREATE (:Item {{id: {i}, val: 'a{i}'}})")).expect("A write");
+            a.query(&format!("CREATE (:Item {{id: {i}, val: 'a{i}'}})"))
+                .expect("A write");
         }
     });
     let hb = thread::spawn(move || {
         for i in 20..40 {
-            b.query(&format!("CREATE (:Item {{id: {i}, val: 'b{i}'}})")).expect("B write");
+            b.query(&format!("CREATE (:Item {{id: {i}, val: 'b{i}'}})"))
+                .expect("B write");
         }
     });
     ha.join().expect("writer A");
@@ -258,17 +268,14 @@ fn test_same_pk_writers_serialize_no_corruption() {
         let ok2 = r2.is_ok();
         let successes = (ok1 as u8) + (ok2 as u8);
         assert_eq!(
-            successes,
-            1,
+            successes, 1,
             "exactly one writer must commit per round, got {successes} (both commits would corrupt the primary key)"
         );
         for outcome in [r1, r2] {
             if let Err(e) = outcome {
                 let lower = e.to_lowercase();
                 assert!(
-                    lower.contains("conflict")
-                        || lower.contains("write")
-                        || lower.contains("duplicate"),
+                    lower.contains("conflict") || lower.contains("write") || lower.contains("duplicate"),
                     "loser error must be a write conflict or duplicate-key error, got: {e}"
                 );
             }
@@ -342,7 +349,9 @@ fn test_ddl_visibility_between_clients() {
     assert!(res.success);
 
     let check = connect(&ts);
-    let res = check.query("MATCH (c:City) RETURN c.name").expect("read by third client");
+    let res = check
+        .query("MATCH (c:City) RETURN c.name")
+        .expect("read by third client");
     assert_eq!(res.num_rows(), 1);
     assert_eq!(res.cell(0, 0), Some(&Value::String("SF".to_string())));
 }
@@ -393,8 +402,11 @@ fn test_server_holds_exclusive_lock() {
     let conn = akar_main::Connection::new(&Arc::new(db));
     conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")
         .expect("reopened database must be writable");
-    conn.query("CREATE (:Person {name: 'reopened'})").expect("insert after reopen");
-    let res = conn.query("MATCH (n:Person) RETURN n.name").expect("query after reopen");
+    conn.query("CREATE (:Person {name: 'reopened'})")
+        .expect("insert after reopen");
+    let res = conn
+        .query("MATCH (n:Person) RETURN n.name")
+        .expect("query after reopen");
     assert_eq!(res.num_rows, 1);
 }
 
@@ -433,7 +445,8 @@ fn test_embedded_single_process_unaffected() {
     {
         let db = Arc::new(Database::new(&db_path, config()).expect("embedded open"));
         let conn = akar_main::Connection::new(&db);
-        conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))").expect("DDL");
+        conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")
+            .expect("DDL");
         conn.query("CREATE (:Person {name: 'alice'})").expect("insert");
         let result = conn.query("MATCH (n:Person) RETURN n.name").expect("query");
         assert_eq!(result.num_rows, 1);
@@ -442,6 +455,8 @@ fn test_embedded_single_process_unaffected() {
     // Embedded reopen still works after close.
     let db = Arc::new(Database::new(&db_path, config()).expect("embedded reopen"));
     let conn = akar_main::Connection::new(&db);
-    let result = conn.query("MATCH (n:Person) RETURN n.name").expect("query after reopen");
+    let result = conn
+        .query("MATCH (n:Person) RETURN n.name")
+        .expect("query after reopen");
     assert_eq!(result.num_rows, 1);
 }

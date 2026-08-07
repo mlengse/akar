@@ -120,10 +120,9 @@ impl PhysicalScan {
     pub(crate) fn logical_to_physical(logical: &LogicalTypeID) -> PhysicalTypeID {
         match logical {
             LogicalTypeID::Bool => PhysicalTypeID::Bool,
-            LogicalTypeID::Int64
-            | LogicalTypeID::Int128
-            | LogicalTypeID::Serial
-            | LogicalTypeID::UInt128 => PhysicalTypeID::Int64,
+            LogicalTypeID::Int64 | LogicalTypeID::Int128 | LogicalTypeID::Serial | LogicalTypeID::UInt128 => {
+                PhysicalTypeID::Int64
+            }
             LogicalTypeID::UInt64 => PhysicalTypeID::UInt64,
             LogicalTypeID::Int32 | LogicalTypeID::UInt32 => PhysicalTypeID::Int32,
             LogicalTypeID::Int16 | LogicalTypeID::UInt16 => PhysicalTypeID::Int16,
@@ -137,9 +136,7 @@ impl PhysicalScan {
             | LogicalTypeID::TimestampNs
             | LogicalTypeID::TimestampSec
             | LogicalTypeID::Time => PhysicalTypeID::Int64,
-            LogicalTypeID::String
-            | LogicalTypeID::Interval
-            | LogicalTypeID::Json => PhysicalTypeID::String,
+            LogicalTypeID::String | LogicalTypeID::Interval | LogicalTypeID::Json => PhysicalTypeID::String,
             LogicalTypeID::Blob => PhysicalTypeID::Blob,
             LogicalTypeID::Any
             | LogicalTypeID::Node
@@ -419,11 +416,7 @@ impl PhysicalScan {
                 .into_iter()
                 .filter_map(|doc_id| {
                     let row_idx = doc_id as usize;
-                    if row_idx < num_rows {
-                        Some(row_idx)
-                    } else {
-                        None
-                    }
+                    if row_idx < num_rows { Some(row_idx) } else { None }
                 })
                 .collect()
         } else {

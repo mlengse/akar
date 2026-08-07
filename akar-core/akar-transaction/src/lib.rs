@@ -56,15 +56,33 @@ pub struct UndoRecord {
 
 impl UndoRecord {
     pub fn update(table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Self {
-        Self { table_id, row_id, column, old_data, undo_type: UndoType::Update }
+        Self {
+            table_id,
+            row_id,
+            column,
+            old_data,
+            undo_type: UndoType::Update,
+        }
     }
 
     pub fn insert(table_id: u64, row_id: u64) -> Self {
-        Self { table_id, row_id, column: 0, old_data: Vec::new(), undo_type: UndoType::Insert }
+        Self {
+            table_id,
+            row_id,
+            column: 0,
+            old_data: Vec::new(),
+            undo_type: UndoType::Insert,
+        }
     }
 
     pub fn delete(table_id: u64, row_id: u64, old_row_data: Vec<u8>) -> Self {
-        Self { table_id, row_id, column: 0, old_data: old_row_data, undo_type: UndoType::Delete }
+        Self {
+            table_id,
+            row_id,
+            column: 0,
+            old_data: old_row_data,
+            undo_type: UndoType::Delete,
+        }
     }
 }
 
@@ -103,7 +121,8 @@ impl Transaction {
     }
 
     pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) {
-        self.undo_records.push(UndoRecord::update(table_id, row_id, column, old_data));
+        self.undo_records
+            .push(UndoRecord::update(table_id, row_id, column, old_data));
         if !self.modified_tables.contains(&table_id) {
             self.modified_tables.push(table_id);
         }
@@ -117,7 +136,8 @@ impl Transaction {
     }
 
     pub fn record_delete_undo(&mut self, table_id: u64, row_id: u64, old_row_data: Vec<u8>) {
-        self.undo_records.push(UndoRecord::delete(table_id, row_id, old_row_data));
+        self.undo_records
+            .push(UndoRecord::delete(table_id, row_id, old_row_data));
         if !self.modified_tables.contains(&table_id) {
             self.modified_tables.push(table_id);
         }
@@ -286,7 +306,13 @@ impl TransactionContext {
     }
 
     /// Record an undo operation on the active transaction.
-    pub fn record_undo(&mut self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) -> Result<(), TransactionError> {
+    pub fn record_undo(
+        &mut self,
+        table_id: u64,
+        row_id: u64,
+        column: u32,
+        old_data: Vec<u8>,
+    ) -> Result<(), TransactionError> {
         if let Some(ref mut txn) = self.active_txn {
             txn.record_undo(table_id, row_id, column, old_data);
             Ok(())
@@ -306,7 +332,12 @@ impl TransactionContext {
     }
 
     /// Record a delete undo on the active transaction (for rollback: restore the row).
-    pub fn record_delete_undo(&mut self, table_id: u64, row_id: u64, old_row_data: Vec<u8>) -> Result<(), TransactionError> {
+    pub fn record_delete_undo(
+        &mut self,
+        table_id: u64,
+        row_id: u64,
+        old_row_data: Vec<u8>,
+    ) -> Result<(), TransactionError> {
         if let Some(ref mut txn) = self.active_txn {
             txn.record_delete_undo(table_id, row_id, old_row_data);
             Ok(())
@@ -479,12 +510,10 @@ impl RowConflictTracker {
     ///
     /// Returns `Ok(())` if no conflicts, or `Err(WriteConflict)` if another
     /// active transaction wrote to any of the same rows.
-    fn validate_write_set(
-        &self,
-        written_rows: &[(u64, u64)],
-        committing_txn: u64,
-    ) -> Result<(), TransactionError> {
-        let writes = self.active_writes.lock()
+    fn validate_write_set(&self, written_rows: &[(u64, u64)], committing_txn: u64) -> Result<(), TransactionError> {
+        let writes = self
+            .active_writes
+            .lock()
             .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
         for &(table_id, row_id) in written_rows {
             if let Some(writer_set) = writes.get(&(table_id, row_id)) {
@@ -540,13 +569,22 @@ impl ConcurrencyControl {
 
     fn acquire_write(&self) -> Result<(), TransactionError> {
         if !self.allow_concurrent_writes() {
-            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+            let mut count = self
+                .active_write_count
+                .lock()
+                .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             while *count > 0 {
-                count = self.writer_condvar.wait(count).map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+                count = self
+                    .writer_condvar
+                    .wait(count)
+                    .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             }
             *count = 1;
         } else {
-            let mut count = self.active_write_count.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+            let mut count = self
+                .active_write_count
+                .lock()
+                .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             *count += 1;
         }
         Ok(())
@@ -563,10 +601,16 @@ impl ConcurrencyControl {
 
     #[allow(clippy::collapsible_if)]
     fn lock_table(&self, txn_id: u64, table_id: u64) -> Result<(), TransactionError> {
-        let mut locks = self.table_locks.lock().map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
+        let mut locks = self
+            .table_locks
+            .lock()
+            .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
         if let Some(&owner) = locks.get(&table_id) {
             if owner != txn_id {
-                return Err(TransactionError::TableLocked { table_id, owner_txn: owner });
+                return Err(TransactionError::TableLocked {
+                    table_id,
+                    owner_txn: owner,
+                });
             }
         }
         locks.insert(table_id, txn_id);
@@ -628,10 +672,7 @@ impl CheckpointCoordinator {
             }
             let result = self
                 .cv_active_txns_changed
-                .wait_timeout(
-                    gate,
-                    Duration::from_millis(100),
-                );
+                .wait_timeout(gate, Duration::from_millis(100));
             match result {
                 Ok((g, _)) => gate = g,
                 Err(_) => return false,
@@ -762,7 +803,10 @@ impl TransactionManager {
     /// Reads the write set from the active_transactions map (which is updated by record_write).
     fn validate_write_set(&self, txn_id: u64) -> Result<(), TransactionError> {
         let written_rows = {
-            let active = self.lifecycle.active_transactions.lock()
+            let active = self
+                .lifecycle
+                .active_transactions
+                .lock()
                 .map_err(|e| TransactionError::LockPoisoned(e.to_string()))?;
             match active.get(&txn_id) {
                 Some(txn) if !txn.written_rows.is_empty() => txn.written_rows.clone(),
@@ -778,7 +822,9 @@ impl TransactionManager {
             transaction.commit_ts = Some(self.lifecycle.assign_commit_ts());
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
-            return Ok(CommitResult::Committed { commit_ts: transaction.commit_ts.unwrap() });
+            return Ok(CommitResult::Committed {
+                commit_ts: transaction.commit_ts.unwrap(),
+            });
         }
 
         // OCC: validate write set before committing
@@ -787,7 +833,9 @@ impl TransactionManager {
             transaction.status = TransactionStatus::RolledBack;
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
-            self.concurrency.row_tracker.clear_txn_writes(transaction.transaction_id);
+            self.concurrency
+                .row_tracker
+                .clear_txn_writes(transaction.transaction_id);
             self.concurrency.release_write();
             self.checkpoint.notify_active_txns_changed();
             return Err(e);
@@ -796,10 +844,13 @@ impl TransactionManager {
         transaction.status = TransactionStatus::Committed;
         let commit_ts = self.lifecycle.assign_commit_ts();
         transaction.commit_ts = Some(commit_ts);
-        self.lifecycle.push_commit_history(transaction.transaction_id, commit_ts);
+        self.lifecycle
+            .push_commit_history(transaction.transaction_id, commit_ts);
         self.lifecycle.deregister(transaction.transaction_id);
         self.concurrency.release_locks(transaction.transaction_id);
-        self.concurrency.row_tracker.clear_txn_writes(transaction.transaction_id);
+        self.concurrency
+            .row_tracker
+            .clear_txn_writes(transaction.transaction_id);
         self.concurrency.release_write();
         self.checkpoint.notify_active_txns_changed();
         Ok(CommitResult::Committed { commit_ts })
@@ -810,7 +861,9 @@ impl TransactionManager {
         let records = transaction.undo_records.clone();
         self.lifecycle.deregister(transaction.transaction_id);
         self.concurrency.release_locks(transaction.transaction_id);
-        self.concurrency.row_tracker.clear_txn_writes(transaction.transaction_id);
+        self.concurrency
+            .row_tracker
+            .clear_txn_writes(transaction.transaction_id);
         self.concurrency.release_write();
         self.checkpoint.notify_active_txns_changed();
         records
@@ -1047,7 +1100,11 @@ mod tests {
         let result = tm.commit(&mut tx1);
         assert!(result.is_err(), "Expected WriteConflict but got {:?}", result);
         match result.unwrap_err() {
-            TransactionError::WriteConflict { table_id, row_id, conflicting_txn } => {
+            TransactionError::WriteConflict {
+                table_id,
+                row_id,
+                conflicting_txn,
+            } => {
                 assert_eq!(table_id, 1);
                 assert_eq!(row_id, 10);
                 assert_eq!(conflicting_txn, tx2.transaction_id);
@@ -1130,7 +1187,11 @@ mod tests {
         let result = tm.commit(&mut tx1);
         assert!(result.is_err(), "Expected WriteConflict but got {:?}", result);
         match result.unwrap_err() {
-            TransactionError::WriteConflict { table_id, row_id, conflicting_txn } => {
+            TransactionError::WriteConflict {
+                table_id,
+                row_id,
+                conflicting_txn,
+            } => {
                 assert_eq!(table_id, 1);
                 assert_eq!(row_id, 100);
                 assert_eq!(conflicting_txn, tx2.transaction_id);

@@ -100,8 +100,7 @@ fn open_db_after_crash(db_path: &Path) {
         ..Default::default()
     };
 
-    let _db = Database::new(db_path, config)
-        .expect("DB should be openable after crash without panic");
+    let _db = Database::new(db_path, config).expect("DB should be openable after crash without panic");
 }
 
 // ===========================================================================
@@ -214,12 +213,8 @@ fn test_wal_replay_truncated_file_50_percent() {
             .expect("Failed to create table");
 
         for i in 0..500 {
-            conn.query(&format!(
-                "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-                i,
-                i % 100
-            ))
-            .unwrap();
+            conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 100))
+                .unwrap();
         }
     }
 
@@ -237,8 +232,7 @@ fn test_wal_replay_truncated_file_50_percent() {
         concurrent_writes: true,
         ..Default::default()
     };
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery after WAL truncation should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery after WAL truncation should not fail");
 }
 
 #[test]
@@ -265,12 +259,8 @@ fn test_wal_replay_truncated_file_25_percent() {
             .expect("Failed to create table");
 
         for i in 0..300 {
-            conn.query(&format!(
-                "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-                i,
-                i % 75
-            ))
-            .unwrap();
+            conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 75))
+                .unwrap();
         }
     }
 
@@ -289,8 +279,7 @@ fn test_wal_replay_truncated_file_25_percent() {
         concurrent_writes: true,
         ..Default::default()
     };
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery after 25% WAL truncation should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery after 25% WAL truncation should not fail");
 }
 
 #[test]
@@ -317,12 +306,8 @@ fn test_wal_replay_truncated_file_10_percent() {
             .expect("Failed to create table");
 
         for i in 0..200 {
-            conn.query(&format!(
-                "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-                i,
-                i % 50
-            ))
-            .unwrap();
+            conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
+                .unwrap();
         }
     }
 
@@ -341,8 +326,7 @@ fn test_wal_replay_truncated_file_10_percent() {
         concurrent_writes: true,
         ..Default::default()
     };
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery after severe WAL truncation should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery after severe WAL truncation should not fail");
 }
 
 #[test]
@@ -361,8 +345,7 @@ fn test_wal_replay_empty_wal_file() {
     fs::write(&wal_path, b"").expect("Failed to empty WAL");
 
     let config = SystemConfig::default();
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery with empty WAL should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery with empty WAL should not fail");
 }
 
 // ===========================================================================
@@ -393,24 +376,16 @@ fn test_concurrent_writes_checkpoint_stress() {
         .expect("Failed to create table");
 
     for i in 0..100 {
-        conn.query(&format!(
-            "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-            i,
-            i % 50
-        ))
-        .unwrap();
+        conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
+            .unwrap();
     }
 
     conn.query("CHECKPOINT").expect("Failed to checkpoint phase 1");
 
     // Phase 2: Add more data (no explicit checkpoint)
     for i in 100..200 {
-        conn.query(&format!(
-            "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-            i,
-            i % 50
-        ))
-        .unwrap();
+        conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
+            .unwrap();
     }
 
     // Verify all rows are present (in same process, catalog alive)
@@ -474,12 +449,8 @@ fn test_auto_checkpoint_threshold_various() {
             .expect("Failed to create table");
 
         for i in 0..50 {
-            conn.query(&format!(
-                "CREATE (p:Person {{name: 'person_{}', age: {}}})",
-                i,
-                i % 25
-            ))
-            .unwrap();
+            conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 25))
+                .unwrap();
         }
 
         // Verify all rows present
@@ -498,9 +469,11 @@ fn test_auto_checkpoint_threshold_various() {
                 .collect()
         };
         assert_eq!(
-            names.len(), 50,
+            names.len(),
+            50,
             "threshold={}: should have 50 rows, got {}",
-            threshold, names.len()
+            threshold,
+            names.len()
         );
     }
 }
@@ -549,8 +522,7 @@ fn test_wal_zeroed_out_recovery() {
         concurrent_writes: true,
         ..Default::default()
     };
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery with zeroed WAL should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery with zeroed WAL should not fail");
 }
 
 #[test]
@@ -570,8 +542,7 @@ fn test_wal_random_bytes_recovery() {
     fs::write(&wal_path, &random_data).expect("Failed to write random WAL");
 
     let config = SystemConfig::default();
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery with random WAL bytes should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery with random WAL bytes should not fail");
 }
 
 #[test]
@@ -587,9 +558,8 @@ fn test_wal_single_byte_recovery() {
     }
 
     let wal_path = db_path.join("wal.log");
-    fs::write(&wal_path, &[0xFF]).expect("Failed to write 1-byte WAL");
+    fs::write(&wal_path, [0xFF]).expect("Failed to write 1-byte WAL");
 
     let config = SystemConfig::default();
-    let _db = Database::new(&db_path, config)
-        .expect("Recovery with 1-byte WAL should not fail");
+    let _db = Database::new(&db_path, config).expect("Recovery with 1-byte WAL should not fail");
 }

@@ -125,9 +125,12 @@ fn test_clean_restart_restores_rows() {
         let conn = Connection::new(&db);
         conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
             .expect("Failed to create table");
-        conn.query("CREATE (:Person {name: 'alice', age: 30})").expect("insert failed");
-        conn.query("CREATE (:Person {name: 'bob', age: 25})").expect("insert failed");
-        conn.query("CREATE (:Person {name: 'carol', age: 40})").expect("insert failed");
+        conn.query("CREATE (:Person {name: 'alice', age: 30})")
+            .expect("insert failed");
+        conn.query("CREATE (:Person {name: 'bob', age: 25})")
+            .expect("insert failed");
+        conn.query("CREATE (:Person {name: 'carol', age: 40})")
+            .expect("insert failed");
         conn.query("CHECKPOINT").expect("Failed to checkpoint");
         assert_eq!(db.table_num_rows("Person"), 3);
     }
@@ -159,13 +162,18 @@ fn test_restart_without_checkpoint_restores_rows() {
         conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")
             .expect("Failed to create table");
         for i in 0..5 {
-            conn.query(&format!("CREATE (:Person {{name: 'p{i}'}})")).expect("insert failed");
+            conn.query(&format!("CREATE (:Person {{name: 'p{i}'}})"))
+                .expect("insert failed");
         }
         assert_eq!(db.table_num_rows("Person"), 5);
     }
 
     let db = Arc::new(Database::new(&db_path, config(0)).expect("Failed to reopen DB"));
-    assert_eq!(db.table_num_rows("Person"), 5, "rows should survive without an explicit checkpoint");
+    assert_eq!(
+        db.table_num_rows("Person"),
+        5,
+        "rows should survive without an explicit checkpoint"
+    );
 }
 
 #[test]
@@ -241,26 +249,31 @@ fn test_rel_table_rows_survive_restart() {
             .expect("Failed to create City");
         conn.query("CREATE REL TABLE LivesIn(FROM Person TO City, since INT64)")
             .expect("Failed to create LivesIn");
-        conn.query("CREATE (:Person {id: 1, name: 'alice'})").expect("insert Person failed");
-        conn.query("CREATE (:City {id: 1, name: 'SF'})").expect("insert City failed");
+        conn.query("CREATE (:Person {id: 1, name: 'alice'})")
+            .expect("insert Person failed");
+        conn.query("CREATE (:City {id: 1, name: 'SF'})")
+            .expect("insert City failed");
         conn.query(
             "MATCH (a:Person {id: 1}), (b:City {id: 1}) \
              CREATE (a)-[:LivesIn {since: 2010}]->(b)",
         )
         .expect("insert rel failed");
         conn.query("CHECKPOINT").expect("Failed to checkpoint");
-        assert_eq!(
-            db.table_catalog().get_rel_table_by_name("LivesIn").unwrap().num_rows,
-            1
-        );
+        assert_eq!(db.table_catalog().get_rel_table_by_name("LivesIn").unwrap().num_rows, 1);
     }
 
     let db = Arc::new(Database::new(&db_path, config(-1)).expect("Failed to reopen DB"));
 
     let table_catalog = db.table_catalog();
-    let rel = table_catalog.get_rel_table_by_name("LivesIn").expect("LivesIn should survive");
+    let rel = table_catalog
+        .get_rel_table_by_name("LivesIn")
+        .expect("LivesIn should survive");
     assert_eq!(rel.num_rows, 1, "rel edge should survive restart");
-    assert_eq!(rel.edges, vec![(1, 1)], "rel edge src/dst internal ids should survive restart");
+    assert_eq!(
+        rel.edges,
+        vec![(1, 1)],
+        "rel edge src/dst internal ids should survive restart"
+    );
     assert_eq!(
         rel.properties,
         vec![vec![Value::Int64(2010)]],
@@ -392,7 +405,8 @@ fn test_crash_recovers_committed_rows_without_double_apply() {
     }
 
     // The table must accept new writes after recovery.
-    conn.query("CREATE (:Person {name: 'after_crash', age: 1})").expect("post-crash insert failed");
+    conn.query("CREATE (:Person {name: 'after_crash', age: 1})")
+        .expect("post-crash insert failed");
     assert_eq!(db.table_num_rows("Person"), rows + 1);
 }
 

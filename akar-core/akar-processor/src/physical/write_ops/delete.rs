@@ -57,7 +57,8 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     return Err(format!(
                         "Cannot delete node {} because it has incident edges (use DETACH DELETE)",
                         row_idx
-                    ).into());
+                    )
+                    .into());
                 }
             }
             if self.detach {

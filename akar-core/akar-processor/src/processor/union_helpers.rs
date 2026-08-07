@@ -11,7 +11,11 @@ pub fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
     }
 }
 
-pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool) -> Result<Vec<DataChunk>, ProcessorError> {
+pub fn merge_union_chunks(
+    left: Vec<DataChunk>,
+    right: Vec<DataChunk>,
+    all: bool,
+) -> Result<Vec<DataChunk>, ProcessorError> {
     if left.is_empty() {
         return Ok(right);
     }
@@ -25,7 +29,8 @@ pub fn merge_union_chunks(left: Vec<DataChunk>, right: Vec<DataChunk>, all: bool
             return Err(format!(
                 "UNION column count mismatch: left has {num_fields} columns, right has {} columns",
                 chunk.num_fields()
-            ).into());
+            )
+            .into());
         }
     }
 

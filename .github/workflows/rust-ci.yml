@@ -22,6 +22,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ══════════════════════════════════════════════════════
   # Formatting check
@@ -92,6 +96,7 @@ jobs:
   test-macos:
     name: test (macOS)
     runs-on: macos-14
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -111,6 +116,7 @@ jobs:
   test-windows:
     name: test (windows)
     runs-on: windows-2022
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -130,6 +136,7 @@ jobs:
   feature-gated:
     name: build (all features)
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -204,6 +211,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -234,6 +242,7 @@ jobs:
   wasm-test:
     name: wasm test (node)
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1

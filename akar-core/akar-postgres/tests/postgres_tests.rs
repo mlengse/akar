@@ -22,7 +22,7 @@ fn test_postgres_extension_name() {
 
 #[test]
 fn test_postgres_extension_default() {
-    let ext = PostgresExtension::default();
+    let ext = PostgresExtension;
     assert_eq!(ext.name(), "POSTGRES");
 }
 

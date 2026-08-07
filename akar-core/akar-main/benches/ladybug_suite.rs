@@ -232,7 +232,8 @@ fn setup_wcoj_fan_db(dir: &TempDir) -> Arc<Database> {
     let database = Arc::new(Database::new(db_path, config).unwrap());
     let conn = Connection::new(&database);
 
-    conn.query("CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))").unwrap();
+    conn.query("CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))")
+        .unwrap();
     conn.query("CREATE NODE TABLE Tag(id INT64, PRIMARY KEY(id))").unwrap();
     conn.query("CREATE REL TABLE r1(FROM Person TO Person)").unwrap();
     conn.query("CREATE REL TABLE r2(FROM Person TO Tag)").unwrap();
@@ -275,7 +276,8 @@ fn setup_wcoj_triangle_db(dir: &TempDir) -> Arc<Database> {
     let database = Arc::new(Database::new(db_path, config).unwrap());
     let conn = Connection::new(&database);
 
-    conn.query("CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))").unwrap();
+    conn.query("CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))")
+        .unwrap();
     conn.query("CREATE REL TABLE r1(FROM Person TO Person)").unwrap();
     conn.query("CREATE REL TABLE r2(FROM Person TO Person)").unwrap();
     conn.query("CREATE REL TABLE r3(FROM Person TO Person)").unwrap();
@@ -689,7 +691,11 @@ fn bench_wcoj(c: &mut Criterion) {
 
     let chain_sql = "MATCH (a:Person)-[:r1]->(b:Person), (b:Person)-[:r3t]->(t:Tag) RETURN a.id, b.id, t.id";
     let chain_res = conn.query(chain_sql).unwrap();
-    assert!(chain_res.is_success(), "chain query failed: {:?}", chain_res.error_message);
+    assert!(
+        chain_res.is_success(),
+        "chain query failed: {:?}",
+        chain_res.error_message
+    );
     assert_eq!(
         chain_res.num_rows, 10_000,
         "HashJoin chain: expected 10,000 rows, got {}",

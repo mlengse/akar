@@ -265,7 +265,8 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 return Err(format!(
                     "FTS terms table '{}' not found. Has the index been created?",
                     self.terms_table
-                ).into());
+                )
+                .into());
             }
         };
 

@@ -124,8 +124,7 @@ fn parse_date_string(s: &str) -> Result<Date, String> {
     let day: u8 = parts[2].parse().map_err(|_| format!("Invalid day in '{}'", s))?;
     let month_enum = Month::try_from(month as u8).map_err(|_| format!("Invalid month in '{}'", s))?;
     let date = TimeDate::from_calendar_date(year, month_enum, day).map_err(|e| format!("Invalid date '{}': {e}", s))?;
-    let epoch = TimeDate::from_calendar_date(1970, Month::January, 1)
-        .map_err(|e| format!("Date error: {e}"))?;
+    let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).map_err(|e| format!("Date error: {e}"))?;
     let days = (date - epoch).whole_days() as i32;
     Ok(Date(days))
 }
@@ -156,9 +155,15 @@ fn parse_timestamp_string(s: &str) -> Result<Timestamp, String> {
         }
         None => (sec_str, 0),
     };
-    let hour: u8 = time_parts[0].parse().map_err(|_| format!("Invalid hour in '{}'", time_part))?;
-    let minute: u8 = time_parts[1].parse().map_err(|_| format!("Invalid minute in '{}'", time_part))?;
-    let second: u8 = sec_str.parse().map_err(|_| format!("Invalid second in '{}'", time_part))?;
+    let hour: u8 = time_parts[0]
+        .parse()
+        .map_err(|_| format!("Invalid hour in '{}'", time_part))?;
+    let minute: u8 = time_parts[1]
+        .parse()
+        .map_err(|_| format!("Invalid minute in '{}'", time_part))?;
+    let second: u8 = sec_str
+        .parse()
+        .map_err(|_| format!("Invalid second in '{}'", time_part))?;
     let time = TimeTime::from_hms(hour, minute, second).map_err(|e| format!("Invalid time '{}': {e}", time_part))?;
     let seconds = time.as_hms().0 as i64 * 3600 + time.as_hms().1 as i64 * 60 + time.as_hms().2 as i64;
     let micros = (date.0 as i64 * 86400) + seconds * 1_000_000 + frac_micros;

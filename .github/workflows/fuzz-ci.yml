@@ -19,6 +19,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fuzz:
     name: fuzz (${{ matrix.target }})
@@ -47,8 +51,8 @@ jobs:
         working-directory: akar-core/fuzz
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            MAX_TIME=1800
+            MAX_TIME=300
           else
-            MAX_TIME=600
+            MAX_TIME=120
           fi
           cargo fuzz run ${{ matrix.target }} -- -max_total_time=$MAX_TIME

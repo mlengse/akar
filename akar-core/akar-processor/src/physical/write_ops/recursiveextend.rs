@@ -576,7 +576,8 @@ impl PhysicalCreateRel {
             }
             tracing::debug!(
                 "PhysicalCreateRel inserted {} relationships from chunk of size {}",
-                inserted, chunk.size
+                inserted,
+                chunk.size
             );
 
             output.push(chunk);

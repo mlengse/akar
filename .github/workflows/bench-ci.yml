@@ -16,10 +16,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     name: benchmark
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:

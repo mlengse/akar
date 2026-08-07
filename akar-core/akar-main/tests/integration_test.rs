@@ -424,7 +424,10 @@ fn test_plan_cache_repeated_query_correct_results() {
     use akar_common::types::Value;
 
     let (db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
 
     {
         let catalog = db.table_catalog();
