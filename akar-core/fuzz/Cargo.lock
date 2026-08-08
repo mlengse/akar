@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
