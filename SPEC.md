@@ -464,7 +464,7 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0`; GitHub Releases with prebuilt CLI binaries are produced as well.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0` (progress tracked in `akar-core/implementation_plan.md`, P50.4); GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -476,14 +476,14 @@ Triggered by pushing a version tag (`v*`):
 |-------|------:|----------------|
 | `akar-common` | 24 | Types (37 LogicalTypes, Value), Vectors, Memory |
 | `akar-parser` | 67 | PEG grammar, 33 Statement variants, operator precedence |
-| `akar-binder` | 24 | Semantic analysis, type inference, symbol resolution |
+| `akar-binder` | 87 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | Logical plan construction |
 | `akar-optimizer` | 59 | 24 optimization passes |
-| `akar-processor` | 24 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
+| `akar-processor` | 142 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 68 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 290 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
+| `akar-main` (integration) | 293 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -586,11 +586,12 @@ cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M rows
 ### 13.1 Core API ([akar-main](akar-core/akar-main))
 
 ```rust
+use std::sync::Arc;
 use akar_main::{Database, Connection, SystemConfig};
 
 // Create database
 let config = SystemConfig::default();
-let db = Database::new("/path/to/db", config)?;
+let db = Arc::new(Database::new("/path/to/db", config)?);
 
 // Create connection
 let conn = Connection::new(&db);
@@ -660,7 +661,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
-- **crates.io:** Deferred until API stabilizes
+- **crates.io:** **superseded 2026-08-08 (P50)** — publishing active since 2026-08-08; see §10.3 and `akar-core/implementation_plan.md` P50.4
 
 ---
 

@@ -11,4 +11,4 @@ Semantic analysis and symbol resolution for Cypher queries.
 - DDL validation (PRIMARY KEY, column types, table existence)
 - Query parameter binding (`$name` syntax)
 
-**Tests:** 24
+**Tests:** 87

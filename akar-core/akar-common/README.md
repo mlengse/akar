@@ -8,4 +8,4 @@ Core type system and utilities for the Akar database engine.
 
 **Infrastructure:** Memory manager (tracking), task system (rayon thread pool), file system abstraction, binary serialization for Value/LogicalType.
 
-**Tests:** 21
+**Tests:** 24

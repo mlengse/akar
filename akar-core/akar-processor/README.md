@@ -27,4 +27,4 @@ Physical operator execution pipeline — the runtime that executes query plans.
 
 **Pipeline:** `QueryProcessor::execute(&[LogicalOperator])` → flattens plan → runs physical operators → returns `Vec<DataChunk>`.
 
-**Tests:** 18
+**Tests:** 142

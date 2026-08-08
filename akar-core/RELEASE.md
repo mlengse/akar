@@ -2,7 +2,7 @@
 
 This document describes how to cut a release of Akar (`akar-core/`).
 
-> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** 31/31 publishable crates are versioned `0.1.0` and published bottom-up to crates.io. GitHub Releases with prebuilt CLI binaries are produced as well. See [implementation_plan.md §P50.4](implementation_plan.md) for the publish log and pacing notes (crates.io rate limit: 1 new crate per 10 min).
+> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** 31/31 publishable crates are versioned `0.1.0` and published bottom-up to crates.io (progress in real time — see [implementation_plan.md §P50.4](implementation_plan.md) for the publish log and pacing notes; crates.io rate limit: 1 new crate per 10 min). GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 

@@ -19,4 +19,4 @@ Logical query plan construction from bound statements.
 
 **Passes through:** LogicalOperator tree with `children_mut()`, `visit_bottom_up()` helpers.
 
-**Tests:** 20
+**Tests:** 21

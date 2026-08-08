@@ -14,4 +14,4 @@ Public API for the Akar database engine.
 
 **`Database::connect_tcp`** — Remote client for embedded server mode (length-prefixed JSON framing).
 
-**Tests:** 68 unit + 260 integration
+**Tests:** 68 unit + 293 integration

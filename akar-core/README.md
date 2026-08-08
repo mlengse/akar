@@ -58,10 +58,11 @@ cargo run --bin akar-cli -- /path/to/db
 ### Example: Cypher via Rust API
 
 ```rust
+use std::sync::Arc;
 use akar_main::database::{Database, SystemConfig};
 use akar_main::connection::Connection;
 
-let db = Database::new("/path/to/db", SystemConfig::default())?;
+let db = Arc::new(Database::new("/path/to/db", SystemConfig::default())?);
 let conn = Connection::new(&db);
 
 conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")?;

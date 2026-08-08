@@ -4,4 +4,4 @@ PostgreSQL integration using `tokio-postgres` with `block_on` for synchronous ex
 
 **Functions:** `sql_query` (scalar)
 
-**Tests:** 1
+**Tests:** 7 (1 lib + 6 integration)
