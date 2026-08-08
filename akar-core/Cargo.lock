@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-algo",
  "akar-azure",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "akar-binder",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-catalog",
  "akar-common",
