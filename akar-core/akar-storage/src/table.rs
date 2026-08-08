@@ -655,6 +655,79 @@ impl NodeTable {
         result
     }
 
+    /// Like `to_column_major_data_with_predicate`, but additionally returns the
+    /// internal node id (global row offset) for every emitted row, in the same
+    /// order as the returned column data. This is the node id space used by the
+    /// processor's extend/insert/join operators (`<var>._id`).
+    pub fn to_column_major_data_with_predicate_and_ids(
+        &self,
+        predicate: Option<(usize, &str, &Value)>,
+    ) -> (Vec<Vec<Value>>, Vec<u64>) {
+        let num_cols = self.columns.len();
+        let mut result = vec![Vec::new(); num_cols];
+        let mut ids = Vec::new();
+
+        for group in &self.node_groups {
+            if let Some((col_idx, op, val)) = predicate
+                && let Some(col_chunk) = group.columns.get(col_idx)
+            {
+                use crate::predicate::{ZoneMapCheckResult, check_zone_map};
+                if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
+                    continue;
+                }
+            }
+
+            for row in 0..group.num_nodes as usize {
+                ids.push(group.start_offset + row as u64);
+                for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
+                    match group.get_value(row, col) {
+                        Some(v) => res_col.push(v.clone()),
+                        None => res_col.push(Value::Null),
+                    }
+                }
+            }
+        }
+
+        (result, ids)
+    }
+
+    /// Like `to_column_major_data_with_snapshot_and_predicate`, but additionally
+    /// returns the internal node id (global row offset) for every emitted row,
+    /// in the same order as the returned column data.
+    pub fn to_column_major_data_with_snapshot_and_predicate_and_ids(
+        &self,
+        predicate: Option<(usize, &str, &Value)>,
+        snapshot_ts: Option<u64>,
+        commit_history: &[(u64, u64)],
+    ) -> (Vec<Vec<Value>>, Vec<u64>) {
+        let num_cols = self.columns.len();
+        let mut result = vec![Vec::new(); num_cols];
+        let mut ids = Vec::new();
+
+        for group in &self.node_groups {
+            if let Some((col_idx, op, val)) = predicate
+                && let Some(col_chunk) = group.columns.get(col_idx)
+            {
+                use crate::predicate::{ZoneMapCheckResult, check_zone_map};
+                if check_zone_map(&col_chunk.stats, op, val) == ZoneMapCheckResult::SkipScan {
+                    continue;
+                }
+            }
+
+            for row in 0..group.num_nodes as usize {
+                ids.push(group.start_offset + row as u64);
+                for (col, res_col) in result.iter_mut().enumerate().take(num_cols) {
+                    match group.get_value_owned_with_snapshot(row, col, snapshot_ts, commit_history) {
+                        Some(v) => res_col.push(v),
+                        None => res_col.push(Value::Null),
+                    }
+                }
+            }
+        }
+
+        (result, ids)
+    }
+
     /// Binary-search for the node group that contains `row`.
     fn find_group(&self, row: u64) -> usize {
         match self.node_groups.binary_search_by_key(&row, |g| g.start_offset) {

@@ -600,6 +600,9 @@ pub struct PhysicalExtend {
     pub rel_table_name: String,
     /// ID of the relationship table.
     pub rel_table_id: u64,
+    /// Variable name of the relationship (e.g., "r"); used as the field-name
+    /// prefix for relationship properties. Falls back to the table name when empty.
+    pub rel_var: String,
     /// Variable name of the bound (source) node.
     pub bound_node_var: String,
     /// Direction of the extend.
@@ -724,14 +727,15 @@ impl PhysicalExtend {
             }
 
             // Build output:
-            // Column layout: [input_fields | rel_properties | dest_node_fields]
+            // Column layout: [input_fields | rel_properties | dest_node_fields | dest_node_id]
             let num_input_fields = chunk.fields.len();
             let num_rel_cols = rel_cols.len();
             let num_dest_cols = dest_cols.len();
-            let num_out_cols = num_input_fields + num_rel_cols + num_dest_cols;
+            let num_out_cols = num_input_fields + num_rel_cols + num_dest_cols + 1;
 
             // Build column-major data
             let mut out_data: Vec<Vec<Value>> = vec![Vec::with_capacity(total_rows); num_out_cols];
+            let mut out_dst_ids: Vec<Value> = Vec::with_capacity(total_rows);
 
             for &(input_row, dst_offset, edge_idx) in &row_mappings {
                 // Copy input fields
@@ -763,6 +767,8 @@ impl PhysicalExtend {
                         });
                     out_data[num_input_fields + num_rel_cols + col].push(val);
                 }
+                // Internal dest node id (`<dst>._id` = row offset)
+                out_dst_ids.push(Value::Int64(dst_offset as i64));
             }
 
             // Convert column-major data to ValueVectors
@@ -798,7 +804,11 @@ impl PhysicalExtend {
                     store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
                 }
                 fields.push(v);
-                let rel_prefix = &self.rel_table_name;
+                let rel_prefix = if self.rel_var.is_empty() {
+                    &self.rel_table_name
+                } else {
+                    &self.rel_var
+                };
                 let col_name = rel_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
                 field_names.push(format!("{}.{}", rel_prefix, col_name));
             }
@@ -820,6 +830,16 @@ impl PhysicalExtend {
                 let col_name = dest_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
                 field_names.push(format!("{}.{}", prefix, col_name));
             }
+
+            // Internal dest node id (`<dst>._id` = row offset) so subsequent
+            // extends/joins resolve the destination node by offset.
+            let mut id_v = ValueVector::new(PhysicalTypeID::Int64, total_rows);
+            id_v.resize(total_rows);
+            for row in 0..total_rows {
+                store_value_in_vector(&mut id_v, row, &out_dst_ids[row])?;
+            }
+            fields.push(id_v);
+            field_names.push(format!("{}.{}", self.dst_node_var, "_id"));
 
             let arrow_fields = fields
                 .iter()

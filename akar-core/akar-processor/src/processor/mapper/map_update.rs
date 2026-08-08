@@ -96,6 +96,7 @@ pub fn map_and_execute_update(
             let extend_op = PhysicalExtend {
                 rel_table_name: ex.rel_table_name.clone(),
                 rel_table_id: ex.rel_table_id,
+                rel_var: ex.rel_var.clone(),
                 bound_node_var: ex.bound_node_var.clone(),
                 direction: ex.direction.clone(),
                 dst_node_var: ex.dst_node_var.clone(),

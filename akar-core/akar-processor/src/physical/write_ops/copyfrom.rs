@@ -223,7 +223,8 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         let num_cols = node_table.columns.len();
         let num_results = row_ids.len();
 
-        let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols];
+        // +1 for the internal node id column (`<var>._id` = row offset)
+        let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols + 1];
 
         for &row_id in &row_ids {
             for (col_idx, out_col) in output_columns.iter_mut().enumerate().take(num_cols) {
@@ -232,14 +233,17 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
                     None => out_col.push(Value::Null),
                 }
             }
+            output_columns[num_cols].push(Value::Int64(row_id as i64));
         }
 
-        let mut col_types = Vec::with_capacity(num_cols);
-        let mut col_names: Vec<String> = Vec::with_capacity(num_cols);
+        let mut col_types = Vec::with_capacity(num_cols + 1);
+        let mut col_names: Vec<String> = Vec::with_capacity(num_cols + 1);
         for col in &node_table.columns {
             col_types.push(col.logical_type);
             col_names.push(col.name.clone());
         }
+        col_types.push(akar_common::types::LogicalTypeID::Int64);
+        col_names.push("_id".to_string());
 
         drop(node_table);
 
@@ -257,9 +261,9 @@ impl PhysicalOperatorExec for PhysicalArtIndexRangeScan {
         for start in (0..num_rows).step_by(chunk_size) {
             let end = (start + chunk_size).min(num_rows);
             let count = end - start;
-            let mut fields = Vec::with_capacity(num_cols);
+            let mut fields = Vec::with_capacity(num_cols + 1);
 
-            for col_idx in 0..num_cols {
+            for col_idx in 0..num_cols + 1 {
                 let col_data = &output_columns[col_idx];
                 let phys_type = match col_types[col_idx] {
                     akar_common::types::LogicalTypeID::Bool => PhysicalTypeID::Bool,

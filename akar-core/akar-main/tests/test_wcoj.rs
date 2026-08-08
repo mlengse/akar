@@ -376,3 +376,59 @@ fn test_wcoj_triangle_closure_n6() {
         assert!(a < b && b < c, "invalid triangle row: {r:?}");
     }
 }
+
+/// Regression: relationship properties must be addressable through the rel
+/// VARIABLE (`r.relation`), both in RETURN projections and in predicates
+/// (WHERE and the pattern property map). The physical extend previously
+/// prefixed rel fields with the rel TABLE name, so `r.relation` could not
+/// resolve and queries silently returned the scan chunk or zero rows.
+#[test]
+fn test_rel_property_access_through_rel_var() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE knows(FROM Person TO Person, since INT64)");
+    for i in 0..3 {
+        exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
+    }
+    exec(
+        &conn,
+        "MATCH (a:Person {id: 0}), (b:Person {id: 1}) CREATE (a)-[:knows {since: 2010}]->(b)",
+    );
+    exec(
+        &conn,
+        "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:knows {since: 2020}]->(b)",
+    );
+
+    // Rel property in RETURN.
+    let rows = query_rows(&conn, "MATCH (a:Person)-[r:knows]->(b:Person) RETURN a.id, b.id, r.since");
+    let mut got: Vec<(i64, i64, i64)> = rows
+        .iter()
+        .map(|r| {
+            let parse = |s: &str| {
+                s.trim_start_matches("Int64(")
+                    .trim_end_matches(')')
+                    .parse::<i64>()
+                    .expect("Int64")
+            };
+            (parse(&r[0]), parse(&r[1]), parse(&r[2]))
+        })
+        .collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![(0, 1, 2010), (1, 2, 2020)], "RETURN r.since must resolve");
+
+    // Rel property in WHERE predicate.
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person)-[r:knows]->(b:Person) WHERE r.since = 2020 RETURN a.id, b.id",
+    );
+    assert_eq!(rows.len(), 1, "WHERE r.since must filter");
+    assert!(rows[0][0].contains("Int64(1)") && rows[0][1].contains("Int64(2)"));
+
+    // Rel property in the pattern property map.
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person)-[r:knows {since: 2010}]->(b:Person) RETURN a.id, b.id",
+    );
+    assert_eq!(rows.len(), 1, "pattern property map must filter on r.since");
+    assert!(rows[0][0].contains("Int64(0)") && rows[0][1].contains("Int64(1)"));
+}

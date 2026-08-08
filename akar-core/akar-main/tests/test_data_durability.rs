@@ -271,7 +271,7 @@ fn test_rel_table_rows_survive_restart() {
     assert_eq!(rel.num_rows, 1, "rel edge should survive restart");
     assert_eq!(
         rel.edges,
-        vec![(1, 1)],
+        vec![(0, 0)],
         "rel edge src/dst internal ids should survive restart"
     );
     assert_eq!(

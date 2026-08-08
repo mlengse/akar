@@ -309,6 +309,7 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
             LogicalOperator::Extend(LogicalExtend {
                 rel_table_name: rel_label.clone(),
                 rel_table_id,
+                rel_var: edge.variable.clone().unwrap_or_default(),
                 bound_node_var: node_var.clone(),
                 direction: edge.direction.clone(),
                 dst_node_var: dst_var,
@@ -346,6 +347,7 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
         trailing.push(LogicalOperator::Extend(LogicalExtend {
             rel_table_name: rel_label.clone(),
             rel_table_id,
+            rel_var: edge.variable.clone().unwrap_or_default(),
             bound_node_var: src_var.clone(),
             direction: edge.direction.clone(),
             dst_node_var: closure_var.clone(),

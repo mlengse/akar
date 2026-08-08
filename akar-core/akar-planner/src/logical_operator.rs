@@ -863,6 +863,9 @@ pub struct LogicalExtend {
     pub rel_table_name: String,
     /// ID of the relationship table.
     pub rel_table_id: u64,
+    /// Variable name of the relationship (e.g., "r" in `-[r:RELATES_TO]->`).
+    /// Used as the field-name prefix for relationship properties.
+    pub rel_var: String,
     /// Variable name of the bound (source) node.
     pub bound_node_var: String,
     /// Direction of the extend (forward, backward, or both).

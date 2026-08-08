@@ -450,6 +450,7 @@ impl QueryPlanner {
                                     extend_ops.push(LogicalOperator::Extend(LogicalExtend {
                                         rel_table_name: rel_label.clone(),
                                         rel_table_id: edge.rel_table_id.unwrap_or(0),
+                                        rel_var: edge.variable.clone().unwrap_or_default(),
                                         bound_node_var: src_node_var.unwrap_or_default(),
                                         direction: edge.direction.clone(),
                                         dst_node_var: dst_var.clone(),

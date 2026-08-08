@@ -8,7 +8,7 @@ pub mod map_update;
 use crate::physical::types::PhysicalOperatorExec;
 use crate::processor::QueryProcessor;
 use akar_common::error::ProcessorError;
-use akar_common::types::physical_type_from_logical;
+use akar_common::types::{physical_type_from_logical, Value};
 use akar_common::vector::DataChunk;
 use akar_function::registry::FunctionRegistry;
 use akar_planner::logical_operator::LogicalOperator;
@@ -60,17 +60,28 @@ impl<'p> ExecutionContext<'p> {
             if let Some(node_table) = tc.get_node_table_by_name(table_name) {
                 let num_rows = node_table.num_rows;
                 if num_rows > 0 {
-                    let data = if self.snapshot_ts.is_some() {
-                        // MVCC-aware scan: filter by snapshot visibility
-                        node_table.to_column_major_data_with_snapshot_and_predicate(
+                    // MVCC-aware scan: filter by snapshot visibility
+                    let (mut data, ids) = if self.snapshot_ts.is_some() {
+                        node_table.to_column_major_data_with_snapshot_and_predicate_and_ids(
                             predicate,
                             self.snapshot_ts,
                             &self.commit_history,
                         )
                     } else {
-                        node_table.to_column_major_data_with_predicate(predicate)
+                        node_table.to_column_major_data_with_predicate_and_ids(predicate)
                     };
-                    return (Some(data), node_table.columns.clone(), num_rows);
+                    // Append the internal node id column (`<var>._id` = row offset).
+                    // Extend/insert/join operators resolve nodes through this column;
+                    // it is the same id space used by rel COPY (PK -> offset).
+                    data.push(ids.into_iter().map(|id| Value::Int64(id as i64)).collect());
+                    let mut columns = node_table.columns.clone();
+                    columns.push(akar_storage::table::ColumnDefinition {
+                        name: "_id".to_string(),
+                        logical_type: akar_common::types::LogicalTypeID::Int64,
+                        is_primary_key: false,
+                        compression: akar_common::enums::CompressionType::Uncompressed,
+                    });
+                    return (Some(data), columns, num_rows);
                 }
             }
             // Try rel table
@@ -121,7 +132,7 @@ impl<'p> ExecutionContext<'p> {
                         }
                     }
                     // Concatenate per-group arrays into one array per column
-                    let concat_arrays: Vec<ArrayRef> = column_arrays
+                    let mut concat_arrays: Vec<ArrayRef> = column_arrays
                         .into_iter()
                         .map(|group_arrays| {
                             if group_arrays.len() == 1 {
@@ -134,7 +145,21 @@ impl<'p> ExecutionContext<'p> {
                             }
                         })
                         .collect();
-                    return (Some(concat_arrays), node_table.columns.clone(), num_rows);
+                    // Append the internal node id column (`<var>._id` = row offset).
+                    // Since Arrow arrays are concatenated in node-group order and no
+                    // zone-map/predicate filtering happens here, offsets are 0..num_rows.
+                    let id_array: ArrayRef = std::sync::Arc::new(
+                        arrow::array::Int64Array::from((0..num_rows as i64).collect::<Vec<i64>>()),
+                    );
+                    concat_arrays.push(id_array);
+                    let mut columns = node_table.columns.clone();
+                    columns.push(akar_storage::table::ColumnDefinition {
+                        name: "_id".to_string(),
+                        logical_type: akar_common::types::LogicalTypeID::Int64,
+                        is_primary_key: false,
+                        compression: akar_common::enums::CompressionType::Uncompressed,
+                    });
+                    return (Some(concat_arrays), columns, num_rows);
                 }
             }
         }
