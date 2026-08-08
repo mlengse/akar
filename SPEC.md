@@ -464,7 +464,7 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0` (progress tracked in `akar-core/implementation_plan.md`, P50.4); GitHub Releases with prebuilt CLI binaries are produced as well.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0` (verified live on crates.io); GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -661,7 +661,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
-- **crates.io:** **superseded 2026-08-08 (P50)** — publishing active since 2026-08-08; see §10.3 and `akar-core/implementation_plan.md` P50.4
+- **crates.io:** **superseded 2026-08-08 (P50)** — publishing active since 2026-08-08; see §10.3
 
 ---
 

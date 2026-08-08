@@ -237,7 +237,7 @@ Total: 1,535 tests — all passing ✅, 5 ignored (doc-tests)
 | HTTP(S)/S3 | `akar-httpfs` extension | ✅ |
 
 ## Optimizer Passes — 24 Total (18 Flat + 6 Tree)
-> P48.16 (2026-08-07): `SIPOptimization` removed — the SemiMasker it injected was never applied at execution time (Arrow fast path never reads a scan-side semi-mask; legacy path checks the wrong column; mask inserted after build-side scan already ran). See `implementation_plan.md` P48.16.
+> P48.16 (2026-08-07): `SIPOptimization` removed — the SemiMasker it injected was never applied at execution time (Arrow fast path never reads a scan-side semi-mask; legacy path checks the wrong column; mask inserted after build-side scan already ran). See commit `5bb6e74` (P48.16).
 
 ### Flat Passes
 | # | Pass | Description |

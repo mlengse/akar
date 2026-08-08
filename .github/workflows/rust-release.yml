@@ -9,8 +9,7 @@
 # publishable crates are published bottom-up at 0.1.0 (only akar-c is
 # intentionally `publish = false`, FFI cdylib). Internal crates now use
 # registry version deps after publish. The rate limit is 1 new crate per
-# 10 min, so publish is paced per the checkpoint schedule in
-# akar-core/implementation_plan.md §P50.4.
+# 10 min, so publish was paced; all 31 crates are now live on crates.io.
 
 name: Rust Release
 
