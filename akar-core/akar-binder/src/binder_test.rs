@@ -164,15 +164,26 @@ mod tests {
 
     #[test]
     fn test_bind_create_rel_table() {
-        let binder = Binder::new(Arc::new(Mutex::new(Catalog::new())));
+        let catalog = Arc::new(Mutex::new(Catalog::new()));
+        let binder = Binder::new(catalog.clone());
         let sql = "CREATE NODE TABLE Person(name STRING, PRIMARY KEY (name))";
         binder.bind(parse(sql).unwrap()).unwrap();
+        // P51.4 regression: src/dst table IDs must be resolved at bind time to
+        // the catalog-assigned id (not hardcoded 0) so adjacency/incident-edge
+        // lookups work. id 0 is a valid table id for the first table.
+        let person_id = catalog
+            .lock()
+            .unwrap()
+            .get_table_id("Person")
+            .expect("Person must exist in catalog");
         let sql2 = "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)";
         let bound = binder.bind(parse(sql2).unwrap()).unwrap();
         match bound {
             BoundStatement::BoundCreateRelTable(t) => {
                 assert_eq!(t.name, "Knows");
                 assert_eq!(t.columns.len(), 1);
+                assert_eq!(t.src_table_id, person_id, "src table id must resolve to Person's id");
+                assert_eq!(t.dst_table_id, person_id, "dst table id must resolve to Person's id");
             }
             _ => panic!("Expected BoundCreateRelTable"),
         }

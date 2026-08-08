@@ -101,9 +101,9 @@ impl LocalTableData {
         }
 
         for (row_id, row_bytes) in &self.updated_rows {
-            let values = crate::deserialize_values_from_bytes(row_bytes, 1);
-            if let Some(val) = values.into_iter().next() {
-                node_table.update_cell(*row_id, 0, val)?;
+            let values = crate::deserialize_values_from_bytes(row_bytes, node_table.columns.len());
+            for (col_idx, val) in values.into_iter().enumerate() {
+                node_table.update_cell(*row_id, col_idx, val)?;
             }
         }
 
@@ -116,6 +116,18 @@ impl LocalTableData {
             let values = crate::deserialize_values_from_bytes(row_bytes, rel_table.columns.len());
             rel_table.insert_row(values)?;
         }
+
+        for (row_id, row_bytes) in &self.updated_rows {
+            let values = crate::deserialize_values_from_bytes(row_bytes, rel_table.columns.len());
+            for (col_idx, val) in values.into_iter().enumerate() {
+                rel_table.update_cell(*row_id as usize, col_idx, val)?;
+            }
+        }
+
+        for row_id in &self.deleted_row_ids {
+            rel_table.delete_edge(*row_id as usize)?;
+        }
+
         Ok(())
     }
 

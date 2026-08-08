@@ -36,6 +36,8 @@ impl Extension for PostgresExtension {
 
         #[cfg(feature = "native")]
         {
+            use akar_function::Value;
+
             // sql_query(conn_str: String, sql: String) → executes SQL against PostgreSQL
             let query_fn: Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync> = Arc::new(|args| {
                 if args.len() < 2 {

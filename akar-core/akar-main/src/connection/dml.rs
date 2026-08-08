@@ -43,12 +43,20 @@ impl Connection {
                 // Substitute the FOREACH variable with the current item value
                 let substituted = substitute_foreach_var(sub_stmt, &fc.variable, item_val)?;
                 tracing::info!("FOREACH executing sub-statement for item={:?}", item_val);
-                // Execute the sub-statement directly
-                let result = self.handle_ddl(&substituted)?;
-                if result.is_some() {
-                    self.database.persist_catalog()?;
+                // Execute the sub-statement directly. `handle_ddl` returns
+                // `Some(...)` for DDL and `None` for DML (query) statements —
+                // DML must be routed through the full processor pipeline so
+                // SET/DELETE/CREATE clauses actually execute.
+                match self.handle_ddl(&substituted)? {
+                    Some(result) => {
+                        self.database.persist_catalog()?;
+                        tracing::info!("FOREACH sub-statement result: {:?}", result);
+                    }
+                    None => {
+                        let result = self.execute_query_inner(&substituted, None, None)?;
+                        tracing::info!("FOREACH DML sub-statement result: {:?}", result);
+                    }
                 }
-                tracing::info!("FOREACH sub-statement result: {:?}", result);
             }
         }
 

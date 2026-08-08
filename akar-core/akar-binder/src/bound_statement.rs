@@ -283,6 +283,8 @@ pub struct BoundCreateRelTable {
     pub name: String,
     pub from: String,
     pub to: String,
+    pub src_table_id: u64,
+    pub dst_table_id: u64,
     pub columns: Vec<akar_catalog::CatalogColumn>,
 }
 

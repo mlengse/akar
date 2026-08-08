@@ -1044,6 +1044,8 @@ impl Binder {
             name: t.name,
             from: t.from,
             to: t.to,
+            src_table_id: src_id,
+            dst_table_id: dst_id,
             columns,
         }))
     }

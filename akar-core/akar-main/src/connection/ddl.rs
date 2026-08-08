@@ -295,8 +295,8 @@ impl Connection {
                         default_value: None,
                     })
                     .collect();
-                let src_id = 0; // src table ID resolved during binding
-                let dst_id = 0;
+                let src_id = t.src_table_id;
+                let dst_id = t.dst_table_id;
                 self.database
                     .create_rel_table(t.name.clone(), src_id, dst_id, columns)?;
                 Ok(Some(QueryResult::success_message(format!(
@@ -517,27 +517,32 @@ impl Connection {
                     .find(|(name, _)| table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false));
 
                 // Check if the node already exists by PK
-                let exists = if let Some((_, expr)) = pk_prop {
-                    // Try to evaluate the PK expression
+                let pk_val = if let Some((_, expr)) = pk_prop {
                     if let akar_parser::ast::Expression::Constant(c) = expr {
-                        let pk_val = ast_constant_to_value(c);
-                        table.hash_index.lookup(&pk_value_to_string(&pk_val)).is_some()
+                        Some(ast_constant_to_value(c))
                     } else {
-                        false
+                        None
                     }
                 } else {
-                    false
+                    None
                 };
+                let exists = pk_val
+                    .as_ref()
+                    .map(|pv| table.hash_index.lookup(&pk_value_to_string(pv)).is_some())
+                    .unwrap_or(false);
 
                 if exists {
-                    // Apply ON MATCH SET
+                    // Apply ON MATCH SET — lookup the row by the pattern's PK
+                    // value, then update the SET target cell with the SET value.
+                    let row = pk_val
+                        .as_ref()
+                        .and_then(|pv| table.hash_index.lookup(&pk_value_to_string(pv)));
                     for item in &m.on_match {
-                        // Evaluate the SET value expression and update the cell
-                        if let akar_parser::ast::Expression::Constant(c) = &item.value {
+                        if let Some(row) = row
+                            && let akar_parser::ast::Expression::Constant(c) = &item.value
+                        {
                             let val = ast_constant_to_value(c);
-                            if let Some(row) = table.hash_index.lookup(&pk_value_to_string(&val)) {
-                                let _ = table.update_cell(row, item.column_idx, val);
-                            }
+                            let _ = table.update_cell(row, item.column_idx, val);
                         }
                     }
                     Ok(Some(QueryResult::success_message(format!(

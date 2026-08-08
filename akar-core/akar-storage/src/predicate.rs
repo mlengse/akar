@@ -52,7 +52,16 @@ impl ColumnChunkStats {
 
     /// Update min/max with a new value.
     /// Only works for ordered Value types (Int64, Double, Float, Int32, String).
+    ///
+    /// Null values are not ordered: they clear `guaranteed_no_nulls` and leave
+    /// min/max untouched so a later non-null value is not compared against a
+    /// `Null` sentinel.
     pub fn update(&mut self, val: &Value) {
+        if matches!(val, Value::Null) {
+            self.guaranteed_no_nulls = false;
+            return;
+        }
+        self.guaranteed_all_nulls = false;
         match (&self.min, &self.max) {
             (None, None) => {
                 self.min = Some(val.clone());
@@ -434,5 +443,48 @@ mod tests {
         stats.update(&Value::Int64(10));
         assert_eq!(stats.min, Some(Value::Int64(3)));
         assert_eq!(stats.max, Some(Value::Int64(10)));
+    }
+
+    #[test]
+    fn test_column_chunk_stats_null_tracking() {
+        let mut stats = ColumnChunkStats::new(None, None);
+        assert!(stats.guaranteed_no_nulls, "empty chunk has no nulls");
+
+        stats.update(&Value::Null);
+        assert!(
+            !stats.guaranteed_no_nulls,
+            "appending Null must clear guaranteed_no_nulls"
+        );
+        assert_eq!(stats.min, None, "Null must not become min");
+        assert_eq!(stats.max, None, "Null must not become max");
+
+        stats.update(&Value::Int64(5));
+        assert_eq!(stats.min, Some(Value::Int64(5)));
+        assert_eq!(stats.max, Some(Value::Int64(5)));
+        assert!(!stats.guaranteed_no_nulls, "flag stays cleared after a null");
+        assert!(!stats.guaranteed_all_nulls, "non-null value clears all-nulls");
+
+        stats.update(&Value::Null);
+        assert_eq!(
+            stats.min,
+            Some(Value::Int64(5)),
+            "later Null must not corrupt min/max"
+        );
+        assert_eq!(stats.max, Some(Value::Int64(5)));
+        assert_eq!(
+            check_null_zone_map(&stats, true),
+            ZoneMapCheckResult::AlwaysScan,
+            "IS NULL must scan when chunk has nulls"
+        );
+    }
+
+    #[test]
+    fn test_column_chunk_stats_all_nulls() {
+        let mut stats = ColumnChunkStats::new(None, None);
+        stats.update(&Value::Null);
+        stats.update(&Value::Null);
+        assert!(!stats.guaranteed_no_nulls);
+        assert_eq!(stats.min, None);
+        assert_eq!(stats.max, None);
     }
 }
