@@ -2,7 +2,6 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use akar_parser::ast::*;
     use akar_parser::parse;
 
