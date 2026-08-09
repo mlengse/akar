@@ -150,7 +150,9 @@ mod tests {
         v.resize(5);
         let input = vec![DataChunk::from_legacy(vec![v])];
         let result = filter.execute(input).unwrap();
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 0);
+        assert_eq!(result[0].num_fields(), 1, "schema must be preserved on empty selection");
     }
 
     #[test]
@@ -666,11 +668,10 @@ mod tests {
 
     #[test]
     fn test_empty_input_through_pipeline() {
-        // Empty input should produce empty output (no rows to process)
         let filter = PhysicalFilter::new(Expression::Constant(Constant::Bool(true)));
         let result = filter.execute(vec![DataChunk::from_legacy(vec![])]).unwrap();
-        // Filter with 0 rows produces 0 output chunks (nothing to filter)
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 0);
     }
 
     // ==================== UNION Tests ====================

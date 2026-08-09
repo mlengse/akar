@@ -526,6 +526,14 @@ mod integration_tests {
             .query("MATCH (n:T) OPTIONAL MATCH (m:T {id: 999}) RETURN n.id, m.id ORDER BY n.id")
             .unwrap();
         assert_eq!(result.num_rows(), 2, "Expected 2 rows from left side");
+        // The optional side has no match, so `m.id` must be NULL on every row —
+        // not silently re-read from another column (P52.9 BUG-B).
+        let m_nulls: Vec<bool> = result
+            .chunks
+            .iter()
+            .flat_map(|c| (0..c.size).map(|i| c.get_value(1, i).is_none()))
+            .collect();
+        assert_eq!(m_nulls, vec![true, true], "m.id must be NULL for unmatched rows");
     }
 
     // ==================== Auto-Checkpoint Tests ====================

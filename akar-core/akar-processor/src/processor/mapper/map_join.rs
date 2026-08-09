@@ -33,9 +33,10 @@ pub fn map_and_execute_join(
             let build_chunks = ctx.execute_children(&left_ops)?;
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
+            let (build_cols, probe_cols) = derive_join_column_indices(&s.join_keys, &build_chunks, &probe_chunks);
             let semi = PhysicalSemiJoin {
-                build_columns: vec![0],
-                probe_columns: vec![0],
+                build_columns: build_cols,
+                probe_columns: probe_cols,
             };
             let result = semi.execute_binary(&build_chunks, &probe_chunks)?;
             Ok(result)
@@ -47,9 +48,10 @@ pub fn map_and_execute_join(
             let build_chunks = ctx.execute_children(&left_ops)?;
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
+            let (build_cols, probe_cols) = derive_join_column_indices(&a.join_keys, &build_chunks, &probe_chunks);
             let anti = PhysicalAntiJoin {
-                build_columns: vec![0],
-                probe_columns: vec![0],
+                build_columns: build_cols,
+                probe_columns: probe_cols,
             };
             let result = anti.execute_binary(&build_chunks, &probe_chunks)?;
             Ok(result)

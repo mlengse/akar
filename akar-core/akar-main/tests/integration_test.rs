@@ -1194,6 +1194,43 @@ fn test_ddl_pipeline_create_drop_rel_table_full_lifecycle() {
 }
 
 #[test]
+fn test_mixed_scalar_aggregates() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, x INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, x: 10})");
+    exec(&conn, "CREATE (t:T {id: 2, x: 20})");
+    exec(&conn, "CREATE (t:T {id: 3, x: 30})");
+
+    // Mixed scalar aggregates without GROUP BY must collapse into one row.
+    let rows = query_rows(&conn, "MATCH (t:T) RETURN COUNT(*), SUM(t.x)");
+    assert_eq!(rows.len(), 1, "scalar aggregates must yield one row, got: {rows:?}");
+    assert_eq!(rows[0][0], "Int64(3)", "COUNT(*) = 3, got: {rows:?}");
+    assert_eq!(rows[0][1], "Int64(60)", "SUM(x) = 60, got: {rows:?}");
+
+    let rows = query_rows(&conn, "MATCH (t:T) RETURN COUNT(t.x), AVG(t.x), MIN(t.x), MAX(t.x)");
+    assert_eq!(rows.len(), 1, "scalar aggregates must yield one row, got: {rows:?}");
+    assert_eq!(rows[0][0], "Int64(3)");
+    assert_eq!(rows[0][1], "Double(20.0)");
+    assert_eq!(rows[0][2], "Int64(10)");
+    assert_eq!(rows[0][3], "Int64(30)");
+
+    exec(&conn, "DROP TABLE T");
+
+    // Empty input: scalar aggregates must still yield exactly one row
+    // (COUNT=0, SUM/MIN/MAX/AVG=NULL).
+    exec(&conn, "CREATE NODE TABLE E(id INT64, x INT64, PRIMARY KEY (id))");
+    let rows = query_rows(&conn, "MATCH (e:E) RETURN COUNT(*), SUM(e.x), MIN(e.x), MAX(e.x), AVG(e.x)");
+    assert_eq!(rows.len(), 1, "empty scalar aggregate must yield one row, got: {rows:?}");
+    assert_eq!(rows[0][0], "Int64(0)", "COUNT(*) over empty input must be 0, got: {rows:?}");
+    assert_eq!(rows[0][1], "null");
+    assert_eq!(rows[0][2], "null");
+    assert_eq!(rows[0][3], "null");
+    assert_eq!(rows[0][4], "null");
+
+    exec(&conn, "DROP TABLE E");
+}
+
+#[test]
 fn test_ddl_pipeline_multiple_alter_operations() {
     let (_db, conn) = setup_db();
 
@@ -1275,4 +1312,33 @@ fn test_ddl_pipeline_create_index_and_query() {
     assert_eq!(result.num_rows(), 1);
 
     exec(&conn, "DROP TABLE Item");
+}
+
+#[test]
+fn test_order_by_non_first_column() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(&conn, "CREATE (p:Person {name: 'Charlie', age: 30})");
+    exec(&conn, "CREATE (p:Person {name: 'Alice', age: 20})");
+    exec(&conn, "CREATE (p:Person {name: 'Bob', age: 10})");
+
+    // Sort key is the second projected column; must sort by age, not by name
+    // (P52.1: sort keys were mapped positionally to the first column).
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.name, p.age ORDER BY p.age");
+    let names: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["String(\"Bob\")", "String(\"Alice\")", "String(\"Charlie\")"],
+        "ORDER BY p.age should order rows by age, got: {rows:?}"
+    );
+
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.name, p.age ORDER BY p.age DESC");
+    let names: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["String(\"Charlie\")", "String(\"Alice\")", "String(\"Bob\")"],
+        "ORDER BY p.age DESC should order rows by age descending, got: {rows:?}"
+    );
+
+    exec(&conn, "DROP TABLE Person");
 }

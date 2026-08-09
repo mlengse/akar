@@ -23,6 +23,40 @@ fn projection_needs_expression_eval(expr: &Expression) -> bool {
     )
 }
 
+/// Derive the output column name of a projected expression, so downstream
+/// operators (ORDER BY / TOP-K) can resolve sort keys by name rather than by
+/// position (P52.1).
+fn expression_field_name(expr: &Expression) -> String {
+    match expr {
+        Expression::PropertyAccess(obj, prop) => {
+            if let Expression::Variable(var) = &**obj {
+                format!("{var}.{prop}")
+            } else {
+                prop.clone()
+            }
+        }
+        Expression::Variable(name) => name.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Resolve ORDER BY / TOP-K sort keys to column indices.
+///
+/// Sort keys are expressions (e.g. `p.age`); they must be mapped to the actual
+/// output column they refer to. Positional mapping sorts by the i-th key's
+/// position, which is wrong whenever ORDER BY references a non-first column
+/// (e.g. `RETURN p.name, p.age ORDER BY p.age` sorted by name).
+fn resolve_sort_keys(sort_keys: &[(Expression, bool)], input: &[DataChunk]) -> Vec<(u32, bool)> {
+    sort_keys
+        .iter()
+        .enumerate()
+        .map(|(i, (expr, asc))| {
+            let col = input.first().and_then(|c| resolve_projection_column_index(expr, c));
+            (col.unwrap_or(i) as u32, *asc)
+        })
+        .collect()
+}
+
 pub fn map_and_execute_projection(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
@@ -70,11 +104,16 @@ pub fn map_and_execute_projection(
                             field_types.push(pt);
                         }
                         let size = fields.first().map(|f| f.len()).unwrap_or(chunk.size);
+                        let field_names = p
+                            .expressions
+                            .iter()
+                            .map(|be| expression_field_name(&be.expression))
+                            .collect();
                         output.push(DataChunk {
                             fields,
                             field_types,
                             size,
-                            field_names: vec![],
+                            field_names,
                             sel_vector: None,
                         });
                     }
@@ -127,12 +166,7 @@ pub fn map_and_execute_projection(
             Ok(result)
         }
         LogicalOperator::TopK(tk) => {
-            let sort_keys: Vec<(u32, bool)> = tk
-                .sort_keys
-                .iter()
-                .enumerate()
-                .map(|(i, _s)| (i as u32, tk.sort_keys.get(i).map(|s| s.1).unwrap_or(true)))
-                .collect();
+            let sort_keys = resolve_sort_keys(&tk.sort_keys, &current_input);
             let topk = PhysicalTopK {
                 sort_keys,
                 limit: tk.limit,
@@ -142,12 +176,7 @@ pub fn map_and_execute_projection(
             Ok(result)
         }
         LogicalOperator::OrderBy(o) => {
-            let sort_keys: Vec<(u32, bool)> = o
-                .sort_keys
-                .iter()
-                .enumerate()
-                .map(|(i, _s)| (i as u32, o.sort_keys.get(i).map(|s| s.1).unwrap_or(true)))
-                .collect();
+            let sort_keys = resolve_sort_keys(&o.sort_keys, &current_input);
             let order = PhysicalOrderBy { sort_keys };
             let result = order.execute(current_input)?;
             Ok(result)

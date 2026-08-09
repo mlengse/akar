@@ -260,8 +260,37 @@ impl AggregateHashTable {
         )])
     }
 
+    /// Scalar aggregate (no GROUP BY) over empty input: emit one row where each
+    /// aggregate column holds its initial state's final value (COUNT=0, SUM=NULL,
+    /// MIN/MAX/AVG=NULL, COLLECT=[], ...).
+    fn empty_scalar_result(&self) -> OperatorResult {
+        let mut fields = Vec::new();
+        for func in &self.funcs {
+            let state = AggValueState::new(func);
+            let result = state.finalize();
+            let phys_type = result.physical_type();
+            let mut v = ValueVector::new(phys_type, 1);
+            v.resize(1);
+            store_value_in_vector(&mut v, 0, &result)?;
+            fields.push(v);
+        }
+        Ok(vec![{
+            let arrow_fields = fields
+                .iter()
+                .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
+                .collect::<Vec<_>>();
+            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+            DataChunk::new(arrow_fields, arrow_field_types)
+        }])
+    }
+
     pub fn build_output(&self, groups: &hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>)>>) -> OperatorResult {
         if groups.is_empty() {
+            // Scalar aggregate (no GROUP BY) over empty input must still emit
+            // exactly one row with default values (COUNT=0, SUM/MIN/MAX/AVG=NULL).
+            if self.group_by_cols.is_empty() && !self.funcs.is_empty() {
+                return self.empty_scalar_result();
+            }
             return self.empty_result();
         }
 
@@ -421,6 +450,13 @@ pub fn hash_group_key(chunk: &DataChunk, group_cols: &[u32], row: usize) -> u64 
 /// Check if a stored group key matches the current row's group column values.
 /// Avoids creating Value::List or intermediate Value objects for comparison.
 pub fn keys_equal(stored: &Value, chunk: &DataChunk, group_cols: &[u32], row: usize) -> bool {
+    if group_cols.is_empty() {
+        // Scalar aggregate without GROUP BY: every row belongs to the single
+        // global group, so the stored `Value::Null` key always matches (P52.8).
+        // Without this, each row became its own bucket entry with an identical
+        // Null key, causing O(n^2) bucket scans and N duplicate output groups.
+        return true;
+    }
     if group_cols.len() == 1 {
         let col = group_cols[0] as usize;
         if col >= chunk.fields.len() {

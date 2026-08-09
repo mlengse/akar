@@ -138,19 +138,24 @@ impl BlockMergeSorter {
         struct HeapEntry {
             block_idx: usize,
             primary: Value,
+            primary_asc: bool,
             rest: Vec<Value>,
+            rest_asc: Vec<bool>,
         }
 
         impl Ord for HeapEntry {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                // BinaryHeap pops the "greatest" entry, so an ASC key pops the
+                // smallest value (reverse the comparison) while a DESC key pops
+                // the largest value (compare directly) (P52.10).
                 let cmp = value_cmp(&self.primary, &other.primary);
                 if cmp != std::cmp::Ordering::Equal {
-                    return cmp.reverse();
+                    return if self.primary_asc { cmp.reverse() } else { cmp };
                 }
-                for (a, b) in self.rest.iter().zip(other.rest.iter()) {
+                for ((a, b), asc) in self.rest.iter().zip(other.rest.iter()).zip(self.rest_asc.iter()) {
                     let cmp = value_cmp(a, b);
                     if cmp != std::cmp::Ordering::Equal {
-                        return cmp.reverse();
+                        return if *asc { cmp.reverse() } else { cmp };
                     }
                 }
                 self.block_idx.cmp(&other.block_idx).reverse()
@@ -181,10 +186,13 @@ impl BlockMergeSorter {
                     .iter()
                     .map(|&(k, _)| all_values[k as usize][row].0.clone())
                     .collect();
+                let rest_asc: Vec<bool> = sk[1..].iter().map(|&(_, asc)| asc).collect();
                 heap.push(HeapEntry {
                     block_idx: bi,
                     primary,
+                    primary_asc: sk[0].1,
                     rest,
+                    rest_asc,
                 });
             }
         }
@@ -201,14 +209,94 @@ impl BlockMergeSorter {
                     .iter()
                     .map(|&(k, _)| all_values[k as usize][row].0.clone())
                     .collect();
+                let rest_asc: Vec<bool> = sk[1..].iter().map(|&(_, asc)| asc).collect();
                 heap.push(HeapEntry {
                     block_idx: bi,
                     primary,
+                    primary_asc: sk[0].1,
                     rest,
+                    rest_asc,
                 });
             }
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_common::types::Value;
+
+    fn to_all_values(cols: Vec<Vec<i64>>) -> Vec<Vec<(Value, bool)>> {
+        cols.into_iter()
+            .map(|c| c.into_iter().map(|v| (Value::Int64(v), false)).collect())
+            .collect()
+    }
+
+    fn assert_sorted(
+        indices: &[usize],
+        all_values: &[Vec<(Value, bool)>],
+        sort_keys: &[(u32, bool)],
+    ) {
+        for w in indices.windows(2) {
+            for &(col, asc) in sort_keys {
+                let va = &all_values[col as usize][w[0]].0;
+                let vb = &all_values[col as usize][w[1]].0;
+                let cmp = value_cmp(va, vb);
+                if cmp != std::cmp::Ordering::Equal {
+                    let ok = if asc { cmp.is_le() } else { cmp.is_ge() };
+                    assert!(ok, "wrong order at {w:?} (col {col}, asc {asc}): {va:?} vs {vb:?}");
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_block_merge_sort_descending_multi_block() {
+        let n = 25_000usize;
+        let vals: Vec<i64> = (0..n as i64).collect();
+        let all_values = to_all_values(vec![vals]);
+        let sorter = BlockMergeSorter::new(10_000, vec![(0u32, false)]);
+        let indices = sorter.sort(&all_values, 1);
+        assert_eq!(indices.len(), n);
+        assert_sorted(&indices, &all_values, &[(0, false)]);
+        for w in indices.windows(2) {
+            let cmp = value_cmp(&all_values[0][w[0]].0, &all_values[0][w[1]].0);
+            assert!(
+                cmp.is_gt(),
+                "DESC must be strictly decreasing at {w:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_block_merge_sort_ascending_multi_block() {
+        let n = 25_000usize;
+        let mut vals: Vec<i64> = (0..n as i64).collect();
+        vals.sort_by_key(|&v| v.rotate_left(17));
+        let all_values = to_all_values(vec![vals]);
+        let sorter = BlockMergeSorter::new(10_000, vec![(0u32, true)]);
+        let indices = sorter.sort(&all_values, 1);
+        assert_eq!(indices.len(), n);
+        assert_sorted(&indices, &all_values, &[(0, true)]);
+    }
+
+    #[test]
+    fn test_block_merge_sort_secondary_key_direction() {
+        let n = 30_000usize;
+        let mut prim = Vec::with_capacity(n);
+        let mut sec = Vec::with_capacity(n);
+        for i in 0..n as i64 {
+            prim.push(i / 7);
+            sec.push(i % 13);
+        }
+        let all_values = to_all_values(vec![prim, sec]);
+        let sorter = BlockMergeSorter::new(10_000, vec![(0u32, true), (1u32, false)]);
+        let indices = sorter.sort(&all_values, 2);
+        assert_eq!(indices.len(), n);
+        assert_sorted(&indices, &all_values, &[(0, true), (1, false)]);
     }
 }

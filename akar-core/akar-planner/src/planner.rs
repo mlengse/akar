@@ -603,6 +603,54 @@ impl QueryPlanner {
                             }));
                         }
                     }
+                    // Apply inline node/edge property predicates to the optional
+                    // side, mirroring the implicit WHERE the binder generates
+                    // for MATCH. Without this, `OPTIONAL MATCH (m:T {id: 999})`
+                    // scans every T row (predicate silently dropped) and the
+                    // left-outer merge degenerates into a cross product.
+                    let mut inline_exprs: Vec<Expression> = Vec::new();
+                    for pattern in &om.patterns {
+                        if let Some(node_var) = &pattern.node_variable {
+                            for (key, val_expr) in &pattern.properties {
+                                inline_exprs.push(Expression::BinaryOp(
+                                    akar_parser::ast::BinaryOp::Equal,
+                                    Box::new(Expression::PropertyAccess(
+                                        Box::new(Expression::Variable(node_var.clone())),
+                                        key.clone(),
+                                    )),
+                                    Box::new(val_expr.clone()),
+                                ));
+                            }
+                        }
+                        if let Some(edge) = &pattern.edge
+                            && let Some(edge_var) = &edge.variable
+                        {
+                            for (key, val_expr) in &edge.properties {
+                                inline_exprs.push(Expression::BinaryOp(
+                                    akar_parser::ast::BinaryOp::Equal,
+                                    Box::new(Expression::PropertyAccess(
+                                        Box::new(Expression::Variable(edge_var.clone())),
+                                        key.clone(),
+                                    )),
+                                    Box::new(val_expr.clone()),
+                                ));
+                            }
+                        }
+                    }
+                    if !inline_exprs.is_empty() {
+                        let combined = inline_exprs.into_iter().reduce(|acc, e| {
+                            Expression::BinaryOp(
+                                akar_parser::ast::BinaryOp::And,
+                                Box::new(acc),
+                                Box::new(e),
+                            )
+                        });
+                        right_ops.push(LogicalOperator::Filter(LogicalFilter {
+                            expression: combined.unwrap(),
+                            children: Vec::new(),
+                            cardinality: 0,
+                        }));
+                    }
                     let right_op = if right_ops.len() == 1 {
                         right_ops.into_iter().next().unwrap()
                     } else if right_ops.is_empty() {

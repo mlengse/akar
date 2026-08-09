@@ -36,7 +36,14 @@ pub fn rows_to_columns(rows: &[Vec<Value>]) -> (Vec<arrow::array::ArrayRef>, Vec
     let mut field_types = Vec::with_capacity(num_cols);
 
     for col in 0..num_cols {
-        let first_val = &rows[0][col];
+        // Infer the column type from the first non-null value so that columns
+        // whose leading rows are null (e.g. OPTIONAL MATCH null padding) still
+        // carry their real values instead of being dropped as untypable.
+        let first_val = rows
+            .iter()
+            .map(|r| &r[col])
+            .find(|v| !matches!(v, Value::Null))
+            .unwrap_or(&rows[0][col]);
         let phys_type = value_to_physical_type(first_val);
         let mut vec = ValueVector::new(phys_type, num_rows.max(1));
         for (row_idx, row) in rows.iter().enumerate() {

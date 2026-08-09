@@ -14,22 +14,23 @@ impl OptimizationPass for SortElision {
         while i < operators.len() {
             if let LogicalOperator::OrderBy(ob) = &operators[i] {
                 if ob.sort_keys.is_empty() {
+                    // No-op sort: drop it.
                     i += 1;
                     continue;
                 }
+                // Two consecutive ORDER BY operators. The plan list is executed
+                // bottom-up (earlier index first), so the LAST OrderBy is the
+                // outermost and defines the final row order; the first sort is
+                // redundant because it is re-sorted by the outer one (P52.3).
                 if i + 1 < operators.len() {
-                    if let LogicalOperator::OrderBy(inner_ob) = &operators[i + 1] {
-                        if ob.sort_keys == inner_ob.sort_keys {
+                    if let LogicalOperator::OrderBy(outer) = &operators[i + 1] {
+                        if outer.sort_keys.is_empty() {
+                            // Outer is a no-op sort: keep the real inner sort.
                             result.push(operators[i].clone());
-                            i += 2;
-                            continue;
+                        } else {
+                            // Keep the outermost sort, drop the redundant inner one.
+                            result.push(operators[i + 1].clone());
                         }
-                        let merged = LogicalOperator::OrderBy(LogicalOrderBy {
-                            sort_keys: ob.sort_keys.clone(),
-                            children: inner_ob.children.clone(),
-                            cardinality: ob.cardinality,
-                        });
-                        result.push(merged);
                         i += 2;
                         continue;
                     }
@@ -95,7 +96,12 @@ mod tests {
         assert_eq!(result.len(), 1);
         if let LogicalOperator::OrderBy(ob) = &result[0] {
             assert_eq!(ob.sort_keys.len(), 1);
-            assert!(ob.sort_keys[0].1);
+            let (key, asc) = &ob.sort_keys[0];
+            assert!(
+                matches!(key, Expression::Variable(name) if name == "b"),
+                "outermost sort must win, got {key:?}"
+            );
+            assert!(!asc);
         } else {
             panic!("Expected OrderBy");
         }

@@ -168,6 +168,12 @@ impl PhysicalOperatorExec for PhysicalFilter {
             let sel = Self::mask_to_selection(&mask);
 
             if sel.is_empty() {
+                // Preserve the schema on empty results: emit a zero-row chunk
+                // with the same fields/types/names so downstream operators
+                // (e.g. optional-match merge) still see the column layout.
+                chunk.resize(0);
+                chunk.sel_vector = None;
+                output.push(chunk);
                 continue;
             }
 

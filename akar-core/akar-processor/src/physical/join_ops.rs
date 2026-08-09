@@ -221,8 +221,11 @@ impl PhysicalSemiJoin {
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
 
-        // Build hash set of right-side keys
-        let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        // Build hash map of right-side keys. Store the actual values per hash
+        // bucket so probes verify equality — hash-only matching would let
+        // colliding values from different tables falsely match (e.g.
+        // `InternalID` hashes by offset only).
+        let mut hash_map: HashMap<u64, Vec<Value>> = HashMap::new();
         for chunk in build_chunks {
             for row in 0..chunk.size {
                 if chunk.fields.get(build_col).is_some() {
@@ -230,12 +233,12 @@ impl PhysicalSemiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    hash_set.insert(value_hash(&key));
+                    hash_map.entry(value_hash(&key)).or_default().push(key);
                 }
             }
         }
 
-        // Probe: emit left rows whose key is in hash_set
+        // Probe: emit left rows whose key is in hash_map (with equality check)
         let num_probe_fields = probe_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
         let mut probe_types: Vec<PhysicalTypeID> = Vec::with_capacity(num_probe_fields);
         if let Some(first) = probe_chunks.first() {
@@ -253,7 +256,10 @@ impl PhysicalSemiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    if hash_set.contains(&value_hash(&key)) {
+                    let matched = hash_map.get(&value_hash(&key)).map_or(false, |bucket| {
+                        bucket.iter().any(|k| *k == key)
+                    });
+                    if matched {
                         match_rows.push((ci, row));
                     }
                 }
@@ -321,8 +327,11 @@ impl PhysicalAntiJoin {
         let build_col = self.build_columns.first().copied().unwrap_or(0) as usize;
         let probe_col = self.probe_columns.first().copied().unwrap_or(0) as usize;
 
-        // Build hash set of right-side keys
-        let mut hash_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        // Build hash map of right-side keys. Store the actual values per hash
+        // bucket so probes verify equality — hash-only matching would let
+        // colliding values from different tables falsely match (e.g.
+        // `InternalID` hashes by offset only).
+        let mut hash_map: HashMap<u64, Vec<Value>> = HashMap::new();
         for chunk in build_chunks {
             for row in 0..chunk.size {
                 if chunk.fields.get(build_col).is_some() {
@@ -330,7 +339,7 @@ impl PhysicalAntiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    hash_set.insert(value_hash(&key));
+                    hash_map.entry(value_hash(&key)).or_default().push(key);
                 }
             }
         }
@@ -352,7 +361,10 @@ impl PhysicalAntiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    if !hash_set.contains(&value_hash(&key)) {
+                    let matched = hash_map.get(&value_hash(&key)).map_or(false, |bucket| {
+                        bucket.iter().any(|k| *k == key)
+                    });
+                    if !matched {
                         non_match_rows.push((ci, row));
                     }
                 }
@@ -869,6 +881,98 @@ mod tests {
         let ptype = v.physical_type();
         let fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&v).array];
         DataChunk::new(fields, vec![ptype])
+    }
+
+    fn make_u64_chunk(values: &[u64]) -> DataChunk {
+        let mut v = ValueVector::new(PhysicalTypeID::UInt64, values.len().max(1));
+        for (i, val) in values.iter().enumerate() {
+            let _ = v.set_value(i, &Value::UInt64(*val));
+        }
+        v.resize(values.len());
+        let ptype = v.physical_type();
+        let fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&v).array];
+        DataChunk::new(fields, vec![ptype])
+    }
+
+    /// Two Int64 columns: column 0 is a non-key label, column 1 is the key.
+    fn make_two_col_chunk(rows: &[(i64, i64)]) -> DataChunk {
+        let mut label = ValueVector::new(PhysicalTypeID::Int64, rows.len().max(1));
+        let mut id = ValueVector::new(PhysicalTypeID::Int64, rows.len().max(1));
+        for (i, (l, v)) in rows.iter().enumerate() {
+            label.set_i64(i, *l);
+            id.set_i64(i, *v);
+        }
+        label.resize(rows.len());
+        id.resize(rows.len());
+        let ptype = label.physical_type();
+        let fields = vec![
+            akar_common::arrow_vector::ArrowVector::from_legacy(&label).array,
+            akar_common::arrow_vector::ArrowVector::from_legacy(&id).array,
+        ];
+        let mut chunk = DataChunk::new(fields, vec![ptype, ptype]);
+        chunk.field_names = vec!["label".into(), "id".into()];
+        chunk
+    }
+
+    #[test]
+    fn test_semi_join_hash_collision_no_false_match() {
+        // `Int64(7)` and `UInt64(7)` hash to the same bucket but are not equal.
+        // Hash-only matching would falsely emit the probe row.
+        let build = make_i64_chunk(&[7]);
+        let probe = make_u64_chunk(&[7]);
+        let semi = PhysicalSemiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        let result = semi.execute_binary(&[build], &[probe]).unwrap();
+        assert!(
+            result.is_empty(),
+            "hash collision must not produce a semi-join match, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_anti_join_hash_collision_keeps_probe() {
+        let build = make_i64_chunk(&[7]);
+        let probe = make_u64_chunk(&[7]);
+        let anti = PhysicalAntiJoin {
+            build_columns: vec![0],
+            probe_columns: vec![0],
+        };
+        let result = anti.execute_binary(&[build], &[probe]).unwrap();
+        assert_eq!(result[0].size, 1, "hash collision must not drop the probe row");
+    }
+
+    #[test]
+    fn test_semi_join_uses_key_column() {
+        // Key is column 1; column 0 must not be treated as the join key.
+        let build = make_two_col_chunk(&[(5, 10), (5, 20)]);
+        let probe = make_two_col_chunk(&[(1, 10), (2, 30), (3, 20)]);
+        let semi = PhysicalSemiJoin {
+            build_columns: vec![1],
+            probe_columns: vec![1],
+        };
+        let result = semi.execute_binary(&[build], &[probe]).unwrap();
+        assert_eq!(result[0].size, 2, "probe rows with id 10 and 20 should match");
+        let got = result[0].get_i64(1, 0).unwrap_or(0);
+        assert_eq!(got, 10, "first matched row id");
+        let got = result[0].get_i64(1, 1).unwrap_or(0);
+        assert_eq!(got, 20, "second matched row id");
+    }
+
+    #[test]
+    fn test_anti_join_uses_key_column() {
+        let build = make_two_col_chunk(&[(5, 10), (5, 20)]);
+        let probe = make_two_col_chunk(&[(1, 10), (2, 30), (3, 20)]);
+        let anti = PhysicalAntiJoin {
+            build_columns: vec![1],
+            probe_columns: vec![1],
+        };
+        let result = anti.execute_binary(&[build], &[probe]).unwrap();
+        assert_eq!(result[0].size, 1, "only probe row with id 30 should remain");
+        let got = result[0].get_i64(1, 0).unwrap_or(0);
+        assert_eq!(got, 30, "remaining row id");
     }
 
     #[test]

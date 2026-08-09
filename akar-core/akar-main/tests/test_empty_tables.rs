@@ -33,9 +33,9 @@ fn test_empty_aggregate_sum() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
     let res = query_values(&conn, "MATCH (p:Person) RETURN SUM(p.id)");
-    // Current behavior: aggregate on empty table returns 0 rows (no results)
-    // SQL standard would expect 1 row with null
-    assert_eq!(res.trim(), "");
+    // Scalar aggregate over empty input emits one row with default values
+    // (COUNT=0, SUM/MIN/MAX/AVG=NULL), matching the SQL standard.
+    assert_eq!(res.trim(), "null");
 }
 
 #[test]
@@ -43,8 +43,9 @@ fn test_empty_aggregate_avg() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY (id))");
     let res = query_values(&conn, "MATCH (p:Person) RETURN AVG(p.id)");
-    // Current behavior: aggregate on empty table returns 0 rows (no results)
-    assert_eq!(res.trim(), "");
+    // Scalar aggregate over empty input emits one row with default values
+    // (COUNT=0, SUM/MIN/MAX/AVG=NULL), matching the SQL standard.
+    assert_eq!(res.trim(), "null");
 }
 
 #[test]
