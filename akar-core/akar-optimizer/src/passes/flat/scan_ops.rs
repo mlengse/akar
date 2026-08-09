@@ -91,8 +91,18 @@ impl OptimizationPass for LimitPushDown {
 
 // ========================================================================
 // Pass 11: Common Subexpression Elimination (CSE)
-// Detects duplicate expressions in Projection and caches results.
 // ========================================================================
+//
+// This pass is a NO-OP. The flat pipeline references columns positionally:
+// every operator below a Projection (ORDER BY sort keys, LIMIT, subsequent
+// Projections, aggregates) reads columns by index and the topmost Projection's
+// arity IS the RETURN schema. Removing duplicate projection expressions changes
+// the output column count (e.g. `RETURN a.name, a.name` → 1 column), but the
+// `mapping` computed by the old implementation was never applied to any
+// downstream consumer — every consumer then read the wrong column or ran out
+// of bounds. True CSE needs a column-reference/alias layer that this flat
+// architecture does not have, so every expression is kept untouched to
+// guarantee correctness.
 
 pub struct CommonSubexpressionElimination;
 
@@ -102,38 +112,59 @@ impl OptimizationPass for CommonSubexpressionElimination {
     }
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
-        operators
-            .iter()
-            .map(|op| {
-                match op {
-                    LogicalOperator::Projection(p) => {
-                        // Check for duplicate expressions
-                        let mut seen_exprs: Vec<&akar_binder::bound_statement::BoundExpression> = Vec::new();
-                        let mut unique_exprs: Vec<akar_binder::bound_statement::BoundExpression> = Vec::new();
-                        let mut mapping: Vec<usize> = Vec::new();
-                        for expr in &p.expressions {
-                            if let Some(pos) = seen_exprs.iter().position(|e| e.expression == expr.expression) {
-                                mapping.push(pos);
-                            } else {
-                                seen_exprs.push(expr);
-                                unique_exprs.push(expr.clone());
-                                mapping.push(unique_exprs.len() - 1);
-                            }
-                        }
-                        // Only rewrite if dedup happened
-                        if unique_exprs.len() < p.expressions.len() {
-                            LogicalOperator::Projection(LogicalProjection {
-                                expressions: unique_exprs,
-                                children: p.children.clone(),
-                                cardinality: p.cardinality,
-                            })
-                        } else {
-                            op.clone()
-                        }
-                    }
-                    _ => op.clone(),
-                }
-            })
-            .collect()
+        operators.to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_binder::bound_statement::BoundExpression;
+    use akar_parser::ast::Expression;
+
+    fn expr(s: &str) -> Expression {
+        Expression::Variable(s.into())
+    }
+
+    fn make_projection(expressions: Vec<Expression>) -> LogicalOperator {
+        LogicalOperator::Projection(LogicalProjection {
+            expressions: expressions
+                .into_iter()
+                .map(|e| BoundExpression {
+                    expression: e,
+                    resolved_type: akar_common::types::LogicalTypeID::Any,
+                    is_constant: false,
+                })
+                .collect(),
+            children: vec![],
+            cardinality: 0,
+        })
+    }
+
+    #[test]
+    fn test_cse_preserves_projection_arity() {
+        let pass = CommonSubexpressionElimination;
+        // `RETURN a.name, a.name` must stay a 2-column projection — deduping
+        // to 1 column would change the RETURN schema and shift every positional
+        // column reference below it.
+        let plan = vec![make_projection(vec![expr("a.name"), expr("a.name")])];
+        let result = pass.apply(&plan);
+        if let LogicalOperator::Projection(p) = &result[0] {
+            assert_eq!(p.expressions.len(), 2, "projection arity must be preserved");
+        } else {
+            panic!("expected Projection");
+        }
+    }
+
+    #[test]
+    fn test_cse_keeps_distinct_expressions() {
+        let pass = CommonSubexpressionElimination;
+        let plan = vec![make_projection(vec![expr("a.name"), expr("a.age")])];
+        let result = pass.apply(&plan);
+        if let LogicalOperator::Projection(p) = &result[0] {
+            assert_eq!(p.expressions.len(), 2);
+        } else {
+            panic!("expected Projection");
+        }
     }
 }

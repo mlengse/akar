@@ -1,4 +1,4 @@
-//! Ladybug optimizer passes: OrderByPushDown, UnwindDedup, CountRelTable.
+﻿//! Ladybug optimizer passes: OrderByPushDown, UnwindDedup, CountRelTable.
 
 use crate::passes::OptimizationPass;
 use akar_planner::logical_operator::*;
@@ -6,8 +6,15 @@ use std::collections::HashSet;
 
 // ========================================================================
 // Pass: OrderBy Push-Down (Ladybug)
-// Pushes ORDER BY below UNION ALL when safe.
 // ========================================================================
+//
+// This pass is a NO-OP. The original implementation replaced `[Union, OrderBy]`
+// with a Union whose branches were each wrapped in a malformed nested
+// Projection (`expressions: vec![]` + two children) and DROPPED the top-level
+// ORDER BY. Because UNION execution is a plain concatenation (no merge), sorting
+// each branch independently does NOT produce a globally sorted result â€” the
+// query silently lost its ordering. Correct push-down would require a
+// merge-sorted UNION; without it the global ORDER BY is kept untouched.
 
 pub struct OrderByPushDown;
 
@@ -17,45 +24,45 @@ impl OptimizationPass for OrderByPushDown {
     }
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
-        let mut result = Vec::with_capacity(operators.len());
-        let mut i = 0;
-        while i < operators.len() {
-            // Pattern: ... UNION ALL ... ORDER BY
-            // Transform: ... ORDER BY ... UNION ALL ... ORDER BY ...
-            // Only safe with UNION ALL (not UNION which needs dedup)
-            if i + 1 < operators.len()
-                && matches!(&operators[i], LogicalOperator::Union(u) if u.all)
-                && matches!(&operators[i + 1], LogicalOperator::OrderBy(_))
-            {
-                if let LogicalOperator::Union(u) = &operators[i] {
-                    // Push OrderBy into each union child
-                    let order_by = operators[i + 1].clone();
-                    let mut pushed_left = LogicalOperator::Union(LogicalUnion {
-                        all: u.all,
-                        left: Box::new(wrap_child_with_orderby(&u.left, &order_by)),
-                        right: Box::new(wrap_child_with_orderby(&u.right, &order_by)),
-                        cardinality: u.cardinality,
-                    });
-                    pushed_left.set_cardinality(u.cardinality);
-                    result.push(pushed_left);
-                    i += 2;
-                    continue;
-                }
-            }
-            result.push(operators[i].clone());
-            i += 1;
-        }
-        result
+        operators.to_vec()
     }
 }
 
-fn wrap_child_with_orderby(child: &LogicalOperator, order_by: &LogicalOperator) -> LogicalOperator {
-    // Create a sequence: [child, order_by]
-    LogicalOperator::Projection(LogicalProjection {
-        expressions: vec![],
-        children: vec![child.clone(), order_by.clone()],
-        cardinality: child.cardinality(),
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_order_by_push_down_keeps_global_order_by() {
+        let pass = OrderByPushDown;
+        let plan = vec![
+            LogicalOperator::Union(LogicalUnion {
+                left: Box::new(LogicalOperator::ScanRel(LogicalScanRel {
+                    table_name: "R1".into(),
+                    table_id: 0,
+                    direction: akar_parser::ast::EdgeDirection::LeftToRight,
+                    cardinality: 10,
+                })),
+                right: Box::new(LogicalOperator::ScanRel(LogicalScanRel {
+                    table_name: "R2".into(),
+                    table_id: 1,
+                    direction: akar_parser::ast::EdgeDirection::LeftToRight,
+                    cardinality: 10,
+                })),
+                all: true,
+                cardinality: 20,
+            }),
+            LogicalOperator::OrderBy(LogicalOrderBy {
+                sort_keys: vec![(akar_parser::ast::Expression::Variable("x".into()), true)],
+                children: vec![],
+                cardinality: 20,
+            }),
+        ];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 2, "global ORDER BY after UNION must be preserved");
+        assert!(matches!(result[0], LogicalOperator::Union(_)));
+        assert!(matches!(result[1], LogicalOperator::OrderBy(_)));
+    }
 }
 
 // ========================================================================
@@ -80,7 +87,7 @@ impl OptimizationPass for UnwindDedup {
                     // Use expression representation as the key for dedup
                     let key = format!("{:?}", uw.expression);
                     if !seen_unwinds.insert(key) {
-                        // Duplicate UNWIND — skip it
+                        // Duplicate UNWIND â€” skip it
                         tracing::debug!("UnwindDedup: removed duplicate UNWIND {:?}", uw.variable);
                         i += 1;
                         continue;
