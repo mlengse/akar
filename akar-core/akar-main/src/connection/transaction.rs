@@ -158,10 +158,25 @@ impl Connection {
                 }
             }
             BoundStatement::BoundCreateDml(c) => {
-                table_ids.push(c.table_id);
+                for p in &c.patterns {
+                    if let Some(ref n) = p.node {
+                        table_ids.push(n.table_id);
+                    }
+                    if let Some(ref e) = p.edge {
+                        table_ids.push(e.table_id);
+                    }
+                }
             }
             BoundStatement::BoundMerge(m) => {
                 table_ids.push(m.table_id);
+                for p in &m.patterns {
+                    if let Some(ref n) = p.node {
+                        table_ids.push(n.table_id);
+                    }
+                    if let Some(ref e) = p.edge {
+                        table_ids.push(e.table_id);
+                    }
+                }
                 for item in &m.on_create {
                     table_ids.push(item.table_id);
                 }

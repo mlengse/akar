@@ -446,7 +446,7 @@ pub fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
                 for part in inner.into_inner() {
                     match part.as_rule() {
                         Rule::pattern => {
-                            patterns = parse_pattern_path(part)?;
+                            patterns.extend(parse_pattern_path(part)?);
                         }
                         Rule::on_create_set => {
                             for item in part.into_inner() {

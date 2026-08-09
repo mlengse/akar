@@ -659,6 +659,108 @@ fn test_merge_with_on_create_set() {
     assert!(result.is_success());
 }
 
+#[test]
+fn test_merge_multi_pattern_creates_all_nodes() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+    exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
+    let result = conn
+        .query("MERGE (p:Person {name: 'Alice', age: 30}), (c:City {name: 'Jakarta'})")
+        .unwrap();
+    assert!(result.is_success());
+
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.name");
+    assert_eq!(rows.len(), 1, "MERGE multi-pattern should create Person");
+    let rows = query_rows(&conn, "MATCH (c:City) RETURN c.name");
+    assert_eq!(rows.len(), 1, "MERGE multi-pattern should create City");
+}
+
+#[test]
+fn test_merge_multi_pattern_matches_existing() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+    exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
+    exec(&conn, "MERGE (p:Person {name: 'Alice', age: 30}), (c:City {name: 'Jakarta'})");
+    // Second MERGE should match, not duplicate.
+    conn.query("MERGE (p:Person {name: 'Alice'}), (c:City {name: 'Jakarta'})")
+        .unwrap();
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.name");
+    assert_eq!(rows.len(), 1, "MERGE multi-pattern should not duplicate Person");
+    let rows = query_rows(&conn, "MATCH (c:City) RETURN c.name");
+    assert_eq!(rows.len(), 1, "MERGE multi-pattern should not duplicate City");
+}
+
+#[test]
+fn test_create_dml_multi_pattern_creates_all_nodes() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+    exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
+    let result = conn
+        .query("CREATE (a:Person {name: 'Alice', age: 30}), (c:City {name: 'Jakarta'})")
+        .unwrap();
+    assert!(result.is_success());
+
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.name");
+    assert_eq!(rows.len(), 1, "CREATE multi-pattern should create Person");
+    let rows = query_rows(&conn, "MATCH (c:City) RETURN c.name");
+    assert_eq!(rows.len(), 1, "CREATE multi-pattern should create City");
+}
+
+#[test]
+fn test_create_dml_with_relationship() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE knows(FROM Person TO Person, since INT64)");
+    let result = conn
+        .query("CREATE (a:Person {id: 0})-[:knows {since: 2020}]->(b:Person {id: 1})")
+        .unwrap();
+    assert!(result.is_success());
+
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.id");
+    assert_eq!(rows.len(), 2, "CREATE relationship should create both endpoints");
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person)-[r:knows]->(b:Person) RETURN a.id, b.id, r.since",
+    );
+    assert_eq!(rows.len(), 1, "CREATE relationship should insert exactly one edge");
+    assert!(
+        rows[0][0].contains("Int64(0)") && rows[0][1].contains("Int64(1)"),
+        "edge endpoints wrong: {:?}",
+        rows
+    );
+    assert!(rows[0][2].contains("Int64(2020)"), "edge property missing: {:?}", rows);
+}
+
+#[test]
+fn test_merge_with_relationship_creates_once() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
+    exec(&conn, "CREATE REL TABLE knows(FROM Person TO Person, since INT64)");
+    conn.query("MERGE (a:Person {id: 0})-[:knows {since: 2020}]->(b:Person {id: 1})")
+        .unwrap();
+    // Second MERGE must match the existing path, not duplicate nodes or edge.
+    conn.query("MERGE (a:Person {id: 0})-[:knows {since: 2020}]->(b:Person {id: 1})")
+        .unwrap();
+
+    let rows = query_rows(&conn, "MATCH (p:Person) RETURN p.id");
+    assert_eq!(rows.len(), 2, "MERGE relationship should not duplicate nodes");
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person)-[r:knows]->(b:Person) RETURN a.id, b.id, r.since",
+    );
+    assert_eq!(rows.len(), 1, "MERGE relationship should not duplicate edge");
+    assert!(rows[0][2].contains("Int64(2020)"), "edge property missing: {:?}", rows);
+}
+
 // ==================== OptionalMatch Integration Tests ====================
 
 #[test]

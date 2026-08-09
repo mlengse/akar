@@ -385,21 +385,48 @@ pub struct BoundCreateMacro {
     pub expression: String,
 }
 
-/// Bound CREATE DML statement — create a node with properties.
+/// A node element of a CREATE/MERGE pattern.
 #[derive(Debug, Clone)]
-pub struct BoundCreateDml {
+pub struct BoundNodeCreate {
+    pub variable: Option<String>,
     pub table_name: String,
     pub table_id: u64,
-    pub properties: Vec<(String, Expression)>,
+    pub properties: Vec<(String, akar_parser::ast::Expression)>,
 }
 
-/// Bound MERGE statement — match or create a node pattern.
+/// An edge element of a CREATE/MERGE pattern with resolved endpoints.
+#[derive(Debug, Clone)]
+pub struct BoundEdgeCreate {
+    pub variable: Option<String>,
+    pub table_name: String,
+    pub table_id: u64,
+    pub src_var: String,
+    pub dst_var: String,
+    pub properties: Vec<(String, akar_parser::ast::Expression)>,
+}
+
+/// A single element of a CREATE/MERGE pattern path (node and/or edge).
+#[derive(Debug, Clone)]
+pub struct BoundCreatePattern {
+    pub node: Option<BoundNodeCreate>,
+    pub edge: Option<BoundEdgeCreate>,
+}
+
+/// Bound CREATE DML statement — create nodes and/or relationships.
+#[derive(Debug, Clone)]
+pub struct BoundCreateDml {
+    pub patterns: Vec<BoundCreatePattern>,
+}
+
+/// Bound MERGE statement — match or create a node/relationship pattern.
 #[derive(Debug, Clone)]
 pub struct BoundMerge {
     pub table_name: String,
     pub table_id: u64,
-    /// Properties from the MERGE pattern (used for matching and creation).
+    /// Properties from the primary (first) MERGE pattern node (used for matching and creation).
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
+    /// All bound patterns (nodes + edges) of the MERGE statement.
+    pub patterns: Vec<BoundCreatePattern>,
     /// ON CREATE SET items: resolved column info.
     pub on_create: Vec<BoundSetItem>,
     /// ON MATCH SET items: resolved column info.

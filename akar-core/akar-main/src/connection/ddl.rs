@@ -3,6 +3,7 @@ use super::utils::{ast_constant_to_value, pk_value_to_string, value_to_csv_strin
 use crate::query_result::QueryResult;
 use akar_binder::bound_statement::BoundStatement;
 use akar_common::types::Value;
+use std::collections::HashMap;
 
 impl Connection {
     /// Handle DDL statements by checking the bound statement type.
@@ -430,146 +431,280 @@ impl Connection {
                 Ok(None)
             }
             BoundStatement::BoundCreateDml(c) => {
-                tracing::info!("CREATE DML into '{}'", c.table_name);
+                tracing::info!("CREATE DML ({} pattern(s))", c.patterns.len());
 
                 let catalog = self.database.table_catalog();
-                let mut table = catalog
-                    .get_node_table_by_name_mut(&c.table_name)
-                    .ok_or_else(|| format!("Table '{}' not found in storage", c.table_name))?;
+                let mut node_rows: HashMap<String, u64> = HashMap::new();
+                let mut node_table_ids: HashMap<String, u64> = HashMap::new();
+                let mut created: usize = 0;
 
-                // Build values from pattern properties, defaulting to Null
-                let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
-                {
-                    let registry = self
-                        .database
-                        .function_registry
-                        .lock()
-                        .map_err(|e| format!("Lock poisoned: {e}"))?;
-                    for (prop_name, expr) in &c.properties {
-                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
-                            values[col_idx] =
-                                akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
-                        }
-                    }
-                }
+                // Pass 1: create all node patterns (endpoints must exist before edges).
+                for pattern in &c.patterns {
+                    let Some(node) = &pattern.node else { continue };
+                    let mut table = catalog
+                        .get_node_table_by_name_mut(&node.table_name)
+                        .ok_or_else(|| format!("Table '{}' not found in storage", node.table_name))?;
 
-                // Auto-generate SERIAL column values for null entries
-                {
-                    let mut sys_catalog = self
-                        .database
-                        .catalog
-                        .lock()
-                        .map_err(|e| format!("Lock poisoned: {e}"))?;
-                    for (col_idx, col) in table.columns.iter().enumerate() {
-                        if col.logical_type == akar_common::types::LogicalTypeID::Serial
-                            && matches!(values[col_idx], Value::Null)
-                        {
-                            let seq_name = akar_catalog::SequenceEntry::get_serial_name(&c.table_name, &col.name);
-                            if let Some(seq) = sys_catalog.get_sequence_mut(&seq_name) {
-                                let next_val = seq.next_k_val(1);
-                                values[col_idx] = Value::Int64(next_val);
+                    // Build values from pattern properties, defaulting to Null
+                    let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
+                    {
+                        let registry = self
+                            .database
+                            .function_registry
+                            .lock()
+                            .map_err(|e| format!("Lock poisoned: {e}"))?;
+                        for (prop_name, expr) in &node.properties {
+                            if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                                values[col_idx] =
+                                    akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
                             }
                         }
                     }
+
+                    // Auto-generate SERIAL column values for null entries
+                    {
+                        let mut sys_catalog = self
+                            .database
+                            .catalog
+                            .lock()
+                            .map_err(|e| format!("Lock poisoned: {e}"))?;
+                        for (col_idx, col) in table.columns.iter().enumerate() {
+                            if col.logical_type == akar_common::types::LogicalTypeID::Serial
+                                && matches!(values[col_idx], Value::Null)
+                            {
+                                let seq_name =
+                                    akar_catalog::SequenceEntry::get_serial_name(&node.table_name, &col.name);
+                                if let Some(seq) = sys_catalog.get_sequence_mut(&seq_name) {
+                                    let next_val = seq.next_k_val(1);
+                                    values[col_idx] = Value::Int64(next_val);
+                                }
+                            }
+                        }
+                    }
+
+                    let row_id = table.insert_row(values)?;
+                    if let Some(v) = &node.variable {
+                        node_rows.insert(v.clone(), row_id);
+                        node_table_ids.insert(v.clone(), node.table_id);
+                    }
+                    created += 1;
+
+                    // Auto-populate vector indexes on this table
+                    let vec_indexes_on_table: Vec<(String, String)> = catalog
+                        .all_vector_indexes()
+                        .iter()
+                        .filter(|entry| entry.table_name == node.table_name)
+                        .map(|entry| (entry.name.clone(), entry.column_name.clone()))
+                        .collect();
+
+                    for (index_name, col_name) in &vec_indexes_on_table {
+                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name)
+                            && let Some(val) = table.get_value(row_id as usize, col_idx)
+                            && let Ok(vec) = akar_storage::extract_f64_list_from_value(val)
+                            && let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name)
+                        {
+                            vi.hnsw_mut().insert(vec, row_id as usize);
+                            tracing::debug!("Auto-populated vector index '{}' with row {}", index_name, row_id);
+                        }
+                    }
                 }
 
-                let row_id = table.num_rows as usize;
-                table.insert_row(values)?;
+                // Pass 2: create all edge patterns now that endpoints exist.
+                for pattern in &c.patterns {
+                    let Some(edge) = &pattern.edge else { continue };
+                    let src = node_rows.get(&edge.src_var).copied().ok_or_else(|| {
+                        format!(
+                            "CREATE relationship '{}': source node '{}' not created in this statement",
+                            edge.table_name, edge.src_var
+                        )
+                    })?;
+                    let dst = node_rows.get(&edge.dst_var).copied().ok_or_else(|| {
+                        format!(
+                            "CREATE relationship '{}': destination node '{}' not created in this statement",
+                            edge.table_name, edge.dst_var
+                        )
+                    })?;
+                    let src_tid = node_table_ids.get(&edge.src_var).copied().unwrap_or(u64::MAX);
+                    let dst_tid = node_table_ids.get(&edge.dst_var).copied().unwrap_or(u64::MAX);
 
-                // Auto-populate vector indexes on this table
-                let vec_indexes_on_table: Vec<(String, String)> = catalog
-                    .all_vector_indexes()
-                    .iter()
-                    .filter(|entry| entry.table_name == c.table_name)
-                    .map(|entry| (entry.name.clone(), entry.column_name.clone()))
-                    .collect();
+                    let mut rel = catalog
+                        .get_rel_table_by_name_mut(&edge.table_name)
+                        .ok_or_else(|| format!("Rel table '{}' not found in storage", edge.table_name))?;
 
-                for (index_name, col_name) in &vec_indexes_on_table {
-                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *col_name)
-                        && let Some(val) = table.get_value(row_id, col_idx)
-                        && let Ok(vec) = akar_storage::extract_f64_list_from_value(val)
-                        && let Some(mut vi) = catalog.get_vector_index_by_name_mut(index_name)
-                    {
-                        vi.hnsw_mut().insert(vec, row_id);
-                        tracing::debug!("Auto-populated vector index '{}' with row {}", index_name, row_id);
+                    if src_tid != rel.src_table_id || dst_tid != rel.dst_table_id {
+                        return Err(format!(
+                            "Relationship '{}' connects node tables {} -> {}, but the endpoints are from {} -> {}",
+                            edge.table_name, rel.src_table_id, rel.dst_table_id, src_tid, dst_tid
+                        ));
                     }
+
+                    // Build edge property values, defaulting to Null
+                    let mut values: Vec<Value> = rel.columns.iter().map(|_| Value::Null).collect();
+                    {
+                        let registry = self
+                            .database
+                            .function_registry
+                            .lock()
+                            .map_err(|e| format!("Lock poisoned: {e}"))?;
+                        for (prop_name, expr) in &edge.properties {
+                            if let Some(col_idx) = rel.columns.iter().position(|c| c.name == *prop_name) {
+                                values[col_idx] =
+                                    akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
+                            }
+                        }
+                    }
+
+                    rel.insert_rel(src, dst, values)?;
+                    created += 1;
                 }
 
                 Ok(Some(QueryResult::success_message(format!(
-                    "Created node in '{}'",
-                    c.table_name
+                    "Created {created} element(s)"
                 ))))
             }
             BoundStatement::BoundMerge(m) => {
-                tracing::info!("MERGE into '{}'", m.table_name);
+                tracing::info!("MERGE into '{}' ({} pattern(s))", m.table_name, m.patterns.len());
 
                 // Get the table — DashMap handles locking internally
                 let catalog = self.database.table_catalog();
-                let mut table = catalog
-                    .get_node_table_by_name_mut(&m.table_name)
-                    .ok_or_else(|| format!("Table '{}' not found in storage", m.table_name))?;
+                let mut node_rows: HashMap<String, u64> = HashMap::new();
+                let mut node_table_ids: HashMap<String, u64> = HashMap::new();
+                let mut primary_matched = false;
+                let mut created: usize = 0;
 
-                // Evaluate the PK properties from the MERGE pattern
-                let pk_col_idx = table.primary_key_column;
-                let pk_prop = m
-                    .properties
-                    .iter()
-                    .find(|(name, _)| table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false));
+                // Pass 1: match-or-create every node pattern. ON MATCH/ON CREATE SET
+                // apply to the primary (first) node pattern.
+                for pattern in &m.patterns {
+                    let Some(node) = &pattern.node else { continue };
+                    let mut table = catalog
+                        .get_node_table_by_name_mut(&node.table_name)
+                        .ok_or_else(|| format!("Table '{}' not found in storage", node.table_name))?;
 
-                // Check if the node already exists by PK
-                let pk_val = if let Some((_, expr)) = pk_prop {
-                    if let akar_parser::ast::Expression::Constant(c) = expr {
-                        Some(ast_constant_to_value(c))
+                    // Evaluate the PK properties from the MERGE pattern
+                    let pk_col_idx = table.primary_key_column;
+                    let pk_prop = node.properties.iter().find(|(name, _)| {
+                        table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false)
+                    });
+
+                    // Check if the node already exists by PK
+                    let pk_val = if let Some((_, expr)) = pk_prop {
+                        if let akar_parser::ast::Expression::Constant(c) = expr {
+                            Some(ast_constant_to_value(c))
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
-                let exists = pk_val
-                    .as_ref()
-                    .map(|pv| table.hash_index.lookup(&pk_value_to_string(pv)).is_some())
-                    .unwrap_or(false);
-
-                if exists {
-                    // Apply ON MATCH SET — lookup the row by the pattern's PK
-                    // value, then update the SET target cell with the SET value.
-                    let row = pk_val
+                    };
+                    let exists = pk_val
                         .as_ref()
-                        .and_then(|pv| table.hash_index.lookup(&pk_value_to_string(pv)));
-                    for item in &m.on_match {
-                        if let Some(row) = row
-                            && let akar_parser::ast::Expression::Constant(c) = &item.value
-                        {
-                            let val = ast_constant_to_value(c);
-                            let _ = table.update_cell(row, item.column_idx, val);
+                        .map(|pv| table.hash_index.lookup(&pk_value_to_string(pv)).is_some())
+                        .unwrap_or(false);
+
+                    let is_primary = node.table_id == m.table_id;
+                    if exists {
+                        // Apply ON MATCH SET — lookup the row by the pattern's PK
+                        // value, then update the SET target cell with the SET value.
+                        let row = pk_val
+                            .as_ref()
+                            .and_then(|pv| table.hash_index.lookup(&pk_value_to_string(pv)));
+                        if let Some(row) = row {
+                            node_rows.insert(node.variable.clone().unwrap_or_default(), row);
+                            if is_primary {
+                                for item in &m.on_match {
+                                    if let akar_parser::ast::Expression::Constant(c) = &item.value {
+                                        let val = ast_constant_to_value(c);
+                                        let _ = table.update_cell(row, item.column_idx, val);
+                                    }
+                                }
+                                primary_matched = true;
+                            }
                         }
+                    } else {
+                        // Create new node with pattern properties + ON CREATE SET
+                        let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
+                        for (prop_name, expr) in &node.properties {
+                            if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
+                                && let akar_parser::ast::Expression::Constant(c) = expr
+                            {
+                                values[col_idx] = ast_constant_to_value(c);
+                            }
+                        }
+                        if is_primary {
+                            for item in &m.on_create {
+                                if let akar_parser::ast::Expression::Constant(c) = &item.value {
+                                    let val = ast_constant_to_value(c);
+                                    if item.column_idx < values.len() {
+                                        values[item.column_idx] = val;
+                                    }
+                                }
+                            }
+                        }
+                        let row_id = table.insert_row(values)?;
+                        node_rows.insert(node.variable.clone().unwrap_or_default(), row_id);
+                        created += 1;
                     }
+                    node_table_ids.insert(node.variable.clone().unwrap_or_default(), node.table_id);
+                }
+
+                // Pass 2: create edges that don't already exist between the
+                // matched/created endpoint nodes.
+                for pattern in &m.patterns {
+                    let Some(edge) = &pattern.edge else { continue };
+                    let src = node_rows.get(&edge.src_var).copied().ok_or_else(|| {
+                        format!(
+                            "MERGE relationship '{}': source node '{}' has no row id",
+                            edge.table_name, edge.src_var
+                        )
+                    })?;
+                    let dst = node_rows.get(&edge.dst_var).copied().ok_or_else(|| {
+                        format!(
+                            "MERGE relationship '{}': destination node '{}' has no row id",
+                            edge.table_name, edge.dst_var
+                        )
+                    })?;
+                    let src_tid = node_table_ids.get(&edge.src_var).copied().unwrap_or(u64::MAX);
+                    let dst_tid = node_table_ids.get(&edge.dst_var).copied().unwrap_or(u64::MAX);
+
+                    let mut rel = catalog
+                        .get_rel_table_by_name_mut(&edge.table_name)
+                        .ok_or_else(|| format!("Rel table '{}' not found in storage", edge.table_name))?;
+
+                    if src_tid != rel.src_table_id || dst_tid != rel.dst_table_id {
+                        return Err(format!(
+                            "Relationship '{}' connects node tables {} -> {}, but the endpoints are from {} -> {}",
+                            edge.table_name, rel.src_table_id, rel.dst_table_id, src_tid, dst_tid
+                        ));
+                    }
+
+                    // Check if an edge already exists between the two endpoints
+                    let edge_exists = rel
+                        .fwd_adj
+                        .get(&src)
+                        .map_or(false, |adj| adj.iter().any(|(d, _)| *d == dst));
+
+                    if !edge_exists {
+                        let mut values: Vec<Value> = rel.columns.iter().map(|_| Value::Null).collect();
+                        for (prop_name, expr) in &edge.properties {
+                            if let Some(col_idx) = rel.columns.iter().position(|c| c.name == *prop_name)
+                                && let akar_parser::ast::Expression::Constant(c) = expr
+                            {
+                                values[col_idx] = ast_constant_to_value(c);
+                            }
+                        }
+                        rel.insert_rel(src, dst, values)?;
+                        created += 1;
+                    }
+                }
+
+                if primary_matched {
                     Ok(Some(QueryResult::success_message(format!(
                         "Matched existing node in '{}'",
                         m.table_name
                     ))))
                 } else {
-                    // Create new node with pattern properties + ON CREATE SET
-                    let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
-                    for (prop_name, expr) in &m.properties {
-                        if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
-                            && let akar_parser::ast::Expression::Constant(c) = expr
-                        {
-                            values[col_idx] = ast_constant_to_value(c);
-                        }
-                    }
-                    for item in &m.on_create {
-                        if let akar_parser::ast::Expression::Constant(c) = &item.value {
-                            let val = ast_constant_to_value(c);
-                            if item.column_idx < values.len() {
-                                values[item.column_idx] = val;
-                            }
-                        }
-                    }
-                    table.insert_row(values)?;
                     Ok(Some(QueryResult::success_message(format!(
-                        "Created new node in '{}'",
+                        "Created new node in '{}' ({created} element(s) created)",
                         m.table_name
                     ))))
                 }

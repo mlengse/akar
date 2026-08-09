@@ -193,10 +193,15 @@ impl QueryPlanner {
     }
 
     fn plan_create_dml(&self, c: BoundCreateDml) -> Result<Vec<LogicalOperator>, PlannerError> {
+        let first_node = c.patterns.iter().find_map(|p| p.node.clone());
+        let (table_name, table_id, properties) = match first_node {
+            Some(n) => (n.table_name, n.table_id, n.properties),
+            None => (String::new(), 0, Vec::new()),
+        };
         Ok(vec![LogicalOperator::CreateDml(LogicalCreateDml {
-            table_name: c.table_name,
-            table_id: c.table_id,
-            properties: c.properties,
+            table_name,
+            table_id,
+            properties,
             cardinality: 1,
         })])
     }

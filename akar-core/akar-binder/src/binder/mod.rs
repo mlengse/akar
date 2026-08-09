@@ -1211,34 +1211,97 @@ impl Binder {
     }
 
     fn bind_merge(&self, m: akar_parser::ast::MergeStatement) -> Result<BoundStatement, BinderError> {
-        // Use the first pattern from the patterns vector
-        let pattern = m.patterns.first().ok_or("MERGE requires at least one pattern")?;
-        let node = pattern.node.as_ref().ok_or("MERGE requires a node pattern")?;
-        let label = node.labels.first().ok_or("MERGE requires a label (table name)")?;
-
-        // Lookup the table in catalog
-        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-        let entry = catalog
-            .get_entry_by_name(label)
-            .ok_or_else(|| format!("Table '{label}' not found"))?;
-
-        let table_id = entry.table_id();
-        let table_name = label.clone();
-
-        // Get properties for matching/creation
-        let properties: Vec<(String, akar_parser::ast::Expression)> = node.properties.clone();
+        let patterns = self.bind_create_patterns(&m.patterns)?;
+        let primary = patterns
+            .iter()
+            .find_map(|p| p.node.clone())
+            .ok_or("MERGE requires at least one node pattern")?;
 
         // Resolve ON CREATE SET items
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let on_create = resolve_set_items(&catalog, &m.on_create)?;
         let on_match = resolve_set_items(&catalog, &m.on_match)?;
 
         Ok(BoundStatement::BoundMerge(BoundMerge {
-            table_name,
-            table_id,
-            properties,
+            table_name: primary.table_name,
+            table_id: primary.table_id,
+            properties: primary.properties,
+            patterns,
             on_create,
             on_match,
         }))
+    }
+
+    /// Bind all node/edge elements of a CREATE or MERGE pattern path.
+    ///
+    /// A path like `(a)-[r:R]->(b)` is flattened by the parser into
+    /// `[Pattern{node: a, edge: r}, Pattern{node: b, edge: None}]`. The edge is
+    /// attached to the element of its *source* node, so its `src_var` is the
+    /// current pattern's node variable and its `dst_var` is the next pattern's
+    /// node variable (reversed for `RightToLeft`).
+    fn bind_create_patterns(
+        &self,
+        patterns: &[akar_parser::ast::Pattern],
+    ) -> Result<Vec<BoundCreatePattern>, BinderError> {
+        let mut bound = Vec::with_capacity(patterns.len());
+        for (i, pat) in patterns.iter().enumerate() {
+            let node = if let Some(ref n) = pat.node {
+                let label = n.labels.first().ok_or("CREATE/MERGE requires a label (table name)")?;
+                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let entry = catalog
+                    .get_entry_by_name(label)
+                    .ok_or_else(|| format!("Table '{label}' not found"))?;
+                if !entry.is_node_table() {
+                    return Err(format!("'{label}' is not a node table").into());
+                }
+                Some(BoundNodeCreate {
+                    variable: n.variable.clone(),
+                    table_name: label.clone(),
+                    table_id: entry.table_id(),
+                    properties: n.properties.clone(),
+                })
+            } else {
+                None
+            };
+
+            let edge = if let Some(ref e) = pat.edge {
+                let label = e.labels.first().ok_or("Edge requires a label (rel table name)")?;
+                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let entry = catalog
+                    .get_entry_by_name(label)
+                    .ok_or_else(|| format!("Rel table '{label}' not found"))?;
+                if !entry.is_rel_table() {
+                    return Err(format!("'{label}' is not a rel table").into());
+                }
+                let cur_var = pat
+                    .node
+                    .as_ref()
+                    .and_then(|n| n.variable.clone())
+                    .ok_or("Edge endpoints must be named node variables")?;
+                let nxt_var = patterns
+                    .get(i + 1)
+                    .and_then(|p| p.node.as_ref())
+                    .and_then(|n| n.variable.clone())
+                    .ok_or("Edge endpoints must be named node variables")?;
+                let (src_var, dst_var) = match e.direction {
+                    akar_parser::ast::EdgeDirection::RightToLeft => (nxt_var, cur_var),
+                    _ => (cur_var, nxt_var),
+                };
+                Some(BoundEdgeCreate {
+                    variable: e.variable.clone(),
+                    table_name: label.clone(),
+                    table_id: entry.table_id(),
+                    src_var,
+                    dst_var,
+                    properties: e.properties.clone(),
+                })
+            } else {
+                None
+            };
+
+            bound.push(BoundCreatePattern { node, edge });
+        }
+        Ok(bound)
     }
 
     fn bind_create_dml(
@@ -1246,26 +1309,12 @@ impl Binder {
         c: akar_parser::ast::CreateClause,
         _variables: &[BoundVariable],
     ) -> Result<BoundStatement, BinderError> {
-        let node = c
-            .patterns
-            .first()
-            .and_then(|p| p.node.as_ref())
-            .ok_or("CREATE DML requires a node pattern")?;
-        let label = node.labels.first().ok_or("CREATE DML requires a label (table name)")?;
+        let patterns = self.bind_create_patterns(&c.patterns)?;
+        if patterns.iter().all(|p| p.node.is_none()) {
+            return Err("CREATE DML requires a node pattern".into());
+        }
 
-        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-        let entry = catalog
-            .get_entry_by_name(label)
-            .ok_or_else(|| format!("Table '{label}' not found"))?;
-
-        let table_id = entry.table_id();
-        let table_name = label.clone();
-
-        Ok(BoundStatement::BoundCreateDml(BoundCreateDml {
-            table_name,
-            table_id,
-            properties: node.properties.clone(),
-        }))
+        Ok(BoundStatement::BoundCreateDml(BoundCreateDml { patterns }))
     }
 
     fn bind_standalone_call(&self, c: akar_parser::ast::StandaloneCall) -> Result<BoundStatement, BinderError> {

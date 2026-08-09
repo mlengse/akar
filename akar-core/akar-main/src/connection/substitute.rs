@@ -82,19 +82,41 @@ pub(crate) fn substitute_foreach_var(
 ) -> Result<BoundStatement, String> {
     match bound {
         BoundStatement::BoundCreateDml(c) => {
-            let new_props: Vec<(String, akar_parser::ast::Expression)> = c
-                .properties
+            let new_patterns: Vec<_> = c
+                .patterns
                 .iter()
-                .map(|(k, v)| {
-                    let new_v = substitute_var_in_expr(v, var_name, val);
-                    (k.clone(), new_v)
+                .map(|p| akar_binder::bound_statement::BoundCreatePattern {
+                    node: p.node.as_ref().map(|n| {
+                        akar_binder::bound_statement::BoundNodeCreate {
+                            variable: n.variable.clone(),
+                            table_name: n.table_name.clone(),
+                            table_id: n.table_id,
+                            properties: n
+                                .properties
+                                .iter()
+                                .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
+                                .collect(),
+                        }
+                    }),
+                    edge: p.edge.as_ref().map(|e| {
+                        akar_binder::bound_statement::BoundEdgeCreate {
+                            variable: e.variable.clone(),
+                            table_name: e.table_name.clone(),
+                            table_id: e.table_id,
+                            src_var: e.src_var.clone(),
+                            dst_var: e.dst_var.clone(),
+                            properties: e
+                                .properties
+                                .iter()
+                                .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
+                                .collect(),
+                        }
+                    }),
                 })
                 .collect();
             Ok(BoundStatement::BoundCreateDml(
                 akar_binder::bound_statement::BoundCreateDml {
-                    table_name: c.table_name.clone(),
-                    table_id: c.table_id,
-                    properties: new_props,
+                    patterns: new_patterns,
                 },
             ))
         }
