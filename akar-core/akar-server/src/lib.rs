@@ -104,23 +104,44 @@ impl Server {
         Ok(())
     }
 
-    /// Number of currently accepted client sessions.
+    /// Number of currently active client sessions.
+    ///
+    /// Finished client threads are pruned from the handle list, so the count
+    /// reflects live sessions rather than the cumulative number ever accepted
+    /// (and the backing `Vec` never grows unboundedly).
     pub fn num_clients(&self) -> usize {
-        self.client_handles.lock().map(|h| h.len()).unwrap_or(0)
+        let mut handles = self.client_handles.lock().unwrap_or_else(|p| p.into_inner());
+        handles.retain(|h| !h.is_finished());
+        handles.len()
     }
 
-    /// Stop the accept loop.
+    /// Stop the accept loop and wait for all client sessions to exit.
     ///
-    /// Active client sessions keep running — they observe the shutdown flag
-    /// between frames and exit when the peer disconnects. Active connections
-    /// must be closed by their clients (or dropped) before the database can be
-    /// reopened elsewhere.
+    /// Client threads observe the shutdown flag between frames and exit (the
+    /// per-session read timeout bounds the wait when a client is idle). Once
+    /// this returns, every client thread has finished, so the database can be
+    /// reopened elsewhere immediately.
     pub fn shutdown(&mut self) {
         if self.shutdown.swap(true, Ordering::SeqCst) {
             return;
         }
         if let Some(handle) = self.accept_handle.take() {
             let _ = handle.join();
+        }
+        // Drain repeatedly: the accept loop may have pushed a handle in the
+        // small window between the shutdown flag and the accept loop actually
+        // stopping. Each join is bounded by the session's read timeout.
+        loop {
+            let finished = {
+                let mut guard = self.client_handles.lock().unwrap_or_else(|p| p.into_inner());
+                if guard.is_empty() {
+                    break;
+                }
+                std::mem::take(&mut *guard)
+            };
+            for handle in finished {
+                let _ = handle.join();
+            }
         }
     }
 }

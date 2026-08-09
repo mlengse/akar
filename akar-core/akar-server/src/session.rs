@@ -26,10 +26,16 @@ use std::time::Duration;
 /// shutdown detection latency.
 const READ_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// How long a response write may block before the session gives up. Bounds how
+/// long [`Server::shutdown`](crate::Server::shutdown) waits for a client that
+/// stops reading its responses.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Serve one client connection until the peer disconnects or the server shuts
 /// down. All per-session state is dropped on return.
 pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, shutdown: &Arc<AtomicBool>) {
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let conn = Connection::new(&db);
     let mut partial: Option<PartialFrame> = None;
 
@@ -94,6 +100,16 @@ fn query_result_to_wire(result: &QueryResult) -> WireResponse {
         for row_idx in chunk.iter_rows() {
             let mut row = Vec::with_capacity(chunk.num_fields());
             for col_idx in 0..chunk.num_fields() {
+                // Defensive bounds checks: a malformed chunk (fields /
+                // field_types / row length disagreement) must never panic the
+                // session thread — render the offending cell instead.
+                if col_idx >= chunk.fields.len()
+                    || col_idx >= chunk.field_types.len()
+                    || row_idx >= chunk.fields[col_idx].len()
+                {
+                    row.push(Some(Value::String("<malformed chunk>".to_string())));
+                    continue;
+                }
                 let cell = if chunk.is_null(col_idx, row_idx) {
                     None
                 } else {

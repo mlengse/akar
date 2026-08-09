@@ -681,7 +681,7 @@ impl Connection {
                     let edge_exists = rel
                         .fwd_adj
                         .get(&src)
-                        .map_or(false, |adj| adj.iter().any(|(d, _)| *d == dst));
+                        .is_some_and(|adj| adj.iter().any(|(d, _)| *d == dst));
 
                     if !edge_exists {
                         let mut values: Vec<Value> = rel.columns.iter().map(|_| Value::Null).collect();

@@ -135,14 +135,75 @@ fn test_query_create_table_and_insert() {
     };
     let state = unsafe { akar_connection_query(&mut conn, create.as_ptr(), &mut result) };
     assert_eq!(state, akar_state::AkarSuccess);
+    assert!(!result._query_result.is_null());
+    unsafe { akar_query_result_destroy(&mut result) };
+    assert!(result._query_result.is_null());
 
     let insert = CString::new("CREATE (p:Person {id: 1, name: 'Alice', age: 30})").unwrap();
     let state = unsafe { akar_connection_query(&mut conn, insert.as_ptr(), &mut result) };
     assert_eq!(state, akar_state::AkarSuccess);
+    unsafe { akar_query_result_destroy(&mut result) };
 
     let query = CString::new("MATCH (p:Person) RETURN p.name").unwrap();
     let state = unsafe { akar_connection_query(&mut conn, query.as_ptr(), &mut result) };
     assert_eq!(state, akar_state::AkarSuccess);
+    unsafe { akar_query_result_destroy(&mut result) };
+
+    unsafe { akar_database_destroy(&mut db) };
+    cleanup(id);
+}
+
+#[test]
+fn test_query_result_destroy_null_is_safe() {
+    let mut result = akar_query_result {
+        _query_result: ptr::null_mut(),
+        _is_owned_by_cpp: false,
+    };
+    unsafe { akar_query_result_destroy(&mut result) };
+}
+
+#[test]
+fn test_query_result_destroy_double_is_safe() {
+    let (path, id) = temp_db_path();
+    let mut db = unsafe { init_db(&path) };
+    let mut conn = unsafe { init_conn(&mut db) };
+
+    let q = CString::new("RETURN 1").unwrap();
+    let mut result = akar_query_result {
+        _query_result: ptr::null_mut(),
+        _is_owned_by_cpp: false,
+    };
+    let state = unsafe { akar_connection_query(&mut conn, q.as_ptr(), &mut result) };
+    assert_eq!(state, akar_state::AkarSuccess);
+    assert!(!result._query_result.is_null());
+
+    unsafe {
+        akar_query_result_destroy(&mut result);
+        akar_query_result_destroy(&mut result);
+    }
+    assert!(result._query_result.is_null());
+
+    unsafe { akar_database_destroy(&mut db) };
+    cleanup(id);
+}
+
+#[test]
+fn test_query_error_leaves_no_stale_result() {
+    let (path, id) = temp_db_path();
+    let mut db = unsafe { init_db(&path) };
+    let mut conn = unsafe { init_conn(&mut db) };
+
+    // Syntax error must return AkarError AND leave the result struct null so a
+    // later destroy is a safe no-op.
+    let bad = CString::new("THIS IS NOT CYPHER").unwrap();
+    let mut result = akar_query_result {
+        _query_result: ptr::null_mut(),
+        _is_owned_by_cpp: false,
+    };
+    let state = unsafe { akar_connection_query(&mut conn, bad.as_ptr(), &mut result) };
+    assert_eq!(state, akar_state::AkarError);
+    assert!(result._query_result.is_null());
+    unsafe { akar_query_result_destroy(&mut result) };
 
     unsafe { akar_database_destroy(&mut db) };
     cleanup(id);
