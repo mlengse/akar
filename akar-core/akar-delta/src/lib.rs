@@ -53,18 +53,9 @@ impl Extension for DeltaExtension {
                     }
 
                     let table_info = native_reader::load_delta_table(&path)?;
-                    let file_refs: Vec<&str> = table_info.data_files.iter().map(|s| s.as_str()).collect();
+                    let file_refs: Vec<String> = table_info.data_files.iter().cloned().collect();
 
-                    let array =
-                        std::sync::Arc::new(arrow::array::StringArray::from(file_refs)) as arrow::array::ArrayRef;
-
-                    chunk.fields.clear();
-                    chunk.field_types.clear();
-                    chunk.field_names.clear();
-                    chunk.fields.push(array);
-                    chunk.field_types.push(akar_common::types::PhysicalTypeID::String);
-                    chunk.field_names.push("file_path".to_string());
-                    chunk.size = table_info.data_files.len();
+                    akar_common::extension_utils::fill_chunk_with_strings(chunk, "file_path", &file_refs);
                     Ok(())
                 });
 

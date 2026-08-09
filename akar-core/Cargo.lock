@@ -134,6 +134,7 @@ dependencies = [
  "akar-common",
  "akar-extension",
  "akar-function",
+ "arrow 59.1.0",
  "duckdb",
  "tracing",
 ]
@@ -376,8 +377,10 @@ dependencies = [
 name = "akar-sqlite"
 version = "0.1.0"
 dependencies = [
+ "akar-common",
  "akar-extension",
  "akar-function",
+ "arrow 59.1.0",
  "rusqlite",
  "tracing",
 ]

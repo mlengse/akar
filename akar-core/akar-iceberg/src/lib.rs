@@ -57,16 +57,7 @@ impl Extension for IcebergExtension {
                     let _meta = native_reader::IcebergMetadata::load(&path)?;
                     let data_files = native_reader::list_data_files(&path)?;
 
-                    let paths: Vec<&str> = data_files.iter().map(|s| s.as_str()).collect();
-                    let array = std::sync::Arc::new(arrow::array::StringArray::from(paths)) as arrow::array::ArrayRef;
-
-                    chunk.fields.clear();
-                    chunk.field_types.clear();
-                    chunk.field_names.clear();
-                    chunk.fields.push(array);
-                    chunk.field_types.push(akar_common::types::PhysicalTypeID::String);
-                    chunk.field_names.push("file_path".to_string());
-                    chunk.size = data_files.len();
+                    akar_common::extension_utils::fill_chunk_with_strings(chunk, "file_path", &data_files);
                     Ok(())
                 });
 

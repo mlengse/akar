@@ -58,13 +58,18 @@ impl Extension for DuckDbExtension {
 
                 match manager.query_rows(&sql) {
                     Ok(rows) => {
-                        // Collect first row, first column as string result
-                        if let Some(first_row) = rows.first() {
-                            if let Some(val) = first_row.first() {
-                                return Ok(Value::String(format!("{:?}", val)));
+                        // Collect every row (all columns) as strings, not just the first.
+                        let mut parts = Vec::new();
+                        for row in &rows {
+                            for val in row {
+                                parts.push(result_converter::duckdb_value_to_string(val));
                             }
                         }
-                        Ok(Value::String("(empty)".into()))
+                        if parts.is_empty() {
+                            Ok(Value::String("(empty)".into()))
+                        } else {
+                            Ok(Value::String(parts.join(",")))
+                        }
                     }
                     Err(e) => Err(format!("DuckDB query error: {e}")),
                 }
@@ -80,7 +85,7 @@ impl Extension for DuckDbExtension {
 
             // duckdb_scan(sql: String) → executes SQL and returns table result
             let scan_fn: Arc<dyn Fn(&[Value], &mut akar_function::DataChunk) -> Result<(), String> + Send + Sync> =
-                Arc::new(|args, _chunk| {
+                Arc::new(|args, chunk| {
                     if args.is_empty() {
                         return Err("duckdb_scan requires a SQL string argument".into());
                     }
@@ -89,15 +94,21 @@ impl Extension for DuckDbExtension {
                         _ => return Err("duckdb_scan expects a string argument".into()),
                     };
 
+                    if chunk.size > 0 {
+                        return Ok(());
+                    }
+
                     let manager = match connection::DuckDbManager::in_memory() {
                         Ok(m) => m,
                         Err(e) => return Err(format!("Failed to open DuckDB: {e}")),
                     };
 
                     match manager.query_rows(&sql) {
-                        Ok(_rows) => {
-                            // Rows are collected; DataChunk filling is done lazily
-                            // by the processor. For now, just validate the query works.
+                        Ok(rows) => {
+                            let converted = result_converter::duckdb_results_to_akar(rows)?;
+                            if let Some(out) = converted.into_iter().next() {
+                                *chunk = out;
+                            }
                             Ok(())
                         }
                         Err(e) => Err(format!("DuckDB scan error: {e}")),

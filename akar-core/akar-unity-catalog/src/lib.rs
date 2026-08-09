@@ -107,7 +107,7 @@ impl Extension for UnityCatalogExtension {
             #[cfg(feature = "duckdb-delegation")]
             {
                 let scan_fn: Arc<dyn Fn(&[Value], &mut akar_function::DataChunk) -> Result<(), String> + Send + Sync> =
-                    Arc::new(|args, _chunk| {
+                    Arc::new(|args, chunk| {
                         if args.len() < 3 {
                             return Err("uc_scan requires (endpoint, token, table) arguments".into());
                         }
@@ -124,6 +124,10 @@ impl Extension for UnityCatalogExtension {
                             _ => return Err("uc_scan: third argument must be table name".into()),
                         };
 
+                        if chunk.size > 0 {
+                            return Ok(());
+                        }
+
                         let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
                         helper.install_and_load("uc_catalog")?;
 
@@ -134,8 +138,16 @@ impl Extension for UnityCatalogExtension {
                         );
                         helper.execute_batch(&create_secret)?;
 
-                        let sql = format!("SELECT * FROM {} LIMIT 1000", table);
-                        helper.query_rows(&sql)?;
+                        // Quote the user-supplied table name so it cannot break out of the query.
+                        let sql = format!(
+                            "SELECT * FROM {} LIMIT 1000",
+                            akar_common::extension_utils::quote_sql_table_name(&table)
+                        );
+                        let rows = helper.query_rows(&sql)?;
+                        let converted = akar_duckdb::result_converter::duckdb_results_to_akar(rows)?;
+                        if let Some(out) = converted.into_iter().next() {
+                            *chunk = out;
+                        }
                         Ok(())
                     });
 

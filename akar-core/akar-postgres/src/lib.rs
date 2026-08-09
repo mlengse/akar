@@ -11,6 +11,38 @@
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
 
+/// Render a single cell of a PostgreSQL row as text.
+///
+/// `try_get` needs a concrete type at compile time, so we cascade through the
+/// common representations. A NULL cell yields `Ok(None)` for every `Option<T>`
+/// probe and is reported as "NULL"; cells whose type matches none of the probes
+/// (e.g. bytea, timestamps) fall back to their column type name.
+#[cfg(feature = "native")]
+fn postgres_value_to_string(row: &tokio_postgres::Row, i: usize) -> String {
+    let type_name = row.columns().get(i).map(|c| c.type_().name()).unwrap_or("unknown").to_string();
+    if let Ok(Some(v)) = row.try_get::<_, Option<String>>(i) {
+        return v;
+    }
+    if let Ok(Some(v)) = row.try_get::<_, Option<i64>>(i) {
+        return v.to_string();
+    }
+    if let Ok(Some(v)) = row.try_get::<_, Option<i32>>(i) {
+        return v.to_string();
+    }
+    if let Ok(Some(v)) = row.try_get::<_, Option<f64>>(i) {
+        return v.to_string();
+    }
+    if let Ok(Some(v)) = row.try_get::<_, Option<bool>>(i) {
+        return v.to_string();
+    }
+    // A NULL cell succeeds with None for any Option<T> probe.
+    if row.try_get::<_, Option<i64>>(i).is_ok() {
+        "NULL".to_string()
+    } else {
+        format!("<{type_name}>")
+    }
+}
+
 /// The PostgreSQL extension enables querying PostgreSQL databases from Akar.
 pub struct PostgresExtension;
 
@@ -70,16 +102,17 @@ impl Extension for PostgresExtension {
                     .block_on(async { client.query(&sql, &[]).await })
                     .map_err(|e| format!("PostgreSQL query error: {e}"))?;
 
-                // Collect first row as string result
-                if let Some(row) = rows.first() {
-                    let mut parts = Vec::new();
+                // Collect every row (all columns) as strings, not just the first.
+                let mut parts = Vec::new();
+                for row in &rows {
                     for i in 0..row.len() {
-                        let val: Option<&str> = row.try_get::<_, &str>(i).ok();
-                        parts.push(val.unwrap_or("NULL").to_string());
+                        parts.push(postgres_value_to_string(row, i));
                     }
-                    Ok(Value::String(parts.join(",")))
-                } else {
+                }
+                if parts.is_empty() {
                     Ok(Value::String("(empty)".into()))
+                } else {
+                    Ok(Value::String(parts.join(",")))
                 }
             });
 

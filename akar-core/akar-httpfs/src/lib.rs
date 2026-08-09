@@ -202,20 +202,13 @@ impl Extension for HttpfsExtension {
                     std::io::copy(&mut reader, &mut temp_file)
                         .map_err(|e| format!("Failed to write temp file: {}", e))?;
 
-                    let path_str = temp_file.path().to_string_lossy().to_string();
-                    // Keep temp file alive by leaking it for this quick prototype,
-                    // in a real implementation we would manage its lifecycle via the query context.
-                    let _ = temp_file.keep();
+                    let (_file, path) =
+                        temp_file.keep().map_err(|e| format!("Failed to keep temp file: {}", e))?;
+                    // Retain the file under a bounded registry so it is eventually
+                    // cleaned up instead of leaking forever.
+                    let path_str = akar_common::extension_utils::retain_temp_file(path);
 
-                    let array = std::sync::Arc::new(arrow::array::StringArray::from(vec![path_str.as_str()]))
-                        as arrow::array::ArrayRef;
-                    chunk.fields.clear();
-                    chunk.field_types.clear();
-                    chunk.field_names.clear();
-                    chunk.fields.push(array);
-                    chunk.field_types.push(akar_common::types::PhysicalTypeID::String);
-                    chunk.field_names.push("path".to_string());
-                    chunk.resize(1);
+                    akar_common::extension_utils::fill_chunk_with_strings(chunk, "path", &[path_str]);
                     Ok(())
                 } else {
                     Err("http_scan argument must be a string".into())

@@ -115,10 +115,10 @@ pub fn download_blob(uri: &str) -> Result<String, String> {
     let mut temp_file = NamedTempFile::new().map_err(|e| format!("Failed to create temp file: {e}"))?;
     std::io::copy(&mut reader, &mut temp_file).map_err(|e| format!("Failed to write temp file: {e}"))?;
 
-    let path_str = temp_file.path().to_string_lossy().to_string();
-    let _ = temp_file.keep();
-
-    Ok(path_str)
+    // Retain the file under a bounded registry so it is eventually cleaned up
+    // instead of leaking forever.
+    let (_file, path) = temp_file.keep().map_err(|e| format!("Failed to keep temp file: {e}"))?;
+    Ok(akar_common::extension_utils::retain_temp_file(path))
 }
 
 #[cfg(test)]

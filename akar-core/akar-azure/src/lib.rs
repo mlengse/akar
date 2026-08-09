@@ -66,16 +66,7 @@ impl Extension for AzureExtension {
 
                     let local_path = download_blob(&path)?;
 
-                    let array = std::sync::Arc::new(arrow::array::StringArray::from(vec![local_path.as_str()]))
-                        as arrow::array::ArrayRef;
-
-                    chunk.fields.clear();
-                    chunk.field_types.clear();
-                    chunk.field_names.clear();
-                    chunk.fields.push(array);
-                    chunk.field_types.push(akar_common::types::PhysicalTypeID::String);
-                    chunk.field_names.push("path".to_string());
-                    chunk.resize(1);
+                    akar_common::extension_utils::fill_chunk_with_strings(chunk, "path", &[local_path]);
                     Ok(())
                 });
 
