@@ -77,7 +77,7 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **1,594 tests, 0 failed** (5 ignored doc-tests; gate `test [akar-core]`, 2026-08-10, release v0.1.4). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
+**Test suite:** **1,594 tests, 0 failed** (5 ignored doc-tests; gate `test [akar-core]`, 2026-08-11, release v0.1.5). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
 
 ## Benchmarks
 
