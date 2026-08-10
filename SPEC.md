@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,535 total, all passing** (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined, 2026-08-07/08), 5 ignored (doc-tests) |
+| Tests passing | **1,578 total, 5 ignored, 1,573 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, pasca P52 batch B optimizer audit `8564faa`, rilis v0.1.3) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -178,14 +178,14 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 6 | AggregateDetection | Detects aggregation boundaries |
 | 7 | JoinOptimization | Cardinality-aware join reordering |
 | 8 | TopKOptimization | Converts OrderBy + Limit to TopK |
-| 9 | VectorSimilarityDetection | Detects vector similarity patterns |
-| 10 | ArtRangeScanDetection | Detects ART index range scan patterns |
+| 9 | VectorSimilarityDetection | **NO-OP (audit P52.5)** — old rewrite dropped the distance threshold and consumed Projection/OrderBy/Limit; also unreachable after FilterPushDown folds the predicate into the ScanNode |
+| 10 | ArtRangeScanDetection | Detects ART index range scan patterns — **fixed conservatively (P52.4)**: rewrites only when the WHOLE filter is bounds on one property; never merges different-column conjuncts or drops predicates |
 | 11 | LimitPushDown | Pushes limits closer to scans |
-| 12 | CommonSubexpressionElimination | Deduplicates expressions |
-| 13 | OrderByPushDown | Pushes ORDER BY below UNION ALL |
+| 12 | CommonSubexpressionElimination | **NO-OP (audit P52.2)** — dedup changed the positional RETURN arity; the mapping was never applied to downstream consumers |
+| 13 | OrderByPushDown | Pushes ORDER BY below UNION ALL — **NO-OP (audit P52.6)**: per-branch sort is not a global sort under UNION concat; the old rewrite dropped the global ORDER BY |
 | 14 | UnwindDedup | Deduplicates consecutive UNWIND |
 | 15 | CountRelTable | Replaces ScanRel+COUNT with CSR metadata |
-| 16 | AggregateFusion | Fuses aggregate operations |
+| 16 | AggregateFusion | Fuses aggregate operations — **NO-OP (audit P52.7)**: fusion resolved the outer agg's args to NULL and changed COUNT(*) from groups to raw rows |
 | 17 | SortElision | Eliminates redundant sorts |
 | 18 | ExpressionInline | Inlines trivial expressions |
 
@@ -464,7 +464,7 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up at `0.1.0` (verified live on crates.io); GitHub Releases with prebuilt CLI binaries are produced as well.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up: 22 @ `0.1.0`, 4 @ `0.1.1`, 5 @ `0.1.2` (verified live on crates.io; latest release v0.1.3, 2026-08-10); GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -478,7 +478,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-parser` | 67 | PEG grammar, 33 Statement variants, operator precedence |
 | `akar-binder` | 87 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | Logical plan construction |
-| `akar-optimizer` | 59 | 24 optimization passes |
+| `akar-optimizer` | 68 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 142 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
@@ -503,7 +503,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,535** | **1,535 passed, 0 failed (P48.14 `test_count_variable` + P48.15 NaN ordering fixed, P48.16 dead SIP semi-masker removed, P48.17 node-predicate + WHERE AND-combined), 5 ignored (doc-tests)** |
+| **Total** | **1,578** | **1,578 total, 5 ignored, 1,573 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, rilis v0.1.3 / P52 batch B optimizer audit `8564faa`) |
 
 ### 11.2 Test Datasets
 
@@ -657,7 +657,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.0`
+- **Current version:** `0.1.2` (highest published crate patch); latest release tag **v0.1.3** (2026-08-10)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
@@ -670,7 +670,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 | # | Decision | Rationale |
 |---|----------|-----------|
 | #11 | crates.io publishing deferred | API not yet stable for public consumption — **superseded 2026-08-08 (P50): publishing active**, 31/31 crates at 0.1.0 |
-| #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,535 tests, audits CLEAN) |
+| #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,578 tests, audits CLEAN) |
 | #67 | WCOJ benchmark deferred | Legacy bench never runnable; pre-existing bugs |
 
 ---

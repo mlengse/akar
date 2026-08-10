@@ -28,6 +28,7 @@ use std::fmt;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// Default port the Akar server binds to when none is specified.
@@ -168,6 +169,40 @@ pub enum PartialFrame {
     Payload { len: usize, buf: Vec<u8>, filled: usize },
 }
 
+/// Result of draining a socket after a read timeout (P52.19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainOutcome {
+    /// A complete stale frame was read and discarded — the stream is in sync.
+    FrameConsumed,
+    /// The peer closed the connection.
+    ConnectionClosed,
+    /// No frame arrived within the grace window — the stream may be desynced.
+    NoFrameWithinGrace,
+}
+
+/// Per-read timeout used while draining stale bytes after a query timeout.
+const GRACE_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Maximum number of grace reads before giving up on reconciling the stream.
+const MAX_GRACE_READS: usize = 8; // ~2s of grace
+
+/// Read-and-discard up to one complete stale frame (resuming any partial-frame
+/// state) so the socket is re-synchronized after a query read timeout.
+///
+/// `reader` is expected to be in "short timeout" mode — each `TimedOut`/
+/// `WouldBlock` is a no-progress tick, not a failure.
+fn drain_stale_frames<R: Read>(reader: &mut R, partial: &mut Option<PartialFrame>) -> DrainOutcome {
+    for _ in 0..MAX_GRACE_READS {
+        match read_frame(reader, partial) {
+            Ok(Some(_frame)) => return DrainOutcome::FrameConsumed,
+            Ok(None) => return DrainOutcome::ConnectionClosed,
+            Err(e) if e.kind() == ErrorKind::TimedOut || e.kind() == ErrorKind::WouldBlock => continue,
+            Err(_) => return DrainOutcome::NoFrameWithinGrace,
+        }
+    }
+    DrainOutcome::NoFrameWithinGrace
+}
+
 /// Write `payload` as a single length-prefixed frame: `[u32 LE len][bytes]`.
 pub fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> std::io::Result<()> {
     let len = payload.len();
@@ -299,6 +334,11 @@ pub struct RemoteDatabase {
     stream: TcpStream,
     address: String,
     partial: Mutex<Option<PartialFrame>>,
+    /// Set once a read timeout could not be reconciled (no stale frame arrived
+    /// within the drain window). The stream may still hold bytes for the
+    /// abandoned query, so further `query()` calls must refuse to run rather
+    /// than silently read a stale response as the next query's result (P52.19).
+    desynced: AtomicBool,
 }
 
 impl RemoteDatabase {
@@ -314,6 +354,7 @@ impl RemoteDatabase {
             stream,
             address: addr,
             partial: Mutex::new(None),
+            desynced: AtomicBool::new(false),
         })
     }
 
@@ -327,6 +368,14 @@ impl RemoteDatabase {
     /// Mirrors [`crate::Connection::query`]: returns the response on success and
     /// an error message when the query failed (including OCC `WriteConflict`s).
     pub fn query(&self, query_str: &str) -> Result<WireResponse, String> {
+        if self.desynced.load(Ordering::Acquire) {
+            return Err(
+                "Connection is desynchronized after a previous read timeout; \
+                 reconnect before sending further queries"
+                    .into(),
+            );
+        }
+
         let request = WireRequest {
             query: query_str.to_string(),
             client_name: None,
@@ -344,7 +393,29 @@ impl RemoteDatabase {
             Ok(Some(f)) => f,
             Ok(None) => return Err("Connection closed by server".to_string()),
             Err(e) => {
-                return Err(format!("Failed to read response: {e}"));
+                // Only a timeout can leave the peer's response in the socket
+                // buffer. On any other error (EOF/protocol) there is nothing
+                // to reconcile — the connection is already broken.
+                if e.kind() != ErrorKind::TimedOut && e.kind() != ErrorKind::WouldBlock {
+                    return Err(format!("Failed to read response: {e}"));
+                }
+                // A read timeout means response A is still pending somewhere on
+                // the wire. Drain it before allowing the next query, otherwise
+                // query B would read A's stale frame as its own result (P52.19).
+                match self.drain_pending_frame(&mut partial) {
+                    DrainOutcome::FrameConsumed => {
+                        // Stale response consumed — stream is re-synchronized.
+                        return Err(format!("Failed to read response (query timed out): {e}"));
+                    }
+                    DrainOutcome::ConnectionClosed => return Err("Connection closed by server".to_string()),
+                    DrainOutcome::NoFrameWithinGrace => {
+                        self.desynced.store(true, Ordering::Release);
+                        return Err(format!(
+                            "Failed to read response: {e} (no stale frame arrived to re-synchronize; \
+                             the connection has been marked desynchronized — reconnect before continuing)"
+                        ));
+                    }
+                }
             }
         };
 
@@ -358,6 +429,18 @@ impl RemoteDatabase {
                 .clone()
                 .unwrap_or_else(|| "Unknown server error".to_string()))
         }
+    }
+
+    /// After a read timeout, keep reading with a short timeout until either a
+    /// full stale frame is consumed (re-sync) or a short grace window elapses.
+    ///
+    /// The drain reuses the connection's `partial` state so a frame interrupted
+    /// mid-read by the timeout is resumed and completed.
+    fn drain_pending_frame(&self, partial: &mut Option<PartialFrame>) -> DrainOutcome {
+        let _ = self.stream.set_read_timeout(Some(GRACE_TIMEOUT));
+        let outcome = drain_stale_frames(&mut &self.stream, partial);
+        let _ = self.stream.set_read_timeout(Some(Duration::from_secs(30)));
+        outcome
     }
 
     /// Verify the connection is alive by round-tripping a trivial query.
@@ -440,6 +523,58 @@ mod tests {
         // Second attempt must reassemble the frame from the retained state.
         let result = read_frame(&mut reader, &mut partial).unwrap();
         assert_eq!(result.as_deref(), Some(b"partial-frame-test".as_slice()));
+    }
+
+    /// A reader that simulates a query timeout: the first `read` returns
+    /// `WouldBlock` (nothing has arrived yet), then the stale response frame
+    /// becomes available and is delivered normally. Exercises the P52.19 drain.
+    #[test]
+    fn test_drain_stale_frames_consumes_stale_response() {
+        let stale_response = serde_json::to_vec(&WireResponse::success_message("slow query".into())).unwrap();
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &stale_response).unwrap();
+
+        let mut cursor = &buf[..];
+        let mut partial = None;
+        let mut reader = ChunkedReader::new(&mut cursor);
+
+        // Initial read times out (no bytes yet) — this is the slow-query case.
+        let err = read_frame(&mut reader, &mut partial).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::WouldBlock);
+
+        // Draining must consume the stale frame that arrives afterwards,
+        // re-synchronizing the stream for the next query.
+        let outcome = drain_stale_frames(&mut reader, &mut partial);
+        assert_eq!(outcome, DrainOutcome::FrameConsumed);
+        // The stream is fully consumed — no residual bytes leak into the next read.
+        let mut tail = Vec::new();
+        let _ = reader.read_to_end(&mut tail);
+        assert_eq!(tail.len(), 0);
+    }
+
+    #[test]
+    fn test_drain_stale_frames_no_frame_returns_grace() {
+        // A reader that only ever times out: the stale frame never arrives, so
+        // the drain must give up after the grace window.
+        struct AlwaysBlocking;
+        impl Read for AlwaysBlocking {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(ErrorKind::WouldBlock, "no data"))
+            }
+        }
+
+        let mut reader = AlwaysBlocking;
+        let mut partial = None;
+        let outcome = drain_stale_frames(&mut reader, &mut partial);
+        assert_eq!(outcome, DrainOutcome::NoFrameWithinGrace);
+    }
+
+    #[test]
+    fn test_drain_stale_frames_eof_reports_closed() {
+        let mut cursor = &b""[..];
+        let mut partial = None;
+        let outcome = drain_stale_frames(&mut &mut cursor, &mut partial);
+        assert_eq!(outcome, DrainOutcome::ConnectionClosed);
     }
 
     #[test]

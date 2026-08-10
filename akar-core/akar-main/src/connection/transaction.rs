@@ -28,7 +28,22 @@ impl Connection {
     /// ShadowFile apply to BufferManager, and auto-checkpoint.
     pub(crate) fn commit_write_txn(&self, txn: &mut Transaction) -> Result<(), String> {
         let txn_id = txn.transaction_id;
-        // Take the resources out of the map
+
+        // Step 1: Commit via TransactionManager (assigns commit_ts, releases
+        // locks). Resources stay in `txn_resources` until EVERY commit step
+        // succeeds — if commit fails we roll back instead of leaking a zombie
+        // txn that wedges the next COMMIT with "No resources found" (P52.24).
+        let tm = &self.database.transaction_manager;
+        let commit_result = tm.commit(txn).map_err(|e| {
+            tracing::error!("Transaction commit failed for txn#{txn_id}: {e}");
+            let _ = self.rollback_write_txn(txn);
+            format!("Transaction commit failed: {e}")
+        })?;
+        let _commit_ts = match commit_result {
+            akar_transaction::CommitResult::Committed { commit_ts } => commit_ts,
+        };
+
+        // Commit succeeded — safe to take the resources out of the map now.
         let resources = self
             .txn_resources
             .lock()
@@ -36,14 +51,7 @@ impl Connection {
             .remove(&txn_id);
         let resources = match resources {
             Some(r) => r,
-            None => return Err(format!("No resources found for txn#{}", txn_id)),
-        };
-
-        // Step 1: Commit via TransactionManager (assigns commit_ts, releases locks)
-        let tm = &self.database.transaction_manager;
-        let commit_result = tm.commit(txn).map_err(|e| format!("Transaction commit failed: {e}"))?;
-        let _commit_ts = match commit_result {
-            akar_transaction::CommitResult::Committed { commit_ts } => commit_ts,
+            None => return Err(format!("No resources found for txn#{txn_id}", )),
         };
 
         // Step 2: Bulk-copy LocalWAL buffer into global WAL (before flush)
@@ -109,15 +117,22 @@ impl Connection {
             | BoundStatement::BoundCopyFrom(_)
             | BoundStatement::BoundAlterTable(_)
             | BoundStatement::BoundExportDatabase(_)
-            | BoundStatement::BoundImportDatabase(_) => true,
+            | BoundStatement::BoundImportDatabase(_)
+            | BoundStatement::BoundCreateFtsIndex(_) => true,
             BoundStatement::BoundExplain(_) => false,
             BoundStatement::BoundQuery(q) => q.clauses.iter().any(|c| {
-                matches!(
-                    c,
+                match c {
                     akar_binder::bound_statement::BoundClause::BoundSet(_)
-                        | akar_binder::bound_statement::BoundClause::BoundDelete(_)
-                        | akar_binder::bound_statement::BoundClause::BoundCreate(_)
-                )
+                    | akar_binder::bound_statement::BoundClause::BoundDelete(_)
+                    | akar_binder::bound_statement::BoundClause::BoundCreate(_) => true,
+                    // FOREACH is a write when any of its sub-statements is a
+                    // write — it must not bypass the read-only guard or OCC
+                    // conflict tracking (P52.14).
+                    akar_binder::bound_statement::BoundClause::BoundForeach(fc) => {
+                        fc.sub_statements.iter().any(Self::is_write_statement)
+                    }
+                    _ => false,
+                }
             }),
             _ => false,
         }

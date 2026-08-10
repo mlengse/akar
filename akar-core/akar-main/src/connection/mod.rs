@@ -76,6 +76,11 @@ pub struct Connection {
     /// Per-transaction resources keyed by transaction ID.
     /// Set up when `begin_write()` is called, cleaned up on commit/rollback.
     pub(crate) txn_resources: Mutex<HashMap<u64, TxnResources>>,
+    /// Set while an explicit `BEGIN TRANSACTION` is open on this connection.
+    /// DDL statements bypass the txn's LocalStorage/ShadowFile and mutate the
+    /// catalog directly, so they cannot be rolled back — they are rejected
+    /// while this flag is set instead of falsely reporting success (P52.28).
+    pub(crate) explicit_txn_active: std::sync::atomic::AtomicBool,
 }
 
 impl Connection {
@@ -90,6 +95,7 @@ impl Connection {
             statement_cache: Mutex::new(HashMap::new()),
             plan_cache: Mutex::new(PlanCache::new(PLAN_CACHE_CAPACITY)),
             txn_resources: Mutex::new(HashMap::new()),
+            explicit_txn_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -111,5 +117,37 @@ impl Connection {
     /// Number of cached query plans.
     pub fn plan_cache_size(&self) -> usize {
         self.plan_cache.lock().map(|c| c.len()).unwrap_or(0)
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // A dropped connection must roll back any abandoned write transactions.
+        // Without this, a client that disconnects after `BEGIN` (without
+        // COMMIT/ROLLBACK) leaves `active_write_count` raised and table locks
+        // held forever, wedging single-writer mode (P52.15).
+        let txn_ids: Vec<u64> = self
+            .txn_resources
+            .lock()
+            .map(|map| map.keys().copied().collect())
+            .unwrap_or_default();
+        if txn_ids.is_empty() {
+            return;
+        }
+
+        let tm = &self.database.transaction_manager;
+        let txns: Vec<akar_transaction::Transaction> = tm
+            .active_snapshot()
+            .ok()
+            .map(|mut active| txn_ids.iter().filter_map(|id| active.remove(id)).collect())
+            .unwrap_or_default();
+
+        for mut txn in txns {
+            let id = txn.transaction_id;
+            match self.rollback_write_txn(&mut txn) {
+                Ok(_) => tracing::info!("Rolled back abandoned txn#{id} on connection drop"),
+                Err(e) => tracing::warn!("Failed to roll back abandoned txn#{id} on connection drop: {e}"),
+            }
+        }
     }
 }

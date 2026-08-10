@@ -7,6 +7,7 @@ impl Connection {
     pub(crate) fn handle_foreach(
         &self,
         fc: &akar_binder::bound_statement::BoundForeachClause,
+        mut txn_opt: Option<&mut akar_transaction::Transaction>,
     ) -> Result<Option<QueryResult>, String> {
         tracing::info!("FOREACH '{}'", fc.variable);
 
@@ -47,13 +48,13 @@ impl Connection {
                 // `Some(...)` for DDL and `None` for DML (query) statements —
                 // DML must be routed through the full processor pipeline so
                 // SET/DELETE/CREATE clauses actually execute.
-                match self.handle_ddl(&substituted)? {
+                match self.handle_ddl(&substituted, txn_opt.as_deref_mut())? {
                     Some(result) => {
                         self.database.persist_catalog()?;
                         tracing::info!("FOREACH sub-statement result: {:?}", result);
                     }
                     None => {
-                        let result = self.execute_query_inner(&substituted, None, None)?;
+                        let result = self.execute_query_inner(&substituted, txn_opt.as_deref_mut(), None)?;
                         tracing::info!("FOREACH DML sub-statement result: {:?}", result);
                     }
                 }

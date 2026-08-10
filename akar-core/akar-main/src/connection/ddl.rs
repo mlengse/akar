@@ -8,7 +8,32 @@ use std::collections::HashMap;
 impl Connection {
     /// Handle DDL statements by checking the bound statement type.
     /// Returns `Ok(Some(result))` if DDL, `Ok(None)` if DML (continue).
-    pub(crate) fn handle_ddl(&self, bound: &BoundStatement) -> Result<Option<QueryResult>, String> {
+    ///
+    /// `txn_opt` carries the active write transaction (from `execute_with_plan`)
+    /// down to sub-statement execution (FOREACH) so those writes participate in
+    /// OCC conflict tracking (P52.14).
+    pub(crate) fn handle_ddl(
+        &self,
+        bound: &BoundStatement,
+        txn_opt: Option<&mut akar_transaction::Transaction>,
+    ) -> Result<Option<QueryResult>, String> {
+        // DDL statements mutate the catalog/storage directly (bypassing the
+        // txn's LocalStorage/ShadowFile), so `ROLLBACK` cannot undo them.
+        // Inside an explicit transaction they must be rejected — falsely
+        // reporting success leaves `BEGIN; CREATE TABLE T; ROLLBACK;` with T
+        // still present (P52.28).
+        if self
+            .explicit_txn_active
+            .load(std::sync::atomic::Ordering::Acquire)
+            && is_catalog_mutating_ddl(bound)
+        {
+            return Err(
+                "DDL statements cannot run inside an explicit transaction (BEGIN/COMMIT/ROLLBACK); \
+                 they would bypass transaction rollback. Run DDL outside the transaction."
+                    .into(),
+            );
+        }
+
         match bound {
             BoundStatement::BoundStandaloneCall(_) => {
                 // StandaloneCall is executed via QueryProcessor pipeline
@@ -21,12 +46,16 @@ impl Connection {
             BoundStatement::BoundTransaction(t) => match t.action {
                 akar_parser::ast::TransactionAction::Begin => {
                     let txn = self.begin_write_txn()?;
+                    self.explicit_txn_active
+                        .store(true, std::sync::atomic::Ordering::Release);
                     Ok(Some(QueryResult::success_message(format!(
                         "Transaction started (txn#{})",
                         txn.transaction_id
                     ))))
                 }
                 akar_parser::ast::TransactionAction::Commit => {
+                    self.explicit_txn_active
+                        .store(false, std::sync::atomic::Ordering::Release);
                     let txn_ids: Vec<u64> = self
                         .txn_resources
                         .lock()
@@ -50,6 +79,8 @@ impl Connection {
                     Err("No active transaction to commit".into())
                 }
                 akar_parser::ast::TransactionAction::Rollback => {
+                    self.explicit_txn_active
+                        .store(false, std::sync::atomic::Ordering::Release);
                     let txn_ids: Vec<u64> = self
                         .txn_resources
                         .lock()
@@ -157,22 +188,21 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateType(t) => {
-                // Register the type alias in the catalog
-                let _catalog = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
-                // Types are stored as catalog entries — for now, just a placeholder
-                tracing::info!("CREATE TYPE '{}' AS '{}'", t.name, t.type_name);
-                Ok(Some(QueryResult::success_message(format!(
-                    "Type '{}' created (type: {})",
+                // Type aliases have no catalog backing store. Reporting success
+                // here would be a lie — the type is not persisted and cannot be
+                // used by the binder (P52.27).
+                Err(format!(
+                    "CREATE TYPE '{}' AS '{}' is not supported yet: type aliases have no catalog backing store",
                     t.name, t.type_name
-                ))))
+                ))
             }
             BoundStatement::BoundCommentOnTable(c) => {
-                // Store the comment as metadata — for now, just acknowledge
-                tracing::info!("COMMENT ON TABLE '{}' IS '{}'", c.table_name, c.comment);
-                Ok(Some(QueryResult::success_message(format!(
-                    "Comment set on table '{}'",
+                // Table comments have no catalog backing store. Report an error
+                // instead of claiming the comment was stored (P52.27).
+                Err(format!(
+                    "COMMENT ON TABLE '{}' is not supported yet: table comments have no catalog backing store",
                     c.table_name
-                ))))
+                ))
             }
             BoundStatement::BoundCreateGraph(g) => {
                 let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -580,21 +610,28 @@ impl Connection {
                         .get_node_table_by_name_mut(&node.table_name)
                         .ok_or_else(|| format!("Table '{}' not found in storage", node.table_name))?;
 
-                    // Evaluate the PK properties from the MERGE pattern
+                    // Locate the PK property in the MERGE pattern (if any).
                     let pk_col_idx = table.primary_key_column;
                     let pk_prop = node.properties.iter().find(|(name, _)| {
                         table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false)
                     });
 
-                    // Check if the node already exists by PK
-                    let pk_val = if let Some((_, expr)) = pk_prop {
-                        if let akar_parser::ast::Expression::Constant(c) = expr {
-                            Some(ast_constant_to_value(c))
-                        } else {
-                            None
+                    // Evaluate the PK properties from the MERGE pattern. The PK
+                    // value is resolved with constant-folding (P52.23): a
+                    // non-`Constant` expression such as `toUpper('x')` must not
+                    // collapse to "no PK" (which turned every MERGE into an
+                    // unconditional duplicate CREATE).
+                    let pk_val = match pk_prop {
+                        Some((_, akar_parser::ast::Expression::Constant(c))) => Some(ast_constant_to_value(c)),
+                        Some((_, expr)) => {
+                            let registry = self
+                                .database
+                                .function_registry
+                                .lock()
+                                .map_err(|e| format!("Lock poisoned: {e}"))?;
+                            Some(akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry))
                         }
-                    } else {
-                        None
+                        None => None,
                     };
                     let exists = pk_val
                         .as_ref()
@@ -611,32 +648,56 @@ impl Connection {
                         if let Some(row) = row {
                             node_rows.insert(node.variable.clone().unwrap_or_default(), row);
                             if is_primary {
+                                let registry = self
+                                    .database
+                                    .function_registry
+                                    .lock()
+                                    .map_err(|e| format!("Lock poisoned: {e}"))?;
                                 for item in &m.on_match {
-                                    if let akar_parser::ast::Expression::Constant(c) = &item.value {
-                                        let val = ast_constant_to_value(c);
-                                        let _ = table.update_cell(row, item.column_idx, val);
-                                    }
+                                    let val = match &item.value {
+                                        akar_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
+                                        other => {
+                                            akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                                other, &registry,
+                                            )
+                                        }
+                                    };
+                                    // A type mismatch (or any other cell-write
+                                    // failure) must surface as an error, not be
+                                    // swallowed (P52.23).
+                                    table
+                                        .update_cell(row, item.column_idx, val)
+                                        .map_err(|e| format!("MERGE ON MATCH SET: {e}"))?;
                                 }
                                 primary_matched = true;
                             }
                         }
                     } else {
                         // Create new node with pattern properties + ON CREATE SET
+                        let registry = self
+                            .database
+                            .function_registry
+                            .lock()
+                            .map_err(|e| format!("Lock poisoned: {e}"))?;
                         let mut values: Vec<Value> = table.columns.iter().map(|_| Value::Null).collect();
                         for (prop_name, expr) in &node.properties {
-                            if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name)
-                                && let akar_parser::ast::Expression::Constant(c) = expr
-                            {
-                                values[col_idx] = ast_constant_to_value(c);
+                            if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                                values[col_idx] =
+                                    akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry);
                             }
                         }
                         if is_primary {
                             for item in &m.on_create {
-                                if let akar_parser::ast::Expression::Constant(c) = &item.value {
-                                    let val = ast_constant_to_value(c);
-                                    if item.column_idx < values.len() {
-                                        values[item.column_idx] = val;
+                                let val = match &item.value {
+                                    akar_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
+                                    other => {
+                                        akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                            other, &registry,
+                                        )
                                     }
+                                };
+                                if item.column_idx < values.len() {
+                                    values[item.column_idx] = val;
                                 }
                             }
                         }
@@ -825,7 +886,7 @@ impl Connection {
                 if q.clauses.len() == 1
                     && let Some(akar_binder::bound_statement::BoundClause::BoundForeach(fc)) = q.clauses.first()
                 {
-                    return self.handle_foreach(fc);
+                    return self.handle_foreach(fc, txn_opt);
                 }
                 Ok(None)
             }
@@ -933,6 +994,35 @@ impl Connection {
     pub(crate) fn write_parquet(&self, path: &str, result: &QueryResult, _header: bool) -> Result<(), String> {
         write_parquet_to_file(path, result)
     }
+}
+
+/// Whether a bound statement mutates the catalog or storage directly rather
+/// than through a transaction's LocalStorage/ShadowFile — i.e. it cannot be
+/// undone by `ROLLBACK` (P52.28).
+fn is_catalog_mutating_ddl(bound: &BoundStatement) -> bool {
+    matches!(
+        bound,
+        BoundStatement::BoundCreateNodeTable(_)
+            | BoundStatement::BoundCreateRelTable(_)
+            | BoundStatement::BoundDropTable(_)
+            | BoundStatement::BoundAlterTable(_)
+            | BoundStatement::BoundCreateVectorIndex(_)
+            | BoundStatement::BoundCreateIndex(_)
+            | BoundStatement::BoundDropIndex(_)
+            | BoundStatement::BoundCreateSequence(_)
+            | BoundStatement::BoundDropSequence(_)
+            | BoundStatement::BoundCreateMacro(_)
+            | BoundStatement::BoundCreateType(_)
+            | BoundStatement::BoundCommentOnTable(_)
+            | BoundStatement::BoundCreateGraph(_)
+            | BoundStatement::BoundDropGraph(_)
+            | BoundStatement::BoundAttachDatabase(_)
+            | BoundStatement::BoundDetachDatabase(_)
+            | BoundStatement::BoundExportDatabase(_)
+            | BoundStatement::BoundImportDatabase(_)
+            | BoundStatement::BoundCreateFtsIndex(_)
+            | BoundStatement::BoundCopyFrom(_)
+    )
 }
 
 /// Standalone function to write query results to a Parquet file.

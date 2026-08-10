@@ -175,11 +175,11 @@ impl Connection {
     pub(crate) fn execute_query_inner(
         &self,
         bound: &BoundStatement,
-        txn_opt: Option<&mut akar_transaction::Transaction>,
+        mut txn_opt: Option<&mut akar_transaction::Transaction>,
         cached_plan: Option<&Vec<LogicalOperator>>,
     ) -> Result<QueryResult, String> {
         // Route: DDL vs DML (handle_ddl returns Some for DDL, None for DML)
-        if let Some(result) = self.handle_ddl(bound)? {
+        if let Some(result) = self.handle_ddl(bound, txn_opt.as_deref_mut())? {
             // DDL may have modified the catalog; persist it so schema
             // changes survive a restart, then checkpoint if needed.
             self.database.persist_catalog()?;
@@ -321,7 +321,7 @@ impl Connection {
         }
 
         // Handle DDL prepared statements
-        if let Some(result) = self.handle_ddl(&prepared.bound_statement)? {
+        if let Some(result) = self.handle_ddl(&prepared.bound_statement, None)? {
             self.database.persist_catalog()?;
             self.maybe_auto_checkpoint()?;
             return Ok(result);
@@ -434,54 +434,13 @@ impl Connection {
                         fs::create_dir_all(dir)
                             .map_err(|err| format!("Cannot create export directory '{}': {err}", file_path))?;
                         let catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
-                        // Generate schema.cypher
-                        let mut schema = String::new();
-                        for entry in catalog.all_entries() {
-                            match entry {
-                                akar_catalog::CatalogEntry::NodeTable(t) => {
-                                    let cols: Vec<String> = t
-                                        .columns
-                                        .iter()
-                                        .map(|c| format!("  {} {:?}", c.name, c.logical_type))
-                                        .collect();
-                                    schema.push_str(&format!(
-                                        "CREATE NODE TABLE {} (\n{}\n);\n\n",
-                                        t.name,
-                                        cols.join(",\n")
-                                    ));
-                                }
-                                akar_catalog::CatalogEntry::RelTable(t) => {
-                                    let cols: Vec<String> = t
-                                        .columns
-                                        .iter()
-                                        .map(|c| format!("  {} {:?}", c.name, c.logical_type))
-                                        .collect();
-                                    schema.push_str(&format!(
-                                        "CREATE REL TABLE {} (\n{}\n);\n\n",
-                                        t.name,
-                                        cols.join(",\n")
-                                    ));
-                                }
-                                _ => {}
-                            }
-                        }
+                        // Shared schema/copy generators (single source of truth,
+                        // P52.13/P52.26: valid rel-table FROM/TO + single-col PK).
+                        let schema = super::copy::generate_schema_cypher(&catalog);
                         fs::write(dir.join("schema.cypher"), &schema)
                             .map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
-                        // Generate copy.cypher (data export)
                         if !schema_only {
-                            let mut copy = String::new();
-                            for entry in catalog.all_entries() {
-                                let name = match entry {
-                                    akar_catalog::CatalogEntry::NodeTable(t) => Some(t.name.as_str()),
-                                    akar_catalog::CatalogEntry::RelTable(t) => Some(t.name.as_str()),
-                                    _ => None,
-                                };
-                                if let Some(table_name) = name {
-                                    let ext = if file_type == "parquet" { "parquet" } else { "csv" };
-                                    let file_name = format!("{}.{}", table_name, ext);
-                                    copy.push_str(&format!("COPY {} FROM '{}';\n", table_name, file_name));
-                                }
-                            }
+                            let copy = super::copy::generate_copy_cypher(&catalog, &file_type);
                             fs::write(dir.join("copy.cypher"), &copy)
                                 .map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
                         }
@@ -492,17 +451,27 @@ impl Connection {
                         query,
                         index_query,
                     } => {
-                        // Re-execute the import via the query pipeline
-                        // The connection holds the query executor, so we delegate via a callback
-                        // For now, parse and execute each statement
-                        let stmts: Vec<&str> = query
-                            .lines()
-                            .chain(index_query.lines())
-                            .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("//"))
-                            .collect();
-                        let count = stmts.len();
-                        // Import is best-effort — individual statements may fail (duplicates)
-                        Ok(format!("Imported {} statements from '{}'", count, file_path))
+                        // Execute the import through a fresh connection so every
+                        // statement runs the full pipeline (P52.12: statements are
+                        // split on `;` — the exporter writes multi-line DDL).
+                        let conn = super::Connection::new(&db_sddl);
+                        let mut executed = 0usize;
+                        let mut skipped = 0usize;
+                        for stmt in super::copy::split_cypher_statements(&query)
+                            .into_iter()
+                            .chain(super::copy::split_cypher_statements(&index_query))
+                        {
+                            match conn.query(&stmt) {
+                                Ok(_) => executed += 1,
+                                Err(e) => {
+                                    tracing::warn!("Import statement skipped (may be duplicate): {e}");
+                                    skipped += 1;
+                                }
+                            }
+                        }
+                        Ok(format!(
+                            "Imported {executed} statement(s) from '{file_path}' ({skipped} skipped)"
+                        ))
                     }
                 }
             },
@@ -644,15 +613,16 @@ impl Connection {
 }
 
 /// Whether a bound statement produces a query plan that is safe to cache.
-/// Only query-shaped statements are eligible — DDL and other statement types
-/// are routed inside `execute_query_inner` and must not be cached (their plans
-/// would be stale the moment the catalog changes).
+///
+/// Only plain query-shaped statements are eligible. `BoundMerge`/
+/// `BoundCreateDml`/`BoundUnion` are executed inline by `handle_ddl` (which
+/// short-circuits before any cached plan could be used), so caching them only
+/// evicts live read-plans from the LRU (P52.25). A FOREACH-only query is also
+/// routed to `handle_foreach` and never runs its plan — excluded too.
 fn is_plan_cachable(bound: &BoundStatement) -> bool {
-    matches!(
-        bound,
-        BoundStatement::BoundQuery(_)
-            | BoundStatement::BoundUnion(_)
-            | BoundStatement::BoundMerge(_)
-            | BoundStatement::BoundCreateDml(_)
-    )
+    match bound {
+        BoundStatement::BoundQuery(q) => !(q.clauses.len() == 1
+            && matches!(q.clauses.first(), Some(akar_binder::bound_statement::BoundClause::BoundForeach(_)))),
+        _ => false,
+    }
 }
