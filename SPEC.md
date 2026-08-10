@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,578 total, 5 ignored, 1,573 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, pasca P52 batch B optimizer audit `8564faa`, rilis v0.1.3) |
+| Tests passing | **1,594 total, 5 ignored, 1,589 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, pasca P52 batch C connection/storage `e3c7b5d`+`2498794`, rilis v0.1.4) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -464,7 +464,7 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up: 22 @ `0.1.0`, 4 @ `0.1.1`, 5 @ `0.1.2` (verified live on crates.io; latest release v0.1.3, 2026-08-10); GitHub Releases with prebuilt CLI binaries are produced as well.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up (verified live on crates.io; latest release v0.1.4, 2026-08-10); GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -503,7 +503,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,578** | **1,578 total, 5 ignored, 1,573 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, rilis v0.1.3 / P52 batch B optimizer audit `8564faa`) |
+| **Total** | **1,594** | **1,594 total, 5 ignored, 1,589 passed, 0 failed** (gate `test [akar-core]` 2026-08-10, rilis v0.1.4 / P52 batch C connection/storage `e3c7b5d`+`2498794`) |
 
 ### 11.2 Test Datasets
 
@@ -657,7 +657,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.2` (highest published crate patch); latest release tag **v0.1.3** (2026-08-10)
+- **Current version:** `0.1.3` (highest published crate patch); latest release tag **v0.1.4** (2026-08-10)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
@@ -670,7 +670,7 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 | # | Decision | Rationale |
 |---|----------|-----------|
 | #11 | crates.io publishing deferred | API not yet stable for public consumption — **superseded 2026-08-08 (P50): publishing active**, 31/31 crates at 0.1.0 |
-| #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,578 tests, audits CLEAN) |
+| #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,594 tests, audits CLEAN) |
 | #67 | WCOJ benchmark deferred | Legacy bench never runnable; pre-existing bugs |
 
 ---
