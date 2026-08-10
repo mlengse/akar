@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "akar-azure"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow 59.1.0",
  "flate2",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "akar-delta"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "akar-duckdb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "akar-httpfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "akar-iceberg"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "pest",
  "pest_derive",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "akar-postgres"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ahash",
  "akar-binder",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "akar-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-main",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "akar-sqlite"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "akar-unity-catalog"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "akar-common",
  "akar-duckdb",

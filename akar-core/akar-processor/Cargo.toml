@@ -1,6 +1,6 @@
 [package]
 name = "akar-processor"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -15,12 +15,12 @@ default = ["parquet"]
 parquet = ["akar-storage/parquet"]
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.1" }
 akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
-akar-planner = { path = "../akar-planner", version = "0.1.1" }
+akar-planner = { path = "../akar-planner", version = "0.1.2" }
 akar-function = { path = "../akar-function", version = "0.1.0" }
-akar-storage = { path = "../akar-storage", version = "0.1.1" }
-akar-parser = { path = "../akar-parser", version = "0.1.0" }
+akar-storage = { path = "../akar-storage", version = "0.1.3" }
+akar-parser = { path = "../akar-parser", version = "0.1.1" }
 akar-fts = { path = "../akar-fts", version = "0.1.0" }
 akar-vector = { path = "../akar-vector", version = "0.1.0" }
 tracing.workspace = true
@@ -31,7 +31,7 @@ arrow.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-akar-binder = { path = "../akar-binder", version = "0.1.0" }
+akar-binder = { path = "../akar-binder", version = "0.1.2" }
 
 [[bench]]
 name = "physical_scan"

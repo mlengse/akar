@@ -1,6 +1,6 @@
 [package]
 name = "akar-delta"
-version.workspace = true
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,10 +12,10 @@ authors.workspace = true
 
 [dependencies]
 arrow.workspace = true
-akar-common = { path = "../akar-common", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.1" }
 akar-function = { path = "../akar-function", version = "0.1.0" }
 akar-extension = { path = "../akar-extension", version = "0.1.0" }
-akar-duckdb = { path = "../akar-duckdb", version = "0.1.0", optional = true }
+akar-duckdb = { path = "../akar-duckdb", version = "0.1.1", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
