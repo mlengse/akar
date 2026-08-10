@@ -120,20 +120,17 @@ mod tests {
         let base = Path::new("/tmp/akar");
 
         let flat_table = IceDiskRelTable::new("knows".into(), base, IceDiskRelTableLayout::Flat);
-        assert_eq!(
-            flat_table.indices_file_path.to_str().unwrap(),
-            "/tmp/akar\\knows.flat.parquet"
-        );
+        assert_eq!(flat_table.indices_file_path, base.join("knows.flat.parquet"));
         assert!(flat_table.indptr_file_path.is_none());
 
         let csr_table = IceDiskRelTable::new("study_at".into(), base, IceDiskRelTableLayout::Csr);
         assert_eq!(
-            csr_table.indices_file_path.to_str().unwrap(),
-            "/tmp/akar\\study_at.indices.parquet"
+            csr_table.indices_file_path,
+            base.join("study_at.indices.parquet")
         );
         assert_eq!(
-            csr_table.indptr_file_path.unwrap().to_str().unwrap(),
-            "/tmp/akar\\study_at.indptr.parquet"
+            csr_table.indptr_file_path,
+            Some(base.join("study_at.indptr.parquet"))
         );
     }
 }
