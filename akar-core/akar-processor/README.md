@@ -25,6 +25,7 @@ Physical operator execution pipeline — the runtime that executes query plans.
 - `BlockMergeSort` + `RadixSort` for ORDER BY
 - `BinaryHeap` O(n log k) TopK
 
-**Pipeline:** `QueryProcessor::execute(&[LogicalOperator])` → flattens plan → runs physical operators → returns `Vec<DataChunk>`.
+**Pipeline:** `QueryProcessor::execute(&[LogicalOperator])` -> flattens plan -> runs
+physical operators -> returns `Vec<DataChunk>`.
 
 **Tests:** 142

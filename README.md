@@ -1,8 +1,12 @@
 # Akar
 
-**Pure Rust embedded graph database for AI agent memory.** Built for speed. Concurrent multi-writer support. GPLv3 licensed.
+**Pure Rust embedded graph database for AI agent memory.** Built for speed. Concurrent
+multi-writer support. GPLv3 licensed.
 
-Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzudb/kuzu), an embedded property graph database optimized for complex analytical workloads on very large graphs. Originally forked from the Vela-Engineering/Kuzu project, Akar is now a **standalone pure Rust codebase** — zero C++ dependencies, zero FFI.
+Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzudb/kuzu),
+an embedded property graph database optimized for complex analytical workloads on very
+large graphs. Originally forked from the Vela-Engineering/Kuzu project, Akar is now a
+**standalone pure Rust codebase** - zero C++ dependencies, zero FFI.
 
 [![GPLv3 License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
@@ -10,11 +14,19 @@ Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzu
 
 ## Why Akar
 
-AI agents need memory that captures relationships, not just documents. When an agent traces a chain like `Founder → Company → Round → Outcome`, that is a multi-hop graph traversal. Akar handles exactly this pattern as an embedded, in-process database — requiring **zero infrastructure** (no server, no Docker, no connection pool).
+AI agents need memory that captures relationships, not just documents. When an agent
+traces a chain like `Founder -> Company -> Round -> Outcome`, that is a multi-hop graph
+traversal. Akar handles exactly this pattern as an embedded, in-process database -
+requiring **zero infrastructure** (no server, no Docker, no connection pool).
 
-Performance is validated against two independent C++ implementations of the same architecture (KuzuDB): **3-way parity** on the hot path (`MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`, 10k rows): Rust **397 µs** ≈ Kuzu C++ **400 µs** ≈ LadybugDB C++ **374 µs**. See [`BENCHMARK_COMPARISON.md`](akar-core/BENCHMARK_COMPARISON.md).
+Performance is validated against two independent C++ implementations of the same
+architecture (KuzuDB): **3-way parity** on the hot path
+(`MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`, 10k rows): Rust **397 us** ~ Kuzu C++
+**400 us** ~ LadybugDB C++ **374 us**. See [`BENCHMARK_COMPARISON.md`](akar-core/BENCHMARK_COMPARISON.md).
 
-> **Note:** Akar has **not** been benchmarked directly against Neo4j or any vector database. Verified comparisons are limited to the Kuzu C++ (Vela) and LadybugDB C++ implementations on identical 10k-row datasets.
+> **Note:** Akar has **not** been benchmarked directly against Neo4j or any vector database.
+> Verified comparisons are limited to the Kuzu C++ (Vela) and LadybugDB C++ implementations
+> on identical 10k-row datasets.
 
 ## Quick Start
 
@@ -45,7 +57,7 @@ No server. No Docker. Just `cargo add akar-main` and query.
 
 ## Core Features
 
-- **Pure Rust** — zero C++ dependencies, zero FFI, safe by default
+- **Pure Rust** - zero C++ dependencies, zero FFI, safe by default
 - **Property Graph Model** with openCypher query language
 - **Embedded, in-process** execution with sub-millisecond latency
 - **Concurrent multi-writer support** for multi-agent architectures
@@ -59,7 +71,8 @@ No server. No Docker. Just `cargo add akar-main` and query.
 
 ## Architecture
 
-Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`) contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
+Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`)
+contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
 
 | Crate | Purpose |
 |-------|---------|
@@ -77,11 +90,15 @@ Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **1,594 tests, 0 failed** (5 ignored doc-tests; gate `test [akar-core]`, 2026-08-11, release v0.1.5). **24 optimizer passes**, **37 logical types**, **58 logical operators**, **48 physical operator structs**.
+**Test suite:** **1,594 tests, 0 failed** (5 ignored doc-tests; gate `test [akar-core]`,
+2026-08-11, release v0.1.5). **24 optimizer passes**, **37 logical types**, **58 logical
+operators**, **48 physical operator structs**.
 
 ## Benchmarks
 
-Performance parity with the C++ implementations of the same architecture (KuzuDB/Vela and LadybugDB) has been verified on the hot path. Large-scale benchmarks (100K/1M rows) confirm near-linear scaling:
+Performance parity with the C++ implementations of the same architecture (KuzuDB/Vela and
+LadybugDB) has been verified on the hot path. Large-scale benchmarks (100K/1M rows) confirm
+near-linear scaling:
 
 | Scale | Scan | Filter | COUNT | Filter+COUNT |
 |---|---|---|---|---|
@@ -90,9 +107,11 @@ Performance parity with the C++ implementations of the same architecture (KuzuDB
 | 1M rows | **222 ms** | **235 ms** | **212 ms** | **237 ms** |
 
 **3-way C++ parity** (10K, `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)`):
-- Rust: **397 µs** | Vela C++: **400 µs** | LadybugDB C++: **374 µs**
+- Rust: **397 us** | Vela C++: **400 us** | LadybugDB C++: **374 us**
 
-Repeated queries benefit from the **plan cache** (LRU at the connection level): identical statements skip parse/bind/plan/optimize entirely, which is significant for planning-dominated workloads (complex plans on small data).
+Repeated queries benefit from the **plan cache** (LRU at the connection level): identical
+statements skip parse/bind/plan/optimize entirely, which is significant for
+planning-dominated workloads (complex plans on small data).
 
 Run benchmarks locally:
 
@@ -104,7 +123,8 @@ cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M
 
 ## Extensions
 
-Akar bundles commonly used extensions as compile-time features (`algo`, `fts`, `json`, `vector`). No manual installation needed.
+Akar bundles commonly used extensions as compile-time features (`algo`, `fts`, `json`,
+`vector`). No manual installation needed.
 
 ## Documentation
 
@@ -112,17 +132,21 @@ Akar bundles commonly used extensions as compile-time features (`algo`, `fts`, `
 
 ## Origins
 
-Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzudb/kuzu), originally developed by Kuzu Inc. at the University of Waterloo. The original project was archived in October 2025. The engineering quality of the original codebase is exceptional, grounded in serious database research including worst-case optimal joins and factorized execution. Akar builds on that foundation.
+Akar is a from-scratch Rust reimplementation of [KuzuDB](https://github.com/kuzudb/kuzu),
+originally developed by Kuzu Inc. at the University of Waterloo. The original project was
+archived in October 2025. The engineering quality of the original codebase is exceptional,
+grounded in serious database research including worst-case optimal joins and factorized
+execution. Akar builds on that foundation.
 
 ## Contributing
 
 We welcome contributions. Priority areas:
 
-1. **Bug fixes and stability** — ensuring core functionality is rock-solid
-2. **Performance optimization** — query execution, storage, concurrency
-3. **CI/CD and testing** — cross-platform automated testing
-4. **Documentation** — tutorials, examples, API reference
-5. **Extension ecosystem** — new functions and integrations
+1. **Bug fixes and stability** - ensuring core functionality is rock-solid
+2. **Performance optimization** - query execution, storage, concurrency
+3. **CI/CD and testing** - cross-platform automated testing
+4. **Documentation** - tutorials, examples, API reference
+5. **Extension ecosystem** - new functions and integrations
 
 ## License
 

@@ -8,8 +8,10 @@ processes connect over TCP to query the same database.
 **Features:**
 - `Server::bind(addr, db)` + `Server::start()` — non-blocking accept loop on a background thread
 - Length-prefixed JSON framing with `MAX_FRAME_SIZE` guard and partial-frame state machine
-- Session bridging via `TransactionManager` — one `Connection` per client; write contention surfaces as `WriteConflict`
-- Clients never open the database directory — the server holds every file lock on their behalf (`Database::connect_tcp` in `akar-main`)
+- Session bridging via `TransactionManager` — one `Connection` per client; write
+  contention surfaces as `WriteConflict`
+- Clients never open the database directory — the server holds every file lock on their
+  behalf (`Database::connect_tcp` in `akar-main`)
 - `Server::shutdown()` and `local_addr()` (for ephemeral port `0`)
 - Embedded single-process (no server) unchanged
 

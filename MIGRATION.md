@@ -1,11 +1,11 @@
-# Migrating to Akar Rust (v0.1.0)
+# Migrating to Akar Rust
 
 This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-core`.
 
 ## Why Migrate?
 
 The Rust port offers:
-- **~100% functional parity** with C++ (1,535 workspace tests, all passing)
+- **~100% functional parity** with C++ (1,594 workspace tests, 1,589 passing + 5 ignored)
 - **Memory safety** via Rust's ownership model
 - **Arrow-native execution** — up to 24x faster filtering/numeric expressions
 - **Operator fusing** — fewer physical nodes, less overhead
@@ -126,6 +126,70 @@ akar-main = { version = "0.1.0", features = ["json-extension", "httpfs-extension
 
 This replaces the C++ `LOAD 'extensions/JSON'` runtime loading model.
 
+## Application Integration
+
+### Python API
+```bash
+pip install akar-rust  # or build from source with `make python`
+```
+
+### Node.js API
+```bash
+npm install @vela-engineering/kuzu  # or use the akar-wasm bindings (AkarDatabase wrapper)
+```
+
+### CLI
+```bash
+cargo install akar-cli
+akar-cli /path/to/db
+```
+
+Or download the prebuilt binary from [GitHub Releases](https://github.com/mlengse/akar/releases).
+
+## Architecture Changes
+
+| Aspect | C++ (Legacy) | Rust |
+|--------|-------------|------|
+| Build | CMake + 28 vendored libs | `cargo build` |
+| Safety | Manual memory | Ownership + borrow checker |
+| Storage | ValueVector | Native Arrow arrays |
+| Operators | Split (BUILD/PROBE) | Fused single operators |
+| Extensions | `.so`/`.dll` runtime loading | Static via Cargo features |
+| Thread safety | Manual | `Send`/`Sync` guaranteed |
+| Error handling | Exceptions | `Result<T, Error>` |
+
+### Performance Parity
+
+| Query pattern | Rust (debug) | Rust (est. release) | C++ (Vela) |
+|---------------|-------------|-------------------|------------|
+| `MATCH ... WHERE age > 30 RETURN COUNT(p)` | ~4 ms | ~400 µs | ~400 µs |
+| `MATCH ... RETURN SUM(p.age)` | ~6 ms | ~435 µs | — |
+| `MATCH ... RETURN AVG(p.score)` | ~6 ms | ~424 µs | — |
+| `MATCH ... RETURN MIN(p.age), MAX(p.age)` | ~9 ms | ~587 µs | — |
+| `GROUP BY active RETURN COUNT(p), AVG(p.score)` | ~9 ms | ~600 µs | — |
+
+## Feature Flags (Extensions)
+
+Enable extensions in `Cargo.toml`:
+```toml
+akar-main = { features = [
+    "json-extension",
+    "fts-extension",
+    "vector-extension",
+    "httpfs-extension",
+    "duckdb-extension",
+    "sqlite-extension",
+    "postgres-extension",
+    "delta-extension",
+    "iceberg-extension",
+    "azure-extension",
+    "unity-catalog-extension",
+    "neo4j-extension",
+    "llm-extension",
+    "algo-extension",
+] }
+```
+
 ## Performance
 
 Run benchmarks to compare:
@@ -148,3 +212,12 @@ Current status: **Rust at parity with C++** (397 µs Rust vs 400 µs C++ for fil
 | Missing extensions | Enable feature flag in Cargo.toml |
 | Slow queries | `cargo build --release`, verify Arrow-native execution |
 | Windows ETW profiling | Run `cargo-flamegraph` as Administrator |
+
+## Known Issues & Workarounds
+
+| Issue | Workaround |
+|-------|-----------|
+| Postgres wire protocol `pg_isready` | Handled gracefully (returns TRUE) |
+| Runtime extension loading | Use Cargo features instead |
+| Windows ETW profiling | Run `cargo-flamegraph` as Administrator |
+| Large databases | Increase buffer pool: `SystemConfig { buffer_pool_size: 1 << 30, .. }` |

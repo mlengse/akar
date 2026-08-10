@@ -145,7 +145,8 @@ akar-common
                   → akar-cli, akar-wasm, akar-c, akar-server
 ```
 
-Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-common` / `akar-extension` and are feature-gated in `akar-main`.
+Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-common` /
+`akar-extension` and are feature-gated in `akar-main`.
 
 ### 3.3 Core Subsystem Details
 
@@ -269,7 +270,9 @@ Special: `ANY`, `NULL`, `RDF_VARIANT`
 
 ## 6. Functions (259 Registered)
 
-> Registry count (verified via `FunctionRegistry::new()`): **244 scalar + 14 aggregate + 1 table** = 259. `CALL show_tables()/db_version()/storage_info()` are handled as `BoundStandaloneCall` in the DDL layer, not registered table functions.
+> Registry count (verified via `FunctionRegistry::new()`): **244 scalar + 14 aggregate + 1
+> table** = 259. `CALL show_tables()/db_version()/storage_info()` are handled as
+> `BoundStandaloneCall` in the DDL layer, not registered table functions.
 
 | Category | Count | Examples |
 |----------|:-----:|---------|
@@ -464,7 +467,9 @@ Triggered by pushing a version tag (`v*`):
 4. Attach CLI binaries as release assets
 
 > [!NOTE]
-> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are published bottom-up (verified live on crates.io; latest release v0.1.5, 2026-08-11); GitHub Releases with prebuilt CLI binaries are produced as well.
+> crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are
+> published bottom-up (verified live on crates.io; latest release v0.1.5, 2026-08-11);
+> GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
 
@@ -638,7 +643,8 @@ AkarError
 └── ProcessorError   (3 variants)
 ```
 
-All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()` in production code paths (replaced with `ok_or_else()`, epsilon float comparisons, etc.).
+All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()` in
+production code paths (replaced with `ok_or_else()`, epsilon float comparisons, etc.).
 
 ---
 
@@ -679,8 +685,10 @@ All crates use `Result<T, E>` with `?` propagation. No `panic!()` or `.unwrap()`
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
 2. **Physical operator count** — 48 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
-3. **`akar-main` is the primary published crate** — install via `cargo add akar-main`; `akar-c` (C FFI) is intentionally not published (build locally)
-4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
+3. **`akar-main` is the primary published crate** — install via `cargo add akar-main`;
+   `akar-c` (C FFI) is intentionally not published (build locally)
+4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j,
+   HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
 
 ---
 

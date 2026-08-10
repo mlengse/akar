@@ -2,7 +2,10 @@
 
 This document describes how to cut a release of Akar (`akar-core/`).
 
-> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** 31/31 publishable crates are versioned `0.1.0` and published bottom-up to crates.io (all verified live on crates.io; crates.io rate limit was 1 new crate per 10 min, so publish was paced). GitHub Releases with prebuilt CLI binaries are produced as well.
+> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** All 31 publishable
+> crates are live on crates.io at `0.1.x` (bottom-up, dependency-ordered). Latest release
+> **v0.1.5** (2026-08-11); latest GitHub Releases carry prebuilt CLI binaries for
+> Linux/macOS/Windows.
 
 ---
 
@@ -121,8 +124,10 @@ This runs tests and a release build to verify everything compiles, without creat
 
 Publishing to crates.io is **active** (Sprint 18/P50, 2026-08-08). The full process:
 
-1. All internal crates have `publish = true` (only `akar-c` remains `publish = false` — FFI cdylib, local builds only).
-2. Publish internal crates bottom-up in dependency order (see graph below), 1 crate per 10 min due to the crates.io rate limit.
+1. All internal crates have `publish = true` (only `akar-c` remains `publish = false` —
+   FFI cdylib, local builds only).
+2. Publish internal crates bottom-up in dependency order (see graph below), paced by the
+   crates.io rate limit.
 3. `akar-main`'s path dependencies ship with `version = "0.1.0"` so they resolve to the registry copies after publish.
 4. Publish `akar-main`, then `akar-server`, `akar-wasm`, `akar-cli`, `akar-migrate`.
 
@@ -145,4 +150,9 @@ Extension crates (akar-json, akar-fts, etc.) can be published in any order after
 
 ### Status
 
-As of 2026-08-08: **31/31 published** (all `0.1.0`, P50 complete).
+As of 2026-08-11: **31/31 published** (bottom-up, dependency-ordered). Highest patch:
+`akar-storage` & `akar-main` @ **0.1.3**; `akar-binder`/`akar-planner`/`akar-optimizer`/
+`akar-processor`/`akar-postgres` @ **0.1.2**; `akar-common`/`akar-parser`/`akar-server`/
+`akar-httpfs`/`akar-duckdb`/`akar-sqlite`/`akar-azure`/`akar-delta`/`akar-iceberg`/
+`akar-unity-catalog` @ **0.1.1**; remaining @ 0.1.0. Latest release tag **v0.1.5**.
+Rate limit: 1 crate/min after the initial burst (30).

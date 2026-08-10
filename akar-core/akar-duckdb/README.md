@@ -6,6 +6,7 @@ DuckDB integration for the Akar database engine using the `duckdb` crate (v1.105
 
 **Functions:** `duckdb_query` (scalar), `duckdb_scan` (table)
 
-**Shared helper:** `DuckDbAttachHelper` used by Delta, Iceberg, Azure, and Unity Catalog extensions for DuckDB delegation.
+**Shared helper:** `DuckDbAttachHelper` used by Delta, Iceberg, Azure, and Unity Catalog
+extensions for DuckDB delegation.
 
 **Tests:** 9
