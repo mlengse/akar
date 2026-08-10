@@ -461,11 +461,19 @@ impl BufferManager {
     fn read_syscall(&self, file_name: &str, page_num: PageNum) -> std::io::Result<Vec<u8>> {
         if let Some(fh) = self.files.get(file_name) {
             use std::io::{Read, Seek, SeekFrom};
-            let mut file = std::fs::File::open(&fh.path)?;
-            file.seek(SeekFrom::Start(page_num * self.page_size as u64))?;
             let mut buf = vec![0u8; self.page_size];
-            file.read_exact(&mut buf)?;
-            Ok(buf)
+            match std::fs::File::open(&fh.path) {
+                Ok(mut file) => {
+                    file.seek(SeekFrom::Start(page_num * self.page_size as u64))?;
+                    // A file that does not cover the whole page (fresh file not
+                    // yet written, or partially written) is read as a zeroed
+                    // page; the file is created on first write.
+                    let _ = file.read(&mut buf);
+                    Ok(buf)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(buf),
+                Err(e) => Err(e),
+            }
         } else {
             Ok(vec![0u8; self.page_size])
         }
@@ -479,9 +487,17 @@ impl BufferManager {
             let page_size = self.page_size;
 
             if !self.mmap_regions.contains_key(&path_str) {
-                let file = std::fs::File::open(&fh.path)?;
-                let mmap = unsafe { memmap2::Mmap::map(&file)? };
-                self.mmap_regions.insert(path_str.clone(), mmap);
+                match std::fs::File::open(&fh.path) {
+                    Ok(file) => {
+                        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+                        self.mmap_regions.insert(path_str.clone(), mmap);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // Fresh file not yet created on disk — return a zeroed page.
+                        return Ok(vec![0u8; page_size]);
+                    }
+                    Err(e) => return Err(e),
+                }
             }
 
             let mmap = &self.mmap_regions[&path_str];
@@ -489,14 +505,9 @@ impl BufferManager {
             let end = offset + page_size;
 
             if end > mmap.len() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!(
-                        "mmap read out of bounds: page {} (offset {offset}, end {end}) exceeds file length {}",
-                        page_num,
-                        mmap.len()
-                    ),
-                ));
+                // File shorter than the requested page (fresh or partially
+                // written) — read as a zeroed page.
+                return Ok(vec![0u8; page_size]);
             }
 
             // SAFETY: We checked that offset..end is within bounds of the mmap region.

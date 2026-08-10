@@ -11,7 +11,7 @@
 //! | UIntN     | Plain big-endian                                       |
 //! | Float/Double | IEEE 754 bytes, flip sign bit for +0/-0 ordering   |
 //! | Bool      | Single byte: 0x00 = false, 0x01 = true                |
-//! | String    | Escape 0x00 → 0x0100, append 0x00 terminator          |
+//! | String    | Escape 0x00 → 0x0101, 0x01 → 0x0102, append 0x00 terminator |
 //! | Date      | Encode as Int32 (days since epoch)                     |
 //! | Timestamp | Encode as Int64 (microseconds since epoch)             |
 //!
@@ -183,34 +183,35 @@ impl ArtKey {
         }
     }
 
-    /// Encode a string with byte-escape for 0x00.
+    /// Encode a string with byte-escape for 0x00 and 0x01.
     ///
-    /// Each 0x00 byte in the original string is replaced by 0x01 0x00.
+    /// Both bytes must be escaped: 0x01 is the escape marker, so a raw 0x01
+    /// would collide with an escaped 0x00 prefix and break ordering.
+    ///   - 0x00 → 0x01 0x01
+    ///   - 0x01 → 0x01 0x02
     /// A 0x00 terminator is appended at the end.
-    /// This ensures lexicographic ordering is preserved.
+    /// This ensures lexicographic ordering is preserved (P52.20).
     fn from_string(s: &str) -> Self {
         let mut bytes = Vec::with_capacity(s.len() + 2);
         for &b in s.as_bytes() {
-            if b == 0x00 {
-                bytes.push(0x01);
-                bytes.push(0x00);
-            } else {
-                bytes.push(b);
+            match b {
+                0x00 => bytes.extend_from_slice(&[0x01, 0x01]),
+                0x01 => bytes.extend_from_slice(&[0x01, 0x02]),
+                _ => bytes.push(b),
             }
         }
         bytes.push(0x00); // terminator
         Self { bytes }
     }
 
-    /// Encode a blob (raw bytes with 0x00 escape).
+    /// Encode a blob (raw bytes with 0x00/0x01 escape).
     fn from_blob(data: &[u8]) -> Self {
         let mut bytes = Vec::with_capacity(data.len() + 2);
         for &b in data {
-            if b == 0x00 {
-                bytes.push(0x01);
-                bytes.push(0x00);
-            } else {
-                bytes.push(b);
+            match b {
+                0x00 => bytes.extend_from_slice(&[0x01, 0x01]),
+                0x01 => bytes.extend_from_slice(&[0x01, 0x02]),
+                _ => bytes.push(b),
             }
         }
         bytes.push(0x00); // terminator
@@ -351,14 +352,32 @@ mod tests {
         let with_null = ArtKey::from_string("a\x00b");
         let without = ArtKey::from_string("ab");
 
-        // 'a' (0x61), then escaped null (0x01 0x00), then 'b' (0x62)
-        assert_eq!(with_null.bytes(), &[0x61, 0x01, 0x00, 0x62, 0x00]);
-        // The escaped null (0x01 0x00) should be > plain 'b' (0x62) after 'a'...
+        // 'a' (0x61), then escaped null (0x01 0x01), then 'b' (0x62)
+        assert_eq!(with_null.bytes(), &[0x61, 0x01, 0x01, 0x62, 0x00]);
+        // The escaped null (0x01 0x01) should be > plain 'b' (0x62) after 'a'...
         // Actually 0x01 < 0x62, so a\x00b < ab in lex order
         assert!(
             with_null.bytes < without.bytes,
             "string with escaped null should sort before same string without null"
         );
+    }
+
+    #[test]
+    fn test_encode_string_with_0x01_preserves_ordering() {
+        // Regression for P52.20: a raw 0x01 byte must not alias the escape
+        // prefix used for 0x00, and 0x00 < 0x01 ordering must be preserved.
+        let nul = ArtKey::from_string("a\x00b");
+        let one = ArtKey::from_string("a\x01b");
+
+        // Distinct encodings (no collision) and natural order 0x00 < 0x01.
+        assert_ne!(nul.bytes(), one.bytes());
+        assert!(
+            nul.bytes < one.bytes,
+            "a\\x00b must sort before a\\x01b in ART key encoding"
+        );
+        // Raw 0x01 is encoded as 0x01 0x02 and is strictly greater than the
+        // 0x00 escape (0x01 0x01).
+        assert_eq!(one.bytes(), &[0x61, 0x01, 0x02, 0x62, 0x00]);
     }
 
     #[test]

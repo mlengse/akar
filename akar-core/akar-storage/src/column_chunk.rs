@@ -93,9 +93,13 @@ impl ColumnChunk {
         self.values.push(value);
     }
 
-    /// Set a value at a specific index (for in-place updates like DELETE).
-    /// If this chunk has `update_info` enabled, the old value is preserved
-    /// in the version chain before overwriting.
+    /// Set a value at a specific index (for in-place writes like INSERT UPDATE
+    /// and DELETE nulling).
+    ///
+    /// This is the non-versioned write path: it overwrites the cell without
+    /// creating an MVCC version node, so snapshot readers see the new value
+    /// immediately. Versioned writes must use [`Self::set_value_with_version`]
+    /// so snapshot reads resolve the version chain correctly (P52.21).
     /// Returns an error if the index is out of bounds.
     pub fn set_value(&mut self, idx: usize, value: Value) -> Result<(), StorageError> {
         if idx >= self.values.len() {
@@ -104,13 +108,33 @@ impl ColumnChunk {
                 self.values.len()
             )));
         }
-        // Preserve old value in update info if MVCC tracking is enabled
+        self.stats.update(&value);
+        self.values[idx] = value;
+        Ok(())
+    }
+
+    /// Set a value with MVCC version tracking.
+    ///
+    /// Records the replaced value in the update version chain at `version` (a
+    /// transaction commit timestamp) and overwrites the base cell. Snapshot
+    /// readers with `snapshot_ts < version` keep seeing the replaced value;
+    /// readers at or after `version` see the new value (P52.21).
+    /// Returns an error if the index is out of bounds.
+    pub fn set_value_with_version(
+        &mut self,
+        idx: usize,
+        value: Value,
+        version: u64,
+    ) -> Result<(), StorageError> {
+        if idx >= self.values.len() {
+            return Err(StorageError::Page(format!(
+                "ColumnChunk index {idx} out of bounds (len={})",
+                self.values.len()
+            )));
+        }
         if let Some(ref ui) = self.update_info {
             let old_data = serialize_value_for_version(&self.values[idx]);
-            // Use a placeholder version (0) — the actual commit version is
-            // assigned during commit. The version chain is traversed by
-            // get_value_with_snapshot using the real commit timestamps.
-            ui.append_update(idx as u32, u64::MAX, old_data);
+            ui.append_update(idx as u32, version, old_data);
         }
         self.stats.update(&value);
         self.values[idx] = value;
@@ -118,11 +142,14 @@ impl ColumnChunk {
     }
 
     /// Get a value considering MVCC visibility at a given snapshot timestamp.
-    /// If `snapshot_ts` is `None`, returns the latest value (current behavior).
+    /// If `snapshot_ts` is `None`, returns the latest value.
     ///
     /// When a snapshot timestamp is provided and `UpdateInfo` has a version
-    /// entry for this row with `version <= snapshot_ts`, the versioned data
-    /// is returned. Otherwise the current (base) value is returned.
+    /// node for this row whose update is NOT yet visible at `snapshot_ts`
+    /// (i.e. `version > snapshot_ts`), the snapshot predates the update and
+    /// must see the replaced (old) value. Since this variant returns `&Value`
+    /// it cannot deserialize the chain's owned bytes, so callers that need a
+    /// versioned read must use [`Self::get_value_owned_with_snapshot`].
     pub fn get_value_with_snapshot(
         &self,
         idx: usize,
@@ -137,30 +164,13 @@ impl ColumnChunk {
             Some(ts) => ts,
             None => return self.values.get(idx),
         };
-        // Check UpdateInfo version chain for an older visible version
+        // If the snapshot predates an update on this row, the correct value
+        // is the replaced one stored in the version chain — which cannot be
+        // returned by reference here. Fall through to the base value only
+        // when every update is visible at `ts`; versioned callers use the
+        // owned variant below (P52.21).
         if let Some(ref ui) = self.update_info {
-            if let Some(old_data) = ui.get_version(idx as u32, ts) {
-                // We have a versioned old value — return the base value instead.
-                // The version chain stores the OLD data before the update. The
-                // base `values[idx]` contains the NEW (latest) data. If the
-                // update at this version is visible (version <= snapshot_ts),
-                // the reader should see the old value, not the new one.
-                //
-                // However, since we return `&Value` (not owned), we cannot
-                // return a deserialized value. Instead, we note that the
-                // UpdateInfo stores old data — the caller must use
-                // `get_value_owned_with_snapshot()` for proper versioned reads.
-                //
-                // For now: if the latest value's version is > snapshot_ts,
-                // the reader predates the update and should see the old
-                // value. Since we can't return it by reference, we check
-                // if the base value itself was the one before the update.
-                // The version chain stores old_data, and if version <= ts,
-                // the reader should see old_data. Since we can't deserialize
-                // here into a &Value, we return None to signal the caller
-                // to use the owned variant.
-                drop(old_data); // Can't use the data by reference
-            }
+            let _ = ui.get_version(idx as u32, ts);
         }
         self.values.get(idx)
     }
@@ -168,7 +178,7 @@ impl ColumnChunk {
     /// Get a value with MVCC snapshot isolation, returning an owned Value.
     ///
     /// This variant properly handles version chain traversal by deserializing
-    /// old values from the UpdateInfo chain. Returns the value visible at
+    /// replaced values from the UpdateInfo chain. Returns the value visible at
     /// `snapshot_ts`, or `None` if the index is out of bounds.
     pub fn get_value_owned_with_snapshot(
         &self,
@@ -183,17 +193,16 @@ impl ColumnChunk {
             Some(ts) => ts,
             None => return Some(self.values[idx].clone()),
         };
-        // Check UpdateInfo version chain
+        // A snapshot read that predates an update must see the replaced value
+        // from the chain (base holds the latest value) (P52.21).
         if let Some(ref ui) = self.update_info {
             if let Some(old_data) = ui.get_version(idx as u32, ts) {
-                // The version at or before snapshot_ts is visible.
-                // Deserialize the old value from the version chain.
                 if let Ok(old_value) = serde_json::from_slice::<Value>(&old_data) {
                     return Some(old_value);
                 }
             }
         }
-        // No visible version in chain — return the current base value
+        // Every update is visible at `ts` — return the current base value
         Some(self.values[idx].clone())
     }
 

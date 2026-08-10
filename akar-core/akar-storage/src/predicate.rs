@@ -6,6 +6,8 @@
 //! Ported from C++ `src/include/storage/predicate/` (column_predicate.h,
 //! constant_predicate.h, null_predicate.h) and `src/storage/predicate/`.
 
+use std::cmp::Ordering;
+
 use akar_common::types::Value;
 
 /// Result of checking a zone map against a predicate.
@@ -51,11 +53,16 @@ impl ColumnChunkStats {
     }
 
     /// Update min/max with a new value.
-    /// Only works for ordered Value types (Int64, Double, Float, Int32, String).
     ///
-    /// Null values are not ordered: they clear `guaranteed_no_nulls` and leave
-    /// min/max untouched so a later non-null value is not compared against a
-    /// `Null` sentinel.
+    /// Works for every ordered primitive `Value` type (numeric, Bool, String,
+    /// Date/Timestamp variants, InternalID). Null values are not ordered: they
+    /// clear `guaranteed_no_nulls` and leave min/max untouched so a later
+    /// non-null value is not compared against a `Null` sentinel.
+    ///
+    /// Values whose type cannot be ordered relative to the existing min/max
+    /// (mismatched types, Blob/List/Map/...) are ignored for the min/max
+    /// bounds — the stats stay conservative and never cause a wrong
+    /// `SkipScan` (P52.22).
     pub fn update(&mut self, val: &Value) {
         if matches!(val, Value::Null) {
             self.guaranteed_no_nulls = false;
@@ -68,40 +75,49 @@ impl ColumnChunkStats {
                 self.max = Some(val.clone());
             }
             (Some(min), Some(max)) => {
-                if Self::value_lt(val, min) {
+                if value_cmp(val, min) == Some(Ordering::Less) {
                     self.min = Some(val.clone());
                 }
-                if Self::value_gt(val, max) {
+                if value_cmp(val, max) == Some(Ordering::Greater) {
                     self.max = Some(val.clone());
                 }
             }
             _ => unreachable!(),
         }
     }
+}
 
-    /// Compare two Values for ordering. Returns true if a < b.
-    fn value_lt(a: &Value, b: &Value) -> bool {
-        match (a, b) {
-            (Value::Int64(x), Value::Int64(y)) => x < y,
-            (Value::Double(x), Value::Double(y)) => x < y,
-            (Value::Float(x), Value::Float(y)) => x < y,
-            (Value::Int32(x), Value::Int32(y)) => x < y,
-            (Value::String(x), Value::String(y)) => x < y,
-            _ => false,
-        }
-    }
-
-    /// Compare two Values for ordering. Returns true if a > b.
-    fn value_gt(a: &Value, b: &Value) -> bool {
-        match (a, b) {
-            (Value::Int64(x), Value::Int64(y)) => x > y,
-            (Value::Double(x), Value::Double(y)) => x > y,
-            (Value::Float(x), Value::Float(y)) => x > y,
-            (Value::Int32(x), Value::Int32(y)) => x > y,
-            (Value::String(x), Value::String(y)) => x > y,
-            _ => false,
-        }
-    }
+/// Order two `Value`s of the same primitive kind.
+///
+/// Returns `Some(ordering)` when the pair is comparable, `None` otherwise
+/// (mismatched types or non-ordered kinds such as Blob/List/Map/Union).
+fn value_cmp(a: &Value, b: &Value) -> Option<Ordering> {
+    let ord = match (a, b) {
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Int64(x), Value::Int64(y)) => x.cmp(y),
+        (Value::Int32(x), Value::Int32(y)) => x.cmp(y),
+        (Value::Int16(x), Value::Int16(y)) => x.cmp(y),
+        (Value::Int8(x), Value::Int8(y)) => x.cmp(y),
+        (Value::UInt64(x), Value::UInt64(y)) => x.cmp(y),
+        (Value::UInt32(x), Value::UInt32(y)) => x.cmp(y),
+        (Value::UInt16(x), Value::UInt16(y)) => x.cmp(y),
+        (Value::UInt8(x), Value::UInt8(y)) => x.cmp(y),
+        (Value::Int128(x), Value::Int128(y)) => x.cmp(y),
+        (Value::UInt128(x), Value::UInt128(y)) => x.cmp(y),
+        (Value::Double(x), Value::Double(y)) => x.partial_cmp(y)?,
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y)?,
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Date(x), Value::Date(y)) => x.cmp(y),
+        (Value::Timestamp(x), Value::Timestamp(y)) => x.cmp(y),
+        (Value::TimestampTz(x), Value::TimestampTz(y)) => x.0.cmp(&y.0),
+        (Value::TimestampNs(x), Value::TimestampNs(y)) => x.cmp(y),
+        (Value::TimestampMs(x), Value::TimestampMs(y)) => x.cmp(y),
+        (Value::TimestampSec(x), Value::TimestampSec(y)) => x.cmp(y),
+        // InternalID orders by table, then offset.
+        (Value::InternalID(x), Value::InternalID(y)) => (x.table_id, x.offset).cmp(&(y.table_id, y.offset)),
+        _ => return None,
+    };
+    Some(ord)
 }
 
 // ==================== Check helpers ====================
@@ -159,21 +175,44 @@ pub fn check_zone_map(stats: &ColumnChunkStats, op: &str, constant: &Value) -> Z
 
     // Type-based dispatch for comparison
     match (min, max, constant) {
-        // Int64
-        (Value::Int64(min_v), Value::Int64(max_v), Value::Int64(c)) => check_constant_predicate(min_v, max_v, c, op),
-        // Double
-        (Value::Double(min_v), Value::Double(max_v), Value::Double(c)) => check_constant_predicate(min_v, max_v, c, op),
-        // Float
-        (Value::Float(min_v), Value::Float(max_v), Value::Float(c)) => check_constant_predicate(min_v, max_v, c, op),
-        // Int32
-        (Value::Int32(min_v), Value::Int32(max_v), Value::Int32(c)) => check_constant_predicate(min_v, max_v, c, op),
+        (Value::Bool(a), Value::Bool(b), Value::Bool(c)) => check_constant_predicate(a, b, c, op),
+        // Integers (all widths)
+        (Value::Int64(a), Value::Int64(b), Value::Int64(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Int32(a), Value::Int32(b), Value::Int32(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Int16(a), Value::Int16(b), Value::Int16(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Int8(a), Value::Int8(b), Value::Int8(c)) => check_constant_predicate(a, b, c, op),
+        (Value::UInt64(a), Value::UInt64(b), Value::UInt64(c)) => check_constant_predicate(a, b, c, op),
+        (Value::UInt32(a), Value::UInt32(b), Value::UInt32(c)) => check_constant_predicate(a, b, c, op),
+        (Value::UInt16(a), Value::UInt16(b), Value::UInt16(c)) => check_constant_predicate(a, b, c, op),
+        (Value::UInt8(a), Value::UInt8(b), Value::UInt8(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Int128(a), Value::Int128(b), Value::Int128(c)) => check_constant_predicate(a, b, c, op),
+        (Value::UInt128(a), Value::UInt128(b), Value::UInt128(c)) => check_constant_predicate(a, b, c, op),
+        // Floats
+        (Value::Double(a), Value::Double(b), Value::Double(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Float(a), Value::Float(b), Value::Float(c)) => check_constant_predicate(a, b, c, op),
         // String
-        (Value::String(min_v), Value::String(max_v), Value::String(c)) => check_constant_predicate(min_v, max_v, c, op),
-        // InternalID (compare by offset)
-        (Value::InternalID(min_id), Value::InternalID(max_id), Value::InternalID(c_id)) => {
-            check_constant_predicate(&min_id.offset, &max_id.offset, &c_id.offset, op)
+        (Value::String(a), Value::String(b), Value::String(c)) => check_constant_predicate(a, b, c, op),
+        // Temporal
+        (Value::Date(a), Value::Date(b), Value::Date(c)) => check_constant_predicate(a, b, c, op),
+        (Value::Timestamp(a), Value::Timestamp(b), Value::Timestamp(c)) => check_constant_predicate(a, b, c, op),
+        (Value::TimestampTz(a), Value::TimestampTz(b), Value::TimestampTz(c)) => {
+            // TimestampTZ is a bare i64 (no Ord impl) — compare the inner value.
+            check_constant_predicate(&a.0, &b.0, &c.0, op)
         }
-        // Mixed/unknown types — fall back to AlwaysScan
+        (Value::TimestampNs(a), Value::TimestampNs(b), Value::TimestampNs(c)) => check_constant_predicate(a, b, c, op),
+        (Value::TimestampMs(a), Value::TimestampMs(b), Value::TimestampMs(c)) => check_constant_predicate(a, b, c, op),
+        (Value::TimestampSec(a), Value::TimestampSec(b), Value::TimestampSec(c)) => check_constant_predicate(a, b, c, op),
+        // InternalID: order by (table_id, offset) so rows from different
+        // tables never alias each other (P52.22).
+        (Value::InternalID(a), Value::InternalID(b), Value::InternalID(c)) => {
+            check_constant_predicate(
+                &(a.table_id, a.offset),
+                &(b.table_id, b.offset),
+                &(c.table_id, c.offset),
+                op,
+            )
+        }
+        // Mixed/unknown types — fall back to AlwaysScan (never wrong-skip)
         _ => ZoneMapCheckResult::AlwaysScan,
     }
 }
@@ -194,7 +233,7 @@ pub fn check_null_zone_map(stats: &ColumnChunkStats, is_null: bool) -> ZoneMapCh
 #[cfg(test)]
 mod tests {
     use super::*;
-    use akar_common::types::InternalID;
+    use akar_common::types::{Date, InternalID};
 
     fn int_stats(min: i64, max: i64) -> ColumnChunkStats {
         ColumnChunkStats::new(Some(Value::Int64(min)), Some(Value::Int64(max)))
@@ -486,5 +525,77 @@ mod tests {
         assert!(!stats.guaranteed_no_nulls);
         assert_eq!(stats.min, None);
         assert_eq!(stats.max, None);
+    }
+
+    #[test]
+    fn test_bool_zone_map_and_stats() {
+        // Bool min/max must track correctly: false < true (P52.22).
+        let mut stats = ColumnChunkStats::new(None, None);
+        stats.update(&Value::Bool(true));
+        stats.update(&Value::Bool(false));
+        assert_eq!(stats.min, Some(Value::Bool(false)));
+        assert_eq!(stats.max, Some(Value::Bool(true)));
+
+        // Single-value chunk: "!=" against that value can skip; "=" can't.
+        let single = ColumnChunkStats::new(Some(Value::Bool(true)), Some(Value::Bool(true)));
+        assert_eq!(
+            check_zone_map(&single, "!=", &Value::Bool(true)),
+            ZoneMapCheckResult::SkipScan
+        );
+        assert_eq!(
+            check_zone_map(&single, "=", &Value::Bool(true)),
+            ZoneMapCheckResult::AlwaysScan
+        );
+        assert_eq!(
+            check_zone_map(&single, "=", &Value::Bool(false)),
+            ZoneMapCheckResult::SkipScan
+        );
+    }
+
+    #[test]
+    fn test_date_zone_map_and_stats() {
+        // Date min/max must track (P52.22) so a scan never wrong-skips.
+        let mut stats = ColumnChunkStats::new(None, None);
+        stats.update(&Value::Date(Date(10)));
+        stats.update(&Value::Date(Date(5)));
+        stats.update(&Value::Date(Date(20)));
+        assert_eq!(stats.min, Some(Value::Date(Date(5))));
+        assert_eq!(stats.max, Some(Value::Date(Date(20))));
+
+        assert_eq!(
+            check_zone_map(&stats, "=", &Value::Date(Date(25))),
+            ZoneMapCheckResult::SkipScan
+        );
+        assert_eq!(
+            check_zone_map(&stats, "=", &Value::Date(Date(10))),
+            ZoneMapCheckResult::AlwaysScan
+        );
+    }
+
+    #[test]
+    fn test_internal_id_zone_map_respects_table_id() {
+        // Regression for P52.22: InternalID is ordered by (table_id, offset).
+        // A chunk holding only table-1 rows must NOT be skipped for a constant
+        // with the same offset but a different table — every row matches.
+        let stats = ColumnChunkStats::new(
+            Some(Value::InternalID(InternalID { table_id: 1, offset: 5 })),
+            Some(Value::InternalID(InternalID { table_id: 1, offset: 5 })),
+        );
+        assert_eq!(
+            check_zone_map(
+                &stats,
+                "!=",
+                &Value::InternalID(InternalID { table_id: 2, offset: 5 })
+            ),
+            ZoneMapCheckResult::AlwaysScan
+        );
+        assert_eq!(
+            check_zone_map(
+                &stats,
+                "=",
+                &Value::InternalID(InternalID { table_id: 2, offset: 5 })
+            ),
+            ZoneMapCheckResult::SkipScan
+        );
     }
 }

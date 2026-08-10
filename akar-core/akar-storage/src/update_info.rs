@@ -1,7 +1,7 @@
 //! UpdateInfo — MVCC version chain for column updates.
 //!
 //! Each `ColumnChunk` can have an optional `UpdateInfo` that tracks
-//! versioned updates to individual rows. On a `set_value()`, the old
+//! versioned updates to individual rows. On a versioned write, the old
 //! value is preserved in a version chain. Readers at a given snapshot
 //! timestamp traverse the chain to find the value visible to them.
 //!
@@ -11,14 +11,14 @@ use std::sync::Mutex;
 
 /// A single node in the update version chain for one vector (1024 rows).
 ///
-/// Each node stores the version (transaction commit timestamp) at which
-/// this update becomes visible, the new data, and a link to the previous
-/// (older) version node.
+/// Each node stores the version (transaction commit timestamp) at which an
+/// update takes effect, the OLD value that update replaced, and a link to
+/// the previous (older) version node.
 #[derive(Debug, Clone)]
 pub struct VectorUpdateInfo {
-    /// The commit timestamp at which this version becomes visible.
+    /// The commit timestamp at which this update takes effect.
     pub version: u64,
-    /// The updated value.
+    /// The serialized value that this update replaced (for undo / snapshot reads).
     pub data: Vec<u8>,
     /// Link to the previous (older) version in the chain.
     pub prev: Option<Box<VectorUpdateInfo>>,
@@ -36,7 +36,6 @@ impl VectorUpdateInfo {
 /// nodes. Each update prepends a new node to the chain for the affected
 /// vector, so recent versions are found first.
 ///
-/// Note: `Clone` is implemented manually because `Mutex` is not `Clone`.
 /// Note: `Clone` is implemented manually because `Mutex` is not `Clone`.
 #[derive(Debug)]
 pub struct UpdateInfo {
@@ -86,11 +85,18 @@ impl UpdateInfo {
         vectors[v_idx] = Some(Box::new(VectorUpdateInfo::new(version, data, prev)));
     }
 
-    /// Get the data that was visible at `snapshot_ts` for a given row.
+    /// Get the value visible to a snapshot at `snapshot_ts` for a given row.
     ///
-    /// Traverses the update chain from newest to oldest, returning the
-    /// data of the first node whose `version ≤ snapshot_ts`.
-    /// Returns `None` if no update is visible (caller should use the base value).
+    /// Each chain node stores the OLD value its update replaced; the base
+    /// (latest) value lives in the `ColumnChunk.values` array. The value
+    /// visible at `snapshot_ts` is the data of the newest node whose version
+    /// is still STRICTLY GREATER than the snapshot — that node holds the value
+    /// that the next update hasn't replaced yet. So the chain is walked from
+    /// newest to oldest and the node immediately before the first node with
+    /// `version <= snapshot_ts` is the answer.
+    ///
+    /// Returns `None` when every update is visible (`version <= snapshot_ts`),
+    /// meaning the caller should use the base (latest) value.
     pub fn get_version(&self, row: u32, snapshot_ts: u64) -> Option<Vec<u8>> {
         let v_idx = self.vector_idx(row);
         let vectors = self.vectors.lock().unwrap();
@@ -98,16 +104,18 @@ impl UpdateInfo {
             return None;
         }
         let mut current = vectors[v_idx].as_ref()?;
-        // Traverse chain from newest to oldest
+        let mut prev: Option<&VectorUpdateInfo> = None;
         loop {
             if current.version <= snapshot_ts {
-                return Some(current.data.clone());
+                break;
             }
+            prev = Some(current);
             match &current.prev {
-                Some(prev) => current = prev,
-                None => return None,
+                Some(next) => current = next,
+                None => break,
             }
         }
+        prev.map(|p| p.data.clone())
     }
 
     /// Get the most recent update data for a row (regardless of visibility).
@@ -135,31 +143,30 @@ mod tests {
     fn test_update_info_append_and_get() {
         let ui = UpdateInfo::new(4096);
 
-        // Append update for row 5 at version 10
+        // Update for row 5 at version 10 replaces value 0xAA.
         ui.append_update(5, 10, vec![0xAA]);
 
-        // Visible at version >= 10
-        assert_eq!(ui.get_version(5, 10), Some(vec![0xAA]));
-        assert_eq!(ui.get_version(5, 20), Some(vec![0xAA]));
-
-        // Not visible before version 10
-        assert_eq!(ui.get_version(5, 5), None);
+        // Before v10 the replaced value (0xAA) is still visible.
+        assert_eq!(ui.get_version(5, 5), Some(vec![0xAA]));
+        // At/after v10 the update is visible → base (latest) value is visible.
+        assert_eq!(ui.get_version(5, 10), None);
+        assert_eq!(ui.get_version(5, 20), None);
     }
 
     #[test]
     fn test_update_info_version_chain() {
         let ui = UpdateInfo::new(4096);
 
-        // Row 5: updated at v10, then again at v20
+        // Row 5: value 0xAA replaced at v10, then value 0xBB replaced at v20.
         ui.append_update(5, 10, vec![0xAA]);
         ui.append_update(5, 20, vec![0xBB]);
 
-        // At v15, should see the v10 update
-        assert_eq!(ui.get_version(5, 15), Some(vec![0xAA]));
-        // At v25, should see the v20 update
-        assert_eq!(ui.get_version(5, 25), Some(vec![0xBB]));
-        // At v5, no update visible
-        assert_eq!(ui.get_version(5, 5), None);
+        // Before v10 the value replaced at v10 (0xAA) is visible.
+        assert_eq!(ui.get_version(5, 5), Some(vec![0xAA]));
+        // Between v10 and v20 the value replaced at v20 (0xBB) is visible.
+        assert_eq!(ui.get_version(5, 15), Some(vec![0xBB]));
+        // At/after v20 both updates are visible → base (latest) value visible.
+        assert_eq!(ui.get_version(5, 25), None);
     }
 
     #[test]

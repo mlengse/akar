@@ -137,7 +137,9 @@ impl VectorIndexTable {
 
     /// Save the in-memory HNSW index to BufferManager-backed pages.
     ///
-    /// Writes the header page (page 0) and all data pages.
+    /// Writes the header page (page 0) and all data pages. Every vector is
+    /// stored whole on a single page; a vector that does not fit in one page
+    /// is an error rather than a silent drop (P52.17).
     pub fn save(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !bm.is_file_registered(&self.file_name) {
             return Err(StorageError::Index(format!(
@@ -146,7 +148,8 @@ impl VectorIndexTable {
             )));
         }
 
-        let num_vectors = self.hnsw.len() as u64;
+        let vectors = self.hnsw.vectors();
+        let num_vectors = vectors.len() as u64;
         let entry_point = self.hnsw.entry_point();
         let max_level = self.hnsw.max_level();
 
@@ -170,49 +173,56 @@ impl VectorIndexTable {
         bm.unpin(&self.file_name, 0);
 
         // Serialize and write vector data pages
-        let vectors = self.hnsw.vectors();
         let data_page_start = 1;
         let mut page_idx = data_page_start;
-        let mut offset = 0u64;
+        let mut offset = 0usize;
 
-        while offset < num_vectors {
+        while offset < num_vectors as usize {
             let frame = bm
                 .pin_mut(&self.file_name, page_idx)
                 .map_err(|e| StorageError::Index(format!("Failed to pin data page {page_idx}: {e}")))?;
             let page_data = &mut frame.data;
             let capacity = page_data.len();
             page_data.fill(0u8);
-            let mut written = 0usize;
             let mut pos = 0usize;
+            let mut written_this_page = 0usize;
 
-            while offset < num_vectors && pos + 8 < capacity {
-                // Write vector ID
-                page_data[pos..pos + 8].copy_from_slice(&offset.to_le_bytes());
-                pos += 8;
-
-                // Write vector data
-                if let Some(vec_data) = vectors.get(offset as usize) {
-                    let vec_bytes: Vec<u8> = vec_data.iter().flat_map(|f| f.to_le_bytes()).collect();
-                    let vec_len = vec_bytes.len() as u32;
-                    if pos + 4 + vec_len as usize > capacity {
-                        break; // Not enough room for this vector — continue on next page
+            while offset < num_vectors as usize {
+                let vec_data = vectors[offset];
+                let vec_len = vec_data.len().checked_mul(8).unwrap_or(usize::MAX);
+                let entry_len = 8 + 4 + vec_len;
+                if pos + entry_len > capacity {
+                    // Doesn't fit on this page. If the page is still empty the
+                    // vector is too large to persist at all — fail loudly
+                    // instead of silently dropping it (P52.17).
+                    if written_this_page == 0 {
+                        bm.unpin(&self.file_name, page_idx);
+                        return Err(StorageError::Index(format!(
+                            "Vector at offset {offset} ({vec_len} bytes) does not fit in a {} byte page",
+                            capacity
+                        )));
                     }
-                    page_data[pos..pos + 4].copy_from_slice(&vec_len.to_le_bytes());
-                    pos += 4;
-                    page_data[pos..pos + vec_len as usize].copy_from_slice(&vec_bytes);
-                    pos += vec_len as usize;
+                    break; // Continue on the next page
                 }
-
+                // Write vector ID
+                page_data[pos..pos + 8].copy_from_slice(&(offset as u64).to_le_bytes());
+                pos += 8;
+                // Write vector data length
+                page_data[pos..pos + 4].copy_from_slice(&(vec_len as u32).to_le_bytes());
+                pos += 4;
+                // Write vector data
+                let mut vec_bytes = Vec::with_capacity(vec_len);
+                for &f in vec_data {
+                    vec_bytes.extend_from_slice(&f.to_le_bytes());
+                }
+                page_data[pos..pos + vec_len].copy_from_slice(&vec_bytes);
+                pos += vec_len;
+                written_this_page += 1;
                 offset += 1;
-                written += 1;
             }
 
             frame.is_dirty = true;
             bm.unpin(&self.file_name, page_idx);
-
-            if written == 0 {
-                break;
-            }
             page_idx += 1;
         }
 
@@ -223,8 +233,11 @@ impl VectorIndexTable {
 
     /// Load the HNSW index from BufferManager-backed pages.
     ///
-    /// Reads the header page and all data pages, rebuilding the in-memory index.
-    /// After loading, the index is fully searchable.
+    /// Reads the header page and exactly `num_vectors` entries from the data
+    /// pages, rebuilding the in-memory index. Zeroed page tails (which the
+    /// page padding leaves behind) are ignored instead of being reconstructed
+    /// as phantom empty vectors (P52.17). After loading, the index is fully
+    /// searchable.
     pub fn load(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !bm.is_file_registered(&self.file_name) {
             return Err(StorageError::Index(format!(
@@ -238,7 +251,7 @@ impl VectorIndexTable {
             .pin(&self.file_name, 0)
             .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
         let header_data = &frame.data;
-        let (_num_vectors, _entry_point, _max_level, dimensions, metric) =
+        let (num_vectors, _entry_point, _max_level, dimensions, metric) =
             deserialize_header(header_data).ok_or(StorageError::Index("Invalid vector index header".into()))?;
         self.dimensions = dimensions;
         bm.unpin(&self.file_name, 0);
@@ -246,25 +259,24 @@ impl VectorIndexTable {
         // Rebuild the HNSW index
         let mut new_hnsw = HnswIndex::new(metric);
 
-        // Read data pages from page 1 onward
+        // Read data pages from page 1 onward until all vectors are loaded.
         let data_page_start = 1u64;
         let mut page_idx = data_page_start;
-        let mut _vector_id = 0usize;
+        let mut loaded = 0usize;
 
-        loop {
-            if !bm.is_file_registered(&self.file_name) {
-                break;
-            }
+        while (loaded as u64) < num_vectors {
             let frame_result = bm.pin(&self.file_name, page_idx);
-            if frame_result.is_err() {
-                break; // No more pages
-            }
-            let frame = frame_result.unwrap();
+            let frame = match frame_result {
+                Ok(f) => f,
+                Err(_) => break, // No more pages
+            };
             let page_data = &frame.data;
-            let mut pos = 0usize;
             let capacity = page_data.len();
+            let mut pos = 0usize;
+            let remaining = num_vectors - loaded as u64;
+            let mut loaded_this_page = 0u64;
 
-            while pos + 8 <= capacity {
+            while loaded_this_page < remaining && pos + 8 <= capacity {
                 let id = u64::from_le_bytes(page_data[pos..pos + 8].try_into().unwrap()) as usize;
                 pos += 8;
 
@@ -277,6 +289,10 @@ impl VectorIndexTable {
                 if pos + vec_len > capacity {
                     break;
                 }
+                if vec_len == 0 {
+                    // Zeroed page tail (padding from save) — no more real data.
+                    break;
+                }
 
                 let dims = vec_len / 8;
                 let mut vec_data = Vec::with_capacity(dims);
@@ -287,12 +303,17 @@ impl VectorIndexTable {
                 pos += vec_len;
 
                 new_hnsw.insert(vec_data, id);
-                _vector_id += 1;
+                loaded_this_page += 1;
             }
 
             bm.unpin(&self.file_name, page_idx);
             page_idx += 1;
+            loaded += loaded_this_page as usize;
 
+            if loaded_this_page == 0 {
+                // Empty/zeroed page — nothing more to read.
+                break;
+            }
             // Safety: prevent infinite loop if pages keep reading
             if page_idx > 1024 * 1024 {
                 break;
@@ -350,5 +371,84 @@ pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, StorageError
             expected: "List value for vector".into(),
             actual: format!("{:?}", other),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer_manager::BufferManagerConfig;
+    use crate::page::DEFAULT_PAGE_SIZE;
+    use akar_common::memory::MemoryManager;
+    use std::sync::Arc;
+
+    fn setup_bm(db_path: &std::path::Path) -> BufferManager {
+        let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+        BufferManager::new(db_path.to_path_buf(), mm, BufferManagerConfig::default())
+    }
+
+    #[test]
+    fn test_vector_index_save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bm = setup_bm(dir.path());
+
+        let mut idx = VectorIndexTable::new(
+            1,
+            "vec_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Cosine,
+            3,
+        );
+        idx.register_file(&mut bm, dir.path());
+        idx.hnsw_mut().insert(vec![1.0, 2.0, 3.0], 0);
+        idx.hnsw_mut().insert(vec![4.0, 5.0, 6.0], 1);
+        idx.hnsw_mut().insert(vec![7.0, 8.0, 9.0], 2);
+        assert_eq!(idx.hnsw.len(), 3);
+        idx.save(&mut bm).unwrap();
+
+        // Reload into a fresh instance.
+        let mut loaded = VectorIndexTable::new(
+            1,
+            "vec_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Cosine,
+            0,
+        );
+        loaded.register_file(&mut bm, dir.path());
+        loaded.load(&mut bm).unwrap();
+
+        // Exactly the persisted vectors are rebuilt — no phantom empties (P52.17).
+        assert_eq!(loaded.hnsw.len(), 3);
+        assert_eq!(loaded.dimensions, 3);
+        let hits = loaded.hnsw.search(&[1.0, 2.0, 3.0], 3);
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].1, 0, "nearest vector to [1,2,3] must be the first inserted");
+        // All persisted vectors must be present in the result set.
+        let mut ids: Vec<usize> = hits.iter().map(|&(_, id)| id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_vector_index_save_errors_when_vector_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bm = setup_bm(dir.path());
+
+        let mut idx = VectorIndexTable::new(
+            1,
+            "vec_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Cosine,
+            1,
+        );
+        idx.register_file(&mut bm, dir.path());
+        // A vector that cannot fit in one page must fail loudly, not silently
+        // drop data (P52.17).
+        let huge = vec![1.0f64; DEFAULT_PAGE_SIZE];
+        idx.hnsw_mut().insert(huge, 0);
+        assert!(idx.save(&mut bm).is_err());
     }
 }

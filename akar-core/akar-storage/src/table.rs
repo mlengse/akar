@@ -519,9 +519,30 @@ impl NodeTable {
                         vi.delete(txn, local_row as u32);
                     }
                 }
+                // Capture the PK value before it is nulled so the in-memory
+                // PK indexes can be kept in sync (P52.16).
+                let pk_value = (self.primary_key_column < self.columns.len())
+                    .then(|| group.columns.get(self.primary_key_column))
+                    .flatten()
+                    .and_then(|chunk| chunk.get(local_row))
+                    .cloned();
                 // Set all columns to Null for this row
                 for col_chunk in &mut group.columns {
                     let _ = col_chunk.set_value(local_row, Value::Null);
+                }
+                // Soft-deleted rows must no longer resolve via PK lookup, and
+                // the same PK must be re-insertable. Drop it from the hash and
+                // ART indexes (P52.16).
+                if let Some(pk) = pk_value
+                    && !matches!(pk, Value::Null)
+                {
+                    let pk_key = pk_value_to_string(&pk);
+                    self.hash_index.delete(&pk_key);
+                    if let Some(ref mut art_idx) = self.art_index
+                        && let Some(art_key) = ArtKey::from_value(&pk)
+                    {
+                        art_idx.delete(&art_key, row_idx);
+                    }
                 }
                 return Ok(());
             }
@@ -1473,6 +1494,63 @@ mod tests {
         assert_eq!(table.num_rows, 2);
         assert_eq!(table.get_value(0, 0), Some(&Value::String("Alice".into())));
         assert_eq!(table.get_value(1, 1), Some(&Value::Int64(25)));
+    }
+
+    #[test]
+    fn test_delete_row_removes_pk_from_hash_and_art_index() {
+        let mut table = NodeTable::new(
+            1,
+            "Person".into(),
+            vec![
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "age".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        );
+        table.art_index = Some(ArtPrimaryKeyIndex::new("test_art"));
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(30)])
+            .unwrap();
+        table
+            .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
+            .unwrap();
+        let art = table.art_index.as_ref().unwrap();
+        assert_eq!(art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap()), Some(0));
+
+        table.delete_row(0).unwrap();
+
+        // Soft-deleted row must no longer resolve via PK lookup (P52.16).
+        assert!(table.lookup_by_pk(&Value::String("Alice".into())).is_none());
+        let art = table.art_index.as_ref().unwrap();
+        assert_eq!(art.len(), 1, "ART must drop the deleted entry");
+        assert!(art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap()).is_none());
+        assert!(art
+            .lookup(&ArtKey::from_value(&Value::String("Bob".into())).unwrap())
+            .is_some());
+        // Range scan over the ART must not surface the deleted PK.
+        let hits = table.lookup_by_pk_range(
+            Some(&Value::String("A".into())),
+            true,
+            Some(&Value::String("C".into())),
+            true,
+            100,
+        );
+        assert_eq!(hits, vec![1], "only 'Bob' (row 1) should be in range");
+
+        // Re-inserting the same PK must now succeed (was: duplicate PK error).
+        table
+            .insert_row(vec![Value::String("Alice".into()), Value::Int64(31)])
+            .unwrap();
+        assert_eq!(table.lookup_by_pk(&Value::String("Alice".into())), Some(2));
     }
 
     #[test]
