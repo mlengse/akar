@@ -9,6 +9,7 @@ use akar_catalog::{Catalog, CatalogColumn, CatalogResult, IndexType};
 use akar_common::error::BinderError;
 use akar_common::types::LogicalTypeID;
 use akar_parser::ast::{Clause, Expression, Statement, *};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Resolve SET clause items against the catalog to find column info.
@@ -1735,14 +1736,32 @@ impl Binder {
             return Err("DELETE requires at least one expression".into());
         }
 
-        let mut items = Vec::new();
+        // Resolve each DELETE variable to its bound table/type. A linear scan per
+        // expression is O(N*M) in the worst case (N bound variables, M DELETE
+        // expressions). Microbenchmarks (benches/delete_variable_lookup.rs) show the
+        // linear scan is faster when the delete list is small — the HashMap build
+        // (O(N)) outweighs it — so the name index is only built past that break-even
+        // (M >= 8 deletes AND N >= 256 variables in scope).
+        let use_index = d.expressions.len() >= 8 && variables.len() >= 256;
+        let mut index: Option<HashMap<&str, &BoundVariable>> = None;
+        if use_index {
+            let mut map = HashMap::with_capacity(variables.len());
+            for v in variables {
+                // First occurrence wins, matching the linear-scan semantics.
+                map.entry(v.name.as_str()).or_insert(v);
+            }
+            index = Some(map);
+        }
+
+        let mut items = Vec::with_capacity(d.expressions.len());
         for expr in &d.expressions {
             match expr {
                 akar_parser::ast::Expression::Variable(var_name) => {
-                    let var = variables
-                        .iter()
-                        .find(|v| v.name == *var_name)
-                        .ok_or_else(|| format!("Variable '{}' not found in scope for DELETE", var_name))?;
+                    let var = match &index {
+                        Some(map) => map.get(var_name.as_str()).copied(),
+                        None => variables.iter().find(|v| v.name == *var_name),
+                    }
+                    .ok_or_else(|| format!("Variable '{}' not found in scope for DELETE", var_name))?;
                     items.push(BoundDeleteItem {
                         expression: expr.clone(),
                         table_name: var.label.clone().unwrap_or_default(),
@@ -1851,4 +1870,115 @@ impl Binder {
 /// Used by macro definition storage.
 fn expr_to_debug_string(expr: &akar_parser::ast::Expression) -> String {
     format!("{:?}", expr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_parser::ast::{Constant, DeleteClause, Expression};
+
+    fn binder() -> Binder {
+        Binder::new(Arc::new(Mutex::new(Catalog::new())))
+    }
+
+    fn var(name: &str, table_id: u64, label: Option<&str>, is_node: bool) -> BoundVariable {
+        BoundVariable {
+            name: name.to_string(),
+            table_id,
+            label: label.map(|s| s.to_string()),
+            is_node,
+        }
+    }
+
+    fn delete_clause(expressions: Vec<Expression>) -> DeleteClause {
+        DeleteClause {
+            detach: true,
+            expressions,
+        }
+    }
+
+    #[test]
+    fn delete_resolves_bound_variable_fields() {
+        let b = binder();
+        let variables = vec![var("a", 7, Some("Person"), true), var("r", 3, Some("Knows"), false)];
+        let d = delete_clause(vec![Expression::Variable("a".into()), Expression::Variable("r".into())]);
+        let BoundDeleteClause { detach, items } = b.bind_delete(&d, &variables).unwrap();
+        {
+            assert!(detach);
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].table_name, "Person");
+            assert_eq!(items[0].table_id, 7);
+            assert!(items[0].is_node);
+            assert_eq!(items[1].table_name, "Knows");
+            assert_eq!(items[1].table_id, 3);
+            assert!(!items[1].is_node);
+        }
+    }
+
+    #[test]
+    fn delete_missing_variable_reports_original_error() {
+        let b = binder();
+        let variables = vec![var("a", 1, Some("Person"), true)];
+        let d = delete_clause(vec![Expression::Variable("ghost".into())]);
+        let err = b.bind_delete(&d, &variables).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Variable 'ghost' not found in scope for DELETE"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn delete_rejects_non_variable_expression() {
+        let b = binder();
+        let variables = vec![var("a", 1, Some("Person"), true)];
+        let d = delete_clause(vec![Expression::Constant(Constant::Integer(42))]);
+        let err = b.bind_delete(&d, &variables).unwrap_err();
+        assert!(
+            err.to_string().contains("DELETE only supports variable references"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn delete_requires_at_least_one_expression() {
+        let b = binder();
+        let d = delete_clause(vec![]);
+        let err = b.bind_delete(&d, &[]).unwrap_err();
+        assert!(
+            err.to_string().contains("at least one expression"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn delete_first_occurrence_wins_in_linear_path() {
+        let b = binder();
+        // N < 100 and M < 8 => linear scan path. A duplicate name must resolve
+        // to the first occurrence, exactly like the pre-optimization code.
+        let variables = vec![var("dup", 1, Some("First"), true), var("dup", 2, Some("Second"), false)];
+        let d = delete_clause(vec![Expression::Variable("dup".into())]);
+        let bound = b.bind_delete(&d, &variables).unwrap();
+        assert_eq!(bound.items[0].table_id, 1, "first occurrence must win");
+        assert_eq!(bound.items[0].table_name, "First");
+    }
+
+    #[test]
+    fn delete_first_occurrence_wins_in_index_path() {
+        let b = binder();
+        // N >= 256 and M >= 8 => HashMap index path. The index must still
+        // prefer the first occurrence (entry().or_insert()), matching the
+        // linear-scan semantics.
+        let mut variables: Vec<BoundVariable> = (0..300).map(|i| var(&format!("v{i}"), i as u64, None, true)).collect();
+        variables[0].name = "dup".into();
+        variables[0].table_id = 999;
+        variables[150].name = "dup".into();
+        variables[150].table_id = 555;
+        let d = delete_clause(vec![Expression::Variable("dup".into()); 8]);
+        let bound = b.bind_delete(&d, &variables).unwrap();
+        assert_eq!(bound.items.len(), 8);
+        for item in &bound.items {
+            assert_eq!(item.table_id, 999, "first occurrence must win in the index path");
+        }
+    }
 }

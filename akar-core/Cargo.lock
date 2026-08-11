@@ -65,6 +65,7 @@ dependencies = [
  "akar-catalog",
  "akar-common",
  "akar-parser",
+ "criterion",
 ]
 
 [[package]]
