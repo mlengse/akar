@@ -1,4 +1,6 @@
-// akar_main::test_httpfs.rs
+use akar_main::{Connection, Database, SystemConfig};
+use std::sync::Arc;
+use tempfile::tempdir;
 
 #[test]
 #[cfg(feature = "httpfs-extension")]
