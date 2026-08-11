@@ -524,6 +524,19 @@ pub enum TableFunction {
         name: String,
         execute: Arc<dyn Fn(&[Value], &mut DataChunk) -> Result<(), String> + Send + Sync>,
     },
+    /// Extension-provided table function with graph access.
+    /// The closure receives input args, an optional graph data source
+    /// (present when the caller owns a storage catalog), and fills a
+    /// mutable DataChunk.
+    #[allow(clippy::type_complexity)]
+    CustomTableWithGraph {
+        name: String,
+        execute: Arc<
+            dyn Fn(&[Value], Option<&dyn crate::graph::GraphDataSource>, &mut DataChunk) -> Result<(), String>
+                + Send
+                + Sync,
+        >,
+    },
 }
 
 impl std::fmt::Debug for TableFunction {
@@ -537,6 +550,9 @@ impl std::fmt::Debug for TableFunction {
             Self::CurrentSetting { key } => f.debug_struct("CurrentSetting").field("key", key).finish(),
             Self::Custom { name } => f.debug_struct("Custom").field("name", name).finish(),
             Self::CustomTable { name, .. } => f.debug_struct("CustomTable").field("name", name).finish(),
+            Self::CustomTableWithGraph { name, .. } => {
+                f.debug_struct("CustomTableWithGraph").field("name", name).finish()
+            }
         }
     }
 }
@@ -1381,7 +1397,18 @@ impl FunctionRegistry {
     ///
     /// Returns a `Vec<Vec<Value>>` representing rows of results.
     /// Each inner vec is one row with one or more column values.
-    pub fn execute_table_function(&self, name: &str, args: &[Value]) -> Result<Vec<Vec<Value>>, String> {
+    ///
+    /// `graph` is an optional graph data source passed to graph-algorithm
+    /// table functions. Callers that own a storage catalog (e.g. the query
+    /// processor or the connection layer) supply it so GDS functions run
+    /// against real node/rel tables; callers without catalog access pass
+    /// `None`, in which case the closure may fall back to its built-in data.
+    pub fn execute_table_function(
+        &self,
+        name: &str,
+        args: &[Value],
+        graph: Option<&dyn crate::graph::GraphDataSource>,
+    ) -> Result<Vec<Vec<Value>>, String> {
         use akar_common::vector::DataChunk;
 
         let func = self
@@ -1407,6 +1434,26 @@ impl FunctionRegistry {
                     sel_vector: None,
                 };
                 execute(args, &mut chunk).map(|_| {
+                    let mut rows = Vec::new();
+                    for row in 0..chunk.size {
+                        let mut row_vals = Vec::new();
+                        for field_idx in 0..chunk.fields.len() {
+                            row_vals.push(chunk.get_value(field_idx, row).unwrap_or(Value::Null));
+                        }
+                        rows.push(row_vals);
+                    }
+                    rows
+                })
+            }
+            TableFunction::CustomTableWithGraph { name: _, execute } => {
+                let mut chunk = DataChunk {
+                    fields: Vec::new(),
+                    field_types: Vec::new(),
+                    size: 0,
+                    field_names: vec![],
+                    sel_vector: None,
+                };
+                execute(args, graph, &mut chunk).map(|_| {
                     let mut rows = Vec::new();
                     for row in 0..chunk.size {
                         let mut row_vals = Vec::new();

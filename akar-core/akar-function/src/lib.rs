@@ -1,6 +1,7 @@
 //! Built-in function registry, evaluation, and type system.
 
 pub mod aggregate;
+pub mod graph;
 pub mod registry;
 pub mod scalar;
 
@@ -10,6 +11,8 @@ pub use registry::{
     MapOp, ResolvedFunction, ScalarFunction, SchemaOp, StringOp, StructOp, TableFunction, UtilityOp,
 };
 pub use scalar::evaluate_scalar;
+
+pub use graph::{GraphDataSource, GraphEdge};
 
 // Re-export types needed for custom function callbacks
 pub use akar_common::types::Value;

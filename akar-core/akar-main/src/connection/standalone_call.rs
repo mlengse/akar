@@ -125,12 +125,13 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
         }
 
         let args_vals: Vec<Value> = args.iter().map(eval_ast_expr_to_value).collect();
+        let graph = akar_processor::processor::CatalogGraphSource::new(Some(&self.database.table_catalog()));
         let registry = self
             .database
             .function_registry
             .lock()
             .map_err(|e| format!("Lock poisoned: {e}"))?;
-        match registry.execute_table_function(name, &args_vals) {
+        match registry.execute_table_function(name, &args_vals, Some(&graph)) {
             Ok(rows) => Self::format_result(rows),
             Err(original_err) => {
                 let known_calls = [

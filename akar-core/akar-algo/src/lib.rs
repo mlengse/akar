@@ -49,17 +49,12 @@ impl Extension for AlgoExtension {
         use akar_common::types::Value;
         use akar_common::vector::DataChunk;
         use akar_function::registry::TableFunction;
+        use akar_function::GraphDataSource;
 
-        // Helper: create a table function closure that runs a GDS shortest path algorithm.
-        let sp_destinations_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-            let source = match args.first() {
-                Some(Value::Int64(s)) => *s as u64,
-                Some(Value::UInt64(s)) => *s,
-                _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
-            };
-
-            // Build sample CSR (5-node chain) for demo — in production this would read from catalog.
-            let edges = vec![
+        // ── Helper: fallback graph used when the caller has no catalog ────────
+        // 5-node ring: 0→1→2→3→4→0
+        let sample_edges = || {
+            vec![
                 akar_graph::Edge {
                     src_offset: 0,
                     dst_offset: 1,
@@ -84,11 +79,50 @@ impl Extension for AlgoExtension {
                     rel_id: 3,
                     rel_table_id: 0,
                 },
-            ];
-            let csr = CSRAdjacency::build(&edges, 5);
+                akar_graph::Edge {
+                    src_offset: 4,
+                    dst_offset: 0,
+                    rel_id: 4,
+                    rel_table_id: 0,
+                },
+            ]
+        };
+
+        // ── Helper: build a CSR from the supplied graph (or the fallback) ────
+        let csr_from_graph = move |graph: Option<&dyn GraphDataSource>| -> (CSRAdjacency, usize) {
+            let (edges, num_nodes) = match graph {
+                Some(g) => {
+                    let edges: Vec<akar_graph::Edge> = g
+                        .edges()
+                        .iter()
+                        .map(|e| akar_graph::Edge {
+                            src_offset: e.src_offset,
+                            dst_offset: e.dst_offset,
+                            rel_id: e.rel_id,
+                            rel_table_id: e.rel_table_id,
+                        })
+                        .collect();
+                    (edges, g.num_nodes())
+                }
+                None => (sample_edges(), 5),
+            };
+            (CSRAdjacency::build(&edges, num_nodes), num_nodes)
+        };
+
+        // Helper: create a table function closure that runs a GDS shortest path algorithm.
+        let sp_destinations_fn = Arc::new(
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+            let source = match args.first() {
+                Some(Value::Int64(s)) => *s as u64,
+                Some(Value::UInt64(s)) => *s,
+                _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
+            };
+
+            // Build CSR from the database graph (or the fallback sample graph).
+            let (csr, num_nodes) = csr_from_graph(graph);
 
             // Run BFS shortest path using GDS framework
-            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(5);
+            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
             akar_graph::gds::utils::GDSUtils::run_single_shortest_path(&csr, source, &mut bfs, 100);
 
             // Collect results: (src, dst, distance)
@@ -96,7 +130,7 @@ impl Extension for AlgoExtension {
             let mut dst_col = Vec::new();
             let mut dist_col = Vec::new();
 
-            for offset in 0..5 {
+            for offset in 0..num_nodes {
                 if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
                     let dist = if offset == source as usize {
                         0i64
@@ -147,42 +181,17 @@ impl Extension for AlgoExtension {
             Ok(())
         });
 
-        let wsp_destinations_fn = Arc::new(|args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+        let wsp_destinations_fn = Arc::new(
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
             let source = match args.first() {
                 Some(Value::Int64(s)) => *s as u64,
                 Some(Value::UInt64(s)) => *s,
                 _ => return Err("weighted_shortest_path: first argument must be source node offset".into()),
             };
 
-            let edges = vec![
-                akar_graph::Edge {
-                    src_offset: 0,
-                    dst_offset: 1,
-                    rel_id: 0,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 1,
-                    dst_offset: 2,
-                    rel_id: 1,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 2,
-                    dst_offset: 3,
-                    rel_id: 2,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 3,
-                    dst_offset: 4,
-                    rel_id: 3,
-                    rel_table_id: 0,
-                },
-            ];
-            let csr = CSRAdjacency::build(&edges, 5);
+            let (csr, num_nodes) = csr_from_graph(graph);
 
-            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(5);
+            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
             akar_graph::gds::utils::GDSUtils::run_weighted_shortest_path(&csr, source, &mut bfs, |_src, _dst, _eid| {
                 1.0
             });
@@ -191,7 +200,7 @@ impl Extension for AlgoExtension {
             let mut dst_col = Vec::new();
             let mut cost_col = Vec::new();
 
-            for offset in 0..5 {
+            for offset in 0..num_nodes {
                 if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
                     let cost = if offset == source as usize {
                         0.0
@@ -244,43 +253,6 @@ impl Extension for AlgoExtension {
             Ok(())
         });
 
-        // ── Helper: build the sample CSR used by all GDS closures ────────────
-        // 5-node ring: 0→1→2→3→4→0
-        let sample_edges = || {
-            vec![
-                akar_graph::Edge {
-                    src_offset: 0,
-                    dst_offset: 1,
-                    rel_id: 0,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 1,
-                    dst_offset: 2,
-                    rel_id: 1,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 2,
-                    dst_offset: 3,
-                    rel_id: 2,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 3,
-                    dst_offset: 4,
-                    rel_id: 3,
-                    rel_table_id: 0,
-                },
-                akar_graph::Edge {
-                    src_offset: 4,
-                    dst_offset: 0,
-                    rel_id: 4,
-                    rel_table_id: 0,
-                },
-            ]
-        };
-
         /// Pack an AlgoResult (parallel score-per-node) into a DataChunk
         /// with columns (node_id INT64, score DOUBLE).
         fn pack_node_scores(
@@ -319,9 +291,8 @@ impl Extension for AlgoExtension {
         // ── page_rank / pr ────────────────────────────────────────────────────
         // CALL page_rank() → (node_id INT64, rank DOUBLE)
         let pr_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_page_rank(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "rank")?;
                 output.fields = fields;
@@ -333,14 +304,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "page_rank",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "page_rank".into(),
                 execute: pr_fn.clone(),
             },
         );
         context.register_table_function(
             "pr",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "page_rank".into(),
                 execute: pr_fn,
             },
@@ -349,9 +320,8 @@ impl Extension for AlgoExtension {
         // ── weakly_connected_components / wcc ─────────────────────────────────
         // CALL wcc() → (node_id INT64, component_id DOUBLE)
         let wcc_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_wcc(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
                 output.fields = fields;
@@ -363,14 +333,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "weakly_connected_components",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "wcc".into(),
                 execute: wcc_fn.clone(),
             },
         );
         context.register_table_function(
             "wcc",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "wcc".into(),
                 execute: wcc_fn,
             },
@@ -379,9 +349,8 @@ impl Extension for AlgoExtension {
         // ── strongly_connected_components (Tarjan) / scc ──────────────────────
         // CALL scc() → (node_id INT64, component_id DOUBLE)
         let scc_tarjan_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_scc_tarjan(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
                 output.fields = fields;
@@ -393,14 +362,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "strongly_connected_components",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "scc_tarjan".into(),
                 execute: scc_tarjan_fn.clone(),
             },
         );
         context.register_table_function(
             "scc",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "scc_tarjan".into(),
                 execute: scc_tarjan_fn,
             },
@@ -408,9 +377,8 @@ impl Extension for AlgoExtension {
 
         // ── scc_kosaraju / scc_ko ─────────────────────────────────────────────
         let scc_ko_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_scc_kosaraju(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "component_id")?;
                 output.fields = fields;
@@ -422,14 +390,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "strongly_connected_components_kosaraju",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "scc_kosaraju".into(),
                 execute: scc_ko_fn.clone(),
             },
         );
         context.register_table_function(
             "scc_ko",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "scc_kosaraju".into(),
                 execute: scc_ko_fn,
             },
@@ -438,9 +406,8 @@ impl Extension for AlgoExtension {
         // ── k_core_decomposition / kcore ──────────────────────────────────────
         // CALL k_core_decomposition() → (node_id INT64, core_number DOUBLE)
         let kcore_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_k_core(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "core_number")?;
                 output.fields = fields;
@@ -452,14 +419,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "k_core_decomposition",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "k_core".into(),
                 execute: kcore_fn.clone(),
             },
         );
         context.register_table_function(
             "kcore",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "k_core".into(),
                 execute: kcore_fn,
             },
@@ -468,9 +435,8 @@ impl Extension for AlgoExtension {
         // ── louvain ───────────────────────────────────────────────────────────
         // CALL louvain() → (node_id INT64, community_id DOUBLE)
         let louvain_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_louvain(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "community_id")?;
                 output.fields = fields;
@@ -482,7 +448,7 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "louvain",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "louvain".into(),
                 execute: louvain_fn,
             },
@@ -491,9 +457,8 @@ impl Extension for AlgoExtension {
         // ── spanning_forest / sf ──────────────────────────────────────────────
         // CALL spanning_forest() → (node_id INT64, parent_id DOUBLE)
         let sf_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_spanning_forest(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "parent_id")?;
                 output.fields = fields;
@@ -505,14 +470,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "spanning_forest",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "spanning_forest".into(),
                 execute: sf_fn.clone(),
             },
         );
         context.register_table_function(
             "sf",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "spanning_forest".into(),
                 execute: sf_fn,
             },
@@ -521,14 +486,13 @@ impl Extension for AlgoExtension {
         // ── label_propagation / lpa ───────────────────────────────────────────
         // CALL lpa(max_iters?) → (node_id INT64, label DOUBLE)
         let lpa_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
                 let max_iters = match args.first() {
                     Some(Value::Int64(n)) if *n > 0 => *n as usize,
                     Some(Value::Int32(n)) if *n > 0 => *n as usize,
                     _ => 10,
                 };
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_lpa(&csr, max_iters);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "label")?;
                 output.fields = fields;
@@ -540,14 +504,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "label_propagation",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "lpa".into(),
                 execute: lpa_fn.clone(),
             },
         );
         context.register_table_function(
             "lpa",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "lpa".into(),
                 execute: lpa_fn,
             },
@@ -556,9 +520,8 @@ impl Extension for AlgoExtension {
         // ── betweenness_centrality / bc ───────────────────────────────────────
         // CALL betweenness_centrality() → (node_id INT64, centrality DOUBLE)
         let bc_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_betweenness_centrality(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "centrality")?;
                 output.fields = fields;
@@ -570,14 +533,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "betweenness_centrality",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "betweenness_centrality".into(),
                 execute: bc_fn.clone(),
             },
         );
         context.register_table_function(
             "bc",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "betweenness_centrality".into(),
                 execute: bc_fn,
             },
@@ -586,9 +549,8 @@ impl Extension for AlgoExtension {
         // ── closeness_centrality / cc ─────────────────────────────────────────
         // CALL closeness_centrality() → (node_id INT64, centrality DOUBLE)
         let cc_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_closeness_centrality(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "centrality")?;
                 output.fields = fields;
@@ -600,14 +562,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "closeness_centrality",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "closeness_centrality".into(),
                 execute: cc_fn.clone(),
             },
         );
         context.register_table_function(
             "cc",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "closeness_centrality".into(),
                 execute: cc_fn,
             },
@@ -616,9 +578,8 @@ impl Extension for AlgoExtension {
         // ── triangle_count / tc ───────────────────────────────────────────────
         // CALL triangle_count() → (node_id INT64, triangles DOUBLE)
         let tc_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_triangle_count(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "triangles")?;
                 output.fields = fields;
@@ -630,14 +591,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "triangle_count",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "triangle_count".into(),
                 execute: tc_fn.clone(),
             },
         );
         context.register_table_function(
             "tc",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "triangle_count".into(),
                 execute: tc_fn,
             },
@@ -646,9 +607,8 @@ impl Extension for AlgoExtension {
         // ── all_sp_destinations ───────────────────────────────────────────────
         // CALL all_sp_destinations() → (node_id INT64, reachable DOUBLE)
         let all_sp_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |_args: &[Value], output: &mut DataChunk| -> Result<(), String> {
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_all_sp_destinations(&csr);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "reachable")?;
                 output.fields = fields;
@@ -660,7 +620,7 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "all_sp_destinations",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "all_sp_destinations".into(),
                 execute: all_sp_fn,
             },
@@ -669,8 +629,7 @@ impl Extension for AlgoExtension {
         // ── random_walk / rw ──────────────────────────────────────────────────
         // CALL random_walk(steps?, walks_per_node?) → (node_id INT64, hit_count DOUBLE)
         let rw_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
                 let steps = match args.first() {
                     Some(Value::Int64(n)) if *n > 0 => *n as usize,
                     Some(Value::Int32(n)) if *n > 0 => *n as usize,
@@ -681,7 +640,7 @@ impl Extension for AlgoExtension {
                     Some(Value::Int32(n)) if *n > 0 => *n as usize,
                     _ => 2,
                 };
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_random_walk(&csr, None, steps, walks_per_node);
                 let (fields, field_types, field_names, size) = pack_node_scores(result, "hit_count")?;
                 output.fields = fields;
@@ -693,14 +652,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "random_walk",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "random_walk".into(),
                 execute: rw_fn.clone(),
             },
         );
         context.register_table_function(
             "rw",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "random_walk".into(),
                 execute: rw_fn,
             },
@@ -710,8 +669,7 @@ impl Extension for AlgoExtension {
         // CALL node2vec(p?, q?, dimensions?, walks?, window?)
         //   → (node_id INT64, dim_0 DOUBLE, …, dim_N DOUBLE)
         let n2v_fn = Arc::new({
-            let sample_edges = sample_edges.clone();
-            move |args: &[Value], output: &mut DataChunk| -> Result<(), String> {
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
                 fn f64_arg(args: &[Value], idx: usize, default: f64) -> f64 {
                     match args.get(idx) {
                         Some(Value::Double(v)) => *v,
@@ -734,7 +692,7 @@ impl Extension for AlgoExtension {
                 let walks = usize_arg(args, 3, 3);
                 let window = usize_arg(args, 4, 5);
 
-                let csr = CSRAdjacency::build(&sample_edges(), 5);
+                let (csr, _num_nodes) = csr_from_graph(graph);
                 let result = compute_node2vec(&csr, p, q, dimensions, walks, window);
 
                 let n = result.values.len().checked_div(dimensions).unwrap_or(0);
@@ -766,14 +724,14 @@ impl Extension for AlgoExtension {
         });
         context.register_table_function(
             "node2vec",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "node2vec".into(),
                 execute: n2v_fn.clone(),
             },
         );
         context.register_table_function(
             "n2v",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "node2vec".into(),
                 execute: n2v_fn,
             },
@@ -782,21 +740,21 @@ impl Extension for AlgoExtension {
         // ── shortest_path / sp ────────────────────────────────────────────────
         context.register_table_function(
             "shortest_path",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "shortest_path".into(),
                 execute: sp_destinations_fn.clone(),
             },
         );
         context.register_table_function(
             "sp",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "shortest_path".into(),
                 execute: sp_destinations_fn,
             },
         );
         context.register_table_function(
             "weighted_shortest_path",
-            TableFunction::CustomTable {
+            TableFunction::CustomTableWithGraph {
                 name: "weighted_shortest_path".into(),
                 execute: wsp_destinations_fn,
             },
@@ -2128,7 +2086,7 @@ mod tests {
         let registry = make_registry_with_algo();
         // CALL random_walk() — uses defaults (steps=5, walks_per_node=2)
         let rows = registry
-            .execute_table_function("random_walk", &[])
+            .execute_table_function("random_walk", &[], None)
             .expect("random_walk should succeed with no args");
         // 5-node ring graph → 5 rows, each with 2 values (node_id, hit_count)
         assert_eq!(rows.len(), 5, "Expected 5 rows (one per node)");
@@ -2152,7 +2110,7 @@ mod tests {
         let registry = make_registry_with_algo();
         // CALL random_walk(10, 3)
         let rows = registry
-            .execute_table_function("random_walk", &[Value::Int64(10), Value::Int64(3)])
+            .execute_table_function("random_walk", &[Value::Int64(10), Value::Int64(3)], None)
             .expect("random_walk(10,3) should succeed");
         assert_eq!(rows.len(), 5);
         let total: f64 = rows
@@ -2171,7 +2129,7 @@ mod tests {
         let registry = make_registry_with_algo();
         // CALL rw() should work just like CALL random_walk()
         let rows = registry
-            .execute_table_function("rw", &[])
+            .execute_table_function("rw", &[], None)
             .expect("rw alias should succeed");
         assert_eq!(rows.len(), 5);
     }
@@ -2181,7 +2139,7 @@ mod tests {
         let registry = make_registry_with_algo();
         // CALL node2vec() — uses defaults (p=1, q=1, dims=4, walks=3, window=5)
         let rows = registry
-            .execute_table_function("node2vec", &[])
+            .execute_table_function("node2vec", &[], None)
             .expect("node2vec should succeed with no args");
         // 5-node ring → 5 rows, each with 1 (node_id) + 4 (dim_0..3) = 5 values
         assert_eq!(rows.len(), 5, "Expected 5 rows");
@@ -2205,6 +2163,7 @@ mod tests {
                     Value::Int64(2),
                     Value::Int64(4),
                 ],
+                None,
             )
             .expect("node2vec(1,1,8,2,4) should succeed");
         assert_eq!(rows.len(), 5);
@@ -2217,7 +2176,7 @@ mod tests {
     fn test_call_n2v_alias() {
         let registry = make_registry_with_algo();
         let rows = registry
-            .execute_table_function("n2v", &[])
+            .execute_table_function("n2v", &[], None)
             .expect("n2v alias should succeed");
         assert_eq!(rows.len(), 5);
     }

@@ -7,6 +7,7 @@
 //! 4. Limit/OrderBy/Aggregate are applied last
 
 pub mod chunk_helpers;
+pub mod graph_source;
 pub mod join_helpers;
 pub mod mapper;
 pub mod plan_serializer;
@@ -18,6 +19,7 @@ mod tests_only;
 pub mod union_helpers;
 
 pub use chunk_helpers::*;
+pub use graph_source::*;
 pub use join_helpers::*;
 pub use mapper::*;
 pub use plan_serializer::*;
@@ -299,6 +301,12 @@ impl QueryProcessor {
                     TableFunction::CustomTable { execute, .. } => {
                         let mut chunk = DataChunk::new(Vec::new(), Vec::new());
                         (execute)(&args, &mut chunk)?;
+                        Ok(vec![chunk])
+                    }
+                    TableFunction::CustomTableWithGraph { execute, .. } => {
+                        let mut chunk = DataChunk::new(Vec::new(), Vec::new());
+                        let graph = CatalogGraphSource::new(self.table_catalog.as_ref());
+                        (execute)(&args, Some(&graph), &mut chunk)?;
                         Ok(vec![chunk])
                     }
                     TableFunction::ScanCsv { .. }
