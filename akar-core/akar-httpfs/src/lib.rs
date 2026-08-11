@@ -287,10 +287,10 @@ pub fn parse_url(url_str: &str) -> Result<Url, String> {
     })
 }
 
-/// Validate that a URL uses a supported scheme (http/https).
+/// Validate that a URL uses a supported scheme (http/https) and has a host.
 pub fn is_valid_http_url(url_str: &str) -> bool {
     parse_url(url_str)
-        .map(|u| matches!(u.scheme.as_str(), "http" | "https"))
+        .map(|u| !u.host.is_empty() && matches!(u.scheme.as_str(), "http" | "https"))
         .unwrap_or(false)
 }
 
@@ -330,9 +330,51 @@ mod tests {
 
     #[test]
     fn test_is_valid_http_url() {
-        assert!(is_valid_http_url("http://example.com"));
-        assert!(is_valid_http_url("https://example.com"));
-        assert!(!is_valid_http_url("ftp://example.com"));
+        let valid = [
+            "http://example.com",
+            "https://example.com",
+            "http://example.com/data.csv",
+            "https://api.example.com/v1/data?format=json",
+            "http://localhost:8080/query",
+            "http://example.com:8080",
+            "HTTP://example.com",
+            "  https://example.com  ",
+        ];
+        for url in valid {
+            assert!(is_valid_http_url(url), "expected `{url}` to be a valid HTTP URL");
+        }
+
+        let invalid = [
+            "",
+            "not-a-url",
+            "example.com/data.csv",
+            "ftp://example.com",
+            "file:///tmp/data.csv",
+            "ws://example.com",
+            "gs://bucket/data.csv",
+            "http:/example.com",
+            "http//example.com",
+            "://example.com",
+            "http://",
+            "https://",
+            "http://:8080",
+            "http://example.com:notaport",
+        ];
+        for url in invalid {
+            assert!(
+                !is_valid_http_url(url),
+                "expected `{url}` to be rejected as an HTTP URL"
+            );
+        }
+    }
+
+    #[test]
+    fn test_can_handle_http_url() {
+        let fs = HttpFileSystem;
+        assert!(fs.can_handle("http://example.com/data.csv"));
+        assert!(fs.can_handle("https://example.com"));
+        assert!(!fs.can_handle("ftp://example.com"));
+        assert!(!fs.can_handle("local/file.csv"));
     }
 
     #[test]
