@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,594 total, 5 ignored, 1,589 passed, 0 failed** (gate `test [akar-core]` 2026-08-11, pasca CI fix ice disk path `0304a3c`, rilis v0.1.5) |
+| Tests passing | **1,605 total, 5 ignored, 1,600 passed, 0 failed** (gate `test [akar-core]` 2026-08-12, batch E working tree; rilis v0.1.5 = 1,594 total) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,594** | **1,594 total, 5 ignored, 1,589 passed, 0 failed** (gate `test [akar-core]` 2026-08-11, rilis v0.1.5 / pasca CI fix ice disk path `0304a3c`) |
+| **Total** | **1,605** | **1,605 total, 5 ignored, 1,600 passed, 0 failed** (gate `test [akar-core]` 2026-08-12, batch E working tree; rilis v0.1.5 = 1,594 total) |
 
 ### 11.2 Test Datasets
 
@@ -689,6 +689,11 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
    `akar-c` (C FFI) is intentionally not published (build locally)
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j,
    HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
+5. **Vector index (HNSW) is write-only from SQL** — optimizer pass `VectorSimilarityDetection` is a
+   documented NO-OP (P52.5), so `VectorSimilarityScan` is unreachable from queries; the index is
+   still maintained (refreshed after DML, P52.38) but vector queries go through normal scan+filter.
+   GDS table functions (`shortest_path`, `page_rank`, ...) still build their CSR from a hard-coded
+   5-node sample ring (P52.46, open)
 
 ---
 

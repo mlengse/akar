@@ -193,6 +193,18 @@ pub struct VectorIndexEntry {
     pub dimensions: u64,
 }
 
+/// A full-text index entry: maps an FTS index name to the source
+/// (table, column) it was created on.
+///
+/// Registered at `CREATE FTS INDEX` bind time so the scan side can keep the
+/// derived macro tables (docs/terms/postings) in sync with live DML (P52.39).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FtsIndexEntry {
+    pub name: String,
+    pub table_name: String,
+    pub column_name: String,
+}
+
 /// A foreign table entry in the catalog for externally-attached tables.
 ///
 /// Foreign tables represent tables from external catalogs (e.g., DuckDB, Postgres, SQLite)
@@ -395,6 +407,9 @@ pub struct Catalog {
     /// Projected graph entries keyed by name.
     /// Ported from C++ `GraphEntrySet::nameToEntry`.
     projected_graphs: HashMap<String, ProjectedGraphInfo>,
+    /// FTS index name → source (table, column) mapping (P52.39).
+    #[serde(default)]
+    fts_indexes: HashMap<String, FtsIndexEntry>,
 }
 
 impl Catalog {
@@ -431,6 +446,39 @@ impl Catalog {
         self.entries.insert(index_id, CatalogEntry::VectorIndex(entry));
         self.name_to_id.insert(name, index_id);
         CatalogResult::Created { table_id: index_id }
+    }
+
+    /// Register an FTS index → source (table, column) mapping.
+    ///
+    /// Called at `CREATE FTS INDEX` bind time. Errors if the name is already
+    /// taken (P52.39).
+    pub fn register_fts_index(
+        &mut self,
+        name: String,
+        table_name: String,
+        column_name: String,
+    ) -> Result<(), CatalogError> {
+        if self.fts_indexes.contains_key(&name) {
+            return Err(CatalogError::InvalidOperation(format!(
+                "FTS index '{name}' already exists"
+            )));
+        }
+        self.fts_indexes.insert(
+            name.clone(),
+            FtsIndexEntry {
+                name,
+                table_name,
+                column_name,
+            },
+        );
+        Ok(())
+    }
+
+    /// Look up the source (table, column) of an FTS index (P52.39).
+    pub fn get_fts_index(&self, name: &str) -> Option<(&str, &str)> {
+        self.fts_indexes
+            .get(name)
+            .map(|f| (f.table_name.as_str(), f.column_name.as_str()))
     }
 
     /// Create a node table. Returns error if name already exists.

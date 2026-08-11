@@ -323,6 +323,20 @@ impl Database {
         Ok(())
     }
 
+    /// Rebuild the HNSW graph of every vector index on the given tables.
+    ///
+    /// The index was only populated during `CREATE VECTOR INDEX`; without this
+    /// hook the graph served stale/positional row ids after INSERT/DELETE
+    /// (P52.38).
+    #[cfg(feature = "vector-extension")]
+    pub fn refresh_vector_indexes(&self, table_ids: &[u64]) {
+        self.storage_manager.table_catalog().refresh_vector_indexes_for_tables(table_ids);
+    }
+
+    /// No-op when the vector extension is not compiled in.
+    #[cfg(not(feature = "vector-extension"))]
+    pub fn refresh_vector_indexes(&self, _table_ids: &[u64]) {}
+
     /// Create an ART index on a node table: data index.
     ///
     /// The schema entry is created by the binder during `bind()`.

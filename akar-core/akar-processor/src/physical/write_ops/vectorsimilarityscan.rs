@@ -88,35 +88,23 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
             }
         }
 
-        drop(node_table);
-
         // Convert column-major Vec<Vec<Value>> to DataChunks
-        use akar_common::types::PhysicalTypeID;
-        use akar_common::vector::{DataChunk, ValueVector};
+        use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
+        use akar_common::vector::ValueVector;
 
         let mut fields = Vec::with_capacity(num_cols + 1);
 
-        // Add table columns
-        for (_col_idx, col_data) in output_columns.iter().enumerate().take(num_cols) {
-            let mut v = ValueVector::new(PhysicalTypeID::Double, num_results);
+        // Add table columns — typed per column from the node table schema
+        // (P52.40: forcing every column to Double corrupted Int64/String data).
+        for col_idx in 0..num_cols {
+            let phys_type = physical_type_from_logical(node_table.columns[col_idx].logical_type);
+            let col_data = &output_columns[col_idx];
+            let mut v = ValueVector::new(phys_type, num_results);
             v.resize(num_results);
             for (i, val) in col_data.iter().enumerate() {
-                match val {
-                    Value::Double(d) => v.set_double(i, *d),
-                    Value::Int64(x) => {
-                        let buf = &mut v.data_mut()[i * 8..(i + 1) * 8];
-                        buf.copy_from_slice(&x.to_le_bytes());
-                        v.set_null(i, false);
-                    }
-                    Value::String(_) => {
-                        v.set_value(i, val)?;
-                    }
-                    Value::Null => {
-                        v.set_null(i, true);
-                    }
-                    _ => {
-                        v.set_null(i, true);
-                    }
+                // set_value coerces numeric types; oversized strings degrade to NULL.
+                if v.set_value(i, val).is_err() {
+                    v.set_null(i, true);
                 }
             }
             fields.push(v);

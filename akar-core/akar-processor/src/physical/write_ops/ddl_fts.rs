@@ -242,6 +242,10 @@ pub struct PhysicalFtsScan {
     pub docs_table: String,
     pub terms_table: String,
     pub posting_table: String,
+    /// Source node table/column the index was created on (P52.39) — used to
+    /// catch up newly inserted rows and filter deleted ones at query time.
+    pub table_name: String,
+    pub column_name: String,
     pub table_catalog: Arc<TableCatalog>,
 }
 
@@ -251,6 +255,10 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // Keep the derived index in sync with the source table first: any
+        // rows inserted after CREATE FTS INDEX must be searchable (P52.39).
+        self.sync_index_with_source()?;
+
         // Tokenize query
         let query_tokens: Vec<String> = akar_fts::tokenize(&self.query_string)
             .into_iter()
@@ -277,32 +285,55 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
             .map(|t| t.num_rows as f64)
             .unwrap_or(1.0);
 
-        // Build map: term -> (term_id, doc_freq)
+        // Build map: term -> (term_id, doc_freq). One pass over the vocabulary,
+        // then O(1) lookups per query token — the old code scanned the whole
+        // terms table per token (O(vocab x tokens), P52.39).
         let terms_data = terms_table.to_column_major_data();
         let num_terms = terms_table.num_rows as usize;
-        let mut matching_terms: Vec<(i64, i64)> = Vec::new(); // (term_id, doc_freq)
-
+        let mut term_index: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
         for row_idx in 0..num_terms {
-            let term_val = terms_data.get(1).and_then(|d| d.get(row_idx));
-            let term_str = if let Some(Value::String(s)) = term_val {
-                s.clone()
-            } else {
-                continue;
+            let term_id = match terms_data.first().and_then(|d| d.get(row_idx)) {
+                Some(Value::Int64(id)) => *id,
+                _ => continue,
             };
-            if query_tokens.contains(&term_str) {
-                let term_id = if let Some(Value::Int64(id)) = terms_data.first().and_then(|d| d.get(row_idx)) {
-                    *id
-                } else {
-                    continue;
-                };
-                let doc_freq = if let Some(Value::Int64(df)) = terms_data.get(2).and_then(|d| d.get(row_idx)) {
-                    *df
-                } else {
-                    0
-                };
+            let term_str = match terms_data.get(1).and_then(|d| d.get(row_idx)) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let doc_freq = match terms_data.get(2).and_then(|d| d.get(row_idx)) {
+                Some(Value::Int64(df)) => *df,
+                _ => 0,
+            };
+            term_index.insert(term_str, (term_id, doc_freq));
+        }
+        drop(terms_data);
+        drop(terms_table);
+
+        let mut matching_terms: Vec<(i64, i64)> = Vec::new(); // (term_id, doc_freq)
+        for token in &query_tokens {
+            if let Some(&(term_id, doc_freq)) = term_index.get(token.as_str()) {
                 matching_terms.push((term_id, doc_freq));
             }
         }
+
+        // Doc validity: a doc is searchable only while its source row still
+        // exists and its text column is non-NULL (soft-deleted rows are
+        // filtered out, P52.39).
+        let source_table = self.table_catalog.get_node_table_by_name(&self.table_name);
+        let source_col = source_table
+            .as_ref()
+            .and_then(|t| t.columns.iter().position(|c| c.name == self.column_name));
+        let doc_valid = |doc_id: i64| -> bool {
+            let Ok(r) = usize::try_from(doc_id) else {
+                return false;
+            };
+            match (&source_table, source_col) {
+                (Some(t), Some(ci)) => {
+                    r < t.num_rows as usize && matches!(t.get_value(r, ci), Some(Value::String(_)))
+                }
+                _ => true, // no source info → keep everything
+            }
+        };
 
         // Accumulate per-doc BM25 scores from posting table
         let mut doc_scores: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
@@ -313,6 +344,9 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 // Scan posting table for this term using get_outgoing_edges(term_id)
                 let posting_rels = posting_table.get_outgoing_edges(term_id as u64);
                 for (doc_id, rel_vals) in posting_rels {
+                    if !doc_valid(doc_id as i64) {
+                        continue;
+                    }
                     let tf = if let Some(Value::Int64(freq)) = rel_vals.first() {
                         *freq as f64
                     } else {
@@ -352,5 +386,134 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
         chunk.size = n;
         chunk.field_names = vec!["doc_id".to_string(), "score".to_string()];
         Ok(vec![chunk])
+    }
+}
+
+impl PhysicalFtsScan {
+    /// Incrementally bring the derived FTS macro tables (docs/terms/postings)
+    /// in line with the source node table (P52.39).
+    ///
+    /// Rows appended to the source after `CREATE FTS INDEX` are tokenized and
+    /// added; existing terms get their `doc_freq` bumped. Rows that were
+    /// soft-deleted in the source are simply not re-inserted, and the scoring
+    /// pass filters them by source state, so no posting cleanup is required.
+    fn sync_index_with_source(&self) -> Result<(), String> {
+        let Some(source_table) = self.table_catalog.get_node_table_by_name(&self.table_name) else {
+            return Ok(());
+        };
+        let Some(col_idx) = source_table.columns.iter().position(|c| c.name == self.column_name) else {
+            return Ok(());
+        };
+        let source_count = source_table.num_rows as usize;
+
+        let already_indexed = match self.table_catalog.get_node_table_by_name(&self.docs_table) {
+            Some(docs) => docs.num_rows as usize,
+            None => return Ok(()),
+        };
+
+        if already_indexed >= source_count {
+            return Ok(());
+        }
+
+        // Collect the text of source rows not yet indexed.
+        let mut new_docs: Vec<(usize, String)> = Vec::new();
+        for row_id in already_indexed..source_count {
+            if let Some(Value::String(s)) = source_table.get_value(row_id, col_idx) {
+                new_docs.push((row_id, s.clone()));
+            }
+        }
+        drop(source_table);
+
+        if new_docs.is_empty() {
+            return Ok(());
+        }
+
+        // term -> (term_id, doc_freq, terms-table row) from the current terms.
+        let mut term_info: std::collections::HashMap<String, (i64, i64, usize)> = std::collections::HashMap::new();
+        let mut max_term_id: i64 = -1;
+        {
+            let terms = self
+                .table_catalog
+                .get_node_table_by_name(&self.terms_table)
+                .ok_or_else(|| format!("Terms table '{}' not found", self.terms_table))?;
+            let data = terms.to_column_major_data();
+            for row_idx in 0..terms.num_rows as usize {
+                let term_id = match data.first().and_then(|d| d.get(row_idx)) {
+                    Some(Value::Int64(id)) => *id,
+                    _ => continue,
+                };
+                let term = match data.get(1).and_then(|d| d.get(row_idx)) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => continue,
+                };
+                let df = match data.get(2).and_then(|d| d.get(row_idx)) {
+                    Some(Value::Int64(v)) => *v,
+                    _ => 0,
+                };
+                max_term_id = max_term_id.max(term_id);
+                term_info.insert(term, (term_id, df, row_idx));
+            }
+        }
+
+        let mut next_term_id = max_term_id + 1;
+        let mut new_postings: Vec<(i64, usize, i64)> = Vec::new();
+        let mut new_terms: Vec<(i64, String)> = Vec::new();
+        let mut df_updates: Vec<(usize, i64)> = Vec::new(); // (terms-table row, new doc_freq)
+
+        for (doc_id, text) in &new_docs {
+            let mut freq: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            for token in akar_fts::tokenize(text) {
+                let stemmed = akar_fts::stem_word(&token);
+                if !akar_fts::STOP_WORDS.contains(&stemmed.as_str()) {
+                    *freq.entry(stemmed).or_insert(0) += 1;
+                }
+            }
+            for (term, f) in freq {
+                if let Some((term_id, df, row_idx)) = term_info.get_mut(&term) {
+                    *df += 1;
+                    df_updates.push((*row_idx, *df));
+                    new_postings.push((*term_id, *doc_id, f));
+                } else {
+                    let tid = next_term_id;
+                    next_term_id += 1;
+                    term_info.insert(term.clone(), (tid, 1, usize::MAX));
+                    new_terms.push((tid, term));
+                    new_postings.push((tid, *doc_id, f));
+                }
+            }
+        }
+
+        // Apply writes to the macro tables.
+        {
+            let mut docs = self
+                .table_catalog
+                .get_node_table_by_name_mut(&self.docs_table)
+                .ok_or_else(|| format!("Docs table '{}' not found", self.docs_table))?;
+            for (doc_id, text) in &new_docs {
+                docs.insert_row(vec![Value::Int64(*doc_id as i64), Value::String(text.clone())])?;
+            }
+        }
+        {
+            let mut terms = self
+                .table_catalog
+                .get_node_table_by_name_mut(&self.terms_table)
+                .ok_or_else(|| format!("Terms table '{}' not found", self.terms_table))?;
+            for (term_id, term) in &new_terms {
+                terms.insert_row(vec![Value::Int64(*term_id), Value::String(term.clone()), Value::Int64(1)])?;
+            }
+            for (row_idx, df) in df_updates {
+                terms.update_cell(row_idx as u64, 2, Value::Int64(df))?;
+            }
+        }
+        {
+            let mut posting = self
+                .table_catalog
+                .get_rel_table_by_name_mut(&self.posting_table)
+                .ok_or_else(|| format!("Posting table '{}' not found", self.posting_table))?;
+            for (term_id, doc_id, f) in &new_postings {
+                posting.insert_rel(*term_id as u64, *doc_id as u64, vec![Value::Int64(*f)])?;
+            }
+        }
+        Ok(())
     }
 }

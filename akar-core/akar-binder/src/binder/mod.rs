@@ -312,13 +312,25 @@ impl Binder {
         }
 
         // Bind optional FTS query
-        let fts_query = m.fts_query.as_ref().map(|fq| BoundFtsQuery {
-            index_name: fq.index_name.clone(),
-            query_string: fq.query_string.clone(),
-            docs_table: format!("fts_{}_docs", fq.index_name),
-            terms_table: format!("fts_{}_terms", fq.index_name),
-            posting_table: format!("fts_{}_appears_in", fq.index_name),
-        });
+        let fts_query = match m.fts_query.as_ref().map(|fq| -> Result<BoundFtsQuery, String> {
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+            let (table_name, column_name) = catalog
+                .get_fts_index(&fq.index_name)
+                .map(|(t, c)| (t.to_string(), c.to_string()))
+                .unwrap_or_default();
+            Ok(BoundFtsQuery {
+                index_name: fq.index_name.clone(),
+                query_string: fq.query_string.clone(),
+                docs_table: format!("fts_{}_docs", fq.index_name),
+                terms_table: format!("fts_{}_terms", fq.index_name),
+                posting_table: format!("fts_{}_appears_in", fq.index_name),
+                table_name,
+                column_name,
+            })
+        }) {
+            Some(r) => Some(r?),
+            None => None,
+        };
 
         Ok((
             BoundMatchClause {
@@ -1575,6 +1587,15 @@ impl Binder {
         let docs_table = format!("fts_{index_name}_docs");
         let terms_table = format!("fts_{index_name}_terms");
         let posting_table = format!("fts_{index_name}_appears_in");
+
+        // Register the FTS index → source mapping so `USING FTS INDEX` scans
+        // can keep the derived macro tables in sync with live DML (P52.39).
+        {
+            let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            catalog
+                .register_fts_index(index_name.clone(), f.table_name.clone(), f.column_name.clone())
+                .map_err(|e| format!("Failed to register FTS index: {e}"))?;
+        }
 
         // Register macro tables in the logical catalog
         {

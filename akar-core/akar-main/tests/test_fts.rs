@@ -114,3 +114,46 @@ fn test_fts_with_where_predicate() -> Result<(), String> {
 
     Ok(())
 }
+
+#[test]
+fn test_fts_catches_up_rows_after_index() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'A fast graph database in Rust'})")?;
+    conn.query("CREATE (d:Document {id: 2, title: 'Rust Language', content: 'A systems programming language'})")?;
+    conn.query("CREATE (d:Document {id: 3, title: 'Python', content: 'A slow scripting language'})")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    // Baseline: the term is not present in any indexed row.
+    let base = conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id, d.title")?;
+    assert_eq!(base.chunks.first().unwrap().size, 0, "no match before the row exists");
+
+    // Insert a row AFTER the index was created.
+    conn.query("CREATE (d:Document {id: 4, title: 'Katana', content: 'katana rust embedded vector database'})")?;
+
+    // P52.39 catch-up: the newly inserted row must be searchable.
+    let res = conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id, d.title")?;
+    let chunk = res.chunks.first().unwrap();
+    assert_eq!(chunk.size, 1, "row inserted after CREATE FTS INDEX must be searchable");
+    let id = match chunk.get_value(0, 0).unwrap() {
+        Value::Int64(v) => v,
+        _ => panic!("Expected Int64 id, got {:?}", chunk.get_value(0, 0).unwrap()),
+    };
+    assert_eq!(id, 4, "catch-up must return the post-index row");
+
+    // P52.39 deleted-row filter: a deleted doc must no longer match.
+    let del_res = conn.query("MATCH (d:Document) WHERE d.id = 4 DELETE d")?;
+    assert_eq!(
+        del_res.chunks.first().unwrap().get_i64(0, 0).unwrap(),
+        1,
+        "DELETE should remove exactly 1 row"
+    );
+    let after = conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id, d.title")?;
+    let chunk_after = after.chunks.first().unwrap();
+    assert_eq!(chunk_after.size, 0, "deleted row must not remain searchable");
+
+    Ok(())
+}

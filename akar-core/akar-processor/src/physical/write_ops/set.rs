@@ -1,6 +1,6 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::delete::ast_constant_to_value;
+use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index};
 use akar_common::types::PhysicalTypeID;
 use akar_common::types::Value;
 use akar_common::vector::{DataChunk, ValueVector};
@@ -29,13 +29,17 @@ impl PhysicalOperatorExec for PhysicalSet {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        // Collect row indices from input chunks (first column has row index)
+        // Collect row indices from input chunks. The scan emits the physical
+        // row index as the `<alias>._id` column (last column); reading column 0
+        // would treat the first *property* value as a row index.
         let mut rows_to_update: Vec<(u64, akar_common::types::Value)> = Vec::new();
 
         for chunk in &input {
+            let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty()
-                    && let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(0, row)
+                    && let Some(akar_common::types::Value::Int64(val)) =
+                        chunk.get_value(row_id_col.unwrap_or(0), row)
                 {
                     // Evaluate the SET value expression against the current row
                     let set_val = evaluate_expression_for_row(&self.value, chunk, row);
@@ -56,8 +60,16 @@ impl PhysicalOperatorExec for PhysicalSet {
         let mut updated = 0u64;
         if self.is_node {
             if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                // The binder hardcodes `column_idx: 0` ("resolved by catalog
+                // lookup") but never resolves it — resolve by name at runtime
+                // so `SET n.prop = v` writes to `prop`, not column 0.
+                let col_idx = table
+                    .columns
+                    .iter()
+                    .position(|c| c.name == self.column_name)
+                    .unwrap_or(self.column_idx);
                 for (row_idx, val) in &rows_to_update {
-                    if table.update_cell(*row_idx, self.column_idx, val.clone()).is_ok() {
+                    if table.update_cell(*row_idx, col_idx, val.clone()).is_ok() {
                         updated += 1;
                     }
                 }
@@ -66,9 +78,14 @@ impl PhysicalOperatorExec for PhysicalSet {
             }
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
+                let col_idx = table
+                    .columns
+                    .iter()
+                    .position(|c| c.name == self.column_name)
+                    .unwrap_or(self.column_idx);
                 for (edge_idx, val) in &rows_to_update {
                     if table
-                        .update_cell(*edge_idx as usize, self.column_idx, val.clone())
+                        .update_cell(*edge_idx as usize, col_idx, val.clone())
                         .is_ok()
                     {
                         updated += 1;

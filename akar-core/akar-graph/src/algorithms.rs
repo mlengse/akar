@@ -66,22 +66,31 @@ pub fn page_rank(csr: &CSRAdjacency, damping: f64, max_iter: usize, tol: f64) ->
     for _iter in 0..max_iter {
         let mut new_pr = vec![base; n];
 
+        // Dangling mass: total PR of nodes with no outgoing edges, distributed
+        // once per iteration instead of O(n) per dangling node (P52.48).
+        let dangling_mass: f64 = (0..n)
+            .filter(|&i| csr.neighbors(i).is_empty())
+            .map(|i| pr[i])
+            .sum();
+
         for i in 0..n {
             let neighbors = csr.neighbors(i);
             if neighbors.is_empty() {
-                // Dangling node: distribute equally
-                let share = pr[i] / n as f64;
-                for j in 0..n {
+                continue;
+            }
+            let share = pr[i] / neighbors.len() as f64;
+            for (_, dst) in neighbors {
+                let j = dst.offset as usize;
+                if j < n {
                     new_pr[j] += damping * share;
                 }
-            } else {
-                let share = pr[i] / neighbors.len() as f64;
-                for (_, dst) in neighbors {
-                    let j = dst.offset as usize;
-                    if j < n {
-                        new_pr[j] += damping * share;
-                    }
-                }
+            }
+        }
+
+        if dangling_mass > 0.0 {
+            let dangling_share = damping * dangling_mass / n as f64;
+            for val in new_pr.iter_mut() {
+                *val += dangling_share;
             }
         }
 
@@ -106,12 +115,20 @@ pub fn weakly_connected_components(csr: &CSRAdjacency) -> AlgorithmResult {
     let n = csr.num_nodes();
     let mut parent: Vec<usize> = (0..n).collect();
 
-    // Union-Find: find with path compression
+    // Union-Find: find with iterative path compression (P52.44 — the recursive
+    // variant overflowed the stack on deep chains).
     fn find(parent: &mut [usize], x: usize) -> usize {
-        if parent[x] != x {
-            parent[x] = find(parent, parent[x]);
+        let mut root = x;
+        while parent[root] != root {
+            root = parent[root];
         }
-        parent[x]
+        let mut cur = x;
+        while parent[cur] != root {
+            let next = parent[cur];
+            parent[cur] = root;
+            cur = next;
+        }
+        root
     }
 
     // Union
@@ -345,5 +362,24 @@ mod tests {
 
         let wcc = weakly_connected_components(&csr);
         assert!(wcc.values.is_empty());
+    }
+
+    #[test]
+    fn test_wcc_deep_chain_no_stack_overflow() {
+        // P52.44: the recursive union-find find() overflowed the stack on a
+        // deep chain (200k nodes, 0→1→2→…). Iterative find must handle it.
+        let n: usize = 200_000;
+        let edges: Vec<Edge> = (0..n - 1)
+            .map(|i| Edge {
+                src_offset: i as u64,
+                dst_offset: (i + 1) as u64,
+                rel_id: i as u64,
+                rel_table_id: 0,
+            })
+            .collect();
+        let csr = CSRAdjacency::build(&edges, n);
+        let result = weakly_connected_components(&csr);
+        assert_eq!(result.values.len(), n);
+        assert!((result.values[0] - result.values[n - 1]).abs() < 1e-10);
     }
 }

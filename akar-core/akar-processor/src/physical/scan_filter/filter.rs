@@ -1,8 +1,11 @@
 use crate::expression_evaluator::ExpressionEvaluator;
+use crate::physical::common::value_cmp;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use crate::processor::projection_helper::resolve_projection_column_index;
 use akar_common::arrow_vector::VectorAccess;
 use akar_common::error::ProcessorError;
 use akar_common::selection::SelectionVector;
+use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
 use arrow::array::Array;
@@ -111,47 +114,147 @@ impl PhysicalFilter {
     }
 
     fn evaluate_expression_legacy(expr: &Expression, chunk: &DataChunk) -> Result<Vec<bool>, ProcessorError> {
+        let size = chunk.size;
+        let mut mask = Vec::with_capacity(size);
+        for i in 0..size {
+            mask.push(Self::legacy_row_truthy(expr, chunk, i));
+        }
+        Ok(mask)
+    }
+
+    /// Evaluate `expr` for a single row into an optional Value (None = NULL)
+    /// using only chunk data — the fallback path when no ExpressionEvaluator
+    /// is available. Unlike the old mask-based recursion, NULL semantics and
+    /// numeric comparisons are handled correctly (P52.43).
+    fn legacy_row_value(expr: &Expression, chunk: &DataChunk, row: usize) -> Option<Value> {
         match expr {
             Expression::BinaryOp(op, left, right) => {
-                let left_vals = Self::evaluate_expression_legacy(left, chunk)?;
-                let right_vals = Self::evaluate_expression_legacy(right, chunk)?;
-                evaluate_binary_op_legacy(op, &left_vals, &right_vals, chunk.size)
+                let l = Self::legacy_row_value(left, chunk, row);
+                let r = Self::legacy_row_value(right, chunk, row);
+                match op {
+                    BinaryOp::And | BinaryOp::Or | BinaryOp::Xor => legacy_logic(op, &l, &r),
+                    _ => legacy_compare(op, &l, &r),
+                }
             }
             Expression::UnaryOp(op, inner) => {
-                let vals = Self::evaluate_expression_legacy(inner, chunk)?;
+                let v = Self::legacy_row_value(inner, chunk, row);
                 match op {
-                    UnaryOp::Not => Ok(vals.iter().map(|v| !v).collect()),
-                    UnaryOp::Negate => Ok(vals.iter().map(|v| !v).collect()),
-                    UnaryOp::IsNull => Ok(vec![false; chunk.size]),
-                    UnaryOp::IsNotNull => Ok(vals),
+                    UnaryOp::Not => v.map(|val| match val {
+                        Value::Bool(b) => Value::Bool(!b),
+                        _ => Value::Null,
+                    }),
+                    UnaryOp::Negate => v.map(|val| match val {
+                        Value::Int64(i) => Value::Int64(i.wrapping_neg()),
+                        Value::Int32(i) => Value::Int64(-(i as i64)),
+                        Value::Int16(i) => Value::Int64(-(i as i64)),
+                        Value::Int8(i) => Value::Int64(-(i as i64)),
+                        Value::UInt64(i) => Value::Int64(-(i as i64)),
+                        Value::UInt32(i) => Value::Int64(-(i as i64)),
+                        Value::Double(d) => Value::Double(-d),
+                        Value::Float(f) => Value::Double(-(f as f64)),
+                        _ => Value::Null,
+                    }),
+                    UnaryOp::IsNull => Some(Value::Bool(v.is_none())),
+                    UnaryOp::IsNotNull => Some(Value::Bool(v.is_some())),
                 }
             }
-            Expression::Variable(_name) => {
-                if let Some(field) = chunk.fields.first() {
-                    Ok((0..chunk.size).map(|i| !field.is_null(i)).collect())
+            Expression::Variable(_) | Expression::PropertyAccess(_, _) => {
+                if let Some(col) = resolve_projection_column_index(expr, chunk) {
+                    chunk.get_value(col, row)
+                } else if !chunk.fields.is_empty() {
+                    // Unresolved variable: fall back to the first column (legacy
+                    // behavior) so bare-variable predicates keep working.
+                    chunk.get_value(0, row)
                 } else {
-                    Ok(vec![true; chunk.size])
+                    None
                 }
             }
-            Expression::Constant(c) => {
-                let val = match c {
-                    Constant::Bool(true) | Constant::Integer(1) => true,
-                    _ => false,
-                };
-                Ok(vec![val; chunk.size])
-            }
-            Expression::PropertyAccess(obj, _prop) => Self::evaluate_expression_legacy(obj, chunk),
-            Expression::FunctionCall(_, _)
-            | Expression::List(_)
-            | Expression::Map(_)
-            | Expression::Parameter(_)
-            | Expression::ExistsSubquery(_)
-            | Expression::Case(_)
-            | Expression::Star
-            | Expression::ListPredicate { .. }
-            | Expression::Lambda { .. } => Ok(vec![true; chunk.size]),
+            Expression::Constant(c) => Some(match c {
+                Constant::Bool(b) => Value::Bool(*b),
+                Constant::Integer(i) => Value::Int64(*i),
+                Constant::Float(f) => Value::Double(*f),
+                Constant::String(s) => Value::String(s.clone()),
+                Constant::Null => Value::Null,
+            }),
+            _ => Some(Value::Null),
         }
     }
+
+    fn legacy_row_truthy(expr: &Expression, chunk: &DataChunk, row: usize) -> bool {
+        match Self::legacy_row_value(expr, chunk, row) {
+            None => false,
+            Some(v) => legacy_truthy(&v),
+        }
+    }
+}
+
+/// SQL truthiness for a non-null Value.
+fn legacy_truthy(v: &Value) -> bool {
+    match v {
+        Value::Bool(b) => *b,
+        Value::Int64(i) => *i != 0,
+        Value::Int32(i) => *i != 0,
+        Value::Int16(i) => *i != 0,
+        Value::Int8(i) => *i != 0,
+        Value::UInt64(i) => *i != 0,
+        Value::UInt32(i) => *i != 0,
+        Value::UInt16(i) => *i != 0,
+        Value::UInt8(i) => *i != 0,
+        Value::Double(d) => *d != 0.0,
+        Value::Float(f) => *f != 0.0,
+        Value::String(s) => !s.is_empty(),
+        _ => true,
+    }
+}
+
+/// Three-valued AND/OR/XOR for the legacy filter path.
+fn legacy_logic(op: &BinaryOp, l: &Option<Value>, r: &Option<Value>) -> Option<Value> {
+    let lb = match l {
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => Some(true),
+        None => None,
+    };
+    let rb = match r {
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => Some(true),
+        None => None,
+    };
+    let res = match op {
+        BinaryOp::And => match (lb, rb) {
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (Some(true), Some(true)) => Some(true),
+            _ => None,
+        },
+        BinaryOp::Or => match (lb, rb) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        },
+        BinaryOp::Xor => match (lb, rb) {
+            (Some(a), Some(b)) => Some(a ^ b),
+            _ => None,
+        },
+        _ => None,
+    };
+    res.map(Value::Bool)
+}
+
+/// NULL-aware comparison for the legacy filter path.
+fn legacy_compare(op: &BinaryOp, l: &Option<Value>, r: &Option<Value>) -> Option<Value> {
+    let (Some(a), Some(b)) = (l, r) else {
+        return None;
+    };
+    let ord = value_cmp(a, b);
+    let res = match op {
+        BinaryOp::Equal => ord == std::cmp::Ordering::Equal,
+        BinaryOp::NotEqual => ord != std::cmp::Ordering::Equal,
+        BinaryOp::GreaterThan => ord == std::cmp::Ordering::Greater,
+        BinaryOp::GreaterThanOrEqual => ord != std::cmp::Ordering::Less,
+        BinaryOp::LessThan => ord == std::cmp::Ordering::Less,
+        BinaryOp::LessThanOrEqual => ord != std::cmp::Ordering::Greater,
+        _ => true,
+    };
+    Some(Value::Bool(res))
 }
 
 impl PhysicalOperatorExec for PhysicalFilter {
@@ -189,24 +292,4 @@ impl PhysicalOperatorExec for PhysicalFilter {
         }
         Ok(output)
     }
-}
-
-fn evaluate_binary_op_legacy(
-    op: &BinaryOp,
-    left: &[bool],
-    right: &[bool],
-    size: usize,
-) -> Result<Vec<bool>, ProcessorError> {
-    let len = left.len().min(right.len()).min(size);
-    let result: Vec<bool> = (0..len)
-        .map(|i| match op {
-            BinaryOp::And => left[i] && right[i],
-            BinaryOp::Or => left[i] || right[i],
-            BinaryOp::Xor => left[i] ^ right[i],
-            BinaryOp::Equal => left[i] == right[i],
-            BinaryOp::NotEqual => left[i] != right[i],
-            _ => true,
-        })
-        .collect();
-    Ok(result)
 }

@@ -5,8 +5,8 @@ use akar_binder::bound_statement::BoundExpression;
 use akar_common::types::{LogicalTypeID, PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::FunctionRegistry;
-use akar_parser::ast::{Constant, Expression};
-use akar_planner::logical_operator::LogicalOperator;
+use akar_parser::ast::{BinaryOp, Constant, Expression, UnaryOp};
+use akar_planner::logical_operator::{LogicalOperator, LogicalScanNode};
 use akar_storage::table::{ColumnDefinition, TableCatalog};
 use hashbrown::HashMap;
 use std::sync::{Arc, Mutex};
@@ -1151,5 +1151,96 @@ mod tests {
             result[0].size, 2,
             "probe id 1 matches build row 0, id 2 matches nothing"
         );
+    }
+
+    #[test]
+    fn test_skip_long_string_no_panic() {
+        // P52.41: PhysicalSkip used to panic via .unwrap() when set_value fails
+        // on a string > 255 bytes; must degrade to NULL instead.
+        let short = "abc".to_string();
+        let long = "x".repeat(300);
+        // Build the chunk from Arrow so it can hold a >255-byte string (the
+        // legacy inline ValueVector storage caps at 255 bytes).
+        let arr = arrow::array::StringArray::from(vec![Some(short.clone()), Some(long.clone()), Some(short.clone())]);
+        let input = vec![DataChunk::new(
+            vec![std::sync::Arc::new(arr) as arrow::array::ArrayRef],
+            vec![PhysicalTypeID::String],
+        )];
+        let skip = PhysicalSkip { skip_count: 1 };
+        let result = skip.execute(input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 2);
+        assert!(result[0].get_value(0, 0).is_none(), "oversized string should degrade to NULL");
+        let second = result[0].get_value(0, 1).unwrap();
+        assert_eq!(second, Value::String(short));
+    }
+
+    #[test]
+    fn test_scan_predicate_without_registry_returns_error_not_panic() {
+        // P52.42: scan node with predicate but no function registry used to
+        // panic (.unwrap()); must surface an error instead.
+        let proc = QueryProcessor::new();
+        let scan = LogicalOperator::ScanNode(LogicalScanNode {
+            predicate: Some(Expression::BinaryOp(
+                BinaryOp::GreaterThan,
+                Box::new(Expression::Variable("a.age".into())),
+                Box::new(Expression::Constant(Constant::Integer(20))),
+            )),
+            table_name: "Person".into(),
+            table_id: 0,
+            alias: Some("a".into()),
+            columns: vec!["age".into()],
+            cardinality: 1,
+            fts_query: None,
+        });
+        let result = proc.execute(&[scan]);
+        assert!(
+            result.is_err(),
+            "expected Err when registry is missing, got {:?}",
+            result.as_ref().map(|r| r.len())
+        );
+    }
+
+    #[test]
+    fn test_legacy_filter_null_semantics() {
+        // P52.43: legacy (no-evaluator) filter must handle IS NULL / IS NOT
+        // NULL correctly — the old path returned all-false / un-inverted.
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        v.set_i64(0, 1);
+        v.set_null(1, true);
+        v.set_i64(2, 3);
+        let input = vec![DataChunk::from_legacy(vec![v])];
+
+        let is_null = PhysicalFilter::new(Expression::UnaryOp(
+            UnaryOp::IsNull,
+            Box::new(Expression::Variable("0".into())),
+        ));
+        let r = is_null.execute(input.clone()).unwrap();
+        assert_eq!(r[0].size, 1, "only row 1 is NULL");
+        assert!(r[0].get_value(0, 0).is_none(), "the single surviving row must be the NULL row");
+
+        let is_not_null = PhysicalFilter::new(Expression::UnaryOp(
+            UnaryOp::IsNotNull,
+            Box::new(Expression::Variable("0".into())),
+        ));
+        let r = is_not_null.execute(input).unwrap();
+        assert_eq!(r[0].size, 2, "rows 0 and 2 are non-NULL");
+    }
+
+    #[test]
+    fn test_legacy_filter_numeric_comparison() {
+        // P52.43: legacy path must evaluate numeric comparisons correctly.
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 5);
+        for i in 0..5 {
+            v.set_i64(i, i as i64 * 10);
+        }
+        let input = vec![DataChunk::from_legacy(vec![v])];
+        let filter = PhysicalFilter::new(Expression::BinaryOp(
+            BinaryOp::GreaterThan,
+            Box::new(Expression::Variable("0".into())),
+            Box::new(Expression::Constant(Constant::Integer(20))),
+        ));
+        let r = filter.execute(input).unwrap();
+        assert_eq!(r[0].size, 2, "only 30 and 40 pass the > 20 filter");
     }
 }

@@ -29,11 +29,17 @@ impl PhysicalOperatorExec for PhysicalDelete {
         // Collect row indices from input chunks
         let mut rows_to_delete: Vec<u64> = self.row_indices.clone();
 
-        // If input has data, extract row indices from it
+        // If input has data, extract row indices from it.
+        // The scan emits the physical row index as the `<alias>._id` column
+        // (last column); reading column 0 would treat the first *property*
+        // value as a row index (wrong row or an out-of-range no-op).
         for chunk in &input {
+            let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty() {
-                    if let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(0, row) {
+                    if let Some(akar_common::types::Value::Int64(val)) =
+                        chunk.get_value(row_id_col.unwrap_or(0), row)
+                    {
                         rows_to_delete.push(val as u64);
                     }
                 }
@@ -106,4 +112,19 @@ pub fn ast_constant_to_value(c: &Constant) -> Value {
         Constant::Float(f) => Value::Double(*f),
         Constant::String(s) => Value::String(s.clone()),
     }
+}
+
+/// Locate the physical row index column in a scan-produced chunk.
+///
+/// Node scans append an internal node id column (`<alias>._id` = row offset)
+/// as the last column of each chunk (see `resolve_scan_arrow_data` and
+/// `resolve_scan_data`). Write operators (DELETE/SET) must read row indices
+/// from that column; reading column 0 would use the first *property* value
+/// as a row index. Falls back to `None` when the chunk carries no `_id`
+/// column (e.g. rel table scans), letting callers keep the legacy behaviour.
+pub fn row_id_column_index(chunk: &DataChunk) -> Option<usize> {
+    chunk
+        .field_names
+        .iter()
+        .position(|n| n == "_id" || n.ends_with("._id"))
 }

@@ -1355,6 +1355,74 @@ impl TableCatalog {
         self.vector_indexes.iter().collect()
     }
 
+    /// Rebuild a vector index from the current contents of its node table.
+    ///
+    /// The HNSW graph is re-populated with the live row ids and vectors, so
+    /// INSERT/DELETE after `CREATE VECTOR INDEX` are always reflected (P52.38).
+    pub fn refresh_vector_index(&self, index_id: u64) {
+        let (table_name, column_name) = match self.vector_indexes.get(&index_id) {
+            Some(vi) => (vi.table_name.clone(), vi.column_name.clone()),
+            None => return,
+        };
+
+        let col_idx = match self.get_node_table_by_name(&table_name) {
+            Some(t) => match t.columns.iter().position(|c| c.name == column_name) {
+                Some(idx) => idx,
+                None => return,
+            },
+            None => return,
+        };
+
+        // Collect (row_id, vector) pairs while holding the read reference,
+        // then re-insert under a single mutable borrow of the index.
+        let mut data: Vec<(usize, Vec<f64>)> = Vec::new();
+        if let Some(table) = self.get_node_table_by_name(&table_name) {
+            for row_id in 0..table.num_rows as usize {
+                if let Some(val) = table.get_value(row_id, col_idx) {
+                    if let Ok(vec) = crate::extract_f64_list_from_value(val) {
+                        data.push((row_id, vec));
+                    }
+                }
+            }
+        }
+        if data.is_empty() {
+            if let Some(mut vi) = self.vector_indexes.get_mut(&index_id) {
+                vi.hnsw_mut().clear();
+            }
+            return;
+        }
+
+        let mut vi = self.vector_indexes.get_mut(&index_id);
+        if let Some(vi) = vi.as_mut() {
+            vi.hnsw_mut().clear();
+            for (row_id, vec) in data {
+                vi.hnsw_mut().insert(vec, row_id);
+            }
+        }
+    }
+
+    /// Rebuild the vector indexes of all node tables written by a statement.
+    ///
+    /// Called after successful writes so the on-disk/in-memory HNSW graph never
+    /// serves stale or wrongly-positioned rows (P52.38).
+    pub fn refresh_vector_indexes_for_tables(&self, table_ids: &[u64]) {
+        for table_id in table_ids {
+            let table_name = match self.get_node_table(*table_id) {
+                Some(t) => t.name.clone(),
+                None => continue,
+            };
+            let index_ids: Vec<u64> = self
+                .vector_indexes
+                .iter()
+                .filter(|vi| vi.table_name == table_name)
+                .map(|vi| *vi.key())
+                .collect();
+            for index_id in index_ids {
+                self.refresh_vector_index(index_id);
+            }
+        }
+    }
+
     /// Create an ART (Adaptive Radix Tree) index on a node table's PK column.
     ///
     /// Creates a new `ArtPrimaryKeyIndex`, backfills it with all existing rows,
@@ -1836,5 +1904,60 @@ mod tests {
         assert!(cat.get_node_table(0).is_some());
         assert!(cat.get_rel_table(1).is_some());
         assert_eq!(cat.node_table_num_rows("Person"), 0);
+    }
+
+    #[test]
+    fn test_refresh_vector_index_after_dml() {
+        // P52.38: the HNSW graph used to be populated only during CREATE VECTOR
+        // INDEX; rows inserted later went un-indexed. refresh_vector_indexes_for_tables
+        // must rebuild the graph from the live table so post-index DML is visible.
+        let cat = TableCatalog::new();
+        cat.create_node_table(
+            "Item".into(),
+            vec![
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "embedding".into(),
+                    logical_type: LogicalTypeID::List,
+                    is_primary_key: false,
+                },
+            ],
+        );
+
+        let vec3 = |x: f64, y: f64, z: f64| Value::List(vec![Value::Double(x), Value::Double(y), Value::Double(z)]);
+        {
+            let mut t = cat.get_node_table_by_name_mut("Item").unwrap();
+            t.insert_row(vec![Value::Int64(1), vec3(1.0, 0.0, 0.0)]).unwrap();
+            t.insert_row(vec![Value::Int64(2), vec3(0.0, 1.0, 0.0)]).unwrap();
+            t.insert_row(vec![Value::Int64(3), vec3(0.0, 0.0, 1.0)]).unwrap();
+        }
+
+        cat.create_vector_index("item_vec".into(), "Item".into(), "embedding".into(), DistanceMetric::Cosine, 3);
+
+        // Seed the index from the 3 pre-existing rows; the vector for row 2 must exist.
+        cat.refresh_vector_indexes_for_tables(&[0]);
+        {
+            let vi = cat.get_vector_index(1).unwrap();
+            assert_eq!(vi.hnsw().len(), 3);
+            assert!(vi.hnsw().get_vector(2).is_some());
+        }
+
+        // Rows inserted AFTER the index was created must become searchable.
+        {
+            let mut t = cat.get_node_table_by_name_mut("Item").unwrap();
+            t.insert_row(vec![Value::Int64(4), vec3(1.0, 1.0, 0.0)]).unwrap();
+            t.insert_row(vec![Value::Int64(5), vec3(0.0, 1.0, 1.0)]).unwrap();
+        }
+
+        cat.refresh_vector_indexes_for_tables(&[0]);
+        let vi = cat.get_vector_index(1).unwrap();
+        assert_eq!(vi.hnsw().len(), 5);
+        assert!(vi.hnsw().get_vector(4).is_some());
     }
 }

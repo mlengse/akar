@@ -73,6 +73,8 @@ pub fn map_and_execute_scan_node(
             docs_table: fq.docs_table.clone(),
             terms_table: fq.terms_table.clone(),
             posting_table: fq.posting_table.clone(),
+            table_name: fq.table_name.clone(),
+            column_name: fq.column_name.clone(),
             table_catalog: ctx
                 .table_catalog
                 .clone()
@@ -81,9 +83,11 @@ pub fn map_and_execute_scan_node(
     }
     if let Some(ref pred) = s.predicate {
         scan = scan.with_predicate(pred.clone());
-        scan = scan.with_evaluator(Arc::new(Mutex::new(ExpressionEvaluator::new(
-            ctx.function_registry.clone().unwrap(),
-        ))));
+        let registry = ctx
+            .function_registry
+            .clone()
+            .ok_or_else(|| "No function registry available for predicate evaluation".to_string())?;
+        scan = scan.with_evaluator(Arc::new(Mutex::new(ExpressionEvaluator::new(registry))));
     }
     let mut result = scan.execute(current_input)?;
     let prefix = s.alias.as_ref().unwrap_or(&s.table_name);

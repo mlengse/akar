@@ -149,6 +149,15 @@ impl HnswIndex {
         self.nodes.is_empty()
     }
 
+    /// Remove all vectors and reset the graph to an empty state.
+    ///
+    /// Used to rebuild the index from live table data after DML (P52.38).
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.max_level = 0;
+        self.entry_point = None;
+    }
+
     /// Get the current maximum level of the graph.
     pub fn max_level(&self) -> usize {
         self.max_level
@@ -219,6 +228,9 @@ impl HnswIndex {
     /// Search layer 0 for the `k` nearest neighbours, starting from a given
     /// entry point. Uses a simple greedy descent with a candidate set.
     fn search_layer_0(&self, entry: usize, query: &[f64], k: usize) -> Vec<(f64, usize)> {
+        if k == 0 {
+            return Vec::new();
+        }
         let mut candidates = Vec::new();
         let mut visited = HashSet::new();
 
@@ -380,7 +392,7 @@ impl HnswIndex {
     /// Returns a list of `(distance, node_id)` pairs sorted by distance
     /// (closest first).
     pub fn search(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
-        if self.nodes.is_empty() || self.entry_point.is_none() {
+        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 {
             return Vec::new();
         }
 
@@ -458,6 +470,16 @@ mod tests {
         assert!(idx.is_empty());
         assert_eq!(idx.len(), 0);
         assert!(idx.search(&[1.0, 2.0, 3.0], 5).is_empty());
+    }
+
+    #[test]
+    fn test_search_k_zero_returns_empty() {
+        // P52.29: k=0 used to underflow `results[k - 1]` and panic.
+        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        for i in 0..20 {
+            idx.insert(vec![i as f64, i as f64], i);
+        }
+        assert!(idx.search(&[0.0, 0.0], 0).is_empty());
     }
 
     #[test]

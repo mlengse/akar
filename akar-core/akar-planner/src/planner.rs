@@ -333,6 +333,8 @@ impl QueryPlanner {
                         docs_table: fq.docs_table.clone(),
                         terms_table: fq.terms_table.clone(),
                         posting_table: fq.posting_table.clone(),
+                        table_name: fq.table_name.clone(),
+                        column_name: fq.column_name.clone(),
                         cardinality: 0,
                     });
                     let patterns: Vec<BoundPattern> = std::mem::take(&mut m.patterns);

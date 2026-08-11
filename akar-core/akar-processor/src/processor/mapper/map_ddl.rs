@@ -383,6 +383,8 @@ pub fn map_and_execute_ddl(
                     docs_table: s.docs_table.clone(),
                     terms_table: s.terms_table.clone(),
                     posting_table: s.posting_table.clone(),
+                    table_name: s.table_name.clone(),
+                    column_name: s.column_name.clone(),
                     table_catalog: tc.clone(),
                 };
                 let result = fts_scan.execute(current_input)?;

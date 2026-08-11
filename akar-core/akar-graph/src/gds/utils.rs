@@ -183,15 +183,17 @@ impl GDSUtils {
 
                 if new_cost < old_cost {
                     dist[nbr as usize] = new_cost;
-                    // Replace parent with better path
-                    bfs_graph.try_add_single_parent_with_weight(bound_node_id, edge_id, *dst, true, weight);
+                    // Record the cumulative path cost, not the edge weight
+                    // (P52.45 — passing only the edge weight made the cost
+                    // comparison reject better paths / record wrong parents).
+                    bfs_graph.try_add_single_parent_with_weight(bound_node_id, edge_id, *dst, true, new_cost);
                     heap.push(std::cmp::Reverse(HeapNode {
                         cost: new_cost,
                         node: nbr,
                     }));
                 } else if (new_cost - old_cost).abs() < f64::EPSILON {
                     // Alternative path with same cost (for all-weighted-shortest-paths)
-                    bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, weight);
+                    bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, new_cost);
                 }
             }
         }
@@ -254,7 +256,7 @@ impl GDSUtils {
                 let old_cost = dist[nbr as usize];
 
                 if new_cost < old_cost + f64::EPSILON
-                    && bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, weight)
+                    && bfs_graph.try_add_parent_with_weight(bound_node_id, edge_id, *dst, true, new_cost)
                     && new_cost < old_cost
                 {
                     dist[nbr as usize] = new_cost;
@@ -382,5 +384,35 @@ mod tests {
         // Node 4 should be reachable
         let parent = bfs.get_parent_list_head_offset(4);
         assert!(parent.is_some());
+    }
+
+    #[test]
+    fn test_weighted_shortest_path_records_path_cost() {
+        // P52.45: parent cost must be the cumulative path cost, not the edge
+        // weight. 0→1 (w=1) →2 (w=10) beats the direct 0→2 (w=100): node 2's
+        // recorded parent cost is 11, and the parent is node 1.
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            Edge { src_offset: 0, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 3);
+        let mut bfs = DenseBFSGraph::new(3);
+
+        let weights = |src: u64, dst: u64, eid: u64| {
+            if eid == 2 {
+                100.0 // direct 0→2
+            } else if eid == 1 {
+                10.0 // 1→2
+            } else {
+                1.0 // 0→1
+            }
+        };
+        GDSUtils::run_weighted_shortest_path(&csr, 0, &mut bfs, weights);
+
+        let parent = bfs.get_parent_list_head_offset(2).expect("node 2 reachable");
+        assert!((parent.cost - 11.0).abs() < 1e-9, "cost should be path cost 11, got {}", parent.cost);
+        assert_eq!(parent.node_id.offset, 1, "parent should be node 1 (via cheaper path)");
+        assert_eq!(parent.edge_id, 1);
     }
 }

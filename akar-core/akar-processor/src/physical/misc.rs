@@ -115,14 +115,14 @@ impl PhysicalOperatorExec for PhysicalSkip {
                 let phys_type = chunk.field_types[col_idx];
                 let mut new_field = ValueVector::new(phys_type, keep_size);
                 for i in 0..keep_size {
-                    new_field
-                        .set_value(
-                            i,
-                            &chunk
-                                .get_value(col_idx, remaining_skip + i)
-                                .unwrap_or(akar_common::types::Value::Null),
-                        )
-                        .unwrap();
+                    let val = chunk
+                        .get_value(col_idx, remaining_skip + i)
+                        .unwrap_or(akar_common::types::Value::Null);
+                    // set_value returns Err only for strings > 255 bytes (legacy
+                    // inline storage limit); drop to NULL instead of panicking.
+                    if new_field.set_value(i, &val).is_err() {
+                        new_field.set_null(i, true);
+                    }
                 }
                 sliced_fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&new_field).array);
                 sliced_types.push(phys_type);

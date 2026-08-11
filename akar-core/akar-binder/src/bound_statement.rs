@@ -216,6 +216,10 @@ pub struct BoundFtsQuery {
     pub docs_table: String,
     pub terms_table: String,
     pub posting_table: String,
+    /// The source node table/column the index was created on (P52.39), used
+    /// to keep the derived macro tables in sync with live DML.
+    pub table_name: String,
+    pub column_name: String,
 }
 
 #[derive(Debug, Clone)]

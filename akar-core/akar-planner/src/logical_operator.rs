@@ -931,6 +931,9 @@ pub struct LogicalFtsScan {
     pub docs_table: String,
     pub terms_table: String,
     pub posting_table: String,
+    /// Source node table/column the index was created on (P52.39).
+    pub table_name: String,
+    pub column_name: String,
     pub cardinality: u64,
 }
 

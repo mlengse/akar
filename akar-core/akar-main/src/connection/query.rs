@@ -156,6 +156,15 @@ impl Connection {
             _ => {}
         }
 
+        // P52.38: after a successful write, rebuild the HNSW graph of any vector
+        // index on the written node tables so it reflects the current rows.
+        if query_result.is_ok() && Connection::is_write_statement(bound) {
+            let written = Connection::extract_write_tables(bound);
+            if !written.is_empty() {
+                self.database.refresh_vector_indexes(&written);
+            }
+        }
+
         query_result
     }
 

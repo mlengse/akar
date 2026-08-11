@@ -847,71 +847,66 @@ pub fn compute_wcc(csr: &CSRAdjacency) -> AlgoResult {
 /// Returns component ID (0-based) for each node.
 pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
-    let mut index = 0usize;
     let mut indices = vec![None; n];
     let mut lowlink = vec![0usize; n];
     let mut on_stack = vec![false; n];
     let mut stack: Vec<usize> = Vec::new();
     let mut component = vec![0usize; n];
     let mut comp_id = 0usize;
+    let mut next_index = 0usize;
 
-    fn strongconnect(
-        v: usize,
-        csr: &CSRAdjacency,
-        index: &mut usize,
-        indices: &mut [Option<usize>],
-        lowlink: &mut [usize],
-        on_stack: &mut [bool],
-        stack: &mut Vec<usize>,
-        component: &mut [usize],
-        comp_id: &mut usize,
-    ) {
-        indices[v] = Some(*index);
-        lowlink[v] = *index;
-        *index += 1;
-        stack.push(v);
-        on_stack[v] = true;
-
-        for (_, dst) in csr.neighbors(v) {
-            let w = dst.offset as usize;
-            if w >= csr.num_nodes() {
-                continue;
-            }
-            if indices[w].is_none() {
-                strongconnect(w, csr, index, indices, lowlink, on_stack, stack, component, comp_id);
-                lowlink[v] = lowlink[v].min(lowlink[w]);
-            } else if on_stack[w] {
-                lowlink[v] = lowlink[v].min(indices[w].unwrap());
-            }
+    // Iterative Tarjan (P52.47): the recursive strongconnect overflowed the
+    // stack on large/deep graphs. DFS stack holds (node, next neighbor pos).
+    for start in 0..n {
+        if indices[start].is_some() {
+            continue;
         }
+        indices[start] = Some(next_index);
+        lowlink[start] = next_index;
+        next_index += 1;
+        stack.push(start);
+        on_stack[start] = true;
+        let mut dfs_stack: Vec<(usize, usize)> = vec![(start, 0)];
 
-        if lowlink[v] == indices[v].unwrap() {
-            // Start a new SCC
-            loop {
-                let w = stack.pop().unwrap();
-                on_stack[w] = false;
-                component[w] = *comp_id;
-                if w == v {
-                    break;
+        while let Some(&(v, npos)) = dfs_stack.last() {
+            let neighbors = csr.neighbors(v);
+            if npos < neighbors.len() {
+                let (_, dst) = neighbors[npos];
+                dfs_stack.last_mut().unwrap().1 += 1;
+                let w = dst.offset as usize;
+                if w >= n {
+                    continue;
+                }
+                if indices[w].is_none() {
+                    indices[w] = Some(next_index);
+                    lowlink[w] = next_index;
+                    next_index += 1;
+                    stack.push(w);
+                    on_stack[w] = true;
+                    dfs_stack.push((w, 0));
+                } else if on_stack[w] {
+                    lowlink[v] = lowlink[v].min(indices[w].unwrap());
+                }
+            } else {
+                // v's neighbors exhausted: unwind v, propagate lowlink to the
+                // parent, and finalize the SCC if v is its root. Stay inside
+                // the loop so the parent resumes its remaining neighbors.
+                dfs_stack.pop();
+                if let Some(&(parent, _)) = dfs_stack.last() {
+                    lowlink[parent] = lowlink[parent].min(lowlink[v]);
+                }
+                if lowlink[v] == indices[v].unwrap() {
+                    loop {
+                        let w = stack.pop().unwrap();
+                        on_stack[w] = false;
+                        component[w] = comp_id;
+                        if w == v {
+                            break;
+                        }
+                    }
+                    comp_id += 1;
                 }
             }
-            *comp_id += 1;
-        }
-    }
-
-    for v in 0..n {
-        if indices[v].is_none() {
-            strongconnect(
-                v,
-                csr,
-                &mut index,
-                &mut indices,
-                &mut lowlink,
-                &mut on_stack,
-                &mut stack,
-                &mut component,
-                &mut comp_id,
-            );
         }
     }
 
@@ -927,23 +922,30 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
 pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     let mut visited = vec![false; n];
-    let mut order = Vec::new();
+    let mut order = Vec::with_capacity(n);
 
-    // Phase 1: DFS to get finish order
-    fn dfs1(v: usize, csr: &CSRAdjacency, visited: &mut [bool], order: &mut Vec<usize>) {
-        visited[v] = true;
-        for (_, dst) in csr.neighbors(v) {
-            let w = dst.offset as usize;
-            if w < csr.num_nodes() && !visited[w] {
-                dfs1(w, csr, visited, order);
-            }
+    // Phase 1: iterative DFS to get finish order (P52.47 — the recursive
+    // dfs1 overflowed the stack on large/deep graphs).
+    for start in 0..n {
+        if visited[start] {
+            continue;
         }
-        order.push(v);
-    }
-
-    for v in 0..n {
-        if !visited[v] {
-            dfs1(v, csr, &mut visited, &mut order);
+        visited[start] = true;
+        let mut dfs_stack: Vec<(usize, usize)> = vec![(start, 0)];
+        while let Some(&(v, npos)) = dfs_stack.last() {
+            let neighbors = csr.neighbors(v);
+            if npos < neighbors.len() {
+                let (_, dst) = neighbors[npos];
+                dfs_stack.last_mut().unwrap().1 += 1;
+                let w = dst.offset as usize;
+                if w < n && !visited[w] {
+                    visited[w] = true;
+                    dfs_stack.push((w, 0));
+                }
+            } else {
+                order.push(v);
+                dfs_stack.pop();
+            }
         }
     }
 
@@ -964,21 +966,23 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     let mut comp_id = 0usize;
     let mut visited2 = vec![false; n];
 
-    fn dfs2(v: usize, rev_adj: &[Vec<usize>], visited: &mut [bool], component: &mut [usize], comp_id: usize) {
-        visited[v] = true;
-        component[v] = comp_id;
-        for &w in &rev_adj[v] {
-            if !visited[w] {
-                dfs2(w, rev_adj, visited, component, comp_id);
+    for &v in order.iter().rev() {
+        if visited2[v] {
+            continue;
+        }
+        // Iterative DFS (replaces recursive dfs2).
+        let mut dfs_stack = vec![v];
+        visited2[v] = true;
+        while let Some(cur) = dfs_stack.pop() {
+            component[cur] = comp_id;
+            for &w in &rev_adj[cur] {
+                if !visited2[w] {
+                    visited2[w] = true;
+                    dfs_stack.push(w);
+                }
             }
         }
-    }
-
-    for &v in order.iter().rev() {
-        if !visited2[v] {
-            dfs2(v, &rev_adj, &mut visited2, &mut component, comp_id);
-            comp_id += 1;
-        }
+        comp_id += 1;
     }
 
     AlgoResult {
@@ -992,46 +996,61 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
 /// Compute k-core decomposition using iterative peeling.
 /// Returns the core number for each node (0-based: max k such that
 /// the node is part of the k-core).
+///
+/// Batagelj & Zaveršnik bucket algorithm — O(V + E) (P52.48; the previous
+/// per-level scan of all active nodes was O(V²)).
 pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     let mut degree: Vec<usize> = (0..n).map(|i| csr.neighbors(i).len()).collect();
     let mut core = vec![0usize; n];
-    let mut active = vec![true; n];
-    let mut max_core = 0usize;
 
-    loop {
-        // Find min degree among active nodes
-        let min_deg = degree
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| active[i])
-            .map(|(_, &d)| d)
-            .min();
+    // Bucket sort nodes by degree: bin[d] = start position of degree-d bucket.
+    let max_deg = degree.iter().copied().max().unwrap_or(0);
+    let mut bin = vec![0usize; max_deg + 1];
+    for &d in &degree {
+        bin[d] += 1;
+    }
+    let mut start = 0;
+    for b in bin.iter_mut() {
+        let cnt = *b;
+        *b = start;
+        start += cnt;
+    }
+    let mut vert = vec![0usize; n];
+    let mut pos = vec![0usize; n];
+    for v in 0..n {
+        let d = degree[v];
+        pos[v] = bin[d];
+        vert[bin[d]] = v;
+        bin[d] += 1;
+    }
+    // Restore bin to bucket start positions.
+    for d in (1..=max_deg).rev() {
+        bin[d] = bin[d - 1];
+    }
+    bin[0] = 0;
 
-        let k = match min_deg {
-            Some(d) => d,
-            None => break,
-        };
-
-        max_core = max_core.max(k);
-
-        // Peeling: remove all active nodes with degree == k
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for v in 0..n {
-                if active[v] && degree[v] <= k {
-                    active[v] = false;
-                    core[v] = k;
-                    changed = true;
-                    // Decrease degree of all neighbors
-                    for (_, dst) in csr.neighbors(v) {
-                        let w = dst.offset as usize;
-                        if w < n && active[w] && degree[w] > 0 {
-                            degree[w] -= 1;
-                        }
-                    }
+    for i in 0..n {
+        let v = vert[i];
+        core[v] = degree[v];
+        for (_, dst) in csr.neighbors(v) {
+            let w = dst.offset as usize;
+            if w >= n {
+                continue;
+            }
+            if degree[w] > degree[v] {
+                let du = degree[w];
+                let pw = pos[w];
+                let pu = bin[du];
+                if pw != pu {
+                    let w2 = vert[pu];
+                    vert[pw] = w2;
+                    pos[w2] = pw;
+                    vert[pu] = w;
+                    pos[w] = pu;
                 }
+                bin[du] += 1;
+                degree[w] = du - 1;
             }
         }
     }
@@ -1288,6 +1307,9 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
     let mut community: Vec<usize> = (0..n).collect();
     // Degree of each node
     let degree: Vec<f64> = (0..n).map(|i| csr.neighbors(i).len() as f64).collect();
+    // Community total degree, maintained incrementally on moves (P52.48 —
+    // the old code resummed degrees over the whole community per candidate).
+    let mut comm_totals: Vec<f64> = degree.clone();
 
     let mut improved = true;
     let max_passes = 20;
@@ -1314,17 +1336,10 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
 
             // Remove v from current community
             let self_weight = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
-            let _total_weight: f64 = neighbors.len() as f64;
             let ki = degree[v];
 
             // Current modularity contribution
-            let sigma_tot = degree
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| community[i] == current_comm)
-                .map(|(_, &d)| d)
-                .sum::<f64>();
-
+            let sigma_tot = comm_totals[current_comm];
             let remove_mod = (self_weight) / m - (ki * sigma_tot) / (2.0 * m * m);
 
             // Find best community
@@ -1335,13 +1350,7 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
                 if comm == current_comm {
                     continue;
                 }
-                let sigma_tot2 = degree
-                    .iter()
-                    .enumerate()
-                    .filter(|&(i, _)| community[i] == comm)
-                    .map(|(_, &d)| d)
-                    .sum::<f64>();
-
+                let sigma_tot2 = comm_totals[comm];
                 let add_mod = (weight) / m - (ki * sigma_tot2) / (2.0 * m * m);
                 let gain = add_mod - remove_mod;
 
@@ -1353,6 +1362,8 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
 
             if best_comm != current_comm {
                 community[v] = best_comm;
+                comm_totals[current_comm] -= ki;
+                comm_totals[best_comm] += ki;
                 improved = true;
             }
         }
@@ -1393,10 +1404,17 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
     let mut rank = vec![0usize; n];
 
     fn find(parent: &mut [usize], x: usize) -> usize {
-        if parent[x] != x {
-            parent[x] = find(parent, parent[x]);
+        let mut root = x;
+        while parent[root] != root {
+            root = parent[root];
         }
-        parent[x]
+        let mut cur = x;
+        while parent[cur] != root {
+            let next = parent[cur];
+            parent[cur] = root;
+            cur = next;
+        }
+        root
     }
 
     fn union(parent: &mut [usize], rank: &mut [usize], a: usize, b: usize) {
@@ -1729,6 +1747,95 @@ mod tests {
         assert_eq!(result.values.len(), 7);
         let first = result.values[0];
         assert!(result.values.iter().all(|&v| v == first));
+    }
+
+    fn directed_csr(edges: &[(usize, usize)], n: usize) -> CSRAdjacency {
+        use akar_common::types::InternalID;
+        let mut offsets = vec![0usize; n + 1];
+        let mut deg = vec![0usize; n];
+        for (s, _) in edges {
+            deg[*s] += 1;
+        }
+        let mut cur = 0;
+        for i in 0..n {
+            offsets[i] = cur;
+            cur += deg[i];
+        }
+        offsets[n] = cur;
+        let mut adj = vec![(0u64, InternalID { table_id: 0, offset: 0 }); cur];
+        let mut pos = offsets.clone();
+        for (s, d) in edges {
+            adj[pos[*s]] = (0u64, InternalID { table_id: 0, offset: *d as u64 });
+            pos[*s] += 1;
+        }
+        CSRAdjacency { offsets, adjacency: adj }
+    }
+
+    fn directed_scc_graph() -> CSRAdjacency {
+        // Cycle {0,1,2}: 0->1, 1->2, 2->0
+        // Cycle {3,4}: 2->3, 3->4, 4->3
+        directed_csr(&[(0, 1), (1, 2), (2, 0), (2, 3), (3, 4), (4, 3)], 5)
+    }
+
+    #[test]
+    fn test_scc_tarjan_directed() {
+        let result = compute_scc_tarjan(&directed_scc_graph());
+        assert_eq!(result.values.len(), 5);
+        let c = |i: usize| result.values[i] as usize;
+        assert_eq!(c(0), c(1));
+        assert_eq!(c(1), c(2));
+        assert_eq!(c(3), c(4));
+        assert_ne!(c(0), c(3));
+    }
+
+    #[test]
+    fn test_scc_kosaraju_directed() {
+        let result = compute_scc_kosaraju(&directed_scc_graph());
+        assert_eq!(result.values.len(), 5);
+        let c = |i: usize| result.values[i] as usize;
+        assert_eq!(c(0), c(1));
+        assert_eq!(c(1), c(2));
+        assert_eq!(c(3), c(4));
+        assert_ne!(c(0), c(3));
+    }
+
+    #[test]
+    fn test_scc_deep_chain_no_stack_overflow() {
+        let n = 200_000;
+        let edges: Vec<Edge> = (0..n - 1)
+            .map(|i| Edge {
+                src_offset: i as u64,
+                dst_offset: (i + 1) as u64,
+                rel_id: i as u64,
+                rel_table_id: 0,
+            })
+            .collect();
+        let csr = CSRAdjacency::build(&edges, n);
+        let tarjan = compute_scc_tarjan(&csr);
+        let kosaraju = compute_scc_kosaraju(&csr);
+        assert_eq!(tarjan.values.len(), n);
+        assert_eq!(kosaraju.values.len(), n);
+        // Undirected chain → single SCC
+        assert!(tarjan.values.iter().all(|&v| v == tarjan.values[0]));
+        assert!(kosaraju.values.iter().all(|&v| v == kosaraju.values[0]));
+    }
+
+    #[test]
+    fn test_k_core_correctness() {
+        // Complete graph K4 (all 6 edges): every node has degree 3, core = 3.
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 0, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            Edge { src_offset: 0, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 3, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 3, rel_id: 4, rel_table_id: 0 },
+            Edge { src_offset: 2, dst_offset: 3, rel_id: 5, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 4);
+        let result = compute_k_core(&csr);
+        for &v in &result.values {
+            assert_eq!(v, 3.0);
+        }
     }
 
     #[test]
