@@ -399,7 +399,7 @@ mod tests {
         let csr = CSRAdjacency::build(&edges, 3);
         let mut bfs = DenseBFSGraph::new(3);
 
-        let weights = |src: u64, dst: u64, eid: u64| {
+        let weights = |_src: u64, _dst: u64, eid: u64| {
             if eid == 2 {
                 100.0 // direct 0→2
             } else if eid == 1 {
