@@ -20,6 +20,7 @@ akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
 akar-planner = { path = "../akar-planner", version = "0.1.2" }
 akar-function = { path = "../akar-function", version = "0.1.0" }
 akar-storage = { path = "../akar-storage", version = "0.1.3" }
+akar-transaction = { path = "../akar-transaction", version = "0.1.0" }
 akar-parser = { path = "../akar-parser", version = "0.1.1" }
 akar-fts = { path = "../akar-fts", version = "0.1.0" }
 akar-vector = { path = "../akar-vector", version = "0.1.0" }

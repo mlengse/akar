@@ -37,6 +37,9 @@ pub struct ExecutionContext<'p> {
     /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
     /// The connection layer reads this after execution and calls `record_write()`.
     pub written_rows: Vec<(u64, u64)>,
+    /// Active transaction id threaded into write operators so inserts/deletes
+    /// use MVCC-aware storage variants (P52.18).
+    pub txn_id: Option<u64>,
 }
 
 impl<'p> ExecutionContext<'p> {

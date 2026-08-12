@@ -8,7 +8,8 @@ use akar_function::registry::FunctionRegistry;
 use akar_function::scalar::evaluate_scalar;
 use akar_parser::ast::Expression;
 use akar_storage::table::TableCatalog;
-use std::sync::Arc;
+use akar_transaction::UndoRecord;
+use std::sync::{Arc, Mutex};
 
 // ==================== Set ====================
 
@@ -21,6 +22,10 @@ pub struct PhysicalSet {
     pub value: akar_parser::ast::Expression,
     pub is_node: bool,
     pub table_catalog: Arc<TableCatalog>,
+    /// Active transaction id (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalSet {
@@ -69,6 +74,13 @@ impl PhysicalOperatorExec for PhysicalSet {
                     .position(|c| c.name == self.column_name)
                     .unwrap_or(self.column_idx);
                 for (row_idx, val) in &rows_to_update {
+                    // Capture the pre-update cell for rollback (P52.18).
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        let old_data = table.cell_undo_bytes(*row_idx, col_idx);
+                        u.push(UndoRecord::update(self.table_id, *row_idx, col_idx as u32, old_data));
+                    }
                     if table.update_cell(*row_idx, col_idx, val.clone()).is_ok() {
                         updated += 1;
                     }
@@ -84,6 +96,12 @@ impl PhysicalOperatorExec for PhysicalSet {
                     .position(|c| c.name == self.column_name)
                     .unwrap_or(self.column_idx);
                 for (edge_idx, val) in &rows_to_update {
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        let old_data = table.edge_cell_undo_bytes(*edge_idx as usize, col_idx);
+                        u.push(UndoRecord::update(self.table_id, *edge_idx, col_idx as u32, old_data));
+                    }
                     if table
                         .update_cell(*edge_idx as usize, col_idx, val.clone())
                         .is_ok()

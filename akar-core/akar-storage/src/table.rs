@@ -2,6 +2,7 @@
 
 use crate::art_index::ArtPrimaryKeyIndex;
 use crate::art_key::ArtKey;
+use crate::column::Column;
 use crate::csr::CsrIndex;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
@@ -553,6 +554,31 @@ impl NodeTable {
         )))
     }
 
+    /// Capture the full row (all columns) as serialized undo bytes.
+    /// Used by the write path to record `UndoType::Delete` records so a
+    /// rollback can restore a soft-deleted row (P52.18).
+    pub fn row_undo_bytes(&self, row_idx: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        for col in 0..self.columns.len() {
+            let val = self
+                .get_value(row_idx as usize, col)
+                .cloned()
+                .unwrap_or(Value::Null);
+            out.extend_from_slice(&Column::serialize_value(&val));
+        }
+        out
+    }
+
+    /// Capture a single cell as serialized undo bytes.
+    /// Used to record `UndoType::Update` records for `SET` rollback (P52.18).
+    pub fn cell_undo_bytes(&self, row_idx: u64, col_idx: usize) -> Vec<u8> {
+        let val = self
+            .get_value(row_idx as usize, col_idx)
+            .cloned()
+            .unwrap_or(Value::Null);
+        Column::serialize_value(&val)
+    }
+
     /// Get a single value at (row, col) by locating the correct `NodeGroup`
     /// and `ColumnChunk`.
     pub fn get_value(&self, row: usize, col: usize) -> Option<&Value> {
@@ -1003,6 +1029,60 @@ impl RelTable {
         }
 
         self.properties[col_idx][edge_idx] = value;
+        self.persistence_dirty = true;
+        Ok(())
+    }
+
+    /// Capture an edge (src, dst) plus all property values as serialized undo
+    /// bytes: `[src, dst, prop0..propN]`. Used to record `UndoType::Delete`
+    /// records so a rollback can restore a deleted edge (P52.18).
+    pub fn edge_undo_bytes(&self, edge_idx: usize) -> Vec<u8> {
+        let (src, dst) = self.edges.get(edge_idx).copied().unwrap_or((u64::MAX, u64::MAX));
+        let mut out = Vec::new();
+        out.extend_from_slice(&Column::serialize_value(&Value::UInt64(src)));
+        out.extend_from_slice(&Column::serialize_value(&Value::UInt64(dst)));
+        for p in self.get_edge_properties(edge_idx) {
+            out.extend_from_slice(&Column::serialize_value(&p));
+        }
+        out
+    }
+
+    /// Capture a single edge property as serialized undo bytes.
+    /// Used to record `UndoType::Update` records for `SET` rollback (P52.18).
+    pub fn edge_cell_undo_bytes(&self, edge_idx: usize, col_idx: usize) -> Vec<u8> {
+        let v = self
+            .get_edge_properties(edge_idx)
+            .get(col_idx)
+            .cloned()
+            .unwrap_or(Value::Null);
+        Column::serialize_value(&v)
+    }
+
+    /// Restore a tombstoned edge (rollback of a `DELETE` edge). Re-adds the
+    /// edge to the forward/reverse adjacency lists and restores its properties
+    /// (P52.18).
+    pub fn restore_deleted_edge(
+        &mut self,
+        edge_idx: usize,
+        src: u64,
+        dst: u64,
+        props: Vec<Value>,
+    ) -> Result<(), StorageError> {
+        if edge_idx >= self.edges.len() {
+            return Err(StorageError::Page(format!("Edge index {edge_idx} out of range")));
+        }
+        self.edges[edge_idx] = (src, dst);
+        self.fwd_adj.entry(src).or_default().push((dst, edge_idx));
+        self.rev_adj.entry(dst).or_default().push((src, edge_idx));
+        for (col_idx, val) in props.into_iter().enumerate() {
+            if col_idx < self.properties.len() {
+                if edge_idx < self.properties[col_idx].len() {
+                    self.properties[col_idx][edge_idx] = val;
+                } else {
+                    self.properties[col_idx].push(val);
+                }
+            }
+        }
         self.persistence_dirty = true;
         Ok(())
     }

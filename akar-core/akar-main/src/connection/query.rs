@@ -122,12 +122,11 @@ impl Connection {
             return Err("Database is in read-only mode; write statements are not allowed".into());
         }
 
-        // Determine if this is a write operation and begin a transaction if so.
-        // Only wrap in a transaction when concurrent_writes is enabled.
-        // In single-writer mode, the old direct-write path is kept for
-        // backward compatibility (no WAL commit records for pure DDL).
-        let concurrent_mode = self.database.transaction_manager.allow_concurrent_writes();
-        let is_write = concurrent_mode && Connection::is_write_statement(bound);
+        // Determine if this is a write operation and begin a transaction.
+        // Every write statement is wrapped in a transaction (both single-writer
+        // and concurrent modes) so MVCC records (VersionInfo/commit_history)
+        // are populated and rollback/conflict handling works uniformly (P52.18).
+        let is_write = Connection::is_write_statement(bound);
         let mut txn_opt: Option<akar_transaction::Transaction> =
             if is_write { Some(self.begin_write_txn()?) } else { None };
 
@@ -234,7 +233,10 @@ impl Connection {
         };
 
         // Execute
-        let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history);
+        let processor = self
+            .create_processor()
+            .with_snapshot(snapshot_ts, commit_history)
+            .with_txn_id(txn_opt.as_ref().map(|t| t.transaction_id));
         let chunks = processor
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
@@ -246,6 +248,13 @@ impl Connection {
             for (table_id, row_id) in written_rows {
                 tm.record_write(txn.transaction_id, table_id, row_id);
             }
+        }
+
+        // Drain undo records captured by write operators into the txn so a
+        // rollback (or OCC conflict loser) can revert the in-place writes (P52.18).
+        if let Some(ref mut txn) = txn_opt {
+            let undo = processor.take_undo_records();
+            txn.undo_records.extend(undo);
         }
 
         // Single-writer mode: DML wrote directly into the in-memory tables,
@@ -352,20 +361,71 @@ impl Connection {
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
 
+        // Every write statement is wrapped in a transaction so MVCC records
+        // are populated and rollback/conflict handling works (P52.18). This
+        // fixes the prepared path which previously executed DML with no txn.
+        let is_write = Connection::is_write_statement(&prepared.bound_statement);
+        let mut txn_opt: Option<akar_transaction::Transaction> =
+            if is_write { Some(self.begin_write_txn()?) } else { None };
+
         // Capture MVCC snapshot for read isolation
-        let ts = self.database.transaction_manager.current_commit_ts();
-        let history = self.database.transaction_manager.commit_history_snapshot();
+        let (snapshot_ts, history) = if let Some(ref txn) = txn_opt {
+            (
+                txn.snapshot_ts,
+                self.database.transaction_manager.commit_history_snapshot(),
+            )
+        } else {
+            let ts = self.database.transaction_manager.current_commit_ts();
+            (Some(ts), self.database.transaction_manager.commit_history_snapshot())
+        };
 
         // Execute
-        let processor = self.create_processor().with_snapshot(Some(ts), history);
-        let chunks = processor
-            .execute(&optimized_plan)
-            .map_err(|e| format!("Execute error: {e}"))?;
+        let processor = self
+            .create_processor()
+            .with_snapshot(snapshot_ts, history)
+            .with_txn_id(txn_opt.as_ref().map(|t| t.transaction_id));
+        let chunks = match processor.execute(&optimized_plan) {
+            Ok(c) => c,
+            Err(e) => {
+                if is_write {
+                    if let Some(ref mut txn) = txn_opt {
+                        match self.rollback_write_txn(txn) {
+                            Ok(_) => tracing::warn!("Prepared write rolled back due to error: {e}"),
+                            Err(rollback_err) => {
+                                tracing::error!("Prepared rollback ALSO failed: {rollback_err} (original: {e})");
+                            }
+                        }
+                    }
+                }
+                return Err(format!("Execute error: {e}"));
+            }
+        };
 
-        // This prepared path executes DML directly (no OCC transaction wrap),
-        // so persist the durable column mirrors to keep committed rows durable
-        // across restarts (P45.4).
-        if Connection::is_write_statement(&prepared.bound_statement) {
+        // Record row-level writes for OCC conflict detection
+        if let Some(ref txn) = txn_opt {
+            let written_rows = processor.take_written_rows();
+            let tm = &self.database.transaction_manager;
+            for (table_id, row_id) in written_rows {
+                tm.record_write(txn.transaction_id, table_id, row_id);
+            }
+        }
+
+        // Drain undo records into the txn for rollback/conflict handling (P52.18).
+        if let Some(ref mut txn) = txn_opt {
+            let undo = processor.take_undo_records();
+            txn.undo_records.extend(undo);
+        }
+
+        // Commit or rollback based on result
+        if is_write {
+            if let Some(ref mut txn) = txn_opt {
+                self.commit_write_txn(txn)?;
+            }
+        }
+
+        // Persist the durable column mirrors so committed rows survive a
+        // restart (P45.4).
+        if is_write {
             self.database
                 .storage_manager
                 .persist_all_tables()

@@ -162,6 +162,10 @@ pub struct PhysicalInsert {
     pub columns: Vec<String>,
     pub values: Vec<Vec<akar_common::types::Value>>,
     pub table_catalog: std::sync::Arc<akar_storage::table::TableCatalog>,
+    /// Active transaction id (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<std::sync::Arc<std::sync::Mutex<Vec<akar_transaction::UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsert {
@@ -198,15 +202,28 @@ impl PhysicalOperatorExec for PhysicalInsert {
                 }
             }
             if !rels_to_insert.is_empty() {
+                let start = rel_tbl.edges.len();
                 if let Ok(count) = rel_tbl.insert_rels_batch(&rels_to_insert) {
                     inserted += count;
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        for idx in start..start + count as usize {
+                            u.push(akar_transaction::UndoRecord::insert(self.table_id, idx as u64));
+                        }
+                    }
                 }
             }
         } else if let Some(mut node_tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
             // Node Table Insert
             for row_values in &self.values {
-                if node_tbl.insert_row(row_values.clone()).is_ok() {
+                if let Ok(row_id) = node_tbl.insert_row_with_txn(row_values.clone(), self.txn_id) {
                     inserted += 1;
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        u.push(akar_transaction::UndoRecord::insert(self.table_id, row_id));
+                    }
                 }
             }
         } else {

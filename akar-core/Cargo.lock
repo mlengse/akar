@@ -354,6 +354,7 @@ dependencies = [
  "akar-parser",
  "akar-planner",
  "akar-storage",
+ "akar-transaction",
  "akar-vector",
  "arrow 59.2.0",
  "criterion",

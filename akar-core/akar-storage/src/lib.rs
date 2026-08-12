@@ -633,6 +633,39 @@ impl StorageManager {
                         }
                     }
                 }
+            } else if let Some(mut rel) = self.table_catalog.get_rel_table_mut(record.table_id) {
+                // Rel-table undo (P52.18): inserts delete the edge, updates
+                // restore the property cell, deletes restore src/dst + props.
+                match record.undo_type {
+                    akar_transaction::UndoType::Update => {
+                        let values = deserialize_values_from_bytes(&record.old_data, 1);
+                        if let Some(val) = values.into_iter().next() {
+                            let _ = rel.update_cell(record.row_id as usize, record.column as usize, val);
+                        }
+                    }
+                    akar_transaction::UndoType::Insert => {
+                        // Rollback an edge insert: tombstone the edge.
+                        let _ = rel.delete_edge(record.row_id as usize);
+                    }
+                    akar_transaction::UndoType::Delete => {
+                        // Rollback an edge delete: restore src/dst + properties.
+                        let num_cols = rel.columns.len();
+                        let values = deserialize_values_from_bytes(&record.old_data, num_cols + 2);
+                        let mut iter = values.into_iter();
+                        let src = match iter.next() {
+                            Some(Value::UInt64(v)) => v,
+                            Some(Value::Int64(v)) if v >= 0 => v as u64,
+                            _ => u64::MAX,
+                        };
+                        let dst = match iter.next() {
+                            Some(Value::UInt64(v)) => v,
+                            Some(Value::Int64(v)) if v >= 0 => v as u64,
+                            _ => u64::MAX,
+                        };
+                        let props: Vec<_> = iter.collect();
+                        let _ = rel.restore_deleted_edge(record.row_id as usize, src, dst, props);
+                    }
+                }
             }
         }
 

@@ -5,7 +5,8 @@ use crate::physical::write_ops::set::evaluate_expression_for_row;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
-use std::sync::Arc;
+use akar_transaction::UndoRecord;
+use std::sync::{Arc, Mutex};
 
 /// Physical operator for CREATE NODE.
 pub struct PhysicalInsertNode {
@@ -14,6 +15,10 @@ pub struct PhysicalInsertNode {
     pub out_var_name: String,
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
     pub table_catalog: Arc<TableCatalog>,
+    /// Active transaction id — inserts are recorded in `VersionInfo` for MVCC (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsertNode {
@@ -53,8 +58,13 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
                 }
 
                 // Add the row to the node table; capture assigned row_id for OCC
-                if let Ok(row_id) = table.insert_row(row_values) {
+                if let Ok(row_id) = table.insert_row_with_txn(row_values, self.txn_id) {
                     assigned_row_ids.push(row_id as i64);
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        u.push(UndoRecord::insert(self.table_id, row_id));
+                    }
                 }
             }
         }
@@ -90,6 +100,10 @@ pub struct PhysicalInsertRel {
     pub dst_node_name: String,
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
     pub table_catalog: Arc<TableCatalog>,
+    /// Active transaction id for MVCC + undo recording (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsertRel {
@@ -187,6 +201,14 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
             inserted_count = table
                 .insert_rels_batch(&rels_to_insert)
                 .map_err(|e| format!("BatchInsert rel error: {e}"))?;
+            if let Some(sink) = self.undo_sink.as_ref()
+                && let Ok(mut u) = sink.lock()
+            {
+                let num_edges = table.edges.len();
+                for idx in (num_edges - inserted_count as usize)..num_edges {
+                    u.push(UndoRecord::insert(self.table_id, idx as u64));
+                }
+            }
         }
 
         tracing::info!("INSERT REL: added {inserted_count} rels to '{}'", self.table_name);

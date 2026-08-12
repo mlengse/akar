@@ -33,6 +33,7 @@ use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, TableFunction};
 use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
+use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync>;
@@ -127,6 +128,13 @@ pub struct QueryProcessor {
     /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
     /// Read by the connection layer after execution for OCC conflict detection.
     written_rows: Mutex<Vec<(u64, u64)>>,
+    /// Active transaction id threaded into write operators so inserts/deletes
+    /// are recorded in `VersionInfo` for MVCC snapshot isolation (P52.18).
+    txn_id: Option<u64>,
+    /// Undo records captured by write operators during execution. Drained into
+    /// the active transaction by the connection layer so a rollback (including
+    /// an OCC conflict loser) can revert the in-place table writes (P52.18).
+    undo_records: Arc<Mutex<Vec<UndoRecord>>>,
 }
 
 impl QueryProcessor {
@@ -142,6 +150,8 @@ impl QueryProcessor {
             snapshot_ts: None,
             commit_history: Vec::new(),
             written_rows: Mutex::new(Vec::new()),
+            txn_id: None,
+            undo_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -158,6 +168,8 @@ impl QueryProcessor {
             snapshot_ts: None,
             commit_history: Vec::new(),
             written_rows: Mutex::new(Vec::new()),
+            txn_id: None,
+            undo_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -178,6 +190,8 @@ impl QueryProcessor {
             snapshot_ts: None,
             commit_history: Vec::new(),
             written_rows: Mutex::new(Vec::new()),
+            txn_id: None,
+            undo_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -210,6 +224,51 @@ impl QueryProcessor {
         self.snapshot_ts = snapshot_ts;
         self.commit_history = commit_history;
         self
+    }
+
+    /// Set the active transaction id for write operators.
+    ///
+    /// When `Some(txn_id)`, insert/delete write operators use the MVCC-aware
+    /// `*_with_txn` storage variants so uncommitted rows are invisible to other
+    /// snapshots, and record undo entries for rollback (P52.18).
+    pub fn with_txn_id(mut self, txn_id: Option<u64>) -> Self {
+        self.txn_id = txn_id;
+        self
+    }
+
+    /// Record an insert undo (rollback deletes the row).
+    pub fn record_insert_undo(&self, table_id: u64, row_id: u64) {
+        if let Ok(mut u) = self.undo_records.lock() {
+            u.push(UndoRecord::insert(table_id, row_id));
+        }
+    }
+
+    /// Record an update undo (rollback restores the cell).
+    pub fn record_update_undo(&self, table_id: u64, row_id: u64, column: u32, old_data: Vec<u8>) {
+        if let Ok(mut u) = self.undo_records.lock() {
+            u.push(UndoRecord::update(table_id, row_id, column, old_data));
+        }
+    }
+
+    /// Record a delete undo (rollback restores the row/edge).
+    pub fn record_delete_undo(&self, table_id: u64, row_id: u64, old_data: Vec<u8>) {
+        if let Ok(mut u) = self.undo_records.lock() {
+            u.push(UndoRecord::delete(table_id, row_id, old_data));
+        }
+    }
+
+    /// Take the accumulated undo records (drained by the connection layer).
+    pub fn take_undo_records(&self) -> Vec<UndoRecord> {
+        self.undo_records
+            .lock()
+            .map(|mut u| std::mem::take(&mut *u))
+            .unwrap_or_default()
+    }
+
+    /// Shared undo sink handed to write operators so they can record undo
+    /// entries during execution (P52.18).
+    pub fn undo_sink(&self) -> Arc<Mutex<Vec<UndoRecord>>> {
+        Arc::clone(&self.undo_records)
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
@@ -250,6 +309,7 @@ impl QueryProcessor {
                 snapshot_ts: self.snapshot_ts,
                 commit_history: self.commit_history.clone(),
                 written_rows: Vec::new(),
+                txn_id: self.txn_id,
             };
 
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, &mut ctx)?;

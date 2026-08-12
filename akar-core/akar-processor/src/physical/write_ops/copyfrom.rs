@@ -3,8 +3,9 @@ use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::{ColumnDefinition, TableCatalog};
+use akar_transaction::UndoRecord;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 // ==================== CopyFrom ====================
 
@@ -20,6 +21,10 @@ pub struct PhysicalCopyFrom {
     pub options: std::collections::HashMap<String, String>,
     pub table_catalog: Arc<TableCatalog>,
     pub vfs: Arc<akar_common::file_system::VirtualFileSystemRegistry>,
+    /// Active transaction id (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalCopyFrom {
@@ -113,9 +118,17 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
         }
 
         if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+            let start = table.num_rows;
             let count = table
-                .insert_rows_batch(&rows)
+                .insert_rows_batch_with_txn(&rows, self.txn_id)
                 .map_err(|e| format!("Batch insert error: {e}"))?;
+            if let Some(sink) = self.undo_sink.as_ref()
+                && let Ok(mut u) = sink.lock()
+            {
+                for row in start..start + count {
+                    u.push(UndoRecord::insert(self.table_id, row));
+                }
+            }
             tracing::info!(
                 "COPY FROM: batch-inserted {count} rows into node table '{}'",
                 self.table_name
@@ -142,9 +155,17 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
                 })?;
                 rels.push((from, to, row[2..].to_vec()));
             }
+            let start = table.edges.len();
             let count = table
                 .insert_rels_batch(&rels)
                 .map_err(|e| format!("Batch insert rel error: {e}"))?;
+            if let Some(sink) = self.undo_sink.as_ref()
+                && let Ok(mut u) = sink.lock()
+            {
+                for idx in start..start + count as usize {
+                    u.push(UndoRecord::insert(self.table_id, idx as u64));
+                }
+            }
             tracing::info!(
                 "COPY FROM: batch-inserted {count} rows into rel table '{}'",
                 self.table_name

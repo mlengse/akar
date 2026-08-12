@@ -24,6 +24,8 @@ pub fn map_and_execute_update(
                 value: sl.value.clone(),
                 is_node: sl.is_node,
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = set_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -44,6 +46,8 @@ pub fn map_and_execute_update(
                 detach: dl.detach,
                 row_indices: Vec::new(),
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = delete_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -62,6 +66,8 @@ pub fn map_and_execute_update(
                 out_var_name: cn.out_var_name.clone(),
                 properties: cn.properties.clone(),
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = create_node_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -81,6 +87,8 @@ pub fn map_and_execute_update(
                 dst_node_name: cr.dst_node_name.clone(),
                 properties: cr.properties.clone(),
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = create_rel_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -125,6 +133,8 @@ pub fn map_and_execute_update(
                     value: set_item.value.clone(),
                     is_node: set_item.is_node,
                     table_catalog: table_catalog.clone(),
+                    txn_id: ctx.txn_id,
+                    undo_sink: Some(ctx.processor.undo_sink()),
                 });
             }
 
@@ -138,6 +148,8 @@ pub fn map_and_execute_update(
                     value: set_item.value.clone(),
                     is_node: set_item.is_node,
                     table_catalog: table_catalog.clone(),
+                    txn_id: ctx.txn_id,
+                    undo_sink: Some(ctx.processor.undo_sink()),
                 });
             }
 
@@ -148,6 +160,8 @@ pub fn map_and_execute_update(
                 on_match: on_match_ops,
                 on_create: on_create_ops,
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = merge_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -180,6 +194,8 @@ pub fn map_and_execute_update(
                     .vfs
                     .clone()
                     .ok_or_else(|| "VFS not initialized in processor".to_string())?,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = copy_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -197,6 +213,8 @@ pub fn map_and_execute_update(
                 table_id: bi.table_id,
                 rows: bi.rows.clone(),
                 table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = batch_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -210,6 +228,8 @@ pub fn map_and_execute_update(
                 columns: i.columns.clone(),
                 values: i.values.clone(),
                 table_catalog: ctx.table_catalog.clone().unwrap(),
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
             };
             let result = exec.execute(current_input)?;
             // Record written rows for OCC conflict detection

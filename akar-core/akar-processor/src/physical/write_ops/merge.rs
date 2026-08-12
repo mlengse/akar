@@ -5,7 +5,8 @@ use crate::physical::write_ops::set::PhysicalSet;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
-use std::sync::Arc;
+use akar_transaction::UndoRecord;
+use std::sync::{Arc, Mutex};
 
 /// Physical operator for MERGE.
 /// Represents a combination of MATCH and INSERT (Upsert).
@@ -16,6 +17,10 @@ pub struct PhysicalMerge {
     pub on_match: Vec<PhysicalSet>,
     pub on_create: Vec<PhysicalSet>,
     pub table_catalog: Arc<TableCatalog>,
+    /// Active transaction id (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalMerge {
@@ -137,8 +142,14 @@ impl PhysicalOperatorExec for PhysicalMerge {
                     drop(table_info);
 
                     if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
-                        tbl.insert_row(new_values)
+                        let row_id = tbl
+                            .insert_row_with_txn(new_values, self.txn_id)
                             .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
+                        if let Some(sink) = self.undo_sink.as_ref()
+                            && let Ok(mut u) = sink.lock()
+                        {
+                            u.push(UndoRecord::insert(self.table_id, row_id));
+                        }
                         _merged_count += 1;
                     }
 

@@ -15,7 +15,7 @@ impl Connection {
     pub(crate) fn handle_ddl(
         &self,
         bound: &BoundStatement,
-        txn_opt: Option<&mut akar_transaction::Transaction>,
+        mut txn_opt: Option<&mut akar_transaction::Transaction>,
     ) -> Result<Option<QueryResult>, String> {
         // DDL statements mutate the catalog/storage directly (bypassing the
         // txn's LocalStorage/ShadowFile), so `ROLLBACK` cannot undo them.
@@ -512,7 +512,10 @@ impl Connection {
                         }
                     }
 
-                    let row_id = table.insert_row(values)?;
+                    let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                    if let Some(ref mut txn) = txn_opt {
+                        txn.record_insert_undo(node.table_id, row_id);
+                    }
                     if let Some(v) = &node.variable {
                         node_rows.insert(v.clone(), row_id);
                         node_table_ids.insert(v.clone(), node.table_id);
@@ -584,7 +587,11 @@ impl Connection {
                         }
                     }
 
+                    let edge_idx = rel.num_rows;
                     rel.insert_rel(src, dst, values)?;
+                    if let Some(ref mut txn) = txn_opt {
+                        txn.record_insert_undo(edge.table_id, edge_idx);
+                    }
                     created += 1;
                 }
 
@@ -665,6 +672,10 @@ impl Connection {
                                     // A type mismatch (or any other cell-write
                                     // failure) must surface as an error, not be
                                     // swallowed (P52.23).
+                                    if let Some(ref mut txn) = txn_opt {
+                                        let old_data = table.cell_undo_bytes(row, item.column_idx);
+                                        txn.record_undo(m.table_id, row, item.column_idx as u32, old_data);
+                                    }
                                     table
                                         .update_cell(row, item.column_idx, val)
                                         .map_err(|e| format!("MERGE ON MATCH SET: {e}"))?;
@@ -701,7 +712,11 @@ impl Connection {
                                 }
                             }
                         }
-                        let row_id = table.insert_row(values)?;
+                        let row_id =
+                            table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                        if let Some(ref mut txn) = txn_opt {
+                            txn.record_insert_undo(m.table_id, row_id);
+                        }
                         node_rows.insert(node.variable.clone().unwrap_or_default(), row_id);
                         created += 1;
                     }
@@ -753,7 +768,11 @@ impl Connection {
                                 values[col_idx] = ast_constant_to_value(c);
                             }
                         }
+                        let edge_idx = rel.num_rows;
                         rel.insert_rel(src, dst, values)?;
+                        if let Some(ref mut txn) = txn_opt {
+                            txn.record_insert_undo(edge.table_id, edge_idx);
+                        }
                         created += 1;
                     }
                 }

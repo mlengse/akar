@@ -4,7 +4,8 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::Constant;
 use akar_storage::table::TableCatalog;
-use std::sync::Arc;
+use akar_transaction::UndoRecord;
+use std::sync::{Arc, Mutex};
 
 // ==================== Delete ====================
 
@@ -18,6 +19,10 @@ pub struct PhysicalDelete {
     /// Row indices to delete (found by the scan/filter pipeline).
     pub row_indices: Vec<u64>,
     pub table_catalog: Arc<TableCatalog>,
+    /// Active transaction id — deletes are recorded in `VersionInfo` for MVCC (P52.18).
+    pub txn_id: Option<u64>,
+    /// Undo sink for rollback records (P52.18).
+    pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalDelete {
@@ -74,7 +79,15 @@ impl PhysicalOperatorExec for PhysicalDelete {
             }
             if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
                 for &row_idx in &rows_to_delete {
-                    if table.delete_row(row_idx).is_ok() {
+                    // Capture pre-delete row data for rollback (P52.18) and
+                    // record the delete in VersionInfo for MVCC isolation.
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        let old_data = table.row_undo_bytes(row_idx);
+                        u.push(UndoRecord::delete(self.table_id, row_idx, old_data));
+                    }
+                    if table.delete_row_with_txn(row_idx, self.txn_id).is_ok() {
                         deleted += 1;
                     }
                 }
@@ -84,6 +97,12 @@ impl PhysicalOperatorExec for PhysicalDelete {
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
                 for &edge_idx in &rows_to_delete {
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        let old_data = table.edge_undo_bytes(edge_idx as usize);
+                        u.push(UndoRecord::delete(self.table_id, edge_idx, old_data));
+                    }
                     if table.delete_edge(edge_idx as usize).is_ok() {
                         deleted += 1;
                     }
