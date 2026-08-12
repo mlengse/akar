@@ -194,11 +194,16 @@ fn handle_double_consonant(stem: &str) -> String {
 
 // ==================== Tokenization ====================
 
+/// Regex for splitting text into word tokens, compiled exactly once.
+/// `Regex::new` is expensive; compiling it on every `tokenize()` call made the
+/// FTS index build / query hot path pay a regex compile per document (P51.18).
+static TOKEN_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"[a-zA-Z0-9]+([''][a-zA-Z]+)?").expect("valid token regex"));
+
 /// Tokenize a text string into words.
 /// Splits on whitespace and punctuation, lowercases all tokens.
 pub fn tokenize(text: &str) -> Vec<String> {
-    let re = regex::Regex::new(r"[a-zA-Z0-9]+([''][a-zA-Z]+)?").unwrap();
-    re.find_iter(text).map(|m| m.as_str().to_lowercase()).collect()
+    TOKEN_RE.find_iter(text).map(|m| m.as_str().to_lowercase()).collect()
 }
 
 /// Compute TF-IDF score for a term in a document.

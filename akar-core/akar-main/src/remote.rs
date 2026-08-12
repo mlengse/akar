@@ -382,13 +382,18 @@ impl RemoteDatabase {
         };
         let payload = serde_json::to_vec(&request).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
+        // Hold the connection's partial-frame lock across the entire write+read
+        // exchange. Two threads sharing a `RemoteDatabase` would otherwise
+        // interleave: thread A writes its request, thread B writes its request,
+        // then A reads B's response (P51.9).
+        let mut partial = self.partial.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+
         {
             let mut writer = &self.stream;
             write_frame(&mut writer, &payload).map_err(|e| format!("Failed to send request: {e}"))?;
             writer.flush().map_err(|e| format!("Failed to flush request: {e}"))?;
         }
 
-        let mut partial = self.partial.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let frame = match read_frame(&mut &self.stream, &mut partial) {
             Ok(Some(f)) => f,
             Ok(None) => return Err("Connection closed by server".to_string()),
@@ -418,6 +423,7 @@ impl RemoteDatabase {
                 }
             }
         };
+        drop(partial);
 
         let response: WireResponse =
             serde_json::from_slice(&frame).map_err(|e| format!("Failed to parse response: {e}"))?;

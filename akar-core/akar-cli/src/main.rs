@@ -24,7 +24,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, KeyEvent};
 use std::borrow::Cow;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::sync::{Arc, Mutex};
 
 // ==================== Output Modes ====================
@@ -293,20 +293,17 @@ fn main() {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
-    // Try rustyline REPL if terminal available
-    let is_tty = cfg!(windows) || atty_check();
-    if is_tty && atty_check() {
+    // Terminal detection: only enter the REPL when stdin is a real TTY. When
+    // stdin is piped (`akar-cli db < script.cypher`) or redirected, run script
+    // mode. `cfg!(windows)` must not force the REPL — a piped stdin on Windows
+    // is not a terminal either (P51.13).
+    if io::stdin().is_terminal() {
         run_repl_rustyline(&mut stdout);
     } else {
         let state_ref = GLOBAL_STATE.lock().unwrap();
         let state = state_ref.as_ref().unwrap();
         run_script(&state.conn, stdin.lock(), &mut stdout);
     }
-}
-
-fn atty_check() -> bool {
-    // Simple heuristic: if TERM is set and not "dumb", assume interactive
-    std::env::var("TERM").is_ok_and(|t| t != "dumb") || std::env::var("CI").is_err()
 }
 
 // ==================== Rustyline REPL ====================

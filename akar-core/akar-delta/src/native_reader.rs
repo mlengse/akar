@@ -45,29 +45,38 @@ fn latest_delta_log_version(table_path: &str) -> Result<i64, String> {
     }
 }
 
-/// Read the latest delta log JSON and parse actions.
-fn read_latest_delta_log(table_path: &str) -> Result<Vec<serde_json::Value>, String> {
-    let version = latest_delta_log_version(table_path)?;
-    let log_path = Path::new(table_path)
-        .join("_delta_log")
-        .join(format!("{:020}.json", version));
-
-    let content =
-        fs::read_to_string(&log_path).map_err(|e| format!("Failed to read delta log {}: {e}", log_path.display()))?;
-
-    let actions: Vec<serde_json::Value> = content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-
-    Ok(actions)
+/// Replay all delta log actions from version 0 to `version`, in order.
+///
+/// Delta's transaction log is additive: each version's JSON only records the
+/// changes *relative to the previous state*. Processing only the latest version
+/// loses files added in older versions and misses removes recorded earlier, so
+/// the full history must be replayed to reconstruct the current file set (P51.15).
+fn read_delta_log_actions(table_path: &str, version: i64) -> Result<Vec<serde_json::Value>, String> {
+    let mut all_actions = Vec::new();
+    for v in 0..=version {
+        let log_path = Path::new(table_path)
+            .join("_delta_log")
+            .join(format!("{:020}.json", v));
+        if !log_path.exists() {
+            // Tolerate a missing intermediate version rather than failing the
+            // whole read; later versions are replayed normally.
+            continue;
+        }
+        let content =
+            fs::read_to_string(&log_path).map_err(|e| format!("Failed to read delta log {}: {e}", log_path.display()))?;
+        for line in content.lines().filter(|l| !l.trim().is_empty()) {
+            if let Ok(action) = serde_json::from_str(line) {
+                all_actions.push(action);
+            }
+        }
+    }
+    Ok(all_actions)
 }
 
 /// Load Delta table info from the given path.
 pub fn load_delta_table(table_path: &str) -> Result<DeltaTableInfo, String> {
     let version = latest_delta_log_version(table_path)?;
-    let actions = read_latest_delta_log(table_path)?;
+    let actions = read_delta_log_actions(table_path, version)?;
 
     let mut data_files = Vec::new();
     let mut schema: Option<String> = None;
@@ -217,6 +226,39 @@ mod tests {
         assert!(info.schema.is_some());
         assert_eq!(info.table_id.unwrap(), "test-table-id");
         assert_eq!(info.min_reader_version, 1);
+    }
+
+    #[test]
+    fn test_load_delta_table_replays_history() {
+        let dir = std::env::temp_dir().join("delta_test_replay");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("_delta_log")).unwrap();
+
+        // Version 0: adds two files.
+        let v0 = vec![
+            r#"{"add":{"path":"part-00001-xxx.parquet","size":100,"partitionValues":{},"modificationTime":1,"dataChange":true}}"#,
+            r#"{"add":{"path":"part-00002-xxx.parquet","size":200,"partitionValues":{},"modificationTime":2,"dataChange":true}}"#,
+        ];
+        fs::write(dir.join("_delta_log/00000000000000000000.json"), v0.join("\n")).unwrap();
+
+        // Version 1: removes part-00001 and adds part-00003.
+        let v1 = vec![
+            r#"{"remove":{"path":"part-00001-xxx.parquet","deletionTimestamp":3,"dataChange":true}}"#,
+            r#"{"add":{"path":"part-00003-xxx.parquet","size":300,"partitionValues":{},"modificationTime":4,"dataChange":true}}"#,
+        ];
+        fs::write(dir.join("_delta_log/00000000000000000001.json"), v1.join("\n")).unwrap();
+
+        let info = load_delta_table(&dir.to_string_lossy()).unwrap();
+        assert_eq!(info.version, 1);
+        // Only part-00002 and part-00003 survive (part-00001 was removed in v1).
+        assert_eq!(info.data_files.len(), 2);
+        for f in &info.data_files {
+            let name = Path::new(f).file_name().unwrap().to_str().unwrap();
+            assert!(
+                name == "part-00002-xxx.parquet" || name == "part-00003-xxx.parquet",
+                "unexpected surviving file: {name}"
+            );
+        }
     }
 
     #[test]

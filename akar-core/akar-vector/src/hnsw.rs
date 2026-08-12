@@ -20,7 +20,9 @@
 //!
 //! `HnswIndex` is `Send` but not `Sync`. Wrap in `Mutex` for concurrent use.
 
-use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashSet};
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
@@ -100,6 +102,34 @@ impl DistanceMetric {
 // ---------------------------------------------------------------------------
 // Core data structures
 // ---------------------------------------------------------------------------
+
+/// A `(distance, node_id)` pair with a total order for use in HNSW heaps.
+///
+/// `f64` does not implement `Ord`/`Eq`, so this wrapper gives the beam-search
+/// heaps a total order based on `total_cmp` (ties broken by node id for
+/// determinism) (P51.16).
+#[derive(Debug, Clone, Copy)]
+struct Candidate(f64, usize);
+
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0).then_with(|| self.1.cmp(&other.1))
+    }
+}
+
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for Candidate {}
 
 /// A node in the HNSW graph representing one vector.
 #[derive(Debug, Clone)]
@@ -225,60 +255,65 @@ impl HnswIndex {
         current
     }
 
-    /// Search layer 0 for the `k` nearest neighbours, starting from a given
-    /// entry point. Uses a simple greedy descent with a candidate set.
-    fn search_layer_0(&self, entry: usize, query: &[f64], k: usize) -> Vec<(f64, usize)> {
+    /// Search the given layer for the `k` nearest neighbours, starting from a
+    /// given entry point, using a bounded beam search (P51.16).
+    ///
+    /// The beam is capped at `ef` candidates: both the candidate set and the
+    /// result set are truncated to `ef`, and a candidate is only expanded when
+    /// it could still improve the `ef`-th best result. This keeps the search
+    /// at O(ef · M) instead of degenerating into a full-graph scan.
+    ///
+    /// `layer` selects the connection set used for expansion (insert searches
+    /// each layer separately; `search()` always uses layer 0).
+    fn search_layer_0(&self, entry: usize, query: &[f64], layer: usize, k: usize) -> Vec<(f64, usize)> {
         if k == 0 {
             return Vec::new();
         }
-        let mut candidates = Vec::new();
+        let ef = EF_SEARCH.max(k);
         let mut visited = HashSet::new();
 
         let entry_dist = self.node_distance(entry, query);
-        candidates.push((entry_dist, entry));
+        // candidates: min-heap (closest popped first).
+        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::new();
+        // results: max-heap (farthest/worst on top), bounded to `ef`.
+        let mut results: BinaryHeap<Candidate> = BinaryHeap::new();
+        candidates.push(Reverse(Candidate(entry_dist, entry)));
+        results.push(Candidate(entry_dist, entry));
         visited.insert(entry);
 
-        // We'll use a simple beam search: keep at most `ef` candidates
-        let ef = EF_SEARCH.max(k);
-        let mut results: Vec<(f64, usize)> = vec![(entry_dist, entry)];
-
-        let mut idx = 0;
-        while idx < candidates.len() {
-            let (dist, node_id) = candidates[idx];
-            idx += 1;
-
-            // Prune: if this candidate is worse than the k-th best so far,
-            // and we already have k results, skip expansion
-            if results.len() >= k && dist > results[k - 1].0 {
+        while let Some(Reverse(c)) = candidates.pop() {
+            // If the closest remaining candidate is already worse than the
+            // `ef`-th best result, no further candidate can improve it (the
+            // beam is exhausted). This is the pruning step that keeps the
+            // search bounded.
+            if results.len() >= ef && c.0 > results.peek().unwrap().0 {
+                break;
+            }
+            let neighbors = &self.nodes[c.1].connections;
+            if layer >= neighbors.len() {
                 continue;
             }
-
-            let neighbors = &self.nodes[node_id].connections;
-            if neighbors.is_empty() {
-                continue;
-            }
-            for &neighbor in &neighbors[0] {
-                if visited.contains(&neighbor) {
+            for &neighbor in &neighbors[layer] {
+                if !visited.insert(neighbor) {
                     continue;
                 }
-                visited.insert(neighbor);
                 let nd = self.node_distance(neighbor, query);
-
-                // Add to candidates
-                candidates.push((nd, neighbor));
-                results.push((nd, neighbor));
-
-                // Sort results by distance ascending, keep at most `ef`
-                results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                if results.len() > ef {
-                    results.truncate(ef);
+                let worst = results.peek().map(|r| r.0).unwrap_or(f64::INFINITY);
+                // Only admit a neighbor that could enter the `ef`-closest set.
+                if nd < worst || results.len() < ef {
+                    results.push(Candidate(nd, neighbor));
+                    candidates.push(Reverse(Candidate(nd, neighbor)));
+                    if results.len() > ef {
+                        results.pop();
+                    }
                 }
             }
         }
 
-        results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        results.truncate(k);
-        results
+        let mut out: Vec<(f64, usize)> = results.into_vec().into_iter().map(|c| (c.0, c.1)).collect();
+        out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        out.truncate(k);
+        out
     }
 
     /// Select the `M` closest neighbours from a candidate list.
@@ -324,9 +359,10 @@ impl HnswIndex {
 
         // Phase 2: Insert at each level from `min(new_level, max_level)` down to 0
         for level in (0..=new_level.min(self.max_level)).rev() {
-            // Find nearest neighbours at this layer
+            // Find nearest neighbours at this layer (search the layer's own
+            // connection set, not layer 0 — P51.16).
             let ep = self.greedy_search_at_layer(current_entry, &vector, level);
-            let candidates = self.search_layer_0(ep, &vector, EF_CONSTRUCTION);
+            let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION);
 
             let m = if level == 0 { M_MAX } else { M };
             let neighbors = self.select_neighbors_simple(&candidates, m);
@@ -405,7 +441,7 @@ impl HnswIndex {
         }
 
         // Phase 2: Search at level 0
-        self.search_layer_0(current, query, k)
+        self.search_layer_0(current, query, 0, k)
     }
 
     /// Get a reference to a specific node's vector.

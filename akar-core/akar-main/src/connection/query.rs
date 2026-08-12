@@ -257,17 +257,6 @@ impl Connection {
             txn.undo_records.extend(undo);
         }
 
-        // Single-writer mode: DML wrote directly into the in-memory tables,
-        // bypassing `commit_transaction`'s mirror sync. Persist the durable
-        // column mirrors so committed rows survive a restart even when the
-        // auto-checkpoint threshold is disabled (P45.4).
-        if txn_opt.is_none() && Connection::is_write_statement(bound) {
-            self.database
-                .storage_manager
-                .persist_all_tables()
-                .map_err(|e| format!("Failed to persist tables: {e}"))?;
-        }
-
         // Auto-checkpoint after DML execution
         self.maybe_auto_checkpoint()?;
 
@@ -416,20 +405,13 @@ impl Connection {
             txn.undo_records.extend(undo);
         }
 
-        // Commit or rollback based on result
+        // Commit or rollback based on result. `commit_write_txn` runs the full
+        // commit pipeline including `persist_all_tables` (durable mirror sync),
+        // so no additional persist is needed here (P51.27).
         if is_write {
             if let Some(ref mut txn) = txn_opt {
                 self.commit_write_txn(txn)?;
             }
-        }
-
-        // Persist the durable column mirrors so committed rows survive a
-        // restart (P45.4).
-        if is_write {
-            self.database
-                .storage_manager
-                .persist_all_tables()
-                .map_err(|e| format!("Failed to persist tables: {e}"))?;
         }
 
         // Auto-checkpoint after DML execution
