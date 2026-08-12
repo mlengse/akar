@@ -165,9 +165,7 @@ fn extract_join_conditions_from_tree(op: &LogicalOperator) -> Vec<(String, Strin
 fn extract_conditions_recursive(op: &LogicalOperator, conditions: &mut Vec<(String, String)>) {
     match op {
         LogicalOperator::Filter(f) => {
-            if let Some((left, right)) = extract_equality_join(&f.expression) {
-                conditions.push((left, right));
-            }
+            extract_join_conditions_from_expr(&f.expression, conditions);
             for child in &f.children {
                 extract_conditions_recursive(child, conditions);
             }
@@ -183,6 +181,31 @@ fn extract_conditions_recursive(op: &LogicalOperator, conditions: &mut Vec<(Stri
         LogicalOperator::Projection(p) => {
             for child in &p.children {
                 extract_conditions_recursive(child, conditions);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Extract equality join conditions from an expression, flattening AND
+/// conjunctions. A single `WHERE a.id = b.id AND c.id = d.id` arrives as one
+/// And-tree; matching only a top-level Equal would miss every conjunct, leaving
+/// the DP adjacency empty and degrading join reordering to a pure cardinality
+/// sort (P51.24).
+fn extract_join_conditions_from_expr(expr: &akar_parser::ast::Expression, conditions: &mut Vec<(String, String)>) {
+    use akar_parser::ast::{BinaryOp, Expression};
+    match expr {
+        Expression::BinaryOp(BinaryOp::And, left, right) => {
+            extract_join_conditions_from_expr(left, conditions);
+            extract_join_conditions_from_expr(right, conditions);
+        }
+        Expression::BinaryOp(BinaryOp::Equal, left, right) => {
+            let left_var = extract_root_var(left);
+            let right_var = extract_root_var(right);
+            if let (Some(lv), Some(rv)) = (&left_var, &right_var)
+                && lv != rv
+            {
+                conditions.push((lv.clone(), rv.clone()));
             }
         }
         _ => {}
@@ -268,6 +291,58 @@ pub fn reorder_joins_greedy(root: &LogicalOperator) -> Option<Vec<LogicalOperato
 
 const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.1;
 
+/// Operators that participate in a single join tree. Any other operator
+/// (ORDER BY, LIMIT/SKIP, WITH projection, aggregate, union, ...) is a pipeline
+/// boundary: DP join reordering must not cross it, otherwise scans from
+/// different WITH stages get folded into one cross-product and the intermediate
+/// operators are pushed past it — changing semantics (P51.23).
+fn is_join_segment_operator(op: &LogicalOperator) -> bool {
+    matches!(
+        op,
+        LogicalOperator::ScanNode(_)
+            | LogicalOperator::ScanRel(_)
+            | LogicalOperator::Filter(_)
+            | LogicalOperator::HashJoin(_)
+            | LogicalOperator::CrossProduct(_)
+    )
+}
+
+/// Reorder joins with the bushy DP algorithm, respecting WITH-stage boundaries.
+///
+/// The input is a flat operator pipeline that may span several query stages
+/// (`... WITH ... ORDER BY ... LIMIT ...`). Only contiguous runs of join-tree
+/// operators are reordered together; boundary operators stay in place so a
+/// LIMIT/ORDER BY from an earlier stage is never applied to a cross-product of
+/// later stages' scans (P51.23).
+pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
+    let mut result: Vec<LogicalOperator> = Vec::with_capacity(operators.len());
+    let mut segment: Vec<LogicalOperator> = Vec::new();
+    let mut any_reordered = false;
+
+    for op in operators {
+        if is_join_segment_operator(op) {
+            segment.push(op.clone());
+        } else {
+            if let Some(reordered) = reorder_joins_segment(&segment) {
+                result.extend(reordered);
+                any_reordered = true;
+            } else {
+                result.extend(segment.iter().cloned());
+            }
+            segment.clear();
+            result.push(op.clone());
+        }
+    }
+    if let Some(reordered) = reorder_joins_segment(&segment) {
+        result.extend(reordered);
+        any_reordered = true;
+    } else {
+        result.extend(segment.iter().cloned());
+    }
+
+    any_reordered.then_some(result)
+}
+
 #[derive(Clone, Debug)]
 struct DpState {
     cost: f64,
@@ -276,7 +351,15 @@ struct DpState {
     right_mask: usize,
 }
 
-pub fn reorder_joins_dp_bushy(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
+/// Reorder joins within a single contiguous join-tree segment.
+///
+/// A segment is a maximal run of operators that can form one join tree
+/// (scans, filters, hash joins, cross products). Pipeline boundaries such as
+/// ORDER BY / LIMIT / WITH projections live between segments and must never be
+/// crossed, otherwise scans from different WITH stages would be folded into a
+/// single cross-product and the intermediate operators pushed past it —
+/// changing semantics (P51.23).
+fn reorder_joins_segment(operators: &[LogicalOperator]) -> Option<Vec<LogicalOperator>> {
     let mut scans_with_pos: Vec<(usize, u64, LogicalOperator)> = Vec::new();
     let mut conditions: Vec<(String, String)> = Vec::new();
     let mut original_join_keys: Vec<akar_parser::ast::Expression> = Vec::new();
@@ -710,5 +793,79 @@ mod tests {
         let reordered = result.unwrap();
         assert_eq!(reordered.len(), 1); // all scans and join filters replaced by a single HashJoin tree
         assert!(matches!(reordered[0], LogicalOperator::HashJoin(_)));
+    }
+
+    #[test]
+    fn test_extract_and_conjunct_join_conditions() {
+        // `a.id = b.id AND c.id = d.id` arrives as a single And-tree. Both
+        // conjuncts must be extracted, otherwise DP adjacency is empty and
+        // join reordering degrades to a pure cardinality sort (P51.24).
+        let expr = akar_parser::ast::Expression::BinaryOp(
+            akar_parser::ast::BinaryOp::And,
+            Box::new(akar_parser::ast::Expression::BinaryOp(
+                akar_parser::ast::BinaryOp::Equal,
+                Box::new(akar_parser::ast::Expression::Variable("a".into())),
+                Box::new(akar_parser::ast::Expression::Variable("b".into())),
+            )),
+            Box::new(akar_parser::ast::Expression::BinaryOp(
+                akar_parser::ast::BinaryOp::Equal,
+                Box::new(akar_parser::ast::Expression::Variable("c".into())),
+                Box::new(akar_parser::ast::Expression::Variable("d".into())),
+            )),
+        );
+        let filter = LogicalOperator::Filter(akar_planner::logical_operator::LogicalFilter {
+            expression: expr,
+            children: vec![],
+            cardinality: 0,
+        });
+        let mut conditions = Vec::new();
+        extract_conditions_recursive(&filter, &mut conditions);
+        assert!(conditions.contains(&("a".to_string(), "b".to_string())));
+        assert!(conditions.contains(&("c".to_string(), "d".to_string())));
+    }
+
+    #[test]
+    fn test_dp_reorder_does_not_cross_with_boundary() {
+        // Simulates `MATCH (a:A) WITH a ... LIMIT 5 MATCH (b:B), (c:C)` — the
+        // LIMIT is a pipeline boundary. Scans before it must NOT be folded into
+        // the same cross-product join as scans after it (P51.23).
+        let scan = |name: &str, card: u64| {
+            LogicalOperator::ScanNode(LogicalScanNode {
+                predicate: None,
+                table_name: name.into(),
+                table_id: 0,
+                alias: Some(name.into()),
+                columns: vec![],
+                cardinality: card,
+                fts_query: None,
+            })
+        };
+        let limit = LogicalOperator::Limit(akar_planner::logical_operator::LogicalLimit {
+            limit: 5,
+            offset: 0,
+            children: vec![],
+            cardinality: 0,
+        });
+
+        let operators = vec![scan("a", 100), limit, scan("b", 200), scan("c", 300)];
+        let result = reorder_joins_dp_bushy(&operators);
+        assert!(result.is_some());
+        let reordered = result.unwrap();
+
+        // The boundary must stay in place between stage 1 (A) and stage 2 (B,C).
+        assert_eq!(reordered.len(), 3, "expected [A, LIMIT, (B×C tree)]");
+        assert!(matches!(reordered[0], LogicalOperator::ScanNode(_)));
+        assert!(matches!(reordered[1], LogicalOperator::Limit(_)));
+
+        // The trailing join tree must only contain the B and C scans.
+        let mut scans = Vec::new();
+        collect_scans_recursive(&reordered[2], &mut scans);
+        let aliases: Vec<String> = scans
+            .iter()
+            .filter_map(|(_, op)| get_scan_alias(op))
+            .collect();
+        assert!(aliases.contains(&"b".to_string()));
+        assert!(aliases.contains(&"c".to_string()));
+        assert!(!aliases.contains(&"a".to_string()), "scan A must stay in its own stage");
     }
 }
