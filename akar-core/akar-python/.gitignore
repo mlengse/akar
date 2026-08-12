@@ -1,0 +1,7 @@
+# Python bindings build artifacts
+target/
+*.so
+*.pyd
+*.pyi
+__pycache__/
+.venv/

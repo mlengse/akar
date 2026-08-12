@@ -1,0 +1,32 @@
+[package]
+name = "akar-python"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Python bindings (PyO3) for Akar — pure Rust embedded graph database for AI agent memory"
+repository = "https://github.com/mlengse/akar"
+publish = false
+
+# Standalone workspace root (NOT a member of akar-core's workspace):
+# keeps the `test [akar-core]` gate and CI (cargo test --workspace) untouched,
+# and lets maturin build this crate in isolation.
+[workspace]
+
+[lib]
+name = "akar"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["abi3-py39", "extension-module"] }
+serde_json = "1"
+akar-common = { path = "../akar-common", version = "0.1.1" }
+akar-main = { path = "../akar-main", version = "0.1.3", features = [
+    "json-extension",
+    "fts-extension",
+    "vector-extension",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
