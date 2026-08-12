@@ -11,7 +11,7 @@
 
 ### Fixed
 
-- **P52.18** — isolasi txn putus dari SQL write path: tulis kini SELALU dibungkus txn (mode single & concurrent writer); `txn_id` dialirkan ke operator tulis (insert/delete/set/merge/copyfrom/batchinsert) via `insert_row_with_txn`/`delete_row_with_txn` sehingga `VersionInfo`/`commit_history` terisi dan `is_row_visible` nyata (uncommitted insert/delete tak terlihat reader lain); undo ditangkap tiap op tulis + DDL inline (CreateDml/Merge) dan diterapkan saat rollback/konflik OCC — termasuk rel table (`rollback_transaction` di-extend) — gate **1,619 (1,614 passed)**.
+- **P52.18** — isolasi txn putus dari SQL write path: tulis kini SELALU dibungkus txn (mode single & concurrent writer); `txn_id` dialirkan ke operator tulis (insert/delete/set/merge/copyfrom/batchinsert) via `insert_row_with_txn`/`delete_row_with_txn` sehingga `VersionInfo`/`commit_history` terisi dan `is_row_visible` nyata (uncommitted insert/delete tak terlihat reader lain); undo ditangkap tiap op tulis + DDL inline (CreateDml/Merge) dan diterapkan saat rollback/konflik OCC — termasuk rel table (`rollback_transaction` di-extend) — `b35fdf4` — gate **1,619 (1,614 passed)**.
 - Batch E: storage/execution/vector/graph + DML DELETE/SET row-id bug (P52.29/P52.31/P52.38–P52.45/P52.47–P52.48/P52.62) — `61b5e0e` — gate 1,607 (1,602 passed).
 - Batch E/F: connectors + extension compile fixes — azure/httpfs/duckdb/postgres/iceberg/neo4j (P52.30/P52.32–P52.37/P52.66 + P51.19/P52.33/P52.34) — `7c601a5` — gate **1,619 (1,614 passed)**.
 
