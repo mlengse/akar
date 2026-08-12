@@ -51,7 +51,7 @@ impl Extension for DuckDbExtension {
                     _ => return Err("duckdb_query expects a string argument".into()),
                 };
 
-                let manager = match connection::DuckDbManager::in_memory() {
+                let manager = match connection::DuckDbManager::shared_in_memory() {
                     Ok(m) => m,
                     Err(e) => return Err(format!("Failed to open DuckDB: {e}")),
                 };
@@ -98,7 +98,7 @@ impl Extension for DuckDbExtension {
                         return Ok(());
                     }
 
-                    let manager = match connection::DuckDbManager::in_memory() {
+                    let manager = match connection::DuckDbManager::shared_in_memory() {
                         Ok(m) => m,
                         Err(e) => return Err(format!("Failed to open DuckDB: {e}")),
                     };

@@ -43,6 +43,86 @@ fn postgres_value_to_string(row: &tokio_postgres::Row, i: usize) -> String {
     }
 }
 
+/// Shared PostgreSQL runtime, connection cache and query helper.
+///
+/// Reuses a single process-wide tokio runtime and caches one connection per
+/// connection string, instead of building a fresh multi-thread runtime and a
+/// fresh TCP connection on every `sql_query` call (P52.37). A `connect_timeout`
+/// is enforced so an unreachable host cannot block the caller forever.
+#[cfg(feature = "native")]
+mod runtime {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    static RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+    static CONNECTIONS: OnceLock<Mutex<HashMap<String, tokio_postgres::Client>>> = OnceLock::new();
+
+    fn runtime() -> Result<&'static tokio::runtime::Runtime, String> {
+        RUNTIME
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("Failed to create tokio runtime: {e}"))
+            })
+            .as_ref()
+            .map_err(|e| e.clone())
+    }
+
+    fn connections() -> &'static Mutex<HashMap<String, tokio_postgres::Client>> {
+        CONNECTIONS.get_or_init(Default::default)
+    }
+
+    pub fn query(conn_str: &str, sql: &str) -> Result<Vec<tokio_postgres::Row>, String> {
+        let rt = runtime()?;
+
+        let mut config = conn_str
+            .parse::<tokio_postgres::Config>()
+            .map_err(|e| format!("Invalid PostgreSQL connection string: {e}"))?;
+
+        // Fail secure rather than silently sending credentials over plaintext
+        // when the caller explicitly requires TLS (which we cannot provide yet).
+        if config.get_ssl_mode() == tokio_postgres::config::SslMode::Require {
+            return Err(
+                "sslmode=require requested but TLS support is not compiled into akar-postgres \
+                 (use sslmode=disable or sslmode=prefer)"
+                    .into(),
+            );
+        }
+        config.connect_timeout(Duration::from_secs(10));
+
+        let mut cache = connections().lock().map_err(|_| "Connection cache lock poisoned".to_string())?;
+
+        let client = match cache.get(conn_str) {
+            Some(c) => c.clone(),
+            None => {
+                let (client, connection) = rt
+                    .block_on(async { config.connect(tokio_postgres::NoTls).await })
+                    .map_err(|e| format!("PostgreSQL connect error: {e}"))?;
+                rt.spawn(async move {
+                    if let Err(e) = connection.await {
+                        tracing::warn!("PostgreSQL connection error: {e}");
+                    }
+                });
+                cache.insert(conn_str.to_string(), client.clone());
+                client
+            }
+        };
+
+        match rt.block_on(async { client.query(sql, &[]).await }) {
+            Ok(rows) => Ok(rows),
+            Err(e) => {
+                // Drop a dead connection so the next call reconnects.
+                if e.is_closed() {
+                    cache.remove(conn_str);
+                }
+                Err(format!("PostgreSQL query error: {e}"))
+            }
+        }
+    }
+}
+
 /// The PostgreSQL extension enables querying PostgreSQL databases from Akar.
 pub struct PostgresExtension;
 
@@ -84,23 +164,7 @@ impl Extension for PostgresExtension {
                     _ => return Err("sql_query: second argument must be a SQL string".into()),
                 };
 
-                // Create a one-shot tokio runtime for this query
-                let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
-
-                let (client, connection) = rt
-                    .block_on(async { tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await })
-                    .map_err(|e| format!("PostgreSQL connect error: {e}"))?;
-
-                // Spawn connection handler
-                rt.spawn(async move {
-                    if let Err(e) = connection.await {
-                        tracing::warn!("PostgreSQL connection error: {e}");
-                    }
-                });
-
-                let rows = rt
-                    .block_on(async { client.query(&sql, &[]).await })
-                    .map_err(|e| format!("PostgreSQL query error: {e}"))?;
+                let rows = runtime::query(&conn_str, &sql)?;
 
                 // Collect every row (all columns) as strings, not just the first.
                 let mut parts = Vec::new();

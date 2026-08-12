@@ -4,7 +4,7 @@
 //! in-memory, and remote HTTP/S3 modes.
 
 #[cfg(feature = "bundled")]
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(feature = "bundled")]
 use duckdb::{AccessMode, Config, Connection as DuckDbConn};
@@ -81,6 +81,10 @@ impl DuckDbConfig {
     }
 }
 
+/// Process-wide shared in-memory DuckDB instance.
+#[cfg(feature = "bundled")]
+static SHARED_IN_MEMORY: OnceLock<Result<std::sync::Arc<DuckDbManager>, String>> = OnceLock::new();
+
 /// Manager for a DuckDB connection.
 pub struct DuckDbManager {
     #[cfg(feature = "bundled")]
@@ -88,6 +92,18 @@ pub struct DuckDbManager {
 }
 
 impl DuckDbManager {
+    /// Return the process-wide shared in-memory DuckDB instance.
+    ///
+    /// Reuses a single DuckDB instance (catalog + thread pool) across every
+    /// `duckdb_query`/`duckdb_scan` and DuckDB-delegated extension call instead
+    /// of booting a fresh instance per call (P52.32).
+    #[cfg(feature = "bundled")]
+    pub fn shared_in_memory() -> Result<std::sync::Arc<DuckDbManager>, String> {
+        SHARED_IN_MEMORY
+            .get_or_init(|| in_memory().map(std::sync::Arc::new))
+            .clone()
+    }
+
     /// Open a DuckDB database with the given configuration.
     #[cfg(feature = "bundled")]
     pub fn open(config: DuckDbConfig) -> Result<Self, String> {
@@ -262,5 +278,17 @@ mod tests {
             .execute("INSERT INTO test VALUES (1, 'hello'), (2, 'world')")
             .unwrap();
         assert_eq!(affected, 2);
+    }
+
+    #[test]
+    #[cfg(feature = "bundled")]
+    fn test_shared_in_memory_is_singleton() {
+        let a = DuckDbManager::shared_in_memory().unwrap();
+        let b = DuckDbManager::shared_in_memory().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "shared instance must be reused, not recreated");
+        a.execute("CREATE TABLE IF NOT EXISTS shared_t (id INTEGER)").unwrap();
+        b.execute("INSERT INTO shared_t VALUES (42)").unwrap();
+        let rows = b.query_rows("SELECT COUNT(*) FROM shared_t").unwrap();
+        assert_eq!(rows.len(), 1);
     }
 }

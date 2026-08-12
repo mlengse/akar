@@ -7,6 +7,9 @@
 #[cfg(feature = "native")]
 mod native_reader;
 
+#[cfg(feature = "native")]
+mod avro;
+
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
 
@@ -53,9 +56,10 @@ impl Extension for IcebergExtension {
                         return Ok(());
                     }
 
-                    // Load metadata and list data files
+                    // Load metadata and list the data files referenced by the
+                    // current snapshot (excludes compacted/deleted files).
                     let _meta = native_reader::IcebergMetadata::load(&path)?;
-                    let data_files = native_reader::list_data_files(&path)?;
+                    let data_files = native_reader::list_active_data_files(&path)?;
 
                     akar_common::extension_utils::fill_chunk_with_strings(chunk, "file_path", &data_files);
                     Ok(())

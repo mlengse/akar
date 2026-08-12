@@ -207,6 +207,7 @@ dependencies = [
  "akar-extension",
  "akar-function",
  "arrow 59.2.0",
+ "flate2",
  "serde",
  "serde_json",
  "tracing",

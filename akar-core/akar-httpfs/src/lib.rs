@@ -53,28 +53,129 @@ impl FileSystem for HttpFileSystem {
     }
 }
 
+/// Read-ahead window fetched by each HTTP Range request.
+const READ_AHEAD: u64 = 256 * 1024;
+
 /// A reader that uses HTTP Range requests for random access.
+///
+/// Fetches the requested byte range plus a read-ahead window into an internal
+/// buffer, so consecutive reads do not issue a request per chunk (P51.19 perf),
+/// and verifies the server honors the `Range` header (P52.33): a `200` full-body
+/// response or a mismatched `Content-Range` is treated as an error instead of
+/// silently returning mis-positioned bytes.
 pub struct HttpRandomAccessReader {
     url: String,
     position: u64,
     content_length: Option<u64>,
+    /// Absolute offset of the first byte in `buf`.
+    buf_start: u64,
+    buf: Vec<u8>,
 }
 
 impl HttpRandomAccessReader {
     pub fn new(url: &str) -> std::io::Result<Self> {
-        let resp = ureq::head(url)
+        // HEAD may be unsupported by some servers; treat it as optional.
+        let content_length = ureq::head(url)
             .call()
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        let content_length = resp
-            .headers()
-            .get("Content-Length")
-            .and_then(|s| s.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok());
+            .ok()
+            .and_then(|resp| {
+                resp.headers()
+                    .get("Content-Length")
+                    .and_then(|s| s.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+            });
         Ok(Self {
             url: url.to_string(),
             position: 0,
             content_length,
+            buf_start: 0,
+            buf: Vec::new(),
         })
+    }
+
+    /// Fetch a window covering `[self.position, self.position + READ_AHEAD)`
+    /// into the internal buffer, verifying the server actually honors the range.
+    fn fetch_window(&mut self) -> std::io::Result<()> {
+        if let Some(len) = self.content_length {
+            if self.position >= len {
+                self.buf.clear();
+                return Ok(());
+            }
+        }
+        let start = self.position;
+        let end = match self.content_length {
+            Some(len) => (start + READ_AHEAD - 1).min(len.saturating_sub(1)),
+            None => start + READ_AHEAD - 1,
+        };
+        let range_header = format!("bytes={start}-{end}");
+
+        let resp = match ureq::get(&self.url).header("Range", &range_header).call() {
+            Ok(r) => r,
+            Err(ureq::Error::StatusCode(416)) => {
+                // Range not satisfiable → we are at/past end of file.
+                self.buf.clear();
+                return Ok(());
+            }
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(std::io::Error::other(format!(
+                    "HTTP Range request failed for {} (status {code})",
+                    self.url
+                )));
+            }
+            Err(e) => {
+                return Err(std::io::Error::other(format!(
+                    "HTTP Range request failed for {}: {e}",
+                    self.url
+                )));
+            }
+        };
+
+        let status = resp.status();
+        if status != 206 {
+            return Err(std::io::Error::other(format!(
+                "HTTP server did not honor Range request (status {status}) for {}",
+                self.url
+            )));
+        }
+
+        let content_range = resp
+            .headers()
+            .get("Content-Range")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "HTTP server returned 206 without Content-Range for {}",
+                    self.url
+                ))
+            })?;
+        let (actual_start, actual_end) = parse_content_range(content_range).ok_or_else(|| {
+            std::io::Error::other(format!(
+                "HTTP server returned malformed Content-Range `{content_range}` for {}",
+                self.url
+            ))
+        })?;
+        if actual_start != start || actual_end < start {
+            return Err(std::io::Error::other(format!(
+                "HTTP server returned unexpected range {actual_start}-{actual_end}, requested {start}-{end} for {}",
+                self.url
+            )));
+        }
+
+        // Read exactly the advertised bytes (bounded — never more than requested).
+        let expected = actual_end - actual_start + 1;
+        let reader = resp.into_body().into_reader();
+        let mut bytes = Vec::with_capacity(expected as usize);
+        let n = reader.take(expected + 1).read_to_end(&mut bytes)?;
+        if n as u64 != expected {
+            return Err(std::io::Error::other(format!(
+                "HTTP server returned {n} bytes for range {start}-{end}, expected {expected}, for {}",
+                self.url
+            )));
+        }
+
+        self.buf_start = actual_start;
+        self.buf = bytes;
+        Ok(())
     }
 }
 
@@ -83,17 +184,33 @@ impl Read for HttpRandomAccessReader {
         if buf.is_empty() {
             return Ok(0);
         }
-        let end = self.position + buf.len() as u64 - 1;
-        let range_header = format!("bytes={}-{}", self.position, end);
-        let resp = ureq::get(&self.url)
-            .header("Range", &range_header)
-            .call()
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        if let Some(len) = self.content_length {
+            if self.position >= len {
+                return Ok(0);
+            }
+        }
 
-        let mut reader = resp.into_body().into_reader();
-        let bytes_read = reader.read(buf)?;
-        self.position += bytes_read as u64;
-        Ok(bytes_read)
+        let mut filled = 0;
+        while filled < buf.len() {
+            let rel = self.position.checked_sub(self.buf_start);
+            if let Some(rel) = rel {
+                if let Some(avail) = (self.buf.len() as u64).checked_sub(rel) {
+                    if avail > 0 {
+                        let off = rel as usize;
+                        let n = (avail as usize).min(buf.len() - filled);
+                        buf[filled..filled + n].copy_from_slice(&self.buf[off..off + n]);
+                        self.position += n as u64;
+                        filled += n;
+                        continue;
+                    }
+                }
+            }
+            self.fetch_window()?;
+            if self.buf.is_empty() {
+                break;
+            }
+        }
+        Ok(filled)
     }
 }
 
@@ -136,6 +253,14 @@ impl Seek for HttpRandomAccessReader {
 }
 
 impl FileRead for HttpRandomAccessReader {}
+
+/// Parse a `Content-Range` header value of the form `bytes {start}-{end}/{total}`.
+fn parse_content_range(header: &str) -> Option<(u64, u64)> {
+    let rest = header.strip_prefix("bytes ")?;
+    let (range, _total) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    Some((start.parse().ok()?, end.parse().ok()?))
+}
 
 /// The HTTPFS extension adds HTTP file system support to Akar.
 pub struct HttpfsExtension;
@@ -386,5 +511,22 @@ mod tests {
     fn test_httpfs_extension_name() {
         let ext = HttpfsExtension::new();
         assert_eq!(ext.name(), "HTTPFS");
+    }
+
+    #[test]
+    fn test_parse_content_range() {
+        assert_eq!(parse_content_range("bytes 0-1023/2048"), Some((0, 1023)));
+        assert_eq!(parse_content_range("bytes 1024-2047/2048"), Some((1024, 2047)));
+        assert_eq!(parse_content_range("bytes 0-0/1"), Some((0, 0)));
+        assert_eq!(parse_content_range("bytes 0-1023/*"), Some((0, 1023)));
+        assert_eq!(parse_content_range("bytes 0-1023"), None);
+        assert_eq!(parse_content_range("chunked 0-10/100"), None);
+        assert_eq!(parse_content_range("bytes a-b/100"), None);
+        assert_eq!(parse_content_range(""), None);
+    }
+
+    #[test]
+    fn test_read_ahead_window_size() {
+        assert_eq!(READ_AHEAD, 256 * 1024);
     }
 }

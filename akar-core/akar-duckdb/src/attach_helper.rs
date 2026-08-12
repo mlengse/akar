@@ -9,14 +9,14 @@ use crate::connection::DuckDbManager;
 /// Helper for extensions that delegate to DuckDB.
 pub struct DuckDbAttachHelper {
     #[cfg(feature = "bundled")]
-    manager: DuckDbManager,
+    manager: std::sync::Arc<DuckDbManager>,
 }
 
 impl DuckDbAttachHelper {
-    /// Create a new helper with an in-memory DuckDB.
+    /// Create a new helper backed by the process-wide shared in-memory DuckDB.
     #[cfg(feature = "bundled")]
     pub fn new() -> Result<Self, String> {
-        let manager = DuckDbManager::in_memory()?;
+        let manager = DuckDbManager::shared_in_memory()?;
         Ok(Self { manager })
     }
 

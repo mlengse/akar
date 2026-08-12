@@ -126,20 +126,15 @@ pub fn parse_neo4j_dump(input: &str) -> Result<Neo4jDump, String> {
 /// Parse `CREATE CONSTRAINT FOR (n:Label) REQUIRE n.prop IS UNIQUE`
 fn parse_constraint(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
     // Pattern: CREATE CONSTRAINT FOR (n:Label) REQUIRE n.prop IS UNIQUE
-    let line = line
-        .trim()
-        .strip_prefix("CREATE CONSTRAINT")
-        .or_else(|| line.trim().strip_prefix("create constraint"))
+    let line = strip_prefix_ascii_ci(line.trim(), "CREATE CONSTRAINT")
         .ok_or_else(|| format!("Expected CREATE CONSTRAINT, got: {line}"))?;
 
     // Extract label from (n:Label)
     let label = extract_label(line)?;
 
     // Extract property from REQUIRE n.prop
-    let after_label = line
-        .split("REQUIRE")
-        .nth(1)
-        .or_else(|| line.split("require").nth(1))
+    let after_label = split_once_ascii_ci(line, "REQUIRE")
+        .map(|(_, rest)| rest)
         .ok_or_else(|| format!("Missing REQUIRE in constraint: {line}"))?;
 
     let prop = after_label
@@ -159,19 +154,14 @@ fn parse_constraint(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
 
 /// Parse `CREATE INDEX FOR (n:Label) ON (n.prop)`
 fn parse_index(line: &str) -> Result<Option<Neo4jSchemaStmt>, String> {
-    let line = line
-        .trim()
-        .strip_prefix("CREATE INDEX")
-        .or_else(|| line.trim().strip_prefix("create index"))
+    let line = strip_prefix_ascii_ci(line.trim(), "CREATE INDEX")
         .ok_or_else(|| format!("Expected CREATE INDEX, got: {line}"))?;
 
     let label = extract_label(line)?;
 
     // Extract property from ON (n.prop)
-    let after_label = line
-        .split("ON")
-        .nth(1)
-        .or_else(|| line.split("on").nth(1))
+    let after_label = split_once_ascii_ci(line, "ON")
+        .map(|(_, rest)| rest)
         .ok_or_else(|| format!("Missing ON in index: {line}"))?;
 
     let prop = after_label
@@ -224,11 +214,9 @@ fn parse_node_creation(line: &str) -> Result<Option<Neo4jNode>, String> {
 
 /// Parse `MATCH ... CREATE (a)-[r:REL_TYPE {props}]->(b)`
 fn parse_rel_creation(line: &str) -> Result<Option<Neo4jRel>, String> {
-    // Find "CREATE" portion
-    let create_idx = line
-        .to_uppercase()
-        .find("CREATE")
-        .ok_or_else(|| format!("Missing CREATE in rel stmt: {line}"))?;
+    // Find "CREATE" portion (case-insensitive; index refers to the original
+    // string, so slicing is safe even with non-ASCII input)
+    let create_idx = find_ascii_ci(line, "CREATE").ok_or_else(|| format!("Missing CREATE in rel stmt: {line}"))?;
     let create_part = &line[create_idx + 6..].trim();
 
     // Pattern: (from_var)-[r:TYPE {props}]->(to_var)
@@ -408,6 +396,49 @@ fn skip_keyword<'a>(s: &'a str, keyword: &str) -> Result<&'a str, String> {
         Ok(s[keyword.len()..].trim())
     } else {
         Err(format!("Expected '{keyword}' at start, got: {s}"))
+    }
+}
+
+/// Find `needle` in `haystack` case-insensitively (ASCII only), returning the
+/// byte index in the original string.
+///
+/// Unlike `haystack.to_uppercase().find(needle)`, the returned index refers to
+/// the original string, so it is safe to slice with it even when the input
+/// contains non-ASCII characters whose uppercase form is wider (e.g. `ß`→`SS`).
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() {
+        return None;
+    }
+    for i in 0..=(h.len() - n.len()) {
+        if h[i..i + n.len()]
+            .iter()
+            .zip(n.iter())
+            .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+        {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Split `s` at the first case-insensitive occurrence of `needle`.
+fn split_once_ascii_ci<'a>(s: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    let idx = find_ascii_ci(s, needle)?;
+    Some((&s[..idx], &s[idx + needle.len()..]))
+}
+
+/// Strip a leading ASCII case-insensitive prefix from `s`.
+fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let idx = find_ascii_ci(s, prefix)?;
+    if idx == 0 {
+        Some(&s[prefix.len()..])
+    } else {
+        None
     }
 }
 
@@ -591,5 +622,50 @@ MATCH (a:Person), (b:Person) CREATE (a)-[r:KNOWS {since: 2019}]->(b)
         assert_eq!(props[0].0, "name");
         assert_eq!(props[1].0, "age");
         assert_eq!(props[2].0, "active");
+    }
+
+    #[test]
+    fn test_mixed_case_constraint_and_index() {
+        let input = "Create constraint for (n:Person) require n.id is unique\nCreate index for (n:Person) on (n.name)";
+        let dump = parse_neo4j_dump(input).unwrap();
+        assert_eq!(dump.schema.len(), 2);
+        match &dump.schema[0] {
+            Neo4jSchemaStmt::Constraint { label, property } => {
+                assert_eq!(label, "Person");
+                assert_eq!(property, "id");
+            }
+            _ => panic!("Expected Constraint"),
+        }
+        match &dump.schema[1] {
+            Neo4jSchemaStmt::Index { label, property } => {
+                assert_eq!(label, "Person");
+                assert_eq!(property, "name");
+            }
+            _ => panic!("Expected Index"),
+        }
+    }
+
+    #[test]
+    fn test_rel_creation_non_ascii_no_panic() {
+        // Regression for P52.35: `to_uppercase()` widens 'ß' to "SS", shifting
+        // byte indices; slicing the original string at that index used to panic.
+        let input = "MATCH (a:Straße), (b:City) CREATE (a)-[r:LIVES_IN {}]->(b)";
+        let dump = parse_neo4j_dump(input).unwrap();
+        assert_eq!(dump.rels.len(), 1);
+        assert_eq!(dump.rels[0].rel_type, "LIVES_IN");
+        assert_eq!(dump.rels[0].from_var, "a");
+        assert_eq!(dump.rels[0].to_var, "b");
+    }
+
+    #[test]
+    fn test_find_ascii_ci_helpers() {
+        assert_eq!(find_ascii_ci("CREATE (a)-[r:T]->(b)", "CREATE"), Some(0));
+        assert_eq!(find_ascii_ci("xx MATCH CREATE (a)", "CREATE"), Some(9));
+        assert_eq!(find_ascii_ci("create (a)", "CREATE"), Some(0));
+        assert_eq!(find_ascii_ci("MATCH (a)", "CREATE"), None);
+        assert_eq!(find_ascii_ci("CREATE", ""), Some(0));
+        assert_eq!(strip_prefix_ascii_ci("Create Constraint ...", "CREATE CONSTRAINT"), Some(" ..."));
+        assert_eq!(strip_prefix_ascii_ci("CREATE INDEX ...", "create index"), Some(" ..."));
+        assert_eq!(split_once_ascii_ci("n.prop IS UNIQUE", "IS"), Some(("n.prop ", " UNIQUE")));
     }
 }
