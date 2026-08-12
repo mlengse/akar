@@ -440,7 +440,12 @@ impl StandaloneCallFn for CurrentSettingHandler {
             ),
             "buffer_pool_size" => ("buffer_pool_size", self.database.config.buffer_pool_size.to_string()),
             "max_num_threads" => ("max_num_threads", self.database.config.max_num_threads.to_string()),
-            "concurrent_writes" => ("concurrent_writes", self.database.config.concurrent_writes.to_string()),
+            "concurrent_writes" => (
+                "concurrent_writes",
+                // Read the live runtime toggle (SET concurrent_writes) rather
+                // than the static config so current_setting stays in sync (P52.50).
+                self.database.transaction_manager.allow_concurrent_writes().to_string(),
+            ),
             "read_only" => ("read_only", self.database.config.read_only.to_string()),
             _ => (key.as_str(), "UNKNOWN".to_string()),
         };

@@ -32,7 +32,7 @@ impl Connection {
             .map(|s| s.trim())
         {
             let bytes: u64 = value.parse().map_err(|_| {
-                format!("Invalid spill_threshold value '{value}'. Expected a positive integer (bytes).")
+                format!("Invalid spill_threshold value '{value}'. Expected a non-negative integer (bytes).")
             })?;
             self.database.set_spill_threshold(bytes);
             return Ok(QueryResult::success_message(format!(

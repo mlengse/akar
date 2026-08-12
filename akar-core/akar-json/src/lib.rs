@@ -1,6 +1,6 @@
 //! JSON extension for Akar.
 //!
-//! Provides JSON data type support and functions:
+//! Provides JSON functions (all operating on JSON strings):
 //! - `json_extract` — extract values from JSON using path expressions
 //! - `json_array_length` — length of JSON array
 //! - `json_valid` — validate JSON string
@@ -8,10 +8,6 @@
 //! - `json_keys` — keys of JSON object
 //! - `json_structure` — type structure of JSON value
 //! - `json_type` — type of JSON value
-//! - `to_json` / `json_quote` — convert value to JSON string
-//! - `json_array` — construct JSON array
-//! - `json_object` — construct JSON object
-//! - `json_merge_patch` — merge JSON documents (RFC 7396)
 
 use akar_extension::{Extension, ExtensionContext};
 
@@ -188,6 +184,10 @@ impl Extension for JsonExtension {
 
 /// Evaluate a JSON path expression on a JSON value.
 /// Supports simple dot-notation paths like `$.name` or `$.items.0` for arrays.
+///
+/// A path that does not exist returns `Ok(None)` (SQL NULL) rather than an
+/// error, matching SQL/JSON path semantics — a missing key or out-of-range
+/// index is not a query failure (P52.49).
 pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, String> {
     let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Invalid JSON: {e}"))?;
 
@@ -210,9 +210,10 @@ pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, 
             let idx: usize = part[1..part.len() - 1]
                 .parse()
                 .map_err(|_| format!("Invalid array index: {part}"))?;
-            current = current
-                .get(idx)
-                .ok_or_else(|| format!("Array index out of bounds: {part}"))?;
+            match current.get(idx) {
+                Some(v) => current = v,
+                None => return Ok(None), // out-of-range index → NULL
+            }
         }
         // Check for array index: key[0], key[1], etc.
         else if let Some((key, idx_str)) = part.split_once('[') {
@@ -220,24 +221,21 @@ pub fn json_extract_value(json_str: &str, path: &str) -> Result<Option<String>, 
                 .trim_end_matches(']')
                 .parse()
                 .map_err(|_| format!("Invalid array index: {idx_str}"))?;
-
-            current = current
-                .get(key)
-                .and_then(|v| v.get(idx))
-                .ok_or_else(|| format!("Path not found: {path}"))?;
+            match current.get(key).and_then(|v| v.get(idx)) {
+                Some(v) => current = v,
+                None => return Ok(None), // missing key or out-of-range index → NULL
+            }
         } else {
             // Try as object key first
             if let Some(val) = current.get(part) {
                 current = val;
-            } else {
-                // Try as array index
-                if let Ok(idx) = part.parse::<usize>() {
-                    current = current
-                        .get(idx)
-                        .ok_or_else(|| format!("Array index out of bounds: {part}"))?;
-                } else {
-                    return Err(format!("Path not found: {part}"));
+            } else if let Ok(idx) = part.parse::<usize>() {
+                match current.get(idx) {
+                    Some(v) => current = v,
+                    None => return Ok(None), // out-of-range index → NULL
                 }
+            } else {
+                return Ok(None); // missing object key → NULL
             }
         }
     }
@@ -269,10 +267,17 @@ pub fn json_type_of(s: &str) -> Result<&'static str, String> {
 /// Get the structure (schema) of a JSON value.
 pub fn json_structure_of(s: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid JSON: {e}"))?;
-    structure_inner(&value, 0)
+    structure_inner(&value, 0, 0)
 }
 
-fn structure_inner(value: &serde_json::Value, indent: usize) -> Result<String, String> {
+/// Guard against unbounded recursion on deeply nested JSON — a pathological
+/// document must produce an error, not a stack overflow (P52.49).
+const MAX_STRUCTURE_DEPTH: usize = 256;
+
+fn structure_inner(value: &serde_json::Value, indent: usize, depth: usize) -> Result<String, String> {
+    if depth > MAX_STRUCTURE_DEPTH {
+        return Err("JSON nesting too deep".into());
+    }
     let prefix = " ".repeat(indent);
     match value {
         serde_json::Value::Null => Ok(format!("{prefix}null")),
@@ -283,14 +288,25 @@ fn structure_inner(value: &serde_json::Value, indent: usize) -> Result<String, S
             if arr.is_empty() {
                 Ok(format!("{prefix}[]"))
             } else {
-                let inner = structure_inner(&arr[0], indent + 2)?;
-                Ok(format!("{prefix}[\n{inner}\n{prefix}]"))
+                // Describe every distinct element type, not just `arr[0]`, so a
+                // heterogeneous array reflects its real schema (P52.49).
+                let mut seen: Vec<String> = Vec::new();
+                let mut res = format!("{prefix}[");
+                for elem in arr {
+                    let inner = structure_inner(elem, indent + 2, depth + 1)?;
+                    if !seen.contains(&inner) {
+                        seen.push(inner.clone());
+                        res.push_str(&format!("\n{prefix}  {inner}"));
+                    }
+                }
+                res.push_str(&format!("\n{prefix}]"));
+                Ok(res)
             }
         }
         serde_json::Value::Object(map) => {
             let mut res = format!("{prefix}{{");
             for (k, v) in map.iter() {
-                let val_str = structure_inner(v, indent + 2)?;
+                let val_str = structure_inner(v, indent + 2, depth + 1)?;
                 res.push_str(&format!("\n{prefix}  {k}: {val_str}"));
             }
             res.push_str(&format!("\n{prefix}}}"));
@@ -322,10 +338,15 @@ pub fn json_contains_value(json: &str, needle: &str) -> Result<bool, String> {
     let value: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
     let needle_val: serde_json::Value =
         serde_json::from_str(needle).map_err(|e| format!("Invalid needle JSON: {e}"))?;
-    Ok(contains_inner(&value, &needle_val))
+    Ok(contains_inner(&value, &needle_val, 0))
 }
 
-fn contains_inner(haystack: &serde_json::Value, needle: &serde_json::Value) -> bool {
+fn contains_inner(haystack: &serde_json::Value, needle: &serde_json::Value, depth: usize) -> bool {
+    // Depth-guarded so a pathological deep document cannot overflow the stack
+    // (P52.49); a hit beyond the guard is treated as "not contained".
+    if depth > MAX_STRUCTURE_DEPTH {
+        return false;
+    }
     if haystack == needle {
         return true;
     }
@@ -334,10 +355,10 @@ fn contains_inner(haystack: &serde_json::Value, needle: &serde_json::Value) -> b
             // Check if needle is a subset of haystack
             n_map
                 .iter()
-                .all(|(k, v)| h_map.get(k).is_some_and(|hv| contains_inner(hv, v)))
+                .all(|(k, v)| h_map.get(k).is_some_and(|hv| contains_inner(hv, v, depth + 1)))
         }
-        (serde_json::Value::Array(arr), _) => arr.iter().any(|v| contains_inner(v, needle)),
-        (serde_json::Value::Object(map), _) => map.values().any(|v| contains_inner(v, needle)),
+        (serde_json::Value::Array(arr), _) => arr.iter().any(|v| contains_inner(v, needle, depth + 1)),
+        (serde_json::Value::Object(map), _) => map.values().any(|v| contains_inner(v, needle, depth + 1)),
         _ => false,
     }
 }
@@ -368,9 +389,35 @@ mod tests {
 
     #[test]
     fn test_json_extract_not_found() {
+        // A missing path returns NULL (Ok(None)), not a query-aborting error (P52.49).
         let json = r#"{"name": "Alice"}"#;
         let result = json_extract_value(json, "$.age");
-        assert!(result.is_err());
+        assert!(matches!(result, Ok(None)), "missing key should yield NULL, got {result:?}");
+
+        let result = json_extract_value(json, "$.name.missing");
+        assert!(matches!(result, Ok(None)), "missing nested key should yield NULL, got {result:?}");
+
+        // Out-of-range array index also yields NULL.
+        let result = json_extract_value("[1, 2]", "$[5]");
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn test_json_structure_heterogeneous_array() {
+        // The structure must reflect all element types, not just arr[0] (P52.49).
+        let struct_str = json_structure_of(r#"[1, "x", true, {"k": 1}]"#).unwrap();
+        assert!(struct_str.contains("number"));
+        assert!(struct_str.contains("string"));
+        assert!(struct_str.contains("boolean"));
+        assert!(struct_str.contains("k:"), "object element structure missing, got: {struct_str}");
+    }
+
+    #[test]
+    fn test_json_structure_depth_guard() {
+        // Deeply nested JSON must error cleanly instead of overflowing the stack.
+        let deep = format!("{}1{}", "[".repeat(300), "]".repeat(300));
+        let result = json_structure_of(&deep);
+        assert!(result.is_err(), "overly deep JSON should be rejected, got {result:?}");
     }
 
     #[test]

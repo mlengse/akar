@@ -1,4 +1,6 @@
 mod common;
+use akar_main::test_helpers::Value;
+use akar_main::Connection;
 use common::{exec, setup_db};
 
 #[test]
@@ -89,4 +91,48 @@ fn test_insert_batch_and_read() {
     let res = conn.query("MATCH (b:Batch) RETURN b.id").unwrap();
     assert!(res.is_success());
     assert_eq!(res.num_rows(), 20);
+}
+
+/// Read the value column of `CALL current_setting('key')`.
+fn current_setting_value(conn: &Connection, key: &str) -> Value {
+    let res = conn
+        .query(&format!("CALL current_setting('{key}')"))
+        .expect("current_setting should succeed");
+    res.chunks
+        .iter()
+        .flat_map(|c| (0..c.size).filter_map(|i| c.get_value(1, i)))
+        .next()
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn test_set_spill_threshold_zero_disables() {
+    let (db, conn) = setup_db();
+
+    conn.query("SET spill_threshold=4096").unwrap();
+    assert_eq!(current_setting_value(&conn, "spill_threshold"), Value::String("4096".into()));
+    assert_eq!(db.effective_spill_threshold(), 4096);
+
+    // SET spill_threshold=0 must explicitly disable spilling (effective 0),
+    // not silently fall back to the config/buffer default (P52.50).
+    conn.query("SET spill_threshold=0").unwrap();
+    assert_eq!(current_setting_value(&conn, "spill_threshold"), Value::String("0".into()));
+    assert_eq!(db.effective_spill_threshold(), 0);
+}
+
+#[test]
+fn test_set_concurrent_writes_reflects_in_current_setting() {
+    let (_db, conn) = setup_db();
+
+    conn.query("SET concurrent_writes=false").unwrap();
+    assert_eq!(
+        current_setting_value(&conn, "concurrent_writes"),
+        Value::String("false".into())
+    );
+
+    conn.query("SET concurrent_writes=true").unwrap();
+    assert_eq!(
+        current_setting_value(&conn, "concurrent_writes"),
+        Value::String("true".into())
+    );
 }

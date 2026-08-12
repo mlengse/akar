@@ -11,7 +11,7 @@ use akar_storage::stats::StatsStore;
 use akar_storage::table::ColumnDefinition;
 use akar_transaction::TransactionManager;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Name of the file that holds the serialized system catalog.
@@ -99,8 +99,10 @@ pub struct Database {
     /// Configuration used at database creation time.
     pub(crate) config: SystemConfig,
     /// Runtime-overridable spill threshold via `SET spill_threshold`.
-    /// 0 means "use config default".
+    /// The override is tracked explicitly so `SET spill_threshold=0` disables
+    /// spilling instead of falling back to the config default (P52.50).
     spill_threshold_override: AtomicU64,
+    spill_threshold_overridden: AtomicBool,
     /// Cross-process lock file handle (kept alive for the lifetime of the
     /// database so the OS lock is released only on `Database` drop).
     _lock_file: Option<std::fs::File>,
@@ -108,21 +110,22 @@ pub struct Database {
 
 impl Database {
     /// Override the spill threshold at runtime (via `SET spill_threshold`).
+    /// A value of `0` explicitly disables spilling.
     pub fn set_spill_threshold(&self, bytes: u64) {
         self.spill_threshold_override.store(bytes, Ordering::Relaxed);
+        self.spill_threshold_overridden.store(true, Ordering::Relaxed);
     }
 
     /// Get the effective spill threshold in bytes.
     ///
     /// Priority:
-    /// 1. Runtime override (via `SET spill_threshold`)
+    /// 1. Runtime override (via `SET spill_threshold`; `0` = explicitly disabled)
     /// 2. `config.spill_threshold`
     /// 3. 80% of `buffer_pool_size`
     /// 4. 0 (disabled)
     pub fn effective_spill_threshold(&self) -> u64 {
-        let override_val = self.spill_threshold_override.load(Ordering::Relaxed);
-        if override_val > 0 {
-            return override_val;
+        if self.spill_threshold_overridden.load(Ordering::Relaxed) {
+            return self.spill_threshold_override.load(Ordering::Relaxed);
         }
         if self.config.spill_threshold > 0 {
             return self.config.spill_threshold;
@@ -523,6 +526,7 @@ impl Database {
             stats_store,
             vfs,
             spill_threshold_override: AtomicU64::new(0),
+            spill_threshold_overridden: AtomicBool::new(false),
             _lock_file: lock_file,
             config,
         };
