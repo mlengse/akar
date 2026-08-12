@@ -1,5 +1,5 @@
 use akar_c::*;
-use std::ffi::CString;
+use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -133,19 +133,19 @@ fn test_query_create_table_and_insert() {
         _query_result: ptr::null_mut(),
         _is_owned_by_cpp: false,
     };
-    let state = unsafe { akar_connection_query(&mut conn, create.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, create.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarSuccess);
     assert!(!result._query_result.is_null());
     unsafe { akar_query_result_destroy(&mut result) };
     assert!(result._query_result.is_null());
 
     let insert = CString::new("CREATE (p:Person {id: 1, name: 'Alice', age: 30})").unwrap();
-    let state = unsafe { akar_connection_query(&mut conn, insert.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, insert.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarSuccess);
     unsafe { akar_query_result_destroy(&mut result) };
 
     let query = CString::new("MATCH (p:Person) RETURN p.name").unwrap();
-    let state = unsafe { akar_connection_query(&mut conn, query.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, query.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarSuccess);
     unsafe { akar_query_result_destroy(&mut result) };
 
@@ -173,7 +173,7 @@ fn test_query_result_destroy_double_is_safe() {
         _query_result: ptr::null_mut(),
         _is_owned_by_cpp: false,
     };
-    let state = unsafe { akar_connection_query(&mut conn, q.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, q.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarSuccess);
     assert!(!result._query_result.is_null());
 
@@ -200,7 +200,7 @@ fn test_query_error_leaves_no_stale_result() {
         _query_result: ptr::null_mut(),
         _is_owned_by_cpp: false,
     };
-    let state = unsafe { akar_connection_query(&mut conn, bad.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, bad.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarError);
     assert!(result._query_result.is_null());
     unsafe { akar_query_result_destroy(&mut result) };
@@ -216,7 +216,7 @@ fn test_query_null_connection_returns_error() {
         _query_result: ptr::null_mut(),
         _is_owned_by_cpp: false,
     };
-    let state = unsafe { akar_connection_query(ptr::null_mut(), q.as_ptr(), &mut result) };
+    let state = unsafe { akar_connection_query(ptr::null_mut(), q.as_ptr(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarError);
 }
 
@@ -230,7 +230,7 @@ fn test_query_null_query_returns_error() {
         _query_result: ptr::null_mut(),
         _is_owned_by_cpp: false,
     };
-    let state = unsafe { akar_connection_query(&mut conn, ptr::null(), &mut result) };
+    let state = unsafe { akar_connection_query(&mut conn, ptr::null(), &mut result, ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarError);
 
     unsafe { akar_database_destroy(&mut db) };
@@ -244,8 +244,44 @@ fn test_query_null_out_result_returns_error() {
     let mut conn = unsafe { init_conn(&mut db) };
 
     let q = CString::new("RETURN 1").unwrap();
-    let state = unsafe { akar_connection_query(&mut conn, q.as_ptr(), ptr::null_mut()) };
+    let state = unsafe { akar_connection_query(&mut conn, q.as_ptr(), ptr::null_mut(), ptr::null_mut()) };
     assert_eq!(state, akar_state::AkarError);
+
+    unsafe { akar_database_destroy(&mut db) };
+    cleanup(id);
+}
+
+#[test]
+fn test_query_error_message_is_populated() {
+    // P52.61: on failure the error detail must be exported via the out-param
+    // (previously only a bare AkarError was returned and the message discarded).
+    let (path, id) = temp_db_path();
+    let mut db = unsafe { init_db(&path) };
+    let mut conn = unsafe { init_conn(&mut db) };
+
+    let bad = CString::new("THIS IS NOT CYPHER").unwrap();
+    let mut result = akar_query_result {
+        _query_result: ptr::null_mut(),
+        _is_owned_by_cpp: false,
+    };
+    let mut err_msg: *mut c_char = ptr::null_mut();
+    let state = unsafe { akar_connection_query(&mut conn, bad.as_ptr(), &mut result, &mut err_msg) };
+    assert_eq!(state, akar_state::AkarError);
+    assert!(!err_msg.is_null(), "error message out-param must be populated");
+
+    let msg = unsafe { CStr::from_ptr(err_msg).to_string_lossy().into_owned() };
+    assert!(!msg.is_empty(), "error message must not be empty");
+    assert!(msg.to_lowercase().contains("error") || msg.to_lowercase().contains("parse") || msg.to_lowercase().contains("syntax"),
+        "unexpected error message: {msg}");
+
+    unsafe { akar_error_message_free(err_msg) };
+
+    // A successful query clears the error slot.
+    let ok = CString::new("RETURN 1").unwrap();
+    let state = unsafe { akar_connection_query(&mut conn, ok.as_ptr(), &mut result, &mut err_msg) };
+    assert_eq!(state, akar_state::AkarSuccess);
+    assert!(err_msg.is_null(), "error slot must be cleared on success");
+    unsafe { akar_query_result_destroy(&mut result) };
 
     unsafe { akar_database_destroy(&mut db) };
     cleanup(id);

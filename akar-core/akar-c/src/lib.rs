@@ -1,5 +1,5 @@
 use akar_main::{Connection, Database, SystemConfig};
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::Arc;
@@ -210,6 +210,10 @@ pub unsafe extern "C" fn akar_connection_destroy(connection: *mut akar_connectio
 
 /// Executes a Cypher query on the given connection.
 ///
+/// On error, `error_message` (if non-null) receives a heap-allocated NUL-
+/// terminated C string with the failure detail, owned by the caller and to be
+/// released with `akar_error_message_free` (P52.61).
+///
 /// # Safety
 ///
 /// - `connection` must be a valid pointer to a `akar_connection` previously
@@ -218,12 +222,16 @@ pub unsafe extern "C" fn akar_connection_destroy(connection: *mut akar_connectio
 /// - `out_query_result` must point to a valid, mutable `akar_query_result`
 ///   struct that will be populated with the query result. The result is owned
 ///   by Rust and must be released with `akar_query_result_destroy`.
+/// - `error_message` may be null; otherwise it must point to a valid
+///   `*mut *mut c_char` slot that receives the error string (or NULL on
+///   success / when no message is available).
 /// - All pointers must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn akar_connection_query(
     connection: *mut akar_connection,
     query: *const c_char,
     out_query_result: *mut akar_query_result,
+    error_message: *mut *mut c_char,
 ) -> akar_state {
     catch(|| {
         unsafe {
@@ -233,6 +241,12 @@ pub unsafe extern "C" fn akar_connection_query(
                 || (*connection)._connection.is_null()
             {
                 return akar_state::AkarError;
+            }
+
+            // Always clear the error slot first so a stale message from a
+            // previous call cannot be misread as this call's error.
+            if !error_message.is_null() {
+                *error_message = ptr::null_mut();
             }
 
             let conn_ref = &mut *((*connection)._connection as *mut Connection);
@@ -245,17 +259,37 @@ pub unsafe extern "C" fn akar_connection_query(
                     (*out_query_result)._is_owned_by_cpp = false;
                     akar_state::AkarSuccess
                 }
-                Err(_) => {
+                Err(e) => {
                     // Never leave a stale pointer behind: a later destroy would
                     // double-free an already-released result (or leak one this
                     // call never produced).
                     (*out_query_result)._query_result = ptr::null_mut();
                     (*out_query_result)._is_owned_by_cpp = false;
+                    // Export the error detail (P52.61).
+                    if !error_message.is_null() {
+                        *error_message = CString::new(e).map(|c| c.into_raw()).unwrap_or(ptr::null_mut());
+                    }
                     akar_state::AkarError
                 }
             }
         }
     })
+}
+
+/// Frees an error string previously returned via `akar_connection_query`'s
+/// `error_message` out-parameter.
+///
+/// # Safety
+///
+/// - `msg` must be a pointer previously produced by `akar_connection_query`,
+///   or null (a no-op).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn akar_error_message_free(msg: *mut c_char) {
+    if !msg.is_null() {
+        unsafe {
+            drop(CString::from_raw(msg));
+        }
+    }
 }
 
 /// Destroys a query result previously produced by `akar_connection_query`.

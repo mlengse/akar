@@ -65,8 +65,12 @@ impl OptimizationPass for LimitPushDown {
             if i + 1 < operators.len() {
                 if matches!(operators[i], LogicalOperator::Limit(_))
                     && matches!(operators[i + 1], LogicalOperator::Filter(_))
+                    && !limit_is_order_sensitive(&operators, i)
                 {
-                    // Swap: push Limit below Filter
+                    // Swap: push Limit below Filter — only when the Limit is a
+                    // plain row-cap (not a top-k after ORDER BY / aggregate /
+                    // distinct), otherwise reordering the filter changes which
+                    // rows survive the limit (P52.55).
                     result.push(operators[i + 1].clone()); // Filter first
                     result.push(operators[i].clone()); // then Limit
                     i += 2;
@@ -87,6 +91,22 @@ impl OptimizationPass for LimitPushDown {
         }
         result
     }
+}
+
+/// Whether the LIMIT at `i` is order-sensitive: it caps the output of an
+/// ORDER BY / top-k / aggregate / skip operator that precedes it. Pushing such
+/// a limit below a Filter would change which rows survive (P52.55).
+fn limit_is_order_sensitive(operators: &[LogicalOperator], i: usize) -> bool {
+    i >= 1
+        && matches!(
+            operators[i - 1],
+            LogicalOperator::OrderBy(_)
+                | LogicalOperator::TopK(_)
+                | LogicalOperator::Aggregate(_)
+                | LogicalOperator::Skip(_)
+                | LogicalOperator::Union(_)
+                | LogicalOperator::Unwind(_)
+        )
 }
 
 // ========================================================================
@@ -166,5 +186,57 @@ mod tests {
         } else {
             panic!("expected Projection");
         }
+    }
+
+    fn make_limit() -> LogicalOperator {
+        LogicalOperator::Limit(LogicalLimit {
+            limit: 5,
+            offset: 0,
+            children: vec![],
+            cardinality: 0,
+        })
+    }
+
+    fn make_filter() -> LogicalOperator {
+        LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                akar_parser::ast::BinaryOp::Equal,
+                Box::new(expr("a")),
+                Box::new(expr("b")),
+            ),
+            children: vec![],
+            cardinality: 0,
+        })
+    }
+
+    #[test]
+    fn test_limit_push_down_plain_limit_swaps() {
+        let pass = LimitPushDown;
+        let plan = vec![make_limit(), make_filter()];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], LogicalOperator::Filter(_)), "Filter should come first");
+        assert!(matches!(result[1], LogicalOperator::Limit(_)), "Limit pushed below Filter");
+    }
+
+    #[test]
+    fn test_limit_push_down_does_not_swap_ordered_limit() {
+        // P52.55: a LIMIT that caps an ORDER BY (top-k) must NOT be pushed below
+        // a Filter — reordering would change which rows survive.
+        let pass = LimitPushDown;
+        let plan = vec![
+            LogicalOperator::OrderBy(LogicalOrderBy {
+                sort_keys: vec![(expr("a"), true)],
+                children: vec![],
+                cardinality: 0,
+            }),
+            make_limit(),
+            make_filter(),
+        ];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 3);
+        assert!(matches!(result[0], LogicalOperator::OrderBy(_)));
+        assert!(matches!(result[1], LogicalOperator::Limit(_)), "ordered limit stays in place");
+        assert!(matches!(result[2], LogicalOperator::Filter(_)));
     }
 }

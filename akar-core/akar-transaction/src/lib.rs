@@ -654,6 +654,20 @@ impl CheckpointCoordinator {
         self.cv_active_txns_changed.notify_all();
     }
 
+    /// Block until new transactions are allowed to start.
+    ///
+    /// Briefly acquires `mtx_for_starting_new_txns` (releasing immediately).
+    /// While a checkpoint drain holds that mutex, this call blocks, so no new
+    /// transaction can slip in during the drain wait — previously the gate was
+    /// never touched by `begin_read`/`begin_write`, so `stop_new_txns_and_wait_
+    /// until_all_leave` could never actually stop new transactions (P52.53).
+    fn gate_new_transaction(&self) {
+        let _gate = self
+            .mtx_for_starting_new_txns
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+    }
+
     fn schedule_auto_checkpoint(&self) {
         self.checkpoint_requested.store(true, Ordering::Release);
         self.cv_active_txns_changed.notify_all();
@@ -764,6 +778,7 @@ impl TransactionManager {
     }
 
     pub fn begin_read(&self) -> Transaction {
+        self.checkpoint.gate_new_transaction();
         let id = self.lifecycle.next_txn_id();
         let snapshot_ts = self.lifecycle.snapshot_ts();
         let mut tx = Transaction::new(id, TransactionType::ReadOnly);
@@ -773,6 +788,7 @@ impl TransactionManager {
     }
 
     pub fn begin_write(&self) -> Result<Transaction, TransactionError> {
+        self.checkpoint.gate_new_transaction();
         let id = self.lifecycle.next_txn_id();
         let snapshot_ts = self.lifecycle.snapshot_ts();
         let mut tx = Transaction::new(id, TransactionType::Write);

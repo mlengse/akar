@@ -83,118 +83,125 @@ impl PathsOutputWriter {
         self.output_mask = Some(mask);
     }
 
-    /// DFS-based fast path for WALK semantic without node mask.
-    fn dfs_fast<'a>(
+    /// Guard against unbounded recursion on corrupt/cyclic parent lists.
+    const MAX_PATH_DEPTH: usize = 10_000;
+
+    /// DFS over the BFS predecessor tree, collecting the path for `dst`.
+    ///
+    /// Follows the PREDECESSOR chain via `get_parent_list_head_offset`: each
+    /// `ParentList` entry's `node_id` is the parent that reached the current
+    /// node, so the next hop is that parent's own parent list. The old code
+    /// followed `ParentList::next` — which is a sibling/candidate list for the
+    /// SAME node — producing truncated/duplicate paths (P52.57).
+    fn dfs_fast(
         &self,
-        first_parent: &'a ParentList,
-        path: &mut Vec<&'a ParentList>,
+        node: InternalID,
+        dst: InternalID,
+        path: &mut Vec<InternalID>,
+        edges: &mut Vec<u64>,
         results: &mut Vec<Vec<Value>>,
     ) {
-        path.push(first_parent);
-
-        // Check if we should stop: we reached the source node (iter == 0 and no parent chain back)
-        let reached_source =
-            first_parent.node_id.offset == self.src_offset || (first_parent.next.is_none() && first_parent.iter == 0);
-
-        if reached_source {
-            // Reconstruct path from source to destination
-            self.write_path(path, results);
-        } else if let Some(ref next_parent) = first_parent.next {
-            self.dfs_fast(next_parent, path, results);
+        if node.offset == self.src_offset {
+            self.write_path(dst, path, edges, results);
+            return;
         }
-
-        path.pop();
+        if path.len() >= Self::MAX_PATH_DEPTH {
+            return;
+        }
+        let mut current = self.bfs_graph.get_parent_list_head_offset(node.offset);
+        while let Some(parent) = current {
+            path.push(parent.node_id);
+            edges.push(parent.edge_id);
+            self.dfs_fast(parent.node_id, dst, path, edges, results);
+            edges.pop();
+            path.pop();
+            current = parent.next.as_deref();
+        }
     }
 
-    /// DFS slow path with semantic checking.
-    fn dfs_slow<'a>(
+    /// DFS with semantic checking (WALK/TRAIL/ACYCLIC).
+    fn dfs_slow(
         &self,
-        first_parent: &'a ParentList,
-        path: &mut Vec<&'a ParentList>,
+        node: InternalID,
+        dst: InternalID,
+        path: &mut Vec<InternalID>,
+        edges: &mut Vec<u64>,
         results: &mut Vec<Vec<Value>>,
     ) {
-        path.push(first_parent);
-
-        let reached_source =
-            first_parent.node_id.offset == self.src_offset || (first_parent.next.is_none() && first_parent.iter == 0);
-
-        if reached_source {
-            // Check semantic constraints
-            if self.check_semantic(path) {
-                self.write_path(path, results);
+        if node.offset == self.src_offset {
+            if self.check_semantic(path, edges) {
+                self.write_path(dst, path, edges, results);
             }
-        } else if let Some(ref next_parent) = first_parent.next
-            && self.is_next_viable(next_parent, path)
-        {
-            self.dfs_slow(next_parent, path, results);
+            return;
         }
-
-        path.pop();
+        if path.len() >= Self::MAX_PATH_DEPTH {
+            return;
+        }
+        let mut current = self.bfs_graph.get_parent_list_head_offset(node.offset);
+        while let Some(parent) = current {
+            if self.is_next_viable(parent, path, edges) {
+                path.push(parent.node_id);
+                edges.push(parent.edge_id);
+                self.dfs_slow(parent.node_id, dst, path, edges, results);
+                edges.pop();
+                path.pop();
+            }
+            current = parent.next.as_deref();
+        }
     }
 
     /// Check if the next parent is viable given the current path and semantic constraints.
-    fn is_next_viable(&self, _next: &ParentList, path: &[&ParentList]) -> bool {
+    fn is_next_viable(&self, next: &ParentList, path: &[InternalID], edges: &[u64]) -> bool {
         match self.info.semantic {
             akar_common::enums::PathSemantic::Walk => true,
-            akar_common::enums::PathSemantic::Trail => {
-                // No edge can repeat
-                let edge_id = _next.edge_id;
-                !path.iter().any(|p| p.edge_id == edge_id)
-            }
-            akar_common::enums::PathSemantic::Acyclic => {
-                // No node can repeat
-                let node_id = _next.node_id.offset;
-                !path.iter().any(|p| p.node_id.offset == node_id)
-            }
+            akar_common::enums::PathSemantic::Trail => !edges.contains(&next.edge_id),
+            akar_common::enums::PathSemantic::Acyclic => !path.iter().any(|n| n.offset == next.node_id.offset),
         }
     }
 
     /// Check semantic constraints for a complete path.
-    fn check_semantic(&self, path: &[&ParentList]) -> bool {
+    fn check_semantic(&self, path: &[InternalID], edges: &[u64]) -> bool {
         match self.info.semantic {
             akar_common::enums::PathSemantic::Walk => true,
             akar_common::enums::PathSemantic::Trail => {
-                let edge_ids: Vec<u64> = path.iter().map(|p| p.edge_id).collect();
-                let mut unique = edge_ids.clone();
-                unique.sort();
+                let mut unique = edges.to_vec();
+                unique.sort_unstable();
                 unique.dedup();
-                unique.len() == edge_ids.len()
+                unique.len() == edges.len()
             }
             akar_common::enums::PathSemantic::Acyclic => {
-                let node_ids: Vec<u64> = path.iter().map(|p| p.node_id.offset).collect();
-                let mut unique = node_ids.clone();
-                unique.sort();
+                let mut unique: Vec<u64> = path.iter().map(|n| n.offset).collect();
+                unique.sort_unstable();
                 unique.dedup();
-                unique.len() == node_ids.len()
+                unique.len() == path.len()
             }
         }
     }
 
-    /// Write a path to the output.
-    fn write_path(&self, path: &[&ParentList], results: &mut Vec<Vec<Value>>) {
+    /// Write a reconstructed path to the output.
+    ///
+    /// `path` is the predecessor chain `[parent_of_dst, ..., source]`; the
+    /// emitted node list is `source, …, parent_of_dst, dst` (P52.57).
+    fn write_path(&self, dst: InternalID, path: &[InternalID], edges: &[u64], results: &mut Vec<Vec<Value>>) {
         let mut row = Vec::new();
 
         // Source node ID
         row.push(Value::InternalID(self.source_node_id));
-        // Destination node ID — the first element in the path (the destination)
-        let dst = if !path.is_empty() {
-            path.first().map(|p| p.node_id).unwrap_or(self.source_node_id)
-        } else {
-            self.source_node_id
-        };
+        // Destination node ID — the actual `dst`, not the first parent entry.
         row.push(Value::InternalID(dst));
-        // Path length
-        row.push(Value::Int64(path.len() as i64));
+        // Path length (number of hops)
+        row.push(Value::Int64(edges.len() as i64));
 
         if self.info.write_path {
-            // Path node IDs (from source to destination)
-            let path_nodes: Vec<Value> = std::iter::once(Value::InternalID(self.source_node_id))
-                .chain(path.iter().rev().map(|p| Value::InternalID(p.node_id)))
-                .collect();
+            // Path node IDs (source → dst)
+            let mut nodes = Vec::with_capacity(path.len() + 1);
+            nodes.extend(path.iter().rev().copied());
+            nodes.push(dst);
+            let path_nodes: Vec<Value> = nodes.iter().map(|n| Value::InternalID(*n)).collect();
             row.push(Value::List(path_nodes));
 
             // Path edge IDs
-            let path_edges: Vec<Value> = path.iter().rev().map(|p| Value::Int64(p.edge_id as i64)).collect();
+            let path_edges: Vec<Value> = edges.iter().rev().map(|e| Value::Int64(*e as i64)).collect();
             row.push(Value::List(path_edges));
         }
 
@@ -225,18 +232,13 @@ impl SPPathsOutputWriter {
 
     /// Write the shortest path for a destination node.
     pub fn write_path_for_dst(&self, dst_offset: u64, results: &mut Vec<Vec<Value>>) {
-        let first_parent = self.inner.bfs_graph.get_parent_list_head_offset(dst_offset);
-        if let Some(parent) = first_parent {
-            let mut path = Vec::new();
-            let mut results_buf = Vec::new();
-
-            // For single shortest path, use fast DFS
-            self.inner.dfs_fast(parent, &mut path, &mut results_buf);
-
-            for row in results_buf {
-                results.push(row);
-            }
-        }
+        let dst = InternalID {
+            offset: dst_offset,
+            table_id: self.inner.source_node_id.table_id,
+        };
+        let mut path = Vec::new();
+        let mut edges = Vec::new();
+        self.inner.dfs_fast(dst, dst, &mut path, &mut edges, results);
     }
 }
 

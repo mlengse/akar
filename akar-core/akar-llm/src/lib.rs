@@ -45,8 +45,18 @@ impl Extension for LlmExtension {
                         _ => return Err("create_embedding: first argument must be string".into()),
                     };
 
-                    // Default config for now
-                    let config = crate::EmbeddingConfig::default();
+                    // Optional overrides: args[1] = provider, args[2] = model.
+                    // These were documented but previously ignored (P52.59).
+                    let mut config = crate::EmbeddingConfig::default();
+                    if let Some(Value::String(provider_str)) = args.get(1) {
+                        config.provider = provider_str
+                            .parse()
+                            .map_err(|e: String| format!("create_embedding: {e}"))?;
+                    }
+                    if let Some(Value::String(model)) = args.get(2) {
+                        config.model = model.clone();
+                    }
+
                     let embedding = crate::create_embedding(text, Some(&config))?;
 
                     // Return the vector as a List of floats
@@ -178,8 +188,10 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .as_array()
         .ok_or_else(|| format!("Missing 'data[0].embedding' in response: {response_text}"))?
         .iter()
-        .map(|v| v.as_f64().unwrap_or(0.0))
-        .collect();
+        // Fail on non-numeric values instead of silently coercing them to 0.0,
+        // which would produce a wrong vector from a malformed response (P52.59).
+        .map(|v| v.as_f64().ok_or_else(|| format!("Non-numeric value in embedding array: {v}")))
+        .collect::<Result<Vec<_>, String>>()?;
 
     let dimensions = vector.len();
 
@@ -228,8 +240,10 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .or_else(|| parsed["embedding"].as_array())
         .ok_or_else(|| format!("Missing 'embeddings[0]' or 'embedding' in response: {response_text}"))?
         .iter()
-        .map(|v| v.as_f64().unwrap_or(0.0))
-        .collect();
+        // Fail on non-numeric values instead of silently coercing them to 0.0,
+        // which would produce a wrong vector from a malformed response (P52.59).
+        .map(|v| v.as_f64().ok_or_else(|| format!("Non-numeric value in embedding array: {v}")))
+        .collect::<Result<Vec<_>, String>>()?;
 
     let dimensions = vector.len();
 

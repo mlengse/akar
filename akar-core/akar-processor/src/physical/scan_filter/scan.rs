@@ -178,6 +178,13 @@ impl PhysicalScan {
                         Some(Value::UInt32(v)) => builder.append_value(*v as i64),
                         Some(Value::UInt16(v)) => builder.append_value(*v as i64),
                         Some(Value::UInt8(v)) => builder.append_value(*v as i64),
+                        // Int128/InternalID map to the Int64 physical type (see
+                        // value_to_physical_type); emit their value instead of
+                        // silently dropping to NULL (P52.58). Wide Int128 values
+                        // are truncated to the low 64 bits, matching the
+                        // Int64-typed physical representation.
+                        Some(Value::Int128(v)) => builder.append_value(*v as i64),
+                        Some(Value::InternalID(id)) => builder.append_value(id.offset as i64),
                         Some(Value::Date(v)) => builder.append_value(v.0 as i64),
                         Some(Value::Timestamp(v))
                         | Some(Value::TimestampNs(v))

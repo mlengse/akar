@@ -296,10 +296,22 @@ impl Extension for HttpfsExtension {
                     }
                     if let Value::String(url) = &args[0] {
                         let body = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
-                        let body_text = body
+                        // Cap the response body so an untrusted server cannot
+                        // stream an unbounded body and OOM the embedded process
+                        // (P52.60).
+                        const MAX_BODY: u64 = 64 * 1024 * 1024;
+                        let mut body_text = String::new();
+                        let n = body
                             .into_body()
-                            .read_to_string()
+                            .into_reader()
+                            .take(MAX_BODY + 1)
+                            .read_to_string(&mut body_text)
                             .map_err(|e| format!("Failed to read response body: {}", e))?;
+                        if n as u64 > MAX_BODY {
+                            return Err(format!(
+                                "http_get response body for {url} exceeds the {MAX_BODY}-byte limit"
+                            ));
+                        }
                         Ok(Value::String(body_text))
                     } else {
                         Err("http_get argument must be a string".into())

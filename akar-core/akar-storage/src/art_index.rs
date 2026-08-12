@@ -277,7 +277,7 @@ impl ArtPrimaryKeyIndex {
                 for &i in &indices {
                     if let Some(ref child) = children[i] {
                         key.push(keys[i]);
-                        if satisfies_upper_bound(key, upper, true) {
+                        if satisfies_upper_bound(key, upper, upper_inclusive) {
                             self.collect_range(
                                 child,
                                 key,
@@ -306,7 +306,7 @@ impl ArtPrimaryKeyIndex {
                 for &i in &indices {
                     if let Some(ref child) = children[i] {
                         key.push(keys[i]);
-                        if satisfies_upper_bound(key, upper, true) {
+                        if satisfies_upper_bound(key, upper, upper_inclusive) {
                             self.collect_range(
                                 child,
                                 key,
@@ -336,7 +336,7 @@ impl ArtPrimaryKeyIndex {
                     }
                     if let Some(ref child) = children[idx as usize] {
                         key.push(byte as u8);
-                        if satisfies_upper_bound(key, upper, true) {
+                        if satisfies_upper_bound(key, upper, upper_inclusive) {
                             self.collect_range(
                                 child,
                                 key,
@@ -360,7 +360,7 @@ impl ArtPrimaryKeyIndex {
                 for byte in 0u16..256u16 {
                     if let Some(ref child) = children[byte as usize] {
                         key.push(byte as u8);
-                        if satisfies_upper_bound(key, upper, true) {
+                        if satisfies_upper_bound(key, upper, upper_inclusive) {
                             self.collect_range(
                                 child,
                                 key,
@@ -719,8 +719,12 @@ impl ArtPrimaryKeyIndex {
     }
 
     /// Get the serialized tree size in bytes.
+    ///
+    /// Computed without materializing the serialized buffer — the previous
+    /// `serialize_tree().len()` allocated O(tree size) transiently, which is an
+    /// OOM risk for wide trees (P52.51).
     pub fn serialized_tree_size(&self) -> u64 {
-        self.serialize_tree().len() as u64
+        serialized_node_size(&self.root) as u64
     }
 }
 
@@ -756,6 +760,72 @@ fn common_prefix_len(node_prefix: &[u8], key_bytes: &[u8], key_offset: usize) ->
         }
     }
     count
+}
+
+/// Length in bytes of the LEB128 varint encoding of `value`.
+fn varint_len(mut value: u64) -> usize {
+    let mut n = 1;
+    while value >= 0x80 {
+        value >>= 7;
+        n += 1;
+    }
+    n
+}
+
+/// Serialized size of `node` in bytes, computed without allocating the buffer
+/// (mirrors `serialize_node`'s layout). Used by `serialized_tree_size` to avoid
+/// materializing the whole tree just to measure it (P52.51).
+fn serialized_node_size(node: &ArtNode) -> usize {
+    let mut size = 0usize;
+    size += varint_len(node.kind() as u64);
+    let prefix = node.prefix();
+    size += varint_len(prefix.len() as u64) + prefix.len();
+    let offsets = node.all_offsets();
+    size += varint_len(offsets.len() as u64);
+    for offset in offsets {
+        size += varint_len(offset);
+    }
+    size += varint_len(node.count() as u64);
+    match node {
+        ArtNode::Node4 {
+            children, count, ..
+        } => {
+            for i in 0..*count as usize {
+                if let Some(ref child) = children[i] {
+                    size += 1 + serialized_node_size(child);
+                }
+            }
+        }
+        ArtNode::Node16 {
+            children, count, ..
+        } => {
+            for i in 0..*count as usize {
+                if let Some(ref child) = children[i] {
+                    size += 1 + serialized_node_size(child);
+                }
+            }
+        }
+        ArtNode::Node48 {
+            child_index, children, ..
+        } => {
+            for byte in 0u16..256u16 {
+                let idx = child_index[byte as usize];
+                if idx != crate::art_node::EMPTY_MARKER
+                    && let Some(ref child) = children[idx as usize]
+                {
+                    size += 1 + serialized_node_size(child);
+                }
+            }
+        }
+        ArtNode::Node256 { children, .. } => {
+            for byte in 0u16..256u16 {
+                if let Some(ref child) = children[byte as usize] {
+                    size += 1 + serialized_node_size(child);
+                }
+            }
+        }
+    }
+    size
 }
 
 /// Check if the current key path satisfies the lower bound.
@@ -998,10 +1068,13 @@ fn insert_internal(node: &mut ArtNode, key: &[u8], depth: usize, row_offset: u64
     let new_depth = depth + prefix.len();
 
     if new_depth >= key.len() {
+        // Existing key: add_offset always appends a new offset entry (to the
+        // primary slot when empty, otherwise to the overflow list), so the
+        // entry count must be incremented here too — the previous `count()==0`
+        // guard ran after `add_offset` and never fired for duplicate keys,
+        // leaving `num_entries` short and tripping the drop-time assert (P52.51).
         node.add_offset(row_offset);
-        if node.count() == 0 && node.prefix().is_empty() {
-            *num_entries += 1;
-        }
+        *num_entries += 1;
         return;
     }
 
@@ -1090,6 +1163,21 @@ mod tests {
         for i in 0..20u64 {
             assert_eq!(idx.lookup(&make_key(i as i64)), Some(i), "key {i} should be found");
         }
+    }
+
+    #[test]
+    fn test_duplicate_key_insert_increments_entries() {
+        // P52.51: a duplicate-key insert adds a new offset entry and must bump
+        // `num_entries` (previously the count was left short and the drop-time
+        // assert failed).
+        let mut idx = ArtPrimaryKeyIndex::new("test");
+        idx.insert(&make_key(7), 0);
+        idx.insert(&make_key(7), 1);
+        assert_eq!(idx.len(), 2, "two offset entries for the duplicate key");
+        idx.delete(&make_key(7), 0);
+        assert_eq!(idx.len(), 1);
+        idx.delete(&make_key(7), 1);
+        assert_eq!(idx.len(), 0);
     }
 
     #[test]

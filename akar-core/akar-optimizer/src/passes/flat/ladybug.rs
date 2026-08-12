@@ -2,7 +2,6 @@
 
 use crate::passes::OptimizationPass;
 use akar_planner::logical_operator::*;
-use std::collections::HashSet;
 
 // ========================================================================
 // Pass: OrderBy Push-Down (Ladybug)
@@ -63,6 +62,55 @@ mod tests {
         assert!(matches!(result[0], LogicalOperator::Union(_)));
         assert!(matches!(result[1], LogicalOperator::OrderBy(_)));
     }
+
+    fn unwind_op(var: &str) -> LogicalOperator {
+        LogicalOperator::Unwind(LogicalUnwind {
+            expression: akar_parser::ast::Expression::List(vec![
+                akar_parser::ast::Expression::Constant(akar_parser::ast::Constant::Integer(1)),
+                akar_parser::ast::Expression::Constant(akar_parser::ast::Constant::Integer(2)),
+            ]),
+            variable: var.to_string(),
+            cardinality: 0,
+        })
+    }
+
+    #[test]
+    fn test_unwind_dedup_keeps_different_variables() {
+        // P52.54: `UNWIND [1,2] AS a` then `UNWIND [1,2] AS b` — same list, different
+        // variables. The old expression-only key collapsed them, losing column b.
+        let pass = UnwindDedup;
+        let plan = vec![unwind_op("a"), unwind_op("b")];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 2, "different UNWIND variables must both be kept");
+    }
+
+    #[test]
+    fn test_unwind_dedup_merges_consecutive_same_key() {
+        let pass = UnwindDedup;
+        let plan = vec![unwind_op("a"), unwind_op("a")];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 1, "consecutive identical UNWINDs are merged");
+    }
+
+    #[test]
+    fn test_unwind_dedup_does_not_collapse_non_adjacent() {
+        // P52.54: two identical UNWINDs separated by another operator are genuine
+        // separate executions and must not be deduped (the old HashSet-based dedup
+        // removed the non-consecutive one).
+        let pass = UnwindDedup;
+        let plan = vec![
+            unwind_op("a"),
+            LogicalOperator::Limit(LogicalLimit {
+                limit: 1,
+                offset: 0,
+                children: vec![],
+                cardinality: 0,
+            }),
+            unwind_op("a"),
+        ];
+        let result = pass.apply(&plan);
+        assert_eq!(result.len(), 3, "non-adjacent UNWINDs must both be kept");
+    }
 }
 
 // ========================================================================
@@ -79,15 +127,23 @@ impl OptimizationPass for UnwindDedup {
 
     fn apply(&self, operators: &[LogicalOperator]) -> Vec<LogicalOperator> {
         let mut result: Vec<LogicalOperator> = Vec::new();
-        let mut seen_unwinds: HashSet<String> = HashSet::new();
         let mut i = 0;
         while i < operators.len() {
             match &operators[i] {
                 LogicalOperator::Unwind(uw) => {
-                    // Use expression representation as the key for dedup
-                    let key = format!("{:?}", uw.expression);
-                    if !seen_unwinds.insert(key) {
-                        // Duplicate UNWIND â€” skip it
+                    // Only merge CONSECUTIVE UNWINDs on the same (variable,
+                    // expression) pair. The key must include the variable:
+                    // two `UNWIND [1,2]` into different variables are NOT
+                    // duplicates (dropping one would remove a column a consumer
+                    // needs). Using a global HashSet also wrongly collapsed
+                    // non-adjacent UNWINDs (P52.54).
+                    let key = (uw.variable.clone(), format!("{:?}", uw.expression));
+                    let is_adjacent_duplicate = matches!(
+                        result.last(),
+                        Some(LogicalOperator::Unwind(prev))
+                            if (prev.variable.clone(), format!("{:?}", prev.expression)) == key
+                    );
+                    if is_adjacent_duplicate {
                         tracing::debug!("UnwindDedup: removed duplicate UNWIND {:?}", uw.variable);
                         i += 1;
                         continue;
