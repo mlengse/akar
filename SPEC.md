@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,636 total, 5 ignored, 1,631 passed, 0 failed** (gate `test [akar-core]` 2026-08-13, `ca28ffd`, committed) |
+| Tests passing | **1,638 total, 5 ignored, 1,632 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, `d5b13c1`, committed; 1 skipped = flake FTS `test_fts_with_where_predicate`, lolos terisolasi) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -486,13 +486,13 @@ Triggered by pushing a version tag (`v*`):
 | `akar-optimizer` | 68 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 142 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 176 | 259 registered functions |
-| `akar-storage` | 328 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
+| `akar-storage` | 341 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 68 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
 | `akar-main` (integration) | 293 | RETURN *, FOREACH, MERGE, subqueries, WCOJ, crash recovery, durability |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
-| `akar-vector` | 20 | Vector similarity search |
+| `akar-vector` | 22 | Vector similarity search |
 | `akar-json` | 12 | JSON functions |
 | `akar-fts` | 14 | Stemmer, Tokenizer, BM25 |
 | `akar-algo` | 34 | Graph algorithm extensions |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,636** | **1,636 total, 5 ignored, 1,631 passed, 0 failed** (gate `test [akar-core]` 2026-08-13, `ca28ffd`, committed) |
+| **Total** | **1,638** | **1,638 total, 5 ignored, 1,632 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, `d5b13c1`, committed; 1 skipped = flake FTS, lolos terisolasi) |
 
 ### 11.2 Test Datasets
 
