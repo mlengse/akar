@@ -203,7 +203,7 @@ struct CypherCompleter;
 impl Completer for CypherCompleter {
     type Candidate = Pair;
     fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        let before = &line[..pos];
+        let before = &line[..line.floor_char_boundary(pos)];
         let word = before.split_whitespace().last().unwrap_or("");
         if word.is_empty() {
             return Ok((pos, vec![]));
@@ -600,7 +600,7 @@ fn format_output(result: &akar_main::QueryResult, mode: OutputMode, output: &mut
                 let objs: Vec<String> = row
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| format!("\"col_{}\": \"{}\"", i, v.replace('"', "\\\"")))
+                    .map(|(i, v)| format!("\"col_{}\": \"{}\"", i, json_escape(v)))
                     .collect();
                 let comma = if ri < rows.len() - 1 { "," } else { "" };
                 writeln!(output, "  {{{}}}{}", objs.join(", "), comma).ok();
@@ -729,6 +729,22 @@ fn run_script(conn: &Connection, reader: impl BufRead, output: &mut dyn Write) {
 
 // ==================== Value Formatting ====================
 
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn fmt_val(v: &akar_common::types::Value) -> String {
     use akar_common::types::Value;
     match v {
@@ -736,8 +752,8 @@ fn fmt_val(v: &akar_common::types::Value) -> String {
         Value::Int64(i) => i.to_string(),
         Value::Int32(i) => i.to_string(),
         Value::Int16(i) => i.to_string(),
-        Value::Double(d) => format!("{:.4}", d),
-        Value::Float(f) => format!("{:.4}", f),
+        Value::Double(d) => d.to_string(),
+        Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::String(s) => s.clone(),
         _ => "<val>".into(),

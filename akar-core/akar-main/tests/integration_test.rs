@@ -370,6 +370,96 @@ fn test_clear_cache() {
     assert_eq!(conn.cache_size(), 0);
 }
 
+#[test]
+fn test_prepare_params_in_match_property() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+
+    // P51.31: pattern properties were skipped by collection and substitution
+    let stmt = conn
+        .prepare("MATCH (p:Person {name: $n}) RETURN p.age")
+        .unwrap();
+    assert_eq!(stmt.parameter_names(), &["n"]);
+
+    let result = conn.execute(
+        &stmt,
+        vec![("n", akar_common::types::Value::String("Alice".into()))],
+    );
+    assert!(result.is_ok(), "Execute failed: {:?}", result.err());
+    assert!(result.unwrap().is_success());
+}
+
+#[test]
+fn test_prepare_params_in_order_by() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+
+    // P51.31: ORDER BY expressions were not collected as parameters
+    let stmt = conn
+        .prepare("MATCH (p:Person) RETURN p.name ORDER BY p.age + $offset")
+        .unwrap();
+    assert_eq!(stmt.parameter_names(), &["offset"]);
+}
+
+#[test]
+fn test_prepare_params_in_create_dml() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
+
+    // P51.31: standalone CREATE DML pattern properties were not handled
+    let stmt = conn
+        .prepare("CREATE (p:Person {name: $n, age: $a})")
+        .unwrap();
+    let mut names = stmt.parameter_names().to_vec();
+    names.sort();
+    assert_eq!(names, &["a", "n"]);
+
+    let result = conn.execute(
+        &stmt,
+        vec![
+            ("n", akar_common::types::Value::String("Alice".into())),
+            ("a", akar_common::types::Value::Int64(30)),
+        ],
+    );
+    assert!(result.is_ok(), "Execute failed: {:?}", result.err());
+    assert!(result.unwrap().is_success());
+}
+
+#[test]
+fn test_drop_table_keeps_same_prefix_sequence() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id SERIAL, name STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person_Extra(id SERIAL, name STRING, PRIMARY KEY (id))",
+    );
+    exec(&conn, "CREATE (p:Person {name: 'a'})");
+    exec(&conn, "CREATE (px:Person_Extra {name: 'b'})");
+
+    // P51.28: dropping Person used to drop Person_Extra's sequence too,
+    // because of the prefix filter on the sequence name.
+    exec(&conn, "DROP TABLE Person");
+
+    exec(&conn, "CREATE (px:Person_Extra {name: 'c'})");
+    let r = conn
+        .query("MATCH (px:Person_Extra) RETURN px.id ORDER BY px.id")
+        .unwrap();
+    assert!(r.is_success());
+    assert_eq!(r.num_rows(), 2, "Person_Extra rows should survive the drop");
+}
+
 // ==================== Plan cache tests ====================
 
 #[test]

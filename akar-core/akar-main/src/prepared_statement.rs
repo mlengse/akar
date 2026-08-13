@@ -8,7 +8,7 @@
 //! let result = conn.execute(&stmt, vec![("min_age", Value::Int64(25))])?;
 //! ```
 
-use akar_binder::bound_statement::BoundStatement;
+use akar_binder::bound_statement::{BoundMatchClause, BoundStatement};
 use akar_common::types::Value;
 use akar_parser::ast::{Clause, Expression, Query, ReturnClause, ReturnItem, WhereClause};
 use akar_planner::logical_operator::LogicalOperator;
@@ -65,36 +65,38 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
         BoundStatement::BoundQuery(q) => {
             for clause in &q.clauses {
                 match clause {
-                    akar_binder::bound_statement::BoundClause::BoundMatch(m) => {
-                        for pattern in &m.patterns {
-                            if let Some(_edge) = &pattern.edge {
-                                // Edge patterns might have properties with params
-                            }
-                        }
+                    akar_binder::bound_statement::BoundClause::BoundMatch(m)
+                    | akar_binder::bound_statement::BoundClause::BoundOptionalMatch(m)
+                    | akar_binder::bound_statement::BoundClause::BoundCreate(m) => {
+                        collect_params_from_match_clause(m, params);
                     }
-                    akar_binder::bound_statement::BoundClause::BoundReturn(r) => {
+                    akar_binder::bound_statement::BoundClause::BoundReturn(r)
+                    | akar_binder::bound_statement::BoundClause::BoundWith(r) => {
                         for expr in &r.expressions {
                             collect_params_from_expr(&expr.expression, params);
+                        }
+                        if let Some(order_by) = &r.order_by {
+                            for item in order_by {
+                                collect_params_from_expr(&item.expression.expression, params);
+                            }
                         }
                     }
                     akar_binder::bound_statement::BoundClause::BoundWhere(w) => {
                         collect_params_from_expr(&w.expression.expression, params);
                     }
-                    akar_binder::bound_statement::BoundClause::BoundCreate(_) => {}
-                    akar_binder::bound_statement::BoundClause::BoundDelete(_) => {}
-                    akar_binder::bound_statement::BoundClause::BoundOptionalMatch(_) => {}
-                    akar_binder::bound_statement::BoundClause::BoundWith(r) => {
-                        for expr in &r.expressions {
-                            collect_params_from_expr(&expr.expression, params);
+                    akar_binder::bound_statement::BoundClause::BoundDelete(d) => {
+                        for item in &d.items {
+                            collect_params_from_expr(&item.expression, params);
+                        }
+                    }
+                    akar_binder::bound_statement::BoundClause::BoundSet(s) => {
+                        for item in &s.items {
+                            collect_params_from_expr(&item.property, params);
+                            collect_params_from_expr(&item.value, params);
                         }
                     }
                     akar_binder::bound_statement::BoundClause::BoundUnwind(u) => {
                         collect_params_from_expr(&u.expression, params);
-                    }
-                    akar_binder::bound_statement::BoundClause::BoundSet(s) => {
-                        for item in &s.items {
-                            collect_params_from_expr(&item.value, params);
-                        }
                     }
                     akar_binder::bound_statement::BoundClause::BoundForeach(f) => {
                         collect_params_from_expr(&f.expression, params);
@@ -105,10 +107,62 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                 }
             }
         }
+        BoundStatement::BoundCreateDml(c) => {
+            for p in &c.patterns {
+                if let Some(n) = &p.node {
+                    for (_, v) in &n.properties {
+                        collect_params_from_expr(v, params);
+                    }
+                }
+                if let Some(e) = &p.edge {
+                    for (_, v) in &e.properties {
+                        collect_params_from_expr(v, params);
+                    }
+                }
+            }
+        }
+        BoundStatement::BoundMerge(m) => {
+            for (_, v) in &m.properties {
+                collect_params_from_expr(v, params);
+            }
+            for p in &m.patterns {
+                if let Some(n) = &p.node {
+                    for (_, v) in &n.properties {
+                        collect_params_from_expr(v, params);
+                    }
+                }
+                if let Some(e) = &p.edge {
+                    for (_, v) in &e.properties {
+                        collect_params_from_expr(v, params);
+                    }
+                }
+            }
+            for item in &m.on_create {
+                collect_params_from_expr(&item.property, params);
+                collect_params_from_expr(&item.value, params);
+            }
+            for item in &m.on_match {
+                collect_params_from_expr(&item.property, params);
+                collect_params_from_expr(&item.value, params);
+            }
+        }
         BoundStatement::BoundExplain(e) => {
             collect_params_from_statement(&e.inner, params);
         }
         _ => {}
+    }
+}
+
+fn collect_params_from_match_clause(m: &BoundMatchClause, params: &mut Vec<String>) {
+    for p in &m.patterns {
+        for (_, v) in &p.properties {
+            collect_params_from_expr(v, params);
+        }
+        if let Some(e) = &p.edge {
+            for (_, v) in &e.properties {
+                collect_params_from_expr(v, params);
+            }
+        }
     }
 }
 
@@ -186,7 +240,7 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
             let value = param_values
                 .get(name)
                 .ok_or_else(|| format!("Missing parameter: ${}", name))?;
-            Ok(Expression::Constant(value_to_constant(value)))
+            Ok(Expression::Constant(value_to_constant(value)?))
         }
         Expression::PropertyAccess(obj, prop) => {
             let new_obj = substitute_params(obj, param_values)?;
@@ -313,24 +367,37 @@ fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Valu
 }
 
 /// Convert a Value to a Constant for expression substitution.
-fn value_to_constant(value: &Value) -> akar_parser::ast::Constant {
+///
+/// Returns an error instead of silently corrupting the parameter: a
+/// `UInt64`/`Int128` that overflows `i64` or a type the parser cannot
+/// represent as a constant (Blob, Date, List, …) would previously become a
+/// wrong `Integer` or `Null` (P51.32).
+fn value_to_constant(value: &Value) -> Result<akar_parser::ast::Constant, String> {
     use akar_parser::ast::Constant;
     match value {
-        Value::Null => Constant::Null,
-        Value::Bool(b) => Constant::Bool(*b),
-        Value::Int64(n) => Constant::Integer(*n),
-        Value::Int32(n) => Constant::Integer(*n as i64),
-        Value::Int16(n) => Constant::Integer(*n as i64),
-        Value::Int8(n) => Constant::Integer(*n as i64),
-        Value::UInt64(n) => Constant::Integer(*n as i64),
-        Value::UInt32(n) => Constant::Integer(*n as i64),
-        Value::UInt16(n) => Constant::Integer(*n as i64),
-        Value::UInt8(n) => Constant::Integer(*n as i64),
-        Value::Double(f) => Constant::Float(*f),
-        Value::Float(f) => Constant::Float(*f as f64),
-        Value::String(s) => Constant::String(s.clone()),
-        Value::Blob(_) => Constant::String("<blob>".into()),
-        _ => Constant::Null,
+        Value::Null => Ok(Constant::Null),
+        Value::Bool(b) => Ok(Constant::Bool(*b)),
+        Value::Int64(n) => Ok(Constant::Integer(*n)),
+        Value::Int32(n) => Ok(Constant::Integer(*n as i64)),
+        Value::Int16(n) => Ok(Constant::Integer(*n as i64)),
+        Value::Int8(n) => Ok(Constant::Integer(*n as i64)),
+        Value::UInt64(n) => i64::try_from(*n)
+            .map(Constant::Integer)
+            .map_err(|_| format!("UInt64 parameter {n} exceeds i64 range and cannot be used in a query")),
+        Value::UInt32(n) => Ok(Constant::Integer(*n as i64)),
+        Value::UInt16(n) => Ok(Constant::Integer(*n as i64)),
+        Value::UInt8(n) => Ok(Constant::Integer(*n as i64)),
+        Value::Int128(n) => i64::try_from(*n)
+            .map(Constant::Integer)
+            .map_err(|_| format!("Int128 parameter {n} exceeds i64 range and cannot be used in a query")),
+        Value::Double(f) => Ok(Constant::Float(*f)),
+        Value::Float(f) => Ok(Constant::Float(*f as f64)),
+        Value::String(s) => Ok(Constant::String(s.clone())),
+        Value::Blob(_) => Err("BLOB parameters are not supported in queries".into()),
+        other => Err(format!(
+            "Parameter type {:?} cannot be used in a query",
+            std::mem::discriminant(other)
+        )),
     }
 }
 
@@ -418,14 +485,40 @@ mod tests {
 
     #[test]
     fn test_value_to_constant() {
-        assert_eq!(value_to_constant(&Value::Int64(42)), Constant::Integer(42));
+        assert_eq!(value_to_constant(&Value::Int64(42)), Ok(Constant::Integer(42)));
         assert_eq!(
             value_to_constant(&Value::String("hi".into())),
-            Constant::String("hi".into())
+            Ok(Constant::String("hi".into()))
         );
-        assert_eq!(value_to_constant(&Value::Bool(true)), Constant::Bool(true));
-        assert_eq!(value_to_constant(&Value::Double(3.15)), Constant::Float(3.15));
-        assert_eq!(value_to_constant(&Value::Null), Constant::Null);
+        assert_eq!(value_to_constant(&Value::Bool(true)), Ok(Constant::Bool(true)));
+        assert_eq!(value_to_constant(&Value::Double(3.15)), Ok(Constant::Float(3.15)));
+        assert_eq!(value_to_constant(&Value::Null), Ok(Constant::Null));
+    }
+
+    #[test]
+    fn test_value_to_constant_uint64_overflow_errors() {
+        // Values beyond i64::MAX must error instead of silently wrapping.
+        assert_eq!(
+            value_to_constant(&Value::UInt64(i64::MAX as u64 + 1)),
+            Err("UInt64 parameter 9223372036854775808 exceeds i64 range and cannot be used in a query".into())
+        );
+        assert_eq!(
+            value_to_constant(&Value::UInt64(u64::MAX)),
+            Err("UInt64 parameter 18446744073709551615 exceeds i64 range and cannot be used in a query".into())
+        );
+        // Fits — ok.
+        assert_eq!(
+            value_to_constant(&Value::UInt64(i64::MAX as u64)),
+            Ok(Constant::Integer(i64::MAX))
+        );
+    }
+
+    #[test]
+    fn test_value_to_constant_blob_errors() {
+        assert_eq!(
+            value_to_constant(&Value::Blob(vec![1, 2, 3])),
+            Err("BLOB parameters are not supported in queries".into())
+        );
     }
 
     #[test]

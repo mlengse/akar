@@ -373,12 +373,28 @@ impl Connection {
                 let planner = akar_planner::QueryPlanner::new();
                 let optimizer = akar_optimizer::Optimizer::with_stats(self.database.stats_store.clone());
 
+                // Capture an MVCC snapshot so both sides read a consistent view
+                // (previously neither side used a snapshot, mixing committed and
+                // uncommitted rows during concurrent writes — P51.30).
+                let (snapshot_ts, commit_history) = if let Some(ref txn) = txn_opt {
+                    (
+                        txn.snapshot_ts,
+                        self.database.transaction_manager.commit_history_snapshot(),
+                    )
+                } else {
+                    let ts = self.database.transaction_manager.current_commit_ts();
+                    (
+                        Some(ts),
+                        self.database.transaction_manager.commit_history_snapshot(),
+                    )
+                };
+
                 // Execute left side
                 let left_plan = planner
                     .plan(BoundStatement::BoundQuery(*u.left.clone()))
                     .map_err(|e| format!("Plan left UNION: {e}"))?;
                 let left_optimized = optimizer.optimize(left_plan);
-                let processor = self.create_processor();
+                let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history.clone());
                 let left_chunks = processor
                     .execute(&left_optimized)
                     .map_err(|e| format!("Execute left UNION: {e}"))?;
@@ -388,7 +404,7 @@ impl Connection {
                     .plan(BoundStatement::BoundQuery(*u.right.clone()))
                     .map_err(|e| format!("Plan right UNION: {e}"))?;
                 let right_optimized = optimizer.optimize(right_plan);
-                let processor = self.create_processor();
+                let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history);
                 let right_chunks = processor
                     .execute(&right_optimized)
                     .map_err(|e| format!("Execute right UNION: {e}"))?;

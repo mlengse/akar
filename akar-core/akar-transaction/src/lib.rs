@@ -8,7 +8,9 @@
 //!
 //! Integration with the storage engine: the `StorageManager::commit_transaction()`
 //! method orchestrates the full commit pipeline (WAL → LocalStorage flush →
-//! ShadowFile apply → checkpoint). Call it after `TransactionManager::commit()`.
+//! ShadowFile apply → checkpoint). Call it between `TransactionManager::
+//! prepare_commit()` and `TransactionManager::finish_commit()` so the durable
+//! pipeline runs before the transaction is published as committed (P51.29).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -870,6 +872,67 @@ impl TransactionManager {
         self.concurrency.release_write();
         self.checkpoint.notify_active_txns_changed();
         Ok(CommitResult::Committed { commit_ts })
+    }
+
+    /// Phase 1 of a two-phase commit for a write transaction (P51.29).
+    ///
+    /// Runs OCC validation, marks the transaction committed, assigns its
+    /// commit timestamp and detaches it from the lifecycle — but does NOT yet
+    /// release its table locks, clear its row-write registrations or release
+    /// the global write lock. This lets the caller run the storage engine's
+    /// durable commit pipeline (WAL + persist) in between, while a checkpoint
+    /// drain triggered there no longer waits on this transaction (it is no
+    /// longer counted as active).
+    ///
+    /// If the durable pipeline fails, call [`TransactionManager::rollback`] to
+    /// abandon the commit (the commit-history entry is only pushed by
+    /// [`TransactionManager::finish_commit`], so a failed durable phase leaves
+    /// no committed record behind). On success, call `finish_commit`.
+    pub fn prepare_commit(&self, transaction: &mut Transaction) -> Result<CommitResult, TransactionError> {
+        if transaction.transaction_type == TransactionType::ReadOnly {
+            transaction.status = TransactionStatus::Committed;
+            transaction.commit_ts = Some(self.lifecycle.assign_commit_ts());
+            self.lifecycle.deregister(transaction.transaction_id);
+            self.concurrency.release_locks(transaction.transaction_id);
+            return Ok(CommitResult::Committed {
+                commit_ts: transaction.commit_ts.unwrap(),
+            });
+        }
+
+        // OCC: validate write set before any durable work is done.
+        if let Err(e) = self.validate_write_set(transaction.transaction_id) {
+            // Validation failed — clean up tracker and release resources
+            transaction.status = TransactionStatus::RolledBack;
+            self.lifecycle.deregister(transaction.transaction_id);
+            self.concurrency.release_locks(transaction.transaction_id);
+            self.concurrency
+                .row_tracker
+                .clear_txn_writes(transaction.transaction_id);
+            self.concurrency.release_write();
+            self.checkpoint.notify_active_txns_changed();
+            return Err(e);
+        }
+
+        transaction.status = TransactionStatus::Committed;
+        let commit_ts = self.lifecycle.assign_commit_ts();
+        transaction.commit_ts = Some(commit_ts);
+        self.lifecycle.deregister(transaction.transaction_id);
+        Ok(CommitResult::Committed { commit_ts })
+    }
+
+    /// Phase 2 of a two-phase commit (P51.29): publish the commit to the
+    /// commit history and release the resources still held after
+    /// [`TransactionManager::prepare_commit`] — table locks, the row-write
+    /// registrations and the global write lock.
+    pub fn finish_commit(&self, transaction: &Transaction) {
+        self.lifecycle
+            .push_commit_history(transaction.transaction_id, transaction.commit_ts.unwrap_or(0));
+        self.concurrency.release_locks(transaction.transaction_id);
+        self.concurrency
+            .row_tracker
+            .clear_txn_writes(transaction.transaction_id);
+        self.concurrency.release_write();
+        self.checkpoint.notify_active_txns_changed();
     }
 
     pub fn rollback(&self, transaction: &mut Transaction) -> Vec<UndoRecord> {

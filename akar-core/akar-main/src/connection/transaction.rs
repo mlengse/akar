@@ -29,21 +29,10 @@ impl Connection {
     pub(crate) fn commit_write_txn(&self, txn: &mut Transaction) -> Result<(), String> {
         let txn_id = txn.transaction_id;
 
-        // Step 1: Commit via TransactionManager (assigns commit_ts, releases
-        // locks). Resources stay in `txn_resources` until EVERY commit step
-        // succeeds — if commit fails we roll back instead of leaking a zombie
-        // txn that wedges the next COMMIT with "No resources found" (P52.24).
-        let tm = &self.database.transaction_manager;
-        let commit_result = tm.commit(txn).map_err(|e| {
-            tracing::error!("Transaction commit failed for txn#{txn_id}: {e}");
-            let _ = self.rollback_write_txn(txn);
-            format!("Transaction commit failed: {e}")
-        })?;
-        let _commit_ts = match commit_result {
-            akar_transaction::CommitResult::Committed { commit_ts } => commit_ts,
-        };
-
-        // Commit succeeded — safe to take the resources out of the map now.
+        // Step 1: Take the resources out of the map while the txn is still
+        // ACTIVE in the TransactionManager. If any later step fails we can roll
+        // back cleanly — the txn is never published as committed before its
+        // data is durable (P51.29).
         let resources = self
             .txn_resources
             .lock()
@@ -54,7 +43,7 @@ impl Connection {
             None => return Err(format!("No resources found for txn#{txn_id}", )),
         };
 
-        // Step 2: Bulk-copy LocalWAL buffer into global WAL (before flush)
+        // Step 2: Bulk-copy LocalWAL buffer into the global WAL (before flush)
         {
             let sm = &self.database.storage_manager;
             let mut wal = sm.wal().lock().map_err(|e| format!("WAL lock: {e}"))?;
@@ -63,11 +52,21 @@ impl Connection {
             }
         }
 
-        // Step 3: Flush LocalStorage → tables, ShadowFile → BM, WAL + checkpoint
+        // Step 3: Prepare the TM-side commit (OCC validation + detach from the
+        // lifecycle so the checkpoint drain inside `commit_transaction` does
+        // not wait on this transaction). Locks/write are still held here and
+        // released by `finish_commit` below.
+        let tm = &self.database.transaction_manager;
+        tm.prepare_commit(txn).map_err(|e| {
+            tracing::error!("Transaction commit failed for txn#{txn_id}: {e}");
+            let _ = self.rollback_write_txn(txn);
+            format!("Transaction commit failed: {e}")
+        })?;
+
+        // Step 4: Flush LocalStorage → tables, ShadowFile → BM, WAL + checkpoint
         // `commit_transaction` handles: Commit record append, WAL flush to disk,
         // LocalStorage flush to tables, ShadowFile apply to BM, auto-checkpoint.
         let sm = &self.database.storage_manager;
-        let tm = &self.database.transaction_manager;
         let drain_fn = |timeout: std::time::Duration| -> bool { tm.stop_new_txns_and_wait_until_all_leave(timeout) };
         sm.commit_transaction(
             &resources.local_storage,
@@ -75,7 +74,16 @@ impl Connection {
             self.database.config.checkpoint_threshold,
             txn_id,
             Some(&drain_fn),
-        )?;
+        )
+        .map_err(|e| {
+            tracing::error!("Durable commit failed for txn#{txn_id}: {e}");
+            let _ = self.rollback_write_txn(txn);
+            format!("Commit failed: {e}")
+        })?;
+
+        // Step 5: Publish the commit and release locks/write. The durable
+        // pipeline succeeded, so the txn is now genuinely committed (P51.29).
+        tm.finish_commit(txn);
 
         Ok(())
     }

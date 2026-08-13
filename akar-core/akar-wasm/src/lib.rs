@@ -12,6 +12,14 @@ pub struct AkarDatabase {
 impl AkarDatabase {
     #[wasm_bindgen(constructor)]
     pub fn new(db_path: &str) -> Result<AkarDatabase, JsValue> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if !db_path.is_empty() && db_path != ":memory:" {
+                return Err(JsValue::from_str(
+                    "Akar WASM runs in-memory only; pass ':memory:' or an empty path",
+                ));
+            }
+        }
         let db = Database::new(db_path, Default::default()).map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(AkarDatabase { db: Arc::new(db) })
     }
@@ -73,7 +81,7 @@ impl AkarConnection {
             } else if let Some(b) = js_val.as_bool() {
                 Value::Bool(b)
             } else if let Some(f) = js_val.as_f64() {
-                if f.fract() == 0.0 {
+                if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f < 9_223_372_036_854_775_808.0 {
                     Value::Int64(f as i64)
                 } else {
                     Value::Double(f)

@@ -30,7 +30,7 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
             Rule::return_clause => {
                 let distinct = has_distinct_flag(&inner);
                 let order_by = parse_order_by(&inner);
-                let (limit, skip) = parse_limit_skip(&inner);
+                let (limit, skip) = parse_limit_skip(&inner)?;
                 clauses.push(Clause::Return(ReturnClause {
                     expressions: parse_return_items(inner)?,
                     distinct,
@@ -41,7 +41,7 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
             }
             Rule::with_clause => {
                 let order_by = parse_order_by(&inner);
-                let (limit, skip) = parse_limit_skip(&inner);
+                let (limit, skip) = parse_limit_skip(&inner)?;
                 clauses.push(Clause::With(ReturnClause {
                     expressions: parse_return_items(inner)?,
                     distinct: false,
@@ -370,31 +370,40 @@ fn parse_order_by(pair: &pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>
 }
 
 /// Extract LIMIT and SKIP values from a return_clause or with_clause pair.
-fn parse_limit_skip(pair: &pest::iterators::Pair<Rule>) -> (Option<u64>, Option<u64>) {
+///
+/// Returns an error instead of silently dropping the value when the integer is
+/// negative or overflows `u64` (previously `.ok()` swallowed those).
+fn parse_limit_skip(pair: &pest::iterators::Pair<Rule>) -> Result<(Option<u64>, Option<u64>), String> {
     let limit_pair = match pair.clone().into_inner().find(|p| p.as_rule() == Rule::limit) {
         Some(p) => p,
-        None => return (None, None),
+        None => return Ok((None, None)),
     };
     let mut limit_val = None;
     let mut skip_val = None;
     for inner in limit_pair.into_inner() {
         match inner.as_rule() {
             Rule::integer => {
+                let raw = inner.as_str();
                 if limit_val.is_none() {
-                    limit_val = inner.as_str().parse::<u64>().ok();
+                    limit_val = Some(raw.parse::<u64>().map_err(|_| {
+                        format!("LIMIT must be a non-negative 64-bit integer, got `{raw}`")
+                    })?);
                 }
             }
             Rule::offset => {
                 for off_inner in inner.into_inner() {
                     if off_inner.as_rule() == Rule::integer {
-                        skip_val = off_inner.as_str().parse::<u64>().ok();
+                        let raw = off_inner.as_str();
+                        skip_val = Some(raw.parse::<u64>().map_err(|_| {
+                            format!("SKIP must be a non-negative 64-bit integer, got `{raw}`")
+                        })?);
                     }
                 }
             }
             _ => {}
         }
     }
-    (limit_val, skip_val)
+    Ok((limit_val, skip_val))
 }
 
 pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<StandaloneCall, String> {

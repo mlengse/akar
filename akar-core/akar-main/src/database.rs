@@ -248,17 +248,31 @@ impl Database {
 
     /// Drop a table: serial sequences + data table + schema entry.
     pub fn drop_table(&self, name: &str) -> Result<(), String> {
-        // 1. Drop auto-created serial sequences
+        // 1. Drop auto-created serial sequences. Sequences are named
+        // `{table}_{column}_serial`, so a prefix match on `{name}_` would also
+        // drop sequences owned by tables sharing the prefix (dropping `person`
+        // would remove `person_x`'s `person_x_id_serial`). Enumerate the
+        // table's own SERIAL columns and drop exactly their sequences (P51.28).
         {
             let mut cat = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-            let serial_seqs: Vec<String> = cat
-                .sequences()
-                .iter()
-                .filter(|s| s.name.ends_with("_serial"))
-                .filter(|s| s.name.starts_with(&format!("{name}_")))
-                .map(|s| s.name.clone())
+            let node_cols: Vec<String> = cat
+                .node_tables()
+                .into_iter()
+                .filter(|t| t.name == name)
+                .flat_map(|t| t.columns.iter())
+                .filter(|c| c.logical_type == akar_common::types::LogicalTypeID::Serial)
+                .map(|c| c.name.clone())
                 .collect();
-            for seq_name in serial_seqs {
+            let rel_cols: Vec<String> = cat
+                .rel_tables()
+                .into_iter()
+                .filter(|t| t.name == name)
+                .flat_map(|t| t.columns.iter())
+                .filter(|c| c.logical_type == akar_common::types::LogicalTypeID::Serial)
+                .map(|c| c.name.clone())
+                .collect();
+            for col in node_cols.into_iter().chain(rel_cols) {
+                let seq_name = akar_catalog::SequenceEntry::get_serial_name(name, &col);
                 if let akar_catalog::CatalogResult::Dropped { .. } = cat.drop_sequence(&seq_name) {
                     tracing::info!("Dropped serial sequence '{seq_name}'");
                 }

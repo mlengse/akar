@@ -57,6 +57,26 @@ mod tests {
     }
 
     #[test]
+    fn test_limit_negative_errors() {
+        // P51.31: negative LIMIT must error instead of silently dropping the limit
+        let err = parse("MATCH (a:Person) RETURN a.name LIMIT -1").unwrap_err();
+        assert!(err.contains("LIMIT"), "Expected LIMIT error, got: {err}");
+    }
+
+    #[test]
+    fn test_limit_overflow_errors() {
+        // P51.31: u64 overflow must error instead of silently dropping the limit
+        let err = parse("MATCH (a:Person) RETURN a.name LIMIT 99999999999999999999999").unwrap_err();
+        assert!(err.contains("LIMIT"), "Expected LIMIT error, got: {err}");
+    }
+
+    #[test]
+    fn test_skip_negative_errors() {
+        let err = parse("MATCH (a:Person) RETURN a.name SKIP -1").unwrap_err();
+        assert!(err.contains("SKIP"), "Expected SKIP error, got: {err}");
+    }
+
+    #[test]
     fn test_rel_pattern() {
         let sql = "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a, b";
         assert!(parse(sql).is_ok());

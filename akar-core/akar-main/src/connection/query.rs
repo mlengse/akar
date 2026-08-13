@@ -327,16 +327,18 @@ impl Connection {
             return Err("Database is in read-only mode; write statements are not allowed".into());
         }
 
+        // Substitute parameters in the bound statement. Done before `handle_ddl`
+        // so prepared DML (CREATE/MERGE) with `$param` in pattern properties gets
+        // concrete values too (P51.31).
+        let substituted =
+            crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
+
         // Handle DDL prepared statements
-        if let Some(result) = self.handle_ddl(&prepared.bound_statement, None)? {
+        if let Some(result) = self.handle_ddl(&substituted, None)? {
             self.database.persist_catalog()?;
             self.maybe_auto_checkpoint()?;
             return Ok(result);
         }
-
-        // Substitute parameters in the bound statement
-        let substituted =
-            crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
 
         // Plan
         let planner = QueryPlanner::new();
