@@ -148,8 +148,8 @@ impl VectorIndexTable {
             )));
         }
 
-        let vectors = self.hnsw.vectors();
-        let num_vectors = vectors.len() as u64;
+        let nodes = self.hnsw.nodes();
+        let num_vectors = nodes.len() as u64;
         let entry_point = self.hnsw.entry_point();
         let max_level = self.hnsw.max_level();
 
@@ -188,7 +188,7 @@ impl VectorIndexTable {
             let mut written_this_page = 0usize;
 
             while offset < num_vectors as usize {
-                let vec_data = vectors[offset];
+                let (id, vec_data) = nodes[offset];
                 let vec_len = vec_data.len().checked_mul(8).unwrap_or(usize::MAX);
                 let entry_len = 8 + 4 + vec_len;
                 if pos + entry_len > capacity {
@@ -198,14 +198,14 @@ impl VectorIndexTable {
                     if written_this_page == 0 {
                         bm.unpin(&self.file_name, page_idx);
                         return Err(StorageError::Index(format!(
-                            "Vector at offset {offset} ({vec_len} bytes) does not fit in a {} byte page",
+                            "Vector at id {id} ({vec_len} bytes) does not fit in a {} byte page",
                             capacity
                         )));
                     }
                     break; // Continue on the next page
                 }
                 // Write vector ID
-                page_data[pos..pos + 8].copy_from_slice(&(offset as u64).to_le_bytes());
+                page_data[pos..pos + 8].copy_from_slice(&(id as u64).to_le_bytes());
                 pos += 8;
                 // Write vector data length
                 page_data[pos..pos + 4].copy_from_slice(&(vec_len as u32).to_le_bytes());
@@ -429,6 +429,45 @@ mod tests {
         let mut ids: Vec<usize> = hits.iter().map(|&(_, id)| id).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_vector_index_roundtrip_preserves_ids() {
+        // P51.17: node ids (row offsets) must survive persist/load, even when
+        // sparse (rows with a NULL vector are skipped during populate).
+        let dir = tempfile::tempdir().unwrap();
+        let mut bm = setup_bm(dir.path());
+
+        let mut idx = VectorIndexTable::new(
+            2,
+            "sparse_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Euclidean,
+            2,
+        );
+        idx.register_file(&mut bm, dir.path());
+        idx.hnsw_mut().insert(vec![0.0, 0.0], 0);
+        idx.hnsw_mut().insert(vec![1.0, 1.0], 2); // row 1 skipped
+        idx.hnsw_mut().insert(vec![2.0, 2.0], 5);
+        idx.save(&mut bm).unwrap();
+
+        let mut loaded = VectorIndexTable::new(
+            2,
+            "sparse_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Euclidean,
+            0,
+        );
+        loaded.register_file(&mut bm, dir.path());
+        loaded.load(&mut bm).unwrap();
+
+        assert_eq!(loaded.hnsw.len(), 3);
+        assert!(loaded.hnsw().get_vector(5).is_some(), "id 5 must be restored");
+        assert!(loaded.hnsw().get_vector(1).is_none());
+        let hits = loaded.hnsw().search(&[2.0, 2.0], 3);
+        assert_eq!(hits[0].1, 5, "nearest vector must still address row 5");
     }
 
     #[test]

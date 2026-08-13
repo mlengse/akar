@@ -22,7 +22,7 @@
 
 use std::cmp::Ordering;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashSet};
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
@@ -144,10 +144,15 @@ struct HnswNode {
 ///
 /// Stores vectors in a multi-layer navigable small world graph for fast
 /// approximate nearest neighbour search.
+///
+/// Nodes are keyed by the caller-supplied id (P51.17): the id passed to
+/// `insert` is preserved as the node id returned by `search`, so a vector
+/// inserted with `id` can always be addressed as `id` even when the ids are
+/// sparse (e.g. rows with a NULL vector column are skipped during populate).
 #[derive(Debug, Clone)]
 pub struct HnswIndex {
-    /// All nodes in the index.
-    nodes: Vec<HnswNode>,
+    /// All nodes in the index, keyed by node id.
+    nodes: BTreeMap<usize, HnswNode>,
     /// Number of layers in the graph.
     max_level: usize,
     /// Entry point — the node ID at the highest layer.
@@ -162,7 +167,7 @@ impl HnswIndex {
     /// Create a new HNSW index with the given distance metric.
     pub fn new(metric: DistanceMetric) -> Self {
         Self {
-            nodes: Vec::new(),
+            nodes: BTreeMap::new(),
             max_level: 0,
             entry_point: None,
             metric,
@@ -203,9 +208,17 @@ impl HnswIndex {
         self.metric
     }
 
-    /// Get a reference to the vectors stored in the index.
+    /// Get a reference to the vectors stored in the index, ordered by node id.
     pub fn vectors(&self) -> Vec<&[f64]> {
-        self.nodes.iter().map(|n| n.vector.as_slice()).collect()
+        self.nodes.values().map(|n| n.vector.as_slice()).collect()
+    }
+
+    /// All nodes as `(node_id, vector)` pairs, ordered by node id.
+    ///
+    /// The node id is the caller-supplied id (row offset in the calling
+    /// table), so it is preserved across persist/load (P51.17).
+    pub fn nodes(&self) -> Vec<(usize, &[f64])> {
+        self.nodes.iter().map(|(&id, n)| (id, n.vector.as_slice())).collect()
     }
 
     // ---- Internal helpers ----
@@ -225,7 +238,7 @@ impl HnswIndex {
 
     /// Compute distance between the vector at `node_id` and a query vector.
     fn node_distance(&self, node_id: usize, query: &[f64]) -> f64 {
-        self.metric.compute(&self.nodes[node_id].vector, query)
+        self.metric.compute(&self.nodes[&node_id].vector, query)
     }
 
     /// Greedy search from a given entry point to find the closest node
@@ -236,7 +249,7 @@ impl HnswIndex {
 
         loop {
             let mut improved = false;
-            let neighbors = &self.nodes[current].connections;
+            let neighbors = &self.nodes[&current].connections;
             if layer < neighbors.len() {
                 for &neighbor in &neighbors[layer] {
                     let d = self.node_distance(neighbor, query);
@@ -289,7 +302,7 @@ impl HnswIndex {
             if results.len() >= ef && c.0 > results.peek().unwrap().0 {
                 break;
             }
-            let neighbors = &self.nodes[c.1].connections;
+            let neighbors = &self.nodes[&c.1].connections;
             if layer >= neighbors.len() {
                 continue;
             }
@@ -328,9 +341,11 @@ impl HnswIndex {
 
     /// Insert a vector into the index with the given ID.
     ///
-    /// The ID should uniquely identify this vector within the index.
-    pub fn insert(&mut self, vector: Vec<f64>, _id: usize) {
-        let new_id = self.nodes.len();
+    /// The ID should uniquely identify this vector within the index. It is
+    /// preserved verbatim: the node is stored under `id`, and `search`
+    /// returns `id` for it. Node ids may be sparse (P51.17) — callers pass
+    /// their own row ids so a search result always addresses the same row.
+    pub fn insert(&mut self, vector: Vec<f64>, id: usize) {
         let new_level = if self.nodes.is_empty() {
             MAX_M // First node goes to max level
         } else {
@@ -342,8 +357,8 @@ impl HnswIndex {
 
         if self.entry_point.is_none() {
             // First node: just add it
-            self.nodes.push(HnswNode { vector, connections });
-            self.entry_point = Some(0);
+            self.nodes.insert(id, HnswNode { vector, connections });
+            self.entry_point = Some(id);
             self.max_level = new_level;
             return;
         }
@@ -373,30 +388,33 @@ impl HnswIndex {
             // Add connections from neighbours back to new node
             for &neighbor_id in &neighbors {
                 // First, pre-compute distances for ALL existing connections of
-                // this neighbor at this level, plus the new connection to new_id.
+                // this neighbor at this level, plus the new connection to `id`.
                 // We do this BEFORE taking any mutable borrow.
-                let existing_connections: Vec<usize> =
-                    if neighbor_id < self.nodes.len() && level < self.nodes[neighbor_id].connections.len() {
-                        self.nodes[neighbor_id].connections[level].clone()
+                let existing_connections: Vec<usize> = if let Some(n) = self.nodes.get(&neighbor_id) {
+                    if level < n.connections.len() {
+                        n.connections[level].clone()
                     } else {
                         Vec::new()
-                    };
+                    }
+                } else {
+                    Vec::new()
+                };
 
-                // Compute distances: existing connections + new_id
+                // Compute distances: existing connections + new node.
                 // Use the self.nodes entries for existing connections, and the
                 // local `vector` variable for the not-yet-inserted new node.
                 let mut dists: Vec<(f64, usize)> = existing_connections
                     .iter()
                     .map(|&nid| {
-                        let d = self.node_distance(nid, &self.nodes[neighbor_id].vector);
+                        let d = self.node_distance(nid, &self.nodes[&neighbor_id].vector);
                         (d, nid)
                     })
                     .collect();
                 // Add the new connection — compute distance using the local
-                // `vector` (new_id node hasn't been added to self.nodes yet).
+                // `vector` (the new node hasn't been added to self.nodes yet).
                 {
-                    let d = self.metric.compute(&vector, &self.nodes[neighbor_id].vector);
-                    dists.push((d, new_id));
+                    let d = self.metric.compute(&vector, &self.nodes[&neighbor_id].vector);
+                    dists.push((d, id));
                 }
 
                 let max_conn = if level == 0 { M_MAX } else { M };
@@ -404,10 +422,12 @@ impl HnswIndex {
                 dists.truncate(max_conn);
 
                 // Now take the mutable borrow and write back
-                while self.nodes[neighbor_id].connections.len() <= level {
-                    self.nodes[neighbor_id].connections.push(Vec::new());
+                if let Some(n) = self.nodes.get_mut(&neighbor_id) {
+                    while n.connections.len() <= level {
+                        n.connections.push(Vec::new());
+                    }
+                    n.connections[level] = dists.into_iter().map(|(_, nid)| nid).collect();
                 }
-                self.nodes[neighbor_id].connections[level] = dists.into_iter().map(|(_, id)| id).collect();
             }
 
             current_entry = ep;
@@ -416,11 +436,11 @@ impl HnswIndex {
         // Update entry point if the new node has a higher level
         if new_level > self.max_level {
             self.max_level = new_level;
-            self.entry_point = Some(new_id);
+            self.entry_point = Some(id);
         }
 
         // Add the new node
-        self.nodes.push(HnswNode { vector, connections });
+        self.nodes.insert(id, HnswNode { vector, connections });
     }
 
     /// Search for the `k` approximate nearest neighbours to `query`.
@@ -446,19 +466,19 @@ impl HnswIndex {
 
     /// Get a reference to a specific node's vector.
     pub fn get_vector(&self, id: usize) -> Option<&[f64]> {
-        self.nodes.get(id).map(|n| n.vector.as_slice())
+        self.nodes.get(&id).map(|n| n.vector.as_slice())
     }
 
     /// Get the degree (number of connections at level 0) for a node.
     pub fn degree(&self, id: usize) -> Option<usize> {
-        self.nodes.get(id).and_then(|n| n.connections.first().map(|c| c.len()))
+        self.nodes.get(&id).and_then(|n| n.connections.first().map(|c| c.len()))
     }
 
     /// Collect index statistics.
     pub fn stats(&self) -> HnswStats {
         let total_connections: usize = self
             .nodes
-            .iter()
+            .values()
             .map(|n| n.connections.iter().map(|c| c.len()).sum::<usize>())
             .sum();
         HnswStats {
@@ -557,6 +577,28 @@ mod tests {
         for i in 0..5 {
             assert_eq!(results[i].1, i, "Result {} should be node {}", i, i);
         }
+    }
+
+    #[test]
+    fn test_insert_honors_sparse_ids() {
+        // P51.17: the caller-supplied id is preserved as the node id returned
+        // by `search`. During vector-index populate, rows with a NULL / non-list
+        // vector column are skipped, so node ids must not be compacted to
+        // positional indices — otherwise a search result would address the
+        // wrong table row.
+        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        idx.insert(vec![0.0, 0.0], 0);
+        idx.insert(vec![10.0, 10.0], 2); // row 1 skipped (NULL vector)
+        idx.insert(vec![100.0, 100.0], 3);
+
+        assert_eq!(idx.len(), 3);
+        // get_vector addresses by caller id, not by position.
+        assert!(idx.get_vector(0).is_some());
+        assert!(idx.get_vector(1).is_none());
+        assert!(idx.get_vector(2).is_some());
+
+        let results = idx.search(&[10.0, 10.0], 3);
+        assert_eq!(results[0].1, 2, "nearest to row 2 must be reported as id 2, not positionally");
     }
 
     #[test]
