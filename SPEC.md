@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,647 total, 5 ignored, 1,642 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, batch P51.28–P51.36; baseline sebelumnya 1,638 @ `d5b13c1`) |
+| Tests passing | **1,647 total, 5 ignored, 1,642 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P51.47 perf: plan-cache Arc + connection processor handlers; sebelumnya 1,647 @ `f901425`) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,647** | **1,647 total, 5 ignored, 1,642 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, batch P51.28–P51.36; baseline sebelumnya 1,638 @ `d5b13c1`) |
+| **Total** | **1,647** | **1,647 total, 5 ignored, 1,642 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P51.47 perf: plan-cache Arc + connection processor handlers; sebelumnya 1,647 @ `f901425`) |
 
 ### 11.2 Test Datasets
 
