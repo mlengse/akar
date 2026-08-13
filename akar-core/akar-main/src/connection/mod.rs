@@ -81,6 +81,12 @@ pub struct Connection {
     /// catalog directly, so they cannot be rolled back — they are rejected
     /// while this flag is set instead of falsely reporting success (P52.28).
     pub(crate) explicit_txn_active: std::sync::atomic::AtomicBool,
+    /// Lazily-built processor handler callbacks (sequence, schema DDL, query,
+    /// subquery, standalone-call registry), shared across every query on this
+    /// connection. Cached here rather than on `Database` so the handlers'
+    /// strong `Arc<Database>` captures do not create a reference cycle that
+    /// would keep the database (and its file lock) alive forever (P51.47).
+    processor_handlers: std::sync::OnceLock<Arc<crate::connection::query::ProcessorHandlers>>,
 }
 
 impl Connection {
@@ -96,6 +102,7 @@ impl Connection {
             plan_cache: Mutex::new(PlanCache::new(PLAN_CACHE_CAPACITY)),
             txn_resources: Mutex::new(HashMap::new()),
             explicit_txn_active: std::sync::atomic::AtomicBool::new(false),
+            processor_handlers: std::sync::OnceLock::new(),
         }
     }
 

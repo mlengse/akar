@@ -1,5 +1,6 @@
 use super::Connection;
 use super::plan_cache::{CachedPlan, normalize_query};
+use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
 use akar_binder::Binder;
@@ -11,6 +12,7 @@ use akar_parser::parse;
 use akar_planner::QueryPlanner;
 use akar_planner::logical_operator::LogicalOperator;
 use akar_processor::QueryProcessor;
+use akar_processor::processor::{SchemaDdlFn, SchemaDdlOp, SequenceFn, StandaloneCallHandler, SubqueryFn};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -72,6 +74,8 @@ impl Connection {
         {
             let mut cache = self.plan_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             if let Some(cached) = cache.get(&normalized).filter(|c| c.catalog_version == catalog_version) {
+                // Cheap Arc bumps — no deep clone of the bound statement or the
+                // operator tree (P51.47).
                 let bound = cached.bound.clone();
                 let plan = cached.plan.clone();
                 drop(cache);
@@ -90,14 +94,14 @@ impl Connection {
         // 3. Build (and cache) the optimized plan for plan-cachable statements.
         //    DDL and other non-query statements are routed inside
         //    execute_query_inner and never cached.
-        let plan_opt: Option<Vec<LogicalOperator>> = if is_plan_cachable(&bound) {
-            let plan = self.build_optimized_plan(&bound)?;
+        let plan_opt: Option<Arc<Vec<LogicalOperator>>> = if is_plan_cachable(&bound) {
+            let plan = Arc::new(self.build_optimized_plan(&bound)?);
             let mut cache = self.plan_cache.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             cache.insert(
                 normalized,
                 CachedPlan {
-                    bound: bound.clone(),
-                    plan: plan.clone(),
+                    bound: Arc::new(bound.clone()),
+                    plan: Arc::clone(&plan),
                     catalog_version,
                 },
             );
@@ -115,7 +119,7 @@ impl Connection {
     fn execute_with_plan(
         &self,
         bound: &BoundStatement,
-        plan: Option<&Vec<LogicalOperator>>,
+        plan: Option<&Arc<Vec<LogicalOperator>>>,
     ) -> Result<QueryResult, String> {
         // Read-only databases reject any write statement (DDL or DML).
         if self.database.config.read_only && Connection::is_write_statement(bound) {
@@ -184,7 +188,7 @@ impl Connection {
         &self,
         bound: &BoundStatement,
         mut txn_opt: Option<&mut akar_transaction::Transaction>,
-        cached_plan: Option<&Vec<LogicalOperator>>,
+        cached_plan: Option<&Arc<Vec<LogicalOperator>>>,
     ) -> Result<QueryResult, String> {
         // Route: DDL vs DML (handle_ddl returns Some for DDL, None for DML)
         if let Some(result) = self.handle_ddl(bound, txn_opt.as_deref_mut())? {
@@ -207,10 +211,12 @@ impl Connection {
             }
         }
 
-        // Plan (from cache when available, otherwise build now)
-        let optimized_plan: Vec<LogicalOperator> = match cached_plan {
+        // Plan (from cache when available, otherwise build now). Cached plans
+        // are shared Arcs — executing through the Arc avoids a second deep
+        // clone of the operator tree (P51.47).
+        let optimized_plan: Arc<Vec<LogicalOperator>> = match cached_plan {
             Some(plan) => plan.clone(),
-            None => self.build_optimized_plan(bound)?,
+            None => Arc::new(self.build_optimized_plan(bound)?),
         };
 
         if optimized_plan.is_empty() {
@@ -422,211 +428,6 @@ impl Connection {
         Ok(QueryResult::new(chunks))
     }
 
-    /// Create a QueryProcessor configured with the sequence callback.
-    pub(crate) fn create_processor(&self) -> QueryProcessor {
-        let seq_fn = super::utils::make_sequence_callback(self.database.catalog.clone());
-
-        let db = self.database.clone();
-
-        // schema_ddl_fn: created before query_fn/subquery_fn so they can capture it
-        let db_sddl = db.clone();
-        let schema_ddl_fn: akar_processor::processor::SchemaDdlFn = Arc::new(
-            move |op: akar_processor::processor::SchemaDdlOp| -> Result<String, ProcessorError> {
-                match op {
-                    akar_processor::processor::SchemaDdlOp::CreateSequence {
-                        name,
-                        if_not_exists,
-                        start_value,
-                        increment,
-                        min_value,
-                        max_value,
-                        cycle,
-                    } => {
-                        let mut catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
-                        match catalog.create_sequence(name.clone(), start_value, increment, min_value, max_value, cycle)
-                        {
-                            akar_catalog::CatalogResult::Created { .. } => Ok(format!("Sequence '{}' created", name)),
-                            akar_catalog::CatalogResult::AlreadyExists => {
-                                if if_not_exists {
-                                    Ok(format!("Sequence '{}' already exists", name))
-                                } else {
-                                    Err(ProcessorError::Execution(format!("Sequence '{}' already exists", name)))
-                                }
-                            }
-                            other => Err(ProcessorError::Execution(format!(
-                                "Failed to create sequence: {:?}",
-                                other
-                            ))),
-                        }
-                    }
-                    akar_processor::processor::SchemaDdlOp::DropSequence { name, if_exists } => {
-                        let mut catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
-                        match catalog.drop_sequence(&name) {
-                            akar_catalog::CatalogResult::Dropped { .. } => Ok(format!("Sequence '{}' dropped", name)),
-                            akar_catalog::CatalogResult::NotFound => {
-                                if if_exists {
-                                    Ok(format!("Sequence '{}' not found", name))
-                                } else {
-                                    Err(ProcessorError::Execution(format!("Sequence '{}' not found", name)))
-                                }
-                            }
-                            other => Err(ProcessorError::Execution(format!(
-                                "Failed to drop sequence: {:?}",
-                                other
-                            ))),
-                        }
-                    }
-                    akar_processor::processor::SchemaDdlOp::ExportDatabase {
-                        file_path,
-                        file_type,
-                        schema_only,
-                    } => {
-                        use std::fs;
-                        use std::path::Path;
-                        let dir = Path::new(&file_path);
-                        fs::create_dir_all(dir)
-                            .map_err(|err| format!("Cannot create export directory '{}': {err}", file_path))?;
-                        let catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
-                        // Shared schema/copy generators (single source of truth,
-                        // P52.13/P52.26: valid rel-table FROM/TO + single-col PK).
-                        let schema = super::copy::generate_schema_cypher(&catalog);
-                        fs::write(dir.join("schema.cypher"), &schema)
-                            .map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
-                        if !schema_only {
-                            let copy = super::copy::generate_copy_cypher(&catalog, &file_type);
-                            fs::write(dir.join("copy.cypher"), &copy)
-                                .map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
-                        }
-                        Ok(format!("Database exported to '{}'", file_path))
-                    }
-                    akar_processor::processor::SchemaDdlOp::ImportDatabase {
-                        file_path,
-                        query,
-                        index_query,
-                    } => {
-                        // Execute the import through a fresh connection so every
-                        // statement runs the full pipeline (P52.12: statements are
-                        // split on `;` — the exporter writes multi-line DDL).
-                        let conn = super::Connection::new(&db_sddl);
-                        let mut executed = 0usize;
-                        let mut skipped = 0usize;
-                        for stmt in super::copy::split_cypher_statements(&query)
-                            .into_iter()
-                            .chain(super::copy::split_cypher_statements(&index_query))
-                        {
-                            match conn.query(&stmt) {
-                                Ok(_) => executed += 1,
-                                Err(e) => {
-                                    tracing::warn!("Import statement skipped (may be duplicate): {e}");
-                                    skipped += 1;
-                                }
-                            }
-                        }
-                        Ok(format!(
-                            "Imported {executed} statement(s) from '{file_path}' ({skipped} skipped)"
-                        ))
-                    }
-                }
-            },
-        );
-
-        // query_fn: execute arbitrary Cypher string → QueryResult (for export_csv / export_parquet CALL)
-        let db_qf = db.clone();
-        let query_fn: crate::connection::standalone_call::QueryFn = Arc::new({
-            let schema_ddl_qf = schema_ddl_fn.clone();
-            move |query_str: &str| -> Result<crate::query_result::QueryResult, String> {
-                let stmt = akar_parser::parse(query_str).map_err(|e| format!("Parse error: {e}"))?;
-                let binder = Binder::new(db_qf.catalog.clone());
-                let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
-                let planner = QueryPlanner::new();
-                let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
-                let optimizer = Optimizer::with_stats(db_qf.stats_store.clone());
-                let optimized_plan = optimizer.optimize(logical_plan);
-
-                let processor = QueryProcessor::with_catalog(
-                    db_qf.function_registry.clone(),
-                    db_qf.table_catalog(),
-                    db_qf.vfs.clone(),
-                )
-                .with_schema_ddl_fn(schema_ddl_qf.clone())
-                .with_standalone_call_handler(Arc::new(
-                    crate::connection::standalone_call::DbStandaloneCallHandler::new(db_qf.clone()),
-                ))
-                .with_snapshot(
-                    Some(db_qf.transaction_manager.current_commit_ts()),
-                    db_qf.transaction_manager.commit_history_snapshot(),
-                );
-
-                let chunks = processor
-                    .execute(&optimized_plan)
-                    .map_err(|e| format!("Execute error: {e}"))?;
-
-                let num_rows: usize = chunks.iter().map(|c| c.size).sum();
-                let num_columns = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
-                Ok(crate::query_result::QueryResult {
-                    chunks,
-                    num_rows,
-                    num_columns,
-                    success: true,
-                    error_message: None,
-                    message: None,
-                    summary: None,
-                })
-            }
-        });
-
-        let subquery_fn: Arc<
-            dyn Fn(&akar_parser::ast::Query) -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError>
-                + Send
-                + Sync,
-        > = Arc::new({
-            let schema_ddl_sq = schema_ddl_fn.clone();
-            move |query: &akar_parser::ast::Query| -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> {
-                let stmt = akar_parser::ast::Statement::Query(query.clone());
-                let binder = Binder::new(db.catalog.clone());
-                let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
-                let planner = QueryPlanner::new();
-                let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
-                let optimizer = Optimizer::with_stats(db.stats_store.clone());
-                let optimized_plan = optimizer.optimize(logical_plan);
-
-                let catalog_inner = db.catalog.clone();
-                let seq_fn_inner = super::utils::make_sequence_callback(catalog_inner);
-
-                let processor =
-                    QueryProcessor::with_catalog(db.function_registry.clone(), db.table_catalog(), db.vfs.clone())
-                        .with_sequence_fn(seq_fn_inner)
-                        .with_schema_ddl_fn(schema_ddl_sq.clone())
-                        .with_standalone_call_handler(Arc::new(
-                            crate::connection::standalone_call::DbStandaloneCallHandler::new(db.clone()),
-                        ))
-                        .with_snapshot(
-                            Some(db.transaction_manager.current_commit_ts()),
-                            db.transaction_manager.commit_history_snapshot(),
-                        );
-
-                processor
-                    .execute(&optimized_plan)
-                    .map_err(|e| ProcessorError::Execution(format!("Execute error: {e}")))
-            }
-        });
-
-        QueryProcessor::with_catalog(
-            self.database.function_registry.clone(),
-            self.database.table_catalog(),
-            self.database.vfs.clone(),
-        )
-        .with_sequence_fn(seq_fn)
-        .with_subquery_fn(subquery_fn)
-        .with_schema_ddl_fn(schema_ddl_fn)
-        .with_standalone_call_handler(Arc::new(
-            crate::connection::standalone_call::DbStandaloneCallHandler::with_query_executor(
-                self.database.clone(),
-                Some(query_fn),
-            ),
-        ))
-    }
-
     /// The checkpoint_threshold config controls this:
     /// - -1 (default): signal checkpoint after every write (every DML/DDL).
     /// - 0: never auto-checkpoint (manual only via `CHECKPOINT`).
@@ -662,6 +463,232 @@ impl Connection {
             .map_err(|e| format!("Checkpoint failed: {e}"))?;
         tracing::debug!("Sync checkpoint completed");
         Ok(())
+    }
+
+    /// Create a QueryProcessor configured with the shared handler callbacks.
+    ///
+    /// The callbacks (sequence, schema DDL, query, subquery, standalone-call
+    /// registry) only depend on the `Database`, so they are built once and
+    /// reused across every query — this avoids re-allocating ~30 handler Arc
+    /// closures plus the standalone-call registry per execution (P51.47).
+    pub(crate) fn create_processor(&self) -> QueryProcessor {
+        let handlers = self
+            .processor_handlers
+            .get_or_init(|| Arc::new(build_processor_handlers(&self.database)));
+
+        QueryProcessor::with_catalog(
+            self.database.function_registry.clone(),
+            self.database.table_catalog(),
+            self.database.vfs.clone(),
+        )
+        .with_sequence_fn(handlers.sequence_fn.clone())
+        .with_subquery_fn(handlers.subquery_fn.clone())
+        .with_schema_ddl_fn(handlers.schema_ddl_fn.clone())
+        .with_standalone_call_handler(handlers.standalone_call_handler.clone())
+    }
+}
+
+/// Immutable per-database processor callbacks, shared by every query through
+/// an `Arc` stored on the [`Database`]. Building them once instead of on every
+/// query removes the per-query allocation of the closure tree and the
+/// standalone-call registry (P51.47).
+pub(crate) struct ProcessorHandlers {
+    pub sequence_fn: SequenceFn,
+    pub schema_ddl_fn: SchemaDdlFn,
+    pub subquery_fn: SubqueryFn,
+    pub standalone_call_handler: Arc<dyn StandaloneCallHandler>,
+}
+
+/// Build the shared processor handlers for a database.
+fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
+    let seq_fn = super::utils::make_sequence_callback(db.catalog.clone());
+
+    // schema_ddl_fn: created before query_fn/subquery_fn so they can capture it
+    let db_sddl = db.clone();
+    let schema_ddl_fn: SchemaDdlFn = Arc::new(move |op: SchemaDdlOp| -> Result<String, ProcessorError> {
+        match op {
+            SchemaDdlOp::CreateSequence {
+                name,
+                if_not_exists,
+                start_value,
+                increment,
+                min_value,
+                max_value,
+                cycle,
+            } => {
+                let mut catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
+                match catalog.create_sequence(name.clone(), start_value, increment, min_value, max_value, cycle) {
+                    akar_catalog::CatalogResult::Created { .. } => Ok(format!("Sequence '{}' created", name)),
+                    akar_catalog::CatalogResult::AlreadyExists => {
+                        if if_not_exists {
+                            Ok(format!("Sequence '{}' already exists", name))
+                        } else {
+                            Err(ProcessorError::Execution(format!("Sequence '{}' already exists", name)))
+                        }
+                    }
+                    other => Err(ProcessorError::Execution(format!(
+                        "Failed to create sequence: {:?}",
+                        other
+                    ))),
+                }
+            }
+            SchemaDdlOp::DropSequence { name, if_exists } => {
+                let mut catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
+                match catalog.drop_sequence(&name) {
+                    akar_catalog::CatalogResult::Dropped { .. } => Ok(format!("Sequence '{}' dropped", name)),
+                    akar_catalog::CatalogResult::NotFound => {
+                        if if_exists {
+                            Ok(format!("Sequence '{}' not found", name))
+                        } else {
+                            Err(ProcessorError::Execution(format!("Sequence '{}' not found", name)))
+                        }
+                    }
+                    other => Err(ProcessorError::Execution(format!(
+                        "Failed to drop sequence: {:?}",
+                        other
+                    ))),
+                }
+            }
+            SchemaDdlOp::ExportDatabase {
+                file_path,
+                file_type,
+                schema_only,
+            } => {
+                use std::fs;
+                use std::path::Path;
+                let dir = Path::new(&file_path);
+                fs::create_dir_all(dir)
+                    .map_err(|err| format!("Cannot create export directory '{}': {err}", file_path))?;
+                let catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
+                // Shared schema/copy generators (single source of truth,
+                // P52.13/P52.26: valid rel-table FROM/TO + single-col PK).
+                let schema = super::copy::generate_schema_cypher(&catalog);
+                fs::write(dir.join("schema.cypher"), &schema)
+                    .map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
+                if !schema_only {
+                    let copy = super::copy::generate_copy_cypher(&catalog, &file_type);
+                    fs::write(dir.join("copy.cypher"), &copy)
+                        .map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
+                }
+                Ok(format!("Database exported to '{}'", file_path))
+            }
+            SchemaDdlOp::ImportDatabase {
+                file_path,
+                query,
+                index_query,
+            } => {
+                // Execute the import through a fresh connection so every
+                // statement runs the full pipeline (P52.12: statements are
+                // split on `;` — the exporter writes multi-line DDL).
+                let conn = super::Connection::new(&db_sddl);
+                let mut executed = 0usize;
+                let mut skipped = 0usize;
+                for stmt in super::copy::split_cypher_statements(&query)
+                    .into_iter()
+                    .chain(super::copy::split_cypher_statements(&index_query))
+                {
+                    match conn.query(&stmt) {
+                        Ok(_) => executed += 1,
+                        Err(e) => {
+                            tracing::warn!("Import statement skipped (may be duplicate): {e}");
+                            skipped += 1;
+                        }
+                    }
+                }
+                Ok(format!(
+                    "Imported {executed} statement(s) from '{file_path}' ({skipped} skipped)"
+                ))
+            }
+        }
+    });
+
+    // query_fn: execute arbitrary Cypher string → QueryResult (for export_csv / export_parquet CALL)
+    let db_qf = db.clone();
+    let query_fn: crate::connection::standalone_call::QueryFn = Arc::new({
+        let schema_ddl_qf = schema_ddl_fn.clone();
+        move |query_str: &str| -> Result<crate::query_result::QueryResult, String> {
+            let stmt = akar_parser::parse(query_str).map_err(|e| format!("Parse error: {e}"))?;
+            let binder = Binder::new(db_qf.catalog.clone());
+            let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
+            let planner = QueryPlanner::new();
+            let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
+            let optimizer = Optimizer::with_stats(db_qf.stats_store.clone());
+            let optimized_plan = optimizer.optimize(logical_plan);
+
+            let processor = QueryProcessor::with_catalog(
+                db_qf.function_registry.clone(),
+                db_qf.table_catalog(),
+                db_qf.vfs.clone(),
+            )
+            .with_schema_ddl_fn(schema_ddl_qf.clone())
+            .with_standalone_call_handler(Arc::new(
+                crate::connection::standalone_call::DbStandaloneCallHandler::new(db_qf.clone()),
+            ))
+            .with_snapshot(
+                Some(db_qf.transaction_manager.current_commit_ts()),
+                db_qf.transaction_manager.commit_history_snapshot(),
+            );
+
+            let chunks = processor
+                .execute(&optimized_plan)
+                .map_err(|e| format!("Execute error: {e}"))?;
+
+            let num_rows: usize = chunks.iter().map(|c| c.size).sum();
+            let num_columns = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+            Ok(crate::query_result::QueryResult {
+                chunks,
+                num_rows,
+                num_columns,
+                success: true,
+                error_message: None,
+                message: None,
+                summary: None,
+            })
+        }
+    });
+
+    let db_sq = db.clone();
+    let subquery_fn: SubqueryFn = Arc::new({
+        let schema_ddl_sq = schema_ddl_fn.clone();
+        move |query: &akar_parser::ast::Query| -> Result<Vec<akar_common::vector::DataChunk>, ProcessorError> {
+            let stmt = akar_parser::ast::Statement::Query(query.clone());
+            let binder = Binder::new(db_sq.catalog.clone());
+            let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
+            let planner = QueryPlanner::new();
+            let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
+            let optimizer = Optimizer::with_stats(db_sq.stats_store.clone());
+            let optimized_plan = optimizer.optimize(logical_plan);
+
+            let catalog_inner = db_sq.catalog.clone();
+            let seq_fn_inner = super::utils::make_sequence_callback(catalog_inner);
+
+            let processor =
+                QueryProcessor::with_catalog(db_sq.function_registry.clone(), db_sq.table_catalog(), db_sq.vfs.clone())
+                    .with_sequence_fn(seq_fn_inner)
+                    .with_schema_ddl_fn(schema_ddl_sq.clone())
+                    .with_standalone_call_handler(Arc::new(
+                        crate::connection::standalone_call::DbStandaloneCallHandler::new(db_sq.clone()),
+                    ))
+                    .with_snapshot(
+                        Some(db_sq.transaction_manager.current_commit_ts()),
+                        db_sq.transaction_manager.commit_history_snapshot(),
+                    );
+
+            processor
+                .execute(&optimized_plan)
+                .map_err(|e| ProcessorError::Execution(format!("Execute error: {e}")))
+        }
+    });
+
+    let standalone_call_handler: Arc<dyn StandaloneCallHandler> = Arc::new(
+        crate::connection::standalone_call::DbStandaloneCallHandler::with_query_executor(db.clone(), Some(query_fn.clone())),
+    );
+
+    ProcessorHandlers {
+        sequence_fn: seq_fn,
+        schema_ddl_fn,
+        subquery_fn,
+        standalone_call_handler,
     }
 }
 

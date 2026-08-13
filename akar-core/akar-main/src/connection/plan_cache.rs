@@ -11,12 +11,17 @@
 use akar_binder::bound_statement::BoundStatement;
 use akar_planner::logical_operator::LogicalOperator;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 /// A cached entry: the bound statement plus the optimized logical plan, both
 /// tied to the catalog version they were built against.
+///
+/// The plan and bound statement are stored behind `Arc` so a cache hit only
+/// bumps a reference count instead of deep-cloning the full operator tree on
+/// every query (P51.47).
 pub(crate) struct CachedPlan {
-    pub bound: BoundStatement,
-    pub plan: Vec<LogicalOperator>,
+    pub bound: Arc<BoundStatement>,
+    pub plan: Arc<Vec<LogicalOperator>>,
     pub catalog_version: u64,
 }
 
