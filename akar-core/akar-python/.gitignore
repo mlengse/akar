@@ -5,3 +5,5 @@ target/
 *.pyi
 __pycache__/
 .venv/
+.pytest_cache/
+*.gap_report.json
