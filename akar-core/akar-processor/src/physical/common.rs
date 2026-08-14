@@ -1,7 +1,39 @@
 //! Common utility functions used across physical operators.
 
 use akar_common::types::{PhysicalTypeID, Value};
-use akar_common::vector::ValueVector;
+use akar_common::vector::{DataChunk, ValueVector};
+
+/// Materialize a set of global row indices (which may span multiple input
+/// chunks) into a new `DataChunk` via Arrow's `take`.
+///
+/// Unlike the legacy `ValueVector` round-trip, this preserves complex types
+/// (List/Struct/Array), which `store_value_in_vector` would drop to NULL.
+pub(crate) fn take_global_rows(
+    chunks: &[DataChunk],
+    global_indices: &[usize],
+    field_names: Vec<String>,
+) -> Result<DataChunk, String> {
+    let num_fields = chunks.first().map(|c| c.num_fields()).unwrap_or(0);
+    if num_fields == 0 {
+        return Ok(DataChunk::new(Vec::new(), Vec::new()).with_names(field_names));
+    }
+    let indices_arr =
+        arrow::array::UInt32Array::from_iter_values(global_indices.iter().map(|&i| i as u32));
+    let mut fields = Vec::with_capacity(num_fields);
+    for col in 0..num_fields {
+        let field = if chunks.len() == 1 {
+            chunks[0].fields[col].clone()
+        } else {
+            let parts: Vec<arrow::array::ArrayRef> = chunks.iter().map(|c| c.fields[col].clone()).collect();
+            let refs: Vec<&dyn arrow::array::Array> = parts.iter().map(|p| p.as_ref()).collect();
+            arrow::compute::concat(&refs).map_err(|e| e.to_string())?
+        };
+        fields.push(
+            arrow::compute::take(field.as_ref(), &indices_arr, None).map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(DataChunk::new(fields, chunks[0].field_types.clone()).with_names(field_names))
+}
 
 #[inline]
 pub(crate) fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result<(), String> {

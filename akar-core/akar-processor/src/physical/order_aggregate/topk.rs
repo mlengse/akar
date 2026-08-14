@@ -1,8 +1,8 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::common::{store_value_in_vector, value_cmp};
+use crate::physical::common::{take_global_rows, value_cmp};
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::Value;
-use akar_common::vector::{DataChunk, ValueVector};
+use akar_common::vector::DataChunk;
 use std::collections::BinaryHeap;
 
 // ==================== TopK ====================
@@ -150,35 +150,18 @@ impl PhysicalOperatorExec for PhysicalTopK {
         // Capture field_names from input chunks for output propagation
         let field_names = input[0].field_names.clone();
 
-        // Build output chunks (up to 100 rows each)
+        // Build output chunks (up to 100 rows each). Slice the source fields
+        // via Arrow `take`, preserving complex types (List/Struct).
+        let global_indices: Vec<usize> = entries.iter().map(|e| e.row_idx).collect();
         let chunk_size = 100usize;
         let mut output = Vec::new();
-        for chunk_start in (0..entries.len()).step_by(chunk_size) {
-            let chunk_end = (chunk_start + chunk_size).min(entries.len());
-            let size = chunk_end - chunk_start;
-            let mut fields = Vec::new();
-            for col in 0..num_fields {
-                let first_row = entries[chunk_start].row_idx;
-                let first_val = &all_values[col][first_row].0;
-                let phys_type = first_val.physical_type();
-                let mut v = ValueVector::new(phys_type, size);
-                v.resize(size);
-                for (out_idx, entry) in entries[chunk_start..chunk_end].iter().enumerate() {
-                    let (ref val, is_null) = all_values[col][entry.row_idx];
-                    if is_null || matches!(val, Value::Null) {
-                        v.set_null(out_idx, true);
-                    } else {
-                        store_value_in_vector(&mut v, out_idx, val)?;
-                    }
-                }
-                fields.push(v);
-            }
-            let arrow_fields = fields
-                .iter()
-                .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-                .collect::<Vec<_>>();
-            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
-            output.push(DataChunk::new(arrow_fields, arrow_field_types).with_names(field_names.clone()));
+        for chunk_start in (0..global_indices.len()).step_by(chunk_size) {
+            let chunk_end = (chunk_start + chunk_size).min(global_indices.len());
+            output.push(take_global_rows(
+                &input,
+                &global_indices[chunk_start..chunk_end],
+                field_names.clone(),
+            )?);
         }
 
         Ok(output)

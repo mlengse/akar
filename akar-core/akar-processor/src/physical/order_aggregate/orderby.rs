@@ -1,9 +1,9 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::common::{store_value_in_vector, value_cmp};
+use crate::physical::common::{take_global_rows, value_cmp};
 use crate::physical::order_aggregate::BlockMergeSorter;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::Value;
-use akar_common::vector::{DataChunk, ValueVector};
+use akar_common::vector::DataChunk;
 
 // ==================== ChunkAccessor ====================
 
@@ -56,14 +56,6 @@ impl<'a> ChunkAccessor<'a> {
     fn is_null(&self, col: usize, global_row: usize) -> bool {
         let (ci, local) = self.resolve(global_row);
         self.chunks[ci].is_null(col, local)
-    }
-
-    fn physical_type(&self, col: usize, global_row: usize) -> akar_common::types::PhysicalTypeID {
-        let (ci, local) = self.resolve(global_row);
-        self.chunks[ci]
-            .get_value(col, local)
-            .map(|v| v.physical_type())
-            .unwrap_or(akar_common::types::PhysicalTypeID::Int64)
     }
 }
 
@@ -129,33 +121,17 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
             indices
         };
 
-        // Build sorted output chunks (up to 100 rows per chunk)
+        // Build sorted output chunks (up to 100 rows per chunk). Slice the
+        // source fields via Arrow `take`, preserving complex types (List/Struct).
         let chunk_size = 100usize;
         let mut output = Vec::new();
         for chunk_start in (0..total_rows).step_by(chunk_size) {
             let chunk_end = (chunk_start + chunk_size).min(total_rows);
-            let size = chunk_end - chunk_start;
-            let mut fields = Vec::new();
-            for col in 0..num_fields {
-                let phys_type = accessor.physical_type(col, indices[chunk_start]);
-                let mut v = ValueVector::new(phys_type, size);
-                v.resize(size);
-                for (out_idx, &src_idx) in indices[chunk_start..chunk_end].iter().enumerate() {
-                    if accessor.is_null(col, src_idx) {
-                        v.set_null(out_idx, true);
-                    } else {
-                        let val = accessor.get_value(col, src_idx);
-                        store_value_in_vector(&mut v, out_idx, &val)?;
-                    }
-                }
-                fields.push(v);
-            }
-            let arrow_fields = fields
-                .iter()
-                .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-                .collect::<Vec<_>>();
-            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
-            output.push(DataChunk::new(arrow_fields, arrow_field_types).with_names(field_names.clone()));
+            output.push(take_global_rows(
+                &input,
+                &indices[chunk_start..chunk_end],
+                field_names.clone(),
+            )?);
         }
         Ok(output)
     }

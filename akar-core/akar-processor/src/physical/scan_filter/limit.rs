@@ -1,7 +1,7 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::common::store_value_in_vector;
+use crate::physical::common::take_global_rows;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use akar_common::vector::{DataChunk, ValueVector};
+use akar_common::vector::DataChunk;
 
 // ==================== Limit ====================
 
@@ -54,34 +54,11 @@ impl PhysicalOperatorExec for PhysicalLimit {
                 // Full chunk, no truncation needed
                 output.push(chunk);
             } else {
-                // Partial chunk: copy row-by-row using get_value/store_value_in_vector
-                // This correctly handles all Value types (including variable-length ones)
-                let mut new_fields = Vec::with_capacity(chunk.fields.len());
-                for (col, field) in chunk.fields.iter().enumerate() {
-                    let phys_type = chunk.field_types[col];
-                    let mut new_v = ValueVector::new(phys_type, take);
-                    new_v.resize(take);
-                    for i in 0..take {
-                        let src_row = start_in_chunk + i;
-                        if field.is_null(src_row) {
-                            new_v.set_null(i, true);
-                        } else if let Some(val) = chunk.get_value(col, src_row) {
-                            store_value_in_vector(&mut new_v, i, &val)?;
-                        }
-                    }
-                    new_fields.push(new_v);
-                }
-                output.push(
-                    {
-                        let arrow_fields = new_fields
-                            .iter()
-                            .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-                            .collect::<Vec<_>>();
-                        let arrow_field_types = new_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
-                        DataChunk::new(arrow_fields, arrow_field_types)
-                    }
-                    .with_names(chunk.field_names.clone()),
-                );
+                // Partial chunk: slice rows via Arrow `take`, which preserves
+                // complex types (List/Struct) that the legacy ValueVector
+                // round-trip would drop to NULL.
+                let indices: Vec<usize> = (start_in_chunk..start_in_chunk + take).collect();
+                output.push(take_global_rows(std::slice::from_ref(&chunk), &indices, chunk.field_names.clone())?);
             }
         }
         Ok(output)
