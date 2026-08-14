@@ -66,19 +66,18 @@ fn test_migration_ingestion() {
     drop(db);
     drop(conn);
 
-    // 2. Run Akar-migrate --skip-extract into the same directory (reusing existing schema + parquet)
-    let status = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "akar-migrate",
-            "--",
-            "--from",
-            mock_cpp_dir.path().to_str().unwrap().replace("\\", "/").as_str(),
-            "--to",
-            mock_cpp_dir.path().to_str().unwrap().replace("\\", "/").as_str(),
-            "--skip-extract",
-        ])
+    // 2. Run the akar-migrate CLI binary directly.
+    //
+    // Uses `CARGO_BIN_EXE_akar-migrate` (set by cargo when building this
+    // integration test) instead of a nested `cargo run -p akar-migrate`.
+    // A nested cargo invocation would trigger a separate (re)build and contend
+    // for the workspace build lock from inside the test; the env var points at
+    // the already-built binary, so no recompilation happens.
+    let binary = env!("CARGO_BIN_EXE_akar-migrate");
+    let from_path = mock_cpp_dir.path().to_str().unwrap().replace("\\", "/");
+    let to_path = mock_cpp_dir.path().to_str().unwrap().replace("\\", "/");
+    let status = Command::new(binary)
+        .args(["--from", &from_path, "--to", &to_path, "--skip-extract"])
         .status()
         .expect("Failed to execute akar-migrate");
 

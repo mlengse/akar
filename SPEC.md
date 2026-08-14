@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,653 total, 5 ignored, 1,648 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P53.12 complex-type query output; sebelumnya 1,649 @ `24e9610`) |
+| Tests passing | **1,648 total, 0 ignored, 1,648 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P53.12 complex-type output + hapus 5 doc-test `ignore`; sebelumnya 1,653 @ `46de39d`) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -507,8 +507,8 @@ Triggered by pushing a version tag (`v*`):
 | `akar-sqlite` / `akar-azure` / `akar-delta` / `akar-iceberg` / `akar-unity-catalog` | 5 | Integration extensions (1 each) |
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
-| Doc-tests | 8 (5 ignored) | Doc-tests across all crates |
-| **Total** | **1,653** | **1,653 total, 5 ignored, 1,648 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P53.12 complex-type query output; sebelumnya 1,649 @ `24e9610`) |
+| Doc-tests | 8 | Doc-tests across all crates |
+| **Total** | **1,648** | **1,648 total, 0 ignored, 1,648 passed, 0 failed** (gate `test [akar-core]` 2026-08-14, P53.12 complex-type output + hapus 5 doc-test `ignore`; sebelumnya 1,653 @ `46de39d`) |
 
 ### 11.2 Test Datasets
 

@@ -4,15 +4,6 @@
 //! iterator loads one NodeGroup at a time, yields its rows, then releases
 //! the group. This reduces peak memory for large tables scanned with
 //! filters or limits.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let scan = LazyColumnScan::new(&node_table, &[0, 1, 2], None, None);
-//! for row in scan {
-//!     // row is Vec<Value> with columns 0, 1, 2
-//! }
-//! ```
 
 use crate::table::NodeTable;
 use akar_common::types::Value;

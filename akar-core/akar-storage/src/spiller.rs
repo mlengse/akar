@@ -12,17 +12,6 @@
 //! This is a simple `Vec<Value>` → JSON-lines → disk approach. Each spill file
 //! contains one JSON object per row. This is intentionally not Arrow-CSR format
 //! — that can be a future optimization.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let spiller = Spiller::new("/tmp/akar_spill", 1024 * 1024);
-//! let mut chunk = ColumnChunk::new();
-//! // ... append values ...
-//! let spill_file = spiller.spill(&mut chunk)?;
-//! // ... later ...
-//! let restored = spiller.restore(&spill_file)?;
-//! ```
 
 use crate::column_chunk::ColumnChunk;
 use akar_common::error::StorageError;
@@ -342,15 +331,6 @@ impl MergeCursor {
 ///
 /// Reads N spill files + one optional in-memory buffer, merges them in
 /// sort-key order (ascending), and optionally deduplicates by primary key.
-///
-/// # Usage
-///
-/// ```ignore
-/// let merger = MultiWayStreamMerge::new(spill_files, None, 0)?;
-/// while let Some(row) = merger.next_tuple() {
-///     // Write row to Column via BufferManager
-/// }
-/// ```
 pub struct MultiWayStreamMerge {
     cursors: Vec<MergeCursor>,
     /// The in-memory buffer (last "run" to merge).

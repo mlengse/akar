@@ -24,21 +24,6 @@ use arrow::array::{
 pub const NODE_GROUP_SIZE: usize = 4096;
 
 /// An in-memory buffer that accumulates values before flushing to a `Column`.
-///
-/// # Example
-///
-/// ```ignore
-/// let mut chunk = ColumnChunk::new(LogicalTypeID::Int64);
-/// for i in 0..100 {
-///     chunk.append(Value::Int64(i));
-/// }
-/// assert!(chunk.num_values() == 100);
-/// assert!(!chunk.is_full());
-///
-/// // Flush into a Column:
-/// chunk.flush_to_column(&mut my_column).unwrap();
-/// assert!(chunk.is_empty());
-/// ```
 #[derive(Debug, Clone)]
 pub struct ColumnChunk {
     /// Buffered values in insertion order.

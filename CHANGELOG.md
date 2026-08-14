@@ -9,6 +9,10 @@
 
 - GDS table functions membaca graf katalog nyata — closure menerima `Option<&dyn GraphDataSource>` lewat `TableFunction::CustomTableWithGraph` + `CatalogGraphSource` (P52.46) — `0290a8c`.
 
+### Removed
+
+- **5 doc-test `ignore` blok** — snippet ilustratif yang tak bisa di-compile standalone dihapus dari doc comment (`akar-storage/column_chunk.rs`, `lazy_scanner.rs`, `spiller.rs` ×2, `akar-main/prepared_statement.rs`) agar tak tercatat sebagai "ignored" test yang membingungkan; tersisa 8 doc-test lulus (0 ignored). — gate **1,648 (1,648 passed)**.
+
 ### Changed
 
 - **P51.47 (perf)** — plan-cache hit kini berbagi `Arc<BoundStatement>`/`Arc<Vec<LogicalOperator>>` sehingga tak ada deep-clone operator tree per query; handler processor (sequence, schema-DDL, query, subquery, standalone-call registry) dibangun sekali per Connection dan di-share via `OnceLock` — `create_processor` tak lagi rebuild ~27 handler Arc tiap query. Handler dicache di `Connection` (bukan `Database`) agar `Arc<Database>` kuat di dalam handler tak membentuk reference cycle yang mengunci file lock selamanya. Validasi: `test_plan_cache_no_hit_regression` isolasi ratio hit/miss **0.914** (full-suite 0.950) — `340dbd0` — gate **1,647 (1,642 passed)**.

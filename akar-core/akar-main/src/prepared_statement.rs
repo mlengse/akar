@@ -1,12 +1,7 @@
 //! PreparedStatement — parameterized query support.
 //!
 //! Allows preparing a query once and executing it multiple times with
-//! different parameter values. The pipeline is:
-//!
-//! ```ignore
-//! let stmt = conn.prepare("MATCH (p:Person) WHERE p.age > $min_age RETURN p.name")?;
-//! let result = conn.execute(&stmt, vec![("min_age", Value::Int64(25))])?;
-//! ```
+//! different parameter values.
 
 use akar_binder::bound_statement::{BoundMatchClause, BoundStatement};
 use akar_common::types::Value;
