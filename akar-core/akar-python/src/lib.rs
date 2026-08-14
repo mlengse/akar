@@ -11,23 +11,33 @@
 //!   `rows_as_dict(True)`, `get_all()`, `close()`, truthiness `if r:`,
 //!   `len(r)`, iterasi.
 //!
-//! Status: **scaffold compile-ready**. Translation layer dialek Kuzu→Akar
-//! (grammar `FLOAT[n]`/`IF NOT EXISTS`/CALL vector index, multi-statement
-//! `INSTALL; LOAD`, `ALTER ... DEFAULT`) dan interpolasi parameter sisi-Python
-//! (workaround P51.31) menyusul — lihat `docs/audits/audit-python-bindings-kairos.md`.
+//! Translation layer dialek Kuzu→Akar (grammar `FLOAT[n]`/`IF NOT EXISTS`/
+//! CALL vector index, multi-statement `INSTALL; LOAD`, `ALTER ... DEFAULT`)
+//! dan interpolasi parameter sisi-Python (P53.x) — lihat `translation.rs`,
+//! `param_interp.rs`, dan `docs/audits/audit-python-bindings-kairos.md`.
+
+mod param_interp;
+mod translation;
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
 use pyo3::{BoundObject, IntoPyObject};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use akar_common::types::Value;
 
-/// `akar.Database` — membungkus `Arc<akar_main::Database>`.
+use translation::{Translated, Translator, ERR_NOT_FOUND};
+
+/// Kolom internal Akar yang tak boleh muncul sebagai properti node.
+const INTERNAL_COLS: &[&str] = &["_id", "_label", "_src", "_dst", "_rel_id"];
+
+/// `akar.Database` — membungkus `Arc<akar_main::Database>` + state translator.
 #[pyclass(module = "akar")]
 pub struct Database {
     db: Option<Arc<akar_main::Database>>,
+    translator: Arc<Mutex<Translator>>,
 }
 
 #[pymethods]
@@ -37,7 +47,10 @@ impl Database {
     fn new(path: &str) -> PyResult<Self> {
         let db = akar_main::Database::new(path, Default::default())
             .map_err(|e| PyValueError::new_err(format!("Cannot open Akar database at {path:?}: {e}")))?;
-        Ok(Self { db: Some(Arc::new(db)) })
+        Ok(Self {
+            db: Some(Arc::new(db)),
+            translator: Arc::new(Mutex::new(Translator::new())),
+        })
     }
 
     /// Tutup database (lepas file lock & resource).
@@ -54,6 +67,7 @@ impl Database {
 #[pyclass(module = "akar")]
 pub struct Connection {
     conn: akar_main::Connection,
+    translator: Arc<Mutex<Translator>>,
 }
 
 #[pymethods]
@@ -68,51 +82,232 @@ impl Connection {
             .clone();
         Ok(Self {
             conn: akar_main::Connection::new(&db),
+            translator: database.translator.clone(),
         })
     }
 
     /// `query(cypher: str)` — eksekusi tanpa parameter.
     fn query(&self, cypher: &str) -> PyResult<QueryResult> {
-        let result = self
-            .conn
-            .query(cypher)
-            .map_err(PyRuntimeError::new_err)?;
-        Ok(QueryResult::from_native(result))
+        self.run(cypher, None)
     }
 
     /// `execute(cypher: str, params: dict = None)` — eksekusi berparameter.
     ///
-    /// TODO(pasca-blocker): parameter `LIMIT $n`/ORDER BY/pola-properti tak
-    /// tersubstitusi oleh prepared-statement native (P51.31) → ganti ke
-    /// interpolasi sisi-Python + translation layer dialek Kuzu.
+    /// Parameter diinterpolasi menjadi literal Cypher (P53.7) karena native
+    /// prepared-statement tak dapat mensubstitusi `LIMIT $n`/`ORDER BY`/
+    /// pola-properti (P51.31).
     #[pyo3(signature = (cypher, params=None))]
     fn execute(&self, cypher: &str, params: Option<&Bound<'_, PyDict>>) -> PyResult<QueryResult> {
-        let params = params.filter(|d| !d.is_empty());
-        let result = match params {
-            None => self.conn.query(cypher),
-            Some(dict) => {
-                let stmt = self
-                    .conn
-                    .prepare(cypher)
-                    .map_err(PyRuntimeError::new_err)?;
-                let mut keys: Vec<String> = Vec::new();
-                let mut vals: Vec<Value> = Vec::new();
-                for (k, v) in dict.iter() {
-                    keys.push(k.extract::<String>()?);
-                    vals.push(py_to_value(&v)?);
-                }
-                let params: Vec<(&str, Value)> = keys.iter().map(|k| k.as_str()).zip(vals).collect();
-                self.conn.execute(&stmt, params)
+        let mut map: HashMap<String, Value> = HashMap::new();
+        if let Some(dict) = params {
+            for (k, v) in dict.iter() {
+                map.insert(k.extract()?, py_to_value(&v)?);
             }
-        };
-        let result = result.map_err(PyRuntimeError::new_err)?;
-        Ok(QueryResult::from_native(result))
+        }
+        self.run(cypher, if map.is_empty() { None } else { Some(map) })
     }
 
     fn close(&mut self) {}
 
     fn __repr__(&self) -> String {
         "<akar.Connection>".to_string()
+    }
+}
+
+impl Connection {
+    /// Terjemahkan tiap statement, lalu eksekusi berurutan. Mengembalikan
+    /// hasil statement terakhir yang memproduksi data.
+    fn run(&self, cypher: &str, params: Option<HashMap<String, Value>>) -> PyResult<QueryResult> {
+        let stmts = translation::split_statements(cypher);
+        if stmts.is_empty() {
+            return Ok(QueryResult::from_native(akar_main::QueryResult::success_message(
+                "(empty statement)".into(),
+            )));
+        }
+
+        // Fase 1: terjemahkan semuanya dulu agar registri (dims, index, kolom)
+        // terisi sebelum eksekusi (CREATE TABLE; CREATE VECTOR INDEX).
+        let mut actions = Vec::with_capacity(stmts.len());
+        {
+            let mut tr = self
+                .translator
+                .lock()
+                .map_err(|_| PyRuntimeError::new_err("translator lock poisoned"))?;
+            for stmt in &stmts {
+                actions.push(translation::translate(stmt, &mut tr).map_err(PyRuntimeError::new_err)?);
+            }
+        }
+
+        // Fase 2: eksekusi.
+        let mut last: Option<QueryResult> = None;
+        for action in actions {
+            if let Some(result) = self.execute_action(action, params.as_ref())? {
+                last = Some(result);
+            }
+        }
+        Ok(last.unwrap_or_else(|| QueryResult::from_native(akar_main::QueryResult::success_message("(ok)".into()))))
+    }
+
+    fn execute_action(
+        &self,
+        action: Translated,
+        params: Option<&HashMap<String, Value>>,
+    ) -> PyResult<Option<QueryResult>> {
+        match action {
+            Translated::NoOp => Ok(None),
+            Translated::Query(sql) => {
+                let sql = self.interpolate(sql, params)?;
+                let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                Ok(Some(QueryResult::from_native(result)))
+            }
+            Translated::Swallow(sql, needles) => {
+                let sql = self.interpolate(sql, params)?;
+                match self.conn.query(&sql) {
+                    Ok(result) => Ok(Some(QueryResult::from_native(result))),
+                    Err(err) if self.swallow(&err, needles) => Ok(None),
+                    Err(err) => Err(PyRuntimeError::new_err(err)),
+                }
+            }
+            Translated::CreateTableIfNotExists { table, sql } => {
+                if self.table_exists(&table)? {
+                    Ok(None)
+                } else {
+                    let sql = self.interpolate(sql, params)?;
+                    let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                    Ok(Some(QueryResult::from_native(result)))
+                }
+            }
+            Translated::DropTableIfExists { table, sql } => match self.conn.query(&sql) {
+                Ok(result) => {
+                    if let Ok(mut tr) = self.translator.lock() {
+                        tr.remove_table(&table);
+                    }
+                    Ok(Some(QueryResult::from_native(result)))
+                }
+                Err(err) if self.swallow(&err, ERR_NOT_FOUND) => Ok(None),
+                Err(err) => Err(PyRuntimeError::new_err(err)),
+            },
+            Translated::VectorQuery {
+                table,
+                index_name,
+                vec_expr,
+                limit_expr,
+                vec_col,
+                where_sql,
+            } => {
+                let sql = self.build_vector_query(
+                    &table,
+                    &index_name,
+                    &vec_expr,
+                    &limit_expr,
+                    &vec_col,
+                    where_sql.as_deref(),
+                )?;
+                let sql = self.interpolate(sql, params)?;
+                let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                Ok(Some(QueryResult::from_native(result)))
+            }
+        }
+    }
+
+    fn swallow(&self, err: &str, needles: &'static [&'static str]) -> bool {
+        let lower = err.to_lowercase();
+        needles.iter().any(|n| lower.contains(n))
+    }
+
+    fn interpolate(&self, sql: String, params: Option<&HashMap<String, Value>>) -> PyResult<String> {
+        match params {
+            Some(p) => param_interp::interpolate(&sql, p).map_err(PyRuntimeError::new_err),
+            None => Ok(sql),
+        }
+    }
+
+    /// `CALL show_tables()` → apakah tabel sudah ada (case-insensitive).
+    fn table_exists(&self, table: &str) -> PyResult<bool> {
+        let result = self.conn.query("CALL show_tables()").map_err(PyRuntimeError::new_err)?;
+        for chunk in &result.chunks {
+            for row in 0..chunk.size {
+                if let Some(Value::String(name)) = chunk.get_value(0, row) {
+                    if name.eq_ignore_ascii_case(table) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Nama kolom tabel untuk ekspansi `RETURN node` (P53.8). Sumber utama:
+    /// registri translator (DDL yang sudah ditranslasi); fallback `CALL
+    /// table_info('T')` untuk DB yang sudah ada dari sesi sebelumnya.
+    fn ensure_table_schema(&self, table: &str) -> PyResult<Vec<String>> {
+        if let Ok(tr) = self.translator.lock() {
+            if let Some(schema) = tr.table(table) {
+                let cols = schema.column_names();
+                if !cols.is_empty() {
+                    return Ok(cols);
+                }
+            }
+        }
+        let query = format!("CALL table_info('{}')", table.replace('\'', "\\'"));
+        let result = self.conn.query(&query).map_err(PyRuntimeError::new_err)?;
+        let mut cols = Vec::new();
+        for chunk in &result.chunks {
+            for row in 0..chunk.size {
+                if let Some(Value::String(name)) = chunk.get_value(1, row) {
+                    if !INTERNAL_COLS.contains(&name.as_str()) {
+                        cols.push(name);
+                    }
+                }
+            }
+        }
+        if cols.is_empty() {
+            return Err(PyRuntimeError::new_err(format!("Table '{table}' not found")));
+        }
+        Ok(cols)
+    }
+
+    /// Bangun brute-force `MATCH` yang meniru `CALL QUERY_VECTOR_INDEX(...)
+    /// RETURN node, distance` (read-path HNSW write-only, P52.5).
+    fn build_vector_query(
+        &self,
+        table: &str,
+        _index_name: &str,
+        vec_expr: &str,
+        limit_expr: &str,
+        vec_col: &str,
+        where_sql: Option<&str>,
+    ) -> PyResult<String> {
+        let cols = self.ensure_table_schema(table)?;
+        let props: Vec<String> = cols
+            .iter()
+            .map(|c| format!("{}: node.{}", qident(c), qident(c)))
+            .collect();
+        let mut q = format!("MATCH (node:{})", qident(table));
+        if let Some(w) = where_sql {
+            q.push(' ');
+            q.push_str(w);
+        }
+        q.push_str(&format!(
+            " RETURN {{{}}} AS node, array_cosine_similarity(node.{}, {vec_expr}) AS distance \
+             ORDER BY array_cosine_similarity(node.{}, {vec_expr}) DESC LIMIT {limit_expr}",
+            props.join(", "),
+            qident(vec_col),
+            qident(vec_col),
+        ));
+        Ok(q)
+    }
+}
+
+/// Backtick-quote identifier bila tak sesuai pola `[A-Za-z_][A-Za-z0-9_]*`.
+fn qident(s: &str) -> String {
+    let plain = !s.is_empty()
+        && (s.starts_with('_') || s.chars().next().is_some_and(|c| c.is_ascii_alphabetic()))
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if plain {
+        s.to_string()
+    } else {
+        format!("`{}`", s.replace('`', "``"))
     }
 }
 
@@ -202,11 +397,7 @@ impl QueryResult {
         let mut idx = 0usize;
         while idx < slf.result.chunks.len() {
             let chunk = &slf.result.chunks[idx];
-            let row_end = if idx == slf.chunk_idx {
-                slf.row_idx
-            } else {
-                0
-            };
+            let row_end = if idx == slf.chunk_idx { slf.row_idx } else { 0 };
             for row in row_end..chunk.size {
                 let mut values = Vec::with_capacity(chunk.fields.len());
                 for col in 0..chunk.fields.len() {
@@ -275,9 +466,9 @@ fn value_to_py(py: Python<'_>, v: Option<akar_common::types::Value>) -> PyResult
         akar_common::types::Value::Date(d) => PyInt::new(py, d.0 as i64).unbind().into_any(),
         akar_common::types::Value::Timestamp(t) => PyInt::new(py, t.0).unbind().into_any(),
         akar_common::types::Value::TimestampTz(t) => PyInt::new(py, t.0).unbind().into_any(),
-        akar_common::types::Value::TimestampNs(t) | akar_common::types::Value::TimestampMs(t) | akar_common::types::Value::TimestampSec(t) => {
-            PyInt::new(py, t.0).unbind().into_any()
-        }
+        akar_common::types::Value::TimestampNs(t)
+        | akar_common::types::Value::TimestampMs(t)
+        | akar_common::types::Value::TimestampSec(t) => PyInt::new(py, t.0).unbind().into_any(),
         akar_common::types::Value::Interval(_) => py.None(),
         akar_common::types::Value::InternalID(id) => {
             let tuple = (id.table_id, id.offset);
@@ -389,4 +580,104 @@ fn akar(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Connection>()?;
     m.add_class::<QueryResult>()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static DB_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn fresh_conn() -> (std::path::PathBuf, Connection) {
+        let n = DB_SEQ.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("akar_p53_1_{}_{}.db", std::process::id(), n));
+        let _ = std::fs::remove_dir_all(&path);
+        let db = Arc::new(akar_main::Database::new(path.to_str().unwrap(), Default::default()).expect("open temp db"));
+        let conn = Connection {
+            conn: akar_main::Connection::new(&db),
+            translator: Arc::new(Mutex::new(Translator::new())),
+        };
+        (path, conn)
+    }
+
+    /// Bootstrap `_ensure_schema()` persis dari `kairos/kuzudb_store.py:267-290`.
+    const KAIROS_BOOTSTRAP: &str = "
+INSTALL vector;
+LOAD EXTENSION vector;
+CREATE NODE TABLE IF NOT EXISTS Memory (
+    id INT64, label STRING, content STRING,
+    embedding FLOAT[384], salience DOUBLE, content_hash STRING,
+    session_id STRING, prof STRING, scope STRING,
+    colbert_tokens STRING,
+    dae_embedding FLOAT[384],
+    created_at DOUBLE, last_accessed DOUBLE, access_count INT64,
+    protected BOOLEAN,
+    PRIMARY KEY (id)
+);
+CREATE REL TABLE IF NOT EXISTS Connected (
+    FROM Memory TO Memory,
+    weight DOUBLE, type STRING, created_at DOUBLE,
+    event_time DOUBLE, ingestion_time DOUBLE,
+    valid_from DOUBLE, valid_to DOUBLE
+);
+CREATE NODE TABLE IF NOT EXISTS Revision (
+    id INT64, memory_id INT64, old_content STRING,
+    new_content STRING, reason STRING, created_at DOUBLE,
+    PRIMARY KEY (id)
+);
+CREATE NODE TABLE IF NOT EXISTS Meta (
+    key STRING, value STRING, PRIMARY KEY (key)
+);
+CREATE NODE TABLE IF NOT EXISTS Counter (
+    key STRING, value INT64, PRIMARY KEY (key)
+);
+";
+
+    fn show_table_names(conn: &Connection) -> Vec<String> {
+        let result = conn.conn.query("CALL show_tables()").expect("show_tables");
+        let mut names = Vec::new();
+        for chunk in &result.chunks {
+            for row in 0..chunk.size {
+                if let Some(Value::String(name)) = chunk.get_value(0, row) {
+                    names.push(name);
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn kairos_ensure_schema_bootstrap_is_idempotent() {
+        let (path, conn) = fresh_conn();
+
+        conn.run(KAIROS_BOOTSTRAP, None).expect("bootstrap harus sukses");
+        conn.run(KAIROS_BOOTSTRAP, None)
+            .expect("bootstrap kedua harus idempoten");
+
+        let names = show_table_names(&conn);
+        for t in ["Memory", "Connected", "Revision", "Meta", "Counter"] {
+            assert!(
+                names.iter().any(|n| n.eq_ignore_ascii_case(t)),
+                "tabel hilang {t}: {names:?}"
+            );
+        }
+
+        conn.run("DROP TABLE IF EXISTS DoesNotExist", None)
+            .expect("DROP IF EXISTS harus di-swallow");
+        conn.run("DROP TABLE IF EXISTS Counter", None)
+            .expect("DROP IF EXISTS tabel nyata");
+        let names = show_table_names(&conn);
+        assert!(
+            !names.iter().any(|n| n.eq_ignore_ascii_case("Counter")),
+            "Counter harus hilang: {names:?}"
+        );
+
+        conn.run("ALTER TABLE Memory ADD protected BOOLEAN DEFAULT false", None)
+            .expect("ALTER ADD DEFAULT");
+        conn.run("ALTER TABLE Memory ADD protected BOOLEAN DEFAULT false", None)
+            .expect("ALTER ADD DEFAULT kedua (already exists) harus di-swallow");
+
+        let _ = std::fs::remove_dir_all(&path);
+    }
 }

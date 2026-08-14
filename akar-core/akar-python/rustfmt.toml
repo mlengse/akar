@@ -1,0 +1,4 @@
+# Rustfmt configuration — match akar-core workspace (repo CI runs
+# `cargo fmt --all -- --check`; keep akar-python on the same 120-col style).
+edition = "2021"
+max_width = 120

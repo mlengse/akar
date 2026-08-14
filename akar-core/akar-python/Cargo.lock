@@ -191,6 +191,7 @@ dependencies = [
  "akar-common",
  "akar-main",
  "pyo3",
+ "regex",
  "serde_json",
 ]
 

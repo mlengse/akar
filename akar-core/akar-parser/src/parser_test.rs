@@ -30,6 +30,21 @@ mod tests {
     }
 
     #[test]
+    fn test_create_node_table_boolean_types() {
+        // `BOOLEAN` must parse even though `BOOL` shares its prefix (P53.1
+        // blocker: Kairos `_ensure_schema` uses `protected BOOLEAN`).
+        let sql = "CREATE NODE TABLE T(id INT64, flag BOOLEAN, b BOOL, PRIMARY KEY (id))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateNodeTable(t) => {
+                assert_eq!(t.columns[1].type_name, "BOOLEAN");
+                assert_eq!(t.columns[2].type_name, "BOOL");
+            }
+            _ => panic!("Expected CreateNodeTable"),
+        }
+    }
+
+    #[test]
     fn test_match_return() {
         let sql = "MATCH (a:Person) RETURN a.name, a.age";
         let stmt = parse(sql).unwrap();
