@@ -780,4 +780,36 @@ mod tests {
             _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
         }
     }
+
+    #[test]
+    fn test_create_vector_index_parse() {
+        // P53: Kuzu-style `CREATE VECTOR INDEX ... WITH (metric=..., dims=N)`.
+        // Regression: options are nested under `vector_index_option` and pest does
+        // not expose string literals as inner pairs, so metric/dims were dropped.
+        let sql = "CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=384)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateVectorIndex(c) => {
+                assert_eq!(c.index_name, "mem_vec");
+                assert_eq!(c.table_name, "Memory");
+                assert_eq!(c.column_name, "embedding");
+                assert_eq!(c.metric, "cosine");
+                assert_eq!(c.dimensions, 384);
+            }
+            _ => panic!("Expected CreateVectorIndex, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_create_vector_index_dims_first() {
+        let sql = "CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (dims=384, metric=euclidean)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateVectorIndex(c) => {
+                assert_eq!(c.metric, "euclidean");
+                assert_eq!(c.dimensions, 384);
+            }
+            _ => panic!("Expected CreateVectorIndex, got {:?}", stmt),
+        }
+    }
 }

@@ -60,16 +60,29 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
-        // Locate source table
-        let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
-            Some(t) => t,
-            None => return Err(format!("Table '{}' not found", self.table_name).into()),
+        // Locate the source table and snapshot its schema + data. The DashMap
+        // `Ref` MUST be dropped before the write locks below: creating/updating
+        // the macro tables (create_node_table / get_*_mut) takes exclusive
+        // shard locks, and DashMap is not re-entrant — holding the read `Ref`
+        // while acquiring a write lock on the same shard self-deadlocks on this
+        // thread. Because DashMap's hasher is random-seeded per catalog, the
+        // shard collision is intermittent (the FTS test flake) (P53.x).
+        let (col_idx, num_rows, source_data) = {
+            let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
+                Some(t) => t,
+                None => return Err(format!("Table '{}' not found", self.table_name).into()),
+            };
+            let col_idx = source_table
+                .columns
+                .iter()
+                .position(|c| c.name == self.column_name)
+                .ok_or_else(|| format!("Column '{}' not found in '{}'", self.column_name, self.table_name))?;
+            (
+                col_idx,
+                source_table.num_rows as usize,
+                source_table.to_column_major_data(),
+            )
         };
-        let col_idx = source_table
-            .columns
-            .iter()
-            .position(|c| c.name == self.column_name)
-            .ok_or_else(|| format!("Column '{}' not found in '{}'", self.column_name, self.table_name))?;
 
         // Ensure macro tables exist; create if needed
         if self.table_catalog.get_node_table_by_name(&self.docs_table).is_none() {
@@ -113,10 +126,6 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
             self.table_catalog
                 .create_node_table(self.terms_table.clone(), terms_cols);
         }
-
-        // Collect docs data
-        let source_data = source_table.to_column_major_data();
-        let num_rows = source_table.num_rows as usize;
 
         // term -> (term_id, doc_freq)
         let mut term_map: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();

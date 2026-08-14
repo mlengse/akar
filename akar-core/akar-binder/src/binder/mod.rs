@@ -907,14 +907,16 @@ impl Binder {
             return Err("Dimensions must be greater than 0".into());
         }
 
-        // Validate the referenced table exists in the catalog
-        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-        let entry = catalog
-            .get_entry_by_name(&v.table_name)
-            .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
-
-        // Validate the referenced column exists in the table
-        let col_exists = entry.columns().iter().any(|c| c.name == v.column_name);
+        // Validate the referenced table and column exist in the catalog.
+        // The guard is scoped so it drops before the write lock below —
+        // otherwise the second `catalog.lock()` self-deadlocks (P53.x).
+        let col_exists = {
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let entry = catalog
+                .get_entry_by_name(&v.table_name)
+                .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
+            entry.columns().iter().any(|c| c.name == v.column_name)
+        };
         if !col_exists {
             return Err(format!("Column '{}' not found in table '{}'", v.column_name, v.table_name).into());
         }

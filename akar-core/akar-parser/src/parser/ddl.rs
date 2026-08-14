@@ -208,27 +208,34 @@ fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statem
             }
             Rule::vector_index_options => {
                 for opt in inner.into_inner() {
-                    match opt.as_rule() {
-                        Rule::metric_option => {
-                            for part in opt.into_inner() {
-                                let val = part.as_str().to_lowercase();
-                                if val != "metric" && val != "=" {
-                                    metric = val;
+                    // The grammar wraps each option in `vector_index_option`
+                    // (metric_option | dimensions_option).
+                    if opt.as_rule() == Rule::vector_index_option {
+                        for part in opt.into_inner() {
+                            match part.as_rule() {
+                                Rule::metric_option => {
+                                    // pest does not expose string literals as inner
+                                    // pairs, so parse the metric value from text.
+                                    let s = part.as_str();
+                                    metric = s
+                                        .split_once('=')
+                                        .map(|(_, v)| v.trim().to_string())
+                                        .unwrap_or_default();
                                 }
+                                Rule::dimensions_option => {
+                                    for p in part.into_inner() {
+                                        if p.as_rule() == Rule::integer {
+                                            dimensions = Some(
+                                                p.as_str()
+                                                    .parse::<u64>()
+                                                    .map_err(|e| format!("Invalid dimensions value: {e}"))?,
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
                         }
-                        Rule::dimensions_option => {
-                            for part in opt.into_inner() {
-                                if part.as_rule() == Rule::integer {
-                                    dimensions = Some(
-                                        part.as_str()
-                                            .parse::<u64>()
-                                            .map_err(|e| format!("Invalid dimensions value: {e}"))?,
-                                    );
-                                }
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
