@@ -11,7 +11,7 @@
 
 ### Removed
 
-- **5 doc-test `ignore` blok** — snippet ilustratif yang tak bisa di-compile standalone dihapus dari doc comment (`akar-storage/column_chunk.rs`, `lazy_scanner.rs`, `spiller.rs` ×2, `akar-main/prepared_statement.rs`) agar tak tercatat sebagai "ignored" test yang membingungkan; tersisa 8 doc-test lulus (0 ignored). — gate **1,648 (1,648 passed)**.
+- **5 doc-test `ignore` blok** — snippet ilustratif yang tak bisa di-compile standalone dihapus dari doc comment (`akar-storage/column_chunk.rs`, `lazy_scanner.rs`, `spiller.rs` ×2, `akar-main/prepared_statement.rs`) agar tak tercatat sebagai "ignored" test yang membingungkan; tersisa 8 doc-test lulus (0 ignored). Bonus: `test_migration_ingestion` kini jalankan binary `akar-migrate` via `env!("CARGO_BIN_EXE_akar-migrate")` (bukan nested `cargo run` yang memicu rebuild). — `6d6cded` — gate **1,648 (1,648 passed)**.
 
 ### Changed
 
