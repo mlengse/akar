@@ -138,6 +138,25 @@ pub fn evaluate_expression_for_row(
             akar_parser::ast::Constant::Float(f) => akar_common::types::Value::Double(*f),
             akar_parser::ast::Constant::String(s) => akar_common::types::Value::String(s.clone()),
         },
+        akar_parser::ast::Expression::List(items) => {
+            let vals = items
+                .iter()
+                .map(|i| evaluate_expression_for_row(i, chunk, row))
+                .collect();
+            akar_common::types::Value::List(vals)
+        }
+        akar_parser::ast::Expression::Map(items) => {
+            let entries = items
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        akar_common::types::Value::String(k.clone()),
+                        evaluate_expression_for_row(v, chunk, row),
+                    )
+                })
+                .collect();
+            akar_common::types::Value::Map(entries)
+        }
         _ => {
             // Fallback: try to get value from chunk fields
             if chunk.fields.len() > 1 {
@@ -157,6 +176,13 @@ pub fn evaluate_expression_for_row(
 pub fn evaluate_constant_expr(expr: &Expression, registry: &FunctionRegistry) -> Value {
     match expr {
         Expression::Constant(c) => ast_constant_to_value(c),
+        Expression::List(items) => Value::List(items.iter().map(|i| evaluate_constant_expr(i, registry)).collect()),
+        Expression::Map(items) => Value::Map(
+            items
+                .iter()
+                .map(|(k, v)| (Value::String(k.clone()), evaluate_constant_expr(v, registry)))
+                .collect(),
+        ),
         Expression::FunctionCall(name, args) => {
             let arg_values: Vec<Value> = args.iter().map(|a| evaluate_constant_expr(a, registry)).collect();
             if arg_values.iter().any(|v| matches!(v, Value::Null)) {

@@ -10,6 +10,7 @@
 
 #![cfg(feature = "vector-extension")]
 
+use akar_common::types::Value;
 use akar_main::{Connection, Database, SystemConfig};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -76,4 +77,79 @@ fn vector_index_does_not_break_scalar_queries() {
     let res = conn.query("MATCH (m:Memory) RETURN m.id, m.content").expect("scalar query");
     let chunk = res.chunks.first().expect("one chunk");
     assert_eq!(chunk.size, 1, "one row expected");
+}
+
+/// P53.12: `RETURN n.embedding` on a `FLOAT[]` column must yield a `Value::List`
+/// instead of NULL. Previously the scan collapsed List/Array columns to Int64
+/// and the Arrow builders emitted all-null arrays.
+#[test]
+fn complex_type_list_column_round_trips() {
+    let (_dir, _db, conn) = setup();
+    conn.query("CREATE (m:Memory {id: 1, content: 'hello', embedding: [0.1, 0.2, 0.3]})")
+        .expect("insert row");
+
+    let res = conn.query("MATCH (m:Memory) RETURN m.embedding").expect("list query");
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 1, "one row expected");
+
+    let val = chunk.get_value(0, 0).expect("embedding must not be null");
+    match val {
+        Value::List(items) => {
+            assert_eq!(items.len(), 3, "embedding has 3 elements, got {items:?}");
+            for item in &items {
+                assert!(
+                    matches!(item, Value::Float(_) | Value::Double(_)),
+                    "expected numeric embedding element, got {item:?}"
+                );
+            }
+        }
+        other => panic!("expected Value::List, got {other:?}"),
+    }
+}
+
+/// P53.12: `RETURN {id: n.id}` (a map literal) must yield a `Value::Struct`
+/// instead of NULL. The map-literal projection now goes through
+/// `evaluate_arrow` → `arrow_array_from_values` (StructArray), bypassing the
+/// ValueVector that had no side-storage.
+#[test]
+fn complex_type_map_literal_returns_struct() {
+    let (_dir, _db, conn) = setup();
+    conn.query("CREATE (m:Memory {id: 1, content: 'hello', embedding: [0.1, 0.2]})")
+        .expect("insert row");
+
+    let res = conn.query("MATCH (m:Memory) RETURN {id: m.id}").expect("map literal query");
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 1, "one row expected");
+
+    let val = chunk.get_value(0, 0).expect("map literal must not be null");
+    match val {
+        Value::Struct(entries) => {
+            assert_eq!(entries.len(), 1, "one field, got {entries:?}");
+            assert_eq!(entries[0].0, "id");
+            assert_eq!(entries[0].1, Value::Int64(1));
+        }
+        other => panic!("expected Value::Struct, got {other:?}"),
+    }
+}
+
+/// P53.12: `array_cosine_similarity` over a `FLOAT[]` column + list literal
+/// must return a Double. Both arguments now resolve through the Arrow-native
+/// path (ListArray) so the scalar function sees real list values.
+#[test]
+fn complex_type_array_cosine_similarity_returns_double() {
+    let (_dir, _db, conn) = setup();
+    conn.query("CREATE (m:Memory {id: 1, content: 'hello', embedding: [1.0, 0.0]})")
+        .expect("insert row");
+
+    let res = conn
+        .query("MATCH (m:Memory) RETURN array_cosine_similarity(m.embedding, [1.0, 0.0])")
+        .expect("cosine query");
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 1, "one row expected");
+
+    let val = chunk.get_value(0, 0).expect("cosine similarity must not be null");
+    match val {
+        Value::Double(d) => assert!((d - 1.0).abs() < 1e-9, "expected ~1.0, got {d}"),
+        other => panic!("expected Value::Double, got {other:?}"),
+    }
 }

@@ -112,7 +112,9 @@ impl PhysicalScan {
             Value::UInt128(_) => PhysicalTypeID::Int128,
             Value::Json(_) => PhysicalTypeID::String,
             Value::Union(_, _) => PhysicalTypeID::Struct,
-            Value::InternalID(_) | Value::List(_) | Value::Map(_) | Value::Struct(_) => PhysicalTypeID::Int64,
+            Value::List(_) => PhysicalTypeID::List,
+            Value::Map(_) | Value::Struct(_) => PhysicalTypeID::Struct,
+            Value::InternalID(_) => PhysicalTypeID::Int64,
         }
     }
 
@@ -138,15 +140,12 @@ impl PhysicalScan {
             | LogicalTypeID::Time => PhysicalTypeID::Int64,
             LogicalTypeID::String | LogicalTypeID::Interval | LogicalTypeID::Json => PhysicalTypeID::String,
             LogicalTypeID::Blob => PhysicalTypeID::Blob,
+            LogicalTypeID::List | LogicalTypeID::Array => PhysicalTypeID::List,
+            LogicalTypeID::Map | LogicalTypeID::Struct | LogicalTypeID::Union => PhysicalTypeID::Struct,
             LogicalTypeID::Any
             | LogicalTypeID::Node
             | LogicalTypeID::Rel
             | LogicalTypeID::RecursiveRel
-            | LogicalTypeID::List
-            | LogicalTypeID::Array
-            | LogicalTypeID::Map
-            | LogicalTypeID::Struct
-            | LogicalTypeID::Union
             | LogicalTypeID::Uuid
             | LogicalTypeID::InternalID => PhysicalTypeID::Int64,
         }
@@ -256,6 +255,10 @@ impl PhysicalScan {
                     }
                 }
                 std::sync::Arc::new(builder.finish())
+            }
+            PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct => {
+                let selected: Vec<Value> = rows.iter().map(|&r| col_data.get(r).cloned().unwrap_or(Value::Null)).collect();
+                akar_common::arrow_vector::arrow_array_from_values(&selected)
             }
             _ => {
                 let mut builder = Int64Builder::with_capacity(size);

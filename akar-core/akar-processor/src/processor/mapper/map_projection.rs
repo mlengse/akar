@@ -97,9 +97,12 @@ pub fn map_and_execute_projection(
                         let mut fields = Vec::with_capacity(p.expressions.len());
                         let mut field_types = Vec::with_capacity(p.expressions.len());
                         for be in &p.expressions {
-                            let result_vec = eval.evaluate(&be.expression, &chunk)?;
-                            let pt = result_vec.physical_type();
-                            let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&result_vec).array;
+                            // Use the Arrow-native evaluator so complex-typed
+                            // results (List/Struct columns and literals) round-trip
+                            // without a ValueVector (which has no side-storage).
+                            let result_vec = eval.evaluate_arrow(&be.expression, &chunk)?;
+                            let pt = result_vec.physical_type;
+                            let arr = result_vec.array.clone();
                             fields.push(arr);
                             field_types.push(pt);
                         }

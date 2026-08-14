@@ -2,10 +2,12 @@ use crate::selection::SelectionVector;
 use crate::types::{PhysicalTypeID, Value};
 use crate::vector::ValueVector;
 use arrow::array::{
-    Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array, ListArray, StringArray,
-    StructArray, UInt64Array,
+    Array, ArrayRef, BooleanArray, BooleanBuilder, Float32Array, Float32Builder, Float64Array, Float64Builder,
+    Int32Array, Int32Builder, Int64Array, Int64Builder, ListArray, StringArray, StringBuilder, StructArray, UInt64Array,
+    UInt64Builder,
 };
-use arrow::datatypes::DataType;
+use arrow::buffer::{NullBuffer, OffsetBuffer, ScalarBuffer};
+use arrow::datatypes::{DataType, Field};
 use std::sync::Arc;
 
 pub trait VectorAccess {
@@ -129,6 +131,34 @@ impl ArrowVector {
                     }
                 }
                 Arc::new(builder.finish())
+            }
+            PhysicalTypeID::List | PhysicalTypeID::Array => {
+                // A legacy vector has no side-storage for variable-length list
+                // payloads; emit empty lists for non-null rows (callers should
+                // prefer `arrow_array_from_values` for real list data).
+                let values: Vec<Value> = (0..size)
+                    .map(|i| {
+                        if vec.is_null(i) {
+                            Value::Null
+                        } else {
+                            vec.get_value(i).unwrap_or(Value::Null)
+                        }
+                    })
+                    .collect();
+                arrow_array_from_values(&values)
+            }
+            PhysicalTypeID::Struct => {
+                // Same limitation as List: emit the legacy placeholder value.
+                let values: Vec<Value> = (0..size)
+                    .map(|i| {
+                        if vec.is_null(i) {
+                            Value::Null
+                        } else {
+                            vec.get_value(i).unwrap_or(Value::Null)
+                        }
+                    })
+                    .collect();
+                arrow_array_from_values(&values)
             }
             _ => {
                 let mut builder = arrow::array::Int64Builder::with_capacity(size);
@@ -316,6 +346,254 @@ pub fn convert_arrow_scalar(array: &ArrayRef, row: usize) -> Option<Value> {
             Some(Value::Struct(entries))
         }
         _ => None,
+    }
+}
+
+/// Infer the Arrow `DataType` for a list of `Value`s.
+///
+/// The first non-null value is used as the type sample. All-null inputs (or
+/// unknown types) default to `Int64`, matching the engine's null fallback.
+/// `Value::List`/`Value::Struct`/`Value::Map` are inferred recursively so that
+/// nested complex types produce the right `List`/`Struct` Arrow types.
+pub fn infer_arrow_type(values: &[Value]) -> DataType {
+    let sample = values.iter().find(|v| !matches!(v, Value::Null));
+    match sample {
+        Some(Value::Bool(_)) => DataType::Boolean,
+        Some(Value::Int64(_))
+        | Some(Value::Int128(_))
+        | Some(Value::UInt128(_))
+        | Some(Value::Date(_))
+        | Some(Value::Timestamp(_))
+        | Some(Value::TimestampTz(_))
+        | Some(Value::TimestampNs(_))
+        | Some(Value::TimestampMs(_))
+        | Some(Value::TimestampSec(_))
+        | Some(Value::DTime(_)) => DataType::Int64,
+        Some(Value::UInt64(_)) => DataType::UInt64,
+        Some(Value::Int32(_)) | Some(Value::UInt32(_)) => DataType::Int32,
+        Some(Value::Double(_)) => DataType::Float64,
+        Some(Value::Float(_)) => DataType::Float32,
+        Some(Value::String(_)) | Some(Value::Json(_)) | Some(Value::Interval(_)) => DataType::Utf8,
+        Some(Value::List(inner)) => {
+            DataType::List(Arc::new(Field::new("item", infer_arrow_type(inner), true)))
+        }
+        Some(Value::Struct(entries)) => {
+            let fields = entries
+                .iter()
+                .map(|(k, v)| Field::new(k.clone(), infer_arrow_type(std::slice::from_ref(v)), true))
+                .collect();
+            DataType::Struct(fields)
+        }
+        Some(Value::Map(entries)) => {
+            let fields = entries
+                .iter()
+                .map(|(k, v)| {
+                    let name = match k {
+                        Value::String(s) => s.clone(),
+                        other => format!("{other:?}"),
+                    };
+                    Field::new(name, infer_arrow_type(std::slice::from_ref(v)), true)
+                })
+                .collect();
+            DataType::Struct(fields)
+        }
+        Some(Value::Union(_, v)) => infer_arrow_type(std::slice::from_ref(v.as_ref())),
+        Some(Value::InternalID(_)) => DataType::Int64,
+        Some(Value::Blob(_)) => DataType::Binary,
+        _ => DataType::Int64,
+    }
+}
+
+/// Build an Arrow `ArrayRef` from a `Vec<Value>`, recursively handling
+/// primitives, `List`, `Struct` and `Map` values.
+///
+/// This is the inverse of [`convert_arrow_scalar`] and is used by the scan /
+/// projection paths to emit complex-typed columns (e.g. `FLOAT[]`, `{..}`
+/// literals) without going through a `ValueVector` (which has no side-storage
+/// for variable-length List/Struct payloads).
+pub fn arrow_array_from_values(values: &[Value]) -> ArrayRef {
+    let data_type = infer_arrow_type(values);
+    match &data_type {
+        DataType::Boolean => {
+            let mut builder = BooleanBuilder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Bool(b) => builder.append_value(*b),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::Int64 => {
+            let mut builder = Int64Builder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Int64(n) => builder.append_value(*n),
+                    Value::Int128(n) => builder.append_value(*n as i64),
+                    Value::UInt128(n) => builder.append_value(*n as i64),
+                    Value::Int32(n) => builder.append_value(*n as i64),
+                    Value::UInt64(n) => builder.append_value(*n as i64),
+                    Value::Date(n) => builder.append_value(n.0 as i64),
+                    Value::Timestamp(n) | Value::TimestampNs(n) | Value::TimestampMs(n) | Value::TimestampSec(n) => {
+                        builder.append_value(n.0)
+                    }
+                    Value::TimestampTz(n) => builder.append_value(n.0),
+                    Value::DTime(n) => builder.append_value(*n),
+                    Value::InternalID(id) => builder.append_value(id.offset as i64),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::UInt64 => {
+            let mut builder = UInt64Builder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::UInt64(n) => builder.append_value(*n),
+                    Value::Int64(n) if *n >= 0 => builder.append_value(*n as u64),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::Int32 => {
+            let mut builder = Int32Builder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Int32(n) => builder.append_value(*n),
+                    Value::Int64(n) => builder.append_value(*n as i32),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::Float64 => {
+            let mut builder = Float64Builder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Double(n) => builder.append_value(*n),
+                    Value::Float(n) => builder.append_value(*n as f64),
+                    Value::Int64(n) => builder.append_value(*n as f64),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::Float32 => {
+            let mut builder = Float32Builder::with_capacity(values.len());
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Float(n) => builder.append_value(*n),
+                    Value::Double(n) => builder.append_value(*n as f32),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::Utf8 => {
+            let mut builder = StringBuilder::with_capacity(values.len(), values.len() * 16);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::String(s) => builder.append_value(s),
+                    Value::Interval(i) => builder.append_value(format!(
+                        "{} months {} days {} microseconds",
+                        i.months, i.days, i.micros
+                    )),
+                    Value::Json(j) => builder.append_value(j.to_string()),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        DataType::List(_) => {
+            let mut child_values: Vec<Value> = Vec::new();
+            let mut offsets: Vec<i32> = Vec::with_capacity(values.len() + 1);
+            let mut valid: Vec<bool> = Vec::with_capacity(values.len());
+            offsets.push(0);
+            for v in values {
+                match v {
+                    Value::List(inner) => {
+                        child_values.extend(inner.iter().cloned());
+                        offsets.push(child_values.len() as i32);
+                        valid.push(true);
+                    }
+                    _ => {
+                        offsets.push(child_values.len() as i32);
+                        valid.push(false);
+                    }
+                }
+            }
+            let child = arrow_array_from_values(&child_values);
+            let field = Arc::new(Field::new("item", child.data_type().clone(), true));
+            let offsets_buf = OffsetBuffer::new(ScalarBuffer::from(offsets));
+            let nulls = NullBuffer::from(valid);
+            match ListArray::try_new(field, offsets_buf, child, Some(nulls)) {
+                Ok(a) => Arc::new(a),
+                Err(_) => {
+                    let mut builder = Int64Builder::with_capacity(values.len());
+                    builder.append_nulls(values.len());
+                    Arc::new(builder.finish())
+                }
+            }
+        }
+        DataType::Struct(fields) => {
+            let mut columns: Vec<ArrayRef> = Vec::with_capacity(fields.len());
+            for field in fields.iter() {
+                let col: Vec<Value> = values
+                    .iter()
+                    .map(|v| match v {
+                        Value::Struct(entries) => entries
+                            .iter()
+                            .find(|(k, _)| k == field.name())
+                            .map(|(_, val)| val.clone())
+                            .unwrap_or(Value::Null),
+                        Value::Map(entries) => entries
+                            .iter()
+                            .find(|(k, _)| matches!(k, Value::String(s) if s == field.name()))
+                            .map(|(_, val)| val.clone())
+                            .unwrap_or(Value::Null),
+                        _ => Value::Null,
+                    })
+                    .collect();
+                columns.push(arrow_array_from_values(&col));
+            }
+            let valid: Vec<bool> = values
+                .iter()
+                .map(|v| matches!(v, Value::Struct(_) | Value::Map(_)))
+                .collect();
+            let nulls = NullBuffer::from(valid);
+            match StructArray::try_new(fields.clone(), columns, Some(nulls)) {
+                Ok(a) => Arc::new(a),
+                Err(_) => {
+                    let mut builder = Int64Builder::with_capacity(values.len());
+                    builder.append_nulls(values.len());
+                    Arc::new(builder.finish())
+                }
+            }
+        }
+        DataType::Binary => {
+            let mut builder = arrow::array::BinaryBuilder::with_capacity(values.len(), values.len() * 8);
+            for v in values {
+                match v {
+                    Value::Null => builder.append_null(),
+                    Value::Blob(b) => builder.append_value(b),
+                    _ => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish())
+        }
+        _ => {
+            let mut builder = Int64Builder::with_capacity(values.len());
+            builder.append_nulls(values.len());
+            Arc::new(builder.finish())
+        }
     }
 }
 
@@ -510,5 +788,58 @@ mod tests {
         assert_eq!(arrow.get_i64_sel(1, &sel), Some(30));
         assert_eq!(arrow.get_i64_sel(2, &sel), Some(50));
         assert_eq!(arrow.get_i64_sel(3, &sel), None);
+    }
+
+    #[test]
+    fn test_arrow_array_from_list_values() {
+        let values = vec![
+            Value::List(vec![Value::Float(0.1), Value::Float(0.2)]),
+            Value::List(vec![Value::Float(0.3)]),
+            Value::Null,
+        ];
+        let arr = arrow_array_from_values(&values);
+        assert_eq!(arr.data_type(), &DataType::List(Arc::new(Field::new("item", DataType::Float32, true))));
+        assert_eq!(arr.len(), 3);
+        assert!(!arr.is_null(0));
+        assert!(!arr.is_null(1));
+        assert!(arr.is_null(2));
+        let list_arr = arr.as_any().downcast_ref::<ListArray>().unwrap();
+        let v0 = convert_arrow_scalar(&arr, 0).unwrap();
+        assert_eq!(v0, Value::List(vec![Value::Float(0.1), Value::Float(0.2)]));
+        let v1 = convert_arrow_scalar(&arr, 1).unwrap();
+        assert_eq!(v1, Value::List(vec![Value::Float(0.3)]));
+        assert_eq!(list_arr.value(0).len(), 2);
+    }
+
+    #[test]
+    fn test_arrow_array_from_struct_values() {
+        let values = vec![
+            Value::Map(vec![(Value::String("id".into()), Value::Int64(1))]),
+            Value::Null,
+        ];
+        let arr = arrow_array_from_values(&values);
+        assert!(matches!(arr.data_type(), DataType::Struct(_)));
+        assert_eq!(arr.len(), 2);
+        assert!(!arr.is_null(0));
+        assert!(arr.is_null(1));
+        let v0 = convert_arrow_scalar(&arr, 0).unwrap();
+        assert_eq!(v0, Value::Struct(vec![("id".to_string(), Value::Int64(1))]));
+    }
+
+    #[test]
+    fn test_arrow_array_from_empty_list() {
+        let values = vec![Value::List(vec![])];
+        let arr = arrow_array_from_values(&values);
+        assert!(matches!(arr.data_type(), DataType::List(_)));
+        assert_eq!(convert_arrow_scalar(&arr, 0).unwrap(), Value::List(vec![]));
+    }
+
+    #[test]
+    fn test_arrow_array_nested_list() {
+        let values = vec![Value::List(vec![Value::List(vec![Value::Int64(1), Value::Int64(2)])])];
+        let arr = arrow_array_from_values(&values);
+        assert!(matches!(arr.data_type(), DataType::List(_)));
+        let v0 = convert_arrow_scalar(&arr, 0).unwrap();
+        assert_eq!(v0, Value::List(vec![Value::List(vec![Value::Int64(1), Value::Int64(2)])]));
     }
 }

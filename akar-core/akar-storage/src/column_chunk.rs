@@ -420,6 +420,9 @@ impl ColumnChunk {
                 }
                 std::sync::Arc::new(builder.finish())
             }
+            PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct => {
+                akar_common::arrow_vector::arrow_array_from_values(&self.values)
+            }
             _ => {
                 let mut builder = Int64Builder::with_capacity(size);
                 for _ in 0..size {

@@ -147,12 +147,61 @@ impl ExpressionEvaluator {
             }
             Expression::BinaryOp(op, left, right) => self.evaluate_arrow_binary_op(op, left, right, chunk),
             Expression::UnaryOp(op, inner) => self.evaluate_arrow_unary_op(op, inner, chunk),
+            Expression::List(items) => self.evaluate_arrow_list_literal(items, chunk),
+            Expression::Map(items) => self.evaluate_arrow_map_literal(items, chunk),
             // Fallback for complex types: use evaluate + from_legacy
             _ => {
                 let legacy = self.evaluate(expr, chunk)?;
                 Ok(ArrowVector::from_legacy(&legacy))
             }
         }
+    }
+
+    /// Evaluate a list literal directly to an Arrow `ListArray`, avoiding the
+    /// `ValueVector` (which has no side-storage for variable-length list
+    /// payloads). Each row's element expressions are evaluated per-row.
+    fn evaluate_arrow_list_literal(&self, items: &[Expression], chunk: &DataChunk) -> Result<ArrowVector, ProcessorError> {
+        let num_rows = chunk.size;
+        let mut row_results: Vec<Value> = Vec::with_capacity(num_rows);
+        for row in 0..num_rows {
+            let mut list_values = Vec::with_capacity(items.len());
+            for item in items {
+                let item_vec = self.evaluate(item, chunk)?;
+                let val = if row < item_vec.size() {
+                    item_vec.get_value(row).unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                };
+                list_values.push(val);
+            }
+            row_results.push(Value::List(list_values));
+        }
+        build_arrow_from_values(&row_results, PhysicalTypeID::List, num_rows)
+    }
+
+    /// Evaluate a map literal directly to an Arrow `StructArray` (a `{..}`
+    /// literal), again bypassing the `ValueVector`.
+    fn evaluate_arrow_map_literal(
+        &self,
+        items: &[(String, Expression)],
+        chunk: &DataChunk,
+    ) -> Result<ArrowVector, ProcessorError> {
+        let num_rows = chunk.size;
+        let mut row_results: Vec<Value> = Vec::with_capacity(num_rows);
+        for row in 0..num_rows {
+            let mut entries = Vec::with_capacity(items.len());
+            for (key, item) in items {
+                let item_vec = self.evaluate(item, chunk)?;
+                let val = if row < item_vec.size() {
+                    item_vec.get_value(row).unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                };
+                entries.push((key.clone(), val));
+            }
+            row_results.push(Value::Struct(entries));
+        }
+        build_arrow_from_values(&row_results, PhysicalTypeID::Struct, num_rows)
     }
 
     /// Evaluate a constant directly as ArrowVector using typed Arrow builders.
@@ -1603,6 +1652,10 @@ fn build_arrow_from_values(
                 }
             }
             Ok(ArrowVector::new(Arc::new(builder.finish()), phys_type))
+        }
+        PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct => {
+            let array = akar_common::arrow_vector::arrow_array_from_values(values);
+            Ok(ArrowVector::new(array, phys_type))
         }
         _ => {
             // Unsupported type — fall back to creating an Arrow array with all nulls

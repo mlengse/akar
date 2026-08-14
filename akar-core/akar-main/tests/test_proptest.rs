@@ -1,6 +1,7 @@
 mod common;
 use common::*;
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
 
 fn extract_count(conn: &Connection, query: &str) -> i64 {
     let res = conn.query(query).unwrap();
@@ -19,7 +20,17 @@ proptest! {
     // Default is 256 cases; each case builds a fresh file-backed WAL DB, so
     // 256 cases cost ~80s+ per test on this machine. 32 cases keep good
     // random coverage of the 1..20 ranges at a fraction of the runtime.
-    #![proptest_config(ProptestConfig::with_cases(32))]
+    //
+    // `failure_persistence` is set to `Off` because this is an integration
+    // test binary (no `lib.rs`/`main.rs`): the default `SourceParallel`
+    // persistence scans the source tree, fails to find a crate root, and
+    // prints `FileFailurePersistence::SourceParallel set, but failed to find
+    // lib.rs or main.rs` on every run.
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        failure_persistence: Some(Box::new(FileFailurePersistence::Off)),
+        ..ProptestConfig::default()
+    })]
 
     #[test]
     fn test_roundtrip_i64(val in 0..i64::MAX) {

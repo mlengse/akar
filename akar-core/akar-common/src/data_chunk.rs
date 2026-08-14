@@ -229,6 +229,9 @@ impl DataChunk {
             PhysicalTypeID::String => self
                 .get_string(field_idx, row_idx)
                 .map(|s| Value::String(s.to_string())),
+            PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct => {
+                crate::arrow_vector::convert_arrow_scalar(&self.fields[field_idx], row_idx)
+            }
             _ => None, // Expand as needed
         }
     }
