@@ -637,33 +637,19 @@ impl PhysicalExtend {
         };
 
         // Collect dest node table data upfront (owned)
-        let (dest_data, dest_cols, dest_pk_col) = {
+        let (dest_data, dest_cols) = {
             let dest_table = self
                 .table_catalog
                 .get_node_table_by_name(&self.dst_table_name)
                 .ok_or_else(|| format!("Node table {} not found", self.dst_table_name))?;
             let data = dest_table.to_column_major_data();
             let cols = dest_table.columns.clone();
-            let pk = dest_table.primary_key_column;
-            (data, cols, pk)
+            (data, cols)
         };
-
-        // Build PK → row offset map for destination lookups
-        let pk_to_row: std::collections::HashMap<u64, usize> = if dest_pk_col < dest_data.len() {
-            dest_data[dest_pk_col]
-                .iter()
-                .enumerate()
-                .filter_map(|(row, val)| {
-                    if let Value::Int64(id) = val {
-                        Some((*id as u64, row))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            std::collections::HashMap::new()
-        };
+        // `dst_offset` from the adjacency is a row offset into the destination
+        // node table (`RelTable.fwd_adj`/`rev_adj` store row offsets, not
+        // primary keys). Resolve destination rows by offset directly (P53.12).
+        let dest_num_rows = dest_data.first().map(|c| c.len()).unwrap_or(0);
 
         let mut output = Vec::with_capacity(input.len());
 
@@ -711,9 +697,7 @@ impl PhysicalExtend {
                 };
 
                 for &(dst_offset, edge_idx) in &edges {
-                    if !pk_to_row.contains_key(&dst_offset)
-                        && dst_offset as usize >= dest_data.first().map(|c| c.len()).unwrap_or(0)
-                    {
+                    if dst_offset as usize >= dest_num_rows {
                         continue;
                     }
                     total_rows += 1;
@@ -752,19 +736,15 @@ impl PhysicalExtend {
                         .unwrap_or(Value::Null);
                     out_data[num_input_fields + col].push(val);
                 }
-                // Copy dest node properties
-                let dest_row = pk_to_row.get(&dst_offset).copied();
+                // Copy dest node properties (row = dst_offset, a row offset into
+                // the destination node table; P53.12).
+                let dest_row = dst_offset as usize;
                 for col in 0..num_dest_cols {
-                    let val = dest_row
-                        .and_then(|r| dest_data.get(col).and_then(|c| c.get(r)))
+                    let val = dest_data
+                        .get(col)
+                        .and_then(|c| c.get(dest_row))
                         .cloned()
-                        .unwrap_or_else(|| {
-                            dest_data
-                                .get(col)
-                                .and_then(|c| c.get(dst_offset as usize))
-                                .cloned()
-                                .unwrap_or(Value::Null)
-                        });
+                        .unwrap_or(Value::Null);
                     out_data[num_input_fields + num_rel_cols + col].push(val);
                 }
                 // Internal dest node id (`<dst>._id` = row offset)
