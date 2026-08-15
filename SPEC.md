@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,658 total, 0 ignored, 1,658 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.13 List ORDER BY/LIMIT @ `79c75f6`; sebelumnya 1,653) |
+| Tests passing | **1,667 total, 0 ignored, 1,667 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.14 chain clauses @ `6c59b3a`; sebelumnya 1,658) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,658** | **1,658 total, 0 ignored, 1,658 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.13 List ORDER BY/LIMIT @ `79c75f6`; sebelumnya 1,653) |
+| **Total** | **1,667** | **1,667 total, 0 ignored, 1,667 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.14 chain clauses @ `6c59b3a`; sebelumnya 1,658) |
 
 ### 11.2 Test Datasets
 
