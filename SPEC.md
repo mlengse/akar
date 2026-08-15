@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,667 total, 0 ignored, 1,667 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.14 chain clauses @ `6c59b3a`; sebelumnya 1,658) |
+| Tests passing | **1,692 total, 0 ignored, 1,692 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.19 G8/G9 @ latest; sebelumnya 1,690) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **58** variants |
@@ -480,7 +480,7 @@ Triggered by pushing a version tag (`v*`):
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
 | `akar-common` | 24 | Types (37 LogicalTypes, Value), Vectors, Memory |
-| `akar-parser` | 70 | PEG grammar, 33 Statement variants, operator precedence |
+| `akar-parser` | 82 | PEG grammar, 33 Statement variants, operator precedence |
 | `akar-binder` | 87 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 21 | Logical plan construction |
 | `akar-optimizer` | 68 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,667** | **1,667 total, 0 ignored, 1,667 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.14 chain clauses @ `6c59b3a`; sebelumnya 1,658) |
+| **Total** | **1,692** | **1,692 total, 0 ignored, 1,692 passed, 0 failed** (gate `test [akar-core]` 2026-08-15, P53.19 G8/G9; sebelumnya 1,690) |
 
 ### 11.2 Test Datasets
 
