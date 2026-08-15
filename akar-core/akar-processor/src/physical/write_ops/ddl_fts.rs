@@ -337,9 +337,7 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 return false;
             };
             match (&source_table, source_col) {
-                (Some(t), Some(ci)) => {
-                    r < t.num_rows as usize && matches!(t.get_value(r, ci), Some(Value::String(_)))
-                }
+                (Some(t), Some(ci)) => r < t.num_rows as usize && matches!(t.get_value(r, ci), Some(Value::String(_))),
                 _ => true, // no source info → keep everything
             }
         };
@@ -508,7 +506,11 @@ impl PhysicalFtsScan {
                 .get_node_table_by_name_mut(&self.terms_table)
                 .ok_or_else(|| format!("Terms table '{}' not found", self.terms_table))?;
             for (term_id, term) in &new_terms {
-                terms.insert_row(vec![Value::Int64(*term_id), Value::String(term.clone()), Value::Int64(1)])?;
+                terms.insert_row(vec![
+                    Value::Int64(*term_id),
+                    Value::String(term.clone()),
+                    Value::Int64(1),
+                ])?;
             }
             for (row_idx, df) in df_updates {
                 terms.update_cell(row_idx as u64, 2, Value::Int64(df))?;

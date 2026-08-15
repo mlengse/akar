@@ -40,7 +40,10 @@ fn test_rel_scan_binds_destination_node() {
     got.sort_unstable();
     assert_eq!(
         got,
-        vec![vec!["Int64(1)".to_string(), "Int64(2)".to_string()], vec!["Int64(2)".to_string(), "Int64(3)".to_string()]],
+        vec![
+            vec!["Int64(1)".to_string(), "Int64(2)".to_string()],
+            vec!["Int64(2)".to_string(), "Int64(3)".to_string()]
+        ],
         "destination node binding"
     );
 }
@@ -60,8 +63,16 @@ fn test_rel_scan_carries_dest_properties_and_rel_props() {
     assert_eq!(
         got,
         vec![
-            vec!["Int64(1)".to_string(), "Int64(2)".to_string(), "Double(0.5)".to_string()],
-            vec!["Int64(2)".to_string(), "Int64(3)".to_string(), "Double(0.7)".to_string()],
+            vec![
+                "Int64(1)".to_string(),
+                "Int64(2)".to_string(),
+                "Double(0.5)".to_string()
+            ],
+            vec![
+                "Int64(2)".to_string(),
+                "Int64(3)".to_string(),
+                "Double(0.7)".to_string()
+            ],
         ]
     );
 }
@@ -76,7 +87,10 @@ fn test_rel_scan_reverse_direction() {
     got.sort_unstable();
     assert_eq!(
         got,
-        vec![vec!["Int64(2)".to_string(), "Int64(1)".to_string()], vec!["Int64(3)".to_string(), "Int64(2)".to_string()]],
+        vec![
+            vec!["Int64(2)".to_string(), "Int64(1)".to_string()],
+            vec!["Int64(3)".to_string(), "Int64(2)".to_string()]
+        ],
         "reverse direction binding"
     );
 }
@@ -92,5 +106,12 @@ fn test_rel_scan_multi_hop() {
         "MATCH (a:Memory)-[:Connected]->(b:Memory)-[:Connected]->(c:Memory) RETURN a.id, b.id, c.id",
     );
     got.sort_unstable();
-    assert_eq!(got, vec![vec!["Int64(1)".to_string(), "Int64(2)".to_string(), "Int64(3)".to_string()]]);
+    assert_eq!(
+        got,
+        vec![vec![
+            "Int64(1)".to_string(),
+            "Int64(2)".to_string(),
+            "Int64(3)".to_string()
+        ]]
+    );
 }

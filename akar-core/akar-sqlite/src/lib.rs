@@ -121,7 +121,10 @@ impl Extension for SqliteExtension {
                     let conn = rusqlite::Connection::open(&path)
                         .map_err(|e| format!("Failed to open SQLite DB '{path}': {e}"))?;
 
-                    let sql = format!("SELECT * FROM {}", akar_common::extension_utils::quote_sql_table_name(&table));
+                    let sql = format!(
+                        "SELECT * FROM {}",
+                        akar_common::extension_utils::quote_sql_table_name(&table)
+                    );
                     let mut stmt = conn.prepare(&sql).map_err(|e| format!("SQLite prepare error: {e}"))?;
                     let col_count = stmt.column_count();
                     let names: Vec<String> = (0..col_count)
@@ -143,11 +146,11 @@ impl Extension for SqliteExtension {
                     chunk.field_types.clear();
                     chunk.field_names.clear();
                     for (col, name) in columns.into_iter().zip(names) {
-                        chunk.fields.push(
-                            std::sync::Arc::new(arrow::array::StringArray::from_iter(
+                        chunk
+                            .fields
+                            .push(std::sync::Arc::new(arrow::array::StringArray::from_iter(
                                 col.iter().map(|o| o.as_deref()),
-                            )) as arrow::array::ArrayRef,
-                        );
+                            )) as arrow::array::ArrayRef);
                         chunk.field_types.push(akar_common::types::PhysicalTypeID::String);
                         chunk.field_names.push(name);
                     }

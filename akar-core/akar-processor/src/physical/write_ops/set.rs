@@ -3,7 +3,7 @@ use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index};
 use akar_common::types::Value;
-use akar_common::types::{physical_type_from_logical, PhysicalTypeID};
+use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::FunctionRegistry;
 use akar_function::scalar::evaluate_scalar;
@@ -51,8 +51,7 @@ impl PhysicalOperatorExec for PhysicalSet {
             let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty()
-                    && let Some(akar_common::types::Value::Int64(val)) =
-                        chunk.get_value(row_id_col.unwrap_or(0), row)
+                    && let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row)
                 {
                     rows_to_update.push(val as u64);
                 }

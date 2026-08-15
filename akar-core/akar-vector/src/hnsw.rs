@@ -598,7 +598,10 @@ mod tests {
         assert!(idx.get_vector(2).is_some());
 
         let results = idx.search(&[10.0, 10.0], 3);
-        assert_eq!(results[0].1, 2, "nearest to row 2 must be reported as id 2, not positionally");
+        assert_eq!(
+            results[0].1, 2,
+            "nearest to row 2 must be reported as id 2, not positionally"
+        );
     }
 
     #[test]

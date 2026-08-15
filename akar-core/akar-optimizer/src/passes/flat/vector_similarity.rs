@@ -52,10 +52,7 @@ mod tests {
                 predicate: None,
             }),
             LogicalOperator::Filter(LogicalFilter {
-                expression: akar_parser::ast::Expression::FunctionCall(
-                    "cosine_similarity".into(),
-                    vec![],
-                ),
+                expression: akar_parser::ast::Expression::FunctionCall("cosine_similarity".into(), vec![]),
                 children: vec![],
                 cardinality: 0,
             }),

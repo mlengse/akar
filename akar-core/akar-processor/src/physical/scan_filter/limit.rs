@@ -58,7 +58,11 @@ impl PhysicalOperatorExec for PhysicalLimit {
                 // complex types (List/Struct) that the legacy ValueVector
                 // round-trip would drop to NULL.
                 let indices: Vec<usize> = (start_in_chunk..start_in_chunk + take).collect();
-                output.push(take_global_rows(std::slice::from_ref(&chunk), &indices, chunk.field_names.clone())?);
+                output.push(take_global_rows(
+                    std::slice::from_ref(&chunk),
+                    &indices,
+                    chunk.field_names.clone(),
+                )?);
             }
         }
         Ok(output)

@@ -54,16 +54,14 @@ fn latest_delta_log_version(table_path: &str) -> Result<i64, String> {
 fn read_delta_log_actions(table_path: &str, version: i64) -> Result<Vec<serde_json::Value>, String> {
     let mut all_actions = Vec::new();
     for v in 0..=version {
-        let log_path = Path::new(table_path)
-            .join("_delta_log")
-            .join(format!("{:020}.json", v));
+        let log_path = Path::new(table_path).join("_delta_log").join(format!("{:020}.json", v));
         if !log_path.exists() {
             // Tolerate a missing intermediate version rather than failing the
             // whole read; later versions are replayed normally.
             continue;
         }
-        let content =
-            fs::read_to_string(&log_path).map_err(|e| format!("Failed to read delta log {}: {e}", log_path.display()))?;
+        let content = fs::read_to_string(&log_path)
+            .map_err(|e| format!("Failed to read delta log {}: {e}", log_path.display()))?;
         for line in content.lines().filter(|l| !l.trim().is_empty()) {
             if let Ok(action) = serde_json::from_str(line) {
                 all_actions.push(action);

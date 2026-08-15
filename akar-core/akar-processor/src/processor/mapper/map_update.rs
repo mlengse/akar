@@ -116,6 +116,29 @@ pub fn map_and_execute_update(
             record_insert_writes(ex.rel_table_id, &result, ctx);
             Ok(result)
         }
+        LogicalOperator::OptionalExtend(oe) => {
+            let table_catalog = ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| "No table catalog available for OptionalExtend".to_string())?;
+
+            let input = if oe.children.is_empty() {
+                current_input
+            } else {
+                ctx.execute_children(&oe.children)?
+            };
+
+            let optional_extend_op = PhysicalOptionalExtend {
+                rel_table_name: oe.rel_table_name.clone(),
+                rel_table_id: oe.rel_table_id,
+                rel_var: oe.rel_var.clone(),
+                src_node_var: oe.src_node_var.clone(),
+                dst_node_var: oe.dst_node_var.clone(),
+                direction: oe.direction.clone(),
+                table_catalog,
+            };
+            Ok(optional_extend_op.execute(input)?)
+        }
         LogicalOperator::Merge(m) => {
             let table_catalog = ctx
                 .table_catalog

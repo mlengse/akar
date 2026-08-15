@@ -12,8 +12,8 @@
 
 use akar_common::types::Value;
 use akar_main::{Connection, Database, SystemConfig};
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::Duration;
 use tempfile::tempdir;
 
@@ -52,10 +52,7 @@ fn create_vector_index_twice_no_deadlock() {
     handle.join().expect("worker thread panicked");
 
     match result {
-        Err(e) => assert!(
-            e.contains("already exists"),
-            "expected 'already exists', got: {e}"
-        ),
+        Err(e) => assert!(e.contains("already exists"), "expected 'already exists', got: {e}"),
         Ok(_) => panic!("second CREATE VECTOR INDEX should have errored with 'already exists'"),
     }
 }
@@ -74,7 +71,9 @@ fn vector_index_does_not_break_scalar_queries() {
     conn.query("CREATE (m:Memory {id: 1, content: 'hello', embedding: [0.1, 0.2]})")
         .expect("insert row");
 
-    let res = conn.query("MATCH (m:Memory) RETURN m.id, m.content").expect("scalar query");
+    let res = conn
+        .query("MATCH (m:Memory) RETURN m.id, m.content")
+        .expect("scalar query");
     let chunk = res.chunks.first().expect("one chunk");
     assert_eq!(chunk.size, 1, "one row expected");
 }
@@ -117,7 +116,9 @@ fn complex_type_map_literal_returns_struct() {
     conn.query("CREATE (m:Memory {id: 1, content: 'hello', embedding: [0.1, 0.2]})")
         .expect("insert row");
 
-    let res = conn.query("MATCH (m:Memory) RETURN {id: m.id}").expect("map literal query");
+    let res = conn
+        .query("MATCH (m:Memory) RETURN {id: m.id}")
+        .expect("map literal query");
     let chunk = res.chunks.first().expect("one chunk");
     assert_eq!(chunk.size, 1, "one row expected");
 

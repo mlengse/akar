@@ -40,7 +40,7 @@ impl Connection {
             .remove(&txn_id);
         let resources = match resources {
             Some(r) => r,
-            None => return Err(format!("No resources found for txn#{txn_id}", )),
+            None => return Err(format!("No resources found for txn#{txn_id}",)),
         };
 
         // Step 2: Bulk-copy LocalWAL buffer into the global WAL (before flush)

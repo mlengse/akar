@@ -256,9 +256,9 @@ impl PhysicalSemiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    let matched = hash_map.get(&value_hash(&key)).map_or(false, |bucket| {
-                        bucket.iter().any(|k| *k == key)
-                    });
+                    let matched = hash_map
+                        .get(&value_hash(&key))
+                        .map_or(false, |bucket| bucket.iter().any(|k| *k == key));
                     if matched {
                         match_rows.push((ci, row));
                     }
@@ -361,9 +361,9 @@ impl PhysicalAntiJoin {
                     if matches!(key, Value::Null) {
                         continue;
                     }
-                    let matched = hash_map.get(&value_hash(&key)).map_or(false, |bucket| {
-                        bucket.iter().any(|k| *k == key)
-                    });
+                    let matched = hash_map
+                        .get(&value_hash(&key))
+                        .map_or(false, |bucket| bucket.iter().any(|k| *k == key));
                     if !matched {
                         non_match_rows.push((ci, row));
                     }

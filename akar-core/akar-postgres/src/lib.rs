@@ -19,7 +19,12 @@ use std::sync::Arc;
 /// (e.g. bytea, timestamps) fall back to their column type name.
 #[cfg(feature = "native")]
 fn postgres_value_to_string(row: &tokio_postgres::Row, i: usize) -> String {
-    let type_name = row.columns().get(i).map(|c| c.type_().name()).unwrap_or("unknown").to_string();
+    let type_name = row
+        .columns()
+        .get(i)
+        .map(|c| c.type_().name())
+        .unwrap_or("unknown")
+        .to_string();
     if let Ok(Some(v)) = row.try_get::<_, Option<String>>(i) {
         return v;
     }
@@ -92,7 +97,9 @@ mod runtime {
         }
         config.connect_timeout(Duration::from_secs(10));
 
-        let mut cache = connections().lock().map_err(|_| "Connection cache lock poisoned".to_string())?;
+        let mut cache = connections()
+            .lock()
+            .map_err(|_| "Connection cache lock poisoned".to_string())?;
 
         let client = match cache.get(conn_str) {
             Some(c) => Arc::clone(c),

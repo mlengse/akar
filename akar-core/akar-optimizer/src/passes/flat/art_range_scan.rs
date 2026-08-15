@@ -161,23 +161,15 @@ fn extract_single_bound(expr: &Expression) -> Option<RangeBounds> {
             // i.e. `10 <= p.id` ⇔ `p.id >= 10`.
             let (property, const_val, is_reversed) = match (left.as_ref(), right.as_ref()) {
                 // p.prop >= constant
-                (Expression::PropertyAccess(obj, prop), constant @ Expression::Constant(_)) => {
-                    match obj.as_ref() {
-                        Expression::Variable(v) => {
-                            (format!("{}.{}", v, prop), constant_to_value(constant), false)
-                        }
-                        _ => return None,
-                    }
-                }
+                (Expression::PropertyAccess(obj, prop), constant @ Expression::Constant(_)) => match obj.as_ref() {
+                    Expression::Variable(v) => (format!("{}.{}", v, prop), constant_to_value(constant), false),
+                    _ => return None,
+                },
                 // constant <= p.prop (reversed)
-                (constant @ Expression::Constant(_), Expression::PropertyAccess(obj, prop)) => {
-                    match obj.as_ref() {
-                        Expression::Variable(v) => {
-                            (format!("{}.{}", v, prop), constant_to_value(constant), true)
-                        }
-                        _ => return None,
-                    }
-                }
+                (constant @ Expression::Constant(_), Expression::PropertyAccess(obj, prop)) => match obj.as_ref() {
+                    Expression::Variable(v) => (format!("{}.{}", v, prop), constant_to_value(constant), true),
+                    _ => return None,
+                },
                 _ => return None,
             };
 
@@ -235,51 +227,41 @@ fn extract_single_bound(expr: &Expression) -> Option<RangeBounds> {
                 }
             } else {
                 match op {
-                    akar_parser::ast::BinaryOp::GreaterThanOrEqual => {
-                        Some(RangeBounds {
-                            property,
-                            lower: Some(val),
-                            lower_inclusive: true,
-                            upper: None,
-                            upper_inclusive: true,
-                        })
-                    }
-                    akar_parser::ast::BinaryOp::GreaterThan => {
-                        Some(RangeBounds {
-                            property,
-                            lower: Some(val),
-                            lower_inclusive: false,
-                            upper: None,
-                            upper_inclusive: true,
-                        })
-                    }
-                    akar_parser::ast::BinaryOp::LessThanOrEqual => {
-                        Some(RangeBounds {
-                            property,
-                            lower: None,
-                            lower_inclusive: true,
-                            upper: Some(val),
-                            upper_inclusive: true,
-                        })
-                    }
-                    akar_parser::ast::BinaryOp::LessThan => {
-                        Some(RangeBounds {
-                            property,
-                            lower: None,
-                            lower_inclusive: true,
-                            upper: Some(val),
-                            upper_inclusive: false,
-                        })
-                    }
-                    akar_parser::ast::BinaryOp::Equal => {
-                        Some(RangeBounds {
-                            property,
-                            lower: Some(val.clone()),
-                            lower_inclusive: true,
-                            upper: Some(val),
-                            upper_inclusive: true,
-                        })
-                    }
+                    akar_parser::ast::BinaryOp::GreaterThanOrEqual => Some(RangeBounds {
+                        property,
+                        lower: Some(val),
+                        lower_inclusive: true,
+                        upper: None,
+                        upper_inclusive: true,
+                    }),
+                    akar_parser::ast::BinaryOp::GreaterThan => Some(RangeBounds {
+                        property,
+                        lower: Some(val),
+                        lower_inclusive: false,
+                        upper: None,
+                        upper_inclusive: true,
+                    }),
+                    akar_parser::ast::BinaryOp::LessThanOrEqual => Some(RangeBounds {
+                        property,
+                        lower: None,
+                        lower_inclusive: true,
+                        upper: Some(val),
+                        upper_inclusive: true,
+                    }),
+                    akar_parser::ast::BinaryOp::LessThan => Some(RangeBounds {
+                        property,
+                        lower: None,
+                        lower_inclusive: true,
+                        upper: Some(val),
+                        upper_inclusive: false,
+                    }),
+                    akar_parser::ast::BinaryOp::Equal => Some(RangeBounds {
+                        property,
+                        lower: Some(val.clone()),
+                        lower_inclusive: true,
+                        upper: Some(val),
+                        upper_inclusive: true,
+                    }),
                     _ => None,
                 }
             }

@@ -22,7 +22,10 @@ use common::*;
 
 /// Insert Memory rows with distinct ids, a numeric `val`, and a `grp`.
 fn setup(conn: &Connection) {
-    exec(conn, "CREATE NODE TABLE Memory (id INT64, val INT64, grp STRING, PRIMARY KEY (id))");
+    exec(
+        conn,
+        "CREATE NODE TABLE Memory (id INT64, val INT64, grp STRING, PRIMARY KEY (id))",
+    );
     exec(conn, "CREATE (m:Memory {id: 1, val: 10, grp: 'a'})");
     exec(conn, "CREATE (m:Memory {id: 2, val: 20, grp: 'a'})");
     exec(conn, "CREATE (m:Memory {id: 5, val: 30, grp: 'b'})");
@@ -30,11 +33,7 @@ fn setup(conn: &Connection) {
 
 fn column_names(conn: &Connection, sql: &str) -> Vec<String> {
     let result = query(conn, sql);
-    result
-        .chunks
-        .first()
-        .map(|c| c.field_names.clone())
-        .unwrap_or_default()
+    result.chunks.first().map(|c| c.field_names.clone()).unwrap_or_default()
 }
 
 fn read_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
@@ -71,7 +70,11 @@ fn alias_applied_to_nested_aggregate() {
     setup(&conn);
 
     let names = column_names(&conn, "MATCH (m:Memory) RETURN COALESCE(MAX(m.id), 0) AS mx");
-    assert_eq!(names, vec!["mx"], "nested-aggregate alias becomes the output column name");
+    assert_eq!(
+        names,
+        vec!["mx"],
+        "nested-aggregate alias becomes the output column name"
+    );
 
     let rows = read_rows(&conn, "MATCH (m:Memory) RETURN COALESCE(MAX(m.id), 0) AS mx");
     assert_eq!(rows, vec![vec![Value::Int64(5)]]);
@@ -134,10 +137,16 @@ fn order_by_alias_on_aggregate() {
     // Add group 'c' (count 1) so sorting by alias `g` (a,b,c) differs from
     // sorting by `cnt` (b,c,a) — a wrong-column sort would fail this.
     exec(&conn, "CREATE (m:Memory {id: 9, val: 1, grp: 'c'})");
-    let names = column_names(&conn, "MATCH (m:Memory) RETURN m.grp AS g, count(m.id) AS cnt ORDER BY g");
+    let names = column_names(
+        &conn,
+        "MATCH (m:Memory) RETURN m.grp AS g, count(m.id) AS cnt ORDER BY g",
+    );
     assert_eq!(names, vec!["g".to_string(), "cnt".to_string()]);
 
-    let rows = read_rows(&conn, "MATCH (m:Memory) RETURN m.grp AS g, count(m.id) AS cnt ORDER BY g");
+    let rows = read_rows(
+        &conn,
+        "MATCH (m:Memory) RETURN m.grp AS g, count(m.id) AS cnt ORDER BY g",
+    );
     assert_eq!(
         rows,
         vec![

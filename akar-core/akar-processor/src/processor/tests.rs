@@ -1173,7 +1173,10 @@ mod tests {
         let result = skip.execute(input).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].size, 2);
-        assert!(result[0].get_value(0, 0).is_none(), "oversized string should degrade to NULL");
+        assert!(
+            result[0].get_value(0, 0).is_none(),
+            "oversized string should degrade to NULL"
+        );
         let second = result[0].get_value(0, 1).unwrap();
         assert_eq!(second, Value::String(short));
     }
@@ -1220,7 +1223,10 @@ mod tests {
         ));
         let r = is_null.execute(input.clone()).unwrap();
         assert_eq!(r[0].size, 1, "only row 1 is NULL");
-        assert!(r[0].get_value(0, 0).is_none(), "the single surviving row must be the NULL row");
+        assert!(
+            r[0].get_value(0, 0).is_none(),
+            "the single surviving row must be the NULL row"
+        );
 
         let is_not_null = PhysicalFilter::new(Expression::UnaryOp(
             UnaryOp::IsNotNull,

@@ -575,6 +575,30 @@ impl QueryPlanner {
                     }));
                 }
                 BoundClause::BoundOptionalMatch(om) => {
+                    // P53.25: Detect the bound-edge-probe shape — an optional
+                    // pattern that is a single edge between two node variables
+                    // already bound by the required side:
+                    //   `OPTIONAL MATCH (a)-[existing:Connected]-(b)`
+                    // where `a`/`b` come from the mandatory MATCH and carry no
+                    // label/property constraints here. Such patterns are executed
+                    // by probing the relationship adjacency per input row
+                    // (OptionalExtend) rather than scanning + outer-joining, so
+                    // the compound `a._id`/`b._id` endpoints survive.
+                    let edge_probe = om.patterns.len() == 2
+                        && om.patterns.iter().all(|p| {
+                            p.node_label.is_none()
+                                && p.properties.is_empty()
+                                && p.node_variable.as_ref().is_some_and(|v| available_vars.contains(v))
+                        })
+                        && om.patterns[0].edge.as_ref().is_some_and(|e| {
+                            e.variable.is_some()
+                                && e.label.as_ref().is_some_and(|l| !l.is_empty())
+                                && e.properties.is_empty()
+                                && e.lower_bound.is_none()
+                                && e.upper_bound.is_none()
+                        })
+                        && om.patterns[1].edge.is_none();
+
                     // Build the current required-side pipeline (left child)
                     let mut left_pipeline: Vec<LogicalOperator> = Vec::new();
                     if !scan_ops.is_empty() {
@@ -596,129 +620,141 @@ impl QueryPlanner {
                     if let Some(proj) = projection.take() {
                         left_pipeline.push(LogicalOperator::Projection(proj));
                     }
-                    let left_op = if left_pipeline.len() == 1 {
-                        left_pipeline.into_iter().next().unwrap()
-                    } else if left_pipeline.is_empty() {
-                        // Empty left side — use a dummy scan
-                        LogicalOperator::ScanNode(LogicalScanNode {
-                            table_name: String::new(),
-                            table_id: 0,
-                            alias: None,
-                            columns: Vec::new(),
-                            cardinality: 0,
-                            fts_query: None,
-                            predicate: None,
-                        })
-                    } else {
-                        LogicalOperator::Projection(LogicalProjection {
-                            expressions: Vec::new(),
+                    if edge_probe {
+                        let edge = om.patterns[0].edge.as_ref().unwrap();
+                        let src_var = om.patterns[0].node_variable.clone().unwrap();
+                        let dst_var = om.patterns[1].node_variable.clone().unwrap();
+                        delete_exprs.push(LogicalOperator::OptionalExtend(LogicalOptionalExtend {
                             children: left_pipeline,
+                            rel_table_name: edge.label.clone().unwrap(),
+                            rel_table_id: edge.rel_table_id.unwrap_or(0),
+                            rel_var: edge.variable.clone().unwrap(),
+                            src_node_var: src_var,
+                            dst_node_var: dst_var,
+                            direction: edge.direction.clone(),
                             cardinality: 0,
-                        })
-                    };
-
-                    // Build the optional-side pipeline (right child)
-                    let mut right_ops: Vec<LogicalOperator> = Vec::new();
-                    for pattern in &om.patterns {
-                        if let Some(label) = &pattern.node_label {
-                            right_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
-                                table_name: label.clone(),
-                                table_id: pattern.node_table_id.unwrap_or(0),
-                                alias: pattern.node_variable.clone(),
+                        }));
+                    } else {
+                        let left_op = if left_pipeline.len() == 1 {
+                            left_pipeline.into_iter().next().unwrap()
+                        } else if left_pipeline.is_empty() {
+                            // Empty left side — use a dummy scan
+                            LogicalOperator::ScanNode(LogicalScanNode {
+                                table_name: String::new(),
+                                table_id: 0,
+                                alias: None,
                                 columns: Vec::new(),
                                 cardinality: 0,
                                 fts_query: None,
                                 predicate: None,
-                            }));
+                            })
+                        } else {
+                            LogicalOperator::Projection(LogicalProjection {
+                                expressions: Vec::new(),
+                                children: left_pipeline,
+                                cardinality: 0,
+                            })
+                        };
+
+                        // Build the optional-side pipeline (right child)
+                        let mut right_ops: Vec<LogicalOperator> = Vec::new();
+                        for pattern in &om.patterns {
+                            if let Some(label) = &pattern.node_label {
+                                right_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
+                                    table_name: label.clone(),
+                                    table_id: pattern.node_table_id.unwrap_or(0),
+                                    alias: pattern.node_variable.clone(),
+                                    columns: Vec::new(),
+                                    cardinality: 0,
+                                    fts_query: None,
+                                    predicate: None,
+                                }));
+                            }
+                            if let Some(edge) = &pattern.edge
+                                && let Some(rel_label) = &edge.label
+                            {
+                                right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
+                                    table_name: rel_label.clone(),
+                                    table_id: edge.rel_table_id.unwrap_or(0),
+                                    direction: edge.direction.clone(),
+                                    cardinality: 0,
+                                }));
+                            }
                         }
-                        if let Some(edge) = &pattern.edge
-                            && let Some(rel_label) = &edge.label
-                        {
-                            right_ops.push(LogicalOperator::ScanRel(LogicalScanRel {
-                                table_name: rel_label.clone(),
-                                table_id: edge.rel_table_id.unwrap_or(0),
-                                direction: edge.direction.clone(),
+                        // Apply inline node/edge property predicates to the optional
+                        // side, mirroring the implicit WHERE the binder generates
+                        // for MATCH. Without this, `OPTIONAL MATCH (m:T {id: 999})`
+                        // scans every T row (predicate silently dropped) and the
+                        // left-outer merge degenerates into a cross product.
+                        let mut inline_exprs: Vec<Expression> = Vec::new();
+                        for pattern in &om.patterns {
+                            if let Some(node_var) = &pattern.node_variable {
+                                for (key, val_expr) in &pattern.properties {
+                                    inline_exprs.push(Expression::BinaryOp(
+                                        akar_parser::ast::BinaryOp::Equal,
+                                        Box::new(Expression::PropertyAccess(
+                                            Box::new(Expression::Variable(node_var.clone())),
+                                            key.clone(),
+                                        )),
+                                        Box::new(val_expr.clone()),
+                                    ));
+                                }
+                            }
+                            if let Some(edge) = &pattern.edge
+                                && let Some(edge_var) = &edge.variable
+                            {
+                                for (key, val_expr) in &edge.properties {
+                                    inline_exprs.push(Expression::BinaryOp(
+                                        akar_parser::ast::BinaryOp::Equal,
+                                        Box::new(Expression::PropertyAccess(
+                                            Box::new(Expression::Variable(edge_var.clone())),
+                                            key.clone(),
+                                        )),
+                                        Box::new(val_expr.clone()),
+                                    ));
+                                }
+                            }
+                        }
+                        if !inline_exprs.is_empty() {
+                            let combined = inline_exprs.into_iter().reduce(|acc, e| {
+                                Expression::BinaryOp(akar_parser::ast::BinaryOp::And, Box::new(acc), Box::new(e))
+                            });
+                            right_ops.push(LogicalOperator::Filter(LogicalFilter {
+                                expression: combined.unwrap(),
+                                children: Vec::new(),
                                 cardinality: 0,
                             }));
                         }
-                    }
-                    // Apply inline node/edge property predicates to the optional
-                    // side, mirroring the implicit WHERE the binder generates
-                    // for MATCH. Without this, `OPTIONAL MATCH (m:T {id: 999})`
-                    // scans every T row (predicate silently dropped) and the
-                    // left-outer merge degenerates into a cross product.
-                    let mut inline_exprs: Vec<Expression> = Vec::new();
-                    for pattern in &om.patterns {
-                        if let Some(node_var) = &pattern.node_variable {
-                            for (key, val_expr) in &pattern.properties {
-                                inline_exprs.push(Expression::BinaryOp(
-                                    akar_parser::ast::BinaryOp::Equal,
-                                    Box::new(Expression::PropertyAccess(
-                                        Box::new(Expression::Variable(node_var.clone())),
-                                        key.clone(),
-                                    )),
-                                    Box::new(val_expr.clone()),
-                                ));
-                            }
-                        }
-                        if let Some(edge) = &pattern.edge
-                            && let Some(edge_var) = &edge.variable
-                        {
-                            for (key, val_expr) in &edge.properties {
-                                inline_exprs.push(Expression::BinaryOp(
-                                    akar_parser::ast::BinaryOp::Equal,
-                                    Box::new(Expression::PropertyAccess(
-                                        Box::new(Expression::Variable(edge_var.clone())),
-                                        key.clone(),
-                                    )),
-                                    Box::new(val_expr.clone()),
-                                ));
-                            }
-                        }
-                    }
-                    if !inline_exprs.is_empty() {
-                        let combined = inline_exprs.into_iter().reduce(|acc, e| {
-                            Expression::BinaryOp(
-                                akar_parser::ast::BinaryOp::And,
-                                Box::new(acc),
-                                Box::new(e),
-                            )
-                        });
-                        right_ops.push(LogicalOperator::Filter(LogicalFilter {
-                            expression: combined.unwrap(),
-                            children: Vec::new(),
+                        let right_op = if right_ops.len() == 1 {
+                            right_ops.into_iter().next().unwrap()
+                        } else if right_ops.is_empty() {
+                            LogicalOperator::ScanNode(LogicalScanNode {
+                                table_name: String::new(),
+                                table_id: 0,
+                                alias: None,
+                                columns: Vec::new(),
+                                cardinality: 0,
+                                fts_query: None,
+                                predicate: None,
+                            })
+                        } else {
+                            LogicalOperator::Projection(LogicalProjection {
+                                expressions: Vec::new(),
+                                children: right_ops,
+                                cardinality: 0,
+                            })
+                        };
+
+                        // Create the OptionalMatch tree node.
+                        // The left side is the entire pipeline built so far (scans + filter + projection).
+                        // The right side is the optional pattern scans.
+                        // Push to delete_exprs so it gets appended at the end of the pipeline.
+                        delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch {
+                            left: Box::new(left_op),
+                            right: Box::new(right_op),
                             cardinality: 0,
                         }));
                     }
-                    let right_op = if right_ops.len() == 1 {
-                        right_ops.into_iter().next().unwrap()
-                    } else if right_ops.is_empty() {
-                        LogicalOperator::ScanNode(LogicalScanNode {
-                            table_name: String::new(),
-                            table_id: 0,
-                            alias: None,
-                            columns: Vec::new(),
-                            cardinality: 0,
-                            fts_query: None,
-                            predicate: None,
-                        })
-                    } else {
-                        LogicalOperator::Projection(LogicalProjection {
-                            expressions: Vec::new(),
-                            children: right_ops,
-                            cardinality: 0,
-                        })
-                    };
-
-                    // Create the OptionalMatch tree node.
-                    // The left side is the entire pipeline built so far (scans + filter + projection).
-                    // The right side is the optional pattern scans.
-                    // Push to delete_exprs so it gets appended at the end of the pipeline.
-                    delete_exprs.push(LogicalOperator::OptionalMatch(LogicalOptionalMatch {
-                        left: Box::new(left_op),
-                        right: Box::new(right_op),
-                        cardinality: 0,
-                    }));
                     // Reset pipeline state — subsequent clauses (DELETE, SET, etc.) build fresh
                     scan_ops = Vec::new();
                     filter_expr = None;
@@ -738,11 +774,20 @@ impl QueryPlanner {
                     }
                 }
                 BoundClause::BoundUnwind(u) => {
-                    delete_exprs.push(LogicalOperator::Unwind(LogicalUnwind {
+                    // Treat UNWIND as a scan operator: it produces the row
+                    // variable that later MATCH clauses join against. Routing it
+                    // through the scan list (instead of delete_exprs) lets the
+                    // join tree combine UNWIND rows with node scans, and keeps
+                    // implicit WHERE predicates from MATCH inline properties in
+                    // the scan filter instead of the top-level pipeline (P53.25).
+                    scan_ops.push(LogicalOperator::Unwind(LogicalUnwind {
                         expression: u.expression.clone(),
                         variable: u.variable.clone(),
                         cardinality: 0,
                     }));
+                    if !u.variable.is_empty() {
+                        available_vars.insert(u.variable.clone());
+                    }
                 }
                 BoundClause::BoundSet(s) => {
                     // Merge every item of a single SET clause into one operator
@@ -754,7 +799,10 @@ impl QueryPlanner {
                     let mut groups: Vec<(String, u64, bool, Vec<SetItem>)> = Vec::new();
                     for item in &s.items {
                         let key = (item.table_name.clone(), item.table_id, item.is_node);
-                        match groups.iter_mut().find(|(n, id, n2, _)| *n == key.0 && *id == key.1 && *n2 == key.2) {
+                        match groups
+                            .iter_mut()
+                            .find(|(n, id, n2, _)| *n == key.0 && *id == key.1 && *n2 == key.2)
+                        {
                             Some((_, _, _, items)) => items.push(SetItem {
                                 column_name: item.column_name.clone(),
                                 column_idx: item.column_idx,

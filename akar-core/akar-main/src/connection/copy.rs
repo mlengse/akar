@@ -114,11 +114,7 @@ fn clean_statement(raw: &str) -> Option<String> {
     let sig = significant?;
     let stmt = raw.lines().skip(sig).collect::<Vec<_>>().join("\n");
     let stmt = stmt.trim();
-    if stmt.is_empty() {
-        None
-    } else {
-        Some(stmt.to_string())
-    }
+    if stmt.is_empty() { None } else { Some(stmt.to_string()) }
 }
 
 /// Map a catalog logical type to a grammar-valid Cypher DDL type name.
@@ -242,7 +238,8 @@ mod tests {
     #[test]
     fn test_split_cypher_statements_multiline_ddl() {
         // The exporter writes multi-line DDL — must round-trip as one statement.
-        let script = "CREATE NODE TABLE A (\n  name STRING,\n  age INT64,\n  PRIMARY KEY (name)\n);\n\nCOPY A FROM 'a.csv';\n";
+        let script =
+            "CREATE NODE TABLE A (\n  name STRING,\n  age INT64,\n  PRIMARY KEY (name)\n);\n\nCOPY A FROM 'a.csv';\n";
         let stmts = split_cypher_statements(script);
         assert_eq!(stmts.len(), 2);
         assert!(stmts[0].starts_with("CREATE NODE TABLE A"));
@@ -268,8 +265,7 @@ mod tests {
 
     #[test]
     fn test_split_cypher_statements_comments_between_statements() {
-        let stmts =
-            split_cypher_statements("CREATE NODE TABLE A (x INT64);\n// mid comment\n\nCOPY A FROM 'a.csv';\n");
+        let stmts = split_cypher_statements("CREATE NODE TABLE A (x INT64);\n// mid comment\n\nCOPY A FROM 'a.csv';\n");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "CREATE NODE TABLE A (x INT64)");
         assert_eq!(stmts[1], "COPY A FROM 'a.csv'");

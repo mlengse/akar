@@ -176,7 +176,8 @@ impl Connection {
         let planner = QueryPlanner::new();
         let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
-        Ok(optimizer.optimize(logical_plan))
+        let optimized = optimizer.optimize(logical_plan);
+        Ok(optimized)
     }
 
     /// Inner query execution (after parsing and binding, before commit/rollback).
@@ -662,17 +663,20 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let catalog_inner = db_sq.catalog.clone();
             let seq_fn_inner = super::utils::make_sequence_callback(catalog_inner);
 
-            let processor =
-                QueryProcessor::with_catalog(db_sq.function_registry.clone(), db_sq.table_catalog(), db_sq.vfs.clone())
-                    .with_sequence_fn(seq_fn_inner)
-                    .with_schema_ddl_fn(schema_ddl_sq.clone())
-                    .with_standalone_call_handler(Arc::new(
-                        crate::connection::standalone_call::DbStandaloneCallHandler::new(db_sq.clone()),
-                    ))
-                    .with_snapshot(
-                        Some(db_sq.transaction_manager.current_commit_ts()),
-                        db_sq.transaction_manager.commit_history_snapshot(),
-                    );
+            let processor = QueryProcessor::with_catalog(
+                db_sq.function_registry.clone(),
+                db_sq.table_catalog(),
+                db_sq.vfs.clone(),
+            )
+            .with_sequence_fn(seq_fn_inner)
+            .with_schema_ddl_fn(schema_ddl_sq.clone())
+            .with_standalone_call_handler(Arc::new(
+                crate::connection::standalone_call::DbStandaloneCallHandler::new(db_sq.clone()),
+            ))
+            .with_snapshot(
+                Some(db_sq.transaction_manager.current_commit_ts()),
+                db_sq.transaction_manager.commit_history_snapshot(),
+            );
 
             processor
                 .execute(&optimized_plan)
@@ -681,7 +685,10 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
     });
 
     let standalone_call_handler: Arc<dyn StandaloneCallHandler> = Arc::new(
-        crate::connection::standalone_call::DbStandaloneCallHandler::with_query_executor(db.clone(), Some(query_fn.clone())),
+        crate::connection::standalone_call::DbStandaloneCallHandler::with_query_executor(
+            db.clone(),
+            Some(query_fn.clone()),
+        ),
     );
 
     ProcessorHandlers {
@@ -701,8 +708,13 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
 /// routed to `handle_foreach` and never runs its plan — excluded too.
 fn is_plan_cachable(bound: &BoundStatement) -> bool {
     match bound {
-        BoundStatement::BoundQuery(q) => !(q.clauses.len() == 1
-            && matches!(q.clauses.first(), Some(akar_binder::bound_statement::BoundClause::BoundForeach(_)))),
+        BoundStatement::BoundQuery(q) => {
+            !(q.clauses.len() == 1
+                && matches!(
+                    q.clauses.first(),
+                    Some(akar_binder::bound_statement::BoundClause::BoundForeach(_))
+                ))
+        }
         _ => false,
     }
 }

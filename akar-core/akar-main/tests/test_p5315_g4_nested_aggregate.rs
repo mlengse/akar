@@ -22,7 +22,10 @@ use common::*;
 
 /// Insert Memory rows with distinct ids and a numeric `val`.
 fn setup(conn: &Connection) {
-    exec(conn, "CREATE NODE TABLE Memory (id INT64, val INT64, grp STRING, PRIMARY KEY (id))");
+    exec(
+        conn,
+        "CREATE NODE TABLE Memory (id INT64, val INT64, grp STRING, PRIMARY KEY (id))",
+    );
     exec(conn, "CREATE (m:Memory {id: 1, val: 10, grp: 'a'})");
     exec(conn, "CREATE (m:Memory {id: 2, val: 20, grp: 'a'})");
     exec(conn, "CREATE (m:Memory {id: 5, val: 30, grp: 'b'})");
@@ -82,7 +85,10 @@ fn nested_coalesce_sum() {
 #[test]
 fn nested_coalesce_sum_empty_table_returns_fallback() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Memory (id INT64, val INT64, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory (id INT64, val INT64, PRIMARY KEY (id))",
+    );
 
     let got = int_column(&conn, "MATCH (m:Memory) RETURN COALESCE(SUM(m.val), 0)");
     assert_eq!(got, vec![0], "COALESCE(SUM(val), 0) = 0 on empty table");
@@ -95,7 +101,10 @@ fn group_by_with_nested_aggregate() {
 
     // Non-aggregate column becomes a GROUP BY key; the nested aggregate is
     // computed per group, then COALESCE is applied per row.
-    let result = query(&conn, "MATCH (m:Memory) RETURN m.grp, COALESCE(MAX(m.val), 0) ORDER BY m.grp");
+    let result = query(
+        &conn,
+        "MATCH (m:Memory) RETURN m.grp, COALESCE(MAX(m.val), 0) ORDER BY m.grp",
+    );
     let mut rows = Vec::new();
     for chunk in &result.chunks {
         for row in chunk.iter_rows() {
@@ -110,7 +119,11 @@ fn group_by_with_nested_aggregate() {
             rows.push((grp, mx));
         }
     }
-    assert_eq!(rows, vec![("a".to_string(), 20), ("b".to_string(), 30)], "per-group nested aggregate");
+    assert_eq!(
+        rows,
+        vec![("a".to_string(), 20), ("b".to_string(), 30)],
+        "per-group nested aggregate"
+    );
 }
 
 #[test]

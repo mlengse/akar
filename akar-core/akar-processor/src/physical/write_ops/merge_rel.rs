@@ -1,7 +1,7 @@
 //! Physical operator for edge MERGE (P53.20): `MERGE (a)-[r:R {..}]->(b)`.
 
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::set::{evaluate_expression_for_row, PhysicalSet};
+use crate::physical::write_ops::set::{PhysicalSet, evaluate_expression_for_row};
 use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
@@ -51,7 +51,11 @@ impl PhysicalOperatorExec for PhysicalMergeRel {
                 .table_catalog
                 .get_rel_table_by_name(&self.rel_table_name)
                 .ok_or_else(|| format!("Rel table '{}' not found", self.rel_table_name))?;
-            (rel_table.fwd_adj.clone(), rel_table.rev_adj.clone(), rel_table.columns.clone())
+            (
+                rel_table.fwd_adj.clone(),
+                rel_table.rev_adj.clone(),
+                rel_table.columns.clone(),
+            )
         };
 
         let mut output = Vec::with_capacity(input.len());

@@ -99,6 +99,11 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
                 collect_scans_recursive(child, scans);
             }
         }
+        LogicalOperator::OptionalExtend(oe) => {
+            for child in &oe.children {
+                collect_scans_recursive(child, scans);
+            }
+        }
         LogicalOperator::MultiplicityReducer(mr) => {
             for child in &mr.children {
                 collect_scans_recursive(child, scans);
@@ -861,10 +866,7 @@ mod tests {
         // The trailing join tree must only contain the B and C scans.
         let mut scans = Vec::new();
         collect_scans_recursive(&reordered[2], &mut scans);
-        let aliases: Vec<String> = scans
-            .iter()
-            .filter_map(|(_, op)| get_scan_alias(op))
-            .collect();
+        let aliases: Vec<String> = scans.iter().filter_map(|(_, op)| get_scan_alias(op)).collect();
         assert!(aliases.contains(&"b".to_string()));
         assert!(aliases.contains(&"c".to_string()));
         assert!(!aliases.contains(&"a".to_string()), "scan A must stay in its own stage");

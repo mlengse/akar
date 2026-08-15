@@ -124,13 +124,7 @@ mod tests {
         assert!(flat_table.indptr_file_path.is_none());
 
         let csr_table = IceDiskRelTable::new("study_at".into(), base, IceDiskRelTableLayout::Csr);
-        assert_eq!(
-            csr_table.indices_file_path,
-            base.join("study_at.indices.parquet")
-        );
-        assert_eq!(
-            csr_table.indptr_file_path,
-            Some(base.join("study_at.indptr.parquet"))
-        );
+        assert_eq!(csr_table.indices_file_path, base.join("study_at.indices.parquet"));
+        assert_eq!(csr_table.indptr_file_path, Some(base.join("study_at.indptr.parquet")));
     }
 }

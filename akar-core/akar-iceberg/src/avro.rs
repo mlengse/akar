@@ -159,8 +159,7 @@ fn read_avro_bytes(bytes: &[u8]) -> Result<Vec<Value>, String> {
 // ---------------------------------------------------------------------------
 
 fn parse_schema(json: &str) -> Result<Schema, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| format!("Invalid Avro schema JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("Invalid Avro schema JSON: {e}"))?;
     parse_schema_value(&value)
 }
 
@@ -180,10 +179,7 @@ fn parse_schema_value(v: &serde_json::Value) -> Result<Schema, String> {
     }
     if let Some(arr) = v.as_array() {
         // Union: [null, "string", ...]
-        let variants = arr
-            .iter()
-            .map(parse_schema_value)
-            .collect::<Result<Vec<_>, _>>()?;
+        let variants = arr.iter().map(parse_schema_value).collect::<Result<Vec<_>, _>>()?;
         return Ok(Schema::Union(variants));
     }
     let obj = v.as_object().ok_or_else(|| "Invalid Avro schema".to_string())?;
@@ -205,15 +201,11 @@ fn parse_schema_value(v: &serde_json::Value) -> Result<Schema, String> {
             Ok(Schema::Record { fields })
         }
         "array" => {
-            let items = obj
-                .get("items")
-                .ok_or_else(|| "Avro array missing items".to_string())?;
+            let items = obj.get("items").ok_or_else(|| "Avro array missing items".to_string())?;
             Ok(Schema::Array(Box::new(parse_schema_value(items)?)))
         }
         "map" => {
-            let values = obj
-                .get("values")
-                .ok_or_else(|| "Avro map missing values".to_string())?;
+            let values = obj.get("values").ok_or_else(|| "Avro map missing values".to_string())?;
             Ok(Schema::Map(Box::new(parse_schema_value(values)?)))
         }
         "enum" => Ok(Schema::Enum),
@@ -222,9 +214,7 @@ fn parse_schema_value(v: &serde_json::Value) -> Result<Schema, String> {
                 .get("size")
                 .and_then(|s| s.as_i64())
                 .ok_or_else(|| "Avro fixed missing size".to_string())?;
-            Ok(Schema::Fixed {
-                size: size as usize,
-            })
+            Ok(Schema::Fixed { size: size as usize })
         }
         other => Err(format!("Unsupported Avro schema type: {other}")),
     }
@@ -267,9 +257,8 @@ fn read_string<R: Read>(r: &mut R) -> std::io::Result<String> {
     }
     let mut buf = vec![0u8; len as usize];
     r.read_exact(&mut buf)?;
-    String::from_utf8(buf).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "Avro string is not valid UTF-8")
-    })
+    String::from_utf8(buf)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Avro string is not valid UTF-8"))
 }
 
 fn read_bytes<R: Read>(r: &mut R) -> std::io::Result<Vec<u8>> {
@@ -511,8 +500,7 @@ mod tests {
         let block: Vec<u8> = match codec {
             "null" => body,
             "deflate" => {
-                let mut enc =
-                    flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+                let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
                 enc.write_all(&body).unwrap();
                 enc.finish().unwrap()
             }
@@ -546,16 +534,22 @@ mod tests {
         }"#;
         let schema = parse_schema(schema_json).unwrap();
         let records = vec![
-            (schema.clone(), Value::Record(vec![
-                ("name".into(), Value::String("alice".into())),
-                ("age".into(), Value::Long(30)),
-                ("active".into(), Value::Boolean(true)),
-            ])),
-            (schema.clone(), Value::Record(vec![
-                ("name".into(), Value::String("bob".into())),
-                ("age".into(), Value::Null),
-                ("active".into(), Value::Boolean(false)),
-            ])),
+            (
+                schema.clone(),
+                Value::Record(vec![
+                    ("name".into(), Value::String("alice".into())),
+                    ("age".into(), Value::Long(30)),
+                    ("active".into(), Value::Boolean(true)),
+                ]),
+            ),
+            (
+                schema.clone(),
+                Value::Record(vec![
+                    ("name".into(), Value::String("bob".into())),
+                    ("age".into(), Value::Null),
+                    ("active".into(), Value::Boolean(false)),
+                ]),
+            ),
         ];
         write_container(&path, schema_json, "null", &records);
 
@@ -618,7 +612,10 @@ mod tests {
             decoded[0].field("tags").unwrap(),
             &Value::Array(vec![Value::String("a".into()), Value::String("b".into())])
         );
-        assert_eq!(decoded[0].field("meta").unwrap(), &Value::Map(vec![("k".into(), Value::Long(1))]));
+        assert_eq!(
+            decoded[0].field("meta").unwrap(),
+            &Value::Map(vec![("k".into(), Value::Long(1))])
+        );
     }
 
     #[test]
@@ -742,7 +739,11 @@ mod tests {
                 }
             ]
         });
-        fs::write(meta_dir.join("v1.metadata.json"), serde_json::to_string(&metadata).unwrap()).unwrap();
+        fs::write(
+            meta_dir.join("v1.metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
         fs::write(meta_dir.join("version-hint.text"), "1\n").unwrap();
 
         let ml_schema = parse_schema(manifest_list_schema).unwrap();
@@ -802,10 +803,13 @@ mod tests {
             "location": table.to_string_lossy().replace('\\', "/"),
             "snapshots": []
         });
-        fs::write(meta_dir.join("v1.metadata.json"), serde_json::to_string(&metadata).unwrap()).unwrap();
+        fs::write(
+            meta_dir.join("v1.metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
 
-        let active = crate::native_reader::list_active_data_files(&table.to_string_lossy().replace('\\', "/"))
-            .unwrap();
+        let active = crate::native_reader::list_active_data_files(&table.to_string_lossy().replace('\\', "/")).unwrap();
         assert!(active.is_empty());
     }
 

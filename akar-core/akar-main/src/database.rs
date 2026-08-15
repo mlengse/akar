@@ -347,7 +347,9 @@ impl Database {
     /// (P52.38).
     #[cfg(feature = "vector-extension")]
     pub fn refresh_vector_indexes(&self, table_ids: &[u64]) {
-        self.storage_manager.table_catalog().refresh_vector_indexes_for_tables(table_ids);
+        self.storage_manager
+            .table_catalog()
+            .refresh_vector_indexes_for_tables(table_ids);
     }
 
     /// No-op when the vector extension is not compiled in.

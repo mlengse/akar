@@ -42,9 +42,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
             let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty() {
-                    if let Some(akar_common::types::Value::Int64(val)) =
-                        chunk.get_value(row_id_col.unwrap_or(0), row)
-                    {
+                    if let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row) {
                         rows_to_delete.push(val as u64);
                     }
                 }
@@ -142,8 +140,5 @@ pub fn ast_constant_to_value(c: &Constant) -> Value {
 /// as a row index. Falls back to `None` when the chunk carries no `_id`
 /// column (e.g. rel table scans), letting callers keep the legacy behaviour.
 pub fn row_id_column_index(chunk: &DataChunk) -> Option<usize> {
-    chunk
-        .field_names
-        .iter()
-        .position(|n| n == "_id" || n.ends_with("._id"))
+    chunk.field_names.iter().position(|n| n == "_id" || n.ends_with("._id"))
 }

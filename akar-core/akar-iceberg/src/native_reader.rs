@@ -77,12 +77,18 @@ pub struct IcebergSnapshot {
 /// `metadata.{n}.json`. Returns `None` for anything else so unrelated files
 /// (e.g. the current `metadata.json`) are ignored.
 fn metadata_version(file_name: &str) -> Option<i64> {
-    if let Some(core) = file_name.strip_prefix("v").and_then(|s| s.strip_suffix(".metadata.json")) {
+    if let Some(core) = file_name
+        .strip_prefix("v")
+        .and_then(|s| s.strip_suffix(".metadata.json"))
+    {
         if let Ok(v) = core.parse::<i64>() {
             return Some(v);
         }
     }
-    if let Some(core) = file_name.strip_prefix("metadata.").and_then(|s| s.strip_suffix(".json")) {
+    if let Some(core) = file_name
+        .strip_prefix("metadata.")
+        .and_then(|s| s.strip_suffix(".json"))
+    {
         if let Ok(v) = core.parse::<i64>() {
             return Some(v);
         }
@@ -402,7 +408,10 @@ mod tests {
         fs::write(meta_dir.join("v10.metadata.json"), "{}").unwrap();
 
         let found = find_metadata_json(&dir.to_string_lossy()).unwrap();
-        assert!(found.ends_with("v10.metadata.json"), "lexical sort would pick v9, got {found}");
+        assert!(
+            found.ends_with("v10.metadata.json"),
+            "lexical sort would pick v9, got {found}"
+        );
     }
 
     #[test]
@@ -416,7 +425,10 @@ mod tests {
         fs::write(meta_dir.join("v2.metadata.json"), "{}").unwrap();
 
         let found = find_metadata_json(&dir.to_string_lossy()).unwrap();
-        assert!(found.ends_with("v3.metadata.json"), "version-hint must win, got {found}");
+        assert!(
+            found.ends_with("v3.metadata.json"),
+            "version-hint must win, got {found}"
+        );
     }
 
     #[test]

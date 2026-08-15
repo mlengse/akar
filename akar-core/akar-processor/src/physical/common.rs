@@ -17,8 +17,7 @@ pub(crate) fn take_global_rows(
     if num_fields == 0 {
         return Ok(DataChunk::new(Vec::new(), Vec::new()).with_names(field_names));
     }
-    let indices_arr =
-        arrow::array::UInt32Array::from_iter_values(global_indices.iter().map(|&i| i as u32));
+    let indices_arr = arrow::array::UInt32Array::from_iter_values(global_indices.iter().map(|&i| i as u32));
     let mut fields = Vec::with_capacity(num_fields);
     for col in 0..num_fields {
         let field = if chunks.len() == 1 {
@@ -28,9 +27,7 @@ pub(crate) fn take_global_rows(
             let refs: Vec<&dyn arrow::array::Array> = parts.iter().map(|p| p.as_ref()).collect();
             arrow::compute::concat(&refs).map_err(|e| e.to_string())?
         };
-        fields.push(
-            arrow::compute::take(field.as_ref(), &indices_arr, None).map_err(|e| e.to_string())?,
-        );
+        fields.push(arrow::compute::take(field.as_ref(), &indices_arr, None).map_err(|e| e.to_string())?);
     }
     Ok(DataChunk::new(fields, chunks[0].field_types.clone()).with_names(field_names))
 }

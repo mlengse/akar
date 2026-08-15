@@ -168,20 +168,18 @@ pub unsafe extern "C" fn akar_connection_init(
     database: *mut akar_database,
     out_connection: *mut akar_connection,
 ) -> akar_state {
-    catch(|| {
-        unsafe {
-            if database.is_null() || out_connection.is_null() || (*database)._database.is_null() {
-                return akar_state::AkarError;
-            }
-
-            let db_arc_ptr = (*database)._database as *mut Arc<Database>;
-            let db_ref = &*db_arc_ptr;
-
-            let conn = Connection::new(db_ref);
-            let conn_box = Box::new(conn);
-            (*out_connection)._connection = Box::into_raw(conn_box) as *mut c_void;
-            akar_state::AkarSuccess
+    catch(|| unsafe {
+        if database.is_null() || out_connection.is_null() || (*database)._database.is_null() {
+            return akar_state::AkarError;
         }
+
+        let db_arc_ptr = (*database)._database as *mut Arc<Database>;
+        let db_ref = &*db_arc_ptr;
+
+        let conn = Connection::new(db_ref);
+        let conn_box = Box::new(conn);
+        (*out_connection)._connection = Box::into_raw(conn_box) as *mut c_void;
+        akar_state::AkarSuccess
     })
 }
 

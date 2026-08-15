@@ -202,7 +202,10 @@ mod tests {
         let mut fields = Vec::with_capacity(cols.len());
         let mut types = Vec::with_capacity(cols.len());
         for col in cols {
-            let first = col.iter().find(|v| !matches!(v, Value::Null)).unwrap_or(&Value::Int64(0));
+            let first = col
+                .iter()
+                .find(|v| !matches!(v, Value::Null))
+                .unwrap_or(&Value::Int64(0));
             let ptype = match first {
                 Value::Int64(_) => PhysicalTypeID::Int64,
                 Value::String(_) => PhysicalTypeID::String,
@@ -249,7 +252,10 @@ mod tests {
         // merge is a cross product. Every left row is kept and no right row is
         // dropped.
         let left = make_chunk(
-            &[vec![Value::Int64(1), Value::Int64(2)], vec![Value::Int64(10), Value::Int64(20)]],
+            &[
+                vec![Value::Int64(1), Value::Int64(2)],
+                vec![Value::Int64(10), Value::Int64(20)],
+            ],
             &["a.id", "a.x"],
         );
         let right = make_chunk(&[vec![Value::Int64(5), Value::Int64(6)]], &["b.id"]);
@@ -262,11 +268,17 @@ mod tests {
     fn test_merge_optional_joins_on_shared_column() {
         // Shared column `a.id` on both sides → proper left-outer join.
         let left = make_chunk(
-            &[vec![Value::Int64(1), Value::Int64(2)], vec![Value::String("Alice".into()), Value::String("Bob".into())]],
+            &[
+                vec![Value::Int64(1), Value::Int64(2)],
+                vec![Value::String("Alice".into()), Value::String("Bob".into())],
+            ],
             &["a.id", "a.name"],
         );
         let right = make_chunk(
-            &[vec![Value::Int64(1), Value::Int64(3)], vec![Value::String("Rex".into()), Value::String("Tom".into())]],
+            &[
+                vec![Value::Int64(1), Value::Int64(3)],
+                vec![Value::String("Rex".into()), Value::String("Tom".into())],
+            ],
             &["a.id", "a.pet"],
         );
         let merged = merge_optional_chunks(vec![left], vec![right]).unwrap();

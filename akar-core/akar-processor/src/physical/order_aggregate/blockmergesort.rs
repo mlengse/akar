@@ -235,11 +235,7 @@ mod tests {
             .collect()
     }
 
-    fn assert_sorted(
-        indices: &[usize],
-        all_values: &[Vec<(Value, bool)>],
-        sort_keys: &[(u32, bool)],
-    ) {
+    fn assert_sorted(indices: &[usize], all_values: &[Vec<(Value, bool)>], sort_keys: &[(u32, bool)]) {
         for w in indices.windows(2) {
             for &(col, asc) in sort_keys {
                 let va = &all_values[col as usize][w[0]].0;
@@ -265,10 +261,7 @@ mod tests {
         assert_sorted(&indices, &all_values, &[(0, false)]);
         for w in indices.windows(2) {
             let cmp = value_cmp(&all_values[0][w[0]].0, &all_values[0][w[1]].0);
-            assert!(
-                cmp.is_gt(),
-                "DESC must be strictly decreasing at {w:?}"
-            );
+            assert!(cmp.is_gt(), "DESC must be strictly decreasing at {w:?}");
         }
     }
 

@@ -39,14 +39,14 @@ impl OptimizationPass for AggregateDetection {
         for op in operators {
             match op {
                 LogicalOperator::Projection(proj) => {
-                // Check if any expression contains an aggregate function call
-                // anywhere in its tree (top-level or nested).
-                let mut all_aggregates: Vec<(String, Vec<Expression>)> = Vec::new();
-                let mut group_by: Vec<Expression> = Vec::new();
-                let mut rewritten: Vec<BoundExpression> = Vec::new();
-                let mut has_agg = false;
+                    // Check if any expression contains an aggregate function call
+                    // anywhere in its tree (top-level or nested).
+                    let mut all_aggregates: Vec<(String, Vec<Expression>)> = Vec::new();
+                    let mut group_by: Vec<Expression> = Vec::new();
+                    let mut rewritten: Vec<BoundExpression> = Vec::new();
+                    let mut has_agg = false;
 
-                for be in &proj.expressions {
+                    for be in &proj.expressions {
                         if !contains_aggregate(&be.expression) {
                             // Non-aggregate expressions become GROUP BY keys.
                             // e.g. RETURN p.active, COUNT(p), AVG(p.score)
@@ -145,9 +145,7 @@ fn contains_aggregate(expr: &Expression) -> bool {
                     .any(|alt| contains_aggregate(&alt.when) || contains_aggregate(&alt.then))
                 || c.else_expr.as_ref().is_some_and(|e| contains_aggregate(e))
         }
-        Expression::ListPredicate {
-            list, predicate, ..
-        } => contains_aggregate(list) || contains_aggregate(predicate),
+        Expression::ListPredicate { list, predicate, .. } => contains_aggregate(list) || contains_aggregate(predicate),
         // Variables, constants, parameters, STAR, subqueries and lambdas cannot
         // carry a liftable aggregate call.
         _ => false,

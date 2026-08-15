@@ -1,6 +1,6 @@
 mod common;
-use akar_main::test_helpers::Value;
 use akar_main::Connection;
+use akar_main::test_helpers::Value;
 use common::{exec, setup_db};
 
 #[test]
@@ -110,13 +110,19 @@ fn test_set_spill_threshold_zero_disables() {
     let (db, conn) = setup_db();
 
     conn.query("SET spill_threshold=4096").unwrap();
-    assert_eq!(current_setting_value(&conn, "spill_threshold"), Value::String("4096".into()));
+    assert_eq!(
+        current_setting_value(&conn, "spill_threshold"),
+        Value::String("4096".into())
+    );
     assert_eq!(db.effective_spill_threshold(), 4096);
 
     // SET spill_threshold=0 must explicitly disable spilling (effective 0),
     // not silently fall back to the config/buffer default (P52.50).
     conn.query("SET spill_threshold=0").unwrap();
-    assert_eq!(current_setting_value(&conn, "spill_threshold"), Value::String("0".into()));
+    assert_eq!(
+        current_setting_value(&conn, "spill_threshold"),
+        Value::String("0".into())
+    );
     assert_eq!(db.effective_spill_threshold(), 0);
 }
 

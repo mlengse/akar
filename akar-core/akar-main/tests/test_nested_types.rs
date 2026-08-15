@@ -29,7 +29,10 @@ fn test_nested_list_nested() {
     exec(&conn, "CREATE NODE TABLE T(id INT64, lst INT64[][], PRIMARY KEY (id))");
     exec(&conn, "CREATE (t:T {id: 1, lst: [[1, 2], [3, 4]]})");
     let res = query_values(&conn, "MATCH (t:T) RETURN t.lst");
-    assert_eq!(res.trim(), "List([List([Int64(1), Int64(2)]), List([Int64(3), Int64(4)])])");
+    assert_eq!(
+        res.trim(),
+        "List([List([Int64(1), Int64(2)]), List([Int64(3), Int64(4)])])"
+    );
 }
 
 #[test]

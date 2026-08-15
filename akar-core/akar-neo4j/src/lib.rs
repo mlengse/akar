@@ -435,11 +435,7 @@ fn split_once_ascii_ci<'a>(s: &'a str, needle: &str) -> Option<(&'a str, &'a str
 /// Strip a leading ASCII case-insensitive prefix from `s`.
 fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     let idx = find_ascii_ci(s, prefix)?;
-    if idx == 0 {
-        Some(&s[prefix.len()..])
-    } else {
-        None
-    }
+    if idx == 0 { Some(&s[prefix.len()..]) } else { None }
 }
 
 // ==================== Migration Logic ====================
@@ -664,8 +660,14 @@ MATCH (a:Person), (b:Person) CREATE (a)-[r:KNOWS {since: 2019}]->(b)
         assert_eq!(find_ascii_ci("create (a)", "CREATE"), Some(0));
         assert_eq!(find_ascii_ci("MATCH (a)", "CREATE"), None);
         assert_eq!(find_ascii_ci("CREATE", ""), Some(0));
-        assert_eq!(strip_prefix_ascii_ci("Create Constraint ...", "CREATE CONSTRAINT"), Some(" ..."));
+        assert_eq!(
+            strip_prefix_ascii_ci("Create Constraint ...", "CREATE CONSTRAINT"),
+            Some(" ...")
+        );
         assert_eq!(strip_prefix_ascii_ci("CREATE INDEX ...", "create index"), Some(" ..."));
-        assert_eq!(split_once_ascii_ci("n.prop IS UNIQUE", "IS"), Some(("n.prop ", " UNIQUE")));
+        assert_eq!(
+            split_once_ascii_ci("n.prop IS UNIQUE", "IS"),
+            Some(("n.prop ", " UNIQUE"))
+        );
     }
 }

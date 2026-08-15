@@ -123,6 +123,60 @@ fn strip_sort_columns(chunks: &mut [DataChunk], extra: usize) {
     }
 }
 
+/// Resolve a projection expression to one or more input column indices.
+///
+/// Property accesses resolve to a single column; a bare variable either matches
+/// an exact input column or — when it names a node/relationship variable —
+/// expands to every input column prefixed `{var}.` (P53.25, so `WITH a, b, row`
+/// carries all of `a.id/a.content/a._id/...` forward). Returns `None` when the
+/// expression cannot be mapped to columns (caller falls back to positional
+/// indices).
+fn resolve_projection_column_expand(expr: &Expression, chunk: &DataChunk) -> Option<Vec<usize>> {
+    match expr {
+        Expression::PropertyAccess(obj, prop) => {
+            let col_name = if let Expression::Variable(var) = &**obj {
+                format!("{}.{}", var, prop)
+            } else {
+                prop.clone()
+            };
+            if !chunk.field_names.is_empty() {
+                if let Some(idx) = chunk.field_names.iter().position(|n| n == &col_name || n == prop) {
+                    return Some(vec![idx]);
+                }
+            }
+            if let Expression::Variable(var) = &**obj
+                && let Ok(idx) = var.parse::<usize>()
+            {
+                return Some(vec![idx]);
+            }
+            None
+        }
+        Expression::Variable(name) => {
+            if let Ok(idx) = name.parse::<usize>() {
+                return Some(vec![idx]);
+            }
+            if !chunk.field_names.is_empty() {
+                if let Some(idx) = chunk.field_names.iter().position(|n| n == name) {
+                    return Some(vec![idx]);
+                }
+                let prefix = format!("{}.", name);
+                let idxs: Vec<usize> = chunk
+                    .field_names
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| n.starts_with(&prefix))
+                    .map(|(i, _)| i)
+                    .collect();
+                if !idxs.is_empty() {
+                    return Some(idxs);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 pub fn map_and_execute_projection(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
@@ -189,14 +243,21 @@ pub fn map_and_execute_projection(
                     output
                 } else {
                     let column_indices: Vec<usize> = if let Some(first_chunk) = input.first() {
-                        p.expressions
-                            .iter()
-                            .filter_map(|be| resolve_projection_column_index(&be.expression, first_chunk))
-                            .collect()
+                        let mut all: Option<Vec<usize>> = Some(Vec::new());
+                        for be in &p.expressions {
+                            match resolve_projection_column_expand(&be.expression, first_chunk) {
+                                Some(idxs) => all.as_mut().expect("all is Some").extend(idxs),
+                                None => {
+                                    all = None;
+                                    break;
+                                }
+                            }
+                        }
+                        all.unwrap_or_default()
                     } else {
                         Vec::new()
                     };
-                    let column_indices = if column_indices.len() == p.expressions.len() {
+                    let column_indices = if !column_indices.is_empty() {
                         column_indices
                     } else {
                         (0..p.expressions.len()).collect()

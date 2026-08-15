@@ -664,10 +664,7 @@ impl CheckpointCoordinator {
     /// never touched by `begin_read`/`begin_write`, so `stop_new_txns_and_wait_
     /// until_all_leave` could never actually stop new transactions (P52.53).
     fn gate_new_transaction(&self) {
-        let _gate = self
-            .mtx_for_starting_new_txns
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _gate = self.mtx_for_starting_new_txns.lock().unwrap_or_else(|p| p.into_inner());
     }
 
     fn schedule_auto_checkpoint(&self) {

@@ -26,9 +26,18 @@ fn setup(conn: &Connection) {
         conn,
         "CREATE NODE TABLE Counter (id INT64, access_count INT64, total INT64, score DOUBLE, PRIMARY KEY (id))",
     );
-    exec(conn, "CREATE (c:Counter {id: 1, access_count: 0, total: 10, score: 0.0})");
-    exec(conn, "CREATE (c:Counter {id: 2, access_count: 3, total: 100, score: 4.0})");
-    exec(conn, "CREATE (c:Counter {id: 5, access_count: 700, total: 1000, score: 2.5})");
+    exec(
+        conn,
+        "CREATE (c:Counter {id: 1, access_count: 0, total: 10, score: 0.0})",
+    );
+    exec(
+        conn,
+        "CREATE (c:Counter {id: 2, access_count: 3, total: 100, score: 4.0})",
+    );
+    exec(
+        conn,
+        "CREATE (c:Counter {id: 5, access_count: 700, total: 1000, score: 2.5})",
+    );
 }
 
 fn read_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
@@ -52,11 +61,17 @@ fn set_self_reference_increments() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    exec(&conn, "MATCH (m:Counter {id: 1}) SET m.access_count = m.access_count + 1");
+    exec(
+        &conn,
+        "MATCH (m:Counter {id: 1}) SET m.access_count = m.access_count + 1",
+    );
     let rows = read_rows(&conn, "MATCH (m:Counter {id: 1}) RETURN m.access_count");
     assert_eq!(rows, vec![vec![Value::Int64(1)]], "first increment reads old 0");
 
-    exec(&conn, "MATCH (m:Counter {id: 1}) SET m.access_count = m.access_count + 1");
+    exec(
+        &conn,
+        "MATCH (m:Counter {id: 1}) SET m.access_count = m.access_count + 1",
+    );
     let rows = read_rows(&conn, "MATCH (m:Counter {id: 1}) RETURN m.access_count");
     assert_eq!(rows, vec![vec![Value::Int64(2)]], "second increment reads old 1");
 }
@@ -79,7 +94,10 @@ fn set_multi_item_evaluates_old_state() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    exec(&conn, "MATCH (m:Counter {id: 2}) SET m.score = 123.0, m.total = m.total + 1");
+    exec(
+        &conn,
+        "MATCH (m:Counter {id: 2}) SET m.score = 123.0, m.total = m.total + 1",
+    );
     let rows = read_rows(&conn, "MATCH (m:Counter {id: 2}) RETURN m.score, m.total");
     assert_eq!(
         rows,
@@ -124,7 +142,10 @@ fn set_function_call_in_value() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    exec(&conn, "MATCH (m:Counter {id: 2}) SET m.total = COALESCE(m.total, 0) + 1");
+    exec(
+        &conn,
+        "MATCH (m:Counter {id: 2}) SET m.total = COALESCE(m.total, 0) + 1",
+    );
     let rows = read_rows(&conn, "MATCH (m:Counter {id: 2}) RETURN m.total");
     assert_eq!(rows, vec![vec![Value::Int64(101)]], "registry-evaluated RHS");
 }

@@ -201,17 +201,17 @@ pub fn check_zone_map(stats: &ColumnChunkStats, op: &str, constant: &Value) -> Z
         }
         (Value::TimestampNs(a), Value::TimestampNs(b), Value::TimestampNs(c)) => check_constant_predicate(a, b, c, op),
         (Value::TimestampMs(a), Value::TimestampMs(b), Value::TimestampMs(c)) => check_constant_predicate(a, b, c, op),
-        (Value::TimestampSec(a), Value::TimestampSec(b), Value::TimestampSec(c)) => check_constant_predicate(a, b, c, op),
+        (Value::TimestampSec(a), Value::TimestampSec(b), Value::TimestampSec(c)) => {
+            check_constant_predicate(a, b, c, op)
+        }
         // InternalID: order by (table_id, offset) so rows from different
         // tables never alias each other (P52.22).
-        (Value::InternalID(a), Value::InternalID(b), Value::InternalID(c)) => {
-            check_constant_predicate(
-                &(a.table_id, a.offset),
-                &(b.table_id, b.offset),
-                &(c.table_id, c.offset),
-                op,
-            )
-        }
+        (Value::InternalID(a), Value::InternalID(b), Value::InternalID(c)) => check_constant_predicate(
+            &(a.table_id, a.offset),
+            &(b.table_id, b.offset),
+            &(c.table_id, c.offset),
+            op,
+        ),
         // Mixed/unknown types — fall back to AlwaysScan (never wrong-skip)
         _ => ZoneMapCheckResult::AlwaysScan,
     }
@@ -504,11 +504,7 @@ mod tests {
         assert!(!stats.guaranteed_all_nulls, "non-null value clears all-nulls");
 
         stats.update(&Value::Null);
-        assert_eq!(
-            stats.min,
-            Some(Value::Int64(5)),
-            "later Null must not corrupt min/max"
-        );
+        assert_eq!(stats.min, Some(Value::Int64(5)), "later Null must not corrupt min/max");
         assert_eq!(stats.max, Some(Value::Int64(5)));
         assert_eq!(
             check_null_zone_map(&stats, true),
@@ -582,19 +578,11 @@ mod tests {
             Some(Value::InternalID(InternalID { table_id: 1, offset: 5 })),
         );
         assert_eq!(
-            check_zone_map(
-                &stats,
-                "!=",
-                &Value::InternalID(InternalID { table_id: 2, offset: 5 })
-            ),
+            check_zone_map(&stats, "!=", &Value::InternalID(InternalID { table_id: 2, offset: 5 })),
             ZoneMapCheckResult::AlwaysScan
         );
         assert_eq!(
-            check_zone_map(
-                &stats,
-                "=",
-                &Value::InternalID(InternalID { table_id: 2, offset: 5 })
-            ),
+            check_zone_map(&stats, "=", &Value::InternalID(InternalID { table_id: 2, offset: 5 })),
             ZoneMapCheckResult::SkipScan
         );
     }

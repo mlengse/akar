@@ -61,7 +61,14 @@ impl PhysicalOperatorExec for PhysicalUnwind {
                     .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
                     .collect::<Vec<_>>();
                 let arrow_field_types = chunk_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
-                result_chunks.push(DataChunk::new(arrow_fields, arrow_field_types));
+                let mut named_chunk = DataChunk::new(arrow_fields, arrow_field_types);
+                named_chunk.field_names = chunk
+                    .field_names
+                    .iter()
+                    .cloned()
+                    .chain([self.variable.clone()])
+                    .collect();
+                result_chunks.push(named_chunk);
             }
         } else {
             // No input — just the unwound vector
@@ -71,7 +78,9 @@ impl PhysicalOperatorExec for PhysicalUnwind {
                 store_value_in_vector(&mut uw_v, i, item)?;
             }
             let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&uw_v).array;
-            result_chunks.push(DataChunk::new(vec![arr], vec![uw_v.physical_type()]));
+            let mut named_chunk = DataChunk::new(vec![arr], vec![uw_v.physical_type()]);
+            named_chunk.field_names = vec![self.variable.clone()];
+            result_chunks.push(named_chunk);
         }
 
         Ok(result_chunks)

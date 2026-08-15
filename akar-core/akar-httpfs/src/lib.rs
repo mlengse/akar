@@ -75,15 +75,12 @@ pub struct HttpRandomAccessReader {
 impl HttpRandomAccessReader {
     pub fn new(url: &str) -> std::io::Result<Self> {
         // HEAD may be unsupported by some servers; treat it as optional.
-        let content_length = ureq::head(url)
-            .call()
-            .ok()
-            .and_then(|resp| {
-                resp.headers()
-                    .get("Content-Length")
-                    .and_then(|s| s.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-            });
+        let content_length = ureq::head(url).call().ok().and_then(|resp| {
+            resp.headers()
+                .get("Content-Length")
+                .and_then(|s| s.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+        });
         Ok(Self {
             url: url.to_string(),
             position: 0,
@@ -339,8 +336,9 @@ impl Extension for HttpfsExtension {
                     std::io::copy(&mut reader, &mut temp_file)
                         .map_err(|e| format!("Failed to write temp file: {}", e))?;
 
-                    let (_file, path) =
-                        temp_file.keep().map_err(|e| format!("Failed to keep temp file: {}", e))?;
+                    let (_file, path) = temp_file
+                        .keep()
+                        .map_err(|e| format!("Failed to keep temp file: {}", e))?;
                     // Retain the file under a bounded registry so it is eventually
                     // cleaned up instead of leaking forever.
                     let path_str = akar_common::extension_utils::retain_temp_file(path);

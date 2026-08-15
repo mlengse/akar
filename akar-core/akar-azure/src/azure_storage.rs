@@ -168,7 +168,7 @@ pub fn download_blob(uri: &str) -> Result<String, String> {
         let status = resp.status();
         if status != 200 {
             last_err = format!("HTTP {status}");
-            if retryable_status(status) && attempt + 1 < RETRY_ATTEMPTS {
+            if retryable_status(status.into()) && attempt + 1 < RETRY_ATTEMPTS {
                 std::thread::sleep(backoff_delay(attempt));
                 continue;
             }

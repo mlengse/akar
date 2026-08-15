@@ -38,7 +38,9 @@ fn embedding_rows(conn: &Connection, sql: &str) -> Vec<(i64, usize, f64)> {
                 Value::Int64(n) => n,
                 other => panic!("expected Int64 id, got {other:?}"),
             };
-            let emb = chunk.get_value(1, row).expect("embedding must not be null (was NULL before fix)");
+            let emb = chunk
+                .get_value(1, row)
+                .expect("embedding must not be null (was NULL before fix)");
             let (len, first) = match emb {
                 Value::List(items) => {
                     assert_eq!(items.len(), 3, "embedding must have 3 elements, got {items:?}");
@@ -75,7 +77,11 @@ fn limit_with_offset_preserves_list_values() {
 
     // Partial-chunk path with a non-zero start offset inside the chunk.
     let got = embedding_rows(&conn, "MATCH (m:Memory) RETURN m.id, m.embedding LIMIT 2 SKIP 1");
-    assert_eq!(got, vec![(2, 3, 0.4), (3, 3, 0.7)], "OFFSET+LIMIT keeps the embedding lists");
+    assert_eq!(
+        got,
+        vec![(2, 3, 0.4), (3, 3, 0.7)],
+        "OFFSET+LIMIT keeps the embedding lists"
+    );
 }
 
 #[test]
@@ -85,7 +91,11 @@ fn order_by_preserves_list_values() {
 
     // ORDER BY re-materializes all output chunks; complex columns must survive.
     let got = embedding_rows(&conn, "MATCH (m:Memory) RETURN m.id, m.embedding ORDER BY m.id DESC");
-    assert_eq!(got, vec![(3, 3, 0.7), (2, 3, 0.4), (1, 3, 0.1)], "ORDER BY DESC keeps the embedding lists");
+    assert_eq!(
+        got,
+        vec![(3, 3, 0.7), (2, 3, 0.4), (1, 3, 0.1)],
+        "ORDER BY DESC keeps the embedding lists"
+    );
 }
 
 #[test]
@@ -94,7 +104,11 @@ fn order_by_asc_preserves_list_values() {
     setup(&conn);
 
     let got = embedding_rows(&conn, "MATCH (m:Memory) RETURN m.id, m.embedding ORDER BY m.id ASC");
-    assert_eq!(got, vec![(1, 3, 0.1), (2, 3, 0.4), (3, 3, 0.7)], "ORDER BY ASC keeps the embedding lists");
+    assert_eq!(
+        got,
+        vec![(1, 3, 0.1), (2, 3, 0.4), (3, 3, 0.7)],
+        "ORDER BY ASC keeps the embedding lists"
+    );
 }
 
 #[test]
@@ -103,7 +117,9 @@ fn order_by_limit_preserves_list_values() {
     setup(&conn);
 
     // Fused ORDER BY + LIMIT (TopK) output path.
-    let got = embedding_rows(&conn, "MATCH (m:Memory) RETURN m.id, m.embedding ORDER BY m.id ASC LIMIT 2");
+    let got = embedding_rows(
+        &conn,
+        "MATCH (m:Memory) RETURN m.id, m.embedding ORDER BY m.id ASC LIMIT 2",
+    );
     assert_eq!(got, vec![(1, 3, 0.1), (2, 3, 0.4)], "TOP-K keeps the embedding lists");
 }
-

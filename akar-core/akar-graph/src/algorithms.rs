@@ -68,10 +68,7 @@ pub fn page_rank(csr: &CSRAdjacency, damping: f64, max_iter: usize, tol: f64) ->
 
         // Dangling mass: total PR of nodes with no outgoing edges, distributed
         // once per iteration instead of O(n) per dangling node (P52.48).
-        let dangling_mass: f64 = (0..n)
-            .filter(|&i| csr.neighbors(i).is_empty())
-            .map(|i| pr[i])
-            .sum();
+        let dangling_mass: f64 = (0..n).filter(|&i| csr.neighbors(i).is_empty()).map(|i| pr[i]).sum();
 
         for i in 0..n {
             let neighbors = csr.neighbors(i);

@@ -285,7 +285,10 @@ mod tests {
     fn test_shared_in_memory_is_singleton() {
         let a = DuckDbManager::shared_in_memory().unwrap();
         let b = DuckDbManager::shared_in_memory().unwrap();
-        assert!(std::sync::Arc::ptr_eq(&a, &b), "shared instance must be reused, not recreated");
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "shared instance must be reused, not recreated"
+        );
         a.execute("CREATE TABLE IF NOT EXISTS shared_t (id INTEGER)").unwrap();
         b.execute("INSERT INTO shared_t VALUES (42)").unwrap();
         let rows = b.query_rows("SELECT COUNT(*) FROM shared_t").unwrap();

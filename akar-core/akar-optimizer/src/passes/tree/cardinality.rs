@@ -139,6 +139,10 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::OptionalMatch(om) => {
                     om.left.cardinality() // same as left (nullable)
                 }
+                LogicalOperator::OptionalExtend(oe) => {
+                    // One output row per input row (null-padded when no edge).
+                    oe.children.first().map(|c| c.cardinality()).unwrap_or(1)
+                }
                 LogicalOperator::Unwind(_) => 10, // list expansion estimate
                 LogicalOperator::Foreach(_) => 1,
                 LogicalOperator::Merge(_) => 1,      // single matched/created node

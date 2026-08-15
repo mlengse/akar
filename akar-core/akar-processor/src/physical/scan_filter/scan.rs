@@ -257,7 +257,10 @@ impl PhysicalScan {
                 std::sync::Arc::new(builder.finish())
             }
             PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct => {
-                let selected: Vec<Value> = rows.iter().map(|&r| col_data.get(r).cloned().unwrap_or(Value::Null)).collect();
+                let selected: Vec<Value> = rows
+                    .iter()
+                    .map(|&r| col_data.get(r).cloned().unwrap_or(Value::Null))
+                    .collect();
                 akar_common::arrow_vector::arrow_array_from_values(&selected)
             }
             _ => {

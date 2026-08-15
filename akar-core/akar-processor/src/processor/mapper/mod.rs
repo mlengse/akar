@@ -8,7 +8,7 @@ pub mod map_update;
 use crate::physical::types::PhysicalOperatorExec;
 use crate::processor::QueryProcessor;
 use akar_common::error::ProcessorError;
-use akar_common::types::{physical_type_from_logical, Value};
+use akar_common::types::{Value, physical_type_from_logical};
 use akar_common::vector::DataChunk;
 use akar_function::registry::FunctionRegistry;
 use akar_planner::logical_operator::LogicalOperator;
@@ -151,9 +151,9 @@ impl<'p> ExecutionContext<'p> {
                     // Append the internal node id column (`<var>._id` = row offset).
                     // Since Arrow arrays are concatenated in node-group order and no
                     // zone-map/predicate filtering happens here, offsets are 0..num_rows.
-                    let id_array: ArrayRef = std::sync::Arc::new(
-                        arrow::array::Int64Array::from((0..num_rows as i64).collect::<Vec<i64>>()),
-                    );
+                    let id_array: ArrayRef = std::sync::Arc::new(arrow::array::Int64Array::from(
+                        (0..num_rows as i64).collect::<Vec<i64>>(),
+                    ));
                     concat_arrays.push(id_array);
                     let mut columns = node_table.columns.clone();
                     columns.push(akar_storage::table::ColumnDefinition {
@@ -211,6 +211,7 @@ impl PlanMapper {
             | LogicalOperator::Merge(_)
             | LogicalOperator::MergeRel(_)
             | LogicalOperator::Extend(_)
+            | LogicalOperator::OptionalExtend(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::Insert(_)
             | LogicalOperator::CopyFrom(_) => map_update::map_and_execute_update(op, current_input, ctx),

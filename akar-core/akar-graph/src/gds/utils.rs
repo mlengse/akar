@@ -392,9 +392,24 @@ mod tests {
         // weight. 0→1 (w=1) →2 (w=10) beats the direct 0→2 (w=100): node 2's
         // recorded parent cost is 11, and the parent is node 1.
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 2, rel_id: 2, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 2,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
         ];
         let csr = CSRAdjacency::build(&edges, 3);
         let mut bfs = DenseBFSGraph::new(3);
@@ -411,7 +426,11 @@ mod tests {
         GDSUtils::run_weighted_shortest_path(&csr, 0, &mut bfs, weights);
 
         let parent = bfs.get_parent_list_head_offset(2).expect("node 2 reachable");
-        assert!((parent.cost - 11.0).abs() < 1e-9, "cost should be path cost 11, got {}", parent.cost);
+        assert!(
+            (parent.cost - 11.0).abs() < 1e-9,
+            "cost should be path cost 11, got {}",
+            parent.cost
+        );
         assert_eq!(parent.node_id.offset, 1, "parent should be node 1 (via cheaper path)");
         assert_eq!(parent.edge_id, 1);
     }

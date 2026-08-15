@@ -27,6 +27,12 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
+        // A filtered-out pipeline (all input chunks empty) must stay empty:
+        // nothing was created, so the output row count is zero (P53.25).
+        if !input.is_empty() && input.iter().all(|c| c.size == 0) {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
+        }
+
         let mut assigned_row_ids: Vec<i64> = Vec::new();
         let mut table = self
             .table_catalog
@@ -117,6 +123,12 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
             .table_catalog
             .get_rel_table_by_name_mut(&self.table_name)
             .ok_or_else(|| format!("Rel table '{}' not found for INSERT", self.table_name))?;
+
+        // A filtered-out pipeline (all input chunks empty) must stay empty:
+        // nothing was created, so the output row count is zero (P53.25).
+        if !input.is_empty() && input.iter().all(|c| c.size == 0) {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
+        }
 
         let num_cols = table.columns.len();
         let mut rels_to_insert = Vec::new();

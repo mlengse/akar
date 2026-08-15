@@ -216,8 +216,14 @@ mod tests {
         let plan = vec![make_limit(), make_filter()];
         let result = pass.apply(&plan);
         assert_eq!(result.len(), 2);
-        assert!(matches!(result[0], LogicalOperator::Filter(_)), "Filter should come first");
-        assert!(matches!(result[1], LogicalOperator::Limit(_)), "Limit pushed below Filter");
+        assert!(
+            matches!(result[0], LogicalOperator::Filter(_)),
+            "Filter should come first"
+        );
+        assert!(
+            matches!(result[1], LogicalOperator::Limit(_)),
+            "Limit pushed below Filter"
+        );
     }
 
     #[test]
@@ -237,7 +243,10 @@ mod tests {
         let result = pass.apply(&plan);
         assert_eq!(result.len(), 3);
         assert!(matches!(result[0], LogicalOperator::OrderBy(_)));
-        assert!(matches!(result[1], LogicalOperator::Limit(_)), "ordered limit stays in place");
+        assert!(
+            matches!(result[1], LogicalOperator::Limit(_)),
+            "ordered limit stays in place"
+        );
         assert!(matches!(result[2], LogicalOperator::Filter(_)));
     }
 }

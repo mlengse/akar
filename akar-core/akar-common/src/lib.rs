@@ -11,8 +11,8 @@
 pub mod arrow_vector;
 pub mod data_chunk;
 pub mod enums;
-pub mod extension_utils;
 pub mod error;
+pub mod extension_utils;
 pub mod file_system;
 pub mod gzip_file_system;
 pub mod memory;

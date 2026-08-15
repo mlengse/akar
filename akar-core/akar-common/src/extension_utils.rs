@@ -39,10 +39,7 @@ pub fn quote_sql_identifier(name: &str) -> String {
 /// name cannot break out of the query (prevents SQL injection in DuckDB-delegated
 /// scans).
 pub fn quote_sql_table_name(name: &str) -> String {
-    name.split('.')
-        .map(quote_sql_identifier)
-        .collect::<Vec<_>>()
-        .join(".")
+    name.split('.').map(quote_sql_identifier).collect::<Vec<_>>().join(".")
 }
 
 /// Maximum number of retained connector temp files before the oldest are evicted.
@@ -110,7 +107,10 @@ mod tests {
 
     #[test]
     fn test_quote_sql_table_name() {
-        assert_eq!(quote_sql_table_name("main.default.people"), "\"main\".\"default\".\"people\"");
+        assert_eq!(
+            quote_sql_table_name("main.default.people"),
+            "\"main\".\"default\".\"people\""
+        );
         assert_eq!(
             quote_sql_table_name("x.\"y\"; DROP TABLE t"),
             "\"x\".\"\"\"y\"\"; DROP TABLE t\""

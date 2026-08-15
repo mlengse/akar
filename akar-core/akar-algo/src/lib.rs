@@ -48,8 +48,8 @@ impl Extension for AlgoExtension {
     fn load(&self, context: &ExtensionContext) -> Result<(), String> {
         use akar_common::types::Value;
         use akar_common::vector::DataChunk;
-        use akar_function::registry::TableFunction;
         use akar_function::GraphDataSource;
+        use akar_function::registry::TableFunction;
 
         // ── Helper: fallback graph used when the caller has no catalog ────────
         // 5-node ring: 0→1→2→3→4→0
@@ -112,146 +112,151 @@ impl Extension for AlgoExtension {
         // Helper: create a table function closure that runs a GDS shortest path algorithm.
         let sp_destinations_fn = Arc::new(
             move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
-            let source = match args.first() {
-                Some(Value::Int64(s)) => *s as u64,
-                Some(Value::UInt64(s)) => *s,
-                _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
-            };
+                let source = match args.first() {
+                    Some(Value::Int64(s)) => *s as u64,
+                    Some(Value::UInt64(s)) => *s,
+                    _ => return Err("shortest_path: first argument must be source node offset (integer)".into()),
+                };
 
-            // Build CSR from the database graph (or the fallback sample graph).
-            let (csr, num_nodes) = csr_from_graph(graph);
+                // Build CSR from the database graph (or the fallback sample graph).
+                let (csr, num_nodes) = csr_from_graph(graph);
 
-            // Run BFS shortest path using GDS framework
-            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
-            akar_graph::gds::utils::GDSUtils::run_single_shortest_path(&csr, source, &mut bfs, 100);
+                // Run BFS shortest path using GDS framework
+                let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
+                akar_graph::gds::utils::GDSUtils::run_single_shortest_path(&csr, source, &mut bfs, 100);
 
-            // Collect results: (src, dst, distance)
-            let mut src_col = Vec::new();
-            let mut dst_col = Vec::new();
-            let mut dist_col = Vec::new();
+                // Collect results: (src, dst, distance)
+                let mut src_col = Vec::new();
+                let mut dst_col = Vec::new();
+                let mut dist_col = Vec::new();
 
-            for offset in 0..num_nodes {
-                if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
-                    let dist = if offset == source as usize {
-                        0i64
-                    } else {
-                        // Trace back to count hops
-                        let mut hops = 0i64;
-                        let mut cur = offset as u64;
-                        while cur != source {
-                            if let Some(parent) = bfs.get_parent_list_head_offset(cur) {
-                                cur = parent.node_id.offset;
-                                hops += 1;
-                            } else {
-                                break;
+                for offset in 0..num_nodes {
+                    if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
+                        let dist = if offset == source as usize {
+                            0i64
+                        } else {
+                            // Trace back to count hops
+                            let mut hops = 0i64;
+                            let mut cur = offset as u64;
+                            while cur != source {
+                                if let Some(parent) = bfs.get_parent_list_head_offset(cur) {
+                                    cur = parent.node_id.offset;
+                                    hops += 1;
+                                } else {
+                                    break;
+                                }
                             }
-                        }
-                        hops
-                    };
-                    src_col.push(Value::Int64(source as i64));
-                    dst_col.push(Value::Int64(offset as i64));
-                    dist_col.push(Value::Int64(dist));
+                            hops
+                        };
+                        src_col.push(Value::Int64(source as i64));
+                        dst_col.push(Value::Int64(offset as i64));
+                        dist_col.push(Value::Int64(dist));
+                    }
                 }
-            }
 
-            let n = src_col.len();
-            let mut v1 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
-            let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
-            let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
-            for (i, val) in src_col.iter().enumerate() {
-                v1.set_value(i, val)?;
-            }
-            for (i, val) in dst_col.iter().enumerate() {
-                v2.set_value(i, val)?;
-            }
-            for (i, val) in dist_col.iter().enumerate() {
-                v3.set_value(i, val)?;
-            }
-            output.fields = vec![
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
-            ];
-            output.field_types = vec![
-                akar_common::types::PhysicalTypeID::Int64,
-                akar_common::types::PhysicalTypeID::Int64,
-                akar_common::types::PhysicalTypeID::Int64,
-            ];
-            output.size = n;
-            Ok(())
-        });
+                let n = src_col.len();
+                let mut v1 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
+                let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
+                let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
+                for (i, val) in src_col.iter().enumerate() {
+                    v1.set_value(i, val)?;
+                }
+                for (i, val) in dst_col.iter().enumerate() {
+                    v2.set_value(i, val)?;
+                }
+                for (i, val) in dist_col.iter().enumerate() {
+                    v3.set_value(i, val)?;
+                }
+                output.fields = vec![
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
+                ];
+                output.field_types = vec![
+                    akar_common::types::PhysicalTypeID::Int64,
+                    akar_common::types::PhysicalTypeID::Int64,
+                    akar_common::types::PhysicalTypeID::Int64,
+                ];
+                output.size = n;
+                Ok(())
+            },
+        );
 
         let wsp_destinations_fn = Arc::new(
             move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
-            let source = match args.first() {
-                Some(Value::Int64(s)) => *s as u64,
-                Some(Value::UInt64(s)) => *s,
-                _ => return Err("weighted_shortest_path: first argument must be source node offset".into()),
-            };
+                let source = match args.first() {
+                    Some(Value::Int64(s)) => *s as u64,
+                    Some(Value::UInt64(s)) => *s,
+                    _ => return Err("weighted_shortest_path: first argument must be source node offset".into()),
+                };
 
-            let (csr, num_nodes) = csr_from_graph(graph);
+                let (csr, num_nodes) = csr_from_graph(graph);
 
-            let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
-            akar_graph::gds::utils::GDSUtils::run_weighted_shortest_path(&csr, source, &mut bfs, |_src, _dst, _eid| {
-                1.0
-            });
+                let mut bfs = akar_graph::gds::bfs_graph::DenseBFSGraph::new(num_nodes);
+                akar_graph::gds::utils::GDSUtils::run_weighted_shortest_path(
+                    &csr,
+                    source,
+                    &mut bfs,
+                    |_src, _dst, _eid| 1.0,
+                );
 
-            let mut src_col = Vec::new();
-            let mut dst_col = Vec::new();
-            let mut cost_col = Vec::new();
+                let mut src_col = Vec::new();
+                let mut dst_col = Vec::new();
+                let mut cost_col = Vec::new();
 
-            for offset in 0..num_nodes {
-                if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
-                    let cost = if offset == source as usize {
-                        0.0
-                    } else if let Some(_parent) = bfs.get_parent_list_head_offset(offset as u64) {
-                        // Walk back accumulating costs
-                        let mut total = 0.0;
-                        let mut cur = offset as u64;
-                        while cur != source {
-                            if let Some(p) = bfs.get_parent_list_head_offset(cur) {
-                                total += p.cost;
-                                cur = p.node_id.offset;
-                            } else {
-                                break;
+                for offset in 0..num_nodes {
+                    if bfs.get_parent_list_head_offset(offset as u64).is_some() || offset == source as usize {
+                        let cost = if offset == source as usize {
+                            0.0
+                        } else if let Some(_parent) = bfs.get_parent_list_head_offset(offset as u64) {
+                            // Walk back accumulating costs
+                            let mut total = 0.0;
+                            let mut cur = offset as u64;
+                            while cur != source {
+                                if let Some(p) = bfs.get_parent_list_head_offset(cur) {
+                                    total += p.cost;
+                                    cur = p.node_id.offset;
+                                } else {
+                                    break;
+                                }
                             }
-                        }
-                        total
-                    } else {
-                        f64::MAX
-                    };
-                    src_col.push(Value::Int64(source as i64));
-                    dst_col.push(Value::Int64(offset as i64));
-                    cost_col.push(Value::Double(cost));
+                            total
+                        } else {
+                            f64::MAX
+                        };
+                        src_col.push(Value::Int64(source as i64));
+                        dst_col.push(Value::Int64(offset as i64));
+                        cost_col.push(Value::Double(cost));
+                    }
                 }
-            }
 
-            let n = src_col.len();
-            let mut v1 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
-            let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
-            let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Double, n);
-            for (i, val) in src_col.iter().enumerate() {
-                v1.set_value(i, val)?;
-            }
-            for (i, val) in dst_col.iter().enumerate() {
-                v2.set_value(i, val)?;
-            }
-            for (i, val) in cost_col.iter().enumerate() {
-                v3.set_value(i, val)?;
-            }
-            output.fields = vec![
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
-                akar_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
-            ];
-            output.field_types = vec![
-                akar_common::types::PhysicalTypeID::Int64,
-                akar_common::types::PhysicalTypeID::Int64,
-                akar_common::types::PhysicalTypeID::Double,
-            ];
-            output.size = n;
-            Ok(())
-        });
+                let n = src_col.len();
+                let mut v1 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
+                let mut v2 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Int64, n);
+                let mut v3 = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::Double, n);
+                for (i, val) in src_col.iter().enumerate() {
+                    v1.set_value(i, val)?;
+                }
+                for (i, val) in dst_col.iter().enumerate() {
+                    v2.set_value(i, val)?;
+                }
+                for (i, val) in cost_col.iter().enumerate() {
+                    v3.set_value(i, val)?;
+                }
+                output.fields = vec![
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&v3).array,
+                ];
+                output.field_types = vec![
+                    akar_common::types::PhysicalTypeID::Int64,
+                    akar_common::types::PhysicalTypeID::Int64,
+                    akar_common::types::PhysicalTypeID::Double,
+                ];
+                output.size = n;
+                Ok(())
+            },
+        );
 
         /// Pack an AlgoResult (parallel score-per-node) into a DataChunk
         /// with columns (node_id INT64, score DOUBLE).
@@ -1723,10 +1728,19 @@ mod tests {
         let mut adj = vec![(0u64, InternalID { table_id: 0, offset: 0 }); cur];
         let mut pos = offsets.clone();
         for (s, d) in edges {
-            adj[pos[*s]] = (0u64, InternalID { table_id: 0, offset: *d as u64 });
+            adj[pos[*s]] = (
+                0u64,
+                InternalID {
+                    table_id: 0,
+                    offset: *d as u64,
+                },
+            );
             pos[*s] += 1;
         }
-        CSRAdjacency { offsets, adjacency: adj }
+        CSRAdjacency {
+            offsets,
+            adjacency: adj,
+        }
     }
 
     fn directed_scc_graph() -> CSRAdjacency {
@@ -1782,12 +1796,42 @@ mod tests {
     fn test_k_core_correctness() {
         // Complete graph K4 (all 6 edges): every node has degree 3, core = 3.
         let edges = vec![
-            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
-            Edge { src_offset: 0, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 2, rel_id: 3, rel_table_id: 0 },
-            Edge { src_offset: 1, dst_offset: 3, rel_id: 4, rel_table_id: 0 },
-            Edge { src_offset: 2, dst_offset: 3, rel_id: 5, rel_table_id: 0 },
+            Edge {
+                src_offset: 0,
+                dst_offset: 1,
+                rel_id: 0,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 2,
+                rel_id: 1,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 0,
+                dst_offset: 3,
+                rel_id: 2,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 2,
+                rel_id: 3,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 1,
+                dst_offset: 3,
+                rel_id: 4,
+                rel_table_id: 0,
+            },
+            Edge {
+                src_offset: 2,
+                dst_offset: 3,
+                rel_id: 5,
+                rel_table_id: 0,
+            },
         ];
         let csr = CSRAdjacency::build(&edges, 4);
         let result = compute_k_core(&csr);

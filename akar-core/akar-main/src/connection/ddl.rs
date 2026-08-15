@@ -22,11 +22,7 @@ impl Connection {
         // Inside an explicit transaction they must be rejected — falsely
         // reporting success leaves `BEGIN; CREATE TABLE T; ROLLBACK;` with T
         // still present (P52.28).
-        if self
-            .explicit_txn_active
-            .load(std::sync::atomic::Ordering::Acquire)
-            && is_catalog_mutating_ddl(bound)
-        {
+        if self.explicit_txn_active.load(std::sync::atomic::Ordering::Acquire) && is_catalog_mutating_ddl(bound) {
             return Err(
                 "DDL statements cannot run inside an explicit transaction (BEGIN/COMMIT/ROLLBACK); \
                  they would bypass transaction rollback. Run DDL outside the transaction."
@@ -383,10 +379,7 @@ impl Connection {
                     )
                 } else {
                     let ts = self.database.transaction_manager.current_commit_ts();
-                    (
-                        Some(ts),
-                        self.database.transaction_manager.commit_history_snapshot(),
-                    )
+                    (Some(ts), self.database.transaction_manager.commit_history_snapshot())
                 };
 
                 // Execute left side
@@ -394,7 +387,9 @@ impl Connection {
                     .plan(BoundStatement::BoundQuery(*u.left.clone()))
                     .map_err(|e| format!("Plan left UNION: {e}"))?;
                 let left_optimized = optimizer.optimize(left_plan);
-                let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history.clone());
+                let processor = self
+                    .create_processor()
+                    .with_snapshot(snapshot_ts, commit_history.clone());
                 let left_chunks = processor
                     .execute(&left_optimized)
                     .map_err(|e| format!("Execute left UNION: {e}"))?;
@@ -635,9 +630,10 @@ impl Connection {
 
                     // Locate the PK property in the MERGE pattern (if any).
                     let pk_col_idx = table.primary_key_column;
-                    let pk_prop = node.properties.iter().find(|(name, _)| {
-                        table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false)
-                    });
+                    let pk_prop = node
+                        .properties
+                        .iter()
+                        .find(|(name, _)| table.columns.get(pk_col_idx).map(|c| c.name == *name).unwrap_or(false));
 
                     // Evaluate the PK properties from the MERGE pattern. The PK
                     // value is resolved with constant-folding (P52.23): a
@@ -652,7 +648,9 @@ impl Connection {
                                 .function_registry
                                 .lock()
                                 .map_err(|e| format!("Lock poisoned: {e}"))?;
-                            Some(akar_processor::physical::write_ops::set::evaluate_constant_expr(expr, &registry))
+                            Some(akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                expr, &registry,
+                            ))
                         }
                         None => None,
                     };
@@ -679,11 +677,9 @@ impl Connection {
                                 for item in &m.on_match {
                                     let val = match &item.value {
                                         akar_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
-                                        other => {
-                                            akar_processor::physical::write_ops::set::evaluate_constant_expr(
-                                                other, &registry,
-                                            )
-                                        }
+                                        other => akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                            other, &registry,
+                                        ),
                                     };
                                     // A type mismatch (or any other cell-write
                                     // failure) must surface as an error, not be
@@ -717,19 +713,16 @@ impl Connection {
                             for item in &m.on_create {
                                 let val = match &item.value {
                                     akar_parser::ast::Expression::Constant(c) => ast_constant_to_value(c),
-                                    other => {
-                                        akar_processor::physical::write_ops::set::evaluate_constant_expr(
-                                            other, &registry,
-                                        )
-                                    }
+                                    other => akar_processor::physical::write_ops::set::evaluate_constant_expr(
+                                        other, &registry,
+                                    ),
                                 };
                                 if item.column_idx < values.len() {
                                     values[item.column_idx] = val;
                                 }
                             }
                         }
-                        let row_id =
-                            table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                        let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
                         if let Some(ref mut txn) = txn_opt {
                             txn.record_insert_undo(m.table_id, row_id);
                         }

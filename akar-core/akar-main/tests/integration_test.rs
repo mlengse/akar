@@ -379,15 +379,10 @@ fn test_prepare_params_in_match_property() {
     );
 
     // P51.31: pattern properties were skipped by collection and substitution
-    let stmt = conn
-        .prepare("MATCH (p:Person {name: $n}) RETURN p.age")
-        .unwrap();
+    let stmt = conn.prepare("MATCH (p:Person {name: $n}) RETURN p.age").unwrap();
     assert_eq!(stmt.parameter_names(), &["n"]);
 
-    let result = conn.execute(
-        &stmt,
-        vec![("n", akar_common::types::Value::String("Alice".into()))],
-    );
+    let result = conn.execute(&stmt, vec![("n", akar_common::types::Value::String("Alice".into()))]);
     assert!(result.is_ok(), "Execute failed: {:?}", result.err());
     assert!(result.unwrap().is_success());
 }
@@ -416,9 +411,7 @@ fn test_prepare_params_in_create_dml() {
     );
 
     // P51.31: standalone CREATE DML pattern properties were not handled
-    let stmt = conn
-        .prepare("CREATE (p:Person {name: $n, age: $a})")
-        .unwrap();
+    let stmt = conn.prepare("CREATE (p:Person {name: $n, age: $a})").unwrap();
     let mut names = stmt.parameter_names().to_vec();
     names.sort();
     assert_eq!(names, &["a", "n"]);
@@ -776,7 +769,10 @@ fn test_merge_multi_pattern_matches_existing() {
         "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
     );
     exec(&conn, "CREATE NODE TABLE City(name STRING, PRIMARY KEY (name))");
-    exec(&conn, "MERGE (p:Person {name: 'Alice', age: 30}), (c:City {name: 'Jakarta'})");
+    exec(
+        &conn,
+        "MERGE (p:Person {name: 'Alice', age: 30}), (c:City {name: 'Jakarta'})",
+    );
     // Second MERGE should match, not duplicate.
     conn.query("MERGE (p:Person {name: 'Alice'}), (c:City {name: 'Jakarta'})")
         .unwrap();
@@ -1310,9 +1306,19 @@ fn test_mixed_scalar_aggregates() {
     // Empty input: scalar aggregates must still yield exactly one row
     // (COUNT=0, SUM/MIN/MAX/AVG=NULL).
     exec(&conn, "CREATE NODE TABLE E(id INT64, x INT64, PRIMARY KEY (id))");
-    let rows = query_rows(&conn, "MATCH (e:E) RETURN COUNT(*), SUM(e.x), MIN(e.x), MAX(e.x), AVG(e.x)");
-    assert_eq!(rows.len(), 1, "empty scalar aggregate must yield one row, got: {rows:?}");
-    assert_eq!(rows[0][0], "Int64(0)", "COUNT(*) over empty input must be 0, got: {rows:?}");
+    let rows = query_rows(
+        &conn,
+        "MATCH (e:E) RETURN COUNT(*), SUM(e.x), MIN(e.x), MAX(e.x), AVG(e.x)",
+    );
+    assert_eq!(
+        rows.len(),
+        1,
+        "empty scalar aggregate must yield one row, got: {rows:?}"
+    );
+    assert_eq!(
+        rows[0][0], "Int64(0)",
+        "COUNT(*) over empty input must be 0, got: {rows:?}"
+    );
     assert_eq!(rows[0][1], "null");
     assert_eq!(rows[0][2], "null");
     assert_eq!(rows[0][3], "null");
@@ -1408,7 +1414,10 @@ fn test_ddl_pipeline_create_index_and_query() {
 #[test]
 fn test_order_by_non_first_column() {
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name))",
+    );
     exec(&conn, "CREATE (p:Person {name: 'Charlie', age: 30})");
     exec(&conn, "CREATE (p:Person {name: 'Alice', age: 20})");
     exec(&conn, "CREATE (p:Person {name: 'Bob', age: 10})");
@@ -1456,12 +1465,24 @@ fn test_p5314_g3_chain_clauses_parse() {
         &conn,
         "CREATE NODE TABLE Memory(id INT64, src STRING, tgt STRING, weight DOUBLE, type STRING, PRIMARY KEY (id))",
     );
-    exec(&conn, "CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE, type STRING)");
-    exec(&conn, "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))");
-    exec(&conn, "CREATE NODE TABLE Counter(key STRING, value INT64, PRIMARY KEY (key))");
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE, type STRING)",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))",
+    );
+    exec(
+        &conn,
+        "CREATE NODE TABLE Counter(key STRING, value INT64, PRIMARY KEY (key))",
+    );
     exec(&conn, "CREATE (a:Memory {id: 1, weight: 0.5})");
     exec(&conn, "CREATE (b:Memory {id: 3, weight: 0.0})");
-    exec(&conn, "MATCH (a:Memory {id: 1}), (b:Memory {id: 3}) CREATE (a)-[:Connected {weight: 0.5}]->(b)");
+    exec(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 3}) CREATE (a)-[:Connected {weight: 0.5}]->(b)",
+    );
 
     // strengthen_connection (G3): SET arithmetic → WITH → WHERE → SET.
     assert_not_parse_error(
@@ -1473,11 +1494,7 @@ fn test_p5314_g3_chain_clauses_parse() {
     );
 
     // set_meta: plain SET after standalone MERGE (was a parse error before P53.14).
-    assert_not_parse_error(
-        &conn,
-        "MERGE (m:Meta {key: 'k'}) SET m.value = 'v'",
-        "set_meta",
-    );
+    assert_not_parse_error(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v'", "set_meta");
 
     // _next_id: MERGE → SET → RETURN.
     assert_not_parse_error(
@@ -1524,7 +1541,10 @@ fn test_p5314_plain_set_after_merge_executes() {
     // A MERGE chain must at least execute without error on a fresh node
     // (the row is created by the merge; the follow-up SET writes are fine).
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))",
+    );
     let msg = exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v'");
     assert!(
         msg.is_ok() || msg.as_ref().err().map(|e| !e.contains("Parse error")).unwrap_or(false),

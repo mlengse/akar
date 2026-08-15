@@ -86,6 +86,7 @@ pub enum LogicalOperator {
     Delete(LogicalDelete),
     Set(LogicalSet),
     OptionalMatch(LogicalOptionalMatch),
+    OptionalExtend(LogicalOptionalExtend),
     Unwind(LogicalUnwind),
     Foreach(LogicalForeach),
     Merge(LogicalMerge),
@@ -151,6 +152,7 @@ impl LogicalOperator {
             LogicalOperator::Delete(s) => s.cardinality,
             LogicalOperator::Set(s) => s.cardinality,
             LogicalOperator::OptionalMatch(s) => s.cardinality,
+            LogicalOperator::OptionalExtend(s) => s.cardinality,
             LogicalOperator::Unwind(s) => s.cardinality,
             LogicalOperator::Foreach(s) => s.cardinality,
             LogicalOperator::Merge(s) => s.cardinality,
@@ -216,6 +218,7 @@ impl LogicalOperator {
             LogicalOperator::Delete(s) => s.cardinality = card,
             LogicalOperator::Set(s) => s.cardinality = card,
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
+            LogicalOperator::OptionalExtend(s) => s.cardinality = card,
             LogicalOperator::Unwind(s) => s.cardinality = card,
             LogicalOperator::Foreach(s) => s.cardinality = card,
             LogicalOperator::Merge(s) => s.cardinality = card,
@@ -279,6 +282,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Flatten(s) => s.children.iter_mut().collect(),
             LogicalOperator::OptionalMatch(s) => vec![&mut *s.left, &mut *s.right],
+            LogicalOperator::OptionalExtend(s) => s.children.iter_mut().collect(),
             LogicalOperator::SemiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::AntiJoin(s) => vec![&mut *s.left, &mut *s.right],
             LogicalOperator::Intersect(s) => vec![&mut *s.left, &mut *s.right],
@@ -344,6 +348,7 @@ impl LogicalOperator {
             LogicalOperator::Union(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Flatten(s) => s.children.iter().collect(),
             LogicalOperator::OptionalMatch(s) => vec![&*s.left, &*s.right],
+            LogicalOperator::OptionalExtend(s) => s.children.iter().collect(),
             LogicalOperator::SemiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::AntiJoin(s) => vec![&*s.left, &*s.right],
             LogicalOperator::Intersect(s) => vec![&*s.left, &*s.right],
@@ -641,6 +646,34 @@ pub struct LogicalRecursiveExtend {
 pub struct LogicalOptionalMatch {
     pub left: Box<LogicalOperator>,
     pub right: Box<LogicalOperator>,
+    pub cardinality: u64,
+}
+
+/// OPTIONAL MATCH over an already-bound pair of node variables.
+///
+/// Used when both endpoint node variables of the optional pattern are bound by
+/// the required side (e.g. `OPTIONAL MATCH (a)-[existing:Connected]-(b)` where
+/// `a` and `b` are already in scope). Unlike `LogicalOptionalMatch`, the right
+/// side is not a scan: the pattern is probed per input row against the
+/// relationship table adjacency (forward and/or reverse), emitting the edge
+/// property columns, or NULL-padding them when no edge exists (P53.25).
+#[derive(Debug, Clone)]
+pub struct LogicalOptionalExtend {
+    pub children: Vec<LogicalOperator>,
+    /// Name of the relationship table to probe.
+    pub rel_table_name: String,
+    /// ID of the relationship table.
+    pub rel_table_id: u64,
+    /// Variable name of the relationship (e.g., "existing"); prefix for the
+    /// emitted edge property columns.
+    pub rel_var: String,
+    /// Variable name of the bound source node (e.g., "a").
+    pub src_node_var: String,
+    /// Variable name of the bound destination node (e.g., "b").
+    pub dst_node_var: String,
+    /// Direction of the probe (forward, backward, or both).
+    pub direction: akar_parser::ast::EdgeDirection,
+    /// Estimated cardinality.
     pub cardinality: u64,
 }
 

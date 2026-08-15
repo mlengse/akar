@@ -392,10 +392,16 @@ mod tests {
         // A missing path returns NULL (Ok(None)), not a query-aborting error (P52.49).
         let json = r#"{"name": "Alice"}"#;
         let result = json_extract_value(json, "$.age");
-        assert!(matches!(result, Ok(None)), "missing key should yield NULL, got {result:?}");
+        assert!(
+            matches!(result, Ok(None)),
+            "missing key should yield NULL, got {result:?}"
+        );
 
         let result = json_extract_value(json, "$.name.missing");
-        assert!(matches!(result, Ok(None)), "missing nested key should yield NULL, got {result:?}");
+        assert!(
+            matches!(result, Ok(None)),
+            "missing nested key should yield NULL, got {result:?}"
+        );
 
         // Out-of-range array index also yields NULL.
         let result = json_extract_value("[1, 2]", "$[5]");
@@ -409,7 +415,10 @@ mod tests {
         assert!(struct_str.contains("number"));
         assert!(struct_str.contains("string"));
         assert!(struct_str.contains("boolean"));
-        assert!(struct_str.contains("k:"), "object element structure missing, got: {struct_str}");
+        assert!(
+            struct_str.contains("k:"),
+            "object element structure missing, got: {struct_str}"
+        );
     }
 
     #[test]

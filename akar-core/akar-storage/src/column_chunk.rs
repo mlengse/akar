@@ -105,12 +105,7 @@ impl ColumnChunk {
     /// readers with `snapshot_ts < version` keep seeing the replaced value;
     /// readers at or after `version` see the new value (P52.21).
     /// Returns an error if the index is out of bounds.
-    pub fn set_value_with_version(
-        &mut self,
-        idx: usize,
-        value: Value,
-        version: u64,
-    ) -> Result<(), StorageError> {
+    pub fn set_value_with_version(&mut self, idx: usize, value: Value, version: u64) -> Result<(), StorageError> {
         if idx >= self.values.len() {
             return Err(StorageError::Page(format!(
                 "ColumnChunk index {idx} out of bounds (len={})",

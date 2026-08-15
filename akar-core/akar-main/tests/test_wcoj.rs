@@ -400,7 +400,10 @@ fn test_rel_property_access_through_rel_var() {
     );
 
     // Rel property in RETURN.
-    let rows = query_rows(&conn, "MATCH (a:Person)-[r:knows]->(b:Person) RETURN a.id, b.id, r.since");
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Person)-[r:knows]->(b:Person) RETURN a.id, b.id, r.since",
+    );
     let mut got: Vec<(i64, i64, i64)> = rows
         .iter()
         .map(|r| {

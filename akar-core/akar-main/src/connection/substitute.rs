@@ -1,7 +1,7 @@
 use akar_binder::bound_statement::{
     BoundClause, BoundDeleteClause, BoundDeleteItem, BoundEdgePattern, BoundExpression, BoundForeachClause,
-    BoundMatchClause, BoundPattern, BoundQuery, BoundReturnClause, BoundSetClause, BoundStatement,
-    BoundUnwindClause, BoundWhereClause,
+    BoundMatchClause, BoundPattern, BoundQuery, BoundReturnClause, BoundSetClause, BoundStatement, BoundUnwindClause,
+    BoundWhereClause,
 };
 use akar_common::types::Value;
 use std::collections::HashMap;
@@ -52,15 +52,11 @@ pub(crate) fn substitute_params_in_statement(
                         let new_expr = substitute_in_bound_expr(&w.expression, params)?;
                         BoundClause::BoundWhere(BoundWhereClause { expression: new_expr })
                     }
-                    BoundClause::BoundMatch(m) => {
-                        BoundClause::BoundMatch(substitute_in_match_clause(m, params)?)
-                    }
+                    BoundClause::BoundMatch(m) => BoundClause::BoundMatch(substitute_in_match_clause(m, params)?),
                     BoundClause::BoundOptionalMatch(m) => {
                         BoundClause::BoundOptionalMatch(substitute_in_match_clause(m, params)?)
                     }
-                    BoundClause::BoundCreate(m) => {
-                        BoundClause::BoundCreate(substitute_in_match_clause(m, params)?)
-                    }
+                    BoundClause::BoundCreate(m) => BoundClause::BoundCreate(substitute_in_match_clause(m, params)?),
                     BoundClause::BoundSet(s) => BoundClause::BoundSet(BoundSetClause {
                         items: substitute_in_set_items(&s.items, params)?,
                     }),
@@ -317,38 +313,32 @@ pub(crate) fn substitute_foreach_var(
                 .patterns
                 .iter()
                 .map(|p| akar_binder::bound_statement::BoundCreatePattern {
-                    node: p.node.as_ref().map(|n| {
-                        akar_binder::bound_statement::BoundNodeCreate {
-                            variable: n.variable.clone(),
-                            table_name: n.table_name.clone(),
-                            table_id: n.table_id,
-                            properties: n
-                                .properties
-                                .iter()
-                                .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
-                                .collect(),
-                        }
+                    node: p.node.as_ref().map(|n| akar_binder::bound_statement::BoundNodeCreate {
+                        variable: n.variable.clone(),
+                        table_name: n.table_name.clone(),
+                        table_id: n.table_id,
+                        properties: n
+                            .properties
+                            .iter()
+                            .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
+                            .collect(),
                     }),
-                    edge: p.edge.as_ref().map(|e| {
-                        akar_binder::bound_statement::BoundEdgeCreate {
-                            variable: e.variable.clone(),
-                            table_name: e.table_name.clone(),
-                            table_id: e.table_id,
-                            src_var: e.src_var.clone(),
-                            dst_var: e.dst_var.clone(),
-                            properties: e
-                                .properties
-                                .iter()
-                                .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
-                                .collect(),
-                        }
+                    edge: p.edge.as_ref().map(|e| akar_binder::bound_statement::BoundEdgeCreate {
+                        variable: e.variable.clone(),
+                        table_name: e.table_name.clone(),
+                        table_id: e.table_id,
+                        src_var: e.src_var.clone(),
+                        dst_var: e.dst_var.clone(),
+                        properties: e
+                            .properties
+                            .iter()
+                            .map(|(k, v)| (k.clone(), substitute_var_in_expr(v, var_name, val)))
+                            .collect(),
                     }),
                 })
                 .collect();
             Ok(BoundStatement::BoundCreateDml(
-                akar_binder::bound_statement::BoundCreateDml {
-                    patterns: new_patterns,
-                },
+                akar_binder::bound_statement::BoundCreateDml { patterns: new_patterns },
             ))
         }
         BoundStatement::BoundQuery(q) => {

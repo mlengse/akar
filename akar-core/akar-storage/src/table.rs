@@ -560,10 +560,7 @@ impl NodeTable {
     pub fn row_undo_bytes(&self, row_idx: u64) -> Vec<u8> {
         let mut out = Vec::new();
         for col in 0..self.columns.len() {
-            let val = self
-                .get_value(row_idx as usize, col)
-                .cloned()
-                .unwrap_or(Value::Null);
+            let val = self.get_value(row_idx as usize, col).cloned().unwrap_or(Value::Null);
             out.extend_from_slice(&Column::serialize_value(&val));
         }
         out
@@ -1672,7 +1669,10 @@ mod tests {
             .insert_row(vec![Value::String("Bob".into()), Value::Int64(25)])
             .unwrap();
         let art = table.art_index.as_ref().unwrap();
-        assert_eq!(art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap()), Some(0));
+        assert_eq!(
+            art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap()),
+            Some(0)
+        );
 
         table.delete_row(0).unwrap();
 
@@ -1680,10 +1680,14 @@ mod tests {
         assert!(table.lookup_by_pk(&Value::String("Alice".into())).is_none());
         let art = table.art_index.as_ref().unwrap();
         assert_eq!(art.len(), 1, "ART must drop the deleted entry");
-        assert!(art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap()).is_none());
-        assert!(art
-            .lookup(&ArtKey::from_value(&Value::String("Bob".into())).unwrap())
-            .is_some());
+        assert!(
+            art.lookup(&ArtKey::from_value(&Value::String("Alice".into())).unwrap())
+                .is_none()
+        );
+        assert!(
+            art.lookup(&ArtKey::from_value(&Value::String("Bob".into())).unwrap())
+                .is_some()
+        );
         // Range scan over the ART must not surface the deleted PK.
         let hits = table.lookup_by_pk_range(
             Some(&Value::String("A".into())),
@@ -2018,7 +2022,13 @@ mod tests {
             t.insert_row(vec![Value::Int64(3), vec3(0.0, 0.0, 1.0)]).unwrap();
         }
 
-        cat.create_vector_index("item_vec".into(), "Item".into(), "embedding".into(), DistanceMetric::Cosine, 3);
+        cat.create_vector_index(
+            "item_vec".into(),
+            "Item".into(),
+            "embedding".into(),
+            DistanceMetric::Cosine,
+            3,
+        );
 
         // Seed the index from the 3 pre-existing rows; the vector for row 2 must exist.
         cat.refresh_vector_indexes_for_tables(&[0]);

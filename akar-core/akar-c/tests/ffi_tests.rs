@@ -271,8 +271,12 @@ fn test_query_error_message_is_populated() {
 
     let msg = unsafe { CStr::from_ptr(err_msg).to_string_lossy().into_owned() };
     assert!(!msg.is_empty(), "error message must not be empty");
-    assert!(msg.to_lowercase().contains("error") || msg.to_lowercase().contains("parse") || msg.to_lowercase().contains("syntax"),
-        "unexpected error message: {msg}");
+    assert!(
+        msg.to_lowercase().contains("error")
+            || msg.to_lowercase().contains("parse")
+            || msg.to_lowercase().contains("syntax"),
+        "unexpected error message: {msg}"
+    );
 
     unsafe { akar_error_message_free(err_msg) };
 

@@ -787,18 +787,14 @@ fn serialized_node_size(node: &ArtNode) -> usize {
     }
     size += varint_len(node.count() as u64);
     match node {
-        ArtNode::Node4 {
-            children, count, ..
-        } => {
+        ArtNode::Node4 { children, count, .. } => {
             for i in 0..*count as usize {
                 if let Some(ref child) = children[i] {
                     size += 1 + serialized_node_size(child);
                 }
             }
         }
-        ArtNode::Node16 {
-            children, count, ..
-        } => {
+        ArtNode::Node16 { children, count, .. } => {
             for i in 0..*count as usize {
                 if let Some(ref child) = children[i] {
                     size += 1 + serialized_node_size(child);

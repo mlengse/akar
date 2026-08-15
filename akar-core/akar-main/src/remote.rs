@@ -369,11 +369,9 @@ impl RemoteDatabase {
     /// an error message when the query failed (including OCC `WriteConflict`s).
     pub fn query(&self, query_str: &str) -> Result<WireResponse, String> {
         if self.desynced.load(Ordering::Acquire) {
-            return Err(
-                "Connection is desynchronized after a previous read timeout; \
+            return Err("Connection is desynchronized after a previous read timeout; \
                  reconnect before sending further queries"
-                    .into(),
-            );
+                .into());
         }
 
         let request = WireRequest {

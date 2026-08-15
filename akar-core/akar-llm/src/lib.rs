@@ -190,7 +190,10 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .iter()
         // Fail on non-numeric values instead of silently coercing them to 0.0,
         // which would produce a wrong vector from a malformed response (P52.59).
-        .map(|v| v.as_f64().ok_or_else(|| format!("Non-numeric value in embedding array: {v}")))
+        .map(|v| {
+            v.as_f64()
+                .ok_or_else(|| format!("Non-numeric value in embedding array: {v}"))
+        })
         .collect::<Result<Vec<_>, String>>()?;
 
     let dimensions = vector.len();
@@ -242,7 +245,10 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
         .iter()
         // Fail on non-numeric values instead of silently coercing them to 0.0,
         // which would produce a wrong vector from a malformed response (P52.59).
-        .map(|v| v.as_f64().ok_or_else(|| format!("Non-numeric value in embedding array: {v}")))
+        .map(|v| {
+            v.as_f64()
+                .ok_or_else(|| format!("Non-numeric value in embedding array: {v}"))
+        })
         .collect::<Result<Vec<_>, String>>()?;
 
     let dimensions = vector.len();

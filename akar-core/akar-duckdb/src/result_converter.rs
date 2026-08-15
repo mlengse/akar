@@ -4,9 +4,9 @@
 //! of Arrow `StringArray` columns (every column is rendered as text for now).
 
 #[cfg(feature = "bundled")]
-use akar_common::vector::DataChunk;
-#[cfg(feature = "bundled")]
 use akar_common::types::PhysicalTypeID;
+#[cfg(feature = "bundled")]
+use akar_common::vector::DataChunk;
 #[cfg(feature = "bundled")]
 use std::sync::Arc;
 
@@ -50,11 +50,7 @@ pub fn duckdb_results_to_akar(results: Vec<Vec<duckdb::types::Value>>) -> Result
     for col in 0..num_cols {
         let values: Vec<Option<String>> = results
             .iter()
-            .map(|row| {
-                row.get(col)
-                    .map(duckdb_value_to_string)
-                    .filter(|s| s != "NULL")
-            })
+            .map(|row| row.get(col).map(duckdb_value_to_string).filter(|s| s != "NULL"))
             .collect();
         arrays.push(Arc::new(arrow::array::StringArray::from_iter(values.into_iter())));
     }

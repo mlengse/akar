@@ -18,7 +18,7 @@ use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, ScalarFunction};
 use akar_function::scalar::evaluate_scalar;
 use akar_parser::ast::{BinaryOp, Constant, Expression, Query, UnaryOp};
-use arrow::array::ArrayRef;
+use arrow::array::{Array, ArrayRef};
 use std::sync::{Arc, Mutex};
 
 pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, ProcessorError> + Send + Sync>;
@@ -160,7 +160,11 @@ impl ExpressionEvaluator {
     /// Evaluate a list literal directly to an Arrow `ListArray`, avoiding the
     /// `ValueVector` (which has no side-storage for variable-length list
     /// payloads). Each row's element expressions are evaluated per-row.
-    fn evaluate_arrow_list_literal(&self, items: &[Expression], chunk: &DataChunk) -> Result<ArrowVector, ProcessorError> {
+    fn evaluate_arrow_list_literal(
+        &self,
+        items: &[Expression],
+        chunk: &DataChunk,
+    ) -> Result<ArrowVector, ProcessorError> {
         let num_rows = chunk.size;
         let mut row_results: Vec<Value> = Vec::with_capacity(num_rows);
         for row in 0..num_rows {
@@ -372,10 +376,80 @@ impl ExpressionEvaluator {
                 })
             }
             UnaryOp::IsNull => {
+                // P53.25: `{rel_var} IS NULL` where the variable expands to
+                // multiple prefixed columns (e.g. the edge columns emitted by
+                // OptionalExtend) is true iff ALL of its columns are NULL.
+                // A bare variable has no exact column here, so evaluate the
+                // null mask directly over the prefixed columns.
+                if let Expression::Variable(name) = inner
+                    && !chunk.field_names.is_empty()
+                    && !chunk.field_names.iter().any(|n| n == name)
+                {
+                    let prefix = format!("{}.", name);
+                    let cols: Vec<usize> = chunk
+                        .field_names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| n.starts_with(prefix.as_str()))
+                        .map(|(i, _)| i)
+                        .collect();
+                    if !cols.is_empty() {
+                        let size = chunk.size;
+                        let mut acc: Option<arrow::array::BooleanArray> = None;
+                        for &col in &cols {
+                            let field = chunk
+                                .fields
+                                .get(col)
+                                .ok_or_else(|| format!("Variable '{}' column {} not found", name, col))?;
+                            let nulls: Vec<bool> = (0..size).map(|i| field.is_null(i)).collect();
+                            let m = arrow::array::BooleanArray::from(nulls);
+                            acc = Some(match acc {
+                                Some(a) => arrow::compute::kernels::boolean::and(&a, &m)
+                                    .map_err(|e| format!("Arrow is_null over variable failed: {e}"))?,
+                                None => m,
+                            });
+                        }
+                        return Ok(ArrowVector::new(Arc::new(acc.unwrap()), PhysicalTypeID::Bool));
+                    }
+                }
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
                 self.apply_arrow_unary_kernel("is_null", &inner_arrow)
             }
             UnaryOp::IsNotNull => {
+                if let Expression::Variable(name) = inner
+                    && !chunk.field_names.is_empty()
+                    && !chunk.field_names.iter().any(|n| n == name)
+                {
+                    let prefix = format!("{}.", name);
+                    let cols: Vec<usize> = chunk
+                        .field_names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| n.starts_with(prefix.as_str()))
+                        .map(|(i, _)| i)
+                        .collect();
+                    if !cols.is_empty() {
+                        let size = chunk.size;
+                        let mut acc: Option<arrow::array::BooleanArray> = None;
+                        for &col in &cols {
+                            let field = chunk
+                                .fields
+                                .get(col)
+                                .ok_or_else(|| format!("Variable '{}' column {} not found", name, col))?;
+                            let nulls: Vec<bool> = (0..size).map(|i| field.is_null(i)).collect();
+                            let m = arrow::array::BooleanArray::from(nulls);
+                            acc = Some(match acc {
+                                Some(a) => arrow::compute::kernels::boolean::and(&a, &m)
+                                    .map_err(|e| format!("Arrow is_not_null over variable failed: {e}"))?,
+                                None => m,
+                            });
+                        }
+                        let all_null = acc.unwrap();
+                        let not_all = arrow::compute::kernels::boolean::not(&all_null)
+                            .map_err(|e| format!("Arrow is_not_null over variable failed: {e}"))?;
+                        return Ok(ArrowVector::new(Arc::new(not_all), PhysicalTypeID::Bool));
+                    }
+                }
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
                 self.apply_arrow_unary_kernel("is_not_null", &inner_arrow)
             }

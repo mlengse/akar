@@ -3,8 +3,8 @@ use crate::types::{PhysicalTypeID, Value};
 use crate::vector::ValueVector;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, BooleanBuilder, Float32Array, Float32Builder, Float64Array, Float64Builder,
-    Int32Array, Int32Builder, Int64Array, Int64Builder, ListArray, StringArray, StringBuilder, StructArray, UInt64Array,
-    UInt64Builder,
+    Int32Array, Int32Builder, Int64Array, Int64Builder, ListArray, StringArray, StringBuilder, StructArray,
+    UInt64Array, UInt64Builder,
 };
 use arrow::buffer::{NullBuffer, OffsetBuffer, ScalarBuffer};
 use arrow::datatypes::{DataType, Field};
@@ -374,9 +374,7 @@ pub fn infer_arrow_type(values: &[Value]) -> DataType {
         Some(Value::Double(_)) => DataType::Float64,
         Some(Value::Float(_)) => DataType::Float32,
         Some(Value::String(_)) | Some(Value::Json(_)) | Some(Value::Interval(_)) => DataType::Utf8,
-        Some(Value::List(inner)) => {
-            DataType::List(Arc::new(Field::new("item", infer_arrow_type(inner), true)))
-        }
+        Some(Value::List(inner)) => DataType::List(Arc::new(Field::new("item", infer_arrow_type(inner), true))),
         Some(Value::Struct(entries)) => {
             let fields = entries
                 .iter()
@@ -502,10 +500,9 @@ pub fn arrow_array_from_values(values: &[Value]) -> ArrayRef {
                 match v {
                     Value::Null => builder.append_null(),
                     Value::String(s) => builder.append_value(s),
-                    Value::Interval(i) => builder.append_value(format!(
-                        "{} months {} days {} microseconds",
-                        i.months, i.days, i.micros
-                    )),
+                    Value::Interval(i) => {
+                        builder.append_value(format!("{} months {} days {} microseconds", i.months, i.days, i.micros))
+                    }
                     Value::Json(j) => builder.append_value(j.to_string()),
                     _ => builder.append_null(),
                 }
@@ -798,7 +795,10 @@ mod tests {
             Value::Null,
         ];
         let arr = arrow_array_from_values(&values);
-        assert_eq!(arr.data_type(), &DataType::List(Arc::new(Field::new("item", DataType::Float32, true))));
+        assert_eq!(
+            arr.data_type(),
+            &DataType::List(Arc::new(Field::new("item", DataType::Float32, true)))
+        );
         assert_eq!(arr.len(), 3);
         assert!(!arr.is_null(0));
         assert!(!arr.is_null(1));
@@ -840,6 +840,9 @@ mod tests {
         let arr = arrow_array_from_values(&values);
         assert!(matches!(arr.data_type(), DataType::List(_)));
         let v0 = convert_arrow_scalar(&arr, 0).unwrap();
-        assert_eq!(v0, Value::List(vec![Value::List(vec![Value::Int64(1), Value::Int64(2)])]));
+        assert_eq!(
+            v0,
+            Value::List(vec![Value::List(vec![Value::Int64(1), Value::Int64(2)])])
+        );
     }
 }
