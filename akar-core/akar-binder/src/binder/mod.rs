@@ -234,6 +234,10 @@ impl Binder {
                     let (bound, vars) = self.bind_optional_match(&m, &variables)?;
                     (BoundClause::BoundOptionalMatch(bound), vars)
                 }
+                Clause::Merge(m) => {
+                    let (bound, vars) = self.bind_merge_clause(&m)?;
+                    (BoundClause::BoundMerge(bound), vars)
+                }
             };
             variables.extend(new_vars);
             clauses.push(bound_clause.clone());
@@ -1226,6 +1230,16 @@ impl Binder {
     }
 
     fn bind_merge(&self, m: akar_parser::ast::MergeStatement) -> Result<BoundStatement, BinderError> {
+        let (bound, _) = self.bind_merge_clause(&m)?;
+        Ok(BoundStatement::BoundMerge(bound))
+    }
+
+    /// Bind a MERGE pattern (standalone statement or clause in a query chain),
+    /// returning the bound merge plus any variables introduced by its patterns.
+    fn bind_merge_clause(
+        &self,
+        m: &akar_parser::ast::MergeStatement,
+    ) -> Result<(BoundMerge, Vec<BoundVariable>), BinderError> {
         let patterns = self.bind_create_patterns(&m.patterns)?;
         let primary = patterns
             .iter()
@@ -1237,14 +1251,41 @@ impl Binder {
         let on_create = resolve_set_items(&catalog, &m.on_create)?;
         let on_match = resolve_set_items(&catalog, &m.on_match)?;
 
-        Ok(BoundStatement::BoundMerge(BoundMerge {
-            table_name: primary.table_name,
-            table_id: primary.table_id,
-            properties: primary.properties,
-            patterns,
-            on_create,
-            on_match,
-        }))
+        let mut new_vars = Vec::new();
+        for pat in &patterns {
+            if let Some(node) = &pat.node {
+                if let Some(name) = &node.variable {
+                    new_vars.push(BoundVariable {
+                        name: name.clone(),
+                        table_id: node.table_id,
+                        label: Some(node.table_name.clone()),
+                        is_node: true,
+                    });
+                }
+            }
+            if let Some(edge) = &pat.edge {
+                if let Some(name) = &edge.variable {
+                    new_vars.push(BoundVariable {
+                        name: name.clone(),
+                        table_id: edge.table_id,
+                        label: Some(edge.table_name.clone()),
+                        is_node: false,
+                    });
+                }
+            }
+        }
+
+        Ok((
+            BoundMerge {
+                table_name: primary.table_name,
+                table_id: primary.table_id,
+                properties: primary.properties,
+                patterns,
+                on_create,
+                on_match,
+            },
+            new_vars,
+        ))
     }
 
     /// Bind all node/edge elements of a CREATE or MERGE pattern path.

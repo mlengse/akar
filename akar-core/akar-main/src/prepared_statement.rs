@@ -99,6 +99,15 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                             collect_params_from_statement(sub, params);
                         }
                     }
+                    akar_binder::bound_statement::BoundClause::BoundMerge(m) => {
+                        for (_, v) in &m.properties {
+                            collect_params_from_expr(v, params);
+                        }
+                        for item in m.on_create.iter().chain(m.on_match.iter()) {
+                            collect_params_from_expr(&item.property, params);
+                            collect_params_from_expr(&item.value, params);
+                        }
+                    }
                 }
             }
         }

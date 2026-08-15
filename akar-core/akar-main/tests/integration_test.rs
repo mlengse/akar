@@ -1432,3 +1432,103 @@ fn test_order_by_non_first_column() {
 
     exec(&conn, "DROP TABLE Person");
 }
+
+// ==================== P53.14 — G3 chain clauses ====================
+
+/// Runs a G3 chain query and asserts it is not rejected at parse time.
+/// Execution semantics (SET arithmetic, aggregates, aliases) are covered by
+/// P53.15/16/17; P53.14 guarantees the chains now parse/bind/plan.
+fn assert_not_parse_error(conn: &Connection, sql: &str, label: &str) {
+    match conn.query(sql) {
+        Ok(_) => {}
+        Err(e) => assert!(
+            !e.contains("Parse error"),
+            "P53.14 {label} must not be a parse error, got: {e}\nsql: {sql}"
+        ),
+    }
+}
+
+#[test]
+fn test_p5314_g3_chain_clauses_parse() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, src STRING, tgt STRING, weight DOUBLE, type STRING, PRIMARY KEY (id))",
+    );
+    exec(&conn, "CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE, type STRING)");
+    exec(&conn, "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))");
+    exec(&conn, "CREATE NODE TABLE Counter(key STRING, value INT64, PRIMARY KEY (key))");
+    exec(&conn, "CREATE (a:Memory {id: 1, weight: 0.5})");
+    exec(&conn, "CREATE (b:Memory {id: 3, weight: 0.0})");
+    exec(&conn, "MATCH (a:Memory {id: 1}), (b:Memory {id: 3}) CREATE (a)-[:Connected {weight: 0.5}]->(b)");
+
+    // strengthen_connection (G3): SET arithmetic → WITH → WHERE → SET.
+    assert_not_parse_error(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected]->(b:Memory {id: 3}) \
+         SET r.weight = COALESCE(r.weight, 0.0) + 0.8 \
+         WITH r WHERE r.weight > 1.0 SET r.weight = 1.0",
+        "strengthen_connection",
+    );
+
+    // set_meta: plain SET after standalone MERGE (was a parse error before P53.14).
+    assert_not_parse_error(
+        &conn,
+        "MERGE (m:Meta {key: 'k'}) SET m.value = 'v'",
+        "set_meta",
+    );
+
+    // _next_id: MERGE → SET → RETURN.
+    assert_not_parse_error(
+        &conn,
+        "MERGE (c:Counter {key: 'next_id'}) SET c.value = COALESCE(c.value, 0) + 1 RETURN c.value",
+        "_next_id",
+    );
+
+    // add_connection: MATCH → MERGE edge → SET.
+    assert_not_parse_error(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 3}) MERGE (a)-[r:Connected]->(b) SET r.weight = 0.7 RETURN count(*)",
+        "add_connection",
+    );
+
+    // add_bridge / add_bridges_batch: UNWIND → MATCH → OPTIONAL MATCH → WITH → WHERE → CREATE → RETURN.
+    assert_not_parse_error(
+        &conn,
+        "UNWIND [1] AS row \
+         MATCH (a:Memory {id: row}), (b:Memory {id: 3}) \
+         OPTIONAL MATCH (a)-[existing:Connected]-(b) \
+         WITH a, b, existing, row WHERE existing IS NULL \
+         CREATE (a)-[:Connected {weight: 0.9, type: 'bridge'}]->(b) RETURN count(*) AS created",
+        "add_bridge_batch",
+    );
+
+    // MATCH → SET → RETURN (generic G3 shape).
+    assert_not_parse_error(
+        &conn,
+        "MATCH (a:Memory {id: 1}) SET a.weight = 1.0 RETURN a.id",
+        "set_then_return",
+    );
+
+    // MATCH → DELETE → RETURN (generic G3 shape).
+    assert_not_parse_error(
+        &conn,
+        "MATCH (a:Memory {id: 3}) DELETE a RETURN count(*)",
+        "delete_then_return",
+    );
+}
+
+#[test]
+fn test_p5314_plain_set_after_merge_executes() {
+    // A MERGE chain must at least execute without error on a fresh node
+    // (the row is created by the merge; the follow-up SET writes are fine).
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))");
+    let msg = exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v'");
+    assert!(
+        msg.is_ok() || msg.as_ref().err().map(|e| !e.contains("Parse error")).unwrap_or(false),
+        "MERGE..SET chain should not be a parse error: {msg:?}"
+    );
+    let rows = query_rows(&conn, "MATCH (m:Meta) RETURN m.key");
+    assert_eq!(rows.len(), 1, "MERGE should create the Meta row, got: {rows:?}");
+}

@@ -157,6 +157,7 @@ pub enum Clause {
     With(ReturnClause),
     Unwind(UnwindClause),
     Foreach(ForeachClause),
+    Merge(MergeStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]

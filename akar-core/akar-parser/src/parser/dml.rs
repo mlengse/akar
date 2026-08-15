@@ -7,104 +7,113 @@ use crate::parser::expression::parse_expression;
 
 pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {
     let mut clauses = Vec::new();
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::match_clause => {
-                // Check for a trailing using_fts_clause child inside the match_clause subtree
-                let inner_clone = inner.clone();
-                let fts_query = inner_clone
-                    .into_inner()
-                    .find(|p| p.as_rule() == Rule::using_fts_clause)
-                    .map(|fts| parse_using_fts_clause(fts))
-                    .transpose()?;
-                clauses.push(Clause::Match(MatchClause {
-                    patterns: parse_patterns(inner)?,
-                    fts_query,
-                }));
-            }
-            Rule::optional_match_clause => {
-                clauses.push(Clause::OptionalMatch(OptionalMatchClause {
-                    patterns: parse_patterns(inner)?,
-                }));
+    for child in pair.into_inner() {
+        // The chain grammar nests clauses inside `query_clause` groups; a trailing
+        // `return_clause` is a direct child of `query_statement`.
+        match child.as_rule() {
+            Rule::query_clause => {
+                for inner in child.into_inner() {
+                    match inner.as_rule() {
+                        Rule::match_clause => {
+                            // Check for a trailing using_fts_clause child inside the match_clause subtree
+                            let inner_clone = inner.clone();
+                            let fts_query = inner_clone
+                                .into_inner()
+                                .find(|p| p.as_rule() == Rule::using_fts_clause)
+                                .map(|fts| parse_using_fts_clause(fts))
+                                .transpose()?;
+                            clauses.push(Clause::Match(MatchClause {
+                                patterns: parse_patterns(inner)?,
+                                fts_query,
+                            }));
+                        }
+                        Rule::optional_match_clause => {
+                            clauses.push(Clause::OptionalMatch(OptionalMatchClause {
+                                patterns: parse_patterns(inner)?,
+                            }));
+                        }
+                        Rule::where_clause => {
+                            let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
+                            clauses.push(Clause::Where(WhereClause { expression: expr }));
+                        }
+                        Rule::with_clause => {
+                            let order_by = parse_order_by(&inner);
+                            let (limit, skip) = parse_limit_skip(&inner)?;
+                            clauses.push(Clause::With(ReturnClause {
+                                expressions: parse_return_items(inner)?,
+                                distinct: false,
+                                order_by,
+                                limit,
+                                skip,
+                            }));
+                        }
+                        Rule::delete_clause => {
+                            let detach = inner.as_str().to_uppercase().starts_with("DETACH");
+                            let expressions: Result<Vec<_>, _> = inner.into_inner().map(parse_expression).collect();
+                            clauses.push(Clause::Delete(DeleteClause {
+                                detach,
+                                expressions: expressions?,
+                            }));
+                        }
+                        Rule::unwind_clause => {
+                            let mut expr = None;
+                            let mut var = String::new();
+                            for part in inner.into_inner() {
+                                match part.as_rule() {
+                                    Rule::expression => expr = Some(parse_expression(part)?),
+                                    Rule::variable => var = part.as_str().to_string(),
+                                    _ => {}
+                                }
+                            }
+                            let expression = expr.ok_or("Missing UNWIND expression")?;
+                            clauses.push(Clause::Unwind(UnwindClause {
+                                expression,
+                                variable: var,
+                            }));
+                        }
+                        Rule::set_clause => {
+                            let items: Result<Vec<SetItem>, String> = inner
+                                .into_inner()
+                                .filter(|p| p.as_rule() == Rule::set_item)
+                                .map(|item| {
+                                    let mut parts = item.into_inner();
+                                    let prop = parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
+                                    let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
+                                    Ok(SetItem {
+                                        property: prop,
+                                        value: val,
+                                    })
+                                })
+                                .collect();
+                            clauses.push(Clause::Set(SetClause { items: items? }));
+                        }
+                        Rule::merge_clause => {
+                            clauses.push(Clause::Merge(parse_merge_clause(inner)?));
+                        }
+                        Rule::foreach_clause => {
+                            let clause = parse_foreach_clause(inner)?;
+                            clauses.push(Clause::Foreach(clause));
+                        }
+                        Rule::create_clause_inline => {
+                            // CREATE inside FOREACH body
+                            let patterns = parse_patterns(inner)?;
+                            clauses.push(Clause::Create(CreateClause { patterns }));
+                        }
+                        _ => {}
+                    }
+                }
             }
             Rule::return_clause => {
-                let distinct = has_distinct_flag(&inner);
-                let order_by = parse_order_by(&inner);
-                let (limit, skip) = parse_limit_skip(&inner)?;
+                let distinct = has_distinct_flag(&child);
+                let order_by = parse_order_by(&child);
+                let (limit, skip) = parse_limit_skip(&child)?;
                 clauses.push(Clause::Return(ReturnClause {
-                    expressions: parse_return_items(inner)?,
+                    expressions: parse_return_items(child)?,
                     distinct,
                     order_by,
                     limit,
                     skip,
                 }));
-            }
-            Rule::with_clause => {
-                let order_by = parse_order_by(&inner);
-                let (limit, skip) = parse_limit_skip(&inner)?;
-                clauses.push(Clause::With(ReturnClause {
-                    expressions: parse_return_items(inner)?,
-                    distinct: false,
-                    order_by,
-                    limit,
-                    skip,
-                }));
-            }
-            Rule::where_clause => {
-                let expr = parse_expression(inner.into_inner().next().ok_or("Empty WHERE")?)?;
-                clauses.push(Clause::Where(WhereClause { expression: expr }));
-            }
-            Rule::delete_clause => {
-                let detach = inner.as_str().to_uppercase().starts_with("DETACH");
-                let expressions: Result<Vec<_>, _> = inner.into_inner().map(parse_expression).collect();
-                clauses.push(Clause::Delete(DeleteClause {
-                    detach,
-                    expressions: expressions?,
-                }));
-            }
-            Rule::unwind_clause => {
-                let mut expr = None;
-                let mut var = String::new();
-                for part in inner.into_inner() {
-                    match part.as_rule() {
-                        Rule::expression => expr = Some(parse_expression(part)?),
-                        Rule::variable => var = part.as_str().to_string(),
-                        _ => {}
-                    }
-                }
-                let expression = expr.ok_or("Missing UNWIND expression")?;
-                clauses.push(Clause::Unwind(UnwindClause {
-                    expression,
-                    variable: var,
-                }));
-            }
-            Rule::set_clause => {
-                let items: Result<Vec<SetItem>, String> = inner
-                    .into_inner()
-                    .filter(|p| p.as_rule() == Rule::set_item)
-                    .map(|item| {
-                        let mut parts = item.into_inner();
-                        let prop = parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
-                        let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
-                        Ok(SetItem {
-                            property: prop,
-                            value: val,
-                        })
-                    })
-                    .collect();
-                clauses.push(Clause::Set(SetClause { items: items? }));
-            }
-            Rule::merge_clause => {
-                // MERGE is handled separately in parse_statement
-            }
-            Rule::foreach_clause => {
-                let clause = parse_foreach_clause(inner)?;
-                clauses.push(Clause::Foreach(clause));
-            }
-            Rule::create_clause_inline => {
-                // CREATE inside FOREACH body
-                let patterns = parse_patterns(inner)?;
-                clauses.push(Clause::Create(CreateClause { patterns }));
             }
             _ => {}
         }
@@ -443,60 +452,50 @@ pub fn parse_call(pair: pest::iterators::Pair<Rule>) -> Result<StandaloneCall, S
     Ok(StandaloneCall { function_name, args })
 }
 
-/// Parse a MERGE statement.
-pub fn parse_merge(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
+/// Parse a single `merge_clause` Pair into a `MergeStatement`.
+pub fn parse_merge_clause(pair: pest::iterators::Pair<Rule>) -> Result<MergeStatement, String> {
     let mut patterns = Vec::new();
     let mut on_create = Vec::new();
     let mut on_match = Vec::new();
 
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::merge_clause => {
-                for part in inner.into_inner() {
-                    match part.as_rule() {
-                        Rule::pattern => {
-                            patterns.extend(parse_pattern_path(part)?);
-                        }
-                        Rule::on_create_set => {
-                            for item in part.into_inner() {
-                                if item.as_rule() == Rule::set_item {
-                                    let mut p = item.into_inner();
-                                    let prop = parse_expression(p.next().ok_or("Missing ON CREATE SET property")?)?;
-                                    let val = parse_expression(p.next().ok_or("Missing ON CREATE SET value")?)?;
-                                    on_create.push(SetItem {
-                                        property: prop,
-                                        value: val,
-                                    });
-                                }
-                            }
-                        }
-                        Rule::on_match_set => {
-                            for item in part.into_inner() {
-                                if item.as_rule() == Rule::set_item {
-                                    let mut p = item.into_inner();
-                                    let prop = parse_expression(p.next().ok_or("Missing ON MATCH SET property")?)?;
-                                    let val = parse_expression(p.next().ok_or("Missing ON MATCH SET value")?)?;
-                                    on_match.push(SetItem {
-                                        property: prop,
-                                        value: val,
-                                    });
-                                }
-                            }
-                        }
-                        _ => {}
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::pattern => {
+                patterns.extend(parse_pattern_path(part)?);
+            }
+            Rule::on_create_set => {
+                for item in part.into_inner() {
+                    if item.as_rule() == Rule::set_item {
+                        let mut p = item.into_inner();
+                        let prop = parse_expression(p.next().ok_or("Missing ON CREATE SET property")?)?;
+                        let val = parse_expression(p.next().ok_or("Missing ON CREATE SET value")?)?;
+                        on_create.push(SetItem {
+                            property: prop,
+                            value: val,
+                        });
                     }
                 }
             }
-            Rule::return_clause => {
-                // MERGE with RETURN — ignored for now; handled at binder level
+            Rule::on_match_set => {
+                for item in part.into_inner() {
+                    if item.as_rule() == Rule::set_item {
+                        let mut p = item.into_inner();
+                        let prop = parse_expression(p.next().ok_or("Missing ON MATCH SET property")?)?;
+                        let val = parse_expression(p.next().ok_or("Missing ON MATCH SET value")?)?;
+                        on_match.push(SetItem {
+                            property: prop,
+                            value: val,
+                        });
+                    }
+                }
             }
             _ => {}
         }
     }
 
-    Ok(Statement::Merge(MergeStatement {
+    Ok(MergeStatement {
         patterns,
         on_create,
         on_match,
-    }))
+    })
 }

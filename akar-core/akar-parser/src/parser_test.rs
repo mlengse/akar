@@ -827,4 +827,141 @@ mod tests {
             _ => panic!("Expected CreateVectorIndex, got {:?}", stmt),
         }
     }
+
+    // ==================== P53.14 — G3 chain clauses ====================
+
+    fn clause_kinds(q: &Query) -> Vec<&'static str> {
+        q.clauses
+            .iter()
+            .map(|c| match c {
+                Clause::Match(_) => "match",
+                Clause::Return(_) => "return",
+                Clause::Where(_) => "where",
+                Clause::Create(_) => "create",
+                Clause::Delete(_) => "delete",
+                Clause::Set(_) => "set",
+                Clause::OptionalMatch(_) => "optional_match",
+                Clause::With(_) => "with",
+                Clause::Unwind(_) => "unwind",
+                Clause::Foreach(_) => "foreach",
+                Clause::Merge(_) => "merge",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_p5314_chain_strengthen_connection() {
+        // Kairos `strengthen_connection`: SET arithmetic + WITH + WHERE + SET.
+        let sql = "MATCH (a:Memory {id: $src})-[r:Connected]->(b:Memory {id: $tgt}) \
+                   SET r.weight = COALESCE(r.weight, 0.0) + $delta \
+                   WITH r WHERE r.weight > 1.0 SET r.weight = 1.0";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(
+                    clause_kinds(&q),
+                    vec!["match", "set", "with", "where", "set"]
+                );
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_p5314_chain_add_bridge_batch() {
+        // Kairos `add_bridges_batch`: UNWIND → MATCH → OPTIONAL MATCH → WITH → WHERE → CREATE → RETURN.
+        let sql = "UNWIND $batch AS row \
+                   MATCH (a:Memory {id: row.src}), (b:Memory {id: row.tgt}) \
+                   OPTIONAL MATCH (a)-[existing:Connected]-(b) \
+                   WITH a, b, existing, row WHERE existing IS NULL \
+                   CREATE (a)-[:Connected {weight: row.w}]->(b) RETURN count(*) AS created";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(
+                    clause_kinds(&q),
+                    vec!["unwind", "match", "optional_match", "with", "where", "create", "return"]
+                );
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_p5314_merge_then_set() {
+        // Kairos `set_meta`/`_next_id`: plain SET after MERGE (previously a parse error).
+        let sql = "MERGE (m:Meta {key: $k}) SET m.value = $v";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(clause_kinds(&q), vec!["merge", "set"]);
+            }
+            _ => panic!("Expected Query"),
+        }
+        let sql = "MERGE (c:Counter {key: $k}) SET c.value = COALESCE(c.value, 0) + 1 RETURN c.value";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(clause_kinds(&q), vec!["merge", "set", "return"]);
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_p5314_set_delete_then_return() {
+        let sql = "MATCH (a:Memory) SET a.weight = 1.0 RETURN a.id";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => assert_eq!(clause_kinds(&q), vec!["match", "set", "return"]),
+            _ => panic!("Expected Query"),
+        }
+        let sql = "MATCH (a:Memory) DELETE a RETURN count(*)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => assert_eq!(clause_kinds(&q), vec!["match", "delete", "return"]),
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_p5314_match_merge_chain() {
+        // Kairos `add_connection`: MATCH then MERGE the edge, then SET.
+        let sql = "MATCH (a:Memory {id: $src}), (b:Memory {id: $tgt}) \
+                   MERGE (a)-[r:Connected]->(b) SET r.weight = 0.7 RETURN count(*)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                assert_eq!(clause_kinds(&q), vec!["match", "merge", "set", "return"]);
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_p5314_standalone_merge_still_statement() {
+        // Legacy standalone MERGE (with optional ON CREATE/ON MATCH and RETURN)
+        // must still dispatch to `Statement::Merge`.
+        let sql = "MERGE (a:Person {id: 0})-[:knows {since: 2020}]->(b:Person {id: 1})";
+        assert!(matches!(parse(sql).unwrap(), Statement::Merge(_)));
+        let sql = "MERGE (m:Meta {key: 'k'}) ON CREATE SET m.value = 'c' ON MATCH SET m.value = 'm' RETURN m.value";
+        assert!(matches!(parse(sql).unwrap(), Statement::Merge(_)));
+    }
+
+    #[test]
+    fn test_p5314_with_where_and_optional_match_chains() {
+        // WITH + WHERE and OPTIONAL MATCH + WHERE must keep clause granularity.
+        let sql = "MATCH (a:Person) WITH a WHERE a.age > 25 RETURN a.name";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => assert_eq!(clause_kinds(&q), vec!["match", "with", "where", "return"]),
+            _ => panic!("Expected Query"),
+        }
+        let sql = "MATCH (a:Person) OPTIONAL MATCH (b:Person) WHERE b.name = a.name RETURN a.name, b.name";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => assert_eq!(clause_kinds(&q), vec!["match", "optional_match", "return"]),
+            _ => panic!("Expected Query"),
+        }
+    }
 }

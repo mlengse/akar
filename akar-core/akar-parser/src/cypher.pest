@@ -201,32 +201,18 @@ foreach_body   = { create_clause_inline | set_clause | delete_clause }
 // Inline CREATE for FOREACH body (CREATE pattern without being wrapped in a full clause)
 create_clause_inline = { "CREATE" ~ pattern }
 
-query_statement = {
-    match_clause ~ optional_match_clause ~ where_clause ~ return_clause
-  | match_clause ~ optional_match_clause ~ return_clause
-  | match_clause ~ optional_match_clause
-  | match_clause ~ where_clause ~ with_clause ~ return_clause
-  | match_clause ~ with_clause ~ return_clause
-  | match_clause ~ with_clause
-  | match_clause ~ where_clause ~ foreach_clause ~ return_clause?
-  | match_clause ~ foreach_clause ~ return_clause?
-  | match_clause ~ foreach_clause ~ set_clause
-  | match_clause ~ foreach_clause ~ delete_clause
-  | match_clause ~ where_clause ~ set_clause
-  | match_clause ~ set_clause
-  | match_clause ~ where_clause ~ delete_clause
-  | match_clause ~ delete_clause
-  | match_clause ~ where_clause ~ create_clause_inline
-  | match_clause ~ create_clause_inline
-  | match_clause ~ where_clause ~ return_clause
-  | match_clause ~ return_clause
-  | match_clause ~ where_clause
-  | match_clause
-  | merge_clause ~ on_create_set? ~ on_match_set? ~ return_clause?
-  | unwind_clause ~ return_clause
+query_statement = { query_clause+ ~ return_clause? | return_clause }
+
+query_clause = {
+    match_clause ~ optional_match_clause* ~ where_clause?
+  | optional_match_clause ~ where_clause?
   | unwind_clause
+  | with_clause ~ where_clause?
+  | set_clause
+  | delete_clause
+  | create_clause_inline
+  | merge_clause
   | foreach_clause
-  | return_clause
 }
 
 // ==================== DDL ====================

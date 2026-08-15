@@ -141,6 +141,7 @@ pub enum BoundClause {
     BoundUnwind(BoundUnwindClause),
     BoundForeach(BoundForeachClause),
     BoundCreate(BoundMatchClause),
+    BoundMerge(BoundMerge),
 }
 
 #[derive(Debug, Clone)]

@@ -53,10 +53,21 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
         }
         Rule::query_statement => {
             let inner_clone = inner.clone();
-            let child_rules: Vec<_> = inner_clone.into_inner().map(|c| c.as_rule()).collect();
-            if child_rules.contains(&Rule::merge_clause) {
-                let merge = dml::parse_merge(inner)?;
-                Ok(merge)
+            let children: Vec<_> = inner_clone.into_inner().collect();
+            // A standalone MERGE (possibly with RETURN) keeps the legacy
+            // `Statement::Merge` shape. A MERGE embedded in a clause chain becomes
+            // `Clause::Merge` inside a Query.
+            let standalone_merge = children.len() <= 2
+                && children.first().is_some_and(|c| c.as_rule() == Rule::query_clause)
+                && (children.len() == 1 || children[1].as_rule() == Rule::return_clause)
+                && {
+                    let qc_inner: Vec<_> = children[0].clone().into_inner().collect();
+                    qc_inner.len() == 1 && qc_inner[0].as_rule() == Rule::merge_clause
+                };
+            if standalone_merge {
+                let qc = inner.into_inner().next().ok_or("Empty MERGE query")?;
+                let merge_pair = qc.into_inner().next().ok_or("MERGE missing merge_clause")?;
+                Ok(Statement::Merge(dml::parse_merge_clause(merge_pair)?))
             } else {
                 let query = dml::parse_query_pairs(inner)?;
                 Ok(Statement::Query(query))
