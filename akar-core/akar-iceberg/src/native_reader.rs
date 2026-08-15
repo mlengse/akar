@@ -194,6 +194,11 @@ fn parse_snapshots(arr: &serde_json::Value) -> Vec<IcebergSnapshot> {
 }
 
 /// List all Parquet data files in the data/ subdirectory.
+///
+/// Production path is [`list_active_data_files`]; this helper is kept for
+/// tooling/tests (enumerates stale files too). Compiled only under the
+/// `native` feature (`--all-features`), so dead outside that build.
+#[allow(dead_code)]
 pub fn list_data_files(table_path: &str) -> Result<Vec<String>, String> {
     let data_dir = Path::new(table_path).join("data");
     if !data_dir.exists() {
