@@ -93,5 +93,11 @@ opt-level = 3
 debug = true
 strip = false
 
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1
+
 [profile.bench]
 debug = true
