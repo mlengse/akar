@@ -38,6 +38,10 @@ const INTERNAL_COLS: &[&str] = &["_id", "_label", "_src", "_dst", "_rel_id"];
 pub struct Database {
     db: Option<Arc<akar_main::Database>>,
     translator: Arc<Mutex<Translator>>,
+    /// Connections created against this database. Kept alive here and
+    /// force-closed by `close()` so the underlying file lock is released even
+    /// if the Python `Connection` wrappers are still referenced (P53.18).
+    connections: Vec<Py<Connection>>,
 }
 
 #[pymethods]
@@ -50,11 +54,21 @@ impl Database {
         Ok(Self {
             db: Some(Arc::new(db)),
             translator: Arc::new(Mutex::new(Translator::new())),
+            connections: Vec::new(),
         })
     }
 
-    /// Tutup database (lepas file lock & resource).
-    fn close(&mut self) {
+    /// Tutup database: lepas file lock & resource. Menutup paksa semua
+    /// connection yang masih hidup (melepas `Arc<Database>` mereka) agar
+    /// `Database(path sama)` bisa dibuka lagi — pola kairos
+    /// close→checkpoint→reopen (P53.18, G7).
+    fn close(&mut self, py: Python<'_>) {
+        let conns = std::mem::take(&mut self.connections);
+        for c in conns {
+            if let Ok(mut conn) = c.try_borrow_mut(py) {
+                conn.conn = None;
+            }
+        }
         self.db = None;
     }
 
@@ -66,7 +80,7 @@ impl Database {
 /// `akar.Connection` — eksekusi Cypher terhadap sebuah `Database`.
 #[pyclass(module = "akar")]
 pub struct Connection {
-    conn: akar_main::Connection,
+    conn: Option<akar_main::Connection>,
     translator: Arc<Mutex<Translator>>,
 }
 
@@ -74,16 +88,23 @@ pub struct Connection {
 impl Connection {
     /// `Connection(db: Database)`.
     #[new]
-    fn new(database: &Database) -> PyResult<Self> {
+    fn new(database: &Bound<'_, Database>) -> PyResult<Py<Self>> {
+        let py = database.py();
         let db = database
+            .borrow()
             .db
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("Database is closed"))?
-            .clone();
-        Ok(Self {
-            conn: akar_main::Connection::new(&db),
-            translator: database.translator.clone(),
-        })
+            .clone()
+            .ok_or_else(|| PyValueError::new_err("Database is closed"))?;
+        let translator = database.borrow().translator.clone();
+        let this = Py::new(
+            py,
+            Self {
+                conn: Some(akar_main::Connection::new(&db)),
+                translator,
+            },
+        )?;
+        database.borrow_mut().connections.push(this.clone_ref(py));
+        Ok(this)
     }
 
     /// `query(cypher: str)` — eksekusi tanpa parameter.
@@ -107,7 +128,11 @@ impl Connection {
         self.run(cypher, if map.is_empty() { None } else { Some(map) })
     }
 
-    fn close(&mut self) {}
+    /// Tutup connection: lepas `Arc<Database>` (file lock). Query berikutnya
+    /// pada wrapper yang sama akan error "Connection is closed" (P53.18).
+    fn close(&mut self) {
+        self.conn = None;
+    }
 
     fn __repr__(&self) -> String {
         "<akar.Connection>".to_string()
@@ -115,6 +140,12 @@ impl Connection {
 }
 
 impl Connection {
+    fn conn(&self) -> PyResult<&akar_main::Connection> {
+        self.conn
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Connection is closed"))
+    }
+
     /// Terjemahkan tiap statement, lalu eksekusi berurutan. Mengembalikan
     /// hasil statement terakhir yang memproduksi data.
     fn run(&self, cypher: &str, params: Option<HashMap<String, Value>>) -> PyResult<QueryResult> {
@@ -139,9 +170,10 @@ impl Connection {
         }
 
         // Fase 2: eksekusi.
+        let conn = self.conn()?;
         let mut last: Option<QueryResult> = None;
         for action in actions {
-            if let Some(result) = self.execute_action(action, params.as_ref())? {
+            if let Some(result) = self.execute_action(conn, action, params.as_ref())? {
                 last = Some(result);
             }
         }
@@ -150,6 +182,7 @@ impl Connection {
 
     fn execute_action(
         &self,
+        conn: &akar_main::Connection,
         action: Translated,
         params: Option<&HashMap<String, Value>>,
     ) -> PyResult<Option<QueryResult>> {
@@ -157,27 +190,27 @@ impl Connection {
             Translated::NoOp => Ok(None),
             Translated::Query(sql) => {
                 let sql = self.interpolate(sql, params)?;
-                let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                let result = conn.query(&sql).map_err(PyRuntimeError::new_err)?;
                 Ok(Some(QueryResult::from_native(result)))
             }
             Translated::Swallow(sql, needles) => {
                 let sql = self.interpolate(sql, params)?;
-                match self.conn.query(&sql) {
+                match conn.query(&sql) {
                     Ok(result) => Ok(Some(QueryResult::from_native(result))),
                     Err(err) if self.swallow(&err, needles) => Ok(None),
                     Err(err) => Err(PyRuntimeError::new_err(err)),
                 }
             }
             Translated::CreateTableIfNotExists { table, sql } => {
-                if self.table_exists(&table)? {
+                if self.table_exists(conn, &table)? {
                     Ok(None)
                 } else {
                     let sql = self.interpolate(sql, params)?;
-                    let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                    let result = conn.query(&sql).map_err(PyRuntimeError::new_err)?;
                     Ok(Some(QueryResult::from_native(result)))
                 }
             }
-            Translated::DropTableIfExists { table, sql } => match self.conn.query(&sql) {
+            Translated::DropTableIfExists { table, sql } => match conn.query(&sql) {
                 Ok(result) => {
                     if let Ok(mut tr) = self.translator.lock() {
                         tr.remove_table(&table);
@@ -196,6 +229,7 @@ impl Connection {
                 where_sql,
             } => {
                 let sql = self.build_vector_query(
+                    conn,
                     &table,
                     &index_name,
                     &vec_expr,
@@ -204,7 +238,7 @@ impl Connection {
                     where_sql.as_deref(),
                 )?;
                 let sql = self.interpolate(sql, params)?;
-                let result = self.conn.query(&sql).map_err(PyRuntimeError::new_err)?;
+                let result = conn.query(&sql).map_err(PyRuntimeError::new_err)?;
                 Ok(Some(QueryResult::from_native(result)))
             }
         }
@@ -223,8 +257,8 @@ impl Connection {
     }
 
     /// `CALL show_tables()` → apakah tabel sudah ada (case-insensitive).
-    fn table_exists(&self, table: &str) -> PyResult<bool> {
-        let result = self.conn.query("CALL show_tables()").map_err(PyRuntimeError::new_err)?;
+    fn table_exists(&self, conn: &akar_main::Connection, table: &str) -> PyResult<bool> {
+        let result = conn.query("CALL show_tables()").map_err(PyRuntimeError::new_err)?;
         for chunk in &result.chunks {
             for row in 0..chunk.size {
                 if let Some(Value::String(name)) = chunk.get_value(0, row) {
@@ -240,7 +274,7 @@ impl Connection {
     /// Nama kolom tabel untuk ekspansi `RETURN node` (P53.8). Sumber utama:
     /// registri translator (DDL yang sudah ditranslasi); fallback `CALL
     /// table_info('T')` untuk DB yang sudah ada dari sesi sebelumnya.
-    fn ensure_table_schema(&self, table: &str) -> PyResult<Vec<String>> {
+    fn ensure_table_schema(&self, conn: &akar_main::Connection, table: &str) -> PyResult<Vec<String>> {
         if let Ok(tr) = self.translator.lock() {
             if let Some(schema) = tr.table(table) {
                 let cols = schema.column_names();
@@ -250,7 +284,7 @@ impl Connection {
             }
         }
         let query = format!("CALL table_info('{}')", table.replace('\'', "\\'"));
-        let result = self.conn.query(&query).map_err(PyRuntimeError::new_err)?;
+        let result = conn.query(&query).map_err(PyRuntimeError::new_err)?;
         let mut cols = Vec::new();
         for chunk in &result.chunks {
             for row in 0..chunk.size {
@@ -271,6 +305,7 @@ impl Connection {
     /// RETURN node, distance` (read-path HNSW write-only, P52.5).
     fn build_vector_query(
         &self,
+        conn: &akar_main::Connection,
         table: &str,
         _index_name: &str,
         vec_expr: &str,
@@ -278,7 +313,7 @@ impl Connection {
         vec_col: &str,
         where_sql: Option<&str>,
     ) -> PyResult<String> {
-        let cols = self.ensure_table_schema(table)?;
+        let cols = self.ensure_table_schema(conn, table)?;
         let props: Vec<String> = cols
             .iter()
             .map(|c| format!("{}: node.{}", qident(c), qident(c)))
@@ -595,7 +630,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&path);
         let db = Arc::new(akar_main::Database::new(path.to_str().unwrap(), Default::default()).expect("open temp db"));
         let conn = Connection {
-            conn: akar_main::Connection::new(&db),
+            conn: Some(akar_main::Connection::new(&db)),
             translator: Arc::new(Mutex::new(Translator::new())),
         };
         (path, conn)
@@ -635,7 +670,11 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
 ";
 
     fn show_table_names(conn: &Connection) -> Vec<String> {
-        let result = conn.conn.query("CALL show_tables()").expect("show_tables");
+        let result = conn
+            .conn()
+            .expect("show_tables")
+            .query("CALL show_tables()")
+            .expect("show_tables");
         let mut names = Vec::new();
         for chunk in &result.chunks {
             for row in 0..chunk.size {
@@ -677,6 +716,80 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
             .expect("ALTER ADD DEFAULT");
         conn.run("ALTER TABLE Memory ADD protected BOOLEAN DEFAULT false", None)
             .expect("ALTER ADD DEFAULT kedua (already exists) harus di-swallow");
+
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    fn fresh_db_path(tag: &str) -> std::path::PathBuf {
+        let n = DB_SEQ.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("akar_{tag}_{}_{}.db", std::process::id(), n));
+        let _ = std::fs::remove_dir_all(&path);
+        path
+    }
+
+    /// G7 (P53.18): pola kairos close→checkpoint→reopen. `Database.close()`
+    /// harus menutup paksa connection yang masih hidup sehingga file lock
+    /// dilepas meskipun wrapper `Connection` Python masih direferensikan.
+    #[test]
+    fn db_close_releases_lock_even_with_live_connection() {
+        let path = fresh_db_path("p53_18_reopen");
+
+        Python::with_gil(|py| {
+            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let _conn = Connection::new(&db).expect("create connection");
+            db.borrow_mut().close(py);
+            drop(db);
+
+            let reopened =
+                akar_main::Database::new(path.clone(), Default::default()).expect("reopen same path after close");
+            drop(reopened);
+        });
+
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// `Connection.close()` melepas `Arc<Database>`-nya; menggabungkan dengan
+    /// `Database.close()` memungkinkan path yang sama dibuka ulang.
+    #[test]
+    fn connection_close_releases_lock_before_db_close() {
+        let path = fresh_db_path("p53_18_conn_close");
+
+        Python::with_gil(|py| {
+            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let conn = Connection::new(&db).expect("create connection");
+            conn.borrow_mut(py).close();
+            db.borrow_mut().close(py);
+            drop(conn);
+            drop(db);
+
+            let reopened =
+                akar_main::Database::new(path.clone(), Default::default()).expect("reopen same path after close");
+            drop(reopened);
+        });
+
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// Connection tidak bisa dibuat setelah Database ditutup, dan query pada
+    /// connection yang sudah ditutup harus error (bukan panic).
+    #[test]
+    fn closed_database_and_connection_reject_use() {
+        let path = fresh_db_path("p53_18_reject");
+
+        Python::with_gil(|py| {
+            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let conn = Connection::new(&db).expect("create connection");
+            db.borrow_mut().close(py);
+            assert!(
+                Connection::new(&db).is_err(),
+                "Connection::new after Database.close() harus error"
+            );
+            conn.borrow_mut(py).close();
+            assert!(
+                conn.borrow(py).query("RETURN 1").is_err(),
+                "query setelah Connection.close() harus error"
+            );
+        });
 
         let _ = std::fs::remove_dir_all(&path);
     }
