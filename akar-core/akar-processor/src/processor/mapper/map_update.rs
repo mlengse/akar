@@ -165,6 +165,59 @@ pub fn map_and_execute_update(
             record_insert_writes(m.table_id, &result, ctx);
             Ok(result)
         }
+        LogicalOperator::MergeRel(mr) => {
+            let table_catalog = ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| "No table catalog available for MERGE".to_string())?;
+
+            let mut on_match_ops = Vec::new();
+            for set_item in &mr.on_match {
+                on_match_ops.push(PhysicalSet {
+                    table_name: set_item.table_name.clone(),
+                    table_id: set_item.table_id,
+                    is_node: set_item.is_node,
+                    items: set_item.items.clone(),
+                    table_catalog: table_catalog.clone(),
+                    txn_id: ctx.txn_id,
+                    undo_sink: Some(ctx.processor.undo_sink()),
+                    function_registry: ctx.function_registry.clone(),
+                });
+            }
+
+            let mut on_create_ops = Vec::new();
+            for set_item in &mr.on_create {
+                on_create_ops.push(PhysicalSet {
+                    table_name: set_item.table_name.clone(),
+                    table_id: set_item.table_id,
+                    is_node: set_item.is_node,
+                    items: set_item.items.clone(),
+                    table_catalog: table_catalog.clone(),
+                    txn_id: ctx.txn_id,
+                    undo_sink: Some(ctx.processor.undo_sink()),
+                    function_registry: ctx.function_registry.clone(),
+                });
+            }
+
+            let merge_rel_op = PhysicalMergeRel {
+                rel_table_name: mr.rel_table_name.clone(),
+                rel_table_id: mr.rel_table_id,
+                edge_var: mr.edge_var.clone(),
+                src_node_var: mr.src_node_var.clone(),
+                dst_node_var: mr.dst_node_var.clone(),
+                direction: akar_parser::ast::EdgeDirection::LeftToRight,
+                properties: mr.properties.clone(),
+                on_match: on_match_ops,
+                on_create: on_create_ops,
+                table_catalog,
+                txn_id: ctx.txn_id,
+                undo_sink: Some(ctx.processor.undo_sink()),
+            };
+            let result = merge_rel_op.execute(current_input)?;
+            // Record written rows for OCC conflict detection
+            record_insert_writes(mr.rel_table_id, &result, ctx);
+            Ok(result)
+        }
         LogicalOperator::CopyFrom(cf) => {
             let table_catalog = ctx
                 .table_catalog

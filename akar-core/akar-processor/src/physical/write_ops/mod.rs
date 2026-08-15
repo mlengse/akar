@@ -25,3 +25,5 @@ pub mod insert;
 pub use insert::*;
 pub mod merge;
 pub use merge::*;
+pub mod merge_rel;
+pub use merge_rel::*;

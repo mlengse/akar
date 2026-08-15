@@ -35,6 +35,7 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::Unwind(uw) => format!("Unwind({})", uw.variable),
         LogicalOperator::Foreach(fe) => format!("Foreach({})", fe.variable),
         LogicalOperator::Merge(m) => format!("Merge({})", m.table_name),
+        LogicalOperator::MergeRel(mr) => format!("MergeRel({})", mr.rel_table_name),
         LogicalOperator::SemiJoin(_) => "SemiJoin".to_string(),
         LogicalOperator::AntiJoin(_) => "AntiJoin".to_string(),
         LogicalOperator::VectorSimilarityScan(vs) => format!("VectorSimilarityScan(k={})", vs.top_k),

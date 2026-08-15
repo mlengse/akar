@@ -230,6 +230,13 @@ impl QueryPlanner {
     /// Converts the bound merge into a `LogicalMerge` operator with
     /// ON MATCH SET and ON CREATE SET as `LogicalSet` sub-operators.
     fn plan_merge(&self, m: BoundMerge) -> Result<Vec<LogicalOperator>, PlannerError> {
+        Ok(self.build_merge_operators(&m))
+    }
+
+    /// Build the update operator(s) for a MERGE clause. Edge MERGE
+    /// (`MERGE (a)-[r:R]->(b)`, P53.20) emits a `LogicalMergeRel`; otherwise a
+    /// node `LogicalMerge` is produced.
+    fn build_merge_operators(&self, m: &BoundMerge) -> Vec<LogicalOperator> {
         let on_match: Vec<LogicalSet> = m
             .on_match
             .iter()
@@ -262,14 +269,28 @@ impl QueryPlanner {
             })
             .collect();
 
-        Ok(vec![LogicalOperator::Merge(LogicalMerge {
-            table_name: m.table_name,
+        if let Some(edge) = m.patterns.iter().find_map(|p| p.edge.clone()) {
+            return vec![LogicalOperator::MergeRel(LogicalMergeRel {
+                rel_table_name: edge.table_name,
+                rel_table_id: edge.table_id,
+                edge_var: edge.variable.unwrap_or_default(),
+                src_node_var: edge.src_var,
+                dst_node_var: edge.dst_var,
+                properties: edge.properties,
+                on_match,
+                on_create,
+                cardinality: 0,
+            })];
+        }
+
+        vec![LogicalOperator::Merge(LogicalMerge {
+            table_name: m.table_name.clone(),
             table_id: m.table_id,
-            properties: m.properties,
+            properties: m.properties.clone(),
             on_match,
             on_create,
             cardinality: 0,
-        })])
+        })]
     }
 
     /// Plan a UNION or UNION ALL statement.
@@ -812,44 +833,7 @@ impl QueryPlanner {
                     }));
                 }
                 BoundClause::BoundMerge(m) => {
-                    let on_match: Vec<LogicalSet> = m
-                        .on_match
-                        .iter()
-                        .map(|item| LogicalSet {
-                            table_name: item.table_name.clone(),
-                            table_id: item.table_id,
-                            is_node: item.is_node,
-                            items: vec![SetItem {
-                                column_name: item.column_name.clone(),
-                                column_idx: item.column_idx,
-                                value: item.value.clone(),
-                            }],
-                            cardinality: 0,
-                        })
-                        .collect();
-                    let on_create: Vec<LogicalSet> = m
-                        .on_create
-                        .iter()
-                        .map(|item| LogicalSet {
-                            table_name: item.table_name.clone(),
-                            table_id: item.table_id,
-                            is_node: item.is_node,
-                            items: vec![SetItem {
-                                column_name: item.column_name.clone(),
-                                column_idx: item.column_idx,
-                                value: item.value.clone(),
-                            }],
-                            cardinality: 0,
-                        })
-                        .collect();
-                    delete_exprs.push(LogicalOperator::Merge(LogicalMerge {
-                        table_name: m.table_name.clone(),
-                        table_id: m.table_id,
-                        properties: m.properties.clone(),
-                        on_match,
-                        on_create,
-                        cardinality: 0,
-                    }));
+                    delete_exprs.extend(self.build_merge_operators(&m));
                 }
             }
         }

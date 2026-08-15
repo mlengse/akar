@@ -120,6 +120,7 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::Unwind(_)
         | LogicalOperator::Foreach(_)
         | LogicalOperator::Merge(_)
+        | LogicalOperator::MergeRel(_)
         | LogicalOperator::Intersect(_)
         | LogicalOperator::RecursiveExtend(_)
         | LogicalOperator::Accumulate(_)

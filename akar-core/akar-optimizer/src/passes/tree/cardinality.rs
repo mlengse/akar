@@ -142,6 +142,7 @@ impl TreeOptimizationPass for CardinalityEstimation {
                 LogicalOperator::Unwind(_) => 10, // list expansion estimate
                 LogicalOperator::Foreach(_) => 1,
                 LogicalOperator::Merge(_) => 1,      // single matched/created node
+                LogicalOperator::MergeRel(_) => 1,   // single matched/created edge
                 LogicalOperator::Explain(_) => 1,    // one row with plan text
                 LogicalOperator::Intersect(_) => 10, // estimate: intersection reduces cardinality
                 LogicalOperator::RecursiveExtend(re) => {

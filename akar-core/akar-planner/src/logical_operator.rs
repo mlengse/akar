@@ -89,6 +89,7 @@ pub enum LogicalOperator {
     Unwind(LogicalUnwind),
     Foreach(LogicalForeach),
     Merge(LogicalMerge),
+    MergeRel(LogicalMergeRel),
     SemiJoin(LogicalSemiJoin),
     AntiJoin(LogicalAntiJoin),
     Intersect(LogicalIntersect),
@@ -153,6 +154,7 @@ impl LogicalOperator {
             LogicalOperator::Unwind(s) => s.cardinality,
             LogicalOperator::Foreach(s) => s.cardinality,
             LogicalOperator::Merge(s) => s.cardinality,
+            LogicalOperator::MergeRel(s) => s.cardinality,
             LogicalOperator::SemiJoin(s) => s.cardinality,
             LogicalOperator::AntiJoin(s) => s.cardinality,
             LogicalOperator::Intersect(s) => s.cardinality,
@@ -217,6 +219,7 @@ impl LogicalOperator {
             LogicalOperator::Unwind(s) => s.cardinality = card,
             LogicalOperator::Foreach(s) => s.cardinality = card,
             LogicalOperator::Merge(s) => s.cardinality = card,
+            LogicalOperator::MergeRel(s) => s.cardinality = card,
             LogicalOperator::SemiJoin(s) => s.cardinality = card,
             LogicalOperator::AntiJoin(s) => s.cardinality = card,
             LogicalOperator::Intersect(s) => s.cardinality = card,
@@ -295,7 +298,8 @@ impl LogicalOperator {
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_)
-            | LogicalOperator::Merge(_) => vec![],
+            | LogicalOperator::Merge(_)
+            | LogicalOperator::MergeRel(_) => vec![],
             // Leaf operators have no children
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
@@ -359,7 +363,8 @@ impl LogicalOperator {
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_)
-            | LogicalOperator::Merge(_) => vec![],
+            | LogicalOperator::Merge(_)
+            | LogicalOperator::MergeRel(_) => vec![],
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
@@ -750,6 +755,31 @@ pub struct LogicalMerge {
     /// SET operations to apply when the node already exists (matched).
     pub on_match: Vec<LogicalSet>,
     /// SET operations to apply when a new node is created.
+    pub on_create: Vec<LogicalSet>,
+    pub cardinality: u64,
+}
+
+/// Logical operator for edge MERGE (P53.20): `MERGE (a)-[r:R]->(b)`.
+///
+/// Matches an existing edge from `src` to `dst` on the rel table whose props
+/// equal the pattern properties; if absent, inserts a new edge. Emits the
+/// matched/inserted edge's `_id` as `<edge_var>._id` so a following SET clause
+/// can target it.
+#[derive(Debug, Clone)]
+pub struct LogicalMergeRel {
+    pub rel_table_name: String,
+    pub rel_table_id: u64,
+    /// Variable bound to the edge (e.g. `r`).
+    pub edge_var: String,
+    /// Node variables bound by a prior MATCH that anchor the endpoints.
+    pub src_node_var: String,
+    pub dst_node_var: String,
+    /// Inline properties from the edge pattern (`{type: $type}`).
+    pub properties: Vec<(String, akar_parser::ast::Expression)>,
+    /// SET operations applied when the edge already exists (empty for the
+    /// standalone-SET form used by Kairos `add_connection`).
+    pub on_match: Vec<LogicalSet>,
+    /// SET operations applied when a new edge is created.
     pub on_create: Vec<LogicalSet>,
     pub cardinality: u64,
 }

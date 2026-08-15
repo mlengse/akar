@@ -125,6 +125,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::StandaloneCall(_)
                 | LogicalOperator::Foreach(_)
                 | LogicalOperator::Merge(_)
+                | LogicalOperator::MergeRel(_)
                 | LogicalOperator::Explain(_)
                 | LogicalOperator::Intersect(_)
                 | LogicalOperator::RecursiveExtend(_)

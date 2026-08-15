@@ -235,7 +235,7 @@ impl Binder {
                     (BoundClause::BoundOptionalMatch(bound), vars)
                 }
                 Clause::Merge(m) => {
-                    let (bound, vars) = self.bind_merge_clause(&m)?;
+                    let (bound, vars) = self.bind_merge_clause(&m, &variables)?;
                     (BoundClause::BoundMerge(bound), vars)
                 }
             };
@@ -382,11 +382,14 @@ impl Binder {
             if let Some(ref v) = var {
                 if let Some(existing) = existing_vars.iter().find(|bv| bv.name == *v) {
                     // Reusing a variable is allowed when it refers to the same node table
-                    // (e.g. `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` — `a` is the shared node).
+                    // (e.g. `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` — `a` is the shared node),
+                    // or when the pattern node has no label and names an already-bound
+                    // node variable (P53.21: `OPTIONAL MATCH (a)-[existing:Connected]-(b)`
+                    // and `MERGE (a)-[r:Connected]->(b)` reuse `a`/`b` from a prior MATCH).
                     let same_node = allow_existing
                         || (existing.is_node
-                            && node_table_id.is_some()
-                            && existing.table_id == node_table_id.unwrap_or(0));
+                            && (label.is_none()
+                                || (node_table_id.is_some() && existing.table_id == node_table_id.unwrap_or(0))));
                     if same_node {
                         // Reference to already-bound variable (e.g. in CREATE after MATCH,
                         // or the shared node of a multi-pattern MATCH).
@@ -1265,17 +1268,22 @@ impl Binder {
     }
 
     fn bind_merge(&self, m: akar_parser::ast::MergeStatement) -> Result<BoundStatement, BinderError> {
-        let (bound, _) = self.bind_merge_clause(&m)?;
+        let (bound, _) = self.bind_merge_clause(&m, &[])?;
         Ok(BoundStatement::BoundMerge(bound))
     }
 
     /// Bind a MERGE pattern (standalone statement or clause in a query chain),
     /// returning the bound merge plus any variables introduced by its patterns.
+    ///
+    /// `variables` holds the query scope so that label-less node patterns
+    /// (e.g. `MERGE (a)-[r:Connected]->(b)` where `a`/`b` were bound by a prior
+    /// MATCH) can be resolved to their already-bound table (P53.20).
     fn bind_merge_clause(
         &self,
         m: &akar_parser::ast::MergeStatement,
+        variables: &[BoundVariable],
     ) -> Result<(BoundMerge, Vec<BoundVariable>), BinderError> {
-        let patterns = self.bind_create_patterns(&m.patterns)?;
+        let patterns = self.bind_merge_patterns(&m.patterns, variables)?;
         let primary = patterns
             .iter()
             .find_map(|p| p.node.clone())
@@ -1290,12 +1298,16 @@ impl Binder {
         for pat in &patterns {
             if let Some(node) = &pat.node {
                 if let Some(name) = &node.variable {
-                    new_vars.push(BoundVariable {
-                        name: name.clone(),
-                        table_id: node.table_id,
-                        label: Some(node.table_name.clone()),
-                        is_node: true,
-                    });
+                    // Skip nodes that were resolved as references to existing bindings.
+                    let is_reference = variables.iter().any(|v| &v.name == name && v.is_node);
+                    if !is_reference {
+                        new_vars.push(BoundVariable {
+                            name: name.clone(),
+                            table_id: node.table_id,
+                            label: Some(node.table_name.clone()),
+                            is_node: true,
+                        });
+                    }
                 }
             }
             if let Some(edge) = &pat.edge {
@@ -1321,6 +1333,105 @@ impl Binder {
             },
             new_vars,
         ))
+    }
+
+    /// Bind the node/edge elements of a MERGE pattern path, resolving
+    /// label-less nodes against the given query scope (P53.20).
+    fn bind_merge_patterns(
+        &self,
+        patterns: &[akar_parser::ast::Pattern],
+        variables: &[BoundVariable],
+    ) -> Result<Vec<BoundCreatePattern>, BinderError> {
+        let mut bound = Vec::with_capacity(patterns.len());
+        for (i, pat) in patterns.iter().enumerate() {
+            let node = if let Some(ref n) = pat.node {
+                match n.labels.first() {
+                    Some(label) => {
+                        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                        let entry = catalog
+                            .get_entry_by_name(label)
+                            .ok_or_else(|| format!("Table '{label}' not found"))?;
+                        if !entry.is_node_table() {
+                            return Err(format!("'{label}' is not a node table").into());
+                        }
+                        Some(BoundNodeCreate {
+                            variable: n.variable.clone(),
+                            table_name: label.clone(),
+                            table_id: entry.table_id(),
+                            properties: n.properties.clone(),
+                        })
+                    }
+                    None => {
+                        // Label-less node: must reference an already-bound node variable.
+                        let var_name = n.variable.as_ref().ok_or("MERGE node requires a label or a variable")?;
+                        let existing =
+                            variables
+                                .iter()
+                                .find(|v| &v.name == var_name && v.is_node)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "MERGE references unknown variable '{}' (no label to resolve table)",
+                                        var_name
+                                    )
+                                })?;
+                        let label = existing.label.clone().unwrap_or_default();
+                        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                        let entry = catalog
+                            .get_entry_by_name(&label)
+                            .ok_or_else(|| format!("Table '{label}' not found"))?;
+                        if !entry.is_node_table() {
+                            return Err(format!("'{label}' is not a node table").into());
+                        }
+                        Some(BoundNodeCreate {
+                            variable: n.variable.clone(),
+                            table_name: label.clone(),
+                            table_id: existing.table_id,
+                            properties: n.properties.clone(),
+                        })
+                    }
+                }
+            } else {
+                None
+            };
+
+            let edge = if let Some(ref e) = pat.edge {
+                let label = e.labels.first().ok_or("Edge requires a label (rel table name)")?;
+                let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let entry = catalog
+                    .get_entry_by_name(label)
+                    .ok_or_else(|| format!("Rel table '{label}' not found"))?;
+                if !entry.is_rel_table() {
+                    return Err(format!("'{label}' is not a rel table").into());
+                }
+                let cur_var = pat
+                    .node
+                    .as_ref()
+                    .and_then(|n| n.variable.clone())
+                    .ok_or("Edge endpoints must be named node variables")?;
+                let nxt_var = patterns
+                    .get(i + 1)
+                    .and_then(|p| p.node.as_ref())
+                    .and_then(|n| n.variable.clone())
+                    .ok_or("Edge endpoints must be named node variables")?;
+                let (src_var, dst_var) = match e.direction {
+                    akar_parser::ast::EdgeDirection::RightToLeft => (nxt_var, cur_var),
+                    _ => (cur_var, nxt_var),
+                };
+                Some(BoundEdgeCreate {
+                    variable: e.variable.clone(),
+                    table_name: label.clone(),
+                    table_id: entry.table_id(),
+                    src_var,
+                    dst_var,
+                    properties: e.properties.clone(),
+                })
+            } else {
+                None
+            };
+
+            bound.push(BoundCreatePattern { node, edge });
+        }
+        Ok(bound)
     }
 
     /// Bind all node/edge elements of a CREATE or MERGE pattern path.

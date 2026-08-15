@@ -209,6 +209,7 @@ impl PlanMapper {
             | LogicalOperator::CreateNode(_)
             | LogicalOperator::CreateRel(_)
             | LogicalOperator::Merge(_)
+            | LogicalOperator::MergeRel(_)
             | LogicalOperator::Extend(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::Insert(_)
