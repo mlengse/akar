@@ -154,6 +154,7 @@ mod tests {
                     expression: e,
                     resolved_type: akar_common::types::LogicalTypeID::Any,
                     is_constant: false,
+                    alias: None,
                 })
                 .collect(),
             children: vec![],

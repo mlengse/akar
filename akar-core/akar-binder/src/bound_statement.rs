@@ -249,6 +249,8 @@ pub struct BoundExpression {
     pub expression: Expression,
     pub resolved_type: LogicalTypeID,
     pub is_constant: bool,
+    /// Output column name override from `AS alias` in RETURN/WITH (P53.16).
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone)]

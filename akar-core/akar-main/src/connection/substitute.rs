@@ -301,6 +301,7 @@ fn substitute_in_bound_expr(
         expression: new_expr,
         resolved_type: expr.resolved_type,
         is_constant: expr.is_constant,
+        alias: expr.alias.clone(),
     })
 }
 

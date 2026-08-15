@@ -81,13 +81,22 @@ pub fn map_and_execute_aggregate(
 }
 
 /// Build output field names for an aggregate result: the group-by variable
-/// names followed by the aggregate function names (P52.56).
+/// names followed by the aggregate function names (P52.56). Group-by naming
+/// mirrors `expression_field_name` in map_projection.rs so the projection above
+/// the aggregate resolves columns by name (P53.16).
 fn aggregate_field_names(a: &akar_planner::logical_operator::LogicalAggregate) -> Vec<String> {
     let mut names: Vec<String> = a
         .group_by
         .iter()
         .map(|e| match e {
             Expression::Variable(v) => v.clone(),
+            Expression::PropertyAccess(obj, prop) => {
+                if let Expression::Variable(var) = &**obj {
+                    format!("{var}.{prop}")
+                } else {
+                    prop.clone()
+                }
+            }
             other => format!("{other:?}"),
         })
         .collect();

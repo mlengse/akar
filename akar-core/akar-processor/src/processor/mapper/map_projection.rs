@@ -25,8 +25,11 @@ fn projection_needs_expression_eval(expr: &Expression) -> bool {
 
 /// Derive the output column name of a projected expression, so downstream
 /// operators (ORDER BY / TOP-K) can resolve sort keys by name rather than by
-/// position (P52.1).
-fn expression_field_name(expr: &Expression) -> String {
+/// position (P52.1). An `AS alias` overrides the derived name (P53.16, G5).
+fn expression_field_name(alias: Option<&str>, expr: &Expression) -> String {
+    if let Some(a) = alias {
+        return a.to_string();
+    }
     match expr {
         Expression::PropertyAccess(obj, prop) => {
             if let Expression::Variable(var) = &**obj {
@@ -110,7 +113,7 @@ pub fn map_and_execute_projection(
                         let field_names = p
                             .expressions
                             .iter()
-                            .map(|be| expression_field_name(&be.expression))
+                            .map(|be| expression_field_name(be.alias.as_deref(), &be.expression))
                             .collect();
                         output.push(DataChunk {
                             fields,
@@ -135,8 +138,25 @@ pub fn map_and_execute_projection(
                     } else {
                         (0..p.expressions.len()).collect()
                     };
+                    let rename = column_indices.len() == p.expressions.len() && !p.expressions.is_empty();
                     let proj = PhysicalProjection { column_indices };
-                    proj.execute(input)?
+                    let mut result = proj.execute(input)?;
+                    // Rename output columns to alias-aware names (P53.16): the
+                    // plain-column path copies input field_names, so `RETURN
+                    // m.name AS nm` would otherwise keep `m.name` as the label.
+                    if rename {
+                        let names: Vec<String> = p
+                            .expressions
+                            .iter()
+                            .map(|be| expression_field_name(be.alias.as_deref(), &be.expression))
+                            .collect();
+                        for chunk in &mut result {
+                            if chunk.fields.len() == names.len() {
+                                chunk.field_names = names.clone();
+                            }
+                        }
+                    }
+                    result
                 }
             };
             Ok(result)

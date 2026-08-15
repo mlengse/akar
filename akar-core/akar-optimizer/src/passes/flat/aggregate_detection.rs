@@ -11,14 +11,13 @@
 // column; a Projection is kept above the Aggregate to evaluate the outer
 // expression (`COALESCE(<agg>, 0)`) over the single-row aggregate result.
 //
+// P53.16 (G5): the Projection is ALWAYS kept above the Aggregate (not only for
+// nested aggregates) so that `AS` aliases from RETURN/WITH are honored — the
+// projection is the single place that applies alias-aware output column names.
+//
 // Example plan transformation:
 //   [Scan, Projection([COALESCE(MAX(x), 0)])]
 //   → [Scan, Aggregate(gb=[], aggs=[MAX(x)]), Projection([COALESCE(<MAX(x)>, 0)])]
-//
-// Pure top-level aggregates keep the existing behavior (Projection dropped,
-// Aggregate output is the final result):
-//   [Scan, Projection([COUNT(*), SUM(x)])]
-//   → [Scan, Aggregate(gb=[], aggs=[COUNT(*), SUM(x)])]
 // ========================================================================
 
 use crate::passes::OptimizationPass;
@@ -46,7 +45,6 @@ impl OptimizationPass for AggregateDetection {
                 let mut group_by: Vec<Expression> = Vec::new();
                 let mut rewritten: Vec<BoundExpression> = Vec::new();
                 let mut has_agg = false;
-                let mut has_nested = false;
 
                 for be in &proj.expressions {
                         if !contains_aggregate(&be.expression) {
@@ -66,18 +64,19 @@ impl OptimizationPass for AggregateDetection {
                                 let ref_name = aggregate_ref_name(&name, &args);
                                 all_aggregates.push((name, args));
                                 // Refer to the aggregate output column by its
-                                // field name (matches aggregate_field_names).
+                                // field name (matches aggregate_field_names);
+                                // keep the RETURN alias (P53.16).
                                 rewritten.push(BoundExpression {
                                     expression: Expression::Variable(ref_name),
                                     resolved_type: be.resolved_type,
                                     is_constant: false,
+                                    alias: be.alias.clone(),
                                 });
                             }
                             // The aggregate is nested inside another expression
                             // (e.g. COALESCE(MAX(x), 0)) — extract it and keep
                             // the outer expression above the Aggregate.
                             None => {
-                                has_nested = true;
                                 let mut collected: Vec<(String, Vec<Expression>)> = Vec::new();
                                 let new_expr = rewrite_aggregates(&be.expression, &mut collected);
                                 all_aggregates.extend(collected);
@@ -85,6 +84,7 @@ impl OptimizationPass for AggregateDetection {
                                     expression: new_expr,
                                     resolved_type: be.resolved_type,
                                     is_constant: be.is_constant,
+                                    alias: be.alias.clone(),
                                 });
                             }
                         }
@@ -103,19 +103,15 @@ impl OptimizationPass for AggregateDetection {
                         cardinality: proj.cardinality,
                     });
 
-                    if has_nested {
-                        // The outer expression must be evaluated AFTER the
-                        // aggregate collapses all rows. Keep the (rewritten)
-                        // projection above the Aggregate in the flat pipeline.
-                        result.push(agg_op);
-                        result.push(LogicalOperator::Projection(LogicalProjection {
-                            expressions: rewritten,
-                            children: Vec::new(),
-                            cardinality: 0,
-                        }));
-                    } else {
-                        result.push(agg_op);
-                    }
+                    // Always keep the (rewritten) projection above the Aggregate
+                    // so `AS` aliases are applied to the output column names and
+                    // outer expressions evaluate over the collapsed rows.
+                    result.push(agg_op);
+                    result.push(LogicalOperator::Projection(LogicalProjection {
+                        expressions: rewritten,
+                        children: Vec::new(),
+                        cardinality: 0,
+                    }));
                 }
                 _ => {
                     result.push(op.clone());

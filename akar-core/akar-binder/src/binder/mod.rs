@@ -497,16 +497,24 @@ impl Binder {
                                 LogicalTypeID::Rel
                             },
                             is_constant: false,
+                            alias: None,
                         });
                     }
                 }
                 _ => {
-                    let resolved = self.resolve_expression(&item.expression, variables)?;
+                    let mut resolved = self.resolve_expression(&item.expression, variables)?;
+                    resolved.alias = item.alias.clone();
                     expressions.push(resolved);
                 }
             }
         }
-        // Bind ORDER BY items
+        // Bind ORDER BY items. Sort keys may reference RETURN/WITH aliases
+        // (e.g. `RETURN count(m) AS cnt ORDER BY cnt`); alias shadows any
+        // scope variable of the same name (P53.16).
+        let alias_types: Vec<(String, LogicalTypeID)> = expressions
+            .iter()
+            .filter_map(|be| be.alias.clone().map(|a| (a, be.resolved_type)))
+            .collect();
         let order_by = r
             .order_by
             .as_ref()
@@ -514,7 +522,18 @@ impl Binder {
                 items
                     .iter()
                     .map(|item| {
-                        let resolved = self.resolve_expression(&item.expression, variables)?;
+                        let resolved = match &item.expression {
+                            Expression::Variable(name) => match alias_types.iter().find(|(alias, _)| alias == name) {
+                                Some((alias, typ)) => BoundExpression {
+                                    expression: Expression::Variable(alias.clone()),
+                                    resolved_type: *typ,
+                                    is_constant: false,
+                                    alias: None,
+                                },
+                                None => self.resolve_expression(&item.expression, variables)?,
+                            },
+                            _ => self.resolve_expression(&item.expression, variables)?,
+                        };
                         Ok(crate::bound_statement::BoundOrderByItem {
                             expression: resolved,
                             ascending: item.ascending,
@@ -591,6 +610,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: typ,
                     is_constant: true,
+                    alias: None,
                 })
             }
             Expression::Variable(name) => {
@@ -605,6 +625,7 @@ impl Binder {
                         expression: expr.clone(),
                         resolved_type: typ,
                         is_constant: false,
+                        alias: None,
                     })
                 } else if name.to_uppercase() == "COUNT" || name == "*" {
                     // Special handling for COUNT(*)
@@ -612,6 +633,7 @@ impl Binder {
                         expression: expr.clone(),
                         resolved_type: LogicalTypeID::Int64,
                         is_constant: false,
+                        alias: None,
                     })
                 } else {
                     // Check catalog for table references
@@ -626,6 +648,7 @@ impl Binder {
                             expression: expr.clone(),
                             resolved_type: typ,
                             is_constant: false,
+                            alias: None,
                         })
                     } else {
                         Err(format!("Variable '{}' not in scope", name).into())
@@ -639,6 +662,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Any,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::PropertyAccess(obj, prop) => {
@@ -678,6 +702,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: prop_type,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::FunctionCall(name, args) => {
@@ -702,6 +727,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: return_type,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::BinaryOp(op, left, right) => {
@@ -737,6 +763,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: result_type,
                     is_constant: left.is_constant && right.is_constant,
+                    alias: None,
                 })
             }
             Expression::UnaryOp(op, inner) => {
@@ -749,6 +776,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: result_type,
                     is_constant: inner.is_constant,
+                    alias: None,
                 })
             }
             Expression::List(items) => {
@@ -759,6 +787,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::List,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::Map(entries) => {
@@ -769,6 +798,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Map,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::ExistsSubquery(query) => {
@@ -779,6 +809,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Bool,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::Case(case_expr) => {
@@ -805,6 +836,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: result_type,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::Star => {
@@ -814,6 +846,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Any,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::ListPredicate {
@@ -838,6 +871,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Bool,
                     is_constant: false,
+                    alias: None,
                 })
             }
             Expression::Lambda { var_name: _, body } => {
@@ -849,6 +883,7 @@ impl Binder {
                     expression: expr.clone(),
                     resolved_type: LogicalTypeID::Any,
                     is_constant: false,
+                    alias: None,
                 })
             }
         }

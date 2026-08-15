@@ -525,6 +525,7 @@ impl QueryPlanner {
                                 ),
                                 resolved_type: akar_common::types::LogicalTypeID::Bool,
                                 is_constant: prev.is_constant && w.expression.is_constant,
+                                alias: None,
                             },
                             None => w.expression,
                         });

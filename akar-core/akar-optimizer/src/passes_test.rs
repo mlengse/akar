@@ -44,6 +44,7 @@ mod tests {
                 expression: Expression::Variable("a".into()),
                 resolved_type: LogicalTypeID::Any,
                 is_constant: false,
+                alias: None,
             }],
             children: Vec::new(),
             cardinality: 0,

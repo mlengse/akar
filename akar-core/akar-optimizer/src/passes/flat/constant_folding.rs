@@ -37,6 +37,7 @@ impl OptimizationPass for ConstantFolding {
                                 expression: folded,
                                 resolved_type: e.resolved_type,
                                 is_constant: e.is_constant,
+                                alias: e.alias.clone(),
                             }
                         })
                         .collect();
