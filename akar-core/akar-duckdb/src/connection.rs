@@ -100,7 +100,7 @@ impl DuckDbManager {
     #[cfg(feature = "bundled")]
     pub fn shared_in_memory() -> Result<std::sync::Arc<DuckDbManager>, String> {
         SHARED_IN_MEMORY
-            .get_or_init(|| in_memory().map(std::sync::Arc::new))
+            .get_or_init(|| Self::in_memory().map(std::sync::Arc::new))
             .clone()
     }
 

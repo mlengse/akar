@@ -52,11 +52,11 @@ fn postgres_value_to_string(row: &tokio_postgres::Row, i: usize) -> String {
 #[cfg(feature = "native")]
 mod runtime {
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
 
     static RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
-    static CONNECTIONS: OnceLock<Mutex<HashMap<String, tokio_postgres::Client>>> = OnceLock::new();
+    static CONNECTIONS: OnceLock<Mutex<HashMap<String, Arc<tokio_postgres::Client>>>> = OnceLock::new();
 
     fn runtime() -> Result<&'static tokio::runtime::Runtime, String> {
         RUNTIME
@@ -70,7 +70,7 @@ mod runtime {
             .map_err(|e| e.clone())
     }
 
-    fn connections() -> &'static Mutex<HashMap<String, tokio_postgres::Client>> {
+    fn connections() -> &'static Mutex<HashMap<String, Arc<tokio_postgres::Client>>> {
         CONNECTIONS.get_or_init(Default::default)
     }
 
@@ -95,7 +95,7 @@ mod runtime {
         let mut cache = connections().lock().map_err(|_| "Connection cache lock poisoned".to_string())?;
 
         let client = match cache.get(conn_str) {
-            Some(c) => c.clone(),
+            Some(c) => Arc::clone(c),
             None => {
                 let (client, connection) = rt
                     .block_on(async { config.connect(tokio_postgres::NoTls).await })
@@ -105,7 +105,8 @@ mod runtime {
                         tracing::warn!("PostgreSQL connection error: {e}");
                     }
                 });
-                cache.insert(conn_str.to_string(), client.clone());
+                let client = Arc::new(client);
+                cache.insert(conn_str.to_string(), Arc::clone(&client));
                 client
             }
         };
