@@ -19,13 +19,12 @@ pub fn map_and_execute_update(
             let set_op = PhysicalSet {
                 table_name: sl.table_name.clone(),
                 table_id: sl.table_id,
-                column_name: sl.column_name.clone(),
-                column_idx: sl.column_idx,
-                value: sl.value.clone(),
                 is_node: sl.is_node,
+                items: sl.items.clone(),
                 table_catalog,
                 txn_id: ctx.txn_id,
                 undo_sink: Some(ctx.processor.undo_sink()),
+                function_registry: ctx.function_registry.clone(),
             };
             let result = set_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -128,13 +127,12 @@ pub fn map_and_execute_update(
                 on_match_ops.push(PhysicalSet {
                     table_name: set_item.table_name.clone(),
                     table_id: set_item.table_id,
-                    column_name: set_item.column_name.clone(),
-                    column_idx: set_item.column_idx,
-                    value: set_item.value.clone(),
                     is_node: set_item.is_node,
+                    items: set_item.items.clone(),
                     table_catalog: table_catalog.clone(),
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
+                    function_registry: ctx.function_registry.clone(),
                 });
             }
 
@@ -143,13 +141,12 @@ pub fn map_and_execute_update(
                 on_create_ops.push(PhysicalSet {
                     table_name: set_item.table_name.clone(),
                     table_id: set_item.table_id,
-                    column_name: set_item.column_name.clone(),
-                    column_idx: set_item.column_idx,
-                    value: set_item.value.clone(),
                     is_node: set_item.is_node,
+                    items: set_item.items.clone(),
                     table_catalog: table_catalog.clone(),
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
+                    function_registry: ctx.function_registry.clone(),
                 });
             }
 

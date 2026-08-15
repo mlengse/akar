@@ -1,31 +1,39 @@
 //! Auto-extracted from physical_operator.rs
+use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index};
-use akar_common::types::PhysicalTypeID;
 use akar_common::types::Value;
+use akar_common::types::{physical_type_from_logical, PhysicalTypeID};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::FunctionRegistry;
 use akar_function::scalar::evaluate_scalar;
-use akar_parser::ast::Expression;
-use akar_storage::table::TableCatalog;
+use akar_parser::ast::{BinaryOp, Expression};
+use akar_planner::logical_operator::SetItem;
+use akar_storage::table::{ColumnDefinition, TableCatalog};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
 // ==================== Set ====================
 
-/// Physical operator for SET — updates a property on matched rows.
+/// Physical operator for SET — updates properties on matched rows.
+///
+/// All items of a SET clause are evaluated against the SAME pre-update
+/// snapshot of the table, then written (atomic semantics, P53.17). This means
+/// `SET n.a = n.a + 1, n.b = n.a * 10` computes both RHS values from the
+/// pre-update `n.a`, matching Cypher/Neo4j behavior.
 pub struct PhysicalSet {
     pub table_name: String,
     pub table_id: u64,
-    pub column_name: String,
-    pub column_idx: usize,
-    pub value: akar_parser::ast::Expression,
     pub is_node: bool,
+    pub items: Vec<SetItem>,
     pub table_catalog: Arc<TableCatalog>,
     /// Active transaction id (P52.18).
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Function registry for evaluating non-constant SET value expressions
+    /// (arithmetic, property reads, function calls) against old row data (P53.17).
+    pub function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
 }
 
 impl PhysicalOperatorExec for PhysicalSet {
@@ -37,7 +45,7 @@ impl PhysicalOperatorExec for PhysicalSet {
         // Collect row indices from input chunks. The scan emits the physical
         // row index as the `<alias>._id` column (last column); reading column 0
         // would treat the first *property* value as a row index.
-        let mut rows_to_update: Vec<(u64, akar_common::types::Value)> = Vec::new();
+        let mut rows_to_update: Vec<u64> = Vec::new();
 
         for chunk in &input {
             let row_id_col = row_id_column_index(chunk);
@@ -46,43 +54,54 @@ impl PhysicalOperatorExec for PhysicalSet {
                     && let Some(akar_common::types::Value::Int64(val)) =
                         chunk.get_value(row_id_col.unwrap_or(0), row)
                 {
-                    // Evaluate the SET value expression against the current row
-                    let set_val = evaluate_expression_for_row(&self.value, chunk, row);
-                    rows_to_update.push((val as u64, set_val));
+                    rows_to_update.push(val as u64);
                 }
             }
         }
 
         if rows_to_update.is_empty() {
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-            v.resize(1);
-            v.set_i64(0, 0);
-            let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
+            return Ok(vec![count_chunk(0)]);
+        }
+
+        // Build ONE pre-update snapshot chunk from the table for all target rows.
+        let snapshot = self.build_snapshot_chunk(&rows_to_update)?;
+
+        // Evaluate every item against the SAME snapshot (P53.17). This reads
+        // true pre-write values: `SET n.x = n.x + 1` increments, and a
+        // multi-item `SET n.a = ..., n.b = n.a * 10` computes `n.b` from the
+        // pre-update `n.a`, matching Cypher/Neo4j semantics.
+        let mut all_values: Vec<Vec<Value>> = Vec::with_capacity(self.items.len());
+        for item in &self.items {
+            all_values.push(self.evaluate_item(item, &snapshot)?);
         }
 
         // Apply updates to the table
         let mut updated = 0u64;
         if self.is_node {
             if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
-                // The binder hardcodes `column_idx: 0` ("resolved by catalog
-                // lookup") but never resolves it — resolve by name at runtime
-                // so `SET n.prop = v` writes to `prop`, not column 0.
-                let col_idx = table
-                    .columns
-                    .iter()
-                    .position(|c| c.name == self.column_name)
-                    .unwrap_or(self.column_idx);
-                for (row_idx, val) in &rows_to_update {
-                    // Capture the pre-update cell for rollback (P52.18).
-                    if let Some(sink) = self.undo_sink.as_ref()
-                        && let Ok(mut u) = sink.lock()
-                    {
-                        let old_data = table.cell_undo_bytes(*row_idx, col_idx);
-                        u.push(UndoRecord::update(self.table_id, *row_idx, col_idx as u32, old_data));
-                    }
-                    if table.update_cell(*row_idx, col_idx, val.clone()).is_ok() {
-                        updated += 1;
+                for (item_idx, item) in self.items.iter().enumerate() {
+                    // The binder hardcodes `column_idx: 0` ("resolved by catalog
+                    // lookup") but never resolves it — resolve by name at runtime
+                    // so `SET n.prop = v` writes to `prop`, not column 0.
+                    let col_idx = table
+                        .columns
+                        .iter()
+                        .position(|c| c.name == item.column_name)
+                        .unwrap_or(item.column_idx);
+                    for (i, row_idx) in rows_to_update.iter().enumerate() {
+                        // Capture the pre-update cell for rollback (P52.18).
+                        if let Some(sink) = self.undo_sink.as_ref()
+                            && let Ok(mut u) = sink.lock()
+                        {
+                            let old_data = table.cell_undo_bytes(*row_idx, col_idx);
+                            u.push(UndoRecord::update(self.table_id, *row_idx, col_idx as u32, old_data));
+                        }
+                        if table
+                            .update_cell(*row_idx, col_idx, all_values[item_idx][i].clone())
+                            .is_ok()
+                        {
+                            updated += 1;
+                        }
                     }
                 }
             } else {
@@ -90,23 +109,25 @@ impl PhysicalOperatorExec for PhysicalSet {
             }
         } else {
             if let Some(mut table) = self.table_catalog.get_rel_table_by_name_mut(&self.table_name) {
-                let col_idx = table
-                    .columns
-                    .iter()
-                    .position(|c| c.name == self.column_name)
-                    .unwrap_or(self.column_idx);
-                for (edge_idx, val) in &rows_to_update {
-                    if let Some(sink) = self.undo_sink.as_ref()
-                        && let Ok(mut u) = sink.lock()
-                    {
-                        let old_data = table.edge_cell_undo_bytes(*edge_idx as usize, col_idx);
-                        u.push(UndoRecord::update(self.table_id, *edge_idx, col_idx as u32, old_data));
-                    }
-                    if table
-                        .update_cell(*edge_idx as usize, col_idx, val.clone())
-                        .is_ok()
-                    {
-                        updated += 1;
+                for (item_idx, item) in self.items.iter().enumerate() {
+                    let col_idx = table
+                        .columns
+                        .iter()
+                        .position(|c| c.name == item.column_name)
+                        .unwrap_or(item.column_idx);
+                    for (i, edge_idx) in rows_to_update.iter().enumerate() {
+                        if let Some(sink) = self.undo_sink.as_ref()
+                            && let Ok(mut u) = sink.lock()
+                        {
+                            let old_data = table.edge_cell_undo_bytes(*edge_idx as usize, col_idx);
+                            u.push(UndoRecord::update(self.table_id, *edge_idx, col_idx as u32, old_data));
+                        }
+                        if table
+                            .update_cell(*edge_idx as usize, col_idx, all_values[item_idx][i].clone())
+                            .is_ok()
+                        {
+                            updated += 1;
+                        }
                     }
                 }
             } else {
@@ -116,12 +137,85 @@ impl PhysicalOperatorExec for PhysicalSet {
 
         tracing::info!("SET: updated {updated} rows in '{}'", self.table_name);
 
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-        v.resize(1);
-        v.set_i64(0, updated as i64);
-        let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
+        Ok(vec![count_chunk(updated)])
     }
+}
+
+fn count_chunk(count: u64) -> DataChunk {
+    let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
+    v.resize(1);
+    v.set_i64(0, count as i64);
+    let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
+    DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])
+}
+
+impl PhysicalSet {
+    /// Build a `DataChunk` of the target rows' pre-update cell values, one
+    /// column per table column, keyed by the physical row offsets in `rows`.
+    fn build_snapshot_chunk(&self, rows: &[u64]) -> Result<DataChunk, String> {
+        if self.is_node {
+            let table = self
+                .table_catalog
+                .get_node_table_by_name(&self.table_name)
+                .ok_or_else(|| format!("Node table '{}' not found for SET", self.table_name))?;
+            build_old_row_chunk(&table.columns, rows, &|row, col| {
+                table.get_value(row as usize, col).cloned()
+            })
+        } else {
+            let table = self
+                .table_catalog
+                .get_rel_table_by_name(&self.table_name)
+                .ok_or_else(|| format!("Rel table '{}' not found for SET", self.table_name))?;
+            build_old_row_chunk(&table.columns, rows, &|row, col| {
+                table.get_edge_properties(row as usize).get(col).cloned()
+            })
+        }
+    }
+
+    /// Evaluate one SET item's value expression for every row of the snapshot
+    /// chunk, returning one `Value` per row.
+    fn evaluate_item(&self, item: &SetItem, chunk: &DataChunk) -> Result<Vec<Value>, String> {
+        if let Some(registry) = self.function_registry.as_ref() {
+            let evaluator = ExpressionEvaluator::new(registry.clone());
+            let vec = evaluator.evaluate(&item.value, chunk).map_err(|e| e.to_string())?;
+            Ok((0..chunk.size)
+                .map(|i| vec.get_value(i).unwrap_or(Value::Null))
+                .collect())
+        } else {
+            Ok((0..chunk.size)
+                .map(|i| evaluate_expression_for_row(&item.value, chunk, i))
+                .collect())
+        }
+    }
+}
+
+/// Build a `DataChunk` of the target rows' pre-update cell values, one column
+/// per table column, using the plain column names as `field_names` so the
+/// evaluator can resolve `<alias>.<prop>` and `<prop>` references.
+fn build_old_row_chunk(
+    columns: &[ColumnDefinition],
+    rows: &[u64],
+    get_cell: &dyn Fn(u64, usize) -> Option<Value>,
+) -> Result<DataChunk, String> {
+    let n = rows.len();
+    let mut fields = Vec::with_capacity(columns.len());
+    let mut field_types = Vec::with_capacity(columns.len());
+    let mut field_names = Vec::with_capacity(columns.len());
+    for (col_idx, col) in columns.iter().enumerate() {
+        let phys_type = physical_type_from_logical(col.logical_type);
+        let mut v = ValueVector::new(phys_type, n);
+        v.resize(n);
+        for (i, row) in rows.iter().enumerate() {
+            match get_cell(*row, col_idx) {
+                Some(val) => v.set_value(i, &val)?,
+                None => v.set_null(i, true),
+            }
+        }
+        fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+        field_types.push(phys_type);
+        field_names.push(col.name.clone());
+    }
+    Ok(DataChunk::new(fields, field_types).with_names(field_names))
 }
 
 /// Simple expression evaluator for SET value expressions against a DataChunk row.
@@ -138,6 +232,40 @@ pub fn evaluate_expression_for_row(
             akar_parser::ast::Constant::Float(f) => akar_common::types::Value::Double(*f),
             akar_parser::ast::Constant::String(s) => akar_common::types::Value::String(s.clone()),
         },
+        akar_parser::ast::Expression::Variable(name) => chunk
+            .field_names
+            .iter()
+            .position(|n| n == name)
+            .and_then(|i| chunk.get_value(i, row))
+            .unwrap_or(akar_common::types::Value::Null),
+        akar_parser::ast::Expression::PropertyAccess(obj, prop) => {
+            let qualified = match obj.as_ref() {
+                akar_parser::ast::Expression::Variable(var) => format!("{var}.{prop}"),
+                _ => prop.clone(),
+            };
+            chunk
+                .field_names
+                .iter()
+                .position(|n| *n == qualified || *n == *prop)
+                .and_then(|i| chunk.get_value(i, row))
+                .unwrap_or(akar_common::types::Value::Null)
+        }
+        akar_parser::ast::Expression::UnaryOp(op, inner) => {
+            let v = evaluate_expression_for_row(inner, chunk, row);
+            match op {
+                akar_parser::ast::UnaryOp::Negate => match v {
+                    akar_common::types::Value::Int64(n) => akar_common::types::Value::Int64(-n),
+                    akar_common::types::Value::Double(n) => akar_common::types::Value::Double(-n),
+                    _ => akar_common::types::Value::Null,
+                },
+                _ => akar_common::types::Value::Null,
+            }
+        }
+        akar_parser::ast::Expression::BinaryOp(op, left, right) => {
+            let l = evaluate_expression_for_row(left, chunk, row);
+            let r = evaluate_expression_for_row(right, chunk, row);
+            binary_value_op(op, &l, &r)
+        }
         akar_parser::ast::Expression::List(items) => {
             let vals = items
                 .iter()
@@ -157,14 +285,100 @@ pub fn evaluate_expression_for_row(
                 .collect();
             akar_common::types::Value::Map(entries)
         }
-        _ => {
-            // Fallback: try to get value from chunk fields
-            if chunk.fields.len() > 1 {
-                chunk.get_value(1, row).unwrap_or(akar_common::types::Value::Null)
-            } else {
-                akar_common::types::Value::Null
+        _ => akar_common::types::Value::Null,
+    }
+}
+
+fn as_f64(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int64(n) => Some(*n as f64),
+        Value::Int32(n) => Some(*n as f64),
+        Value::Int128(n) => Some(*n as f64),
+        Value::Double(n) => Some(*n),
+        Value::Float(n) => Some(*n as f64),
+        _ => None,
+    }
+}
+
+/// Minimal binary-operator evaluation used when no function registry is
+/// available (unit-test path). The full evaluator is preferred when a registry
+/// is present.
+fn binary_value_op(op: &BinaryOp, l: &Value, r: &Value) -> Value {
+    match op {
+        BinaryOp::Add => match (l, r) {
+            (Value::String(a), Value::String(b)) => Value::String(format!("{a}{b}")),
+            _ => match (as_f64(l), as_f64(r)) {
+                (Some(a), Some(b)) => {
+                    if matches!(l, Value::Int64(_)) && matches!(r, Value::Int64(_)) {
+                        Value::Int64(a as i64 + b as i64)
+                    } else {
+                        Value::Double(a + b)
+                    }
+                }
+                _ => Value::Null,
+            },
+        },
+        BinaryOp::Subtract => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => {
+                if matches!(l, Value::Int64(_)) && matches!(r, Value::Int64(_)) {
+                    Value::Int64(a as i64 - b as i64)
+                } else {
+                    Value::Double(a - b)
+                }
             }
-        }
+            _ => Value::Null,
+        },
+        BinaryOp::Multiply => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => {
+                if matches!(l, Value::Int64(_)) && matches!(r, Value::Int64(_)) {
+                    Value::Int64(a as i64 * b as i64)
+                } else {
+                    Value::Double(a * b)
+                }
+            }
+            _ => Value::Null,
+        },
+        BinaryOp::Divide => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) if b != 0.0 => {
+                if matches!(l, Value::Int64(_)) && matches!(r, Value::Int64(_)) {
+                    Value::Int64(a as i64 / b as i64)
+                } else {
+                    Value::Double(a / b)
+                }
+            }
+            _ => Value::Null,
+        },
+        BinaryOp::Modulo => match (l, r) {
+            (Value::Int64(a), Value::Int64(b)) if *b != 0 => Value::Int64(a % b),
+            _ => Value::Null,
+        },
+        BinaryOp::Equal => Value::Bool(l == r),
+        BinaryOp::NotEqual => Value::Bool(l != r),
+        BinaryOp::LessThan => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => Value::Bool(a < b),
+            _ => Value::Null,
+        },
+        BinaryOp::LessThanOrEqual => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => Value::Bool(a <= b),
+            _ => Value::Null,
+        },
+        BinaryOp::GreaterThan => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => Value::Bool(a > b),
+            _ => Value::Null,
+        },
+        BinaryOp::GreaterThanOrEqual => match (as_f64(l), as_f64(r)) {
+            (Some(a), Some(b)) => Value::Bool(a >= b),
+            _ => Value::Null,
+        },
+        BinaryOp::And => match (l, r) {
+            (Value::Bool(a), Value::Bool(b)) => Value::Bool(*a && *b),
+            _ => Value::Null,
+        },
+        BinaryOp::Or => match (l, r) {
+            (Value::Bool(a), Value::Bool(b)) => Value::Bool(*a || *b),
+            _ => Value::Null,
+        },
+        _ => Value::Null,
     }
 }
 

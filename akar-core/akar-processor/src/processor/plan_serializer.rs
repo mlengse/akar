@@ -30,7 +30,7 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::BatchInsert(bi) => format!("BatchInsert({}, {} rows)", bi.table_name, bi.rows.len()),
         LogicalOperator::IndexLookup(il) => format!("IndexLookup({})", il.table_name),
         LogicalOperator::Delete(dl) => format!("Delete({})", dl.table_name),
-        LogicalOperator::Set(sl) => format!("Set({}.{})", sl.table_name, sl.column_name),
+        LogicalOperator::Set(sl) => format!("Set({}.{})", sl.table_name, sl.items.first().map(|i| i.column_name.as_str()).unwrap_or("?")),
         LogicalOperator::OptionalMatch(_) => "OptionalMatch".to_string(),
         LogicalOperator::Unwind(uw) => format!("Unwind({})", uw.variable),
         LogicalOperator::Foreach(fe) => format!("Foreach({})", fe.variable),

@@ -644,11 +644,21 @@ pub struct LogicalOptionalMatch {
 pub struct LogicalSet {
     pub table_name: String,
     pub table_id: u64,
+    pub is_node: bool,
+    /// All assignments of the SET clause, evaluated against the pre-update
+    /// snapshot as a group (P53.17). Multiple items were previously emitted as
+    /// a chain of single-item operators, so items after the first received the
+    /// previous item's count chunk and lost the scan rows.
+    pub items: Vec<SetItem>,
+    pub cardinality: u64,
+}
+
+/// A single `SET n.prop = <expr>` assignment inside a [`LogicalSet`].
+#[derive(Debug, Clone)]
+pub struct SetItem {
     pub column_name: String,
     pub column_idx: usize,
     pub value: akar_parser::ast::Expression,
-    pub is_node: bool,
-    pub cardinality: u64,
 }
 
 /// DELETE operator — removes rows from a table.

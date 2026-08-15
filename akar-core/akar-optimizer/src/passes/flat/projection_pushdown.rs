@@ -67,7 +67,9 @@ fn collect_referenced_columns(operators: &[LogicalOperator]) -> HashSet<String> 
                 }
             }
             LogicalOperator::Set(s) => {
-                extract_variables(&s.value, &mut refs);
+                for item in &s.items {
+                    extract_variables(&item.value, &mut refs);
+                }
             }
             LogicalOperator::Unwind(u) => {
                 extract_variables(&u.expression, &mut refs);

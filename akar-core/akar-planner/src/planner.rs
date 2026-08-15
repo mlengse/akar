@@ -236,10 +236,12 @@ impl QueryPlanner {
             .map(|item| LogicalSet {
                 table_name: item.table_name.clone(),
                 table_id: item.table_id,
-                column_name: item.column_name.clone(),
-                column_idx: item.column_idx,
-                value: item.value.clone(),
                 is_node: item.is_node,
+                items: vec![SetItem {
+                    column_name: item.column_name.clone(),
+                    column_idx: item.column_idx,
+                    value: item.value.clone(),
+                }],
                 cardinality: 0,
             })
             .collect();
@@ -250,10 +252,12 @@ impl QueryPlanner {
             .map(|item| LogicalSet {
                 table_name: item.table_name.clone(),
                 table_id: item.table_id,
-                column_name: item.column_name.clone(),
-                column_idx: item.column_idx,
-                value: item.value.clone(),
                 is_node: item.is_node,
+                items: vec![SetItem {
+                    column_name: item.column_name.clone(),
+                    column_idx: item.column_idx,
+                    value: item.value.clone(),
+                }],
                 cardinality: 0,
             })
             .collect();
@@ -720,14 +724,39 @@ impl QueryPlanner {
                     }));
                 }
                 BoundClause::BoundSet(s) => {
+                    // Merge every item of a single SET clause into one operator
+                    // (grouped by target table). All items then evaluate against
+                    // the same pre-update snapshot (P53.17) — chaining one
+                    // operator per item would feed items 2+ the previous item's
+                    // count chunk, losing the scan rows (`SET a=123.0, b=b+1`
+                    // left `b` at its old value).
+                    let mut groups: Vec<(String, u64, bool, Vec<SetItem>)> = Vec::new();
                     for item in &s.items {
+                        let key = (item.table_name.clone(), item.table_id, item.is_node);
+                        match groups.iter_mut().find(|(n, id, n2, _)| *n == key.0 && *id == key.1 && *n2 == key.2) {
+                            Some((_, _, _, items)) => items.push(SetItem {
+                                column_name: item.column_name.clone(),
+                                column_idx: item.column_idx,
+                                value: item.value.clone(),
+                            }),
+                            None => groups.push((
+                                key.0,
+                                key.1,
+                                key.2,
+                                vec![SetItem {
+                                    column_name: item.column_name.clone(),
+                                    column_idx: item.column_idx,
+                                    value: item.value.clone(),
+                                }],
+                            )),
+                        }
+                    }
+                    for (table_name, table_id, is_node, items) in groups {
                         delete_exprs.push(LogicalOperator::Set(LogicalSet {
-                            table_name: item.table_name.clone(),
-                            table_id: item.table_id,
-                            column_name: item.column_name.clone(),
-                            column_idx: item.column_idx,
-                            value: item.value.clone(),
-                            is_node: item.is_node,
+                            table_name,
+                            table_id,
+                            is_node,
+                            items,
                             cardinality: 0,
                         }));
                     }
@@ -789,10 +818,12 @@ impl QueryPlanner {
                         .map(|item| LogicalSet {
                             table_name: item.table_name.clone(),
                             table_id: item.table_id,
-                            column_name: item.column_name.clone(),
-                            column_idx: item.column_idx,
-                            value: item.value.clone(),
                             is_node: item.is_node,
+                            items: vec![SetItem {
+                                column_name: item.column_name.clone(),
+                                column_idx: item.column_idx,
+                                value: item.value.clone(),
+                            }],
                             cardinality: 0,
                         })
                         .collect();
@@ -802,10 +833,12 @@ impl QueryPlanner {
                         .map(|item| LogicalSet {
                             table_name: item.table_name.clone(),
                             table_id: item.table_id,
-                            column_name: item.column_name.clone(),
-                            column_idx: item.column_idx,
-                            value: item.value.clone(),
                             is_node: item.is_node,
+                            items: vec![SetItem {
+                                column_name: item.column_name.clone(),
+                                column_idx: item.column_idx,
+                                value: item.value.clone(),
+                            }],
                             cardinality: 0,
                         })
                         .collect();
