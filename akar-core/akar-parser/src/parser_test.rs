@@ -29,6 +29,63 @@ mod tests {
         assert!(matches!(parse(sql).unwrap(), Statement::DropTable(t) if t.name == "Person"));
     }
 
+    // P53.24: list subscript `n.embedding[0]` — index dulu di-drop parser
+    // (mengembalikan seluruh list); kini di-rewrite ke
+    // `list_extract(n.embedding, 0 + 1)` (list_extract 1-based, subscript 0-based).
+    #[test]
+    fn test_list_subscript_index_kept() {
+        let sql = "RETURN n.embedding[0]";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let Some(Clause::Return(r)) = q.clauses.first() else {
+                    panic!("Expected Return clause");
+                };
+                assert_eq!(
+                    r.expressions[0].expression,
+                    Expression::FunctionCall(
+                        "list_extract".to_string(),
+                        vec![
+                            Expression::PropertyAccess(Box::new(Expression::Variable("n".into())), "embedding".into()),
+                            Expression::BinaryOp(
+                                BinaryOp::Add,
+                                Box::new(Expression::Constant(Constant::Integer(0))),
+                                Box::new(Expression::Constant(Constant::Integer(1))),
+                            ),
+                        ],
+                    )
+                );
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_list_subscript_chain_and_expr_index() {
+        let sql = "RETURN a[1].b + x[id].c";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let Some(Clause::Return(r)) = q.clauses.first() else {
+                    panic!("Expected Return clause");
+                };
+                let expr = &r.expressions[0].expression;
+                assert!(matches!(expr, Expression::BinaryOp(BinaryOp::Add, _, _)));
+                // a[1].b -> PropertyAccess(list_extract(a, 1+1), b)
+                if let Expression::BinaryOp(BinaryOp::Add, left, _) = expr {
+                    assert!(matches!(
+                        left.as_ref(),
+                        Expression::PropertyAccess(
+                            obj,
+                            prop
+                        ) if prop == "b" && matches!(obj.as_ref(), Expression::FunctionCall(name, _) if name == "list_extract")
+                    ));
+                }
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
     #[test]
     fn test_create_node_table_boolean_types() {
         // `BOOLEAN` must parse even though `BOOL` shares its prefix (P53.1

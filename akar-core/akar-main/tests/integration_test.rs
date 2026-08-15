@@ -1163,8 +1163,9 @@ fn test_ddl_pipeline_alter_table_add_column() {
     // Insert with new column
     exec(&conn, "CREATE (b:Book {id: 2, title: 'Advanced Akar', author: 'Jane'})");
 
-    // Query: both old and new rows should work
-    let result = conn.query("MATCH (b:Book) RETURN b.title ORDER BY b.id").unwrap();
+    // Query: both old and new rows should work. `b.id` is projected so the
+    // ORDER BY key is valid post-projection (P53.23).
+    let result = conn.query("MATCH (b:Book) RETURN b.title, b.id ORDER BY b.id").unwrap();
     assert!(
         result.is_success(),
         "Query after alter should succeed: {:?}",

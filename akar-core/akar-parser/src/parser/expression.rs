@@ -154,6 +154,22 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
                 if child.as_rule() == Rule::property_access {
                     let prop = child.into_inner().next().unwrap().as_str().to_string();
                     result = Expression::PropertyAccess(Box::new(result), prop);
+                } else if child.as_rule() == Rule::expression {
+                    // List subscript `lst[i]` (Cypher 0-based). `[` `]` are
+                    // unnamed tokens, so the index arrives as a bare
+                    // `Rule::expression` child. Rewrite to
+                    // `list_extract(lst, i + 1)` because `list_extract` is
+                    // 1-based (P53.24). Previously the index was silently
+                    // dropped, returning the whole list/map.
+                    let idx = parse_expression(child)?;
+                    let one = Expression::Constant(Constant::Integer(1));
+                    result = Expression::FunctionCall(
+                        "list_extract".to_string(),
+                        vec![
+                            result,
+                            Expression::BinaryOp(BinaryOp::Add, Box::new(idx), Box::new(one)),
+                        ],
+                    );
                 }
             }
             Ok(result)

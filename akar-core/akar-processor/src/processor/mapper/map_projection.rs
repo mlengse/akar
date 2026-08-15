@@ -49,15 +49,78 @@ fn expression_field_name(alias: Option<&str>, expr: &Expression) -> String {
 /// output column they refer to. Positional mapping sorts by the i-th key's
 /// position, which is wrong whenever ORDER BY references a non-first column
 /// (e.g. `RETURN p.name, p.age ORDER BY p.age` sorted by name).
-fn resolve_sort_keys(sort_keys: &[(Expression, bool)], input: &[DataChunk]) -> Vec<(u32, bool)> {
-    sort_keys
-        .iter()
-        .enumerate()
-        .map(|(i, (expr, asc))| {
-            let col = input.first().and_then(|c| resolve_projection_column_index(expr, c));
-            (col.unwrap_or(i) as u32, *asc)
-        })
-        .collect()
+///
+/// Sort keys that are computed expressions (`array_cosine_similarity(...)`,
+/// `a + b`, ...) cannot be mapped to a column: `resolve_projection_column_index`
+/// only handles PropertyAccess/Variable. They are evaluated per row via the
+/// `ExpressionEvaluator` and appended to a copy of the input as synthetic
+/// trailing columns (P53.23). The returned `Vec<DataChunk>` is the (possibly
+/// augmented) input to sort on, and `usize` is the number of appended columns
+/// that must be stripped from the operator output.
+fn resolve_sort_keys(
+    sort_keys: &[(Expression, bool)],
+    input: &[DataChunk],
+    ctx: &mut ExecutionContext,
+) -> Result<(Vec<(u32, bool)>, Vec<DataChunk>, usize), ProcessorError> {
+    let base_cols = input.first().map(|c| c.num_fields()).unwrap_or(0);
+    let mut resolved = Vec::with_capacity(sort_keys.len());
+    let mut computed: Vec<Expression> = Vec::new();
+    for (expr, asc) in sort_keys.iter() {
+        let col = input.first().and_then(|c| resolve_projection_column_index(expr, c));
+        match col {
+            Some(idx) => resolved.push((idx as u32, *asc)),
+            None => {
+                resolved.push(((base_cols + computed.len()) as u32, *asc));
+                computed.push(expr.clone());
+            }
+        }
+    }
+    if computed.is_empty() {
+        return Ok((resolved, input.to_vec(), 0));
+    }
+    let registry = ctx
+        .function_registry
+        .clone()
+        .ok_or_else(|| "No function registry available for computed ORDER BY key".to_string())?;
+    let mut eval = ExpressionEvaluator::new(registry);
+    if let Some(ref seq_fn) = ctx.sequence_fn {
+        eval = eval.with_sequence_fn(seq_fn.clone());
+    }
+    if let Some(ref subquery_fn) = ctx.subquery_fn {
+        eval = eval.with_subquery_fn(subquery_fn.clone());
+    }
+    let mut augmented = Vec::with_capacity(input.len());
+    for chunk in input {
+        let mut fields = chunk.fields.clone();
+        let mut field_types = chunk.field_types.clone();
+        for expr in &computed {
+            let vv = eval.evaluate_arrow(expr, chunk)?;
+            fields.push(vv.array);
+            field_types.push(vv.physical_type);
+        }
+        augmented.push(DataChunk {
+            fields,
+            field_types,
+            size: chunk.size,
+            field_names: chunk.field_names.clone(),
+            sel_vector: None,
+        });
+    }
+    Ok((resolved, augmented, computed.len()))
+}
+
+/// Drop the synthetic computed sort-key columns appended by `resolve_sort_keys`
+/// (P53.23) from the operator output chunks.
+fn strip_sort_columns(chunks: &mut [DataChunk], extra: usize) {
+    if extra == 0 {
+        return;
+    }
+    for chunk in chunks {
+        let keep = chunk.fields.len().saturating_sub(extra);
+        chunk.fields.truncate(keep);
+        chunk.field_types.truncate(keep);
+        chunk.field_names.truncate(keep);
+    }
 }
 
 pub fn map_and_execute_projection(
@@ -189,19 +252,21 @@ pub fn map_and_execute_projection(
             Ok(result)
         }
         LogicalOperator::TopK(tk) => {
-            let sort_keys = resolve_sort_keys(&tk.sort_keys, &current_input);
+            let (sort_keys, augmented, extra) = resolve_sort_keys(&tk.sort_keys, &current_input, ctx)?;
             let topk = PhysicalTopK {
                 sort_keys,
                 limit: tk.limit,
                 offset: tk.offset,
             };
-            let result = topk.execute(current_input)?;
+            let mut result = topk.execute(augmented)?;
+            strip_sort_columns(&mut result, extra);
             Ok(result)
         }
         LogicalOperator::OrderBy(o) => {
-            let sort_keys = resolve_sort_keys(&o.sort_keys, &current_input);
+            let (sort_keys, augmented, extra) = resolve_sort_keys(&o.sort_keys, &current_input, ctx)?;
             let order = PhysicalOrderBy { sort_keys };
-            let result = order.execute(current_input)?;
+            let mut result = order.execute(augmented)?;
+            strip_sort_columns(&mut result, extra);
             Ok(result)
         }
         LogicalOperator::Flatten(f) => {

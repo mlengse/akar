@@ -653,6 +653,14 @@ impl ExpressionEvaluator {
                 }
                 return Ok(v);
             }
+            // P53.23: previously this silently fell back to column 0, so a
+            // missing column (e.g. an ORDER BY key referencing a non-projected
+            // column) produced a silently-wrong result instead of an error.
+            return Err(format!(
+                "Variable '{}' not found in chunk field_names {:?}",
+                name, chunk.field_names
+            )
+            .into());
         }
 
         if !chunk.fields.is_empty() {

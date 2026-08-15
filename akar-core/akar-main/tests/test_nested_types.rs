@@ -1,5 +1,5 @@
 mod common;
-use common::{exec, query_values, setup_db};
+use common::{exec, exec_err, query_values, setup_db};
 
 // P53.12: List/Struct columns and literals now round-trip through the Arrow
 // scan/projection path (`arrow_array_from_values`) instead of collapsing to
@@ -117,11 +117,10 @@ fn test_nested_list_extract_out_of_bounds() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, lst INT64[], PRIMARY KEY (id))");
     exec(&conn, "CREATE (t:T {id: 1, lst: [10, 20]})");
-    let res = query_values(&conn, "MATCH (t:T) RETURN t.lst[10]");
-    // `t.lst[10]` — the `[10]` subscript is dropped by the parser (postfix_expr
-    // only rewrites `property_access`), so the whole list is returned. Element
-    // extraction is tracked separately from P53.12.
-    assert_eq!(res.trim(), "List([Int64(10), Int64(20)])");
+    // P53.24: `[10]` is rewritten to `list_extract(t.lst, 11)` (0-based
+    // subscript → 1-based list_extract); the index is no longer dropped.
+    let err = exec_err(&conn, "MATCH (t:T) RETURN t.lst[10]");
+    assert!(err.contains("out of bounds"), "expected OOB error, got: {err}");
 }
 
 #[test]
@@ -129,9 +128,19 @@ fn test_nested_list_element_access() {
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE T(id INT64, lst INT64[], PRIMARY KEY (id))");
     exec(&conn, "CREATE (t:T {id: 1, lst: [10, 20]})");
+    // P53.24: `t.lst[1]` → `list_extract(t.lst, 2)` → second element.
     let res = query_values(&conn, "MATCH (t:T) RETURN t.lst[1]");
-    // Same parser limitation as above: `[1]` is dropped, returning the list.
-    assert_eq!(res.trim(), "List([Int64(10), Int64(20)])");
+    assert_eq!(res.trim(), "Int64(20)");
+}
+
+#[test]
+fn test_nested_list_element_zero_based() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE T(id INT64, lst INT64[], PRIMARY KEY (id))");
+    exec(&conn, "CREATE (t:T {id: 1, lst: [10, 20]})");
+    // P53.24: Cypher subscript is 0-based → `[0]` is the first element.
+    let res = query_values(&conn, "MATCH (t:T) RETURN t.lst[0]");
+    assert_eq!(res.trim(), "Int64(10)");
 }
 
 #[test]
