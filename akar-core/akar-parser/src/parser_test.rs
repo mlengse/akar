@@ -610,6 +610,34 @@ mod tests {
         }
     }
 
+    /// G8 (P53.19): string literal path — kutip ganda (dan literal) harus
+    /// di-strip agar directory dibuat di path sebenarnya (kairos
+    /// `export_database` memakai `"C:/..."`).
+    #[test]
+    fn test_export_database_double_quoted_path() {
+        for sql in ["EXPORT DATABASE \"/tmp/export\"", "EXPORT DATABASE '/tmp/export'"] {
+            let stmt = parse(sql).unwrap();
+            match stmt {
+                Statement::ExportDatabase(e) => {
+                    assert_eq!(e.file_path, "/tmp/export", "{sql}");
+                }
+                _ => panic!("Expected ExportDatabase: {sql}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_import_database_double_quoted_path() {
+        let sql = "IMPORT DATABASE \"/tmp/export\"";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::ImportDatabase(i) => {
+                assert_eq!(i.file_path, "/tmp/export");
+            }
+            _ => panic!("Expected ImportDatabase"),
+        }
+    }
+
     // ==================== CREATE MACRO tests ====================
 
     #[test]
@@ -858,10 +886,7 @@ mod tests {
         let stmt = parse(sql).unwrap();
         match stmt {
             Statement::Query(q) => {
-                assert_eq!(
-                    clause_kinds(&q),
-                    vec!["match", "set", "with", "where", "set"]
-                );
+                assert_eq!(clause_kinds(&q), vec!["match", "set", "with", "where", "set"]);
             }
             _ => panic!("Expected Query"),
         }

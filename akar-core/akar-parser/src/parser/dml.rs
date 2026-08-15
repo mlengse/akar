@@ -77,7 +77,8 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                                 .filter(|p| p.as_rule() == Rule::set_item)
                                 .map(|item| {
                                     let mut parts = item.into_inner();
-                                    let prop = parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
+                                    let prop =
+                                        parse_expression(parts.next().ok_or("Missing SET property".to_string())?)?;
                                     let val = parse_expression(parts.next().ok_or("Missing SET value".to_string())?)?;
                                     Ok(SetItem {
                                         property: prop,
@@ -394,18 +395,20 @@ fn parse_limit_skip(pair: &pest::iterators::Pair<Rule>) -> Result<(Option<u64>, 
             Rule::integer => {
                 let raw = inner.as_str();
                 if limit_val.is_none() {
-                    limit_val = Some(raw.parse::<u64>().map_err(|_| {
-                        format!("LIMIT must be a non-negative 64-bit integer, got `{raw}`")
-                    })?);
+                    limit_val = Some(
+                        raw.parse::<u64>()
+                            .map_err(|_| format!("LIMIT must be a non-negative 64-bit integer, got `{raw}`"))?,
+                    );
                 }
             }
             Rule::offset => {
                 for off_inner in inner.into_inner() {
                     if off_inner.as_rule() == Rule::integer {
                         let raw = off_inner.as_str();
-                        skip_val = Some(raw.parse::<u64>().map_err(|_| {
-                            format!("SKIP must be a non-negative 64-bit integer, got `{raw}`")
-                        })?);
+                        skip_val = Some(
+                            raw.parse::<u64>()
+                                .map_err(|_| format!("SKIP must be a non-negative 64-bit integer, got `{raw}`"))?,
+                        );
                     }
                 }
             }

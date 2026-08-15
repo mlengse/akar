@@ -323,11 +323,14 @@ impl Connection {
             q.push(' ');
             q.push_str(w);
         }
+        // ORDER BY memakai alias `distance` (bukan ulang ekspresi cosine):
+        // ORDER BY pada ekspresi computed tak di-evaluasi sebagai sort key —
+        // fallback posisional di `resolve_sort_keys` memetakan ke kolom 0
+        // (P53.19, G9). Alias resolve via P53.16.
         q.push_str(&format!(
             " RETURN {{{}}} AS node, array_cosine_similarity(node.{}, {vec_expr}) AS distance \
-             ORDER BY array_cosine_similarity(node.{}, {vec_expr}) DESC LIMIT {limit_expr}",
+             ORDER BY distance DESC LIMIT {limit_expr}",
             props.join(", "),
-            qident(vec_col),
             qident(vec_col),
         ));
         Ok(q)
@@ -725,6 +728,81 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
         let path = std::env::temp_dir().join(format!("akar_{tag}_{}_{}.db", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&path);
         path
+    }
+
+    fn embed(n: f64) -> Value {
+        let mut v = vec![0.0f64; 384];
+        v[0] = n;
+        v[1] = 1.0 - n * 0.1;
+        Value::List(v.into_iter().map(Value::Double).collect())
+    }
+
+    /// G9 (P53.19): hasil translasi `CALL QUERY_VECTOR_INDEX(...) RETURN
+    /// node, distance` (brute-force `MATCH ... RETURN {..} AS node,
+    /// array_cosine_similarity(...) ...`) harus parse & eksekusi — dulu
+    /// gagal parse 1:141 pada probe terisolasi (pra G2).
+    #[test]
+    fn p5319_g9_query_vector_index_translation() {
+        let (path, conn) = fresh_conn();
+
+        conn.run(KAIROS_BOOTSTRAP, None).expect("bootstrap");
+        conn.run(
+            "CALL CREATE_VECTOR_INDEX('Memory', 'mem_vec', 'embedding', metric := 'cosine')",
+            None,
+        )
+        .expect("create index");
+
+        for i in 0..4 {
+            let params = HashMap::from([
+                ("id".to_string(), Value::Int64(i)),
+                ("content".to_string(), Value::String(format!("memory {i}"))),
+                ("vec".to_string(), embed(i as f64)),
+                ("sal".to_string(), Value::Double(0.5 + i as f64 * 0.1)),
+            ]);
+            conn.run(
+                "CREATE (:Memory {id: $id, content: $content, embedding: $vec, salience: $sal})",
+                Some(params),
+            )
+            .expect("insert");
+        }
+
+        let params = HashMap::from([
+            ("query_vec".to_string(), embed(0.0)),
+            ("limit".to_string(), Value::Int64(2)),
+        ]);
+        let q = conn
+            .run(
+                "CALL QUERY_VECTOR_INDEX('Memory', 'mem_vec', $query_vec, $limit) RETURN node, distance",
+                Some(params),
+            )
+            .expect("vector query");
+
+        let native = &q.result;
+        let mut rows = 0usize;
+        let mut prev_dist = f64::INFINITY;
+        for chunk in &native.chunks {
+            for row in 0..chunk.size {
+                rows += 1;
+                let node = chunk.get_value(0, row).expect("node column");
+                let dist = chunk.get_value(1, row).expect("distance column");
+                assert!(matches!(node, Value::Struct(_)), "node harus dict/struct, got {node:?}");
+                let Value::Double(d) = dist else {
+                    panic!("distance harus Double, got {dist:?}");
+                };
+                assert!(
+                    (d - 1.0).abs() < 1e-6 || rows > 1,
+                    "baris pertama (nearest) harus ~1.0, got {d}"
+                );
+                assert!(
+                    d <= prev_dist + 1e-9,
+                    "distance harus DESC, got {d} setelah {prev_dist}"
+                );
+                prev_dist = d;
+            }
+        }
+        assert_eq!(rows, 2, "LIMIT 2 harus 2 baris");
+
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     /// G7 (P53.18): pola kairos close→checkpoint→reopen. `Database.close()`

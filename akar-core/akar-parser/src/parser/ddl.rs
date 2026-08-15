@@ -141,7 +141,7 @@ pub(crate) fn parse_export_database(pair: pest::iterators::Pair<Rule>) -> Result
         match inner.as_rule() {
             Rule::string => {
                 let raw = inner.as_str().trim();
-                file_path = raw.trim_matches('\'').to_string();
+                file_path = unescape_string(raw);
             }
             Rule::export_option => {
                 let mut key = String::new();
@@ -151,7 +151,7 @@ pub(crate) fn parse_export_database(pair: pest::iterators::Pair<Rule>) -> Result
                         Rule::identifier => key = part.as_str().to_string(),
                         Rule::literal => {
                             let raw = part.as_str();
-                            val = raw.trim_matches('\'').to_string();
+                            val = unescape_string(raw);
                         }
                         _ => {}
                     }
@@ -170,7 +170,7 @@ pub(crate) fn parse_import_database(pair: pest::iterators::Pair<Rule>) -> Result
     let mut file_path = String::new();
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::string {
-            file_path = inner.as_str().trim().trim_matches('\'').to_string();
+            file_path = unescape_string(inner.as_str().trim());
         }
     }
     Ok(Statement::ImportDatabase(ImportDatabase { file_path }))
@@ -217,10 +217,7 @@ fn parse_create_vector_index(pair: pest::iterators::Pair<Rule>) -> Result<Statem
                                     // pest does not expose string literals as inner
                                     // pairs, so parse the metric value from text.
                                     let s = part.as_str();
-                                    metric = s
-                                        .split_once('=')
-                                        .map(|(_, v)| v.trim().to_string())
-                                        .unwrap_or_default();
+                                    metric = s.split_once('=').map(|(_, v)| v.trim().to_string()).unwrap_or_default();
                                 }
                                 Rule::dimensions_option => {
                                     for p in part.into_inner() {
