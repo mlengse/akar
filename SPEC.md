@@ -26,11 +26,11 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,701 total, 0 ignored, 1,701 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.20/P53.21 sisa G3 binder; sebelumnya 1,692) |
+| Tests passing | **1,704 total, 0 ignored, 1,704 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.25 eksekusi OPTIONAL MATCH→CREATE `add_bridge_batch`; sebelumnya 1,701) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
-| Logical operators | **58** variants |
-| Physical operators | **49** structs (incl. `PhysicalMergeRel` P53.20) |
+| Logical operators | **59** variants |
+| Physical operators | **50** structs (incl. `PhysicalMergeRel` P53.20, `PhysicalOptionalExtend` P53.25) |
 | Extensions | **15** crates |
 | Graph algorithms | **15** |
 
@@ -488,7 +488,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 341 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 70 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 308 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT |
+| `akar-main` (integration) | 311 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,701** | **1,701 total, 0 ignored, 1,701 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.20/P53.21; sebelumnya 1,692) |
+| **Total** | **1,704** | **1,704 total, 0 ignored, 1,704 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.25 eksekusi OPTIONAL MATCH→CREATE; sebelumnya 1,701) |
 
 ### 11.2 Test Datasets
 
