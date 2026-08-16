@@ -32,9 +32,23 @@ impl OptimizationPass for TopKOptimization {
                         continue;
                     }
                     // Pattern: ORDER BY + Projection + LIMIT → ORDER BY pushed through projection as TopK
-                    (LogicalOperator::OrderBy(order), LogicalOperator::Projection(_))
+                    (LogicalOperator::OrderBy(order), LogicalOperator::Projection(proj))
                         if i + 2 < operators.len() && matches!(&operators[i + 2], LogicalOperator::Limit(_)) =>
                     {
+                        // Only fuse when every sort key is covered by the projection
+                        // output. When a key references an unprojected column (e.g.
+                        // `RETURN m.id ORDER BY m.access_count`), the planner placed
+                        // the sort below the projection on purpose (P53.37); pushing
+                        // it back above would evaluate the key against the pruned
+                        // chunk and fail.
+                        let covered = order.sort_keys.iter().all(|(expr, _)| {
+                            akar_planner::planner::projection_covers_sort_key(&proj.expressions, expr)
+                        });
+                        if !covered {
+                            result.push(operators[i].clone());
+                            i += 1;
+                            continue;
+                        }
                         let limit = match &operators[i + 2] {
                             LogicalOperator::Limit(l) => l.clone(),
                             _ => unreachable!(),

@@ -59,18 +59,26 @@ fn order_by_computed_expression_desc() {
     );
 }
 
-/// An ORDER BY key referencing a column that is not projected (`n.a` here) is
-/// invalid Cypher. It must error — not silently sort by output column 0
-/// (the pre-P53.23 behaviour / the evaluator's column-0 fallback).
+/// An ORDER BY key referencing a column that is not in the RETURN list is valid
+/// Cypher (kuzu sorts by the pre-projection column, then projects). Since P53.37
+/// the sort runs below the projection, so this must produce rows sorted by the
+/// unprojected value — not error and not silently sort by output column 0.
 #[test]
-fn order_by_non_projected_column_errors() {
+fn order_by_non_projected_column_sorts() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    let err = exec_err(&conn, "MATCH (n:T) RETURN n.id ORDER BY n.a + n.b ASC");
-    assert!(
-        err.contains("not found") || err.contains("not in scope") || err.contains("field_names"),
-        "expected a clear error, got: {err}"
+    let rows = read_rows(&conn, "MATCH (n:T) RETURN n.id ORDER BY n.a + n.b ASC");
+    // a+b: id3=7, id4=10, id1=11, id2=101
+    assert_eq!(
+        rows,
+        vec![
+            vec![Value::Int64(3)],
+            vec![Value::Int64(4)],
+            vec![Value::Int64(1)],
+            vec![Value::Int64(2)],
+        ],
+        "ORDER BY n.a + n.b ASC on a non-projected expression"
     );
 }
 

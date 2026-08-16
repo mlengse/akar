@@ -13,6 +13,50 @@ use akar_common::error::PlannerError;
 use akar_parser::ast::Expression;
 use std::collections::HashSet;
 
+/// Whether an ORDER BY key expression is produced by the projection output.
+///
+/// A key is covered when it matches a projection item's alias or is identical
+/// to one of the projected expressions, or when the projection returns the bare
+/// node variable and the key accesses a property of that variable. Keys that are
+/// not covered (e.g. `m.access_count` in `RETURN m.id, m.label ORDER BY
+/// m.access_count`) must sort on the pre-projection columns (P53.37).
+pub fn projection_covers_sort_key(projected: &[BoundExpression], key: &Expression) -> bool {
+    for be in projected {
+        if let Some(alias) = &be.alias {
+            if sort_key_matches_name(key, alias) {
+                return true;
+            }
+        }
+        if &be.expression == key {
+            return true;
+        }
+    }
+    if let Expression::PropertyAccess(obj, _) = key {
+        if let Expression::Variable(var) = &**obj {
+            let bare = Expression::Variable(var.clone());
+            if projected.iter().any(|be| be.expression == bare) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether a sort key refers to the column named by `name` (`x` or `node.prop`).
+fn sort_key_matches_name(key: &Expression, name: &str) -> bool {
+    match key {
+        Expression::Variable(v) => v == name,
+        Expression::PropertyAccess(obj, prop) => {
+            if let Expression::Variable(var) = &**obj {
+                format!("{var}.{prop}") == name
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
 /// The query planner transforms bound statements into logical query plans.
 pub struct QueryPlanner;
 
@@ -96,7 +140,7 @@ impl QueryPlanner {
 
     fn plan_standalone_call(
         &self,
-        c: akar_binder::bound_statement::BoundStandaloneCall,
+        c: BoundStandaloneCall,
     ) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::StandaloneCall(LogicalStandaloneCall {
             function_name: c.function_name,
@@ -339,7 +383,7 @@ impl QueryPlanner {
         let mut delete_exprs: Vec<LogicalOperator> = Vec::new();
         let mut extend_ops: Vec<LogicalOperator> = Vec::new();
         // ORDER BY / LIMIT / SKIP from RETURN clause
-        let mut order_by: Option<Vec<akar_binder::bound_statement::BoundOrderByItem>> = None;
+        let mut order_by: Option<Vec<BoundOrderByItem>> = None;
         let mut limit: Option<u64> = None;
         let mut skip: Option<u64> = None;
         // Flag to skip destination node pattern consumed by RecursiveExtend or Extend
@@ -939,6 +983,38 @@ impl QueryPlanner {
             } else {
                 None
             };
+
+            // When ORDER BY references a column the projection does not output
+            // (e.g. `RETURN m.id, m.label ORDER BY m.access_count`), the sort key
+            // cannot be evaluated against the projected (pruned) chunk. Push the
+            // sort below the projection so it runs against the full pre-projection
+            // columns (P53.37). It stays on top when every key is covered by the
+            // projection output (alias or identical expression), or when DISTINCT
+            // deduplicates above (sorting before dedup would lose the order).
+            let order_by_below_projection = match &order_by {
+                Some(items) => {
+                    group_by.is_none()
+                        && !items.iter().all(|item| {
+                            projection_covers_sort_key(&proj.expressions, &item.expression.expression)
+                        })
+                }
+                None => false,
+            };
+
+            if order_by_below_projection {
+                if let Some(items) = order_by.take() {
+                    let sort_keys: Vec<(Expression, bool)> = items
+                        .iter()
+                        .map(|item| (item.expression.expression.clone(), item.ascending))
+                        .collect();
+                    result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                        sort_keys,
+                        children: Vec::new(),
+                        cardinality: 0,
+                    }));
+                }
+            }
+
             result.push(LogicalOperator::Projection(proj));
             // DISTINCT is implemented as a hash aggregate with group-by keys and no aggregate functions
             if let Some(gb) = group_by {
