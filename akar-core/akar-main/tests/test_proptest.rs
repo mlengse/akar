@@ -8,7 +8,7 @@ fn extract_count(conn: &Connection, query: &str) -> i64 {
     let mut count = 0;
     for chunk in &res.chunks {
         for row in chunk.iter_rows() {
-            if let Some(akar_common::types::Value::Int64(c)) = chunk.get_value(0, row) {
+            if let Some(Value::Int64(c)) = chunk.get_value(0, row) {
                 count = c;
             }
         }
