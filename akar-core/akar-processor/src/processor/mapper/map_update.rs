@@ -314,12 +314,18 @@ pub fn map_and_execute_update(
 }
 
 /// Record rows written by a SET operation for OCC conflict detection.
-/// The result DataChunk contains the row indices that were updated (first column).
+/// The result DataChunk carries the updated row indices under the `_id`
+/// pseudo-column (P53.30); older outputs put a single updated-count in column 0.
 fn record_set_writes(table_id: u64, result: &[DataChunk], ctx: &mut ExecutionContext) {
     if let Some(chunk) = result.first() {
+        let id_col = chunk
+            .field_names
+            .iter()
+            .position(|n| n == "_id" || n.ends_with("._id"))
+            .unwrap_or(0);
         for row in 0..chunk.size {
             if !chunk.fields.is_empty() {
-                if let Some(akar_common::types::Value::Int64(row_idx)) = chunk.get_value(0, row) {
+                if let Some(akar_common::types::Value::Int64(row_idx)) = chunk.get_value(id_col, row) {
                     ctx.written_rows.push((table_id, row_idx as u64));
                 }
             }
@@ -342,13 +348,21 @@ fn record_delete_writes(table_id: u64, result: &[DataChunk], ctx: &mut Execution
 }
 
 /// Record rows written by an INSERT operation for OCC conflict detection.
-/// When the result chunk contains a second column with assigned row IDs,
-/// tracks at row level. Otherwise, row-level inserts are not tracked
-/// (PK uniqueness is enforced by the storage layer's hash index).
+/// When the result chunk contains an `_id` pseudo-column (Merge output, P53.31)
+/// or a second column with assigned row IDs (Create/BatchInsert), tracks at row
+/// level. Otherwise, row-level inserts are not tracked (PK uniqueness is
+/// enforced by the storage layer's hash index).
 fn record_insert_writes(table_id: u64, result: &[DataChunk], ctx: &mut ExecutionContext) {
     if let Some(chunk) = result.first() {
-        // Column 0 = inserted_count, Column 1 = assigned row IDs (optional)
-        if chunk.fields.len() > 1 {
+        // Column 0 = inserted_count, Column 1 = assigned row IDs (legacy); a
+        // Merge output names the row ids `_id` at its last column instead.
+        if let Some(id_col) = chunk.field_names.iter().position(|n| n == "_id" || n.ends_with("._id")) {
+            for row in 0..chunk.size {
+                if let Some(akar_common::types::Value::Int64(row_id)) = chunk.get_value(id_col, row) {
+                    ctx.written_rows.push((table_id, row_id as u64));
+                }
+            }
+        } else if chunk.fields.len() > 1 {
             for row in 0..chunk.fields[1].len() {
                 if let Some(akar_common::types::Value::Int64(row_id)) = chunk.get_value(1, row) {
                     ctx.written_rows.push((table_id, row_id as u64));

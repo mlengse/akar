@@ -2,6 +2,7 @@
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index};
+use akar_common::arrow_vector::VectorAccess;
 use akar_common::types::Value;
 use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
 use akar_common::vector::{DataChunk, ValueVector};
@@ -55,7 +56,7 @@ impl PhysicalOperatorExec for PhysicalSet {
             let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty()
-                    && let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row)
+                    && let Some(Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row)
                 {
                     rows_to_update.push(val as u64);
                     source_rows.push((ci, row));
@@ -141,7 +142,22 @@ impl PhysicalOperatorExec for PhysicalSet {
 
         tracing::info!("SET: updated {updated} rows in '{}'", self.table_name);
 
-        Ok(vec![count_chunk(updated)])
+        // Carry the updated rows forward (P53.30): [count, <table columns>,
+        // <pipeline columns>, <_id>]. Column 0 keeps the updated count so
+        // `get_i64(0, 0)` checks stay valid; a following RETURN resolves
+        // `<alias>.prop` against the named table columns instead of the count.
+        let mut output = self.build_output_chunk(&rows_to_update, &input, &source_rows)?;
+        let mut count_v = ValueVector::new(PhysicalTypeID::Int64, rows_to_update.len());
+        count_v.resize(rows_to_update.len());
+        for i in 0..rows_to_update.len() {
+            count_v.set_i64(i, updated as i64);
+        }
+        output
+            .fields
+            .insert(0, akar_common::arrow_vector::ArrowVector::from_legacy(&count_v).array);
+        output.field_types.insert(0, PhysicalTypeID::Int64);
+        output.field_names.insert(0, String::new());
+        Ok(vec![output])
     }
 }
 
@@ -181,59 +197,105 @@ impl PhysicalSet {
                 table.get_edge_properties(row as usize).get(col).cloned()
             })?
         };
-        self.append_input_columns(&mut snapshot, input, source_rows)?;
+        append_pipeline_columns(&mut snapshot, input, source_rows)?;
         Ok(snapshot)
     }
+}
 
-    /// Append input-chunk columns that are not table columns (nor the internal
-    /// `_id` pseudo-column) to the snapshot, aligned by the source row index of
-    /// each target row. This makes UNWIND variables visible to SET value
-    /// expressions, e.g. `UNWIND $ids AS iid ... SET n.x = iid`.
-    fn append_input_columns(
-        &self,
-        snapshot: &mut DataChunk,
-        input: &[DataChunk],
-        source_rows: &[(usize, usize)],
-    ) -> Result<(), String> {
-        let n = source_rows.len();
-        for (ci, chunk) in input.iter().enumerate() {
-            let mut appended: Vec<(usize, String)> = Vec::new();
-            for (col_idx, name) in chunk.field_names.iter().enumerate() {
-                if name == "_id" || name.ends_with("._id") {
-                    continue;
-                }
-                if snapshot.field_names.iter().any(|existing| existing == name) {
-                    continue;
-                }
-                appended.push((col_idx, name.clone()));
-            }
-            if appended.is_empty() {
+/// Append input-chunk columns that are not table columns (nor the internal
+/// `_id` pseudo-column) to the chunk, aligned by the source row index of each
+/// target row. This makes UNWIND variables visible to later clauses, e.g.
+/// `UNWIND $ids AS iid ... SET n.x = iid` (P53.26).
+pub(crate) fn append_pipeline_columns(
+    snapshot: &mut DataChunk,
+    input: &[DataChunk],
+    source_rows: &[(usize, usize)],
+) -> Result<(), String> {
+    let n = source_rows.len();
+    for (ci, chunk) in input.iter().enumerate() {
+        let mut appended: Vec<(usize, String)> = Vec::new();
+        for (col_idx, name) in chunk.field_names.iter().enumerate() {
+            if name == "_id" || name.ends_with("._id") {
                 continue;
             }
-
-            for (col_idx, name) in appended {
-                // Gather each target row's value from this input chunk.
-                let mut col_values: Vec<Value> = vec![Value::Null; n];
-                for (i, &(cci, rowi)) in source_rows.iter().enumerate() {
-                    if cci == ci {
-                        col_values[i] = chunk.get_value(col_idx, rowi).unwrap_or(Value::Null);
-                    }
-                }
-                // Build via Arrow so complex values (map/struct) survive the
-                // round-trip; `ValueVector::set_value` rejects them.
-                let phys_type = col_values
-                    .iter()
-                    .find(|v| !matches!(v, Value::Null))
-                    .map(|v| v.physical_type())
-                    .unwrap_or(chunk.field_types[col_idx]);
-                let arr = crate::expression_evaluator::build_arrow_from_values(&col_values, phys_type, n)
-                    .map_err(|e| e.to_string())?;
-                snapshot.fields.push(arr.array);
-                snapshot.field_types.push(arr.physical_type);
-                snapshot.field_names.push(name);
+            if snapshot.field_names.iter().any(|existing| existing == name) {
+                continue;
             }
+            appended.push((col_idx, name.clone()));
         }
-        Ok(())
+        if appended.is_empty() {
+            continue;
+        }
+
+        for (col_idx, name) in appended {
+            // Gather each target row's value from this input chunk.
+            let mut col_values: Vec<Value> = vec![Value::Null; n];
+            for (i, &(cci, rowi)) in source_rows.iter().enumerate() {
+                if cci == ci {
+                    col_values[i] = chunk.get_value(col_idx, rowi).unwrap_or(Value::Null);
+                }
+            }
+            // Build via Arrow so complex values (map/struct) survive the
+            // round-trip; `ValueVector::set_value` rejects them.
+            let phys_type = col_values
+                .iter()
+                .find(|v| !matches!(v, Value::Null))
+                .map(|v| v.physical_type())
+                .unwrap_or(chunk.field_types[col_idx]);
+            let arr = crate::expression_evaluator::build_arrow_from_values(&col_values, phys_type, n)
+                .map_err(|e| e.to_string())?;
+            snapshot.fields.push(arr.array);
+            snapshot.field_types.push(arr.physical_type);
+            snapshot.field_names.push(name);
+        }
+    }
+    Ok(())
+}
+
+impl PhysicalSet {
+    /// Build the SET operator's output chunk: the post-update table columns
+    /// (named, so a following RETURN can resolve `<alias>.<prop>`), the input
+    /// pipeline columns (e.g. UNWIND variables), and the `_id` pseudo-column
+    /// with the physical row indices (so a following write op can re-target the
+    /// same rows). Previously SET returned only a count chunk, so `MATCH ... SET
+    /// ... RETURN n.prop` evaluated the projection against the count (P53.30).
+    fn build_output_chunk(
+        &self,
+        rows: &[u64],
+        input: &[DataChunk],
+        source_rows: &[(usize, usize)],
+    ) -> Result<DataChunk, String> {
+        let mut chunk = if self.is_node {
+            let table = self
+                .table_catalog
+                .get_node_table_by_name(&self.table_name)
+                .ok_or_else(|| format!("Node table '{}' not found for SET", self.table_name))?;
+            build_old_row_chunk(&table.columns, rows, &|row, col| {
+                table.get_value(row as usize, col).cloned()
+            })?
+        } else {
+            let table = self
+                .table_catalog
+                .get_rel_table_by_name(&self.table_name)
+                .ok_or_else(|| format!("Rel table '{}' not found for SET", self.table_name))?;
+            build_old_row_chunk(&table.columns, rows, &|row, col| {
+                table.get_edge_properties(row as usize).get(col).cloned()
+            })?
+        };
+        append_pipeline_columns(&mut chunk, input, source_rows)?;
+        // Append the `_id` pseudo-column (physical row indices) so a following
+        // write op can target the same rows.
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, rows.len());
+        v.resize(rows.len());
+        for (i, r) in rows.iter().enumerate() {
+            v.set_i64(i, *r as i64);
+        }
+        chunk
+            .fields
+            .push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+        chunk.field_types.push(PhysicalTypeID::Int64);
+        chunk.field_names.push("_id".to_string());
+        Ok(chunk)
     }
 
     /// Evaluate one SET item's value expression for every row of the snapshot
@@ -241,7 +303,12 @@ impl PhysicalSet {
     fn evaluate_item(&self, item: &SetItem, chunk: &DataChunk) -> Result<Vec<Value>, String> {
         if let Some(registry) = self.function_registry.as_ref() {
             let evaluator = ExpressionEvaluator::new(registry.clone());
-            let vec = evaluator.evaluate(&item.value, chunk).map_err(|e| e.to_string())?;
+            // Arrow-native evaluation so complex literals (list/map) survive the
+            // round-trip: `evaluate` builds a legacy ValueVector with no List
+            // storage, which silently produces `Value::Null` (P53.29).
+            let vec = evaluator
+                .evaluate_to_arrow(&item.value, chunk)
+                .map_err(|e| e.to_string())?;
             Ok((0..chunk.size)
                 .map(|i| vec.get_value(i).unwrap_or(Value::Null))
                 .collect())
@@ -253,10 +320,15 @@ impl PhysicalSet {
     }
 }
 
-/// Build a `DataChunk` of the target rows' pre-update cell values, one column
-/// per table column, using the plain column names as `field_names` so the
-/// evaluator can resolve `<alias>.<prop>` and `<prop>` references.
-fn build_old_row_chunk(
+/// Build a `DataChunk` of the target rows' cell values, one column per table
+/// column, using the plain column names as `field_names` so the evaluator can
+/// resolve `<alias>.<prop>` and `<prop>` references.
+///
+/// The chunk is built via Arrow (`build_arrow_from_values`) rather than
+/// `ValueVector::set_value` so complex values (map/struct/list, e.g. FLOAT[]
+/// embeddings) survive the round-trip — the legacy vector has no List arm and
+/// silently produced `Value::Null` (P53.29).
+pub(crate) fn build_old_row_chunk(
     columns: &[ColumnDefinition],
     rows: &[u64],
     get_cell: &dyn Fn(u64, usize) -> Option<Value>,
@@ -267,15 +339,13 @@ fn build_old_row_chunk(
     let mut field_names = Vec::with_capacity(columns.len());
     for (col_idx, col) in columns.iter().enumerate() {
         let phys_type = physical_type_from_logical(col.logical_type);
-        let mut v = ValueVector::new(phys_type, n);
-        v.resize(n);
-        for (i, row) in rows.iter().enumerate() {
-            match get_cell(*row, col_idx) {
-                Some(val) => v.set_value(i, &val)?,
-                None => v.set_null(i, true),
-            }
-        }
-        fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+        let col_values: Vec<Value> = rows
+            .iter()
+            .map(|row| get_cell(*row, col_idx).unwrap_or(Value::Null))
+            .collect();
+        let arr = crate::expression_evaluator::build_arrow_from_values(&col_values, phys_type, n)
+            .map_err(|e| e.to_string())?;
+        fields.push(arr.array);
         field_types.push(phys_type);
         field_names.push(col.name.clone());
     }

@@ -99,7 +99,9 @@ fn resolve_side(full: &str, var: &str, key: &str, names: &[&str]) -> Option<(usi
     if let Some(i) = names.iter().position(|n| *n == key) {
         return Some((i, None));
     }
-    if !var.is_empty() && let Some(i) = names.iter().position(|n| *n == var) {
+    if !var.is_empty()
+        && let Some(i) = names.iter().position(|n| *n == var)
+    {
         return Some((i, Some(key.to_string())));
     }
     None

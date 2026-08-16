@@ -371,6 +371,16 @@ impl PhysicalScan {
             rows_to_emit = filter_rows_by_mask(&rows_to_emit, &mask);
         }
 
+        // Soft-deleted rows have every column (including the PK) nulled out by
+        // DELETE; exclude them so a deleted node is no longer returned (P53.32).
+        // Node inserts reject NULL PKs, so a null PK unambiguously marks a
+        // deleted slot.
+        if let Some(pk_idx) = self.table_columns.iter().position(|c| c.is_primary_key) {
+            if pk_idx < arrays.len() {
+                rows_to_emit.retain(|&r| !arrays[pk_idx].is_null(r));
+            }
+        }
+
         // Take filtered rows from pre-built Arrow arrays using take kernel
         let mut final_fields = Vec::new();
         let mut final_types = Vec::new();
@@ -526,6 +536,14 @@ impl PhysicalScan {
             rows_to_emit = filtered_rows;
 
             fields.fill(None);
+        }
+
+        // Soft-deleted rows have every column (including the PK) nulled out by
+        // DELETE; exclude them so a deleted node is no longer returned (P53.32).
+        if let Some(pk_idx) = self.table_columns.iter().position(|c| c.is_primary_key) {
+            if pk_idx < data.len() {
+                rows_to_emit.retain(|&r| !matches!(data[pk_idx].get(r), Some(Value::Null) | None));
+            }
         }
 
         let mut final_types = Vec::new();

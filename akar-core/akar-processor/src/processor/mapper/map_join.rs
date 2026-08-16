@@ -53,7 +53,14 @@ pub fn map_and_execute_join(
                 probe_columns: probe_cols,
             };
             let result = semi.execute_binary(&build_chunks, &probe_chunks)?;
-            Ok(strip_join_synthetic_columns(result, 0, 0, probe_orig, probe_appended, false))
+            Ok(strip_join_synthetic_columns(
+                result,
+                0,
+                0,
+                probe_orig,
+                probe_appended,
+                false,
+            ))
         }
         LogicalOperator::AntiJoin(a) => {
             let left_ops = flatten_union_child(&a.left);
@@ -71,7 +78,14 @@ pub fn map_and_execute_join(
                 probe_columns: probe_cols,
             };
             let result = anti.execute_binary(&build_chunks, &probe_chunks)?;
-            Ok(strip_join_synthetic_columns(result, 0, 0, probe_orig, probe_appended, false))
+            Ok(strip_join_synthetic_columns(
+                result,
+                0,
+                0,
+                probe_orig,
+                probe_appended,
+                false,
+            ))
         }
         LogicalOperator::Intersect(ic) => {
             // Build side is a (possibly nested) Union of per-pattern pipelines,
@@ -169,7 +183,14 @@ fn prepare_join_sides(
     let (build_cols, build_keys, probe_cols, probe_keys) = split_bindings(&bindings);
     let (build_chunks, build_cols, build_appended) = materialize_map_keys(&build_chunks, &build_cols, &build_keys)?;
     let (probe_chunks, probe_cols, probe_appended) = materialize_map_keys(&probe_chunks, &probe_cols, &probe_keys)?;
-    Ok((build_chunks, build_cols, build_appended, probe_chunks, probe_cols, probe_appended))
+    Ok((
+        build_chunks,
+        build_cols,
+        build_appended,
+        probe_chunks,
+        probe_cols,
+        probe_appended,
+    ))
 }
 
 /// Append synthetic columns holding map/struct key values for every binding

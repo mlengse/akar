@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,712 total, 0 ignored, 1,712 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.27 NULL-PK CREATE error + P53.28 UNWIND→MATCH vektor; sebelumnya 1,708) |
+| Tests passing | **1,721 total, 0 ignored, 1,721 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.29–P53.32 SET/MERGE/DELETE drop-in +9; sebelumnya 1,712) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -488,7 +488,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 176 | 259 registered functions |
 | `akar-storage` | 341 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
 | `akar-main` (unit) | 70 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 311 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25) |
+| `akar-main` (integration) | 320 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,712** | **1,712 total, 0 ignored, 1,712 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.27 NULL-PK CREATE error + P53.28 UNWIND→MATCH vektor; sebelumnya 1,708) |
+| **Total** | **1,721** | **1,721 total, 0 ignored, 1,721 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.29–P53.32 SET/MERGE/DELETE drop-in +9; sebelumnya 1,712) |
 
 ### 11.2 Test Datasets
 

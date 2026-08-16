@@ -69,8 +69,14 @@ fn test_p5328_unwind_match_all_rows_with_vector_column() {
         &conn,
         "CREATE NODE TABLE Memory(id INT64, content STRING, embedding FLOAT[], PRIMARY KEY (id))",
     );
-    exec(&conn, "CREATE (:Memory {id: 1, content: 'one', embedding: [0.1, 0.2, 0.3]})");
-    exec(&conn, "CREATE (:Memory {id: 2, content: 'two', embedding: [0.4, 0.5, 0.6]})");
+    exec(
+        &conn,
+        "CREATE (:Memory {id: 1, content: 'one', embedding: [0.1, 0.2, 0.3]})",
+    );
+    exec(
+        &conn,
+        "CREATE (:Memory {id: 2, content: 'two', embedding: [0.4, 0.5, 0.6]})",
+    );
 
     let rows = query_rows(
         &conn,
@@ -118,22 +124,9 @@ fn test_p5328_unwind_match_vector_column_join_keeps_values() {
         &conn,
         "UNWIND [2, 1] AS iid MATCH (m:Memory {id: iid}) RETURN iid, m.embedding",
     );
-    assert_eq!(
-        rows.len(),
-        2,
-        "both UNWIND elements must produce rows, got: {rows:?}"
-    );
-    let by_id: std::collections::HashMap<String, String> = rows
-        .iter()
-        .map(|r| (r[0].clone(), r[1].clone()))
-        .collect();
+    assert_eq!(rows.len(), 2, "both UNWIND elements must produce rows, got: {rows:?}");
+    let by_id: std::collections::HashMap<String, String> = rows.iter().map(|r| (r[0].clone(), r[1].clone())).collect();
     assert_eq!(by_id.len(), 2, "rows: {rows:?}");
-    assert!(
-        by_id["Int64(1)"].contains("0.5"),
-        "id 1 embedding, got: {rows:?}"
-    );
-    assert!(
-        by_id["Int64(2)"].contains("0.75"),
-        "id 2 embedding, got: {rows:?}"
-    );
+    assert!(by_id["Int64(1)"].contains("0.5"), "id 1 embedding, got: {rows:?}");
+    assert!(by_id["Int64(2)"].contains("0.75"), "id 2 embedding, got: {rows:?}");
 }

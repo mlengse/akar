@@ -1763,7 +1763,8 @@ pub(crate) fn build_arrow_from_values(
     values: &[Value],
     phys_type: PhysicalTypeID,
     num_rows: usize,
-) -> Result<ArrowVector, ProcessorError> {    match phys_type {
+) -> Result<ArrowVector, ProcessorError> {
+    match phys_type {
         PhysicalTypeID::Bool => {
             let mut builder = arrow::array::BooleanBuilder::with_capacity(num_rows);
             for v in values {

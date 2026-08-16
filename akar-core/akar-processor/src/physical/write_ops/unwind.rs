@@ -69,8 +69,7 @@ impl PhysicalOperatorExec for PhysicalUnwind {
             }
         } else {
             // No input — just the unwound vector
-            let mut named_chunk =
-                DataChunk::new(vec![uw_arrow.array.clone()], vec![uw_arrow.physical_type]);
+            let mut named_chunk = DataChunk::new(vec![uw_arrow.array.clone()], vec![uw_arrow.physical_type]);
             named_chunk.field_names = vec![self.variable.clone()];
             result_chunks.push(named_chunk);
         }
@@ -101,9 +100,7 @@ fn expr_to_value(expr: &akar_parser::ast::Expression) -> Value {
             akar_parser::ast::Constant::Float(f) => Value::Double(*f),
             akar_parser::ast::Constant::String(s) => Value::String(s.clone()),
         },
-        akar_parser::ast::Expression::List(items) => {
-            Value::List(items.iter().map(expr_to_value).collect())
-        }
+        akar_parser::ast::Expression::List(items) => Value::List(items.iter().map(expr_to_value).collect()),
         akar_parser::ast::Expression::Map(items) => Value::Map(
             items
                 .iter()
