@@ -328,6 +328,15 @@ class TestMaintenance:
         assert stats["ok"] is True, stats
         assert seeded_store.count() == 3
 
+    def test_store_many_empty_returns_empty(self, store: KuzuDBStore) -> None:
+        assert store.store_many([]) == []
+        assert store.count() == 0
+
+    def test_empty_store_many_does_not_panic_get_all(self, store: KuzuDBStore) -> None:
+        store.store_many([])
+        rows = store.get_all()
+        assert rows == []
+
     def test_close_and_reopen(self, store: KuzuDBStore, tmp_path: Path) -> None:
         path = str(tmp_path / "mem.db")
         s = KuzuDBStore(db_path=path, dimension=DIM)
