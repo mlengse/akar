@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,708 total, 0 ignored, 1,708 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.26 UNWIND binding visible setelah MATCH/CREATE/SET; sebelumnya 1,704) |
+| Tests passing | **1,712 total, 0 ignored, 1,712 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.27 NULL-PK CREATE error + P53.28 UNWIND→MATCH vektor; sebelumnya 1,708) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -508,7 +508,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,708** | **1,708 total, 0 ignored, 1,708 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.26 UNWIND binding visible setelah MATCH/CREATE/SET; sebelumnya 1,704) |
+| **Total** | **1,712** | **1,712 total, 0 ignored, 1,712 passed, 0 failed** (gate `test [akar-core]` 2026-08-16, P53.27 NULL-PK CREATE error + P53.28 UNWIND→MATCH vektor; sebelumnya 1,708) |
 
 ### 11.2 Test Datasets
 
