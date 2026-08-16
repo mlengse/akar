@@ -41,7 +41,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
     }
     // Cross-type float promotion: compare a float against any numeric via f64
     // (e.g. a FLOAT column value against an integer/Double literal).
-    if let (Ok(x), Ok(y)) = (super::arithmetic::numeric_to_f64(a), super::arithmetic::numeric_to_f64(b)) {
+    if let (Ok(x), Ok(y)) = (
+        super::arithmetic::numeric_to_f64(a),
+        super::arithmetic::numeric_to_f64(b),
+    ) {
         return x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
     }
     false

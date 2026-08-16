@@ -74,13 +74,19 @@ fn test_p5333_set_accumulation_exact() {
     // COALESCE(weight,0) + $delta twice must accumulate exactly: 0.9 ->
     // 0.9500000000000001 -> 1.0 (the same walk Python f64 takes).
     let (_db, conn) = setup_db();
-    exec(&conn, "CREATE NODE TABLE Chain(id INT64, weight DOUBLE, PRIMARY KEY (id))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Chain(id INT64, weight DOUBLE, PRIMARY KEY (id))",
+    );
     exec(&conn, "CREATE (:Chain {id: 1, weight: 0.9})");
     let stmt = conn
         .prepare("MATCH (c:Chain {id: 1}) SET c.weight = COALESCE(c.weight, 0.0) + $delta")
         .unwrap();
     conn.execute(&stmt, vec![("delta", Value::Double(0.05))]).unwrap();
-    assert_eq!(query_doubles(&conn, "MATCH (c:Chain {id: 1}) RETURN c.weight")[0], 0.9 + 0.05);
+    assert_eq!(
+        query_doubles(&conn, "MATCH (c:Chain {id: 1}) RETURN c.weight")[0],
+        0.9 + 0.05
+    );
     conn.execute(&stmt, vec![("delta", Value::Double(0.05))]).unwrap();
     assert_eq!(query_doubles(&conn, "MATCH (c:Chain {id: 1}) RETURN c.weight")[0], 1.0);
 }
@@ -99,7 +105,11 @@ fn test_p5333_float_column_readback() {
             vals.push(chunk.get_value(0, row));
         }
     }
-    assert_eq!(vals, vec![Some(Value::Float(0.9_f32))], "FLOAT column must not read back as null");
+    assert_eq!(
+        vals,
+        vec![Some(Value::Float(0.9_f32))],
+        "FLOAT column must not read back as null"
+    );
     // Arithmetic on the f32 column promotes to f64 and stays non-null.
     let r = query_doubles(&conn, "MATCH (f:F {id: 1}) RETURN f.x + 0.05");
     assert_eq!(r, vec![0.9_f32 as f64 + 0.05]);
