@@ -192,6 +192,16 @@ impl DataChunk {
         Some(arr.value(row_idx))
     }
 
+    /// Read an `f32` value from column `field_idx` at `row_idx`, or `None` if null.
+    #[inline]
+    pub fn get_f32(&self, field_idx: usize, row_idx: usize) -> Option<f32> {
+        if self.is_null(field_idx, row_idx) {
+            return None;
+        }
+        let arr = self.fields[field_idx].as_primitive::<Float32Type>();
+        Some(arr.value(row_idx))
+    }
+
     /// Read a `bool` value from column `field_idx` at `row_idx`, or `None` if null.
     #[inline]
     pub fn get_bool(&self, field_idx: usize, row_idx: usize) -> Option<bool> {
@@ -225,6 +235,7 @@ impl DataChunk {
             PhysicalTypeID::UInt64 => self.get_u64(field_idx, row_idx).map(Value::UInt64),
             PhysicalTypeID::Int32 => self.get_i32(field_idx, row_idx).map(Value::Int32),
             PhysicalTypeID::Double => self.get_f64(field_idx, row_idx).map(Value::Double),
+            PhysicalTypeID::Float => self.get_f32(field_idx, row_idx).map(Value::Float),
             PhysicalTypeID::Bool => self.get_bool(field_idx, row_idx).map(Value::Bool),
             PhysicalTypeID::String => self
                 .get_string(field_idx, row_idx)

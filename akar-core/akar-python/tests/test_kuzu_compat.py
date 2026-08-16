@@ -376,12 +376,12 @@ class TestDream:
     def test_strengthen_connection(self, seeded_store: KuzuDBStore, dream: KuzuDBDreamBackend) -> None:
         dream.strengthen_connection(1, 2, delta=0.05)
         conns = seeded_store.get_connections(1)
-        assert conns[0]["weight"] == 0.95
+        assert conns[0]["weight"] == 0.9 + 0.05
 
     def test_batch_strengthen_connections(self, seeded_store: KuzuDBStore, dream: KuzuDBDreamBackend) -> None:
         n = dream.batch_strengthen_connections([(1, 2)], delta=0.05, dream_session_id=7)
         assert n == 1
-        assert seeded_store.get_connections(1)[0]["weight"] == 0.95
+        assert seeded_store.get_connections(1)[0]["weight"] == 0.9 + 0.05
 
     def test_set_connection_weight(self, seeded_store: KuzuDBStore, dream: KuzuDBDreamBackend) -> None:
         assert dream.set_connection_weight(1, 2, 0.25) is True

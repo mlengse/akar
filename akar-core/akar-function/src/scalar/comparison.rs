@@ -39,6 +39,11 @@ fn values_equal(a: &Value, b: &Value) -> bool {
     if let (Some(x), Some(y)) = (integer_to_i128(a), integer_to_i128(b)) {
         return x == y;
     }
+    // Cross-type float promotion: compare a float against any numeric via f64
+    // (e.g. a FLOAT column value against an integer/Double literal).
+    if let (Ok(x), Ok(y)) = (super::arithmetic::numeric_to_f64(a), super::arithmetic::numeric_to_f64(b)) {
+        return x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
+    }
     false
 }
 
@@ -93,6 +98,10 @@ pub(crate) fn compare_values(a: &Value, b: &Value) -> Result<std::cmp::Ordering,
         // Cross-type numeric promotion (int ↔ float)
         (Value::Int64(x), Value::Double(y)) => Ok(double_cmp(*x as f64, *y)),
         (Value::Double(x), Value::Int64(y)) => Ok(double_cmp(*x, *y as f64)),
+        (Value::Float(x), Value::Double(y)) => Ok(double_cmp(*x as f64, *y)),
+        (Value::Double(x), Value::Float(y)) => Ok(double_cmp(*x, *y as f64)),
+        (Value::Float(x), Value::Int64(y)) => Ok(double_cmp(*x as f64, *y as f64)),
+        (Value::Int64(x), Value::Float(y)) => Ok(double_cmp(*x as f64, *y as f64)),
         // Mixed signed/unsigned integer promotion (exact via i128). A UInt64
         // column compared against an Int64 literal (e.g. `WHERE id > 5`) would
         // otherwise hit the generic "Cannot compare types" error below.

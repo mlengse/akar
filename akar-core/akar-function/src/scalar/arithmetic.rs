@@ -311,6 +311,9 @@ pub(crate) fn numeric_to_f64(v: &Value) -> Result<f64, String> {
 }
 
 fn add_values(a: Value, b: Value) -> Result<Value, String> {
+    if matches!(a, Value::Float(_)) || matches!(b, Value::Float(_)) {
+        return Ok(Value::Double(numeric_to_f64(&a)? + numeric_to_f64(&b)?));
+    }
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x + y)),
         (Value::Double(x), Value::Double(y)) => Ok(Value::Double(x + y)),
@@ -334,6 +337,9 @@ fn add_values(a: Value, b: Value) -> Result<Value, String> {
 }
 
 fn sub_values(a: Value, b: Value) -> Result<Value, String> {
+    if matches!(a, Value::Float(_)) || matches!(b, Value::Float(_)) {
+        return Ok(Value::Double(numeric_to_f64(&a)? - numeric_to_f64(&b)?));
+    }
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x - y)),
         (Value::Double(x), Value::Double(y)) => Ok(Value::Double(x - y)),
@@ -358,6 +364,9 @@ fn sub_values(a: Value, b: Value) -> Result<Value, String> {
 }
 
 fn mul_values(a: Value, b: Value) -> Result<Value, String> {
+    if matches!(a, Value::Float(_)) || matches!(b, Value::Float(_)) {
+        return Ok(Value::Double(numeric_to_f64(&a)? * numeric_to_f64(&b)?));
+    }
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => Ok(Value::Int64(x * y)),
         (Value::Double(x), Value::Double(y)) => Ok(Value::Double(x * y)),
@@ -378,6 +387,13 @@ fn mul_values(a: Value, b: Value) -> Result<Value, String> {
 }
 
 fn div_values(a: Value, b: Value) -> Result<Value, String> {
+    if matches!(a, Value::Float(_)) || matches!(b, Value::Float(_)) {
+        let y = numeric_to_f64(&b)?;
+        if y == 0.0 {
+            return Err("Division by zero".into());
+        }
+        return Ok(Value::Double(numeric_to_f64(&a)? / y));
+    }
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => {
             if *y == 0 {
@@ -404,6 +420,13 @@ fn div_values(a: Value, b: Value) -> Result<Value, String> {
 }
 
 fn mod_values(a: Value, b: Value) -> Result<Value, String> {
+    if matches!(a, Value::Float(_)) || matches!(b, Value::Float(_)) {
+        let y = numeric_to_f64(&b)?;
+        if y == 0.0 {
+            return Err("Modulo by zero".into());
+        }
+        return Ok(Value::Double(numeric_to_f64(&a)? % y));
+    }
     match (&a, &b) {
         (Value::Int64(x), Value::Int64(y)) => {
             if *y == 0 {
