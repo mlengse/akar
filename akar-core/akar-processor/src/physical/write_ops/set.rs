@@ -46,14 +46,19 @@ impl PhysicalOperatorExec for PhysicalSet {
         // row index as the `<alias>._id` column (last column); reading column 0
         // would treat the first *property* value as a row index.
         let mut rows_to_update: Vec<u64> = Vec::new();
+        // For each target row, remember which input (chunk, row) it came from so
+        // the snapshot can carry pipeline-only columns (e.g. an UNWIND variable)
+        // into the SET value expressions (P53.26).
+        let mut source_rows: Vec<(usize, usize)> = Vec::new();
 
-        for chunk in &input {
+        for (ci, chunk) in input.iter().enumerate() {
             let row_id_col = row_id_column_index(chunk);
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty()
                     && let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row)
                 {
                     rows_to_update.push(val as u64);
+                    source_rows.push((ci, row));
                 }
             }
         }
@@ -63,7 +68,7 @@ impl PhysicalOperatorExec for PhysicalSet {
         }
 
         // Build ONE pre-update snapshot chunk from the table for all target rows.
-        let snapshot = self.build_snapshot_chunk(&rows_to_update)?;
+        let snapshot = self.build_snapshot_chunk(&rows_to_update, &input, &source_rows)?;
 
         // Evaluate every item against the SAME snapshot (P53.17). This reads
         // true pre-write values: `SET n.x = n.x + 1` increments, and a
@@ -151,15 +156,22 @@ fn count_chunk(count: u64) -> DataChunk {
 impl PhysicalSet {
     /// Build a `DataChunk` of the target rows' pre-update cell values, one
     /// column per table column, keyed by the physical row offsets in `rows`.
-    fn build_snapshot_chunk(&self, rows: &[u64]) -> Result<DataChunk, String> {
-        if self.is_node {
+    /// Pipeline-only columns from the input chunks (e.g. an UNWIND variable)
+    /// are appended so SET value expressions can reference them (P53.26).
+    fn build_snapshot_chunk(
+        &self,
+        rows: &[u64],
+        input: &[DataChunk],
+        source_rows: &[(usize, usize)],
+    ) -> Result<DataChunk, String> {
+        let mut snapshot = if self.is_node {
             let table = self
                 .table_catalog
                 .get_node_table_by_name(&self.table_name)
                 .ok_or_else(|| format!("Node table '{}' not found for SET", self.table_name))?;
             build_old_row_chunk(&table.columns, rows, &|row, col| {
                 table.get_value(row as usize, col).cloned()
-            })
+            })?
         } else {
             let table = self
                 .table_catalog
@@ -167,8 +179,61 @@ impl PhysicalSet {
                 .ok_or_else(|| format!("Rel table '{}' not found for SET", self.table_name))?;
             build_old_row_chunk(&table.columns, rows, &|row, col| {
                 table.get_edge_properties(row as usize).get(col).cloned()
-            })
+            })?
+        };
+        self.append_input_columns(&mut snapshot, input, source_rows)?;
+        Ok(snapshot)
+    }
+
+    /// Append input-chunk columns that are not table columns (nor the internal
+    /// `_id` pseudo-column) to the snapshot, aligned by the source row index of
+    /// each target row. This makes UNWIND variables visible to SET value
+    /// expressions, e.g. `UNWIND $ids AS iid ... SET n.x = iid`.
+    fn append_input_columns(
+        &self,
+        snapshot: &mut DataChunk,
+        input: &[DataChunk],
+        source_rows: &[(usize, usize)],
+    ) -> Result<(), String> {
+        let n = source_rows.len();
+        for (ci, chunk) in input.iter().enumerate() {
+            let mut appended: Vec<(usize, String)> = Vec::new();
+            for (col_idx, name) in chunk.field_names.iter().enumerate() {
+                if name == "_id" || name.ends_with("._id") {
+                    continue;
+                }
+                if snapshot.field_names.iter().any(|existing| existing == name) {
+                    continue;
+                }
+                appended.push((col_idx, name.clone()));
+            }
+            if appended.is_empty() {
+                continue;
+            }
+
+            for (col_idx, name) in appended {
+                // Gather each target row's value from this input chunk.
+                let mut col_values: Vec<Value> = vec![Value::Null; n];
+                for (i, &(cci, rowi)) in source_rows.iter().enumerate() {
+                    if cci == ci {
+                        col_values[i] = chunk.get_value(col_idx, rowi).unwrap_or(Value::Null);
+                    }
+                }
+                // Build via Arrow so complex values (map/struct) survive the
+                // round-trip; `ValueVector::set_value` rejects them.
+                let phys_type = col_values
+                    .iter()
+                    .find(|v| !matches!(v, Value::Null))
+                    .map(|v| v.physical_type())
+                    .unwrap_or(chunk.field_types[col_idx]);
+                let arr = crate::expression_evaluator::build_arrow_from_values(&col_values, phys_type, n)
+                    .map_err(|e| e.to_string())?;
+                snapshot.fields.push(arr.array);
+                snapshot.field_types.push(arr.physical_type);
+                snapshot.field_names.push(name);
+            }
         }
+        Ok(())
     }
 
     /// Evaluate one SET item's value expression for every row of the snapshot
@@ -242,12 +307,21 @@ pub fn evaluate_expression_for_row(
                 akar_parser::ast::Expression::Variable(var) => format!("{var}.{prop}"),
                 _ => prop.clone(),
             };
-            chunk
-                .field_names
-                .iter()
-                .position(|n| *n == qualified || *n == *prop)
-                .and_then(|i| chunk.get_value(i, row))
-                .unwrap_or(akar_common::types::Value::Null)
+            if let Some(i) = chunk.field_names.iter().position(|n| *n == qualified) {
+                chunk.get_value(i, row).unwrap_or(akar_common::types::Value::Null)
+            } else if let akar_parser::ast::Expression::Variable(var) = obj.as_ref()
+                && let Some(i) = chunk.field_names.iter().position(|n| n == var)
+            {
+                // P53.26: `row.id` where `row` is a map/struct column — extract
+                // the key. Runs before the bare-name match so a plain `content`
+                // table column does not shadow an UNWIND map variable.
+                let obj_val = chunk.get_value(i, row).unwrap_or(akar_common::types::Value::Null);
+                crate::expression_evaluator::map_property_value(&obj_val, prop)
+            } else if let Some(i) = chunk.field_names.iter().position(|n| *n == *prop) {
+                chunk.get_value(i, row).unwrap_or(akar_common::types::Value::Null)
+            } else {
+                akar_common::types::Value::Null
+            }
         }
         akar_parser::ast::Expression::UnaryOp(op, inner) => {
             let v = evaluate_expression_for_row(inner, chunk, row);

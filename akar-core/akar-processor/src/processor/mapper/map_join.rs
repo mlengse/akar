@@ -1,11 +1,12 @@
 use super::ExecutionContext;
 use crate::physical_operator::*;
 use akar_common::error::ProcessorError;
+use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
 
-use crate::processor::join_helpers::derive_join_column_indices;
+use crate::processor::join_helpers::{JoinKeyBinding, derive_join_bindings};
 use crate::processor::union_helpers::{flatten_union_child, merge_optional_chunks};
 
 pub fn map_and_execute_join(
@@ -21,10 +22,20 @@ pub fn map_and_execute_join(
             let build_chunks = ctx.execute_children(&left_ops)?;
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
-            let (build_cols, probe_cols) = derive_join_column_indices(&h.join_keys, &build_chunks, &probe_chunks);
+            let (build_orig, probe_orig) = (field_count(&build_chunks), field_count(&probe_chunks));
+            let (build_chunks, build_cols, build_appended, probe_chunks, probe_cols, probe_appended) =
+                prepare_join_sides(&h.join_keys, build_chunks, probe_chunks)?;
+
             let join = PhysicalHashJoin::new(build_cols, probe_cols);
             let result = join.execute_binary(&build_chunks, &probe_chunks)?;
-            Ok(result)
+            Ok(strip_join_synthetic_columns(
+                result,
+                build_orig,
+                build_appended,
+                probe_orig,
+                probe_appended,
+                true,
+            ))
         }
         LogicalOperator::SemiJoin(s) => {
             let left_ops = flatten_union_child(&s.left);
@@ -33,13 +44,16 @@ pub fn map_and_execute_join(
             let build_chunks = ctx.execute_children(&left_ops)?;
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
-            let (build_cols, probe_cols) = derive_join_column_indices(&s.join_keys, &build_chunks, &probe_chunks);
+            let (_build_orig, probe_orig) = (field_count(&build_chunks), field_count(&probe_chunks));
+            let (build_chunks, build_cols, _build_appended, probe_chunks, probe_cols, probe_appended) =
+                prepare_join_sides(&s.join_keys, build_chunks, probe_chunks)?;
+
             let semi = PhysicalSemiJoin {
                 build_columns: build_cols,
                 probe_columns: probe_cols,
             };
             let result = semi.execute_binary(&build_chunks, &probe_chunks)?;
-            Ok(result)
+            Ok(strip_join_synthetic_columns(result, 0, 0, probe_orig, probe_appended, false))
         }
         LogicalOperator::AntiJoin(a) => {
             let left_ops = flatten_union_child(&a.left);
@@ -48,13 +62,16 @@ pub fn map_and_execute_join(
             let build_chunks = ctx.execute_children(&left_ops)?;
             let probe_chunks = ctx.execute_children(&right_ops)?;
 
-            let (build_cols, probe_cols) = derive_join_column_indices(&a.join_keys, &build_chunks, &probe_chunks);
+            let (_build_orig, probe_orig) = (field_count(&build_chunks), field_count(&probe_chunks));
+            let (build_chunks, build_cols, _build_appended, probe_chunks, probe_cols, probe_appended) =
+                prepare_join_sides(&a.join_keys, build_chunks, probe_chunks)?;
+
             let anti = PhysicalAntiJoin {
                 build_columns: build_cols,
                 probe_columns: probe_cols,
             };
             let result = anti.execute_binary(&build_chunks, &probe_chunks)?;
-            Ok(result)
+            Ok(strip_join_synthetic_columns(result, 0, 0, probe_orig, probe_appended, false))
         }
         LogicalOperator::Intersect(ic) => {
             // Build side is a (possibly nested) Union of per-pattern pipelines,
@@ -119,6 +136,142 @@ pub fn map_and_execute_join(
         }
         _ => Err(format!("Not a join operator: {:?}", op).into()),
     }
+}
+
+fn field_count(chunks: &[DataChunk]) -> usize {
+    chunks.first().map(|c| c.fields.len()).unwrap_or(0)
+}
+
+/// Split join bindings into per-side (column, map_key) lists.
+fn split_bindings(bindings: &[JoinKeyBinding]) -> (Vec<u32>, Vec<Option<String>>, Vec<u32>, Vec<Option<String>>) {
+    let mut build_cols = Vec::new();
+    let mut build_keys = Vec::new();
+    let mut probe_cols = Vec::new();
+    let mut probe_keys = Vec::new();
+    for b in bindings {
+        build_cols.push(b.build_col);
+        build_keys.push(b.build_map_key.clone());
+        probe_cols.push(b.probe_col);
+        probe_keys.push(b.probe_map_key.clone());
+    }
+    (build_cols, build_keys, probe_cols, probe_keys)
+}
+
+/// Resolve join key columns and materialize map/struct key extraction (P53.26).
+/// Returns the (possibly extended) build/probe chunks with the resolved column
+/// indices, plus how many synthetic columns were appended to each side.
+fn prepare_join_sides(
+    join_keys: &[Expression],
+    build_chunks: Vec<DataChunk>,
+    probe_chunks: Vec<DataChunk>,
+) -> Result<(Vec<DataChunk>, Vec<u32>, usize, Vec<DataChunk>, Vec<u32>, usize), ProcessorError> {
+    let bindings = derive_join_bindings(join_keys, &build_chunks, &probe_chunks);
+    let (build_cols, build_keys, probe_cols, probe_keys) = split_bindings(&bindings);
+    let (build_chunks, build_cols, build_appended) = materialize_map_keys(&build_chunks, &build_cols, &build_keys)?;
+    let (probe_chunks, probe_cols, probe_appended) = materialize_map_keys(&probe_chunks, &probe_cols, &probe_keys)?;
+    Ok((build_chunks, build_cols, build_appended, probe_chunks, probe_cols, probe_appended))
+}
+
+/// Append synthetic columns holding map/struct key values for every binding
+/// that needs extraction, and point the join column at them. Complex values are
+/// preserved because `build_arrow_from_values` emits Arrow arrays directly
+/// (unlike `store_value_in_vector`, which drops them to NULL).
+fn materialize_map_keys(
+    chunks: &[DataChunk],
+    cols: &[u32],
+    keys: &[Option<String>],
+) -> Result<(Vec<DataChunk>, Vec<u32>, usize), ProcessorError> {
+    let mut out: Vec<DataChunk> = chunks.to_vec();
+    let mut new_cols: Vec<u32> = cols.to_vec();
+    let base_count = out.first().map(|c| c.fields.len()).unwrap_or(0);
+    let mut appended = 0usize;
+    // Dedupe repeated (column, key) extractions so each synthetic column is
+    // added only once and shared across join keys.
+    let mut done: std::collections::HashMap<(u32, String), u32> = std::collections::HashMap::new();
+
+    for (i, key) in keys.iter().enumerate() {
+        let Some(key_name) = key else { continue };
+        let col = cols[i];
+        if let Some(&idx) = done.get(&(col, key_name.clone())) {
+            new_cols[i] = idx;
+            continue;
+        }
+        let new_idx = (base_count + appended) as u32;
+        let mut ok = false;
+        for chunk in out.iter_mut() {
+            if col as usize >= chunk.fields.len() {
+                continue;
+            }
+            let extracted: Vec<Value> = (0..chunk.size)
+                .map(|row| {
+                    crate::expression_evaluator::map_property_value(
+                        &chunk.get_value(col as usize, row).unwrap_or(Value::Null),
+                        key_name,
+                    )
+                })
+                .collect();
+            let t = extracted
+                .iter()
+                .find(|v| !matches!(v, Value::Null))
+                .map(|v| v.physical_type())
+                .unwrap_or(PhysicalTypeID::Int64);
+            let arr = crate::expression_evaluator::build_arrow_from_values(&extracted, t, chunk.size)
+                .map_err(|e| e.to_string())?;
+            chunk.fields.push(arr.array);
+            chunk.field_types.push(arr.physical_type);
+            chunk.field_names.push(format!("__join_extract_{}_{}", col, key_name));
+            ok = true;
+        }
+        if ok {
+            appended += 1;
+        }
+        done.insert((col, key_name.clone()), new_idx);
+        new_cols[i] = new_idx;
+    }
+    Ok((out, new_cols, appended))
+}
+
+/// Remove synthetic extraction columns from join output chunks.
+///
+/// For hash joins the output is `[build columns..., probe columns...]`; for
+/// semi/anti joins it is `[probe columns...]`. Synthetic columns are the last
+/// `build_appended` / `probe_appended` fields of their side.
+fn strip_join_synthetic_columns(
+    result: Vec<DataChunk>,
+    build_orig: usize,
+    build_appended: usize,
+    probe_orig: usize,
+    probe_appended: usize,
+    output_has_build: bool,
+) -> Vec<DataChunk> {
+    let mut to_remove: Vec<usize> = Vec::new();
+    if output_has_build {
+        to_remove.extend(build_orig..build_orig + build_appended);
+        let probe_base = build_orig + build_appended + probe_orig;
+        to_remove.extend(probe_base..probe_base + probe_appended);
+    } else {
+        to_remove.extend(probe_orig..probe_orig + probe_appended);
+    }
+    if to_remove.is_empty() {
+        return result;
+    }
+    result
+        .into_iter()
+        .map(|mut chunk| {
+            for &idx in to_remove.iter().rev() {
+                if idx < chunk.fields.len() {
+                    chunk.fields.remove(idx);
+                    if idx < chunk.field_types.len() {
+                        chunk.field_types.remove(idx);
+                    }
+                    if idx < chunk.field_names.len() {
+                        chunk.field_names.remove(idx);
+                    }
+                }
+            }
+            chunk
+        })
+        .collect()
 }
 
 /// Flatten a (possibly nested) `Union` subtree into a list of independent

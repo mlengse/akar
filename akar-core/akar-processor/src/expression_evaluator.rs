@@ -24,6 +24,27 @@ use std::sync::{Arc, Mutex};
 pub type SubqueryFn = Arc<dyn Fn(&Query) -> Result<Vec<DataChunk>, ProcessorError> + Send + Sync>;
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync>;
 
+/// Extract a named property from a runtime map/struct value. Returns
+/// `Value::Null` when `val` is not a map/struct or the key is absent.
+///
+/// Used to resolve property access on a variable bound to a map/struct column,
+/// e.g. `UNWIND $rows AS row CREATE (:Memory {id: row.id})` (P53.26).
+pub fn map_property_value(val: &Value, prop: &str) -> Value {
+    match val {
+        Value::Map(entries) => entries
+            .iter()
+            .find(|(k, _)| matches!(k, Value::String(s) if s == prop))
+            .map(|(_, v)| v.clone())
+            .unwrap_or(Value::Null),
+        Value::Struct(fields) => fields
+            .iter()
+            .find(|(name, _)| name == prop)
+            .map(|(_, v)| v.clone())
+            .unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
+
 /// Evaluates expressions against DataChunks using the function registry.
 impl std::fmt::Debug for ExpressionEvaluator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -284,7 +305,36 @@ impl ExpressionEvaluator {
         };
 
         if !chunk.field_names.is_empty()
-            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop)
+        {
+            let field = chunk
+                .fields
+                .get(idx)
+                .ok_or_else(|| format!("Property '{}' not found in chunk", prop))?;
+            return Ok(ArrowVector::new(field.clone(), chunk.field_types[idx]));
+        }
+        // P53.26: `row.id` where `row` is a map/struct column — extract the key
+        // from each row's value instead of returning the whole object. This must
+        // run BEFORE the bare-name match below, otherwise `row.content` in a
+        // snapshot that also carries a plain `content` table column resolves to
+        // the table column instead of the UNWIND variable.
+        if let Expression::Variable(var_name) = obj
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == var_name)
+        {
+            let extracted: Vec<Value> = (0..chunk.size)
+                .map(|i| map_property_value(&chunk.get_value(idx, i).unwrap_or(Value::Null), prop))
+                .collect();
+            if extracted.iter().any(|v| !matches!(v, Value::Null)) {
+                let result_type = extracted
+                    .iter()
+                    .find(|v| !matches!(v, Value::Null))
+                    .map(|v| v.physical_type())
+                    .unwrap_or(PhysicalTypeID::Int64);
+                return build_arrow_from_values(&extracted, result_type, chunk.size);
+            }
+        }
+        if !chunk.field_names.is_empty()
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == prop)
         {
             let field = chunk
                 .fields
@@ -772,9 +822,57 @@ impl ExpressionEvaluator {
             prop.to_string()
         };
 
-        // Fast path: look up the property by name in the chunk's field names.
+        // Fast path: look up the property by name in the chunk's field names
+        // (exact qualified match only).
         if !chunk.field_names.is_empty()
-            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop || n == prop)
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == &qualified_prop)
+        {
+            if chunk.fields.get(idx).is_none() {
+                return Err(format!("Column '{}' (index {}) not found in chunk", prop, idx).into());
+            }
+            let phys_type = chunk.field_types[idx];
+            let mut v = ValueVector::new(phys_type, chunk.size);
+            v.resize(chunk.size);
+            for i in 0..chunk.size {
+                if let Some(val) = chunk.get_value(idx, i) {
+                    store_value_in_vector(&mut v, i, &val)?;
+                } else {
+                    v.set_null(i, true);
+                }
+            }
+            return Ok(v);
+        }
+        // P53.26: `row.id` where `row` is a map/struct column — extract the key
+        // from each row's value instead of returning the whole object. Runs
+        // BEFORE the bare-name match so a plain `content` table column does not
+        // shadow an UNWIND map variable's `row.content`.
+        if let Expression::Variable(var_name) = obj
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == var_name)
+        {
+            let extracted: Vec<Value> = (0..chunk.size)
+                .map(|i| map_property_value(&chunk.get_value(idx, i).unwrap_or(Value::Null), prop))
+                .collect();
+            if extracted.iter().any(|v| !matches!(v, Value::Null)) {
+                let result_type = extracted
+                    .iter()
+                    .find(|v| !matches!(v, Value::Null))
+                    .map(|v| v.physical_type())
+                    .unwrap_or(PhysicalTypeID::Int64);
+                let mut v = ValueVector::new(result_type, chunk.size);
+                v.resize(chunk.size);
+                for (i, val) in extracted.iter().enumerate() {
+                    if matches!(val, Value::Null) {
+                        v.set_null(i, true);
+                    } else {
+                        store_value_in_vector(&mut v, i, val)?;
+                    }
+                }
+                return Ok(v);
+            }
+        }
+        // Bare-name match (plain table columns, e.g. `SET m.content = content`).
+        if !chunk.field_names.is_empty()
+            && let Some(idx) = chunk.field_names.iter().position(|n| n == prop)
         {
             if chunk.fields.get(idx).is_none() {
                 return Err(format!("Column '{}' (index {}) not found in chunk", prop, idx).into());
@@ -1661,12 +1759,11 @@ fn store_value_in_vector(v: &mut ValueVector, row: usize, val: &Value) -> Result
 
 /// Build an ArrowVector from a Vec<Value>, using typed builders to
 /// avoid the intermediate ValueVector allocation.
-fn build_arrow_from_values(
+pub(crate) fn build_arrow_from_values(
     values: &[Value],
     phys_type: PhysicalTypeID,
     num_rows: usize,
-) -> Result<ArrowVector, ProcessorError> {
-    match phys_type {
+) -> Result<ArrowVector, ProcessorError> {    match phys_type {
         PhysicalTypeID::Bool => {
             let mut builder = arrow::array::BooleanBuilder::with_capacity(num_rows);
             for v in values {

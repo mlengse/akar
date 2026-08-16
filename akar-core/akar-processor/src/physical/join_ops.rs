@@ -1,8 +1,9 @@
 //! Auto-extracted from physical_operator.rs
-use crate::physical::common::{hash_value_into, store_value_in_vector, value_hash};
+use crate::physical::common::{hash_value_into, value_hash};
 use crate::physical::types::{HashJoinTable, OperatorResult};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
+use arrow::array::ArrayRef;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -258,7 +259,7 @@ impl PhysicalSemiJoin {
                     }
                     let matched = hash_map
                         .get(&value_hash(&key))
-                        .map_or(false, |bucket| bucket.iter().any(|k| *k == key));
+                        .is_some_and(|bucket| bucket.contains(&key));
                     if matched {
                         match_rows.push((ci, row));
                     }
@@ -363,7 +364,7 @@ impl PhysicalAntiJoin {
                     }
                     let matched = hash_map
                         .get(&value_hash(&key))
-                        .map_or(false, |bucket| bucket.iter().any(|k| *k == key));
+                        .is_some_and(|bucket| bucket.contains(&key));
                     if !matched {
                         non_match_rows.push((ci, row));
                     }
@@ -779,54 +780,63 @@ impl JoinHashTable {
             return Ok(Vec::new());
         }
 
-        // Second pass: build output DataChunk from collected matches
+        // Second pass: build output DataChunk from collected matches using Arrow
+        // `take` over per-column concatenations. Unlike the legacy per-cell
+        // Value round-trip, `take` preserves complex values (map/struct/list)
+        // that `store_value_in_vector` would drop to NULL (P53.26).
         let num_rows = matches.len();
-        let mut result_fields: Vec<ValueVector> = output_types
+
+        // Global row offsets so `(chunk_idx, row)` → index in the concatenation.
+        let mut build_offsets: Vec<usize> = Vec::with_capacity(build_chunks.len());
+        let mut probe_offsets: Vec<usize> = Vec::with_capacity(probe_chunks.len());
+        let mut acc = 0usize;
+        for c in build_chunks {
+            build_offsets.push(acc);
+            acc += c.size;
+        }
+        let mut acc = 0usize;
+        for c in probe_chunks {
+            probe_offsets.push(acc);
+            acc += c.size;
+        }
+        let build_take: arrow::array::UInt32Array = matches
             .iter()
-            .map(|t| {
-                let mut v = ValueVector::new(*t, num_rows);
-                v.resize(num_rows);
-                v
-            })
+            .map(|&(bci, brow, _, _)| (build_offsets[bci] + brow) as u32)
+            .collect();
+        let probe_take: arrow::array::UInt32Array = matches
+            .iter()
+            .map(|&(_, _, pci, prow)| (probe_offsets[pci] + prow) as u32)
             .collect();
 
-        for (out_row, &(bci, brow, pci, prow)) in matches.iter().enumerate() {
-            // Copy build-side columns
-            for col in 0..num_build_fields {
-                if let Some(_field) = build_chunks[bci].fields.get(col) {
-                    let val = build_chunks[bci].get_value(col, brow).unwrap_or(Value::Null);
-                    if matches!(val, Value::Null) {
-                        result_fields[col].set_null(out_row, true);
-                    } else {
-                        store_value_in_vector(&mut result_fields[col], out_row, &val)?;
-                    }
-                }
-            }
-            // Copy probe-side columns
-            for col in 0..num_probe_fields {
-                if let Some(_field) = probe_chunks[pci].fields.get(col) {
-                    let val = probe_chunks[pci].get_value(col, prow).unwrap_or(Value::Null);
-                    if matches!(val, Value::Null) {
-                        result_fields[num_build_fields + col].set_null(out_row, true);
-                    } else {
-                        store_value_in_vector(&mut result_fields[num_build_fields + col], out_row, &val)?;
-                    }
-                }
-            }
+        let mut result_fields: Vec<ArrayRef> = Vec::with_capacity(total_cols);
+        for col in 0..num_build_fields {
+            let parts: Vec<ArrayRef> = build_chunks.iter().map(|c| c.fields[col].clone()).collect();
+            let concat = concat_parts(parts)?;
+            result_fields.push(arrow::compute::take(concat.as_ref(), &build_take, None).map_err(|e| e.to_string())?);
+        }
+        for col in 0..num_probe_fields {
+            let parts: Vec<ArrayRef> = probe_chunks.iter().map(|c| c.fields[col].clone()).collect();
+            let concat = concat_parts(parts)?;
+            result_fields.push(arrow::compute::take(concat.as_ref(), &probe_take, None).map_err(|e| e.to_string())?);
         }
 
-        let arrow_fields = result_fields
-            .iter()
-            .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-            .collect::<Vec<_>>();
-        let arrow_field_types = result_fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
         Ok(vec![DataChunk {
-            fields: arrow_fields,
-            field_types: arrow_field_types,
+            fields: result_fields,
+            field_types: output_types,
             size: num_rows,
             field_names: vec![],
             sel_vector: None,
         }])
+    }
+}
+
+/// Concatenate the same column across chunks into one Arrow array.
+fn concat_parts(parts: Vec<ArrayRef>) -> Result<ArrayRef, String> {
+    if parts.len() == 1 {
+        Ok(parts.into_iter().next().unwrap())
+    } else {
+        let refs: Vec<&dyn arrow::array::Array> = parts.iter().map(|a| a.as_ref()).collect();
+        arrow::compute::concat(&refs).map_err(|e| e.to_string())
     }
 }
 
