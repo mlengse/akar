@@ -136,44 +136,58 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
 
 pub(crate) fn parse_export_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
     let mut file_path = String::new();
-    let mut options = std::collections::HashMap::new();
+    let mut options = HashMap::new();
     for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::string => {
-                let raw = inner.as_str().trim();
-                file_path = unescape_string(raw);
-            }
-            Rule::export_option => {
-                let mut key = String::new();
-                let mut val = String::new();
-                for part in inner.into_inner() {
-                    match part.as_rule() {
-                        Rule::identifier => key = part.as_str().to_string(),
-                        Rule::literal => {
-                            let raw = part.as_str();
-                            val = unescape_string(raw);
-                        }
-                        _ => {}
-                    }
-                }
-                if !key.is_empty() {
-                    options.insert(key.to_uppercase(), val);
-                }
-            }
-            _ => {}
+        if inner.as_rule() == Rule::string {
+            let raw = inner.as_str().trim();
+            file_path = unescape_string(raw);
         }
+        parse_options_into(inner, &mut options);
     }
     Ok(Statement::ExportDatabase(ExportDatabase { file_path, options }))
 }
 
+/// Collect `(key, value)` pairs from an options clause into `out`.
+///
+/// The grammar nests each option under a `export_options` parent pair
+/// (`import/export_database -> export_options -> export_option`), so callers
+/// must descend both levels (the old loop matched only the outer level and
+/// silently dropped every option).
+fn parse_options_into(pair: pest::iterators::Pair<Rule>, out: &mut HashMap<String, String>) {
+    match pair.as_rule() {
+        Rule::export_options => {
+            for inner in pair.into_inner() {
+                parse_options_into(inner, out);
+            }
+        }
+        Rule::export_option => {
+            let mut key = String::new();
+            let mut val = String::new();
+            for part in pair.into_inner() {
+                match part.as_rule() {
+                    Rule::identifier => key = part.as_str().to_string(),
+                    Rule::literal => val = unescape_string(part.as_str()),
+                    _ => {}
+                }
+            }
+            if !key.is_empty() {
+                out.insert(key.to_uppercase(), val);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn parse_import_database(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
     let mut file_path = String::new();
+    let mut options = HashMap::new();
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::string {
             file_path = unescape_string(inner.as_str().trim());
         }
+        parse_options_into(inner, &mut options);
     }
-    Ok(Statement::ImportDatabase(ImportDatabase { file_path }))
+    Ok(Statement::ImportDatabase(ImportDatabase { file_path, options }))
 }
 
 /// Parse ANALYZE (TABLE) <name> | ANALYZE *
@@ -897,9 +911,9 @@ fn parse_load_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
 fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> String {
     let text = pair.as_str().to_string();
     if let Some(inner) = pair.into_inner().next() {
-        match inner.as_rule() {
-            Rule::string => return unescape_string(inner.as_str()),
-            _ => return inner.as_str().to_string(),
+        return match inner.as_rule() {
+            Rule::string => unescape_string(inner.as_str()),
+            _ => inner.as_str().to_string(),
         }
     }
     text

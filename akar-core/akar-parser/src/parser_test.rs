@@ -695,6 +695,54 @@ mod tests {
         }
     }
 
+    /// P53.34 (E2): kairos `repair_schema()` step 5 sends
+    /// `IMPORT DATABASE "...path" (format="parquet")` — grammar must accept the
+    /// same optional options clause as EXPORT (mirror of Kuzu).
+    #[test]
+    fn test_import_database_with_format_option() {
+        for sql in [
+            "IMPORT DATABASE \"/tmp/export\" (format=\"parquet\")",
+            "IMPORT DATABASE '/tmp/export' (format='csv')",
+            "IMPORT DATABASE \"/tmp/export\" (format=\"parquet\", schema_only=\"false\")",
+        ] {
+            let stmt = parse(sql).unwrap();
+            match stmt {
+                Statement::ImportDatabase(i) => {
+                    assert_eq!(i.file_path, "/tmp/export", "{sql}");
+                }
+                _ => panic!("Expected ImportDatabase: {sql}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_import_database_options_roundtrip() {
+        // Options survive into the AST (harmless; binder currently ignores them).
+        let stmt = parse("IMPORT DATABASE '/tmp/export' (format='parquet', schema_only='false')").unwrap();
+        match stmt {
+            Statement::ImportDatabase(i) => {
+                assert_eq!(i.file_path, "/tmp/export");
+                assert_eq!(i.options.get("FORMAT").map(String::as_str), Some("parquet"));
+                assert_eq!(i.options.get("SCHEMA_ONLY").map(String::as_str), Some("false"));
+            }
+            _ => panic!("Expected ImportDatabase"),
+        }
+    }
+
+    /// P53.34: EXPORT options were silently dropped by the same nesting bug —
+    /// `(format="parquet")` must reach the AST (kairos EXPORT uses it).
+    #[test]
+    fn test_export_database_options_roundtrip() {
+        let stmt = parse("EXPORT DATABASE '/tmp/export' (format='parquet')").unwrap();
+        match stmt {
+            Statement::ExportDatabase(e) => {
+                assert_eq!(e.file_path, "/tmp/export");
+                assert_eq!(e.options.get("FORMAT").map(String::as_str), Some("parquet"));
+            }
+            _ => panic!("Expected ExportDatabase"),
+        }
+    }
+
     // ==================== CREATE MACRO tests ====================
 
     #[test]
@@ -1046,4 +1094,9 @@ mod tests {
             _ => panic!("Expected Query"),
         }
     }
+}
+#[test]
+fn probe_import_options_debug() {
+    let stmt = parse("IMPORT DATABASE '/tmp/export' (format='parquet', schema_only='false')").unwrap();
+    println!("AST: {:?}", stmt);
 }

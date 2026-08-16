@@ -25,6 +25,8 @@ pub struct ExportDatabase {
 pub struct ImportDatabase {
     /// Path to the import directory (previously exported).
     pub file_path: String,
+    /// Import options (format, etc.) — accepted for Kuzu syntax parity.
+    pub options: std::collections::HashMap<String, String>,
 }
 
 /// ANALYZE statement — collect table statistics.
