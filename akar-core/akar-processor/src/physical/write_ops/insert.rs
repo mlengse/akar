@@ -63,14 +63,20 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
                     }
                 }
 
-                // Add the row to the node table; capture assigned row_id for OCC
-                if let Ok(row_id) = table.insert_row_with_txn(row_values, self.txn_id) {
-                    assigned_row_ids.push(row_id as i64);
-                    if let Some(sink) = self.undo_sink.as_ref()
-                        && let Ok(mut u) = sink.lock()
-                    {
-                        u.push(UndoRecord::insert(self.table_id, row_id));
-                    }
+                // Add the row to the node table; capture assigned row_id for OCC.
+                // Errors (e.g. NULL primary key) must surface, not silently skip
+                // the row — otherwise UNWIND+CREATE drops input rows (P53.27).
+                let row_id = table.insert_row_with_txn(row_values, self.txn_id).map_err(|e| {
+                    format!(
+                        "INSERT NODE row {row} failed in '{}': {e}",
+                        self.table_name
+                    )
+                })?;
+                assigned_row_ids.push(row_id as i64);
+                if let Some(sink) = self.undo_sink.as_ref()
+                    && let Ok(mut u) = sink.lock()
+                {
+                    u.push(UndoRecord::insert(self.table_id, row_id));
                 }
             }
         }
