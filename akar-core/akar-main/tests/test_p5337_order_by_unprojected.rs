@@ -43,7 +43,10 @@ fn order_by_unprojected_column() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    let rows = read_rows(&conn, "MATCH (m:Memory) RETURN m.id, m.label ORDER BY m.access_count DESC");
+    let rows = read_rows(
+        &conn,
+        "MATCH (m:Memory) RETURN m.id, m.label ORDER BY m.access_count DESC",
+    );
     assert_eq!(
         rows,
         vec![
@@ -61,7 +64,10 @@ fn order_by_unprojected_column_with_limit() {
     let (_db, conn) = setup_db();
     setup(&conn);
 
-    let rows = read_rows(&conn, "MATCH (m:Memory) RETURN m.id ORDER BY m.access_count DESC LIMIT 2");
+    let rows = read_rows(
+        &conn,
+        "MATCH (m:Memory) RETURN m.id ORDER BY m.access_count DESC LIMIT 2",
+    );
     assert_eq!(
         rows,
         vec![vec![Value::Int64(2)], vec![Value::Int64(3)]],
@@ -79,11 +85,7 @@ fn order_by_projected_alias() {
     let rows = read_rows(&conn, "MATCH (m:Memory) RETURN m.access_count AS ac ORDER BY ac DESC");
     assert_eq!(
         rows,
-        vec![
-            vec![Value::Int64(5)],
-            vec![Value::Int64(3)],
-            vec![Value::Int64(1)],
-        ],
+        vec![vec![Value::Int64(5)], vec![Value::Int64(3)], vec![Value::Int64(1)],],
         "ORDER BY projected alias"
     );
 }

@@ -138,10 +138,7 @@ impl QueryPlanner {
         })])
     }
 
-    fn plan_standalone_call(
-        &self,
-        c: BoundStandaloneCall,
-    ) -> Result<Vec<LogicalOperator>, PlannerError> {
+    fn plan_standalone_call(&self, c: BoundStandaloneCall) -> Result<Vec<LogicalOperator>, PlannerError> {
         Ok(vec![LogicalOperator::StandaloneCall(LogicalStandaloneCall {
             function_name: c.function_name,
             args: c.args,
@@ -994,9 +991,9 @@ impl QueryPlanner {
             let order_by_below_projection = match &order_by {
                 Some(items) => {
                     group_by.is_none()
-                        && !items.iter().all(|item| {
-                            projection_covers_sort_key(&proj.expressions, &item.expression.expression)
-                        })
+                        && !items
+                            .iter()
+                            .all(|item| projection_covers_sort_key(&proj.expressions, &item.expression.expression))
                 }
                 None => false,
             };
