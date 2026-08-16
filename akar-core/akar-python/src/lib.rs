@@ -480,56 +480,56 @@ fn column_names(result: &akar_main::QueryResult) -> Vec<String> {
 }
 
 /// Konversi `Value` (Akar) → objek Python.
-fn value_to_py(py: Python<'_>, v: Option<akar_common::types::Value>) -> PyResult<PyObject> {
+fn value_to_py(py: Python<'_>, v: Option<Value>) -> PyResult<PyObject> {
     let Some(v) = v else {
         return Ok(py.None());
     };
     let obj = match v {
-        akar_common::types::Value::Null => py.None(),
-        akar_common::types::Value::Bool(b) => PyBool::new(py, b).unbind().into_any(),
-        akar_common::types::Value::Int64(i) => PyInt::new(py, i).unbind().into_any(),
-        akar_common::types::Value::Int32(i) => PyInt::new(py, i).unbind().into_any(),
-        akar_common::types::Value::Int16(i) => PyInt::new(py, i).unbind().into_any(),
-        akar_common::types::Value::Int8(i) => PyInt::new(py, i).unbind().into_any(),
-        akar_common::types::Value::UInt64(u) => PyInt::new(py, u).unbind().into_any(),
-        akar_common::types::Value::UInt32(u) => PyInt::new(py, u).unbind().into_any(),
-        akar_common::types::Value::UInt16(u) => PyInt::new(py, u).unbind().into_any(),
-        akar_common::types::Value::UInt8(u) => PyInt::new(py, u).unbind().into_any(),
-        akar_common::types::Value::Int128(i) => PyInt::new(py, i).unbind().into_any(),
-        akar_common::types::Value::UInt128(u) => PyInt::new(py, u).unbind().into_any(),
-        akar_common::types::Value::Double(d) => PyFloat::new(py, d).unbind().into_any(),
-        akar_common::types::Value::Float(f) => PyFloat::new(py, f as f64).unbind().into_any(),
-        akar_common::types::Value::String(s) => PyString::new(py, &s).unbind().into_any(),
-        akar_common::types::Value::Blob(b) => PyBytes::new(py, &b).unbind().into_any(),
-        akar_common::types::Value::Date(d) => PyInt::new(py, d.0 as i64).unbind().into_any(),
-        akar_common::types::Value::Timestamp(t) => PyInt::new(py, t.0).unbind().into_any(),
-        akar_common::types::Value::TimestampTz(t) => PyInt::new(py, t.0).unbind().into_any(),
-        akar_common::types::Value::TimestampNs(t)
-        | akar_common::types::Value::TimestampMs(t)
-        | akar_common::types::Value::TimestampSec(t) => PyInt::new(py, t.0).unbind().into_any(),
-        akar_common::types::Value::Interval(_) => py.None(),
-        akar_common::types::Value::InternalID(id) => {
+        Value::Null => py.None(),
+        Value::Bool(b) => PyBool::new(py, b).unbind().into_any(),
+        Value::Int64(i) => PyInt::new(py, i).unbind().into_any(),
+        Value::Int32(i) => PyInt::new(py, i).unbind().into_any(),
+        Value::Int16(i) => PyInt::new(py, i).unbind().into_any(),
+        Value::Int8(i) => PyInt::new(py, i).unbind().into_any(),
+        Value::UInt64(u) => PyInt::new(py, u).unbind().into_any(),
+        Value::UInt32(u) => PyInt::new(py, u).unbind().into_any(),
+        Value::UInt16(u) => PyInt::new(py, u).unbind().into_any(),
+        Value::UInt8(u) => PyInt::new(py, u).unbind().into_any(),
+        Value::Int128(i) => PyInt::new(py, i).unbind().into_any(),
+        Value::UInt128(u) => PyInt::new(py, u).unbind().into_any(),
+        Value::Double(d) => PyFloat::new(py, d).unbind().into_any(),
+        Value::Float(f) => PyFloat::new(py, f as f64).unbind().into_any(),
+        Value::String(s) => PyString::new(py, &s).unbind().into_any(),
+        Value::Blob(b) => PyBytes::new(py, &b).unbind().into_any(),
+        Value::Date(d) => PyInt::new(py, d.0 as i64).unbind().into_any(),
+        Value::Timestamp(t) => PyInt::new(py, t.0).unbind().into_any(),
+        Value::TimestampTz(t) => PyInt::new(py, t.0).unbind().into_any(),
+        Value::TimestampNs(t)
+        | Value::TimestampMs(t)
+        | Value::TimestampSec(t) => PyInt::new(py, t.0).unbind().into_any(),
+        Value::Interval(_) => py.None(),
+        Value::InternalID(id) => {
             let tuple = (id.table_id, id.offset);
             tuple.into_pyobject(py)?.unbind().into_any()
         }
-        akar_common::types::Value::Json(j) => serde_json_to_py(py, &j)?,
-        akar_common::types::Value::DTime(t) => PyInt::new(py, t).unbind().into_any(),
-        akar_common::types::Value::Union(_, inner) => value_to_py(py, Some(*inner))?,
-        akar_common::types::Value::List(items) => {
+        Value::Json(j) => serde_json_to_py(py, &j)?,
+        Value::DTime(t) => PyInt::new(py, t).unbind().into_any(),
+        Value::Union(_, inner) => value_to_py(py, Some(*inner))?,
+        Value::List(items) => {
             let list = PyList::empty(py);
             for item in items {
                 list.append(value_to_py(py, Some(item))?)?;
             }
             list.unbind().into_any()
         }
-        akar_common::types::Value::Map(kvs) => {
+        Value::Map(kvs) => {
             let d = PyDict::new(py);
             for (k, v) in kvs {
                 d.set_item(value_to_py(py, Some(k))?, value_to_py(py, Some(v))?)?;
             }
             d.unbind().into_any()
         }
-        akar_common::types::Value::Struct(fields) => {
+        Value::Struct(fields) => {
             let d = PyDict::new(py);
             for (name, val) in fields {
                 d.set_item(&name, value_to_py(py, Some(val))?)?;
@@ -820,6 +820,40 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
 
             let reopened =
                 akar_main::Database::new(path.clone(), Default::default()).expect("reopen same path after close");
+            drop(reopened);
+        });
+
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// E3 (P53.35): replikasi flow harness `test_close_and_reopen` — dua
+    /// `Database` Python pada path yang sama hidup bersamaan (fixture store +
+    /// store milik test). Lock lintas-proses kini reentrant dalam satu proses:
+    /// open kedua berbagi lock yang sama alih-alih gagal, dan setelah semua
+    /// instance ditutup path bisa dibuka lagi.
+    #[test]
+    fn two_databases_on_same_path_coexist_then_reopen() {
+        let path = fresh_db_path("p53_35_reopen");
+
+        Python::with_gil(|py| {
+            // fixture store
+            let fixture = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            // store milik test — open kedua pada path sama, harus sukses (P53.35)
+            let s = Bound::new(py, Database::new(path.to_str().unwrap()).expect("second open shares lock")).expect("wrap db");
+            let _conn_s = Connection::new(&s).expect("connection on second db");
+            s.borrow_mut().close(py);
+            drop(s);
+
+            // fixture masih hidup, path dibuka ulang — harus sukses (share)
+            let s2 = Bound::new(py, Database::new(path.to_str().unwrap()).expect("reopen while fixture alive")).expect("wrap db");
+            s2.borrow_mut().close(py);
+            drop(s2);
+
+            // fixture ditutup → semua refcount habis → lock dilepas
+            fixture.borrow_mut().close(py);
+            drop(fixture);
+
+            let reopened = akar_main::Database::new(path.clone(), Default::default()).expect("reopen after all closed");
             drop(reopened);
         });
 

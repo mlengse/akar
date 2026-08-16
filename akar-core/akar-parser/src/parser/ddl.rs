@@ -914,7 +914,7 @@ fn parse_literal_value(pair: pest::iterators::Pair<Rule>) -> String {
         return match inner.as_rule() {
             Rule::string => unescape_string(inner.as_str()),
             _ => inner.as_str().to_string(),
-        }
+        };
     }
     text
 }

@@ -447,32 +447,84 @@ fn test_read_only_rejects_writes_but_allows_reads() {
 // ===========================================================================
 
 #[test]
-fn test_exclusive_lock_blocks_second_open() {
+fn test_same_process_second_open_shares_lock() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp_dir.path().join("test_db");
 
     setup_person_table(&db_path, &[("alice", 30)]);
 
-    // First process holds the exclusive lock.
+    // P53.35 (E3): the cross-process lock is reentrant within one process —
+    // two Database instances on the same path can coexist (the kairos harness
+    // opens a fixture store and a fresh store on the same path). The OS lock is
+    // held once, refcounted.
     let db1 = Database::new(&db_path, config(-1)).expect("first open should succeed");
     assert_eq!(db1.table_num_rows("Person"), 1);
-
-    // A second open of the same path must be rejected while the lock is held.
-    let err = match Database::new(&db_path, config(-1)) {
-        Ok(_) => panic!("second open should fail"),
-        Err(e) => e,
-    };
-    assert!(err.contains("already open"), "unexpected error: {err}");
+    let db2 = Database::new(&db_path, config(-1)).expect("same-process second open shares the lock");
+    assert_eq!(db2.table_num_rows("Person"), 1);
 
     drop(db1);
 
-    // After the first instance is dropped, the path can be opened again.
-    let db2 = Database::new(&db_path, config(-1)).expect("reopen after lock release should succeed");
-    assert_eq!(db2.table_num_rows("Person"), 1);
+    // Lock still held by db2 while it is alive.
+    let db3 = Database::new(&db_path, config(-1)).expect("share persists while db2 lives");
+    assert_eq!(db3.table_num_rows("Person"), 1);
+    drop(db3);
+    drop(db2);
+
+    // All instances dropped -> OS lock released -> a fresh open re-locks.
+    let db4 = Database::new(&db_path, config(-1)).expect("reopen after last drop should succeed");
+    assert_eq!(db4.table_num_rows("Person"), 1);
 }
 
 #[test]
-fn test_shared_lock_allows_multiple_readers_blocks_writer() {
+fn test_cross_process_lock_still_excludes_second_process() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let db_path = temp_dir.path().join("test_db");
+
+    setup_person_table(&db_path, &[("alice", 30)]);
+
+    // Hold the exclusive lock in this process (in-process reentrancy does not
+    // weaken the cross-process guard).
+    let db1 = Database::new(&db_path, config(-1)).expect("first open should succeed");
+
+    // A second PROCESS must still be rejected while the lock is held.
+    let child = Command::new(env!("CARGO_BIN_EXE_crash_sim_child"))
+        .arg(db_path.to_str().unwrap())
+        .arg("hold-lock")
+        .arg("0")
+        .arg("0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn crash_sim_child");
+    let out = child.wait_with_output().expect("wait for child");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(stdout.contains("LOCK-ERROR"), "child should be rejected: {stdout}");
+    assert!(!out.status.success(), "child must exit non-zero");
+    assert!(stdout.contains("already open"), "unexpected error: {stdout}");
+
+    drop(db1);
+
+    // After the parent releases the lock, the child can acquire it. Pre-create
+    // the signal file so the child (which waits on it after opening) exits at
+    // once.
+    fs::write(db_path.join("signal"), b"").expect("create signal file");
+    let child = Command::new(env!("CARGO_BIN_EXE_crash_sim_child"))
+        .arg(db_path.to_str().unwrap())
+        .arg("hold-lock")
+        .arg("0")
+        .arg("0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn crash_sim_child");
+    let out = child.wait_with_output().expect("wait for child");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(stdout.contains("LOCK-HELD"), "child should acquire lock: {stdout}");
+    assert!(out.status.success(), "child must exit zero: {stdout}");
+}
+
+#[test]
+fn test_shared_lock_allows_multiple_readers() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp_dir.path().join("test_db");
 
@@ -484,16 +536,15 @@ fn test_shared_lock_allows_multiple_readers_blocks_writer() {
     assert_eq!(reader1.table_num_rows("Person"), 1);
     assert_eq!(reader2.table_num_rows("Person"), 1);
 
-    // A write open conflicts with the shared locks.
-    let err = match Database::new(&db_path, config(-1)) {
-        Ok(_) => panic!("write open should fail while readers hold the lock"),
-        Err(e) => e,
-    };
-    assert!(err.contains("already open"), "unexpected error: {err}");
+    // Same-process write open now shares the held lock (P53.35); the
+    // cross-process writer is covered by test_cross_process_lock_still_excludes_second_process.
+    let writer = Database::new(&db_path, config(-1)).expect("same-process write open shares the lock");
+    assert_eq!(writer.table_num_rows("Person"), 1);
 
     drop(reader1);
     drop(reader2);
+    drop(writer);
 
-    let writer = Database::new(&db_path, config(-1)).expect("write open after readers close should succeed");
-    assert_eq!(writer.table_num_rows("Person"), 1);
+    let reopen = Database::new(&db_path, read_only_config()).expect("read-only open after close should succeed");
+    assert_eq!(reopen.table_num_rows("Person"), 1);
 }

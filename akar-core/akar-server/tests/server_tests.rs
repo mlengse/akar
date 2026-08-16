@@ -386,14 +386,15 @@ fn test_read_only_server_rejects_writes() {
 fn test_server_holds_exclusive_lock() {
     let ts = start_server(config());
 
-    // While the server runs, its Database holds the exclusive file lock: a
-    // direct open of the same directory must fail — exactly what prevents two
-    // processes from writing the same files.
-    let err = match Database::new(&ts.db_path, config()) {
-        Ok(_) => panic!("second open while server runs must fail"),
-        Err(e) => e,
-    };
-    assert!(err.contains("already open"), "unexpected error: {err}");
+    // While the server runs, its Database holds the cross-process file lock.
+    // The lock is reentrant within this process (P53.35, E3), so a same-process
+    // open shares the held lock; a genuinely separate process is still rejected
+    // (covered by `test_cross_process_lock_still_excludes_second_process` in
+    // akar-main). Verify the shared instance can open and run a trivial query.
+    let db2 = Database::new(&ts.db_path, config()).expect("same-process open shares the server lock");
+    let conn2 = akar_main::Connection::new(&Arc::new(db2));
+    conn2.query("RETURN 1").expect("second instance usable");
+    drop(conn2);
 
     // Drop the server (releasing the Database and its lock), then reopen.
     let db_path = ts.db_path.clone();
@@ -422,14 +423,13 @@ fn test_client_never_opens_db_files() {
         .expect("write via client");
 
     // The client only talks TCP — it never creates or opens the lock file.
-    // The lock file is created by the server's Database open, not by the client.
-    // Verify the client connection itself does not hold any file handle by
-    // confirming the database is still exclusively locked by the server.
-    let err = match Database::new(&ts.db_path, config()) {
-        Ok(_) => panic!("lock must remain held by the server process"),
-        Err(e) => e,
-    };
-    assert!(err.contains("already open"));
+    // The server's Database holds the cross-process lock; a second Database in
+    // the same process shares it (reentrancy, P53.35). The client itself owns
+    // no Database handle, so the lock state is entirely the server's.
+    let db2 = Database::new(&ts.db_path, config()).expect("same-process open shares the server lock");
+    let conn2 = akar_main::Connection::new(&Arc::new(db2));
+    conn2.query("RETURN 1").expect("second instance usable");
+    drop(conn2);
 }
 
 // ===========================================================================

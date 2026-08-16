@@ -10,9 +10,10 @@ use akar_storage::StorageManager;
 use akar_storage::stats::StatsStore;
 use akar_storage::table::ColumnDefinition;
 use akar_transaction::TransactionManager;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Name of the file that holds the serialized system catalog.
 ///
@@ -85,6 +86,49 @@ impl Default for SystemConfig {
 /// conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")?;
 /// # Ok::<(), String>(())
 /// ```
+/// Cross-process path lock, reentrant within this process (P53.35, E3).
+///
+/// The first `Database` on a path takes the OS-level lock and keeps the file
+/// handle here; later opens on the *same path in this process* share that
+/// handle (refcount) instead of failing — this is what allows the kairos
+/// harness pattern of a fixture store and a fresh store on one path in the
+/// same process. The last `Database` to drop removes the entry, closing the
+/// handle and releasing the OS lock. Cross-process exclusion is unchanged:
+/// every process owns a private registry, so a second process still fails to
+/// acquire the OS lock while the first holds it.
+static PROCESS_PATH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, (std::fs::File, u32)>>> = OnceLock::new();
+
+fn process_path_locks() -> &'static Mutex<HashMap<PathBuf, (std::fs::File, u32)>> {
+    PROCESS_PATH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Slot guard in `PROCESS_PATH_LOCKS`. On drop it decrements the refcount for
+/// the path and removes the entry (dropping the shared OS lock handle) once
+/// the count reaches zero.
+struct PathLock {
+    key: PathBuf,
+}
+
+impl Drop for PathLock {
+    fn drop(&mut self) {
+        let mut reg = process_path_locks().lock().unwrap();
+        if let Some((_, count)) = reg.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                reg.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// Resolve the canonical lock-file path for a database directory so that
+/// alternative spellings of the same directory share one registry slot.
+fn lock_key(db_path: &Path) -> PathBuf {
+    std::fs::canonicalize(db_path)
+        .unwrap_or_else(|_| db_path.to_path_buf())
+        .join(LOCK_FILE_NAME)
+}
+
 #[allow(dead_code)]
 pub struct Database {
     pub(crate) storage_manager: Arc<StorageManager>,
@@ -103,9 +147,9 @@ pub struct Database {
     /// spilling instead of falling back to the config default (P52.50).
     spill_threshold_override: AtomicU64,
     spill_threshold_overridden: AtomicBool,
-    /// Cross-process lock file handle (kept alive for the lifetime of the
-    /// database so the OS lock is released only on `Database` drop).
-    _lock_file: Option<std::fs::File>,
+    /// Registry slot holding this process's share of the cross-process path
+    /// lock (see `PROCESS_PATH_LOCKS` / `PathLock`).
+    _lock: Option<PathLock>,
 }
 
 impl Database {
@@ -139,13 +183,13 @@ impl Database {
     /// Create a `Spiller` instance using the current database configuration.
     ///
     /// Returns `None` if spilling is disabled (threshold is 0).
-    pub fn spiller(&self) -> Option<std::sync::Arc<akar_storage::Spiller>> {
+    pub fn spiller(&self) -> Option<Arc<akar_storage::Spiller>> {
         let threshold = self.effective_spill_threshold();
         if threshold == 0 {
             return None;
         }
         let spill_dir = self.storage_manager.db_path().join("spill");
-        Some(std::sync::Arc::new(akar_storage::Spiller::new(spill_dir, threshold)))
+        Some(Arc::new(akar_storage::Spiller::new(spill_dir, threshold)))
     }
 
     /// Create a [`StorageDriver`] for programmatic storage-level access
@@ -180,9 +224,9 @@ impl Database {
     /// This method creates the storage-level table and associated resources.
     pub fn create_node_table(&self, name: String, columns: Vec<akar_catalog::CatalogColumn>) -> Result<u64, String> {
         // 1. Create the data-level table
-        let storage_columns: Vec<akar_storage::table::ColumnDefinition> = columns
+        let storage_columns: Vec<ColumnDefinition> = columns
             .iter()
-            .map(|c| akar_storage::table::ColumnDefinition {
+            .map(|c| ColumnDefinition {
                 name: c.name.clone(),
                 logical_type: c.logical_type,
                 is_primary_key: c.is_primary_key,
@@ -228,9 +272,9 @@ impl Database {
         columns: Vec<akar_catalog::CatalogColumn>,
     ) -> Result<u64, String> {
         // 1. Create the data-level table
-        let storage_columns: Vec<akar_storage::table::ColumnDefinition> = columns
+        let storage_columns: Vec<ColumnDefinition> = columns
             .iter()
-            .map(|c| akar_storage::table::ColumnDefinition {
+            .map(|c| ColumnDefinition {
                 name: c.name.clone(),
                 logical_type: c.logical_type,
                 is_primary_key: c.is_primary_key,
@@ -484,28 +528,39 @@ impl Database {
         // Multi-process guard: take a file lock on <db_path>/akar.lock so two
         // processes cannot open the same database directory concurrently.
         // Read-only opens take a shared lock (multiple readers allowed); write
-        // opens take an exclusive lock. The handle is kept alive for the
-        // lifetime of the Database to hold the lock.
-        let lock_file = if is_memory {
+        // opens take an exclusive lock. In-process reopens of the same path
+        // share the held lock via PROCESS_PATH_LOCKS (P53.35, E3).
+        let lock = if is_memory {
             None
         } else {
             std::fs::create_dir_all(&db_path)
                 .map_err(|e| format!("Failed to create database directory '{}': {e}", db_path.display()))?;
-            let lock_path = db_path.join(LOCK_FILE_NAME);
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .read(true)
-                .write(true)
-                .truncate(false)
-                .open(&lock_path)
-                .map_err(|e| format!("Failed to open lock file '{}': {e}", lock_path.display()))?;
-            let result = if config.read_only {
-                file.try_lock_shared()
-            } else {
-                file.try_lock()
-            };
-            result.map_err(|_| format!("Database '{}' is already open by another process", db_path.display()))?;
-            Some(file)
+            let key = lock_key(&db_path);
+            let mut reg = process_path_locks().lock().unwrap();
+            match reg.get_mut(&key) {
+                // Already open in this process: share the held OS lock.
+                Some((_, count)) => {
+                    *count += 1;
+                }
+                None => {
+                    let file = std::fs::OpenOptions::new()
+                        .create(true)
+                        .read(true)
+                        .write(true)
+                        .truncate(false)
+                        .open(&key)
+                        .map_err(|e| format!("Failed to open lock file '{}': {e}", key.display()))?;
+                    let result = if config.read_only {
+                        file.try_lock_shared()
+                    } else {
+                        file.try_lock()
+                    };
+                    result
+                        .map_err(|_| format!("Database '{}' is already open by another process", db_path.display()))?;
+                    reg.insert(key.clone(), (file, 1));
+                }
+            }
+            Some(PathLock { key })
         };
 
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));
@@ -516,7 +571,7 @@ impl Database {
         // catalog, preserving backward compatibility.
         let catalog_file = db_path.join(CATALOG_FILE_NAME);
         let catalog = Arc::new(Mutex::new(
-            akar_catalog::Catalog::load_from_path(&catalog_file)
+            Catalog::load_from_path(&catalog_file)
                 .map_err(|e| format!("Failed to load persisted catalog: {e}"))?
                 .unwrap_or_default(),
         ));
@@ -543,7 +598,7 @@ impl Database {
             vfs,
             spill_threshold_override: AtomicU64::new(0),
             spill_threshold_overridden: AtomicBool::new(false),
-            _lock_file: lock_file,
+            _lock: lock,
             config,
         };
 
@@ -583,16 +638,13 @@ impl Database {
         // here. When it replayed WAL records, the mirrors are re-persisted by
         // recover(), so they are only consulted when they are authoritative —
         // this avoids double-applying committed rows (P45.4).
-        let recovered = match db.storage_manager.recover() {
-            Ok(n) => n,
-            Err(e) => {
-                tracing::warn!(
-                    "WAL recovery failed (database may need manual repair): {e}. \
+        let recovered = db.storage_manager.recover().unwrap_or_else(|e| {
+            tracing::warn!(
+                "WAL recovery failed (database may need manual repair): {e}. \
                      Starting with fresh state."
-                );
-                0
-            }
-        };
+            );
+            0
+        });
         if recovered == 0 {
             match db.storage_manager.load_persisted_tables() {
                 Ok(n) => {

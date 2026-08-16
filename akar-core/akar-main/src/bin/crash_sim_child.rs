@@ -9,6 +9,11 @@
 ///   write-and-checkpoint — Insert rows then force a CHECKPOINT
 ///   ddl-recovery       — Open an existing DB, verify `Person` exists (created
 ///                        by the parent process), create `Person2`, insert a row
+///   hold-lock          — Open the DB and hold the cross-process lock; prints
+///                        `LOCK-HELD` on success (then waits for the signal file
+///                        like the other modes) or `LOCK-ERROR: <msg>` + exit 2
+///                        if the open is rejected. Used to verify the
+///                        cross-process lock guard (P53.35).
 ///
 /// The parent process is expected to have already created the DB, table, and
 /// checkpointed it. This process only performs DML (INSERT).
@@ -46,35 +51,29 @@ fn main() {
         ..Default::default()
     };
 
-    let db = Arc::new(Database::new(&db_path, config).expect("Failed to create/open database"));
-    let conn = Connection::new(&db);
-
-    if mode != "ddl-recovery" {
-        // Create the Person table (in-memory catalog, per-process)
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))")
-            .expect("Failed to create Person table");
-    }
-
-    match mode.as_str() {
-        "write" => {
-            for i in 0..num_rows {
-                let name = format!("person_{}", i);
-                let age = (i % 100) as i64;
-                let score = (i as f64) * 1.5;
-                let active = i % 2 == 0;
-                conn.query(&format!(
-                    "CREATE (p:Person {{name: '{}', age: {}, score: {}, active: {}}})",
-                    name, age, score, active
-                ))
-                .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
+    if mode == "hold-lock" {
+        match Database::new(&db_path, config) {
+            Ok(_db) => println!("LOCK-HELD"),
+            Err(e) => {
+                println!("LOCK-ERROR: {e}");
+                std::process::exit(2);
             }
         }
-        "write-burst" => {
-            let batch_size = 100;
-            let mut inserted = 0;
-            while inserted < num_rows {
-                let batch_end = (inserted + batch_size).min(num_rows);
-                for i in inserted..batch_end {
+    } else {
+        let db = Arc::new(Database::new(&db_path, config).expect("Failed to create/open database"));
+        let conn = Connection::new(&db);
+
+        if mode != "ddl-recovery" {
+            // Create the Person table (in-memory catalog, per-process)
+            conn.query(
+                "CREATE NODE TABLE Person(name STRING, age INT64, score DOUBLE, active BOOL, PRIMARY KEY(name))",
+            )
+            .expect("Failed to create Person table");
+        }
+
+        match mode.as_str() {
+            "write" => {
+                for i in 0..num_rows {
                     let name = format!("person_{}", i);
                     let age = (i % 100) as i64;
                     let score = (i as f64) * 1.5;
@@ -85,48 +84,66 @@ fn main() {
                     ))
                     .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
                 }
-                inserted = batch_end;
+            }
+            "write-burst" => {
+                let batch_size = 100;
+                let mut inserted = 0;
+                while inserted < num_rows {
+                    let batch_end = (inserted + batch_size).min(num_rows);
+                    for i in inserted..batch_end {
+                        let name = format!("person_{}", i);
+                        let age = (i % 100) as i64;
+                        let score = (i as f64) * 1.5;
+                        let active = i % 2 == 0;
+                        conn.query(&format!(
+                            "CREATE (p:Person {{name: '{}', age: {}, score: {}, active: {}}})",
+                            name, age, score, active
+                        ))
+                        .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
+                    }
+                    inserted = batch_end;
+                }
+            }
+            "write-and-checkpoint" => {
+                for i in 0..num_rows {
+                    let name = format!("person_{}", i);
+                    let age = (i % 100) as i64;
+                    let score = (i as f64) * 1.5;
+                    let active = i % 2 == 0;
+                    conn.query(&format!(
+                        "CREATE (p:Person {{name: '{}', age: {}, score: {}, active: {}}})",
+                        name, age, score, active
+                    ))
+                    .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
+                }
+                conn.query("CHECKPOINT").expect("Failed to checkpoint");
+            }
+            "ddl-recovery" => {
+                // Cross-process DDL recovery: the `Person` table was created by the
+                // parent process and persisted to catalog.json. It must be visible
+                // here without re-creating it.
+                let person_exists = db.catalog().lock().map(|c| c.contains("Person")).unwrap_or(false);
+                if !person_exists {
+                    eprintln!("DDL-RECOVERY-FAIL: 'Person' table missing after restart");
+                    std::process::exit(2);
+                }
+                // Create a new table in this process; it must be persisted so the
+                // parent process can see it after we exit.
+                conn.query("CREATE NODE TABLE Person2(name STRING, PRIMARY KEY(name))")
+                    .expect("Failed to create Person2 table");
+                conn.query("CREATE (:Person2 {name: 'child_row'})")
+                    .expect("insert failed");
+                println!("DDL-RECOVERY-OK");
+            }
+            _ => {
+                eprintln!("Unknown mode: {}", mode);
+                std::process::exit(1);
             }
         }
-        "write-and-checkpoint" => {
-            for i in 0..num_rows {
-                let name = format!("person_{}", i);
-                let age = (i % 100) as i64;
-                let score = (i as f64) * 1.5;
-                let active = i % 2 == 0;
-                conn.query(&format!(
-                    "CREATE (p:Person {{name: '{}', age: {}, score: {}, active: {}}})",
-                    name, age, score, active
-                ))
-                .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
-            }
-            conn.query("CHECKPOINT").expect("Failed to checkpoint");
-        }
-        "ddl-recovery" => {
-            // Cross-process DDL recovery: the `Person` table was created by the
-            // parent process and persisted to catalog.json. It must be visible
-            // here without re-creating it.
-            let person_exists = db.catalog().lock().map(|c| c.contains("Person")).unwrap_or(false);
-            if !person_exists {
-                eprintln!("DDL-RECOVERY-FAIL: 'Person' table missing after restart");
-                std::process::exit(2);
-            }
-            // Create a new table in this process; it must be persisted so the
-            // parent process can see it after we exit.
-            conn.query("CREATE NODE TABLE Person2(name STRING, PRIMARY KEY(name))")
-                .expect("Failed to create Person2 table");
-            conn.query("CREATE (:Person2 {name: 'child_row'})")
-                .expect("insert failed");
-            println!("DDL-RECOVERY-OK");
-        }
-        _ => {
-            eprintln!("Unknown mode: {}", mode);
-            std::process::exit(1);
-        }
-    }
 
-    drop(conn);
-    drop(db);
+        drop(conn);
+        drop(db);
+    }
 
     for _ in 0..6000 {
         if signal_path.exists() {
