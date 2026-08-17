@@ -240,6 +240,16 @@ fn generate_copy_cypher_from_entries(
 ) -> String {
     let mut copy = String::new();
     for entry in entries {
+        // Rel tables with only endpoints (metadata relations like HAS_TABLE)
+        // have no exportable property columns — skip their COPY FROM line so
+        // IMPORT doesn't reference a data file that wasn't written (P53.37).
+        let skip_data = match entry {
+            akar_catalog::CatalogEntry::RelTable(t) => t.columns.is_empty(),
+            _ => false,
+        };
+        if skip_data {
+            continue;
+        }
         let name = match entry {
             akar_catalog::CatalogEntry::NodeTable(t) => Some(t.name.as_str()),
             akar_catalog::CatalogEntry::RelTable(t) => Some(t.name.as_str()),
@@ -286,6 +296,11 @@ fn export_table_data(
             akar_catalog::CatalogEntry::RelTable(t) => {
                 let name = t.name.as_str();
                 let cols: Vec<String> = t.columns.iter().map(|c| c.name.clone()).collect();
+                if cols.is_empty() {
+                    // Rel table with only endpoints — no exportable property
+                    // columns; skip data export (P53.37).
+                    continue;
+                }
                 let return_cols: Vec<String> = cols.iter().map(|c| format!("r.{}", c)).collect();
                 let q = format!("MATCH ()-[r:{}]->() RETURN {}", name, return_cols.join(", "));
                 (name, q, cols)
@@ -389,7 +404,8 @@ fn export_table_data(
                         continue;
                     }
 
-                    // Write parquet with proper column names
+                    // Write parquet with proper column names and declared column
+                    // types (all-null columns must keep their Arrow type, P53.37).
                     let mut rows: Vec<Vec<Value>> = Vec::new();
                     for chunk in &result.chunks {
                         for row_idx in 0..chunk.size {
@@ -400,9 +416,15 @@ fn export_table_data(
                             rows.push(row);
                         }
                     }
+                    let declared_types = result.chunks.first().map(|c| c.field_types.as_slice());
 
-                    akar_storage::parquet_writer::write_parquet(&file_path_str, &rows, &final_column_names)
-                        .map_err(|e| format!("Parquet export error for '{}': {}", table_name, e))?;
+                    akar_storage::parquet_writer::write_parquet(
+                        &file_path_str,
+                        &rows,
+                        &final_column_names,
+                        declared_types,
+                    )
+                    .map_err(|e| format!("Parquet export error for '{}': {}", table_name, e))?;
                 }
                 #[cfg(not(feature = "parquet-export"))]
                 {

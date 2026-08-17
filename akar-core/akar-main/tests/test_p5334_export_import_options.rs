@@ -165,3 +165,98 @@ fn test_p5334_export_without_options_still_works() {
     let res = query_values(&conn, "MATCH (p:Person) RETURN count(p)");
     assert_eq!(res.trim(), "Int64(1)", "expected 1 Person after CSV import");
 }
+
+/// P53.37 — EXPORT DATABASE must tolerate rel tables with no property columns
+/// (metadata relations like kairos HAS_TABLE/HAS_DEFINITION are created with
+/// only FROM/TO endpoints). Previously the data-export query degraded to
+/// `MATCH ()-[r:T]->() RETURN ` (empty column list) → parse error; the COPY
+/// FROM line also referenced a data file that was never written.
+#[test]
+fn test_p5337_export_with_endpoint_only_rel_table() {
+    let (dir, _db, conn) = setup_db_on_disk();
+    exec(&conn, "CREATE NODE TABLE Database(name STRING, PRIMARY KEY (name))");
+    exec(
+        &conn,
+        "CREATE NODE TABLE MetadataTable(name STRING, PRIMARY KEY (name))",
+    );
+    exec(&conn, "CREATE REL TABLE HAS_TABLE(FROM Database TO MetadataTable)");
+    exec(&conn, "CREATE (:Database {name: 'db1'})");
+    exec(&conn, "CREATE (:MetadataTable {name: 'm1'})");
+    exec(
+        &conn,
+        "MATCH (d:Database {name: 'db1'}), (m:MetadataTable {name: 'm1'}) \
+         CREATE (d)-[:HAS_TABLE]->(m)",
+    );
+
+    let export_dir = dir.path().join("backup");
+    let p = export_dir.to_string_lossy().replace('\\', "/");
+    let msg = exec(&conn, &format!(r#"EXPORT DATABASE "{p}""#));
+    assert!(msg.contains("exported"), "export failed: {msg}");
+
+    // The endpoint-only rel table must not appear in copy.cypher (no data file).
+    let copy = std::fs::read_to_string(export_dir.join("copy.cypher")).expect("copy.cypher written");
+    assert!(
+        !copy.contains("HAS_TABLE"),
+        "endpoint-only rel table must be skipped in copy.cypher: {copy}"
+    );
+    assert!(
+        copy.contains("Database"),
+        "node table export must still be listed: {copy}"
+    );
+
+    // IMPORT must still succeed (skipped table has nothing to load).
+    let msg = exec(&conn, &format!(r#"IMPORT DATABASE "{p}""#));
+    assert!(msg.contains("imported"), "import failed: {msg}");
+    let res = query_values(&conn, "MATCH (d:Database) RETURN count(d)");
+    assert_eq!(res.trim(), "Int64(1)", "Database rows must survive round-trip");
+}
+
+/// P53.37 — parquet EXPORT/IMPORT round-trip preserves data AND FLOAT[]
+/// embedding lists (harness `repair_schema`: count == 3 after export →
+/// drop → recreate → import). The parquet writer previously serialized
+/// `Value::List` as Utf8/NULL and the reader rejected Utf8→List, so every
+/// row was dropped on import; all-null columns (an untouched FLOAT[] column)
+/// must keep their declared Arrow type instead of falling back to Utf8.
+#[cfg(feature = "parquet-export")]
+#[test]
+fn test_p5337_parquet_roundtrip_data_persists() {
+    let (dir, _db, conn) = setup_db_on_disk();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, embedding FLOAT[], dae_embedding FLOAT[], PRIMARY KEY (id))",
+    );
+    for id in 1..=3 {
+        exec(
+            &conn,
+            &format!("CREATE (:Memory {{id: {id}, content: 'hello {id}', embedding: [{id}.0, 0.0, 0.0]}})"),
+        );
+    }
+    let export_dir = dir.path().join("backup");
+    let p = export_dir.to_string_lossy().replace('\\', "/");
+    let msg = exec(&conn, &format!(r#"EXPORT DATABASE "{p}" (format="parquet")"#));
+    assert!(msg.contains("exported"), "export failed: {msg}");
+
+    exec(&conn, "DROP TABLE Memory");
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, embedding FLOAT[], dae_embedding FLOAT[], PRIMARY KEY (id))",
+    );
+    let msg = exec(&conn, &format!(r#"IMPORT DATABASE "{p}" (format="parquet")"#));
+    assert!(msg.contains("imported"), "import failed: {msg}");
+
+    let res = query_values(&conn, "MATCH (m:Memory) RETURN count(m)");
+    assert_eq!(res.trim(), "Int64(3)", "all 3 rows must survive the parquet round-trip");
+    // The FLOAT[] embedding must come back as a list of doubles, not NULL/Utf8.
+    let res = query_values(&conn, "MATCH (m:Memory {id: 2}) RETURN m.embedding");
+    assert!(
+        res.contains("List([Double(2.0), Double(0.0), Double(0.0)])"),
+        "embedding must round-trip as a FLOAT[] list, got: {res}"
+    );
+    // The untouched (all-null) FLOAT[] column must import as NULL, not fail
+    // the whole COPY with a Utf8→List type mismatch.
+    let res = query_values(&conn, "MATCH (m:Memory {id: 2}) RETURN m.dae_embedding");
+    assert!(
+        res.contains("null") || res.contains("None"),
+        "all-null FLOAT[] column must read back as NULL, got: {res}"
+    );
+}

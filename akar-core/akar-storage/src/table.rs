@@ -3,6 +3,7 @@
 use crate::art_index::ArtPrimaryKeyIndex;
 use crate::art_key::ArtKey;
 use crate::column::Column;
+use crate::column_chunk::ColumnChunk;
 use crate::csr::CsrIndex;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
@@ -78,6 +79,26 @@ impl NodeTable {
             art_index: None,
             persistence_dirty: false,
         }
+    }
+
+    /// Widen the table schema with a new column (ALTER TABLE ADD). Every
+    /// existing row gets a NULL in the new column and all node groups are
+    /// widened so scans emit it (P53.37). The main DDL catalog is updated by
+    /// the caller; without this storage-side mirror the column silently
+    /// vanishes from scans and the export/projection paths drift.
+    pub fn add_column(&mut self, column: ColumnDefinition) {
+        if self.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
+            return;
+        }
+        self.columns.push(column);
+        for group in &mut self.node_groups {
+            let mut chunk = ColumnChunk::new();
+            for _ in 0..group.num_nodes {
+                chunk.append(Value::Null);
+            }
+            group.columns.push(chunk);
+        }
+        self.persistence_dirty = true;
     }
 
     /// Insert a row of values into the table.
@@ -774,16 +795,13 @@ impl NodeTable {
 
     /// Binary-search for the node group that contains `row`.
     fn find_group(&self, row: u64) -> usize {
-        match self.node_groups.binary_search_by_key(&row, |g| g.start_offset) {
-            Ok(i) => i,
-            Err(i) => {
-                if i == 0 {
-                    0
-                } else {
-                    i - 1
-                }
+        self.node_groups.binary_search_by_key(&row, |g| g.start_offset).unwrap_or_else(|i| {
+            if i == 0 {
+                0
+            } else {
+                i - 1
             }
-        }
+        })
     }
 }
 
@@ -901,6 +919,17 @@ impl RelTable {
             properties: vec![Vec::new(); num_cols],
             persistence_dirty: false,
         }
+    }
+
+    /// Widen the rel table schema with a new property column (ALTER TABLE ADD).
+    /// Existing edges get a NULL in the new property column (P53.37).
+    pub fn add_column(&mut self, column: ColumnDefinition) {
+        if self.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&column.name)) {
+            return;
+        }
+        self.columns.push(column);
+        self.properties.push(vec![Value::Null; self.edges.len()]);
+        self.persistence_dirty = true;
     }
 
     /// Insert a relationship (edge) between two nodes with property values.

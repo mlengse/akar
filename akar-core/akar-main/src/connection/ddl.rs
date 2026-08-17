@@ -432,6 +432,24 @@ impl Connection {
                                 },
                             )
                             .map_err(|e| format!("ALTER ADD: {e}"))?;
+                        // Mirror the schema change into the storage table so
+                        // scans emit the new column. Previously only the DDL
+                        // catalog was updated — ALTER-added columns silently
+                        // vanished from scan/projection output, and exports
+                        // referenced columns the scan could not produce
+                        // (P53.37 repair_schema).
+                        let storage = self.database.table_catalog();
+                        let col_def = akar_storage::table::ColumnDefinition {
+                            name: name.clone(),
+                            logical_type,
+                            is_primary_key: false,
+                            compression: akar_common::enums::CompressionType::Uncompressed,
+                        };
+                        if let Some(mut t) = storage.get_node_table_by_name_mut(&a.table_name) {
+                            t.add_column(col_def.clone());
+                        } else if let Some(mut t) = storage.get_rel_table_by_name_mut(&a.table_name) {
+                            t.add_column(col_def);
+                        }
                         Ok(Some(QueryResult::success_message(format!(
                             "Column '{}' added to table '{}'",
                             name, a.table_name
@@ -933,7 +951,7 @@ impl Connection {
                     let node_table = catalog.get_node_table(table_id);
                     if let Some(table) = node_table {
                         let row_count = table.num_rows;
-                        let mut columns = std::collections::HashMap::new();
+                        let mut columns = HashMap::new();
                         for col_idx in 0..table.columns.len() {
                             let mut null_count: u64 = 0;
                             let mut distinct_set = std::collections::HashSet::new();
@@ -972,7 +990,7 @@ impl Connection {
                         let rel_table = catalog.get_rel_table(table_id);
                         if let Some(table) = rel_table {
                             let row_count = table.num_rows;
-                            let mut columns = std::collections::HashMap::new();
+                            let mut columns = HashMap::new();
                             for col_idx in 0..table.columns.len() {
                                 let mut null_count: u64 = 0;
                                 let mut distinct_set = std::collections::HashSet::new();
@@ -1088,5 +1106,11 @@ pub fn write_parquet_to_file(path: &str, result: &QueryResult) -> Result<(), Str
         })
         .unwrap_or_default();
 
-    Ok(akar_storage::parquet_writer::write_parquet(path, &rows, &column_names)?)
+    let declared_types = result.chunks.first().map(|c| c.field_types.as_slice());
+    Ok(akar_storage::parquet_writer::write_parquet(
+        path,
+        &rows,
+        &column_names,
+        declared_types,
+    )?)
 }

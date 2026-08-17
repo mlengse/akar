@@ -590,7 +590,11 @@ fn cast_timestamp_to_micros(array: &dyn Array, row: usize, column_name: &str) ->
 
 // ─── Complex type helpers ───────────────────────────────────────────────────────
 
-/// Convert a List array entry to `Vec<Value>`.
+/// Convert a List array entry to `Vec<Value>`, preserving the element type
+/// (Float64 → `Value::Double`, Int64 → `Value::Int64`, ...) so FLOAT[]
+/// embeddings round-trip through parquet (P53.37). The previous String
+/// fallback turned every element into `Value::String`, which the FLOAT[]
+/// column could not coerce.
 fn array_list_to_values(array: &dyn Array, row: usize, column_name: &str) -> ParquetResult<Vec<Value>> {
     let list_arr = downcast::<ListArray>(array, column_name)?;
     let values = list_arr.value(row);
@@ -598,8 +602,24 @@ fn array_list_to_values(array: &dyn Array, row: usize, column_name: &str) -> Par
     for i in 0..values.len() {
         if values.is_null(i) {
             result.push(Value::Null);
+        } else if let Some(f) = values.as_any().downcast_ref::<Float64Array>() {
+            result.push(Value::Double(f.value(i)));
+        } else if let Some(f) = values.as_any().downcast_ref::<Float32Array>() {
+            result.push(Value::Float(f.value(i)));
+        } else if let Some(a) = values.as_any().downcast_ref::<Int64Array>() {
+            result.push(Value::Int64(a.value(i)));
+        } else if let Some(a) = values.as_any().downcast_ref::<Int32Array>() {
+            result.push(Value::Int32(a.value(i)));
+        } else if let Some(a) = values.as_any().downcast_ref::<Int16Array>() {
+            result.push(Value::Int16(a.value(i)));
+        } else if let Some(a) = values.as_any().downcast_ref::<Int8Array>() {
+            result.push(Value::Int8(a.value(i)));
+        } else if let Some(a) = values.as_any().downcast_ref::<BooleanArray>() {
+            result.push(Value::Bool(a.value(i)));
+        } else if let Some(s) = values.as_any().downcast_ref::<StringArray>() {
+            result.push(Value::String(s.value(i).to_string()));
         } else {
-            // Recursively convert each element as String (generic fallback)
+            // Unknown element type — generic string fallback.
             let s = array_to_string(&values, i, column_name)?;
             result.push(Value::String(s));
         }
