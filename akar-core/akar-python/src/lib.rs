@@ -392,7 +392,7 @@ impl QueryResult {
         self.row_idx < chunk.size
     }
 
-    fn get_next(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_next(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         if !self.has_next() {
             return Ok(py.None());
         }
@@ -420,7 +420,7 @@ impl QueryResult {
     }
 
     /// Ambil seluruh sisa baris sebagai `list` (dict bila `rows_as_dict(True)`).
-    fn get_all(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+    fn get_all(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let mut rows = Vec::new();
         while self.has_next() {
             rows.push(self.get_next(py)?);
@@ -429,7 +429,7 @@ impl QueryResult {
     }
 
     /// Sisa baris sebagai iterator Python (kuzu shim compat).
-    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyObject> {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<Py<PyAny>> {
         let py = slf.py();
         let mut rows = Vec::new();
         let mut idx = 0usize;
@@ -480,7 +480,7 @@ fn column_names(result: &akar_main::QueryResult) -> Vec<String> {
 }
 
 /// Konversi `Value` (Akar) → objek Python.
-fn value_to_py(py: Python<'_>, v: Option<Value>) -> PyResult<PyObject> {
+fn value_to_py(py: Python<'_>, v: Option<Value>) -> PyResult<Py<PyAny>> {
     let Some(v) = v else {
         return Ok(py.None());
     };
@@ -504,9 +504,9 @@ fn value_to_py(py: Python<'_>, v: Option<Value>) -> PyResult<PyObject> {
         Value::Date(d) => PyInt::new(py, d.0 as i64).unbind().into_any(),
         Value::Timestamp(t) => PyInt::new(py, t.0).unbind().into_any(),
         Value::TimestampTz(t) => PyInt::new(py, t.0).unbind().into_any(),
-        Value::TimestampNs(t)
-        | Value::TimestampMs(t)
-        | Value::TimestampSec(t) => PyInt::new(py, t.0).unbind().into_any(),
+        Value::TimestampNs(t) | Value::TimestampMs(t) | Value::TimestampSec(t) => {
+            PyInt::new(py, t.0).unbind().into_any()
+        }
         Value::Interval(_) => py.None(),
         Value::InternalID(id) => {
             let tuple = (id.table_id, id.offset);
@@ -541,7 +541,7 @@ fn value_to_py(py: Python<'_>, v: Option<Value>) -> PyResult<PyObject> {
 }
 
 /// Konversi `serde_json::Value` → objek Python (untuk `Value::Json`).
-fn serde_json_to_py(py: Python<'_>, j: &serde_json::Value) -> PyResult<PyObject> {
+fn serde_json_to_py(py: Python<'_>, j: &serde_json::Value) -> PyResult<Py<PyAny>> {
     let obj = match j {
         serde_json::Value::Null => py.None(),
         serde_json::Value::Bool(b) => PyBool::new(py, *b).unbind().into_any(),
@@ -574,7 +574,7 @@ fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if obj.is_none() {
         return Ok(Value::Null);
     }
-    if let Ok(b) = obj.downcast::<PyBytes>() {
+    if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(Value::Blob(b.as_bytes().to_vec()));
     }
     if let Ok(b) = obj.extract::<bool>() {
@@ -589,14 +589,14 @@ fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(s) = obj.extract::<String>() {
         return Ok(Value::String(s));
     }
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
         }
         return Ok(Value::List(items));
     }
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut fields = Vec::with_capacity(dict.len());
         for (k, v) in dict.iter() {
             let key: String = k.extract().map_err(|_| {
@@ -812,7 +812,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
     fn db_close_releases_lock_even_with_live_connection() {
         let path = fresh_db_path("p53_18_reopen");
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
             let _conn = Connection::new(&db).expect("create connection");
             db.borrow_mut().close(py);
@@ -835,17 +835,26 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
     fn two_databases_on_same_path_coexist_then_reopen() {
         let path = fresh_db_path("p53_35_reopen");
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // fixture store
-            let fixture = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let fixture =
+                Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
             // store milik test — open kedua pada path sama, harus sukses (P53.35)
-            let s = Bound::new(py, Database::new(path.to_str().unwrap()).expect("second open shares lock")).expect("wrap db");
+            let s = Bound::new(
+                py,
+                Database::new(path.to_str().unwrap()).expect("second open shares lock"),
+            )
+            .expect("wrap db");
             let _conn_s = Connection::new(&s).expect("connection on second db");
             s.borrow_mut().close(py);
             drop(s);
 
             // fixture masih hidup, path dibuka ulang — harus sukses (share)
-            let s2 = Bound::new(py, Database::new(path.to_str().unwrap()).expect("reopen while fixture alive")).expect("wrap db");
+            let s2 = Bound::new(
+                py,
+                Database::new(path.to_str().unwrap()).expect("reopen while fixture alive"),
+            )
+            .expect("wrap db");
             s2.borrow_mut().close(py);
             drop(s2);
 
@@ -866,7 +875,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
     fn connection_close_releases_lock_before_db_close() {
         let path = fresh_db_path("p53_18_conn_close");
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
             let conn = Connection::new(&db).expect("create connection");
             conn.borrow_mut(py).close();
@@ -888,7 +897,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
     fn closed_database_and_connection_reject_use() {
         let path = fresh_db_path("p53_18_reject");
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
             let conn = Connection::new(&db).expect("create connection");
             db.borrow_mut().close(py);

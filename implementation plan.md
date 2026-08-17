@@ -3,7 +3,7 @@
 > **Status:** Sprint 19/20. **Hanya berisi pekerjaan yang belum dikerjakan (PLANNED).**
 > Semua task yang sudah FIXED & COMMITTED dicover di [`CHANGELOG.md`](CHANGELOG.md) & [`SPEC.md`](SPEC.md) — tidak diduplikasi di sini.
 >
-> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,751 total / 0 ignored / 1,751 passed / 0 failed** (2026-08-17, s.d. P53.38 COMMITTED) — tidak boleh turun.
+> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,751 total / 0 ignored / 1,751 passed / 0 failed** (2026-08-17, s.d. P53.11 COMMITTED) — tidak boleh turun.
 >
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 
@@ -57,14 +57,11 @@
 > Fase 2 SET/MERGE/DELETE P53.29–P53.32) → detail + commit hash di `CHANGELOG.md` (gate **1,737**).
 > Fase 3 (P53.33–P53.35) + Fase 4 (P53.36–P53.36b) + P53.34b (data export, `d2174c8`) **COMMITTED** → `CHANGELOG.md`.
 > **P53.10 (drop-in verification) SELESAI** — harness 53/0 (3×, 0 flake); P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim) + P53.38 (reconcile) **COMMITTED** → `CHANGELOG.md`. Gate **1,751**.
+> **P53.11 (packaging & docs) COMMITTED** — README.md rewrite, maturin build/sdist terdokumentasi, fix compile pyo3 0.29.2 (`cargo test --lib` 25/25).
 > Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
-> Hanya pekerjaan yang **belum dikerjakan** tercantum di bawah.
+> Tidak ada task P53 PLANNED tersisa.
 
-| Task | Description | Files | Severity | Status |
-|------|-------------|-------|----------|--------|
-| P53.11 | **Packaging & docs** — `maturin build`/`sdist` release, update `akar-python/README.md`, catat batch + commit di `CHANGELOG.md` (format KAC), update `SPEC.md` (Python bindings — sudah di P53.38), & plan (hapus task selesai). | `akar-python/`, `CHANGELOG.md`, `SPEC.md` | **LOW (KISS)** | PLANNED |
-
-**Urutan kerja usulan (Sprint 20):** P53.11 packaging & docs → P54.1+P54.2 (louvain + spread activation).
+**Urutan kerja usulan (Sprint 20):** P54.1+P54.2 (louvain + spread activation) → P54.3 (kNN re-ranker) → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
 Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,751 tidak boleh turun).
 
 ---
@@ -94,7 +91,7 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,751
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — Python-side P53 (pycharm)** — Batch A+B (P53.1–P53.8) s.d. P53.32 COMMITTED; Fase 1–4 + P53.34b (`d2174c8`) + P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim) + **P53.38 (reconcile)** COMMITTED → detail di `CHANGELOG.md`, gate **1,751**, harness **53/0** (3×). **Berikutnya: P53.11** (packaging & docs).
+1. **Sprint 20 — Python-side P53 (pycharm)** — Batch A+B (P53.1–P53.8) s.d. P53.32 COMMITTED; Fase 1–4 + P53.34b (`d2174c8`) + P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim) + **P53.38 (reconcile)** COMMITTED → detail di `CHANGELOG.md`, gate **1,751**, harness **53/0** (3×). **P53.11 (packaging & docs) COMMITTED** — README.md rewrite + maturin build/sdist terdokumentasi. **Sprint 20 P53 selesai.**
 2. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2 (louvain naik-kelas, spread port) → P54.3 (kNN re-ranker) → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
 3. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 4. **Sprint 21** — topik jangka panjang (di bawah).
