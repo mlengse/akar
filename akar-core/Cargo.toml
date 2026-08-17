@@ -27,6 +27,7 @@ members = [
     "akar-azure",
     "akar-postgres",
     "akar-unity-catalog",
+    "akar-ml",
     "akar-main",
     "akar-cli", "akar-wasm", "akar-migrate", "akar-c",
     "akar-server",

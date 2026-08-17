@@ -3,7 +3,7 @@
 > **Status:** Sprint 19/20. **Hanya berisi pekerjaan yang belum dikerjakan (PLANNED).**
 > Semua task yang sudah FIXED & COMMITTED dicover di [`CHANGELOG.md`](CHANGELOG.md) & [`SPEC.md`](SPEC.md) — tidak diduplikasi di sini.
 >
-> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,769 total / 0 ignored / 1,769 passed / 0 failed** (2026-08-18, s.d. P54.3 COMMITTED `9a477cd`) — tidak boleh turun.
+> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,774 total / 0 ignored / 1,774 passed / 0 failed** (2026-08-18, s.d. P54.4 COMMITTED) — tidak boleh turun.
 >
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 
@@ -61,8 +61,8 @@
 > Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
 > Tidak ada task P53 PLANNED tersisa.
 
-**Urutan kerja usulan (Sprint 20):** ~~P54.1+P54.2 (louvain + spread activation)~~ **COMMITTED** `9a477cd` → ~~P54.3 (kNN re-ranker)~~ **COMMITTED** → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
-Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,769 tidak boleh turun).
+**Urutan kerja usulan (Sprint 20):** P54.5 (PyO3 expose) next — P54.1–P54.4 semua COMMITTED.
+Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774 tidak boleh turun).
 
 ---
 
@@ -79,16 +79,15 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,769
 
 | Task | Description | Files | Severity | Status |
 |------|-------------|-------|----------|--------|
-| P54.4 | **Port LSTM 1-layer (forward/train/save/load)** ke crate baru `akar-ml` (atau perluas `akar-llm`) — stand-alone (rand+serde). Keputusan desain: training model masuk engine DB vs library sisi-Python (PyO3). | `akar-core/akar-ml/` (baru), `kairos_core/src/lstm.rs:23-368` | **MEDIUM (butuh keputusan desain)** | PLANNED |
 | P54.5 | **Expose kNN/LSTM/spread/louvain sebagai module PyO3** di akar-python agar Kairos ganti ctypes `rust_bridge.py`/`cpp_bridge.py` → `import akar` (stateful/hot-loop paling cocok PyO3; graph analytics bisa CALL). Bergantung P54.1–P54.4. | `akar-python/src/` | **LOW-MEDIUM** | PLANNED |
 
-**Urutan kerja usulan (P54):** ~~P54.1 + P54.2 (graph)~~ **COMMITTED** → ~~P54.3 (vector)~~ **COMMITTED** → P54.4 (ml; tunggu keputusan desain) → P54.5 (pyo3; bergantung). Gate tiap batch: `test [akar-core]` tidak boleh turun. Urutan final menunggu persetujuan user.
+**Urutan kerja usulan (P54):** P54.5 (pyo3; bergantung P54.1–P54.4 semua COMMITTED). Gate tiap batch: `test [akar-core]` tidak boleh turun. Urutan final menunggu persetujuan user.
 
 ---
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2+P54.3 **COMMITTED** `9a477cd` (gate 1,769). P54.4 (LSTM; butuh keputusan desain) → P54.5 (PyO3 expose; bergantung).
+1. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2+P54.3 **COMMITTED** `9a477cd` (gate 1,769). P54.4 **COMMITTED** (gate 1,774). P54.5 (PyO3 expose) next.
 2. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 3. **Sprint 21** — topik jangka panjang (di bawah).
 
