@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **32** |
 | Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,737 total, 0 ignored, 1,737 passed, 0 failed** (gate `test [akar-core]` 2026-08-17, P53.36b ORDER BY +4; sebelumnya 1,733) |
+| Tests passing | **1,751 total, 0 ignored, 1,751 passed, 0 failed** (gate `test [akar-core]` 2026-08-17, s.d. P53.37c COMMITTED) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -320,6 +320,19 @@ Extensions are compiled statically via Cargo feature flags:
 akar-main = { git = "...", features = ["json-extension", "fts-extension", "vector-extension"] }
 ```
 
+### 7.2 Python Bindings (`akar-python`)
+
+| Component | Description |
+|-----------|-------------|
+| Location | `akar-core/akar-python/` (standalone workspace, not a member of `akar-core`) |
+| Binding layer | PyO3 0.29.2 + maturin |
+| Modules | `akar.Database`, `akar.Connection`, `akar.QueryResult` |
+| Compat shim | `kairos/kuzu.py` — `import kuzu`/`import ladybug` → `import akar` (sys.modules aliases) |
+| Harness | `test_kuzu_compat.py` — 53 tests, 0 failed (P53.37–P53.38) |
+| Cypher translation | Kuzu syntax → Akar SQL (DDL idempotent, DML, vector index, EXPORT/IMPORT) |
+| Features | Reentrant lock, close/reopen, UNION DISTINCT, MERGE rel, OPTIONAL MATCH, SET arithmetic, FLOAT read-back, EXPORT/IMPORT with options |
+| Tested against | Kairos `KuzuDBStore` + `KuzuDBDreamBackend` via shim |
+
 ---
 
 ## 8. Graph Data Science (GDS) Framework
@@ -508,7 +521,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,737** | **1,737 total, 0 ignored, 1,737 passed, 0 failed** (gate `test [akar-core]` 2026-08-17, P53.36b ORDER BY +4; sebelumnya 1,733) |
+| **Total** | **1,751** | **1,751 total, 0 ignored, 1,751 passed, 0 failed** (gate `test [akar-core]` 2026-08-17, s.d. P53.37c COMMITTED) |
 
 ### 11.2 Test Datasets
 

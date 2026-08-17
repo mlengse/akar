@@ -3,7 +3,7 @@
 > **Status:** Sprint 19/20. **Hanya berisi pekerjaan yang belum dikerjakan (PLANNED).**
 > Semua task yang sudah FIXED & COMMITTED dicover di [`CHANGELOG.md`](CHANGELOG.md) & [`SPEC.md`](SPEC.md) — tidak diduplikasi di sini.
 >
-> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,751 total / 0 ignored / 1,751 passed / 0 failed** (2026-08-17, s.d. P53.37c COMMITTED) — tidak boleh turun.
+> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,751 total / 0 ignored / 1,751 passed / 0 failed** (2026-08-17, s.d. P53.38 COMMITTED) — tidak boleh turun.
 >
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 
@@ -63,22 +63,21 @@
 > regression Rust setara harness A2 (`add_connections_batch`) & A3 (`batch_strengthen_connections`) green.
 > **P53.37c SUDAH COMMITTED** → `CHANGELOG.md` — `RETURN count(*)` setelah DELETE kini melaporkan
 > jumlah terhapus sebenarnya (audit D1: root cause = count-chunk 1-baris, bukan persistensi — scan MVCC
-> sudah memfilter baris soft-deleted). Gate **1,751**. **P53.37 (shim kairos) SUDAH COMMITTED** →
-> `CHANGELOG.md` — `kairos/kuzu.py` shim + `__init__.py` import; harness 53/0 (3×, 0 flake); smoke test
-> end-to-end all passed. Sisa: P53.38 (reconcile).
-> Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`; dokumen asal di `kairos/docs/plans/akar-dropin-p53.10-{findings,implementation-plan}.md`.
+> sudah memfilter baris soft-deleted). Gate **1,751**. **P53.37 (shim kairos) + P53.38 (reconcile) SUDAH COMMITTED** →
+> `CHANGELOG.md` — harness 53/0 (3×, 0 flake); smoke test end-to-end all passed; SPEC.md updated.
+> Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
 > Hanya pekerjaan yang **belum dikerjakan** tercantum di bawah.
 
 | Task | Description | Files | Severity | Status |
 |------|-------------|-------|----------|--------|
-| P53.10 | **Verifikasi drop-in end-to-end di Kairos** — patch `import kuzu` → `import akar` (modul `kairos/kuzu.py` shim atau langsung), jalankan alur Kairos nyata, fix gap yang muncul dari P53.9. **Blokir:** P53.25. **Breakdown 5 fase → P53.26–P53.38 di bawah.** | kairos (repo terpisah) | **MEDIUM (VAL)** | PLANNED |
-| P53.11 | **Packaging & docs** — `maturin build`/`sdist` release, update `akar-python/README.md`, catat batch + commit di `CHANGELOG.md` (format KAC), update `SPEC.md` (ekosistem ekstensi: +Python bindings) & plan (hapus task selesai). | `akar-python/`, `CHANGELOG.md`, `SPEC.md` | **LOW (KISS)** | PLANNED |
+| P53.10 | **Verifikasi drop-in end-to-end di Kairos** — patch `import kuzu` → `import akar` (modul `kairos/kuzu.py` shim atau langsung), jalankan alur Kairos nyata, fix gap yang muncul dari P53.9. **Blokir:** P53.25. **Breakdown 5 fase → P53.26–P53.38 selesai** → `CHANGELOG.md`. | kairos (repo terpisah) | **MEDIUM (VAL)** | DONE |
+| P53.11 | **Packaging & docs** — `maturin build`/`sdist` release, update `akar-python/README.md`, catat batch + commit di `CHANGELOG.md` (format KAC), update `SPEC.md` (Python bindings — sudah di P53.38), & plan (hapus task selesai). | `akar-python/`, `CHANGELOG.md`, `SPEC.md` | **LOW (KISS)** | PLANNED |
 
 ### P53.10 breakdown — fix engine (dari audit 2026-08-16)
 
 > Baseline harness `akar-core/akar-python/tests/test_kuzu_compat.py`: **4 failed / 49 passed** → target **0 failed**.
-> Fase 1–4 + P53.34b + **P53.37a+b+c** + **P53.37 (shim)** sudah selesai → `CHANGELOG.md` (harness 53/0, 3×).
-> Sisa: P53.38 (reconcile).
+> Fase 1–4 + P53.34b + **P53.37a+b+c** + **P53.37 (shim)** + **P53.38 (reconcile)** sudah selesai → `CHANGELOG.md` (harness 53/0, 3×).
+> Sisa: P53.11 (packaging & docs).
 > Tiap task = 1+ tes Rust baru; gate `test [akar-core]` 1,751 tidak boleh turun.
 > Detail root-cause + probe: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
 
@@ -90,15 +89,10 @@
 
 **Fase 4 — Wrapper polish**: SELESAI → `CHANGELOG.md` (harness 49/4).
 
-**Fase 5 — End-to-end drop-in (scope P53.10)** — P53.37a (A2 `add_connections_batch`) & P53.37b (A3 `batch_strengthen_connections`) **SUDAH COMMITTED** `70a7eb4`; P53.37c (`prune_connection_history` count) **SUDAH COMMITTED**; P53.34b (repair_schema data export) COMMITTED `d2174c8`; **P53.37 (shim kairos + smoke) SUDAH COMMITTED** → semua `CHANGELOG.md` (regression Rust setara harness green, harness 53/0 3×). Sisa: reconcile:
-
-| Task | Description | Files | Severity | Status |
-|------|-------------|-------|----------|--------|
-| P53.37 | **Shim `kairos/kuzu.py` + smoke alur Kairos nyata** — alias `import kuzu` → `import akar` (sys.modules); smoke: store memories + embeddings, search_semantic/search_bm25, satu siklus dream (strengthen/prune), close/reopen; weight exact 0.95, embedding round-trip. **Blokir:** engine gaps P53.37a–c sudah fix (`70a7eb4` + commit P53.37c) — tinggal re-run harness P53.9 (setelah `maturin develop`) untuk konfirmasi 0 failed. | kairos (`engine.py`, `kuzu.py` shim) | **MEDIUM (VAL)** | COMMITTED |
-| P53.38 | **Gate re-check + reconcile** — `test [akar-core]` tetap 1,751; harness P53.9 dijalankan 3× (cek flake order-dependent, khususnya close/reopen); update `CHANGELOG.md` (KAC) + `SPEC.md` + hapus task selesai dari plan. | `CHANGELOG.md`, `SPEC.md`, plan | **LOW (KISS)** | PLANNED |
+**Fase 5 — End-to-end drop-in (scope P53.10)** — SELESAI → `CHANGELOG.md` (harness 53/0, 3×, 0 flake; shim committed; reconcile done).
 
 **Urutan kerja usulan (Sprint 20):**
-1. **Berikutnya:** Fase 5 — P53.37 (shim kairos + smoke; butuh re-run harness P53.9 dulu untuk baseline 0 failed) → P53.38 (re-check + reconcile) → P53.11 packaging & docs.
+1. **Berikutnya:** P53.11 packaging & docs → P54.1+P54.2 (louvain + spread activation).
 2. Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,751 tidak boleh turun); setelah semua gap fix, jalankan ulang harness P53.9 → target 0 failed.
 
 ---
@@ -128,7 +122,7 @@
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — Python-side P53 (pycharm)** — Batch A+B (P53.1–P53.8) s.d. P53.32 COMMITTED; Fase 1–4 + P53.34b (`d2174c8`) + **P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim)** COMMITTED → detail di `CHANGELOG.md`, gate **1,751**, harness **53/0** (3×). **Berikutnya: P53.38** (re-check + reconcile) → P53.11 packaging & docs.
+1. **Sprint 20 — Python-side P53 (pycharm)** — Batch A+B (P53.1–P53.8) s.d. P53.32 COMMITTED; Fase 1–4 + P53.34b (`d2174c8`) + P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim) + **P53.38 (reconcile)** COMMITTED → detail di `CHANGELOG.md`, gate **1,751**, harness **53/0** (3×). **Berikutnya: P53.11** (packaging & docs).
 2. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2 (louvain naik-kelas, spread port) → P54.3 (kNN re-ranker) → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
 3. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 4. **Sprint 21** — topik jangka panjang (di bawah).
