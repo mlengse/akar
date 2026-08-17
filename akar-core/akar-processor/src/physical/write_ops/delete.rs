@@ -50,12 +50,17 @@ impl PhysicalOperatorExec for PhysicalDelete {
         }
 
         if rows_to_delete.is_empty() {
-            // No rows to delete - still return success
-            let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-            v.resize(1);
-            v.set_i64(0, 0);
-            let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-            return Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])]);
+            // No rows to delete — emit zero-row chunks so a following
+            // `RETURN count(*)` reports 0 (the old 1-row count chunk made it
+            // report 1 regardless; CREATE/SET already follow the per-row
+            // convention, P53.25/P53.30).
+            let mut out = Vec::with_capacity(input.len());
+            for mut chunk in input {
+                chunk.resize(0);
+                chunk.sel_vector = None;
+                out.push(chunk);
+            }
+            return Ok(out);
         }
 
         // Delete rows from the table
@@ -112,9 +117,16 @@ impl PhysicalOperatorExec for PhysicalDelete {
 
         tracing::info!("DELETE: removed {deleted} rows from '{}'", self.table_name);
 
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-        v.resize(1);
-        v.set_i64(0, deleted as i64);
+        // Emit one row per deleted row so a following `RETURN count(*)` reports
+        // the actual deleted count (P53.37c). Column 0 carries the deleted count
+        // in every row, preserving the count-chunk contract for consumers that
+        // read `get_i64(0, 0)`. An all-failed delete emits zero rows.
+        let n = deleted as usize;
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, n);
+        v.resize(n);
+        for i in 0..n {
+            v.set_i64(i, deleted as i64);
+        }
         let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
         Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
     }
