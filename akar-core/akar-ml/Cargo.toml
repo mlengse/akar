@@ -1,0 +1,19 @@
+[package]
+name = "akar-ml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Local ML inference and training for Akar (LSTM)"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+rand = "0.8"
+
+[dev-dependencies]
+ tempfile = "3"
+
+[lints]
+workspace = true
