@@ -28,6 +28,7 @@ pub fn map_and_execute_join(
 
             let join = PhysicalHashJoin::new(build_cols, probe_cols);
             let result = join.execute_binary(&build_chunks, &probe_chunks)?;
+
             Ok(strip_join_synthetic_columns(
                 result,
                 build_orig,
@@ -114,10 +115,13 @@ pub fn map_and_execute_join(
         LogicalOperator::CrossProduct(cp) => {
             let left_ops = flatten_union_child(&cp.left);
             let right_ops = flatten_union_child(&cp.right);
-            let build_chunks = ctx.execute_children(&left_ops)?;
-            let probe_chunks = ctx.execute_children(&right_ops)?;
+
+            let left_chunks = ctx.execute_children(&left_ops)?;
+            let right_chunks = ctx.execute_children(&right_ops)?;
+
             let cross = PhysicalCrossProduct;
-            let result = cross.execute_binary(&build_chunks, &probe_chunks)?;
+            let result = cross.execute_binary(&left_chunks, &right_chunks)?;
+
             Ok(result)
         }
         LogicalOperator::OptionalMatch(om) => {

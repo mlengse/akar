@@ -38,6 +38,12 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         LogicalOperator::CountRelTable(_crt) => {
             scans.push((1, op.clone())); // CSR COUNT = O(1), single row
         }
+        // UNWIND is a row source like a scan: its variable must survive join
+        // reordering, otherwise the reorder pass drops the UNWIND operator and
+        // the pipeline loses the row binding (P53.37a).
+        LogicalOperator::Unwind(u) => {
+            scans.push((u.cardinality, op.clone()));
+        }
         // Non-leaf operators: recurse into children
         LogicalOperator::Filter(f) => {
             for child in &f.children {
@@ -122,7 +128,6 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         | LogicalOperator::Delete(_)
         | LogicalOperator::Set(_)
         | LogicalOperator::OptionalMatch(_)
-        | LogicalOperator::Unwind(_)
         | LogicalOperator::Foreach(_)
         | LogicalOperator::Merge(_)
         | LogicalOperator::MergeRel(_)
@@ -250,6 +255,9 @@ fn get_scan_alias(op: &LogicalOperator) -> Option<String> {
         LogicalOperator::ScanNode(s) => s.alias.clone().or_else(|| Some(s.table_name.clone())),
         LogicalOperator::ScanRel(s) => Some(s.table_name.clone()),
         LogicalOperator::TableFunctionCall(tf) => Some(tf.function_name.clone()),
+        // UNWIND binds its variable as an alias so join conditions like
+        // `a.id = row.src` resolve against the UNWIND source (P53.37a).
+        LogicalOperator::Unwind(u) => Some(u.variable.clone()),
         _ => None,
     }
 }
@@ -740,6 +748,94 @@ mod tests {
             fts_query: None,
         });
         assert_eq!(get_scan_alias(&scan), Some("p".into()));
+    }
+
+    /// P53.37a: UNWIND must be a first-class row source in join reordering —
+    /// `get_scan_alias` exposes its variable so join keys like `a.id = row.src`
+    /// resolve against it.
+    #[test]
+    fn test_get_scan_alias_unwind() {
+        let unwind = LogicalOperator::Unwind(LogicalUnwind {
+            expression: akar_parser::ast::Expression::List(vec![]),
+            variable: "row".into(),
+            cardinality: 0,
+        });
+        assert_eq!(get_scan_alias(&unwind), Some("row".into()));
+    }
+
+    /// P53.37a: the join-reorder segment must NOT drop the UNWIND source.
+    ///
+    /// Regression for the kairos `add_connections_batch` shape:
+    /// `UNWIND $batch AS row MATCH (a:Memory {id: row.src}), (b:Memory {id: row.tgt})`
+    /// plans to `HashJoin(b.id=row.tgt, build=HashJoin(a.id=row.src, build=Unwind,
+    /// probe=Scan(a)), probe=Scan(b))`. `collect_scans_recursive` had no Unwind
+    /// arm, so the segment rebuild produced a CrossProduct of the two node scans
+    /// and silently discarded the UNWIND binding.
+    #[test]
+    fn test_reorder_segment_keeps_unwind_source() {
+        let unwind = LogicalOperator::Unwind(LogicalUnwind {
+            expression: akar_parser::ast::Expression::List(vec![]),
+            variable: "row".into(),
+            cardinality: 0,
+        });
+        let scan = |alias: &str| {
+            LogicalOperator::ScanNode(LogicalScanNode {
+                predicate: None,
+                table_name: "Memory".into(),
+                table_id: 0,
+                alias: Some(alias.into()),
+                columns: vec![],
+                cardinality: 0,
+                fts_query: None,
+            })
+        };
+        let key = |var: &str, prop: &str| {
+            akar_parser::ast::Expression::BinaryOp(
+                akar_parser::ast::BinaryOp::Equal,
+                Box::new(akar_parser::ast::Expression::PropertyAccess(
+                    Box::new(akar_parser::ast::Expression::Variable(var.into())),
+                    "id".into(),
+                )),
+                Box::new(akar_parser::ast::Expression::PropertyAccess(
+                    Box::new(akar_parser::ast::Expression::Variable("row".into())),
+                    prop.into(),
+                )),
+            )
+        };
+        let wrap = |ops: Vec<LogicalOperator>| {
+            LogicalOperator::Projection(akar_planner::logical_operator::LogicalProjection {
+                expressions: vec![],
+                children: ops,
+                cardinality: 0,
+            })
+        };
+        let inner = LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![key("a", "src")],
+            build_side: Box::new(wrap(vec![unwind.clone()])),
+            probe_side: Box::new(wrap(vec![scan("a")])),
+            cardinality: 0,
+            push_down_eligible: false,
+        });
+        let outer = LogicalOperator::HashJoin(LogicalHashJoin {
+            join_keys: vec![key("b", "tgt")],
+            build_side: Box::new(wrap(vec![inner])),
+            probe_side: Box::new(wrap(vec![scan("b")])),
+            cardinality: 0,
+            push_down_eligible: false,
+        });
+
+        let reordered = reorder_joins_dp_bushy(&[outer]).expect("join segment must reorder");
+        assert_eq!(reordered.len(), 1, "segment collapses to one join tree");
+
+        let mut scans = Vec::new();
+        collect_scans_recursive(&reordered[0], &mut scans);
+        let aliases: Vec<String> = scans.iter().filter_map(|(_, op)| get_scan_alias(op)).collect();
+        assert!(
+            aliases.contains(&"row".to_string()),
+            "UNWIND source must survive join reordering, got aliases: {aliases:?}"
+        );
+        assert!(aliases.contains(&"a".to_string()));
+        assert!(aliases.contains(&"b".to_string()));
     }
 
     #[test]

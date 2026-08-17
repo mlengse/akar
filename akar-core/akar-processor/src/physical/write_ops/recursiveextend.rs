@@ -751,19 +751,37 @@ impl PhysicalExtend {
                 out_dst_ids.push(Value::Int64(dst_offset as i64));
             }
 
-            // Convert column-major data to ValueVectors
-            let mut fields = Vec::with_capacity(num_out_cols);
+            // Convert column-major data to Arrow arrays. Columns whose values are
+            // complex (map/struct/list, e.g. an UNWIND row variable) must go through
+            // `build_arrow_from_values` — `store_value_in_vector` silently drops
+            // them to NULL and the pipeline loses the binding (P53.37a).
+            let mut fields: Vec<arrow::array::ArrayRef> = Vec::with_capacity(num_out_cols);
+            let mut field_type_ids: Vec<PhysicalTypeID> = Vec::with_capacity(num_out_cols);
             let mut field_names = Vec::with_capacity(num_out_cols);
 
             // Input field names (already prefixed)
             for col in 0..num_input_fields {
                 let phys_type = chunk.field_types[col];
-                let mut v = ValueVector::new(phys_type, total_rows);
-                v.resize(total_rows);
-                for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[col][row])?;
+                let is_complex = matches!(
+                    phys_type,
+                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                );
+                if is_complex {
+                    fields.push(
+                        crate::expression_evaluator::build_arrow_from_values(&out_data[col], phys_type, total_rows)
+                            .map_err(|e| e.to_string())?
+                            .array,
+                    );
+                    field_type_ids.push(phys_type);
+                } else {
+                    let mut v = ValueVector::new(phys_type, total_rows);
+                    v.resize(total_rows);
+                    for row in 0..total_rows {
+                        store_value_in_vector(&mut v, row, &out_data[col][row])?;
+                    }
+                    fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                    field_type_ids.push(v.physical_type());
                 }
-                fields.push(v);
                 if col < chunk.field_names.len() {
                     field_names.push(chunk.field_names[col].clone());
                 } else {
@@ -783,7 +801,8 @@ impl PhysicalExtend {
                 for row in 0..total_rows {
                     store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
                 }
-                fields.push(v);
+                fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                field_type_ids.push(v.physical_type());
                 let rel_prefix = if self.rel_var.is_empty() {
                     &self.rel_table_name
                 } else {
@@ -800,12 +819,30 @@ impl PhysicalExtend {
                 } else {
                     PhysicalTypeID::Int64
                 };
-                let mut v = ValueVector::new(phys_type, total_rows);
-                v.resize(total_rows);
-                for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row])?;
+                let is_complex = matches!(
+                    phys_type,
+                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                );
+                if is_complex {
+                    fields.push(
+                        crate::expression_evaluator::build_arrow_from_values(
+                            &out_data[num_input_fields + num_rel_cols + col],
+                            phys_type,
+                            total_rows,
+                        )
+                        .map_err(|e| e.to_string())?
+                        .array,
+                    );
+                    field_type_ids.push(phys_type);
+                } else {
+                    let mut v = ValueVector::new(phys_type, total_rows);
+                    v.resize(total_rows);
+                    for row in 0..total_rows {
+                        store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row])?;
+                    }
+                    fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                    field_type_ids.push(v.physical_type());
                 }
-                fields.push(v);
                 let prefix = &self.dst_node_var;
                 let col_name = dest_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
                 field_names.push(format!("{}.{}", prefix, col_name));
@@ -818,17 +855,13 @@ impl PhysicalExtend {
             for row in 0..total_rows {
                 store_value_in_vector(&mut id_v, row, &out_dst_ids[row])?;
             }
-            fields.push(id_v);
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&id_v).array);
+            field_type_ids.push(PhysicalTypeID::Int64);
             field_names.push(format!("{}.{}", self.dst_node_var, "_id"));
 
-            let arrow_fields = fields
-                .iter()
-                .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-                .collect::<Vec<_>>();
-            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
             output.push(DataChunk {
-                fields: arrow_fields,
-                field_types: arrow_field_types,
+                fields,
+                field_types: field_type_ids,
                 size: total_rows,
                 field_names,
                 sel_vector: None,

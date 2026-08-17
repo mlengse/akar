@@ -221,6 +221,16 @@ pub(crate) fn append_pipeline_columns(
             if snapshot.field_names.iter().any(|existing| existing == name) {
                 continue;
             }
+            // Qualified copies (r.weight) whose base matches a plain snapshot
+            // column (weight) are pre-write stale reads from the pipeline; the
+            // evaluator's bare-name fallback resolves to the fresh table column
+            // instead, so a following `RETURN r.weight` sees the written value
+            // (P53.37a).
+            if let Some((_, base)) = name.rsplit_once('.') {
+                if snapshot.field_names.iter().any(|existing| existing == base) {
+                    continue;
+                }
+            }
             appended.push((col_idx, name.clone()));
         }
         if appended.is_empty() {

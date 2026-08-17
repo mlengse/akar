@@ -177,6 +177,19 @@ fn resolve_projection_column_expand(expr: &Expression, chunk: &DataChunk) -> Opt
     }
 }
 
+/// True when a property access's base is a chunk column (a map/struct value,
+/// e.g. an UNWIND row variable `e`), so `e.src` must be extracted per row
+/// instead of resolving to a qualified column (P53.26/P53.37a).
+fn property_base_is_chunk_column(expr: &Expression, chunk: &DataChunk) -> bool {
+    if let Expression::PropertyAccess(base, _) = expr
+        && let Expression::Variable(var) = &**base
+        && !chunk.field_names.is_empty()
+    {
+        return chunk.field_names.iter().any(|n| n == var);
+    }
+    false
+}
+
 pub fn map_and_execute_projection(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
@@ -193,10 +206,26 @@ pub fn map_and_execute_projection(
             let result = if p.expressions.is_empty() {
                 input
             } else {
+                // Expressions that cannot map to a plain column — computed exprs
+                // (function calls, arithmetic) OR property accesses on a map/
+                // UNWIND variable (`e.src`: base `e` is a chunk column but no
+                // qualified `e.src` column exists) — must go through the per-row
+                // evaluator (P53.37a). Other unresolvable accesses keep the
+                // positional fallback so plans whose scan/optional-merge dropped
+                // columns (masked pre-existing gaps) keep their old behavior.
                 let needs_eval = p
                     .expressions
                     .iter()
-                    .any(|be| projection_needs_expression_eval(&be.expression));
+                    .any(|be| projection_needs_expression_eval(&be.expression))
+                    || input.first().is_some_and(|chunk| {
+                        p.expressions.iter().any(|be| {
+                            matches!(
+                                &be.expression,
+                                Expression::PropertyAccess(_, _) | Expression::Variable(_)
+                            ) && resolve_projection_column_expand(&be.expression, chunk).is_none()
+                                && property_base_is_chunk_column(&be.expression, chunk)
+                        })
+                    });
 
                 if needs_eval {
                     let registry = ctx
