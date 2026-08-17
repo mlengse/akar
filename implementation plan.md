@@ -3,7 +3,7 @@
 > **Status:** Sprint 19/20. **Hanya berisi pekerjaan yang belum dikerjakan (PLANNED).**
 > Semua task yang sudah FIXED & COMMITTED dicover di [`CHANGELOG.md`](CHANGELOG.md) & [`SPEC.md`](SPEC.md) — tidak diduplikasi di sini.
 >
-> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,751 total / 0 ignored / 1,751 passed / 0 failed** (2026-08-17, s.d. P53.11 COMMITTED) — tidak boleh turun.
+> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,769 total / 0 ignored / 1,769 passed / 0 failed** (2026-08-18, s.d. P54.3 COMMITTED `9a477cd`) — tidak boleh turun.
 >
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 
@@ -61,8 +61,8 @@
 > Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
 > Tidak ada task P53 PLANNED tersisa.
 
-**Urutan kerja usulan (Sprint 20):** P54.1+P54.2 (louvain + spread activation) → P54.3 (kNN re-ranker) → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
-Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,751 tidak boleh turun).
+**Urutan kerja usulan (Sprint 20):** ~~P54.1+P54.2 (louvain + spread activation)~~ **COMMITTED** `9a477cd` → ~~P54.3 (kNN re-ranker)~~ **COMMITTED** → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
+Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,769 tidak boleh turun).
 
 ---
 
@@ -79,22 +79,18 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,751
 
 | Task | Description | Files | Severity | Status |
 |------|-------------|-------|----------|--------|
-| P54.1 | **Naik-kelas `compute_louvain` akar-algo** — dukung edge **weighted** + `seed` + `min_gain`/`max_iterations` + output **modularity** (kairos_core `louvain.rs` lebih kaya dari versi akar). Setelah ini `CALL louvain()` bisa output modularity & node id asli; kairos buang `louvain.rs`-nya. Catatan: CSRAdjacency tak simpan edge weight → weight array/fn (pola `weight_fn` `akar-algo/src/lib.rs:1500-1551`). | `akar-algo/src/lib.rs:1241-1344`, `kairos_core/src/louvain.rs:6-129` | **MEDIUM** | PLANNED |
-| P54.2 | **Port spreading activation (single + batch)** ke akar-algo di atas `CSRAdjacency` + weight_fn — propagasi `act*weight*decay`, pruning `threshold`, top-k per seed; build adjacency sekali utk batch; expose `CALL spread_activation(...)`. Port dari kairos_core `spread.rs`; CSR ≪ HashMap adjacency utk graf besar. | `akar-algo/src/lib.rs` (baru), `kairos_core/src/spread.rs:18-187` | **MEDIUM** | PLANNED |
-| P54.3 | **Modul kNN multi-signal re-ranker** di akar-vector — `combined = w_e*(cos+1)/2 + w_t*exp(-age*0.01) + w_f*ln(freq+1)/ln(1000) + w_g*graph`, default (0.6/0.15/0.1/0.15), top-k; memakai `akar_vector::cosine_similarity` yang sudah ada. Opsi SQL: dekomposisi `w_e*array_cosine_similarity(...) + ...` (butuh fn temporal/freq). | `akar-vector/src/` (baru), `kairos_core/src/knn.rs:61-179` | **MEDIUM** | PLANNED |
 | P54.4 | **Port LSTM 1-layer (forward/train/save/load)** ke crate baru `akar-ml` (atau perluas `akar-llm`) — stand-alone (rand+serde). Keputusan desain: training model masuk engine DB vs library sisi-Python (PyO3). | `akar-core/akar-ml/` (baru), `kairos_core/src/lstm.rs:23-368` | **MEDIUM (butuh keputusan desain)** | PLANNED |
 | P54.5 | **Expose kNN/LSTM/spread/louvain sebagai module PyO3** di akar-python agar Kairos ganti ctypes `rust_bridge.py`/`cpp_bridge.py` → `import akar` (stateful/hot-loop paling cocok PyO3; graph analytics bisa CALL). Bergantung P54.1–P54.4. | `akar-python/src/` | **LOW-MEDIUM** | PLANNED |
 
-**Urutan kerja usulan (P54):** P54.1 + P54.2 (graph, independen) → P54.3 (vector) → P54.4 (ml; tunggu keputusan desain) → P54.5 (pyo3; bergantung). Gate tiap batch: `test [akar-core]` tidak boleh turun. Urutan final menunggu persetujuan user.
+**Urutan kerja usulan (P54):** ~~P54.1 + P54.2 (graph)~~ **COMMITTED** → ~~P54.3 (vector)~~ **COMMITTED** → P54.4 (ml; tunggu keputusan desain) → P54.5 (pyo3; bergantung). Gate tiap batch: `test [akar-core]` tidak boleh turun. Urutan final menunggu persetujuan user.
 
 ---
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — Python-side P53 (pycharm)** — Batch A+B (P53.1–P53.8) s.d. P53.32 COMMITTED; Fase 1–4 + P53.34b (`d2174c8`) + P53.37a+b (`70a7eb4`) + P53.37c + P53.37 (shim) + **P53.38 (reconcile)** COMMITTED → detail di `CHANGELOG.md`, gate **1,751**, harness **53/0** (3×). **P53.11 (packaging & docs) COMMITTED** — README.md rewrite + maturin build/sdist terdokumentasi. **Sprint 20 P53 selesai.**
-2. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2 (louvain naik-kelas, spread port) → P54.3 (kNN re-ranker) → P54.4 (LSTM/akar-ml) → P54.5 (PyO3 expose).
-3. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
-4. **Sprint 21** — topik jangka panjang (di bawah).
+1. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2+P54.3 **COMMITTED** `9a477cd` (gate 1,769). P54.4 (LSTM; butuh keputusan desain) → P54.5 (PyO3 expose; bergantung).
+2. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
+3. **Sprint 21** — topik jangka panjang (di bawah).
 
 ### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 21+ (2026)
 
