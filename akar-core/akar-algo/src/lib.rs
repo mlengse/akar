@@ -11,6 +11,7 @@
 //! - Shortest Path (BFS-based, alias SP)
 //! - Weighted Shortest Path (Dijkstra-based)
 //! - All Shortest Path Destinations
+//! - Spreading Activation
 //!
 //! All algorithms operate on the CSR adjacency built from existing
 //! node/rel tables in the database, using the GDS framework.
@@ -438,16 +439,46 @@ impl Extension for AlgoExtension {
         );
 
         // ── louvain ───────────────────────────────────────────────────────────
-        // CALL louvain() → (node_id INT64, community_id DOUBLE)
+        // CALL louvain(seed?, min_gain?, max_iterations?) → (node_id INT64, community_id DOUBLE, modularity DOUBLE)
         let louvain_fn = Arc::new({
-            move |_args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                use akar_common::types::{PhysicalTypeID, Value};
+                use akar_common::vector::ValueVector;
+
+                let seed = match args.first() {
+                    Some(Value::Int64(s)) => Some(*s as u64),
+                    _ => None,
+                };
+                let min_gain = match args.get(1) {
+                    Some(Value::Double(d)) => *d,
+                    _ => 0.001,
+                };
+                let max_iterations = match args.get(2) {
+                    Some(Value::Int64(i)) => *i as usize,
+                    _ => 20,
+                };
+
                 let (csr, _num_nodes) = csr_from_graph(graph);
-                let result = compute_louvain(&csr);
-                let (fields, field_types, field_names, size) = pack_node_scores(result, "community_id")?;
-                output.fields = fields;
-                output.field_types = field_types;
-                output.field_names = field_names;
-                output.size = size;
+                let result = compute_louvain_weighted(&csr, |_u, _v| 1.0, seed, min_gain, max_iterations);
+                let modularity = result.metadata.as_ref().and_then(|m| m.get("modularity")).copied().unwrap_or(0.0);
+
+                let n = result.values.len();
+                let mut id_vec = ValueVector::new(PhysicalTypeID::Int64, n);
+                let mut comm_vec = ValueVector::new(PhysicalTypeID::Double, n);
+                let mut mod_vec = ValueVector::new(PhysicalTypeID::Double, n);
+                for (i, &v) in result.values.iter().enumerate() {
+                    id_vec.set_value(i, &Value::Int64(i as i64))?;
+                    comm_vec.set_value(i, &Value::Double(v))?;
+                    mod_vec.set_value(i, &Value::Double(modularity))?;
+                }
+                output.fields = vec![
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&comm_vec).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&mod_vec).array,
+                ];
+                output.field_types = vec![PhysicalTypeID::Int64, PhysicalTypeID::Double, PhysicalTypeID::Double];
+                output.field_names = vec!["node_id".into(), "community_id".into(), "modularity".into()];
+                output.size = n;
                 Ok(())
             }
         });
@@ -456,6 +487,81 @@ impl Extension for AlgoExtension {
             TableFunction::CustomTableWithGraph {
                 name: "louvain".into(),
                 execute: louvain_fn,
+            },
+        );
+
+        // ── spread_activation ─────────────────────────────────────────────────
+        // CALL spread_activation(seed_ids, decay?, threshold?, max_hops?)
+        //   → (node_id INT64, activation DOUBLE, hop INT64)
+        let spread_fn = Arc::new({
+            move |args: &[Value], graph: Option<&dyn GraphDataSource>, output: &mut DataChunk| -> Result<(), String> {
+                use akar_common::types::{PhysicalTypeID, Value};
+                use akar_common::vector::ValueVector;
+
+                // Parse seed_ids (required): comma-separated list of INT64 node IDs
+                let seed_ids: Vec<i64> = match args.first() {
+                    Some(Value::String(s)) => {
+                        s.split(',')
+                            .map(|t| t.trim().parse::<i64>().map_err(|e| format!("invalid seed id: {e}")))
+                            .collect::<Result<Vec<_>, _>>()?
+                    }
+                    _ => return Err("spread_activation requires seed_ids as comma-separated INT64 list".into()),
+                };
+
+                let decay = match args.get(1) {
+                    Some(Value::Double(d)) => *d,
+                    _ => 0.5,
+                };
+                let threshold = match args.get(2) {
+                    Some(Value::Double(d)) => *d,
+                    _ => 0.01,
+                };
+                let max_hops = match args.get(3) {
+                    Some(Value::Int64(i)) => *i as usize,
+                    _ => 3,
+                };
+
+                let (csr, _num_nodes) = csr_from_graph(graph);
+                let seeds: Vec<(usize, f64)> = seed_ids
+                    .iter()
+                    .map(|&id| (id as usize, 1.0))
+                    .filter(|&(pos, _)| pos < csr.num_nodes())
+                    .collect();
+
+                let result = compute_spread_activation(
+                    &csr,
+                    &seeds,
+                    |_u, _v| 1.0,
+                    decay,
+                    threshold,
+                    max_hops,
+                );
+
+                let size = result.activated.len();
+                let mut id_vec = ValueVector::new(PhysicalTypeID::Int64, size);
+                let mut act_vec = ValueVector::new(PhysicalTypeID::Double, size);
+                let mut hop_vec = ValueVector::new(PhysicalTypeID::Int64, size);
+                for (i, &(pos, act, hop)) in result.activated.iter().enumerate() {
+                    id_vec.set_value(i, &Value::Int64(pos as i64))?;
+                    act_vec.set_value(i, &Value::Double(act))?;
+                    hop_vec.set_value(i, &Value::Int64(hop as i64))?;
+                }
+                output.fields = vec![
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&id_vec).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&act_vec).array,
+                    akar_common::arrow_vector::ArrowVector::from_legacy(&hop_vec).array,
+                ];
+                output.field_types = vec![PhysicalTypeID::Int64, PhysicalTypeID::Double, PhysicalTypeID::Int64];
+                output.field_names = vec!["node_id".into(), "activation".into(), "hop".into()];
+                output.size = size;
+                Ok(())
+            }
+        });
+        context.register_table_function(
+            "spread_activation",
+            TableFunction::CustomTableWithGraph {
+                name: "spread_activation".into(),
+                execute: spread_fn,
             },
         );
 
@@ -777,9 +883,12 @@ impl Extension for AlgoExtension {
 // In a real execution, the graph is built from storage first.
 
 /// Result of a graph algorithm.
+#[derive(Default)]
 pub struct AlgoResult {
     pub name: String,
     pub values: Vec<f64>,
+    /// Optional metadata (e.g. modularity for Louvain).
+    pub metadata: Option<std::collections::HashMap<String, f64>>,
 }
 
 // --------------- PageRank (wraps Akar-graph implementation) ---------------
@@ -790,6 +899,7 @@ pub fn compute_page_rank(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "page_rank".into(),
         values: result.values,
+        metadata: None,
     }
 }
 
@@ -801,6 +911,7 @@ pub fn compute_wcc(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "wcc".into(),
         values: result.values,
+        metadata: None,
     }
 }
 
@@ -876,6 +987,7 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "scc_tarjan".into(),
         values: component.iter().map(|&c| c as f64).collect(),
+        metadata: None,
     }
 }
 
@@ -951,6 +1063,7 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "scc_kosaraju".into(),
         values: component.iter().map(|&c| c as f64).collect(),
+        metadata: None,
     }
 }
 
@@ -1021,6 +1134,7 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "k_core".into(),
         values: core.iter().map(|&c| c as f64).collect(),
+        metadata: None,
     }
 }
 
@@ -1075,6 +1189,7 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
     AlgoResult {
         name: "lpa".into(),
         values: labels.iter().map(|&c| c as f64).collect(),
+        metadata: None,
     }
 }
 
@@ -1135,6 +1250,7 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "betweenness_centrality".into(),
         values: cb,
+        metadata: None,
     }
 }
 
@@ -1150,6 +1266,7 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
         return AlgoResult {
             name: "closeness_centrality".into(),
             values: vec![0.0; n],
+            metadata: None,
         };
     }
 
@@ -1176,6 +1293,7 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "closeness_centrality".into(),
         values,
+        metadata: None,
     }
 }
 
@@ -1236,87 +1354,138 @@ pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "triangle_count".into(),
         values,
+        metadata: None,
     }
 }
 
 // --------------- Louvain Community Detection ---------------
 
-/// Compute community structure using the Louvain heuristic.
-/// Simple implementation: modularity-based greedy optimization.
-pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
+/// Weighted Louvain community detection with configurable parameters.
+///
+/// - `weight_fn`: closure returning edge weight for (src_pos, dst_pos)
+/// - `seed`: optional RNG seed for deterministic node visit order
+/// - `min_gain`: minimum modularity gain to accept a move (default 0.001)
+/// - `max_iterations`: maximum passes (default 20)
+///
+/// Returns `AlgoResult` with community IDs in `values` and modularity Q in `metadata`.
+pub fn compute_louvain_weighted<F>(
+    csr: &CSRAdjacency,
+    weight_fn: F,
+    seed: Option<u64>,
+    min_gain: f64,
+    max_iterations: usize,
+) -> AlgoResult
+where
+    F: Fn(usize, usize) -> f64,
+{
     let n = csr.num_nodes();
     if n == 0 {
         return AlgoResult {
             name: "louvain".into(),
             values: vec![],
+            metadata: None,
         };
     }
 
-    // Total edge weight (count)
+    // Weighted total edge weight (each edge counted twice in undirected CSR)
     let mut m: f64 = 0.0;
     for v in 0..n {
-        m += csr.neighbors(v).len() as f64;
+        for (_rel, dst) in csr.neighbors(v) {
+            let w = dst.offset as usize;
+            if w < n {
+                m += weight_fn(v, w);
+            }
+        }
     }
-    m /= 2.0; // undirected: each edge counted twice
+    m /= 2.0;
 
     if m == 0.0 {
         return AlgoResult {
             name: "louvain".into(),
             values: (0..n).map(|_| 0.0).collect(),
+            metadata: None,
         };
     }
 
-    // Initialize each node to its own community
+    // Weighted degree per node
+    let degree: Vec<f64> = (0..n)
+        .map(|v| {
+            csr.neighbors(v)
+                .iter()
+                .map(|(_rel, dst)| {
+                    let w = dst.offset as usize;
+                    if w < n { weight_fn(v, w) } else { 0.0 }
+                })
+                .sum()
+        })
+        .collect();
+
+    // Internal edge weight per community (initially 0 — each node in its own community)
+    let mut sigma_in: Vec<f64> = vec![0.0; n];
+    // Community total degree
+    let mut sigma_tot: Vec<f64> = degree.clone();
+    // Node community assignment
     let mut community: Vec<usize> = (0..n).collect();
-    // Degree of each node
-    let degree: Vec<f64> = (0..n).map(|i| csr.neighbors(i).len() as f64).collect();
-    // Community total degree, maintained incrementally on moves (P52.48 —
-    // the old code resummed degrees over the whole community per candidate).
-    let mut comm_totals: Vec<f64> = degree.clone();
 
     let mut improved = true;
-    let max_passes = 20;
     let mut pass = 0;
 
-    while improved && pass < max_passes {
+    // Simple LCG for deterministic shuffling (matches codebase convention)
+    struct SimpleRng { state: u64 }
+    impl SimpleRng {
+        fn new(seed: u64) -> Self { Self { state: seed } }
+        fn next_u64(&mut self) -> u64 {
+            self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            self.state
+        }
+        fn shuffle(&mut self, slice: &mut [usize]) {
+            for i in (1..slice.len()).rev() {
+                let j = self.next_u64() as usize % (i + 1);
+                slice.swap(i, j);
+            }
+        }
+    }
+
+    while improved && pass < max_iterations {
         improved = false;
         pass += 1;
 
-        for v in 0..n {
-            let current_comm = community[v];
-            let neighbors: Vec<usize> = csr
-                .neighbors(v)
-                .iter()
-                .map(|(_, dst)| dst.offset as usize)
-                .filter(|&w| w < n)
-                .collect();
+        // Deterministic or sequential visit order
+        let mut order: Vec<usize> = (0..n).collect();
+        if let Some(s) = seed {
+            SimpleRng::new(s.wrapping_add(pass as u64)).shuffle(&mut order);
+        }
 
-            // Compute neighbor community weights
-            let mut comm_weights: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
-            for &w in &neighbors {
-                *comm_weights.entry(community[w]).or_insert(0.0) += 1.0;
+        // Batch mode: compute all gains, then apply best moves
+        let mut moves: Vec<(usize, usize, f64)> = Vec::new(); // (v, best_comm, gain)
+
+        for &v in &order {
+            let current_comm = community[v];
+            let kv = degree[v];
+
+            // Sum of weights from v to each neighboring community
+            let mut comm_weights: std::collections::BTreeMap<usize, f64> =
+                std::collections::BTreeMap::new();
+            for (_rel, dst) in csr.neighbors(v) {
+                let w = dst.offset as usize;
+                if w < n {
+                    let wt = weight_fn(v, w);
+                    *comm_weights.entry(community[w]).or_insert(0.0) += wt;
+                }
             }
 
-            // Remove v from current community
-            let self_weight = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
-            let ki = degree[v];
+            let sigma_v_current = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
 
-            // Current modularity contribution
-            let sigma_tot = comm_totals[current_comm];
-            let remove_mod = (self_weight) / m - (ki * sigma_tot) / (2.0 * m * m);
-
-            // Find best community
+            // ΔQ = (Σ_vD - Σ_vC)/m + k_v·(Σ_tot_C - Σ_tot_D - k_v)/(2m²)
             let mut best_comm = current_comm;
-            let mut best_gain = 0.0;
+            let mut best_gain = min_gain;
 
-            for (&comm, &weight) in &comm_weights {
+            for (&comm, &sigma_v_comm) in &comm_weights {
                 if comm == current_comm {
                     continue;
                 }
-                let sigma_tot2 = comm_totals[comm];
-                let add_mod = (weight) / m - (ki * sigma_tot2) / (2.0 * m * m);
-                let gain = add_mod - remove_mod;
-
+                let gain = (sigma_v_comm - sigma_v_current) / m
+                    + kv * (sigma_tot[current_comm] - sigma_tot[comm] - kv) / (2.0 * m * m);
                 if gain > best_gain {
                     best_gain = gain;
                     best_comm = comm;
@@ -1324,11 +1493,64 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
             }
 
             if best_comm != current_comm {
-                community[v] = best_comm;
-                comm_totals[current_comm] -= ki;
-                comm_totals[best_comm] += ki;
-                improved = true;
+                moves.push((v, best_comm, best_gain));
             }
+        }
+
+        // Apply batch moves (first-come-first-served for same-community conflicts)
+        let mut claimed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for (v, best_comm, _gain) in &moves {
+            let v = *v;
+            let best_comm = *best_comm;
+            let current_comm = community[v];
+            if current_comm == best_comm || claimed.contains(&best_comm) {
+                continue;
+            }
+            let kv = degree[v];
+
+            // Recompute v's weight into new community using current community assignments
+            let sigma_v_current: f64 = csr
+                .neighbors(v)
+                .iter()
+                .filter_map(|(_rel, dst)| {
+                    let w = dst.offset as usize;
+                    if w < n && community[w] == current_comm {
+                        Some(weight_fn(v, w))
+                    } else {
+                        None
+                    }
+                })
+                .sum();
+            let sigma_v_new: f64 = csr
+                .neighbors(v)
+                .iter()
+                .filter_map(|(_rel, dst)| {
+                    let w = dst.offset as usize;
+                    if w < n && community[w] == best_comm {
+                        Some(weight_fn(v, w))
+                    } else {
+                        None
+                    }
+                })
+                .sum();
+
+            sigma_in[current_comm] -= 2.0 * sigma_v_current;
+            sigma_tot[current_comm] -= kv;
+            sigma_in[best_comm] += 2.0 * sigma_v_new;
+            sigma_tot[best_comm] += kv;
+            community[v] = best_comm;
+            claimed.insert(v);
+            improved = true;
+        }
+    }
+
+    // Compute final modularity Q = Σ_c [σ_in_c / m - (σ_tot_c / 2m)²]
+    let mut q = 0.0;
+    let mut seen_comms = std::collections::HashSet::new();
+    for v in 0..n {
+        let c = community[v];
+        if seen_comms.insert(c) {
+            q += sigma_in[c] / m - (sigma_tot[c] / (2.0 * m)).powi(2);
         }
     }
 
@@ -1342,10 +1564,122 @@ pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
         })
         .collect();
 
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("modularity".into(), q);
+
     AlgoResult {
         name: "louvain".into(),
         values,
+        metadata: Some(metadata),
     }
+}
+
+/// Compute community structure using the Louvain heuristic (unweighted, default parameters).
+pub fn compute_louvain(csr: &CSRAdjacency) -> AlgoResult {
+    compute_louvain_weighted(csr, |_u, _v| 1.0, None, 0.001, 20)
+}
+
+// --------------- Spreading Activation ---------------
+
+/// Result of a spread activation computation.
+pub struct SpreadActivationResult {
+    /// Activated nodes: (node_position, activation_score, hop_reached).
+    pub activated: Vec<(usize, f64, usize)>,
+}
+
+/// Spreading activation over a graph starting from seed nodes.
+///
+/// - `seed_positions`: starting node positions with initial activation
+/// - `weight_fn`: closure returning edge weight for (src_pos, dst_pos)
+/// - `decay`: multiplicative decay per hop (0.0..1.0)
+/// - `threshold`: minimum activation to survive pruning
+/// - `max_hops`: maximum propagation distance
+pub fn compute_spread_activation<F>(
+    csr: &CSRAdjacency,
+    seed_positions: &[(usize, f64)],
+    weight_fn: F,
+    decay: f64,
+    threshold: f64,
+    max_hops: usize,
+) -> SpreadActivationResult
+where
+    F: Fn(usize, usize) -> f64,
+{
+    let n = csr.num_nodes();
+    if n == 0 || seed_positions.is_empty() {
+        return SpreadActivationResult {
+            activated: Vec::new(),
+        };
+    }
+
+    // activation[node_pos] = (current_activation, hop_when_activated)
+    let mut activation: Vec<f64> = vec![0.0; n];
+    let mut hop_reached: Vec<usize> = vec![usize::MAX; n];
+
+    // Initialize seeds at hop 0
+    let mut current_frontier: Vec<(usize, f64)> = Vec::new();
+    for &(pos, act) in seed_positions {
+        if pos < n && act > 0.0 {
+            activation[pos] = act;
+            hop_reached[pos] = 0;
+            current_frontier.push((pos, act));
+        }
+    }
+
+    // Propagate hop by hop
+    for hop in 1..=max_hops {
+        let mut next_activation: std::collections::BTreeMap<usize, f64> =
+            std::collections::BTreeMap::new();
+
+        for &(node, _node_act) in &current_frontier {
+            let total_act = activation[node];
+            for (_rel, dst) in csr.neighbors(node) {
+                let w = dst.offset as usize;
+                if w >= n {
+                    continue;
+                }
+                // Skip nodes already activated at an earlier hop (prevent cycle inflation)
+                if hop_reached[w] != usize::MAX && hop_reached[w] < hop {
+                    continue;
+                }
+                let edge_weight = weight_fn(node, w);
+                let propagated = total_act * edge_weight * decay;
+                if propagated < threshold {
+                    continue;
+                }
+                *next_activation.entry(w).or_insert(0.0) += propagated;
+            }
+        }
+
+        let mut next_frontier: Vec<(usize, f64)> = Vec::new();
+        for (&w, &prop) in &next_activation {
+            activation[w] += prop;
+            if hop_reached[w] == usize::MAX {
+                hop_reached[w] = hop;
+            }
+            // Only add to frontier if first time reaching this node
+            // (same-hop accumulation is folded into activation but doesn't re-propagate)
+            if hop_reached[w] == hop {
+                next_frontier.push((w, prop));
+            }
+        }
+
+        current_frontier = next_frontier;
+        if current_frontier.is_empty() {
+            break;
+        }
+    }
+
+    // Collect activated nodes (excluding seeds at hop 0, include only propagated nodes)
+    let mut activated: Vec<(usize, f64, usize)> = Vec::new();
+    for pos in 0..n {
+        if hop_reached[pos] <= max_hops && activation[pos] >= threshold {
+            activated.push((pos, activation[pos], hop_reached[pos]));
+        }
+    }
+    activated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    SpreadActivationResult { activated }
 }
 
 // --------------- Spanning Forest (Kruskal) ---------------
@@ -1359,6 +1693,7 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
         return AlgoResult {
             name: "spanning_forest".into(),
             values: vec![],
+            metadata: None,
         };
     }
 
@@ -1424,6 +1759,7 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "spanning_forest".into(),
         values,
+        metadata: None,
     }
 }
 
@@ -1475,6 +1811,7 @@ pub fn compute_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
     AlgoResult {
         name: "shortest_path".into(),
         values,
+        metadata: None,
     }
 }
 
@@ -1564,6 +1901,7 @@ pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> Algo
     AlgoResult {
         name: "weighted_shortest_path".into(),
         values,
+        metadata: None,
     }
 }
 
@@ -1582,6 +1920,7 @@ pub fn compute_all_sp_destinations(csr: &CSRAdjacency) -> AlgoResult {
     AlgoResult {
         name: "all_sp_destinations".into(),
         values,
+        metadata: None,
     }
 }
 
@@ -1856,6 +2195,118 @@ mod tests {
         let csr = small_csr();
         let result = compute_louvain(&csr);
         assert_eq!(result.values.len(), 7);
+        // Community IDs should be sequential from 0
+        let max_comm = result.values.iter().fold(0.0f64, |a, &b| a.max(b));
+        assert!(max_comm >= 0.0);
+        // Modularity should be present and valid
+        let q = result.metadata.as_ref().unwrap().get("modularity").unwrap();
+        assert!(*q >= -0.5 && *q <= 1.0, "modularity {q} out of range");
+    }
+
+    #[test]
+    fn test_louvain_weighted() {
+        // Two dense cliques connected by a single weak edge
+        // Clique A: 0-1-2-3 (fully connected, weight 10)
+        // Clique B: 4-5-6-7 (fully connected, weight 10)
+        // Bridge: 3-4 (weight 1)
+        let mut edges = Vec::new();
+        let mut rel = 0u64;
+        // Clique A
+        for i in 0..4 {
+            for j in (i+1)..4 {
+                edges.push(Edge { src_offset: i, dst_offset: j, rel_id: rel, rel_table_id: 0 });
+                rel += 1;
+            }
+        }
+        // Clique B
+        for i in 4..8 {
+            for j in (i+1)..8 {
+                edges.push(Edge { src_offset: i, dst_offset: j, rel_id: rel, rel_table_id: 0 });
+                rel += 1;
+            }
+        }
+        // Bridge (weak)
+        edges.push(Edge { src_offset: 3, dst_offset: 4, rel_id: rel, rel_table_id: 0 });
+        let csr = CSRAdjacency::build(&edges, 8);
+        let result = compute_louvain_weighted(&csr, |u, v| {
+            if (u == 3 && v == 4) || (u == 4 && v == 3) { 1.0 } else { 10.0 }
+        }, None, 0.001, 20);
+        assert_eq!(result.values.len(), 8);
+        // Should find 2 communities
+        let num_comms: usize = result.values.iter().map(|x| *x as usize).collect::<std::collections::HashSet<_>>().len();
+        assert_eq!(num_comms, 2, "weighted louvain should find 2 clusters");
+        // Nodes 0-3 should share a community, 4-7 should share another
+        assert_eq!(result.values[0], result.values[1]);
+        assert_eq!(result.values[0], result.values[2]);
+        assert_eq!(result.values[0], result.values[3]);
+        assert_eq!(result.values[4], result.values[5]);
+        assert_eq!(result.values[4], result.values[6]);
+        assert_eq!(result.values[4], result.values[7]);
+        assert_ne!(result.values[0], result.values[4]);
+    }
+
+    #[test]
+    fn test_louvain_modularity_positive() {
+        // Two dense cliques connected by a single edge — clear community structure
+        let mut edges = Vec::new();
+        let mut rel = 0u64;
+        for i in 0..5 {
+            for j in (i+1)..5 {
+                edges.push(Edge { src_offset: i, dst_offset: j, rel_id: rel, rel_table_id: 0 });
+                rel += 1;
+            }
+        }
+        for i in 5..10 {
+            for j in (i+1)..10 {
+                edges.push(Edge { src_offset: i, dst_offset: j, rel_id: rel, rel_table_id: 0 });
+                rel += 1;
+            }
+        }
+        edges.push(Edge { src_offset: 4, dst_offset: 5, rel_id: rel, rel_table_id: 0 });
+        let csr = CSRAdjacency::build(&edges, 10);
+        let result = compute_louvain(&csr);
+        let q = result.metadata.as_ref().unwrap().get("modularity").unwrap();
+        assert!(*q > 0.3, "modularity should be strongly positive for two cliques, got {q}");
+    }
+
+    #[test]
+    fn test_louvain_seed_deterministic() {
+        let csr = small_csr();
+        let r1 = compute_louvain_weighted(&csr, |_u, _v| 1.0, Some(42), 0.001, 20);
+        let r2 = compute_louvain_weighted(&csr, |_u, _v| 1.0, Some(42), 0.001, 20);
+        assert_eq!(r1.values, r2.values, "same seed should produce same result");
+    }
+
+    #[test]
+    fn test_louvain_empty() {
+        let csr = CSRAdjacency::new(0);
+        let result = compute_louvain(&csr);
+        assert!(result.values.is_empty());
+    }
+
+    #[test]
+    fn test_call_louvain() {
+        use akar_common::types::Value;
+        let registry = make_registry_with_algo();
+        let rows = registry
+            .execute_table_function("louvain", &[], None)
+            .expect("louvain should succeed");
+        assert_eq!(rows.len(), 5, "5-node ring → 5 rows");
+        for row in &rows {
+            assert_eq!(row.len(), 3, "each row should have node_id + community_id + modularity");
+        }
+        // Modularity should be the same in every row
+        let mod0 = match rows[0].get(2) {
+            Some(Value::Double(v)) => v,
+            _ => panic!("expected Double for modularity"),
+        };
+        for row in rows.iter().skip(1) {
+            let m = match row.get(2) {
+                Some(Value::Double(v)) => v,
+                _ => panic!("expected Double"),
+            };
+            assert!((m - mod0).abs() < 1e-10, "modularity should be broadcast uniformly");
+        }
     }
 
     #[test]
@@ -2223,5 +2674,91 @@ mod tests {
             .execute_table_function("n2v", &[], None)
             .expect("n2v alias should succeed");
         assert_eq!(rows.len(), 5);
+    }
+
+    // ── spread activation tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_spread_activation_basic() {
+        // 0--1--2--3  (linear chain)
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 4);
+        let result = compute_spread_activation(&csr, &[(0, 1.0)], |_u, _v| 1.0, 0.5, 0.01, 3);
+        // Seed 0 at hop 0, then 1 at hop1 (0.5), 2 at hop2 (0.25), 3 at hop3 (0.125)
+        assert_eq!(result.activated.len(), 4);
+        // Sorted by activation descending — node 0 first
+        assert_eq!(result.activated[0].0, 0);
+        assert!((result.activated[0].1 - 1.0).abs() < 1e-10);
+        assert_eq!(result.activated[0].2, 0);
+        // Node 1 at hop 1
+        assert_eq!(result.activated[1].0, 1);
+        assert!((result.activated[1].1 - 0.5).abs() < 1e-10);
+        assert_eq!(result.activated[1].2, 1);
+    }
+
+    #[test]
+    fn test_spread_activation_threshold_pruning() {
+        // 0--1--2--3 (linear chain), high threshold
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+            Edge { src_offset: 2, dst_offset: 3, rel_id: 2, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 4);
+        // threshold 0.3 → only nodes with activation >= 0.3 survive
+        let result = compute_spread_activation(&csr, &[(0, 1.0)], |_u, _v| 1.0, 0.5, 0.3, 3);
+        // node 0: 1.0, node 1: 0.5, node 2: 0.25 (< 0.3 pruned), node 3: 0.125 (< 0.3 pruned)
+        assert_eq!(result.activated.len(), 2);
+        let ids: Vec<usize> = result.activated.iter().map(|(id, _, _)| *id).collect();
+        assert!(ids.contains(&0));
+        assert!(ids.contains(&1));
+    }
+
+    #[test]
+    fn test_spread_activation_multi_seed() {
+        // 0→2, 1→2 (two seeds both reach node 2 at hop 1)
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 2, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 3);
+        // Seeds at 0 and 1 — both propagate to node 2 at hop 1
+        let result = compute_spread_activation(&csr, &[(0, 1.0), (1, 1.0)], |_u, _v| 1.0, 0.5, 0.01, 2);
+        // Node 2 gets 0.5 from seed 0 + 0.5 from seed 1 = 1.0
+        let node2 = result.activated.iter().find(|(id, _, _)| *id == 2).unwrap();
+        assert!((node2.1 - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_spread_activation_empty() {
+        let csr = CSRAdjacency::build(&[], 0);
+        let result = compute_spread_activation(&csr, &[], |_u, _v| 1.0, 0.5, 0.01, 3);
+        assert!(result.activated.is_empty());
+    }
+
+    #[test]
+    fn test_spread_activation_weighted() {
+        // 0--(w=2.0)--1--(w=0.1)--2
+        let edges = vec![
+            Edge { src_offset: 0, dst_offset: 1, rel_id: 0, rel_table_id: 0 },
+            Edge { src_offset: 1, dst_offset: 2, rel_id: 1, rel_table_id: 0 },
+        ];
+        let csr = CSRAdjacency::build(&edges, 3);
+        let weight_fn = |u: usize, v: usize| {
+            if (u == 0 && v == 1) || (u == 1 && v == 0) { 2.0 }
+            else if (u == 1 && v == 2) || (u == 2 && v == 1) { 0.1 }
+            else { 1.0 }
+        };
+        let result = compute_spread_activation(&csr, &[(0, 1.0)], weight_fn, 0.5, 0.01, 2);
+        // Node 1: 1.0 * 2.0 * 0.5 = 1.0
+        // Node 2: 1.0 * 0.1 * 0.5 = 0.05
+        let node1 = result.activated.iter().find(|(id, _, _)| *id == 1).unwrap();
+        assert!((node1.1 - 1.0).abs() < 1e-10);
+        let node2 = result.activated.iter().find(|(id, _, _)| *id == 2).unwrap();
+        assert!((node2.1 - 0.05).abs() < 1e-10);
     }
 }

@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **P54.1 (Sprint 20) Louvain upgrade — weighted + seed + modularity** — `compute_louvain_weighted` in `akar-algo/src/lib.rs` now supports: (1) `weight_fn` closure for weighted edges, (2) `seed` for deterministic shuffle via custom LCG (`SimpleRng`), (3) `min_gain` threshold (default 0.001) + `max_iterations` (default 20), (4) modularity Q output in `AlgoResult.metadata`. `compute_louvain` rewritten as thin wrapper (`weight_fn = |_u,_v| 1.0`). `AlgoResult` extended with `metadata: Option<HashMap<String, f64>>` (backward-compatible, all 17 existing constructors updated). CALL louvain() closure parses optional args `(seed?, min_gain?, max_iterations?)` and outputs 3 columns `(node_id, community_id, modularity)`. Batch-mode gain evaluation (no node-ordering dependency). 6 tests: `test_louvain`, `test_louvain_weighted` (two-clique + weak bridge), `test_louvain_modularity_positive`, `test_louvain_seed_deterministic`, `test_louvain_empty`, `test_call_louvain`. Gate **1,765 passed / 0 failed**.
+- **P54.2 (Sprint 20) spread activation — single + batch spreading** — `compute_spread_activation` in `akar-algo/src/lib.rs`: BFS-like propagation with `weight_fn`, `decay` (default0.5), `threshold` pruning (default 0.01), `max_hops` (default 3). Returns `(node_id, activation, hop)` sorted by activation descending. BTreeMap-based frontier deduplication prevents cycle inflation; same-hop multi-path accumulation supported. CALL `spread_activation(seed_ids, decay?, threshold?, max_hops?)` → 3 columns `(node_id INT64, activation DOUBLE, hop INT64)`. 5 tests: `test_spread_activation_basic` (linear chain), `test_spread_activation_threshold_pruning`, `test_spread_activation_multi_seed` (convergent paths), `test_spread_activation_empty`, `test_spread_activation_weighted`. Gate **1,769 passed / 0 failed**.
+- **P54.3 (Sprint 20) kNN multi-signal re-ranker** — `rerank_knn` and `compute_rerank_score` in `akar-vector/src/lib.rs`: 4-signal weighted combination — embedding `(cos+1)/2`, temporal `exp(-age*0.01)`, frequency `ln(freq+1)/ln(1000)`, graph proximity. Default weights `(0.6,0.15,0.1,0.15)`. `RerankWeights` and `RerankCandidate` structs with `Default` impl. `rerank_knn(candidates, weights, top_k)` returns `Vec<(id, score)>` sorted by descending score. 4 tests: `test_rerank_score_basic` (maxed signals), `test_rerank_score_low_quality`, `test_rerank_top_k` (ordering), `test_rerank_weight_shift` (weight isolation). Gate **1,769 passed / 0 failed**.
+
 ## [0.1.6] - 2026-08-17
 
 ### Added

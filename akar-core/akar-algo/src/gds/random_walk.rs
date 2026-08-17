@@ -69,5 +69,6 @@ pub fn compute_random_walk(
     AlgoResult {
         name: "random_walk".into(),
         values: hit_counts,
+        metadata: None,
     }
 }

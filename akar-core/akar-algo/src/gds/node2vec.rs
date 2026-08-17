@@ -127,6 +127,7 @@ pub fn compute_node2vec(
     AlgoResult {
         name: "node2vec".into(),
         values: embeddings,
+        metadata: None,
     }
 }
 

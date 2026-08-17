@@ -197,6 +197,89 @@ pub fn normalize(v: &[f64]) -> Vec<f64> {
     v.iter().map(|x| x / norm).collect()
 }
 
+// --------------- kNN Multi-Signal Re-ranker ---------------
+
+/// Default weights for multi-signal re-ranking: (embedding, temporal, frequency, graph).
+pub const DEFAULT_RERANK_WEIGHTS: RerankWeights = RerankWeights {
+    embedding: 0.6,
+    temporal: 0.15,
+    frequency: 0.1,
+    graph: 0.15,
+};
+
+/// Weight configuration for multi-signal re-ranking.
+#[derive(Debug, Clone, Copy)]
+pub struct RerankWeights {
+    pub embedding: f64,
+    pub temporal: f64,
+    pub frequency: f64,
+    pub graph: f64,
+}
+
+impl Default for RerankWeights {
+    fn default() -> Self {
+        DEFAULT_RERANK_WEIGHTS
+    }
+}
+
+/// A candidate with all signal values for re-ranking.
+#[derive(Debug, Clone)]
+pub struct RerankCandidate {
+    /// Node/entity ID.
+    pub id: usize,
+    /// Embedding similarity score (raw cosine, will be mapped to [0,1]).
+    pub embedding_score: f64,
+    /// Age in time units (e.g., days). 0 = just now.
+    pub age: f64,
+    /// Access/mention frequency. 0 = never accessed.
+    pub frequency: f64,
+    /// Graph proximity score. 0 = no connection, 1 = same community.
+    pub graph_score: f64,
+}
+
+/// Compute combined re-ranking score from multiple signals.
+///
+/// Formula: `w_e*(cos+1)/2 + w_t*exp(-age*0.01) + w_f*ln(freq+1)/ln(1000) + w_g*graph`
+///
+/// All components are normalized to [0,1] before weighting.
+pub fn compute_rerank_score(candidate: &RerankCandidate, weights: &RerankWeights) -> f64 {
+    // Embedding: cosine ∈ [-1,1] → [0,1]
+    let embedding = (candidate.embedding_score + 1.0) / 2.0;
+    // Temporal: exponential decay, half-life ~69 time units
+    let temporal = (-candidate.age * 0.01).exp();
+    // Frequency: logarithmic scaling, saturates around 1000
+    let frequency = if candidate.frequency > 0.0 {
+        (candidate.frequency + 1.0).ln() / 1000.0_f64.ln()
+    } else {
+        0.0
+    };
+    // Graph: already in [0,1]
+    let graph = candidate.graph_score.clamp(0.0, 1.0);
+
+    weights.embedding * embedding
+        + weights.temporal * temporal
+        + weights.frequency * frequency
+        + weights.graph * graph
+}
+
+/// Re-rank candidates by combined multi-signal score and return top-k.
+///
+/// Candidates are scored using `compute_rerank_score` with the given weights,
+/// then sorted by descending score. Returns at most `top_k` results.
+pub fn rerank_knn(
+    candidates: &[RerankCandidate],
+    weights: &RerankWeights,
+    top_k: usize,
+) -> Vec<(usize, f64)> {
+    let mut scored: Vec<(usize, f64)> = candidates
+        .iter()
+        .map(|c| (c.id, compute_rerank_score(c, weights)))
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+    scored
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +350,61 @@ mod tests {
         let a = vec![1.0, -1.0];
         let b = vec![-1.0, 1.0];
         assert!((dot_product(&a, &b) + 2.0).abs() < 1e-10);
+    }
+
+    // ── re-ranker tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_rerank_score_basic() {
+        let c = RerankCandidate {
+            id: 0,
+            embedding_score: 1.0, // perfect match → (1+1)/2 = 1.0
+            age: 0.0,             // just now → exp(0) = 1.0
+            frequency: 999.0,     // high freq → ~1.0
+            graph_score: 1.0,     // same community
+        };
+        let score = compute_rerank_score(&c, &DEFAULT_RERANK_WEIGHTS);
+        // Should be close to 1.0 (all signals maxed)
+        assert!(score > 0.9, "score should be > 0.9, got {score}");
+    }
+
+    #[test]
+    fn test_rerank_score_low_quality() {
+        let c = RerankCandidate {
+            id: 1,
+            embedding_score: -1.0, // worst match → 0.0
+            age: 1000.0,           // very old → ~0.0
+            frequency: 0.0,        // never accessed → 0.0
+            graph_score: 0.0,      // no connection
+        };
+        let score = compute_rerank_score(&c, &DEFAULT_RERANK_WEIGHTS);
+        assert!(score < 0.1, "score should be < 0.1, got {score}");
+    }
+
+    #[test]
+    fn test_rerank_top_k() {
+        let candidates = vec![
+            RerankCandidate { id: 0, embedding_score: 0.5, age: 100.0, frequency: 10.0, graph_score: 0.5 },
+            RerankCandidate { id: 1, embedding_score: 0.9, age: 0.0, frequency: 100.0, graph_score: 0.9 },
+            RerankCandidate { id: 2, embedding_score: 0.1, age: 500.0, frequency: 1.0, graph_score: 0.1 },
+            RerankCandidate { id: 3, embedding_score: 0.8, age: 10.0, frequency: 50.0, graph_score: 0.7 },
+        ];
+        let top2 = rerank_knn(&candidates, &DEFAULT_RERANK_WEIGHTS, 2);
+        assert_eq!(top2.len(), 2);
+        // Best candidate (id=1) should be first
+        assert_eq!(top2[0].0, 1);
+        // Second best (id=3) should be second
+        assert_eq!(top2[1].0, 3);
+    }
+
+    #[test]
+    fn test_rerank_weight_shift() {
+        // With only embedding weight, age should not matter
+        let weights = RerankWeights { embedding: 1.0, temporal: 0.0, frequency: 0.0, graph: 0.0 };
+        let c1 = RerankCandidate { id: 0, embedding_score: 0.8, age: 0.0, frequency: 0.0, graph_score: 0.0 };
+        let c2 = RerankCandidate { id: 1, embedding_score: 0.8, age: 999.0, frequency: 0.0, graph_score: 0.0 };
+        let s1 = compute_rerank_score(&c1, &weights);
+        let s2 = compute_rerank_score(&c2, &weights);
+        assert!((s1 - s2).abs() < 1e-10, "same embedding should give same score when temporal weight is 0");
     }
 }
