@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-17
+
 ### Added
 
 - **P53.11 (Sprint 20) packaging & docs — akar-python README rewrite + build fix pyo3 0.29.2** — `akar-python/README.md` ditulis ulang menyeluruh: API surface (`Database`, `Connection`, `QueryResult`), build dari source (development + release wheel via `maturin build --release`, source dist via `maturin sdist`), Kairos compatibility shim (`kairos/kuzu.py`), daftar Cypher features yang didukung, struktur proyek, instruksi tes. **Fix compile `cargo test --lib`** (regresi upgrade `300a5cd` pyo3 0.24 → 0.29.2 — target lib-test belum pernah dikompilasi sejak upgrade): `PyObject` dihapus di 0.29 → `Py<PyAny>` (5 situs); `Bound::downcast` → `Bound::cast` (`py_to_value`, 3 situs); `Python::with_gil` → `Python::attach` (4 situs tes). `cargo test --package akar-python --lib --all-features` **25/25 hijau** (0.36s; runtime butuh `python313.dll` di PATH dari base uv python). **Verifikasi packaging** (maturin 1.14.1 di `.venv`): `maturin build --release` → wheel `akar-0.1.0-cp39-abi3-win_amd64.whl` (abi3-py39, 2m59s); `maturin sdist` → `akar-0.1.0.tar.gz`; wheel ter-install & smoke test `import akar` + CREATE NODE TABLE + CREATE OK; harness pytest **53/0** hijau terhadap wheel (47.4s). Crate standalone workspace (bukan member `akar-core`); gate `test [akar-core]` **1,751** tidak berubah.
@@ -117,7 +119,8 @@
 
 **Status publish (2026-08-10):** semua 31 crate publishable live di crates.io — akar-storage & akar-main @ 0.1.3, akar-binder/planner/processor/postgres @ 0.1.2, akar-optimizer @ 0.1.2, akar-common/parser @ 0.1.1, akar-server/httpfs/duckdb/sqlite/azure/delta/iceberg/unity-catalog @ 0.1.1, sisanya @ 0.1.0 (rilis v0.1.4 sync backlog crates.io → HEAD, bottom-up, 2026-08-10); akar-c `publish=false`; repo GitHub **public**; tag **v0.1.1** + **v0.1.2** + **v0.1.3** + **v0.1.4** + **v0.1.5** + GitHub Releases live.
 
-[Unreleased]: https://github.com/mlengse/akar/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/mlengse/akar/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/mlengse/akar/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/mlengse/akar/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
