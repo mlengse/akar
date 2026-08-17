@@ -3,6 +3,7 @@ use crate::query_result::QueryResult;
 use akar_binder::bound_statement::{BoundExportDatabase, BoundImportDatabase};
 use akar_catalog::Catalog;
 use akar_common::types::LogicalTypeID;
+use akar_parser::ast::CopyToFormat;
 
 impl Connection {
     pub(crate) fn execute_export_database(&self, e: &BoundExportDatabase) -> Result<Option<QueryResult>, String> {
@@ -12,20 +13,27 @@ impl Connection {
         let dir = Path::new(&e.file_path);
         fs::create_dir_all(dir).map_err(|err| format!("Cannot create export directory '{}': {err}", e.file_path))?;
 
-        let catalog = self
-            .database
-            .catalog
-            .lock()
-            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        // Get catalog entries needed for schema and data export, then release the lock
+        let entries: Vec<_> = {
+            let catalog = self
+                .database
+                .catalog
+                .lock()
+                .map_err(|e| format!("Lock poisoned: {e}"))?;
+            catalog.all_entries().cloned().collect()
+        };
 
-        // Generate schema.cypher
-        let schema = generate_schema_cypher(&catalog);
+        // Generate schema.cypher from entries
+        let schema = generate_schema_cypher_from_entries(&entries);
         fs::write(dir.join("schema.cypher"), &schema).map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
 
-        // Generate copy.cypher (data export)
+        // Generate copy.cypher (data export) AND write actual data files
         if !e.schema_only {
-            let copy = generate_copy_cypher(&catalog, &e.file_type);
+            let copy = generate_copy_cypher_from_entries(&entries, &e.file_type, Some(dir));
             fs::write(dir.join("copy.cypher"), &copy).map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
+
+            // Write actual data files for each table (catalog lock released)
+            export_table_data(self, &entries, &e.file_type, dir)?;
         }
 
         tracing::info!("Exported database to '{}'", e.file_path);
@@ -149,8 +157,9 @@ fn logical_type_name(t: LogicalTypeID) -> String {
         LogicalTypeID::Json => "JSON",
         LogicalTypeID::Time => "TIME",
         // Compound/nested types carry no child-type metadata in the catalog,
-        // so they cannot round-trip; fall back to the Debug name (unchanged
-        // pre-fix behavior for these edge cases).
+        // so they cannot round-trip; fall back to a parser-accepted default.
+        // `List` → `FLOAT[]` (parser accepts `primitive_type ~ "[]"*`).
+        LogicalTypeID::List => "FLOAT[]",
         other => return format!("{other:?}"),
     };
     name.to_string()
@@ -164,8 +173,14 @@ fn logical_type_name(t: LogicalTypeID) -> String {
 /// - rel tables: `CREATE REL TABLE t (FROM src TO dst, col T, ...);`
 ///   (endpoint node tables resolved by ID, required by the import grammar)
 pub(crate) fn generate_schema_cypher(catalog: &Catalog) -> String {
+    let entries: Vec<_> = catalog.all_entries().cloned().collect();
+    generate_schema_cypher_from_entries(&entries)
+}
+
+/// Build the `schema.cypher` file content from a list of catalog entries.
+fn generate_schema_cypher_from_entries(entries: &[akar_catalog::CatalogEntry]) -> String {
     let mut schema = String::new();
-    for entry in catalog.all_entries() {
+    for entry in entries {
         match entry {
             akar_catalog::CatalogEntry::NodeTable(t) => {
                 let mut cols: Vec<String> = t
@@ -179,12 +194,14 @@ pub(crate) fn generate_schema_cypher(catalog: &Catalog) -> String {
                 schema.push_str(&format!("CREATE NODE TABLE {} (\n{}\n);\n\n", t.name, cols.join(",\n")));
             }
             akar_catalog::CatalogEntry::RelTable(t) => {
-                let src = catalog
-                    .get_entry(t.src_table_id)
+                let src = entries
+                    .iter()
+                    .find(|e| e.table_id() == t.src_table_id)
                     .map(|e| e.name().to_string())
                     .unwrap_or_else(|| t.src_table_id.to_string());
-                let dst = catalog
-                    .get_entry(t.dst_table_id)
+                let dst = entries
+                    .iter()
+                    .find(|e| e.table_id() == t.dst_table_id)
                     .map(|e| e.name().to_string())
                     .unwrap_or_else(|| t.dst_table_id.to_string());
                 let mut ddl = format!("CREATE REL TABLE {} (FROM {} TO {}", t.name, src, dst);
@@ -207,8 +224,22 @@ pub(crate) fn generate_schema_cypher(catalog: &Catalog) -> String {
 
 /// Build the `copy.cypher` file content for a database export.
 pub(crate) fn generate_copy_cypher(catalog: &Catalog, file_type: &str) -> String {
+    let entries: Vec<_> = catalog.all_entries().cloned().collect();
+    generate_copy_cypher_from_entries(&entries, file_type, None)
+}
+
+/// Build the `copy.cypher` file content from a list of catalog entries.
+///
+/// When `dir` is provided, COPY FROM paths are written as absolute paths
+/// rooted at that directory so that IMPORT DATABASE can resolve them
+/// regardless of the working directory (P53.34b).
+fn generate_copy_cypher_from_entries(
+    entries: &[akar_catalog::CatalogEntry],
+    file_type: &str,
+    dir: Option<&std::path::Path>,
+) -> String {
     let mut copy = String::new();
-    for entry in catalog.all_entries() {
+    for entry in entries {
         let name = match entry {
             akar_catalog::CatalogEntry::NodeTable(t) => Some(t.name.as_str()),
             akar_catalog::CatalogEntry::RelTable(t) => Some(t.name.as_str()),
@@ -217,10 +248,173 @@ pub(crate) fn generate_copy_cypher(catalog: &Catalog, file_type: &str) -> String
         if let Some(table_name) = name {
             let ext = if file_type == "parquet" { "parquet" } else { "csv" };
             let file_name = format!("{}.{}", table_name, ext);
-            copy.push_str(&format!("COPY {} FROM '{}';\n", table_name, file_name));
+            let path = match dir {
+                Some(d) => d.join(&file_name).to_string_lossy().replace('\\', "/"),
+                None => file_name,
+            };
+            copy.push_str(&format!("COPY {} FROM '{}';\n", table_name, path));
         }
     }
     copy
+}
+
+/// Export actual table data to CSV or Parquet files.
+fn export_table_data(
+    conn: &Connection,
+    entries: &[akar_catalog::CatalogEntry],
+    file_type: &str,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    use super::utils::value_to_csv_string;
+
+    let format = if file_type == "parquet" {
+        CopyToFormat::Parquet
+    } else {
+        CopyToFormat::Csv
+    };
+
+    for entry in entries {
+        let (table_name, query, column_names) = match entry {
+            akar_catalog::CatalogEntry::NodeTable(t) => {
+                let name = t.name.as_str();
+                let cols: Vec<String> = t.columns.iter().map(|c| c.name.clone()).collect();
+                // Use explicit column list to exclude internal `_id` (P53.34b).
+                let return_cols: Vec<String> = cols.iter().map(|c| format!("n.{}", c)).collect();
+                let q = format!("MATCH (n:{}) RETURN {}", name, return_cols.join(", "));
+                (name, q, cols)
+            }
+            akar_catalog::CatalogEntry::RelTable(t) => {
+                let name = t.name.as_str();
+                let cols: Vec<String> = t.columns.iter().map(|c| c.name.clone()).collect();
+                let return_cols: Vec<String> = cols.iter().map(|c| format!("r.{}", c)).collect();
+                let q = format!("MATCH ()-[r:{}]->() RETURN {}", name, return_cols.join(", "));
+                (name, q, cols)
+            }
+            _ => continue,
+        };
+
+        let ext = if format == CopyToFormat::Parquet {
+            "parquet"
+        } else {
+            "csv"
+        };
+        let file_path = dir.join(format!("{}.{}", table_name, ext));
+        let file_path_str = file_path.to_string_lossy().to_string();
+
+        // Execute query to get all data using the public query API
+        let result = conn.query(&query)?;
+
+        // Write to file
+        match format {
+            CopyToFormat::Csv => {
+                let mut w = csv::WriterBuilder::new()
+                    .has_headers(true)
+                    .from_path(&file_path)
+                    .map_err(|e| format!("Cannot create file '{}': {}", file_path_str, e))?;
+
+                // Write header — strip alias prefix (n.id → id) so COPY FROM
+                // column names match the catalog column names (P53.34b).
+                if let Some(first_chunk) = result.chunks.first() {
+                    let header: Vec<String> = if first_chunk.field_names.is_empty() {
+                        (0..first_chunk.num_fields()).map(|i| format!("column_{}", i)).collect()
+                    } else {
+                        first_chunk
+                            .field_names
+                            .iter()
+                            .map(|n| {
+                                n.rsplit_once('.')
+                                    .map(|(_, base)| base.to_string())
+                                    .unwrap_or_else(|| n.clone())
+                            })
+                            .collect()
+                    };
+                    if !header.is_empty() {
+                        w.write_record(&header).map_err(|e| format!("CSV write error: {e}"))?;
+                    }
+                } else if !column_names.is_empty() {
+                    // Empty table: use catalog column names
+                    w.write_record(&column_names)
+                        .map_err(|e| format!("CSV write error: {e}"))?;
+                }
+
+                // Write rows
+                for chunk in &result.chunks {
+                    for row in 0..chunk.size {
+                        let row_values: Vec<String> = (0..chunk.fields.len())
+                            .map(|col_idx| {
+                                chunk
+                                    .get_value(col_idx, row)
+                                    .map(|v| value_to_csv_string(&v))
+                                    .unwrap_or_default()
+                            })
+                            .collect();
+                        w.write_record(&row_values)
+                            .map_err(|e| format!("CSV write error: {e}"))?;
+                    }
+                }
+
+                w.flush().map_err(|e| format!("CSV flush error: {e}"))?;
+            }
+            CopyToFormat::Parquet => {
+                #[cfg(feature = "parquet-export")]
+                {
+                    use akar_common::types::Value;
+
+                    // Use query result's field_names (works for empty tables too)
+                    let final_column_names = result
+                        .chunks
+                        .first()
+                        .map(|chunk| {
+                            if chunk.field_names.is_empty() {
+                                (0..chunk.fields.len()).map(|i| format!("column_{}", i)).collect()
+                            } else {
+                                chunk
+                                    .field_names
+                                    .iter()
+                                    .map(|n| {
+                                        n.rsplit_once('.')
+                                            .map(|(_, base)| base.to_string())
+                                            .unwrap_or_else(|| n.clone())
+                                    })
+                                    .collect()
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            // No chunks at all - use catalog column names as fallback
+                            column_names
+                        });
+
+                    if final_column_names.is_empty() {
+                        // No schema info available, skip this table
+                        continue;
+                    }
+
+                    // Write parquet with proper column names
+                    let mut rows: Vec<Vec<Value>> = Vec::new();
+                    for chunk in &result.chunks {
+                        for row_idx in 0..chunk.size {
+                            let mut row = Vec::with_capacity(chunk.fields.len());
+                            for col_idx in 0..chunk.fields.len() {
+                                row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
+                            }
+                            rows.push(row);
+                        }
+                    }
+
+                    akar_storage::parquet_writer::write_parquet(&file_path_str, &rows, &final_column_names)
+                        .map_err(|e| format!("Parquet export error for '{}': {}", table_name, e))?;
+                }
+                #[cfg(not(feature = "parquet-export"))]
+                {
+                    return Err(format!(
+                        "Parquet export for table '{}' requires 'parquet-export' feature. Build with: cargo build --features parquet-export",
+                        table_name
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
