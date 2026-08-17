@@ -28,3 +28,6 @@ rust_bench.txt
 # Scratch
 scratch/
 scratch_test.rs
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

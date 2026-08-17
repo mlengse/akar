@@ -50,3 +50,6 @@ akar-core/docs/archive/
 dataset/binary-demo
 dataset/databases/tinysnb
 dataset/ldbc-1/csv
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
