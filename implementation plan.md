@@ -87,7 +87,7 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — P54 kairos_core refactor** — P54.1+P54.2+P54.3 **COMMITTED** `9a477cd` (gate 1,769). P54.4 **COMMITTED** (gate 1,774). P54.5 (PyO3 expose) next.
+1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.4 **COMMITTED** (gate 1,774). P54.5 (PyO3 expose) next.
 2. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 3. **Sprint 21** — topik jangka panjang (di bawah).
 
