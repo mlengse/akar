@@ -65,11 +65,11 @@ fn knn_search(
     }
 
     let score_fn: Box<dyn Fn(&[f64], &[f64]) -> f64> = match metric {
-        "cosine" => Box::new(akar_vector::cosine_similarity),
+        "cosine" => Box::new(|a, b| akar_vector::cosine_similarity(a, b)),
         "euclidean" | "l2" => {
             Box::new(|a, b| -akar_vector::euclidean_distance(a, b))
         }
-        "dot" => Box::new(akar_vector::dot_product),
+        "dot" => Box::new(|a, b| akar_vector::dot_product(a, b)),
         _ => {
             return Err(PyValueError::new_err(format!(
                 "Unknown metric: {metric}. Use 'cosine', 'euclidean', 'l2', or 'dot'."
@@ -114,7 +114,7 @@ mod tests {
     fn test_cosine_basic() {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
-        assert!(cosine_similarity(a, b).unwrap().abs() < 1e-10);
+        assert!((cosine_similarity(a, b).unwrap()).abs() < 1e-10);
     }
 
     #[test]
