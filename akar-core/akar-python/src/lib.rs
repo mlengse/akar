@@ -16,7 +16,11 @@
 //! dan interpolasi parameter sisi-Python (P53.x) — lihat `translation.rs`,
 //! `param_interp.rs`, dan `docs/audits/audit-python-bindings-kairos.md`.
 
+mod knn;
+mod lstm;
+mod louvain;
 mod param_interp;
+mod spread;
 mod translation;
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -617,6 +621,10 @@ fn akar(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Database>()?;
     m.add_class::<Connection>()?;
     m.add_class::<QueryResult>()?;
+    knn::register(m)?;
+    lstm::register(m)?;
+    spread::register(m)?;
+    louvain::register(m)?;
     Ok(())
 }
 

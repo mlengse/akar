@@ -3,7 +3,7 @@
 > **Status:** Sprint 19/20. **Hanya berisi pekerjaan yang belum dikerjakan (PLANNED).**
 > Semua task yang sudah FIXED & COMMITTED dicover di [`CHANGELOG.md`](CHANGELOG.md) & [`SPEC.md`](SPEC.md) — tidak diduplikasi di sini.
 >
-> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,774 total / 0 ignored / 1,774 passed / 0 failed** (2026-08-18, s.d. P54.4 COMMITTED) — tidak boleh turun.
+> **Gate:** `test [akar-core]` (laporan RustRover, tanpa `--all-features` → `libduckdb-sys` tidak ikut dikompilasi) hijau **1,774 total / 0 ignored / 1,774 passed / 0 failed** (2026-08-18, s.d. P54.5 COMMITTED) — tidak boleh turun.
 >
 > **Author:** Anjang Kusuma Netra | **License:** GPLv3
 
@@ -61,7 +61,7 @@
 > Rincian: `docs/audits/audit-p5310-kairos-dropin-gaps.md`.
 > Tidak ada task P53 PLANNED tersisa.
 
-**Urutan kerja usulan (Sprint 20):** P54.5 (PyO3 expose) next — P54.1–P54.4 semua COMMITTED.
+**Urutan kerja usulan (Sprint 20):** ~~P54.5 (PyO3 expose) next~~ **DONE** — P54.1–P54.5 semua COMMITTED.
 Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774 tidak boleh turun).
 
 ---
@@ -79,15 +79,13 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 
 | Task | Description | Files | Severity | Status |
 |------|-------------|-------|----------|--------|
-| P54.5 | **Expose kNN/LSTM/spread/louvain sebagai module PyO3** di akar-python agar Kairos ganti ctypes `rust_bridge.py`/`cpp_bridge.py` → `import akar` (stateful/hot-loop paling cocok PyO3; graph analytics bisa CALL). Bergantung P54.1–P54.4. | `akar-python/src/` | **LOW-MEDIUM** | PLANNED |
-
-**Urutan kerja usulan (P54):** P54.5 (pyo3; bergantung P54.1–P54.4 semua COMMITTED). Gate tiap batch: `test [akar-core]` tidak boleh turun. Urutan final menunggu persetujuan user.
+> **P54.5 (PyO3 expose) COMMITTED** — 4 modul PyO3 baru (kNN, LSTM, spread activation, Louvain) + registrasi submodule. `cargo check` + `cargo test --lib` 39/39 hijau. Gate **1,774** tidak berubah (akar-python standalone workspace). Tidak ada task P54 PLANNED tersisa.
 
 ---
 
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
-1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.4 **COMMITTED** (gate 1,774). P54.5 (PyO3 expose) next.
+1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.5 **COMMITTED** (gate 1,774). Sprint 20 selesai.
 2. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 3. **Sprint 21** — topik jangka panjang (di bawah).
 
