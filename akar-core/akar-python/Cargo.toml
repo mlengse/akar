@@ -27,10 +27,10 @@ akar-main = { path = "../akar-main", version = "0.1.4", features = [
     "vector-extension",
     "parquet-export",
 ] }
-akar-vector = { path = "../akar-vector", version = "0.1.0" }
-akar-graph = { path = "../akar-graph", version = "0.1.0" }
-akar-algo = { path = "../akar-algo", version = "0.1.0" }
-akar-ml = { path = "../akar-ml", version = "0.1.0" }
+akar-vector = { path = "../akar-vector", version = "0.1.2" }
+akar-graph = { path = "../akar-graph", version = "0.1.1" }
+akar-algo = { path = "../akar-algo", version = "0.1.2" }
+akar-ml = { path = "../akar-ml", version = "0.1.1" }
 
 [profile.release]
 opt-level = 3
