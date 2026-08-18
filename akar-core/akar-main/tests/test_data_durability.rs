@@ -314,22 +314,6 @@ impl CrashSimulator {
         }
     }
 
-    fn wait_for_wal_size(&self, min_wal_bytes: u64, timeout: Duration) -> bool {
-        let wal_path = self.db_path.join("wal.log");
-        let start = Instant::now();
-        loop {
-            if let Ok(meta) = fs::metadata(&wal_path) {
-                if meta.len() >= min_wal_bytes {
-                    return true;
-                }
-            }
-            if start.elapsed() > timeout {
-                return false;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-    }
-
     fn kill(&mut self) {
         if let Some(ref mut child) = self.child {
             let _ = child.kill();
@@ -353,11 +337,48 @@ impl Drop for CrashSimulator {
 fn test_crash_recovers_committed_rows_without_double_apply() {
     let mut sim = CrashSimulator::spawn("write", 200, 0);
 
-    assert!(
-        sim.wait_for_wal_size(300, Duration::from_secs(30)),
-        "WAL file did not grow within timeout"
-    );
-    thread::sleep(Duration::from_millis(300));
+    // Wait for the database directory to exist
+    let db_dir = sim.db_path().to_path_buf();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(30) {
+        if db_dir.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(db_dir.exists(), "Database directory was not created");
+
+    // Wait for at least some commits to be fully flushed (WAL fsync + column mirrors persisted).
+    // The child writes commit_done_N marker after each commit.
+    let start = Instant::now();
+    let mut last_commit = 0;
+    while start.elapsed() < Duration::from_secs(30) {
+        let entries: Vec<_> = fs::read_dir(&db_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("commit_done_"))
+            .collect();
+        if !entries.is_empty() {
+            last_commit = entries
+                .iter()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .strip_prefix("commit_done_")?
+                        .parse::<usize>()
+                        .ok()
+                })
+                .max()
+                .unwrap_or(0);
+            if last_commit >= 50 {
+                // At least 50 commits fully durable
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(last_commit >= 50, "Child did not complete enough durable commits in time");
+    thread::sleep(Duration::from_millis(100));
     sim.kill();
 
     // Reopen after the crash: the committed rows must survive, must not be

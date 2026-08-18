@@ -83,6 +83,10 @@ fn main() {
                         name, age, score, active
                     ))
                     .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
+
+                    // Signal that this commit (including WAL fsync + column mirror persist) is complete
+                    let commit_done = db_path.join(format!("commit_done_{}", i));
+                    fs::write(&commit_done, b"").expect("Failed to write commit_done marker");
                 }
             }
             "write-burst" => {
