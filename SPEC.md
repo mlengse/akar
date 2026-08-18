@@ -327,11 +327,12 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 | Location | `akar-core/akar-python/` (standalone workspace, not a member of `akar-core`) |
 | Binding layer | PyO3 0.29.2 + maturin |
 | Modules | `akar.Database`, `akar.Connection`, `akar.QueryResult` |
+| PyPI release | **`akar==0.1.0` published 2026-08-18** (wheel cp39-abi3 + sdist) — `pip install akar` |
 | Compat shim | `kairos/kuzu.py` — `import kuzu`/`import ladybug` → `import akar` (sys.modules aliases) |
-| Harness | `test_kuzu_compat.py` — 53 tests, 0 failed (P53.37–P53.38) |
+| Harness | `test_kuzu_compat.py` — 53 tests, 0 failed (P53.37–P53.38, re-verified 2026-08-18) |
 | Cypher translation | Kuzu syntax → Akar SQL (DDL idempotent, DML, vector index, EXPORT/IMPORT) |
 | Features | Reentrant lock, close/reopen, UNION DISTINCT, MERGE rel, OPTIONAL MATCH, SET arithmetic, FLOAT read-back, EXPORT/IMPORT with options |
-| Tested against | Kairos `KuzuDBStore` + `KuzuDBDreamBackend` via shim |
+| Tested against | Kairos `KuzuDBStore` + `KuzuDBDreamBackend` via shim; Kairos E2E remember/recall on PyPI wheel OK |
 
 ---
 

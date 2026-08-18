@@ -6,9 +6,33 @@ build-backend = "maturin"
 name = "akar"
 version = "0.1.0"
 description = "Akar — pure Rust embedded graph database for AI agent memory (Python bindings)"
+readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Anjang Kusuma Netra", email = "medtosys@gmail.com" },
+]
+keywords = ["graph", "database", "embedded", "cypher", "memory", "ai-agent", "kuzu"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/mlengse/akar"
+Documentation = "https://github.com/mlengse/akar/tree/main/akar-core/akar-python"
 
 [tool.maturin]
 module-name = "akar"

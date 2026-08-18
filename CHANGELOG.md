@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **P55.1 Python wheel `akar` 0.1.0 published to PyPI** — `akar==0.1.0` live di
+  [PyPI](https://pypi.org/project/akar/0.1.0/) (wheel `akar-0.1.0-cp39-abi3-win_amd64.whl`
+  + sdist `akar-0.1.0.tar.gz`), diverifikasi via TestPyPI terlebih dahulu. Prosedur:
+  `maturin build --release` → `maturin sdist` → upload `twine upload --repository pypi
+  target/wheels/*` (token via env `TWINE_PASSWORD`; `__token__` sebagai username).
+  Catatan: `maturin publish` me-rebuild dari nol (~10 menit) — gunakan **twine** untuk
+  upload artefak yang sudah dibangun. Install verifikasi: `pip install akar==0.1.0`
+  dari PyPI resmi + smoke test Database/Cypher OK; E2E Kairos (`remember`/`recall`,
+  backend kuzudb → akar) OK pada DB fresh. Ini menutup dependensi
+  `akar>=0.1.0` di `kairos/pyproject.toml` (sebelumnya gagal karena `akar` belum di PyPI).
+
 ## [0.1.7] - 2026-08-18
 
 ### Added

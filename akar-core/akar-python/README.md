@@ -117,6 +117,36 @@ $env:PYO3_PYTHON = ".venv\Scripts\python.exe"   # Windows PowerShell
 # Output: target/wheels/akar-0.1.0.tar.gz
 ```
 
+### Publishing to PyPI
+
+`akar` 0.1.0 is live on [PyPI](https://pypi.org/project/akar/). Procedure:
+
+1. **Build artifacts** (do NOT use `maturin publish` — it rebuilds the whole
+   workspace from scratch, ~10 min, and can exceed tool timeouts):
+   ```bash
+   .venv/Scripts/maturin build --release
+   .venv/Scripts/maturin sdist
+   ```
+2. **Upload with twine** (installed via `uv tool install twine`). Create an
+   API token at https://pypi.org/manage/account/token/ ("Entire account"); it
+   shows once — store it in a file outside the repo.
+   ```bash
+   # TestPyPI first (optional but recommended)
+   twine upload --repository testpypi target/wheels/*.whl target/wheels/*.tar.gz
+
+   # PyPI production
+   twine upload --repository pypi target/wheels/*.whl target/wheels/*.tar.gz
+   ```
+   Token supplied via env: `TWINE_USERNAME=__token__`, `TWINE_PASSWORD=<token>`.
+   Add `--skip-existing` when re-uploading after a metadata-only change.
+3. **Verify**: `pip install akar==<version>` in a clean venv, then smoke test
+   `Database`/`Connection`/Cypher. Run the compat harness
+   (`tests/test_kuzu_compat.py`) against the installed wheel.
+4. **Bump version** in `pyproject.toml` (`[project].version`) before each new
+   release — PyPI rejects re-upload of an existing version.
+5. **Record** the release in `../CHANGELOG.md` under `## [Unreleased]`
+   (Keep a Changelog).
+
 ## Tests
 
 ### Rust unit tests (cargo)
