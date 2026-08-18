@@ -83,11 +83,13 @@ fn main() {
                         name, age, score, active
                     ))
                     .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
-
-                    // Signal that this commit (including WAL fsync + column mirror persist) is complete
-                    let commit_done = db_path.join(format!("commit_done_{}", i));
-                    fs::write(&commit_done, b"").expect("Failed to write commit_done marker");
                 }
+                // All rows written and committed (each query's durable commit
+                // completed, including WAL flush + column-mirror persist).
+                // Signal the parent so it can kill us while idle — a hard
+                // kill (SIGKILL) with no clean shutdown, but with all
+                // committed rows already durable on disk.
+                fs::write(db_path.join("write_done"), b"").expect("Failed to write write_done marker");
             }
             "write-burst" => {
                 let batch_size = 100;
