@@ -7,8 +7,15 @@
 
 ### Added
 
+- **P55.2 akar-python 0.1.1 — metadata PyPI + re-publish** — pyproject metadata
+  diperkaya (authors, 13 classifiers, keywords, readme embed, project urls);
+  versi bump `0.1.0` → `0.1.1` (PyPI menolak upload ulang versi sama) dan
+  re-publish. Halaman PyPI kini menampilkan README penuh (6KB description),
+  classifier GPLv3, dan author. Wheel `akar-0.1.1-cp39-abi3-win_amd64.whl` +
+  sdist `akar-0.1.1.tar.gz`. Verifikasi: `pip install akar==0.1.1` + smoke test OK.
+
 - **P55.1 Python wheel `akar` 0.1.0 published to PyPI** — `akar==0.1.0` live di
-  [PyPI](https://pypi.org/project/akar/0.1.0/) (wheel `akar-0.1.0-cp39-abi3-win_amd64.whl`
+  [PyPI](https://pypi.org/project/akar/) (wheel `akar-0.1.0-cp39-abi3-win_amd64.whl`
   + sdist `akar-0.1.0.tar.gz`), diverifikasi via TestPyPI terlebih dahulu. Prosedur:
   `maturin build --release` → `maturin sdist` → upload `twine upload --repository pypi
   target/wheels/*` (token via env `TWINE_PASSWORD`; `__token__` sebagai username).

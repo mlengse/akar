@@ -68,7 +68,8 @@ db = kuzu.Database("/path/to/db")
 conn = kuzu.Connection(db)
 ```
 
-The shim registers `sys.modules` aliases for `kuzu` and `ladybug` packages.
+The shim registers a `sys.modules` alias for the `kuzu` package (`ladybug`
+alias was removed in 0.1.1 — Kairos imports akar directly).
 
 ## Supported Cypher features
 
