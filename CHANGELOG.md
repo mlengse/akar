@@ -5,12 +5,6 @@
 
 ## [Unreleased]
 
-### Added
-
-### Fixed
-
-- **Flaky crash recovery test stabilized** — `test_crash_recovers_committed_rows_without_double_apply` now uses commit_done marker files instead of WAL file size + sleep. Child writes marker after each commit (WAL fsync + column mirror persist); parent waits for markers ensuring durability. — `0f57c07` — gate **1,774** unchanged.
-
 ## [0.1.7] - 2026-08-18
 
 ### Added
@@ -23,7 +17,7 @@
 
 ### Fixed
 
-- **Flaky crash recovery test stabilized** — `test_crash_recovers_committed_rows_without_double_apply` now uses commit_done marker files instead of WAL file size + sleep. Child writes marker after each commit (WAL fsync + column mirror persist); parent waits for markers ensuring durability. — `0f57c07` — gate **1,774** unchanged.
+- **Flaky crash recovery test stabilized** — `test_crash_recovers_committed_rows_without_double_apply` kini kill child hanya setelah semua 200 baris committed & durable. Sejarah: (1) pendekatan awal menunggu WAL size + sleep → racy di Windows (fsync tak selesai). (2) Marker per-commit (`commit_done_N`) membunuh di tengah aliran tulis → state persist/WAL sobek yang tak bisa di-recover Linux (0 baris). (3) Fix final: child menulis `write_done` setelah loop tulis selesai (tiap commit durable: WAL flush + column-mirror persist), lalu di-SIGKILL saat idle — tanpa clean shutdown, tapi seluruh baris committed sudah durable. `wait_for_wal_size` (dead code) dihapus. — `ecf0244` — gate **1,774** unchanged.
 
 ## [0.1.6] - 2026-08-17
 
