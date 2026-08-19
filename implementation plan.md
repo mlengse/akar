@@ -108,7 +108,7 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 | P55.2 | **Implement `rrf_fuse`** — fungsi generik: `fn rrf_fuse<T>(sets: &[Vec<T>], k: usize, limit: usize) -> Vec<(T, f64)>` di mana `T` punya `id() -> impl Hash+Eq`. RRF constant `K=60`. Deduplicate by id, accumulate `1/(K+rank+1)`, sort desc, return top-limit dengan score. | `akar-search/src/rrf.rs` | **HIGH (CORE)** | COMMITTED |
 | P55.3 | **Implement `hybrid_search`** — fungsi tingkat tinggi: terima vector results + FTS results (keduanya `Vec<(id, score)>`), fuse via RRF, return `Vec<(id, f64)>`. Ini bridge antara `akar-vector` search + `akar-fts` search. | `akar-search/src/hybrid.rs` | **HIGH (BRIDGE)** | COMMITTED |
 | P55.4 | **Implement `multi_perspective_recall`** — fungsi: terima N queries, jalankan search function per query (callback/fn trait), fuse semua results via RRF. | `akar-search/src/multi.rs` | **MEDIUM** | COMMITTED |
-| P55.5 | **PyO3 expose** — submodule `akar.search` dengan `rrf_fuse`, `hybrid_search`, `multi_perspective_recall`. | `akar-python/src/search.rs` + `lib.rs` register | **MEDIUM** | PLANNED |
+| P55.5 | **PyO3 expose** — submodule `akar.search` dengan `rrf_fuse`, `hybrid_search`, `multi_perspective_recall`. | `akar-python/src/search.rs` + `lib.rs` register | **MEDIUM** | COMMITTED |
 | P55.6 | **Tes Rust** — minimal 8 tes: RRF kosong, 1 set, 2 set overlap, 3 set, dedup, limit, score ordering, `multi_perspective_recall` 3 queries. | `akar-search/src/rrf.rs` (inline tests) | **HIGH (GATE)** | COMMITTED |
 
 **Gate:** `cargo test -p akar-search` hijau 0 failed (17/17 passed). `test [akar-core]` tetap 1,774+.
@@ -167,7 +167,7 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 | P57.9 | **Implement `_phase_afe`** — sentence split → regex atomic fact extraction → write `afe:auto` memories + `SUPPORTS` edges. | `akar-dream/src/phases/afe.rs` | **MEDIUM** | COMMITTED |
 | P57.10 | **Implement `_phase_synthesis`** — group AFE facts by source → merge clusters → write synthesis memories. | `akar-dream/src/phases/synthesis.rs` | **MEDIUM** | COMMITTED |
 | P57.11 | **Implement `_phase_dae`** — recompute DAE embeddings untuk semua memories (batch). | `akar-dream/src/phases/dae.rs` | **MEDIUM** | COMMITTED |
-| P57.12 | **PyO3 expose** — submodule `akar.dream` dengan `DreamOrchestrator`, `DreamConfig`, `DreamBackend` (sebagai Python trait). | `akar-python/src/dream.rs` + `lib.rs` register | **HIGH** | PLANNED |
+| P57.12 | **PyO3 expose** — submodule `akar.dream` dengan `DreamOrchestrator`, `DreamConfig`, `DreamBackend` (sebagai Python trait). | `akar-python/src/dream.rs` + `lib.rs` register | **HIGH** | COMMITTED |
 | P57.13 | **Tes Rust** — minimal 12 tes: config defaults, NREM strengthen/weaken/prune, REM bridge, insights louvain, AFE extract, full cycle mock, error handling, concurrent safety. | `akar-dream/src/` (inline tests) | **HIGH (GATE)** | COMMITTED |
 
 **Gate:** `cargo test -p akar-dream` hijau 0 failed (5/5 passed). `test [akar-core]` tetap 1,774+.
@@ -184,7 +184,7 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 ## NEXT ACTIONS — Prioritas Pengerjaan
 
 1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.5 **COMMITTED** (gate 1,774). Sprint 20 selesai.
-2. **Sprint 21 — P55–P57 kairos-native** — hybrid RRF → batch spread → dream engine. P55.1–P55.4, P55.6 + P56.1–P56.3 + P57.1–P57.11, P57.13 **COMMITTED** (gate tetap 0 failed). Sisa: P55.5 (PyO3 search), P57.12 (PyO3 dream).
+2. **Sprint 21 — P55–P57 kairos-native** — hybrid RRF → batch spread → dream engine. P55.1–P55.6 + P56.1–P56.3 + P57.1–P57.13 **ALL COMMITTED**. Sprint 21 selesai (gate 0 failed, 34 crates).
 3. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
 4. **Sprint 22** — topik jangka panjang (di bawah).
 

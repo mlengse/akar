@@ -76,6 +76,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "akar-dream"
+version = "0.1.0"
+dependencies = [
+ "akar-algo",
+ "akar-common",
+ "akar-graph",
+ "akar-vector",
+ "hashbrown 0.17.1",
+ "tracing",
+]
+
+[[package]]
 name = "akar-extension"
 version = "0.1.1"
 dependencies = [
@@ -223,13 +235,22 @@ version = "0.1.1"
 dependencies = [
  "akar-algo",
  "akar-common",
+ "akar-dream",
  "akar-graph",
  "akar-main",
  "akar-ml",
+ "akar-search",
  "akar-vector",
  "pyo3",
  "regex",
  "serde_json",
+]
+
+[[package]]
+name = "akar-search"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]

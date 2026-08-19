@@ -11,10 +11,10 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-algo = { path = "../akar-algo", version = "0.1.0" }
-akar-common = { path = "../akar-common", version = "0.1.0" }
-akar-vector = { path = "../akar-vector", version = "0.1.0" }
-akar-graph = { path = "../akar-graph", version = "0.1.0" }
+akar-algo = { path = "../akar-algo", version = "0.1.2" }
+akar-common = { path = "../akar-common", version = "0.1.2" }
+akar-vector = { path = "../akar-vector", version = "0.1.2" }
+akar-graph = { path = "../akar-graph", version = "0.1.1" }
 hashbrown.workspace = true
 tracing.workspace = true
 
