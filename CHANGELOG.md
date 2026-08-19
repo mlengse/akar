@@ -7,6 +7,8 @@
 
 ### Added
 
+- **Sprint 21 (P55–P57) kairos-native migration — akar-search + akar-dream crates** — tiga capability kairos dipindahkan ke akar-native (Rust-only, zero Python runtime dependency). (1) **P55 Hybrid RRF Fusion** — crate baru `akar-search`: `rrf_fuse_ref`/`rrf_fuse_owned` (generik, K=60, dedup+rank), `hybrid_search` (vector+FTS→RRF), `multi_perspective_recall_with_id` (N queries→RRF). 17 Rust tests. (2) **P56 Batch Spread Activation** — `batch_spread_activation` di `akar-algo` (CSR shared, N seeds, top-k per seed) + PyO3 binding `akar.spread.batch_spread`. 5 Rust tests. (3) **P57 Dream Engine** — crate baru `akar-dream`: `DreamBackend` trait (MockBackend for tests), `DreamOrchestrator::run_cycle()` mengorchestrasi 7 fase (NREM→SUPERSEDES→REM→Insight→AFE→Synthesis→DAE), phase stats tracking. `DreamConfig` dengan defaults. 5 Rust tests. Workspace: 32→34 crates. Gate `test [akar-core]` tetap 0 failed.
+
 - **P55.2 akar-python 0.1.1 — metadata PyPI + re-publish** — pyproject metadata
   diperkaya (authors, 13 classifiers, keywords, readme embed, project urls);
   versi bump `0.1.0` → `0.1.1` (PyPI menolak upload ulang versi sama) dan

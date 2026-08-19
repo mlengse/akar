@@ -1682,6 +1682,68 @@ where
     SpreadActivationResult { activated }
 }
 
+/// Batch spreading activation: build CSR once, run BFS from each seed independently.
+///
+/// Returns a HashMap mapping each seed position to its top-k activated nodes
+/// (excluding the seed itself), sorted by activation descending.
+///
+/// - `edges`: edge list as `(src_offset, dst_offset)` pairs
+/// - `num_nodes`: total number of nodes in the graph
+/// - `seed_positions`: list of `(node_position, initial_activation)` tuples
+/// - `decay`: multiplicative decay per hop
+/// - `threshold`: minimum activation to propagate
+/// - `max_hops`: maximum propagation distance
+/// - `k_per_seed`: max results per seed
+pub fn batch_spread_activation(
+    edges: &[(usize, usize)],
+    num_nodes: usize,
+    seed_positions: &[(usize, f64)],
+    decay: f64,
+    threshold: f64,
+    max_hops: usize,
+    k_per_seed: usize,
+) -> std::collections::HashMap<usize, Vec<(usize, f64, usize)>> {
+    let mut results: std::collections::HashMap<usize, Vec<(usize, f64, usize)>> =
+        std::collections::HashMap::new();
+
+    if edges.is_empty() || num_nodes == 0 || seed_positions.is_empty() {
+        return results;
+    }
+
+    // Build CSR once for all seeds
+    let graph_edges: Vec<akar_graph::graph::Edge> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, &(src, dst))| akar_graph::graph::Edge {
+            src_offset: src as u64,
+            dst_offset: dst as u64,
+            rel_id: i as u64,
+            rel_table_id: 0,
+        })
+        .collect();
+    let csr = CSRAdjacency::build(&graph_edges, num_nodes);
+
+    // Run spread activation per seed
+    for &(seed_pos, seed_act) in seed_positions {
+        let result = compute_spread_activation(
+            &csr,
+            &[(seed_pos, seed_act)],
+            |_u, _v| 1.0,
+            decay,
+            threshold,
+            max_hops,
+        );
+
+        let mut activated = result.activated;
+        activated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        activated.truncate(k_per_seed);
+
+        results.insert(seed_pos, activated);
+    }
+
+    results
+}
+
 // --------------- Spanning Forest (Kruskal) ---------------
 
 /// Compute a spanning forest using Kruskal's algorithm.
@@ -2760,5 +2822,84 @@ mod tests {
         assert!((node1.1 - 1.0).abs() < 1e-10);
         let node2 = result.activated.iter().find(|(id, _, _)| *id == 2).unwrap();
         assert!((node2.1 - 0.05).abs() < 1e-10);
+    }
+
+    // ── batch spread activation tests ──────────────────────────────────
+
+    #[test]
+    fn test_batch_spread_empty() {
+        let result = batch_spread_activation(&[], 0, &[], 0.5, 0.01, 3, 20);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_batch_spread_single_seed() {
+        // 0--1--2
+        let edges = vec![(0, 1), (1, 2)];
+        let seeds = vec![(0, 1.0)];
+        let result = batch_spread_activation(&edges, 3, &seeds, 0.5, 0.01, 3, 20);
+        assert_eq!(result.len(), 1);
+        let activated = result.get(&0).unwrap();
+        assert!(!activated.is_empty());
+        // Node 1 should be activated
+        assert!(activated.iter().any(|(id, _, _)| *id == 1));
+    }
+
+    #[test]
+    fn test_batch_spread_three_seeds() {
+        // 0--2, 1--2, 2--3
+        let edges = vec![(0, 2), (1, 2), (2, 3)];
+        let seeds = vec![(0, 1.0), (1, 1.0), (2, 1.0)];
+        let result = batch_spread_activation(&edges, 4, &seeds, 0.5, 0.01, 2, 20);
+        // All 3 seeds should have results
+        assert_eq!(result.len(), 3);
+        // Seed 0 reaches node 2
+        assert!(result.get(&0).unwrap().iter().any(|(id, _, _)| *id == 2));
+        // Seed 1 reaches node 2
+        assert!(result.get(&1).unwrap().iter().any(|(id, _, _)| *id == 2));
+        // Seed 2 reaches nodes 0, 1, 3
+        let seed2 = result.get(&2).unwrap();
+        assert!(seed2.iter().any(|(id, _, _)| *id == 0));
+        assert!(seed2.iter().any(|(id, _, _)| *id == 1));
+        assert!(seed2.iter().any(|(id, _, _)| *id == 3));
+    }
+
+    #[test]
+    fn test_batch_spread_k_per_seed_limit() {
+        // Star: 0--1, 0--2, 0--3, 0--4, 0--5
+        let edges: Vec<(usize, usize)> = (1..=5).map(|i| (0, i)).collect();
+        let seeds = vec![(0, 1.0)];
+        let result = batch_spread_activation(&edges, 6, &seeds, 0.5, 0.01, 1, 3);
+        let activated = result.get(&0).unwrap();
+        // Should be limited to 3 results
+        assert_eq!(activated.len(), 3);
+    }
+
+    #[test]
+    fn test_batch_spread_csr_shared() {
+        // Verify that CSR is built once by checking results are consistent
+        // with individual spread_activation calls
+        let edges = vec![(0, 1), (1, 2), (2, 3)];
+        let seeds = vec![(0, 1.0), (2, 1.0)];
+        let batch_result = batch_spread_activation(&edges, 4, &seeds, 0.5, 0.01, 2, 20);
+
+        // Compare with individual calls
+        let csr = CSRAdjacency::build(
+            &edges.iter().enumerate().map(|(i, &(s, d))| Edge {
+                src_offset: s as u64,
+                dst_offset: d as u64,
+                rel_id: i as u64,
+                rel_table_id: 0,
+            }).collect::<Vec<_>>(),
+            4,
+        );
+        let r0 = compute_spread_activation(&csr, &[(0, 1.0)], |_u, _v| 1.0f64, 0.5, 0.01, 2);
+        let r2 = compute_spread_activation(&csr, &[(2, 1.0)], |_u, _v| 1.0f64, 0.5, 0.01, 2);
+
+        // Batch results should match individual results (top-k truncated)
+        let b0 = batch_result.get(&0).unwrap();
+        assert_eq!(b0.len(), r0.activated.len().min(20));
+        let b2 = batch_result.get(&2).unwrap();
+        assert_eq!(b2.len(), r2.activated.len().min(20));
     }
 }

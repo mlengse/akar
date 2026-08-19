@@ -129,6 +129,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "akar-dream"
+version = "0.1.0"
+dependencies = [
+ "akar-algo",
+ "akar-common",
+ "akar-graph",
+ "akar-vector",
+ "hashbrown 0.17.1",
+ "tracing",
+]
+
+[[package]]
 name = "akar-duckdb"
 version = "0.1.2"
 dependencies = [
@@ -372,6 +384,13 @@ dependencies = [
  "hashbrown 0.17.1",
  "rayon",
  "tracing",
+]
+
+[[package]]
+name = "akar-search"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
