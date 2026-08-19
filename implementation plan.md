@@ -185,10 +185,53 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 
 1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.5 **COMMITTED** (gate 1,774). Sprint 20 selesai.
 2. **Sprint 21 — P55–P57 kairos-native** — hybrid RRF → batch spread → dream engine. P55.1–P55.6 + P56.1–P56.3 + P57.1–P57.13 **ALL COMMITTED**. Sprint 21 selesai (gate 0 failed, 34 crates).
-3. **Sisa P51** — P51.48–P51.49 (perf connector/parquet) → P51.40–P51.46 (DRY/KISS) → P51.46 verify.
-4. **Sprint 22** — topik jangka panjang (di bawah).
+3. **Sprint 21b — kairos migration** — RRF + batch_spread migrated in kairos (engine.py, plugin.py, rust_bridge.py). akar 0.1.2 published to PyPI. **COMMITTED**.
+4. **Sprint 22** — P58 weighted RRF → sisa P51 (perf/DRY) → topik jangka panjang.
 
-### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 22+ (2026)
+---
+
+## SPRINT 22 — WEIGHTED RRF + KAIROS FULL MIGRATION (P58): PLANNED
+
+> Sprint 22 (2026-08-19+): menyelesaikan migrasi kairos ke akar-native.
+> Temuan dari Sprint 21b: `memory_client.py:_rrf_fuse` butuh **weighted** RRF
+> (akar `rrf_fuse` hanya rank-based, mengabaikan input score). Dream engine
+> orchestration tetap di Python (application logic, bukan akar candidate).
+
+| Task | Description | Files | Severity | Status |
+|------|-------------|-------|----------|--------|
+| P58.1 | **Implement `weighted_rrf_fuse` di `akar-search`** — fungsi: `fn weighted_rrf_fuse<T>(sets: &[Vec<T>], weights: &[f64], k: usize, limit: usize) -> Vec<(T, f64)>`. Weight diterapkan sebagai multiplier pada RRF score: `weight / (k + rank + 1)`. Idempoten: weight=1.0 menghasilkan output sama dengan `rrf_fuse_ref`. | `akar-search/src/rrf.rs` | **HIGH (CORE)** | PLANNED |
+| P58.2 | **PyO3 expose `weighted_rrf_fuse`** — tambahkan ke submodule `akar.search`: `weighted_rrf_fuse(sets, weights, k, limit)`. Sets = list of list of `(id, score)`, weights = list of float. | `akar-python/src/search.rs` | **HIGH** | PLANNED |
+| P58.3 | **Tes Rust** — 6 tes: weighted kosong, 1 set (weight=2.0), 2 set berbeda weight, weight=1.0 = unweighted, limit, dedup. | `akar-search/src/rrf.rs` (inline tests) | **HIGH (GATE)** | PLANNED |
+| P58.4 | **Migrasi `memory_client.py:_rrf_fuse`** — ganti Python implementation dengan `akar.search.weighted_rrf_fuse`. Reconstruct `channel_scores` dan `semantic_similarity` setelah fusion. Fallback ke Python jika akar tidak tersedia. | `kairos/kairos/memory_client.py:2964-2976` | **HIGH** | PLANNED |
+| P58.5 | **Publish `akar-search` 0.1.1** — bump versi untuk include `weighted_rrf_fuse`. Publish ke crates.io. | `akar-core/akar-search/Cargo.toml` | **MEDIUM** | PLANNED |
+
+**Gate:** `cargo test -p akar-search` hijau 0 failed. `test [akar-core]` tetap 0 failed.
+
+**Urutan:** P58.1 → P58.3 → P58.2 → P58.5 → P58.4 (kairos side).
+
+---
+
+## SPRINT 22 — SISA P51 (AUDIT 1): PLANNED
+
+> Sisa P51 dari Sprint 19. Performance dan DRY/KISS cleanup.
+
+| Task | Description | Files | Severity | Status |
+|------|-------------|-------|----------|--------|
+| P51.48 | **Perf: connector query materialize penuh (`duckdb query_rows`), HTTP timeout absent (`akar-llm`), `Box::leak` API key** | `akar-duckdb/src/connection.rs:176-187`, `akar-llm/src/lib.rs:140-142,158-162` | **MEDIUM (PERF/BUG)** | PLANNED |
+| P51.49 | **Perf: parquet export materialize `Vec<Vec<Value>>`; ANALYZE stringify per col sambil pegang stats lock** | `akar-main/src/connection/ddl.rs:801-811,693-787` | **MEDIUM (PERF)** | PLANNED |
+| P51.40 | **DRY: DuckDB-delegation copy-paste 4 crate** | lihat P51.39 | **MEDIUM (DRY)** | PLANNED |
+| P51.41 | **DRY: `extract_f64_list` duplikat** | `akar-vector/src/lib.rs:128-147`, `akar-storage/src/vector_index.rs:329-354` | **MEDIUM (DRY)** | PLANNED |
+| P51.42 | **DRY: EXPORT DATABASE diimplementasi 2x (divergen)** | `akar-main/src/connection/copy.rs:6-77`, `query.rs:426-489` | **MEDIUM (DRY)** | PLANNED |
+| P51.43 | **DRY: `value_to_csv_string` vs `pk_value_to_string` near-duplicate** | `akar-main/src/connection/utils.rs:87-135`, `query_result.rs:137-169`, `remote.rs:110-156` | **LOW (DRY)** | PLANNED |
+| P51.44 | **KISS: `auto_checkpoint` dead config & spiller plumbing mati** | `akar-main/src/database.rs:38,110-146`, `connection/query.rs:28-41` | **LOW-MEDIUM (KISS/DEAD CODE)** | PLANNED |
+| P51.45 | **KISS: parser text-sniffing** | `akar-parser/src/parser/expression.rs:101`, `dml.rs:58,345-370` | **LOW (KISS)** | PLANNED |
+| P51.46 | **KISS: `vector_similarity` cosine normalisasi hanya query vector** | `akar-processor/src/physical/vector_similarity.rs` | **LOW (BUG?)** | PLANNED |
+
+**Urutan kerja usulan (sisa P51):** P58 (weighted RRF) → P51.48–P51.49 (perf) → P51.40–P51.45 (DRY/KISS) → P51.46 (verify).
+
+---
+
+### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 23+ (2026)
 
 - FTS ranking (BM25/TF-IDF) & highlight — `akar-fts`
 - Konektor graph-native (Neo4j Bolt) — `akar-graph`
