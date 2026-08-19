@@ -3,7 +3,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use akar_search::rrf::{rrf_fuse_owned, FusedItem, DEFAULT_K};
+use akar_search::rrf::{rrf_fuse_owned, weighted_rrf_fuse, FusedItem, DEFAULT_K};
 use akar_search::hybrid::{hybrid_search, SearchResult};
 use akar_search::multi::multi_perspective_recall_with_id;
 
@@ -71,6 +71,42 @@ fn hybrid_search_py(
     Ok(result)
 }
 
+/// Weighted RRF: fuse N ranked result lists with per-channel weights.
+///
+/// - `sets`: list of ranked result lists, each a list of `(id: int, score: float)` tuples.
+/// - `weights`: list of floats, one per set (e.g. `[1.0, 0.8, 0.6]`).
+/// - `k`: RRF constant (default 60).
+/// - `limit`: max results to return (default 20).
+///
+/// Formula: `weight / (k + rank)` per item (rank is 1-based).
+/// Returns list of `{id: int, score: float}` dicts sorted by descending weighted RRF score.
+#[pyfunction]
+#[pyo3(signature = (sets, weights, k=DEFAULT_K as usize, limit=20))]
+fn weighted_rrf_fuse_py(
+    py: Python<'_>,
+    sets: Vec<Vec<(u64, f64)>>,
+    weights: Vec<f64>,
+    k: usize,
+    limit: usize,
+) -> PyResult<Vec<Py<PyAny>>> {
+    if sets.len() != weights.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "sets and weights must have the same length",
+        ));
+    }
+    let input: Vec<(Vec<(u64, f64)>, f64)> = sets.into_iter().zip(weights).collect();
+    let fused: Vec<FusedItem<(u64, f64)>> = weighted_rrf_fuse(input, |&(id, _)| id, k, limit);
+
+    let mut result = Vec::with_capacity(fused.len());
+    for f in fused {
+        let d = PyDict::new(py);
+        d.set_item("id", f.item.0)?;
+        d.set_item("score", f.rrf_score)?;
+        result.push(d.unbind().into_any());
+    }
+    Ok(result)
+}
+
 /// Multi-perspective recall: run N search queries and fuse results via RRF.
 ///
 /// - `queries`: list of query strings.
@@ -115,6 +151,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "search")?;
     sub.add_function(wrap_pyfunction!(rrf_fuse, &sub)?)?;
     sub.add_function(wrap_pyfunction!(hybrid_search_py, &sub)?)?;
+    sub.add_function(wrap_pyfunction!(weighted_rrf_fuse_py, &sub)?)?;
     sub.add_function(wrap_pyfunction!(multi_perspective_recall, &sub)?)?;
     m.add_submodule(&sub)?;
     Ok(())

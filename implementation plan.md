@@ -186,28 +186,33 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 1. **Sprint 20 — P54 kairos_core refactor** — P54.1–P54.5 **COMMITTED** (gate 1,774). Sprint 20 selesai.
 2. **Sprint 21 — P55–P57 kairos-native** — hybrid RRF → batch spread → dream engine. P55.1–P55.6 + P56.1–P56.3 + P57.1–P57.13 **ALL COMMITTED**. Sprint 21 selesai (gate 0 failed, 34 crates).
 3. **Sprint 21b — kairos migration** — RRF + batch_spread migrated in kairos (engine.py, plugin.py, rust_bridge.py). akar 0.1.2 published to PyPI. **COMMITTED**.
-4. **Sprint 22** — P58 weighted RRF → sisa P51 (perf/DRY) → topik jangka panjang.
+4. **Sprint 22 — P58 weighted RRF** — `weighted_rrf_fuse` in akar-search + PyO3 binding. `memory_client.py` NOT migrated (channel_scores coupling). **COMMITTED**. akar-search 0.1.1 published to crates.io.
+5. **Sprint 23** — sisa P51 (perf/DRY) → topik jangka panjang.
 
----
+### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 23+ (2026)
 
-## SPRINT 22 — WEIGHTED RRF + KAIROS FULL MIGRATION (P58): PLANNED
+- FTS ranking (BM25/TF-IDF) & highlight — `akar-fts`
+- Konektor graph-native (Neo4j Bolt) — `akar-graph`
+- JSON type native + operator — `akar-json`
+- Vector index ANN (HNSW/PQ) — `akar-vector`
+- Streaming/Chunked query results — `akar-server`
+- Cluster/multi-node — arsitektur embedding vs server (2026)
 
-> Sprint 22 (2026-08-19+): menyelesaikan migrasi kairos ke akar-native.
-> Temuan dari Sprint 21b: `memory_client.py:_rrf_fuse` butuh **weighted** RRF
-> (akar `rrf_fuse` hanya rank-based, mengabaikan input score). Dream engine
-> orchestration tetap di Python (application logic, bukan akar candidate).
+> Sprint 22 (2026-08-19): weighted RRF fusion untuk akar-search.
+> Temuan: `memory_client.py:_rrf_fuse` TIDAK dimigrasi — tight coupling dengan
+> `channel_scores` tracking + downstream PPR/ColBERT/DAE mutations. Rust
+> `weighted_rrf_fuse` tetap berguna untuk caller lain yang tidak butuh
+> `channel_scores`.
 
 | Task | Description | Files | Severity | Status |
 |------|-------------|-------|----------|--------|
-| P58.1 | **Implement `weighted_rrf_fuse` di `akar-search`** — fungsi: `fn weighted_rrf_fuse<T>(sets: &[Vec<T>], weights: &[f64], k: usize, limit: usize) -> Vec<(T, f64)>`. Weight diterapkan sebagai multiplier pada RRF score: `weight / (k + rank + 1)`. Idempoten: weight=1.0 menghasilkan output sama dengan `rrf_fuse_ref`. | `akar-search/src/rrf.rs` | **HIGH (CORE)** | PLANNED |
-| P58.2 | **PyO3 expose `weighted_rrf_fuse`** — tambahkan ke submodule `akar.search`: `weighted_rrf_fuse(sets, weights, k, limit)`. Sets = list of list of `(id, score)`, weights = list of float. | `akar-python/src/search.rs` | **HIGH** | PLANNED |
-| P58.3 | **Tes Rust** — 6 tes: weighted kosong, 1 set (weight=2.0), 2 set berbeda weight, weight=1.0 = unweighted, limit, dedup. | `akar-search/src/rrf.rs` (inline tests) | **HIGH (GATE)** | PLANNED |
-| P58.4 | **Migrasi `memory_client.py:_rrf_fuse`** — ganti Python implementation dengan `akar.search.weighted_rrf_fuse`. Reconstruct `channel_scores` dan `semantic_similarity` setelah fusion. Fallback ke Python jika akar tidak tersedia. | `kairos/kairos/memory_client.py:2964-2976` | **HIGH** | PLANNED |
-| P58.5 | **Publish `akar-search` 0.1.1** — bump versi untuk include `weighted_rrf_fuse`. Publish ke crates.io. | `akar-core/akar-search/Cargo.toml` | **MEDIUM** | PLANNED |
+| P58.1 | **Implement `weighted_rrf_fuse` di `akar-search`** — `fn weighted_rrf_fuse<T>(sets: Vec<(Vec<T>, f64)>, id_fn, k, limit) -> Vec<FusedItem<T>>`. Formula: `weight / (k + rank)` (rank 1-based). Weight=1.0 = unweighted. | `akar-search/src/rrf.rs` | **HIGH (CORE)** | DONE |
+| P58.2 | **PyO3 expose `weighted_rrf_fuse`** — `akar.search.weighted_rrf_fuse_py(sets, weights, k, limit)`. Validation: sets.len() == weights.len(). | `akar-python/src/search.rs` | **HIGH** | DONE |
+| P58.3 | **Tes Rust** — 6 tes: empty, single set, weight 2x > weight 1x, equal weights = unweighted, dedup, limit. | `akar-search/src/rrf.rs` | **HIGH (GATE)** | DONE |
+| P58.4 | **Migrasi `memory_client.py:_rrf_fuse`** — **NOT MIGRATED**: `channel_scores` tracking + downstream PPR/ColBERT/DAE mutations tightly coupled. Reconstructing in Python negates native benefit. | `kairos/kairos/memory_client.py:2964-2976` | **HIGH** | DONE (skipped) |
+| P58.5 | **Publish `akar-search` 0.1.1** — bumped + published to crates.io. | `akar-core/akar-search/Cargo.toml` | **MEDIUM** | DONE |
 
-**Gate:** `cargo test -p akar-search` hijau 0 failed. `test [akar-core]` tetap 0 failed.
-
-**Urutan:** P58.1 → P58.3 → P58.2 → P58.5 → P58.4 (kairos side).
+**Gate:** `cargo test -p akar-search` 23/23 hijau. `test [akar-core]` 0 failed.
 
 ---
 

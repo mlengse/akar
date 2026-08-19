@@ -16,6 +16,48 @@ pub struct FusedItem<T> {
     pub rrf_score: f64,
 }
 
+/// Weighted RRF fusion: `weight / (k + rank)` per item.
+///
+/// Each set carries its own weight. Rank is 1-based (matching Python convention).
+/// When all weights are 1.0 this is equivalent to unweighted RRF.
+pub fn weighted_rrf_fuse<T, I, F>(
+    sets: Vec<(Vec<T>, f64)>,
+    id_fn: F,
+    k: usize,
+    limit: usize,
+) -> Vec<FusedItem<T>>
+where
+    I: Eq + std::hash::Hash + Clone,
+    F: Fn(&T) -> I,
+{
+    let mut scores: HashMap<I, f64> = HashMap::new();
+    let mut id_to_item: HashMap<I, T> = HashMap::new();
+
+    for (set, weight) in sets {
+        for (rank, item) in set.into_iter().enumerate() {
+            let id = id_fn(&item);
+            let rrf = weight / (k as f64 + (rank + 1) as f64);
+
+            *scores.entry(id.clone()).or_insert(0.0) += rrf;
+            id_to_item.entry(id).or_insert(item);
+        }
+    }
+
+    let mut results: Vec<FusedItem<T>> = scores
+        .into_iter()
+        .filter_map(|(id, score)| {
+            id_to_item.remove(&id).map(|item| FusedItem {
+                item,
+                rrf_score: score,
+            })
+        })
+        .collect();
+
+    results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
+    results.truncate(limit);
+    results
+}
+
 /// Fuse N ranked result sets (owned version).
 ///
 /// Simpler API that takes ownership of the result sets.
@@ -201,5 +243,66 @@ mod tests {
         // Items 2 and 4 appear in 2 sets
         assert!(*result[1].0 == 2 || *result[1].0 == 4);
         assert!(*result[2].0 == 2 || *result[2].0 == 4);
+    }
+
+    // ── weighted_rrf_fuse tests ──
+
+    #[test]
+    fn test_weighted_rrf_empty() {
+        let result = weighted_rrf_fuse::<i32, i32, _>(vec![], |x| *x, DEFAULT_K, 10);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_weighted_rrf_single_set() {
+        let sets = vec![(vec![1, 2, 3], 1.0)];
+        let result = weighted_rrf_fuse(sets, |x| *x, DEFAULT_K, 10);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].item, 1);
+        assert_eq!(result[1].item, 2);
+        assert_eq!(result[2].item, 3);
+    }
+
+    #[test]
+    fn test_weighted_rrf_weight_2x_beats_weight_1x() {
+        // item 5 is rank 1 in high-weight set; item 1 is rank 0 in low-weight set
+        // 5 should still win because weight 2.0 boosts it
+        let sets = vec![(vec![5], 2.0), (vec![1], 1.0)];
+        let result = weighted_rrf_fuse(sets, |x| *x, DEFAULT_K, 10);
+        assert_eq!(result[0].item, 5);
+        assert_eq!(result[1].item, 1);
+    }
+
+    #[test]
+    fn test_weighted_rrf_equal_weights_matches_unweighted() {
+        // With weight=1.0, weighted_rrf_fuse should give same ranking as rrf_fuse_ref
+        let a = vec![1, 2, 3];
+        let b = vec![2, 3, 4];
+        let weighted = weighted_rrf_fuse(vec![(a, 1.0), (b, 1.0)], |x| *x, DEFAULT_K, 10);
+        let ref_sets = [vec![1, 2, 3], vec![2, 3, 4]];
+        let unweighted = rrf_fuse_ref(&ref_sets, |x| *x, DEFAULT_K, 10);
+        assert_eq!(weighted.len(), unweighted.len());
+        for (w, u) in weighted.iter().zip(unweighted.iter()) {
+            assert_eq!(w.item, *u.0);
+            assert!((w.rrf_score - u.1).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_weighted_rrf_dedup_within_set() {
+        // item 1 appears in one set with weight 3.0 at ranks 0 and 1
+        let sets = vec![(vec![1, 1, 2], 3.0)];
+        let result = weighted_rrf_fuse(sets, |x| *x, DEFAULT_K, 10);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].item, 1);
+        // 3.0/(60+1) + 3.0/(60+2) ≈ 0.0492 + 0.0484 ≈ 0.0976
+        assert!((result[0].rrf_score - 0.0976).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_weighted_rrf_limit() {
+        let sets = vec![(vec![1, 2, 3, 4, 5], 1.0)];
+        let result = weighted_rrf_fuse(sets, |x| *x, DEFAULT_K, 3);
+        assert_eq!(result.len(), 3);
     }
 }
