@@ -176,8 +176,13 @@ impl DuckDbManager {
     }
 
     /// Query rows using a prepared statement.
+    ///
+    /// Caps at `MAX_QUERY_ROWS` to prevent OOM on unbounded queries.
+    /// Callers should use LIMIT in their SQL for intentional caps.
     #[cfg(feature = "bundled")]
     pub fn query_rows(&self, sql: &str) -> Result<Vec<Vec<duckdb::types::Value>>, String> {
+        const MAX_QUERY_ROWS: usize = 100_000;
+
         let conn = self.connection.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         let mut stmt = match conn.prepare(sql) {
             Ok(s) => s,
@@ -191,6 +196,9 @@ impl DuckDbManager {
 
         let mut results = Vec::new();
         while let Some(row) = rows.next().map_err(|e| format!("DuckDB row error: {e}"))? {
+            if results.len() >= MAX_QUERY_ROWS {
+                break;
+            }
             let mut values = Vec::with_capacity(col_count);
             for i in 0..col_count {
                 let val: duckdb::types::Value = row

@@ -7,6 +7,8 @@
 
 ### Added
 
+- **Sprint 23 (P51.48, P51.48b) — perf & flaky fix** — (1) **P51.48a** DuckDB `query_rows` safety cap: `MAX_QUERY_ROWS = 100_000` prevents OOM on unbounded queries (`akar-duckdb/src/connection.rs:180`). (2) **P51.48b** akar-llm HTTP timeout: `ureq::Agent::new_with_config` with `timeout_global: 30s` on both OpenAI and Ollama endpoints (`akar-llm/src/lib.rs:171,231`). (3) **P51.48c** akar-llm `Box::leak` API key fix: replaced with local `_env_key` variable — no more memory leak (`akar-llm/src/lib.rs:141-148`). (4) **P51.48b** flaky `test_plan_cache_no_hit_regression` fix: threshold 1.5→2.0, warmup 1→10, N 1000→2000. Verified: hit/miss ratio 0.975. Gate `test [akar-core]` 0 failed.
+
 - **Sprint 22 (P58) — weighted RRF fusion** — `weighted_rrf_fuse` added to `akar-search` (Rust) + PyO3 binding `akar.search.weighted_rrf_fuse_py`. Formula: `weight / (k + rank)` per item, rank 1-based. Weight=1.0 equivalent to unweighted RRF. 6 Rust tests. Published: `akar-search` 0.1.1. `memory_client.py:_rrf_fuse` kept as Python (tight coupling with `channel_scores` tracking + downstream PPR/ColBERT/DAE mutations).
 
 - **Sprint 21b — kairos native migration: akar-python 0.1.2 (PyPI)** — akar-python bumped 0.1.1 → 0.1.2; wheel rebuilt with `akar.search` (rrf_fuse, hybrid_search, multi_perspective_recall), `akar.spread` (spread_activation, batch_spread), and `akar.dream` (PyDreamConfig, PyPhaseStats, PyDreamStats) submodules. Published to PyPI: `pip install akar==0.1.2`. Enables kairos to replace Python RRF/spread implementations with native Rust via `import akar.search` / `import akar.spread`.

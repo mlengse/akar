@@ -6,6 +6,10 @@
 //! - Ollama (local, supports nomic-embed-text, mxbai-embed-large, etc.)
 
 use akar_extension::{Extension, ExtensionContext};
+use std::time::Duration;
+
+/// Default HTTP timeout for LLM API requests.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The LLM embedding extension.
 pub struct LlmExtension;
@@ -141,18 +145,17 @@ pub fn create_embedding(text: &str, config: Option<&EmbeddingConfig>) -> Result<
 /// Uses the `/v1/embeddings` endpoint.
 /// Requires `OPENAI_API_KEY` environment variable or config.api_key.
 fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, String> {
-    let api_key = config
-        .api_key
-        .as_deref()
-        .or_else(|| {
-            // Try environment variable as fallback
-            let env_key = std::env::var("OPENAI_API_KEY").ok()?;
-            // Leak the string to get a &'static str — safe for one-shot config
-            Some(Box::leak(env_key.into_boxed_str()) as &str)
-        })
-        .ok_or_else(|| {
-            "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config.".to_string()
-        })?;
+    // Resolve API key: config first, then env var. No Box::leak — keep as
+    // owned String so it lives long enough for the HTTP request below.
+    let _env_key;
+    let api_key: &str = match config.api_key.as_deref() {
+        Some(k) => k,
+        None => {
+            _env_key = std::env::var("OPENAI_API_KEY")
+                .map_err(|_| "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config.".to_string())?;
+            &_env_key
+        }
+    };
 
     let url = config
         .api_url
@@ -165,7 +168,12 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     });
     let body_str = serde_json::to_string(&request_body).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
-    let response = ureq::post(url)
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(HTTP_TIMEOUT))
+            .build()
+    );
+    let response = agent.post(url)
         .header("Authorization", &format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .send(body_str)
@@ -219,7 +227,12 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     });
     let body_str = serde_json::to_string(&request_body).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
-    let response = ureq::post(url)
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(HTTP_TIMEOUT))
+            .build()
+    );
+    let response = agent.post(url)
         .header("Content-Type", "application/json")
         .send(body_str)
         .map_err(|e| format!("Ollama API request failed: {e}"))?;
