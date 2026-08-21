@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Dead-code cleanup — phantom classes in `__init__.pyi` (2026-08-22)** — dropped `NodeVal`, `RelVal`, `KNNResult`, `DatabaseType` from the hand-written type stub: none exist in the compiled `akar` module (verified against wheel 0.1.2 export surface: `Database`, `Connection`, `QueryResult` + submodules `search/spread/dream/knn/louvain/lstm`; `akar.knn` has functions only). Leftovers of the deleted `tools/rust_api` crate. Stub-only change — zero runtime impact. Commit `c1eff2c`.
+
 ### Fixed
 
 - **P53.18 / P53.39 — kairos drop-in bugs (2026-08-21)** — (1) **P53.18** `WITH` clause now resets the scope to its projection: bare variables and aliases (aggregates like `COUNT(r) AS cnt`) become in-scope for trailing `WHERE`/`RETURN`. Previously the alias list was discarded, so `WITH m, COUNT(r) AS cnt WHERE cnt < $n` failed with `Variable 'cnt' not in scope` (kairos Finding #13, dream REM phase). (2) **P53.39** `MATCH ... SET ... RETURN` with no matching row now returns **zero rows**; previously the SET emitted a phantom `count=0` chunk that the RETURN turned into `[[0]]` (kairos P0/P59.1). A terminal SET (no RETURN) still reports "updated: N" via column 0. Files: `akar-binder/src/binder/mod.rs`, `akar-planner/src/planner.rs`, `akar-planner/src/logical_operator.rs`, `akar-processor/src/physical/write_ops/set.rs`, `akar-processor/src/processor/mapper/map_update.rs`. Tests: `test_bind_with_alias_in_scope_where_and_return`, `test_bind_with_plain_aggregate_return`, `test_p5339_match_set_return_no_match_empty`, `test_p5339_match_set_no_return_reports_zero`. Gate: akar-binder 95/95, akar-main integration 70/70, akar-main full 0 failed.
