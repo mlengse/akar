@@ -192,7 +192,37 @@ impl Binder {
                 }
                 Clause::With(r) => {
                     let bound = self.bind_return(&r, &variables)?;
-                    (BoundClause::BoundWith(bound), Vec::new())
+                    // P53.18: WITH resets the scope to its projection. Each
+                    // projected bare variable (carried through) and each alias
+                    // (aggregate/computed) becomes an in-scope variable for the
+                    // following clauses — e.g. `WITH m, COUNT(r) AS cnt
+                    // WHERE cnt < $n RETURN cnt`. Previously the alias list was
+                    // discarded, so the trailing WHERE/RETURN failed with
+                    // `Variable 'cnt' not in scope`.
+                    let projected: Vec<BoundVariable> = bound
+                        .expressions
+                        .iter()
+                        .filter_map(|be| {
+                            if let Expression::Variable(v) = &be.expression {
+                                if let Some(existing) = variables.iter().find(|x| &x.name == v) {
+                                    let alias = be.alias.clone().unwrap_or_else(|| v.clone());
+                                    return Some(BoundVariable {
+                                        name: alias,
+                                        table_id: existing.table_id,
+                                        label: existing.label.clone(),
+                                        is_node: existing.is_node,
+                                    });
+                                }
+                            }
+                            be.alias.as_ref().map(|alias| BoundVariable {
+                                name: alias.clone(),
+                                table_id: 0,
+                                label: None,
+                                is_node: false,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    (BoundClause::BoundWith(bound), projected)
                 }
                 Clause::Where(w) => {
                     let bound = self.bind_where(&w, &variables)?;
@@ -239,7 +269,13 @@ impl Binder {
                     (BoundClause::BoundMerge(bound), vars)
                 }
             };
-            variables.extend(new_vars);
+            if matches!(bound_clause, BoundClause::BoundWith(_)) {
+                // WITH resets the scope to its projection (P53.18): only the
+                // projected variables/aliases remain in scope afterwards.
+                variables = new_vars;
+            } else {
+                variables.extend(new_vars);
+            }
             clauses.push(bound_clause.clone());
 
             // Generate implicit WHERE clauses from inline properties for MATCH and CREATE

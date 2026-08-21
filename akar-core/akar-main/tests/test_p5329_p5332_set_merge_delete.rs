@@ -60,6 +60,36 @@ fn test_p5330_match_set_return_multi_rows() {
 }
 
 #[test]
+fn test_p5339_match_set_return_no_match_empty() {
+    // P53.39 / kairos P59.1: `MATCH ... SET ... RETURN` with NO matching row
+    // must return ZERO rows — previously the SET emitted a phantom `count=0`
+    // chunk that the RETURN projection turned into `[[0]]`.
+    let (_db, conn) = setup_chain();
+    let rows = query_rows(
+        &conn,
+        "MATCH (c:Chain {id: 999}) SET c.value = 42 RETURN c.id",
+    );
+    assert_eq!(
+        rows,
+        Vec::<Vec<String>>::new(),
+        "MATCH..SET..RETURN with no match must return 0 rows, got: {rows:?}"
+    );
+}
+
+#[test]
+fn test_p5339_match_set_no_return_reports_zero() {
+    // Terminal SET (no RETURN) still reports "updated: 0" via the count column.
+    let (_db, conn) = setup_chain();
+    let res = conn
+        .query("MATCH (c:Chain {id: 999}) SET c.value = 42")
+        .map_err(|e| e.to_string())
+        .unwrap();
+    let chunk = res.chunks.first().unwrap();
+    let val = chunk.get_i64(0, 0).unwrap();
+    assert_eq!(val, 0, "terminal SET with no match should report 0 updated");
+}
+
+#[test]
 fn test_p5331_merge_set_return_create_writes_value() {
     // On the CREATE path, `MERGE ... SET ... RETURN n.value` must write the new
     // value to the created row and return it (previously row id = merged count

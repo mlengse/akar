@@ -344,4 +344,50 @@ mod tests {
         let bound = binder.bind(parse(sql).unwrap()).unwrap();
         assert!(matches!(bound, BoundStatement::BoundQuery(_)));
     }
+
+    #[test]
+    fn test_bind_with_alias_in_scope_where_and_return() {
+        // P53.18 regression: WITH resets scope to its projection; the alias
+        // `cnt` (aggregate) must be visible to the trailing WHERE and RETURN.
+        // Previously this failed with `Variable 'cnt' not in scope` (kairos
+        // Finding #13 — dream REM phase).
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person)-[e:Knows]-(:Person) \
+                   WITH a, COUNT(e) AS cnt WHERE cnt < $max_conn \
+                   RETURN a.name AS name, cnt AS connection_count";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => {
+                assert!(q
+                    .variables
+                    .iter()
+                    .any(|v| v.name == "cnt"), "alias `cnt` must be in scope");
+                assert!(q
+                    .variables
+                    .iter()
+                    .any(|v| v.name == "a"), "bare variable `a` must carry through WITH");
+                assert!(q
+                    .clauses
+                    .iter()
+                    .any(|c| matches!(c, BoundClause::BoundWhere(_))), "WHERE must bind");
+            }
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
+
+    #[test]
+    fn test_bind_with_plain_aggregate_return() {
+        // Minimal form of the same bug: even `WITH m, COUNT(r) AS cnt RETURN cnt`
+        // (no WHERE) failed before the fix.
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person)-[e:Knows]-(:Person) \
+                   WITH a, COUNT(e) AS cnt RETURN cnt AS connection_count";
+        let bound = binder.bind(parse(sql).unwrap()).unwrap();
+        match bound {
+            BoundStatement::BoundQuery(q) => {
+                assert!(q.variables.iter().any(|v| v.name == "cnt"));
+            }
+            _ => panic!("Expected BoundQuery"),
+        }
+    }
 }

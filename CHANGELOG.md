@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **P53.18 / P53.39 — kairos drop-in bugs (2026-08-21)** — (1) **P53.18** `WITH` clause now resets the scope to its projection: bare variables and aliases (aggregates like `COUNT(r) AS cnt`) become in-scope for trailing `WHERE`/`RETURN`. Previously the alias list was discarded, so `WITH m, COUNT(r) AS cnt WHERE cnt < $n` failed with `Variable 'cnt' not in scope` (kairos Finding #13, dream REM phase). (2) **P53.39** `MATCH ... SET ... RETURN` with no matching row now returns **zero rows**; previously the SET emitted a phantom `count=0` chunk that the RETURN turned into `[[0]]` (kairos P0/P59.1). A terminal SET (no RETURN) still reports "updated: N" via column 0. Files: `akar-binder/src/binder/mod.rs`, `akar-planner/src/planner.rs`, `akar-planner/src/logical_operator.rs`, `akar-processor/src/physical/write_ops/set.rs`, `akar-processor/src/processor/mapper/map_update.rs`. Tests: `test_bind_with_alias_in_scope_where_and_return`, `test_bind_with_plain_aggregate_return`, `test_p5339_match_set_return_no_match_empty`, `test_p5339_match_set_no_return_reports_zero`. Gate: akar-binder 95/95, akar-main integration 70/70, akar-main full 0 failed.
+
 ### Added
 
 - **Sprint 23 (P51.48, P51.48b) — perf & flaky fix** — (1) **P51.48a** DuckDB `query_rows` safety cap: `MAX_QUERY_ROWS = 100_000` prevents OOM on unbounded queries (`akar-duckdb/src/connection.rs:180`). (2) **P51.48b** akar-llm HTTP timeout: `ureq::Agent::new_with_config` with `timeout_global: 30s` on both OpenAI and Ollama endpoints (`akar-llm/src/lib.rs:171,231`). (3) **P51.48c** akar-llm `Box::leak` API key fix: replaced with local `_env_key` variable — no more memory leak (`akar-llm/src/lib.rs:141-148`). (4) **P51.48b** flaky `test_plan_cache_no_hit_regression` fix: threshold 1.5→2.0, warmup 1→10, N 1000→2000. Verified: hit/miss ratio 0.975. Gate `test [akar-core]` 0 failed.

@@ -35,6 +35,10 @@ pub struct PhysicalSet {
     /// Function registry for evaluating non-constant SET value expressions
     /// (arithmetic, property reads, function calls) against old row data (P53.17).
     pub function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
+    /// True when SET is terminal (no trailing RETURN): empty match reports a
+    /// `count=0` row. False when RETURN follows: empty match must flow 0 rows,
+    /// not a phantom count row (P53.39 / kairos P59.1).
+    pub emit_count: bool,
 }
 
 impl PhysicalOperatorExec for PhysicalSet {
@@ -65,7 +69,14 @@ impl PhysicalOperatorExec for PhysicalSet {
         }
 
         if rows_to_update.is_empty() {
-            return Ok(vec![count_chunk(0)]);
+            // No rows matched. A terminal SET (no RETURN) reports "updated: 0"
+            // via a count chunk; a SET that feeds a RETURN must emit NO rows so
+            // the projection produces zero output — not a phantom row with a
+            // default/0 value (P53.39, kairos Finding P59.1).
+            if self.emit_count {
+                return Ok(vec![count_chunk(0)]);
+            }
+            return Ok(Vec::new());
         }
 
         // Build ONE pre-update snapshot chunk from the table for all target rows.

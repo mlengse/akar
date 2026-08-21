@@ -25,6 +25,7 @@ pub fn map_and_execute_update(
                 txn_id: ctx.txn_id,
                 undo_sink: Some(ctx.processor.undo_sink()),
                 function_registry: ctx.function_registry.clone(),
+                emit_count: sl.emit_count,
             };
             let result = set_op.execute(current_input)?;
             // Record written rows for OCC conflict detection
@@ -156,6 +157,7 @@ pub fn map_and_execute_update(
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
                     function_registry: ctx.function_registry.clone(),
+                    emit_count: false,
                 });
             }
 
@@ -170,6 +172,7 @@ pub fn map_and_execute_update(
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
                     function_registry: ctx.function_registry.clone(),
+                    emit_count: false,
                 });
             }
 
@@ -205,6 +208,7 @@ pub fn map_and_execute_update(
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
                     function_registry: ctx.function_registry.clone(),
+                    emit_count: false,
                 });
             }
 
@@ -219,6 +223,7 @@ pub fn map_and_execute_update(
                     txn_id: ctx.txn_id,
                     undo_sink: Some(ctx.processor.undo_sink()),
                     function_registry: ctx.function_registry.clone(),
+                    emit_count: false,
                 });
             }
 

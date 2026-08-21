@@ -290,6 +290,7 @@ impl QueryPlanner {
                     column_idx: item.column_idx,
                     value: item.value.clone(),
                 }],
+                emit_count: false,
                 cardinality: 0,
             })
             .collect();
@@ -306,6 +307,7 @@ impl QueryPlanner {
                     column_idx: item.column_idx,
                     value: item.value.clone(),
                 }],
+                emit_count: false,
                 cardinality: 0,
             })
             .collect();
@@ -389,6 +391,14 @@ impl QueryPlanner {
         // Prevents duplicate scans for a shared variable across comma patterns
         // (P48.1): `MATCH (a)-[:r1]->(b), (b)-[:r3]->(c)` must not scan `b` twice.
         let mut available_vars: HashSet<String> = HashSet::new();
+        // A terminal SET (no trailing RETURN) reports "N rows updated" via
+        // column 0; with a trailing RETURN the SET must pass through the matched
+        // rows (0 rows when nothing matched) instead of a phantom count row
+        // (P53.39 / kairos P59.1).
+        let has_return = query
+            .clauses
+            .iter()
+            .any(|c| matches!(c, BoundClause::BoundReturn(_)));
 
         for clause in query.clauses {
             match clause {
@@ -867,6 +877,7 @@ impl QueryPlanner {
                             table_id,
                             is_node,
                             items,
+                            emit_count: !has_return,
                             cardinality: 0,
                         }));
                     }

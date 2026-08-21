@@ -688,6 +688,11 @@ pub struct LogicalSet {
     /// a chain of single-item operators, so items after the first received the
     /// previous item's count chunk and lost the scan rows.
     pub items: Vec<SetItem>,
+    /// True when the SET is the terminal clause (no trailing RETURN): the
+    /// operator reports "N rows updated" as column 0. False when a RETURN
+    /// follows — an empty match must flow 0 rows, not a phantom count row
+    /// (P53.39, kairos Finding P59.1).
+    pub emit_count: bool,
     pub cardinality: u64,
 }
 
