@@ -33,6 +33,10 @@
   backend kuzudb → akar) OK pada DB fresh. Ini menutup dependensi
   `akar>=0.1.0` di `kairos/pyproject.toml` (sebelumnya gagal karena `akar` belum di PyPI).
 
+### Fixed
+
+- **P53.9 compat harness re-pointed to Akar stores + P59.1 discovered** — `akar-core/akar-python/tests/test_kuzu_compat.py` still imported `KuzuDBStore`/`KuzuDBDreamBackend` from `kairos.kuzudb_store`/`kairos.dream_kuzudb_store` (modules deleted in kairos Phase 3 rename). Updated to `AkarStore`/`AkarDreamBackend` from `kairos.akar_store`/`kairos.dream_akar_store`. Harness now **53/53 pass** and surfaced engine gap **P59.1**: `MATCH..SET..RETURN` with no matching node emits one phantom row (`{'col0': 0}`, alias column names lost) where Kuzu returns zero rows — silently broke kairos `_next_id` (id=0) and `set_meta` (lost writes) on fresh DBs; worked around kairos-side via returned-key validation. Engine fix tracked as P59.1 (Sprint 24, `implementation plan.md`).
+
 ## [0.1.7] - 2026-08-18
 
 ### Added

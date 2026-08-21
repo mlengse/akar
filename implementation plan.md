@@ -272,7 +272,17 @@ Gate: tiap task wajib punya tes Rust baru + gate `test [akar-core]` hijau (1,774
 
 ---
 
-### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 24+ (2026)
+## SPRINT 24 — TEMUAN KAIROS COMPAT HARNESS (2026-08-21): PLANNED
+
+> Sumber: harness P53.9 (`akar-core/akar-python/tests/test_kuzu_compat.py`) setelah import di-update ke `AkarStore`/`AkarDreamBackend` — 53/53 hijau dengan workaround sisi kairos.
+
+| ID | Task | File | Severity | Status |
+|----|------|------|----------|--------|
+| P59.1 | **BUG kompat: `MATCH..SET..RETURN` tanpa match memancarkan baris hantu** — saat tidak ada node yang cocok, akar tetap mengembalikan 1 baris (`{'col0': 0}`; nama kolom alias hilang), Kuzu mengembalikan 0 baris. Efek: `set_meta`/`_next_id` kairos gagal senyap (id=0, meta hilang). Sudah di-workaround sisi kairos (validasi key balikan di `kairos/akar_store.py:_next_id`, `set_meta`; harness P53.9 53/53 hijau). Fix engine: 0 row saat MATCH kosong meski ada SET+RETURN. Setelah fix: pertahankan validasi kairos (harmless), re-run harness. | `akar-processor/src/physical/` (path SET/RETURN) | **HIGH (KUZU-COMPAT BUG)** | PLANNED |
+
+---
+
+### TOPIK JANGKA PANJANG — dipertimbangkan untuk Sprint 25+ (2026)
 
 - FTS ranking (BM25/TF-IDF) & highlight — `akar-fts`
 - Konektor graph-native (Neo4j Bolt) — `akar-graph`
