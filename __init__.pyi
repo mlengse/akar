@@ -21,39 +21,6 @@ class QueryResult:
     def get_column_names(self) -> list[str]: ...
     def get_as_dict(self) -> list[dict[str, Any]]: ...
 
-class NodeVal:
-    def get_id(self) -> int: ...
-    def get_label(self) -> str: ...
-    def get_property(self, name: str) -> Any: ...
-
-class RelVal:
-    def get_src_id(self) -> int: ...
-    def get_dst_id(self) -> int: ...
-    def get_property(self, name: str) -> Any: ...
-
-class KNNResult:
-    id: int = ...
-    distance: float = ...
-
-class DatabaseType:
-    INTEGER: int
-    STRING: int
-    DOUBLE: int
-    FLOAT: int
-    BOOL: int
-    BLOB: int
-    DATE: int
-    TIMESTAMP: int
-    UUID: int
-    LIST: int
-    MAP: int
-    UNION: int
-    STRUCT: int
-    ARRAY: int
-    RECURSIVE_REL: int
-    NODE: int
-    REL: int
-
 class search:
     @staticmethod
     def rrf_fuse(sets: list[list[tuple[int, float]]], k: int = ..., limit: int = ...) -> list[dict[str, Any]]: ...
