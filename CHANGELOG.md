@@ -7,6 +7,8 @@
 
 ### Changed
 
+- **refactor(storage) — ekstraksi helper `compute_bytes` & `compute_values` (2026-08-23, tanpa id task)** — dua cleanup extract-function di `akar-storage`, perilaku dipertahankan: (1) encoding union `Value::Union(tag, val)` di `ArtKey::from_value` (`art_key.rs`) diekstrak ke helper `ArtKey::compute_bytes(tag, val)`; (2) `read_values` (`npy_reader.rs`) dipecah validasi panjang buffer + loop decode baru `compute_values(count, dtype, elem_size, raw)` dengan preconditions terdokumentasi. Verifikasi ter-scope (bukan gate penuh): `cargo check -p akar-storage` bersih; `cargo test -p akar-storage` **343 passed / 0 failed** (+1 doctest). Commit `6eeaff8`.
+
 - **chore — crates.io backlog sync (2026-08-23)** — menyinkronkan registry dengan HEAD untuk semua crate yang berubah sejak v0.1.8 tetapi tidak ikut dirilis sesi-sesi sebelumnya. Fix fungsional yang akhirnya sampai ke registry: **akar-binder/planner/processor** (P53.18 WITH-scope, P53.39 SET-RETURN, P53.40 OPTIONAL fan-out), **akar-duckdb** (P51.40 delegation helper + P51.48a row cap) dan konsumennya **delta/iceberg/azure/unity-catalog**, **akar-vector** (P51.41 refactor internal `extract_f64_list`, non-breaking — fungsi lama private), **akar-llm** (P51.48b HTTP timeout + fix kebocoran API key). Bump patch juga untuk delta kosmetik fmt/clippy: algo/search/dream/optimizer/ml/neo4j. `akar-llm`/`akar-ml`/`akar-neo4j` dikonversi dari `version.workspace = true` ke versi eksplisit agar bisa di-bump independen. Versi baru: binder/planner/processor/algo/optimizer 0.1.4 · vector/duckdb/delta/iceberg/azure/unity-catalog 0.1.3 · llm/ml/neo4j/search 0.1.2 · dream 0.1.1.
 
 ## [0.1.9] - 2026-08-23
