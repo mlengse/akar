@@ -2,6 +2,7 @@
 //!
 //! Converts Akar `Value` rows to Arrow `RecordBatch` and writes to `.parquet` files.
 
+use akar_common::data_chunk::DataChunk;
 use akar_common::error::StorageError;
 use akar_common::types::{PhysicalTypeID, Value};
 use arrow::array::*;
@@ -61,6 +62,103 @@ pub fn write_parquet(
         .map_err(|e| StorageError::Reader(format!("Failed to create RecordBatch: {e}")))?;
 
     write_batch(path, &batch)
+}
+
+/// Write already-columnar query-result chunks straight to a Parquet file
+/// without materializing an intermediate row-major `Vec<Vec<Value>>` copy.
+///
+/// Semantics mirror [`write_parquet`]: declared physical types win over value
+/// inference so all-null columns keep their Arrow type; otherwise the first
+/// non-null value decides; List columns infer their inner element type from
+/// the first non-null item (Float64 default). Values are appended directly
+/// from each chunk's columns into the Arrow builders, so peak memory stays
+/// proportional to the source data instead of doubling it (P51.49).
+///
+/// When `column_names` is `None`, names are derived from the first chunk's
+/// `field_names` (alias prefixes like `n.id` stripped down to `id`), falling
+/// back to `column_{i}` when unset.
+pub fn write_parquet_from_chunks(
+    path: &str,
+    chunks: &[DataChunk],
+    column_names: Option<&[String]>,
+    declared_types: Option<&[PhysicalTypeID]>,
+) -> Result<(), StorageError> {
+    let derived_names;
+    let column_names: &[String] = match column_names {
+        Some(names) => names,
+        None => {
+            derived_names = derive_column_names_from_chunks(chunks);
+            &derived_names
+        }
+    };
+    let total_rows: usize = chunks.iter().map(|c| c.size).sum();
+    if total_rows == 0 {
+        return write_empty_parquet(path, column_names);
+    }
+
+    let num_cols = column_names
+        .len()
+        .max(chunks.first().map(|c| c.fields.len()).unwrap_or(0));
+    let mut arrow_cols: Vec<Box<dyn ArrayBuilder>> = Vec::with_capacity(num_cols);
+    let mut arrow_types: Vec<ArrowDataType> = Vec::with_capacity(num_cols);
+
+    // Determine types from the declared schema or the first non-null value
+    // in each column, scanning chunks in order.
+    for col_idx in 0..num_cols {
+        let declared = declared_types.and_then(|t| t.get(col_idx));
+        let (dt, builder) = infer_column_type_from_chunks(chunks, col_idx, declared, total_rows);
+        arrow_types.push(dt);
+        arrow_cols.push(builder);
+    }
+
+    // Append values column-by-column straight from the chunk storage
+    // (column-major access; no row vectors are ever built).
+    for col_idx in 0..num_cols {
+        for chunk in chunks {
+            if col_idx >= chunk.fields.len() {
+                for _ in 0..chunk.size {
+                    append_value_to_builder(&mut arrow_cols[col_idx], &Value::Null);
+                }
+                continue;
+            }
+            for row in 0..chunk.size {
+                let val = chunk.get_value(col_idx, row).unwrap_or(Value::Null);
+                append_value_to_builder(&mut arrow_cols[col_idx], &val);
+            }
+        }
+    }
+
+    let schema_fields: Vec<Field> = column_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Field::new(name, arrow_types[i].clone(), true))
+        .collect();
+    let schema = Arc::new(Schema::new(schema_fields));
+
+    let arrays: Vec<Arc<dyn Array>> = arrow_cols.into_iter().map(|mut b| b.finish()).collect();
+
+    let batch = RecordBatch::try_new(schema, arrays)
+        .map_err(|e| StorageError::Reader(format!("Failed to create RecordBatch: {e}")))?;
+
+    write_batch(path, &batch)
+}
+
+/// Derive output column names from chunk metadata: strip alias prefixes
+/// (`n.id` -> `id`), fall back to `column_{i}` when field names are unset.
+fn derive_column_names_from_chunks(chunks: &[DataChunk]) -> Vec<String> {
+    match chunks.first() {
+        Some(c) if !c.field_names.is_empty() => c
+            .field_names
+            .iter()
+            .map(|n| {
+                n.rsplit_once('.')
+                    .map(|(_, base)| base.to_string())
+                    .unwrap_or_else(|| n.clone())
+            })
+            .collect(),
+        Some(c) => (0..c.fields.len()).map(|i| format!("column_{}", i)).collect(),
+        None => Vec::new(),
+    }
 }
 
 fn write_empty_parquet(path: &str, column_names: &[String]) -> Result<(), StorageError> {
@@ -127,69 +225,6 @@ fn infer_column_type(
         if let Some(val) = row.get(col_idx) {
             match val {
                 Value::Null => continue,
-                Value::Bool(_) => {
-                    return (
-                        ArrowDataType::Boolean,
-                        Box::new(BooleanBuilder::with_capacity(rows.len())),
-                    );
-                }
-                Value::Int8(_) => return (ArrowDataType::Int8, Box::new(Int8Builder::with_capacity(rows.len()))),
-                Value::Int16(_) => return (ArrowDataType::Int16, Box::new(Int16Builder::with_capacity(rows.len()))),
-                Value::Int32(_) => return (ArrowDataType::Int32, Box::new(Int32Builder::with_capacity(rows.len()))),
-                Value::Int64(_) => return (ArrowDataType::Int64, Box::new(Int64Builder::with_capacity(rows.len()))),
-                Value::UInt8(_) => return (ArrowDataType::UInt8, Box::new(UInt8Builder::with_capacity(rows.len()))),
-                Value::UInt16(_) => {
-                    return (
-                        ArrowDataType::UInt16,
-                        Box::new(UInt16Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::UInt32(_) => {
-                    return (
-                        ArrowDataType::UInt32,
-                        Box::new(UInt32Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::UInt64(_) => {
-                    return (
-                        ArrowDataType::UInt64,
-                        Box::new(UInt64Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::Float(_) => {
-                    return (
-                        ArrowDataType::Float32,
-                        Box::new(Float32Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::Double(_) => {
-                    return (
-                        ArrowDataType::Float64,
-                        Box::new(Float64Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::String(_) => {
-                    return (
-                        ArrowDataType::Utf8,
-                        Box::new(StringBuilder::with_capacity(rows.len(), rows.len() * 32)),
-                    );
-                }
-                Value::Date(_) => {
-                    return (
-                        ArrowDataType::Date32,
-                        Box::new(Date32Builder::with_capacity(rows.len())),
-                    );
-                }
-                Value::Timestamp(_) => {
-                    return (ArrowDataType::Int64, Box::new(Int64Builder::with_capacity(rows.len())));
-                }
-                Value::Interval(_) => return (ArrowDataType::Int64, Box::new(Int64Builder::with_capacity(rows.len()))),
-                Value::Blob(_) => {
-                    return (
-                        ArrowDataType::Binary,
-                        Box::new(BinaryBuilder::with_capacity(rows.len(), rows.len() * 32)),
-                    );
-                }
                 Value::List(items) => {
                     // FLOAT[] / INT[] columns (e.g. embeddings) must round-trip as a
                     // real Arrow List, not a Utf8 fallback — the parquet reader
@@ -197,7 +232,11 @@ fn infer_column_type(
                     let _ = items;
                     return list_column_builder(rows, col_idx);
                 }
-                _ => continue,
+                other => {
+                    if let Some(pair) = scalar_builder_for_value(other, rows.len()) {
+                        return pair;
+                    }
+                }
             }
         }
     }
@@ -224,6 +263,97 @@ fn list_column_builder(rows: &[Vec<Value>], col_idx: usize) -> (ArrowDataType, B
         .find(|v| !matches!(v, Value::Null))
         .map(infer_scalar_type)
         .unwrap_or(ArrowDataType::Float64);
+    list_builder_for_inner(inner)
+}
+
+/// Chunk-streaming counterpart of [`infer_column_type`]: declared physical
+/// types win over value inference; otherwise scan chunks until the first
+/// non-null value decides.
+fn infer_column_type_from_chunks(
+    chunks: &[DataChunk],
+    col_idx: usize,
+    declared_type: Option<&PhysicalTypeID>,
+    total_rows: usize,
+) -> (ArrowDataType, Box<dyn ArrayBuilder>) {
+    if let Some(dt) = declared_type {
+        if *dt == PhysicalTypeID::List {
+            return list_column_builder_from_chunks(chunks, col_idx);
+        }
+        if let Some(builder) = builder_for_declared_type(*dt) {
+            return builder;
+        }
+    }
+    for chunk in chunks {
+        for row in 0..chunk.size {
+            match chunk.get_value(col_idx, row) {
+                None | Some(Value::Null) => continue,
+                Some(Value::List(_)) => return list_column_builder_from_chunks(chunks, col_idx),
+                Some(other) => {
+                    if let Some(pair) = scalar_builder_for_value(&other, total_rows) {
+                        return pair;
+                    }
+                }
+            }
+        }
+    }
+    // Default to String if all null
+    (
+        ArrowDataType::Utf8,
+        Box::new(StringBuilder::with_capacity(total_rows, total_rows * 32)),
+    )
+}
+
+fn list_column_builder_from_chunks(chunks: &[DataChunk], col_idx: usize) -> (ArrowDataType, Box<dyn ArrayBuilder>) {
+    let mut inner_item: Option<Value> = None;
+    'outer: for chunk in chunks {
+        for row in 0..chunk.size {
+            if let Some(Value::List(items)) = chunk.get_value(col_idx, row)
+                && let Some(first) = items.iter().find(|v| !matches!(v, Value::Null))
+            {
+                inner_item = Some(first.clone());
+                break 'outer;
+            }
+        }
+    }
+    let inner = inner_item
+        .map(|v| infer_scalar_type(&v))
+        .unwrap_or(ArrowDataType::Float64);
+    list_builder_for_inner(inner)
+}
+
+/// Map a scalar Value to its (Arrow type, builder) pair. Returns `None` for
+/// values without a direct scalar mapping (Node/Rel/List/Struct/etc.), which
+/// callers treat as "keep scanning / fall back to Utf8".
+fn scalar_builder_for_value(val: &Value, rows: usize) -> Option<(ArrowDataType, Box<dyn ArrayBuilder>)> {
+    let pair: (ArrowDataType, Box<dyn ArrayBuilder>) = match val {
+        Value::Bool(_) => (ArrowDataType::Boolean, Box::new(BooleanBuilder::with_capacity(rows))),
+        Value::Int8(_) => (ArrowDataType::Int8, Box::new(Int8Builder::with_capacity(rows))),
+        Value::Int16(_) => (ArrowDataType::Int16, Box::new(Int16Builder::with_capacity(rows))),
+        Value::Int32(_) => (ArrowDataType::Int32, Box::new(Int32Builder::with_capacity(rows))),
+        Value::Int64(_) => (ArrowDataType::Int64, Box::new(Int64Builder::with_capacity(rows))),
+        Value::UInt8(_) => (ArrowDataType::UInt8, Box::new(UInt8Builder::with_capacity(rows))),
+        Value::UInt16(_) => (ArrowDataType::UInt16, Box::new(UInt16Builder::with_capacity(rows))),
+        Value::UInt32(_) => (ArrowDataType::UInt32, Box::new(UInt32Builder::with_capacity(rows))),
+        Value::UInt64(_) => (ArrowDataType::UInt64, Box::new(UInt64Builder::with_capacity(rows))),
+        Value::Float(_) => (ArrowDataType::Float32, Box::new(Float32Builder::with_capacity(rows))),
+        Value::Double(_) => (ArrowDataType::Float64, Box::new(Float64Builder::with_capacity(rows))),
+        Value::String(_) => (
+            ArrowDataType::Utf8,
+            Box::new(StringBuilder::with_capacity(rows, rows * 32)),
+        ),
+        Value::Date(_) => (ArrowDataType::Date32, Box::new(Date32Builder::with_capacity(rows))),
+        Value::Timestamp(_) | Value::Interval(_) => (ArrowDataType::Int64, Box::new(Int64Builder::with_capacity(rows))),
+        Value::Blob(_) => (
+            ArrowDataType::Binary,
+            Box::new(BinaryBuilder::with_capacity(rows, rows * 32)),
+        ),
+        _ => return None,
+    };
+    Some(pair)
+}
+
+/// Build a List column builder for the given inner element type.
+fn list_builder_for_inner(inner: ArrowDataType) -> (ArrowDataType, Box<dyn ArrayBuilder>) {
     let field = Arc::new(Field::new("item", inner.clone(), true));
     let dt = ArrowDataType::List(field);
     match inner {
@@ -506,5 +636,71 @@ mod tests {
         assert_eq!(builder.schema().fields().len(), 2);
         // Empty parquet may produce 0 batches (no row groups); just verify it opens
         let _reader = builder.build().unwrap();
+    }
+
+    #[test]
+    fn test_write_parquet_from_chunks_roundtrip() {
+        use akar_common::data_chunk::DataChunk;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chunks.parquet");
+        let path_str = path.to_str().unwrap().to_string();
+
+        // Two chunks over Int64 + String columns, one null each; names derived
+        // from chunk metadata fall back to column_{i} (field_names unset).
+        let ids1 = Int64Array::from(vec![Some(1), None]);
+        let names1 = StringArray::from(vec!["Alice", "Bob"]);
+        let ids2 = Int64Array::from(vec![Some(3)]);
+        let names2 = StringArray::from(vec!["Charlie"]);
+        let types = vec![PhysicalTypeID::Int64, PhysicalTypeID::String];
+        let chunks = vec![
+            DataChunk::new(vec![Arc::new(ids1), Arc::new(names1)], types.clone()),
+            DataChunk::new(vec![Arc::new(ids2), Arc::new(names2)], types),
+        ];
+
+        write_parquet_from_chunks(&path_str, &chunks, None, None).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap();
+        let batches: Vec<_> = reader.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.num_rows(), 3);
+        assert_eq!(batch.num_columns(), 2);
+        let schema = batch.schema();
+        assert_eq!(schema.field(0).name(), "column_0");
+        assert_eq!(schema.field(0).data_type(), &ArrowDataType::Int64);
+        assert_eq!(schema.field(1).name(), "column_1");
+        let ids = batch.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(ids.value(0), 1);
+        assert!(ids.is_null(1));
+        assert_eq!(ids.value(2), 3);
+    }
+
+    #[test]
+    fn test_write_parquet_from_chunks_declared_all_null_keeps_type() {
+        use akar_common::data_chunk::DataChunk;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("all_null.parquet");
+        let path_str = path.to_str().unwrap().to_string();
+
+        // All-null Int64 column must keep its declared Arrow type (P53.37
+        // semantics) instead of falling back to the Utf8 default.
+        let ids = Int64Array::from(vec![None::<i64>, None]);
+        let flag = BooleanArray::from(vec![None::<bool>, Some(true)]);
+        let declared = vec![PhysicalTypeID::Int64, PhysicalTypeID::Bool];
+        let chunk = DataChunk::new(vec![Arc::new(ids), Arc::new(flag)], declared.clone());
+
+        write_parquet_from_chunks(&path_str, std::slice::from_ref(&chunk), None, Some(&declared)).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+        let fields = builder.schema().fields().clone();
+        assert_eq!(fields[0].data_type(), &ArrowDataType::Int64);
+        assert_eq!(fields[1].data_type(), &ArrowDataType::Boolean);
     }
 }

@@ -373,8 +373,6 @@ fn export_table_data(
             CopyToFormat::Parquet => {
                 #[cfg(feature = "parquet-export")]
                 {
-                    use akar_common::types::Value;
-
                     // Use query result's field_names (works for empty tables too)
                     let final_column_names = result
                         .chunks
@@ -404,24 +402,16 @@ fn export_table_data(
                         continue;
                     }
 
-                    // Write parquet with proper column names and declared column
-                    // types (all-null columns must keep their Arrow type, P53.37).
-                    let mut rows: Vec<Vec<Value>> = Vec::new();
-                    for chunk in &result.chunks {
-                        for row_idx in 0..chunk.size {
-                            let mut row = Vec::with_capacity(chunk.fields.len());
-                            for col_idx in 0..chunk.fields.len() {
-                                row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
-                            }
-                            rows.push(row);
-                        }
-                    }
+                    // Stream the result chunks column-major into the parquet
+                    // writer with proper column names and declared column
+                    // types (all-null columns keep their Arrow type, P53.37) —
+                    // no row-major materialization (P51.49).
                     let declared_types = result.chunks.first().map(|c| c.field_types.as_slice());
 
-                    akar_storage::parquet_writer::write_parquet(
+                    akar_storage::parquet_writer::write_parquet_from_chunks(
                         &file_path_str,
-                        &rows,
-                        &final_column_names,
+                        &result.chunks,
+                        Some(&final_column_names),
                         declared_types,
                     )
                     .map_err(|e| format!("Parquet export error for '{}': {}", table_name, e))?;

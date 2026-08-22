@@ -939,91 +939,29 @@ impl Connection {
             BoundStatement::BoundCreateFtsIndex(_) => Ok(None),
             BoundStatement::BoundAnalyze(a) => {
                 tracing::info!("ANALYZE {} tables", a.table_ids.len());
+                let catalog = self.database.table_catalog();
+
+                // Compute stats WITHOUT holding the stats lock (P51.49): the
+                // full table scans and distinct-stringify run against catalog
+                // data only; the lock is taken briefly afterwards to publish,
+                // so concurrent readers are never blocked behind a
+                // whole-database ANALYZE.
+                let mut collected = Vec::with_capacity(a.table_ids.len());
+                for &table_id in &a.table_ids {
+                    if let Some(table) = catalog.get_node_table(table_id) {
+                        collected.push((table_id, analyze_node_table(table_id, &table)));
+                    } else if let Some(table) = catalog.get_rel_table(table_id) {
+                        collected.push((table_id, analyze_rel_table(table_id, &table)));
+                    }
+                }
+
                 let mut stats = self
                     .database
                     .stats_store
                     .lock()
                     .map_err(|e| format!("Lock poisoned: {e}"))?;
-                let catalog = self.database.table_catalog();
-
-                for &table_id in &a.table_ids {
-                    // Try node table first, then rel table
-                    let node_table = catalog.get_node_table(table_id);
-                    if let Some(table) = node_table {
-                        let row_count = table.num_rows;
-                        let mut columns = HashMap::new();
-                        for col_idx in 0..table.columns.len() {
-                            let mut null_count: u64 = 0;
-                            let mut distinct_set = std::collections::HashSet::new();
-                            for row_idx in 0..row_count as usize {
-                                if let Some(val) = table.get_value(row_idx, col_idx) {
-                                    if matches!(val, Value::Null) {
-                                        null_count += 1;
-                                    } else {
-                                        distinct_set.insert(format!("{:?}", val));
-                                    }
-                                } else {
-                                    null_count += 1;
-                                }
-                            }
-                            columns.insert(
-                                col_idx as u32,
-                                akar_storage::stats::ColumnStats {
-                                    table_id,
-                                    column_id: col_idx as u32,
-                                    num_distinct_values: distinct_set.len() as u64,
-                                    num_null_values: null_count,
-                                    min_value: None,
-                                    max_value: None,
-                                },
-                            );
-                        }
-                        stats.update_table_stats(
-                            table_id,
-                            akar_storage::stats::TableStats {
-                                num_rows: row_count,
-                                columns,
-                            },
-                        );
-                    } else {
-                        // Try rel table
-                        let rel_table = catalog.get_rel_table(table_id);
-                        if let Some(table) = rel_table {
-                            let row_count = table.num_rows;
-                            let mut columns = HashMap::new();
-                            for col_idx in 0..table.columns.len() {
-                                let mut null_count: u64 = 0;
-                                let mut distinct_set = std::collections::HashSet::new();
-                                if let Some(col_data) = table.get_column(col_idx) {
-                                    for val in col_data {
-                                        if matches!(val, Value::Null) {
-                                            null_count += 1;
-                                        } else {
-                                            distinct_set.insert(format!("{:?}", val));
-                                        }
-                                    }
-                                }
-                                columns.insert(
-                                    col_idx as u32,
-                                    akar_storage::stats::ColumnStats {
-                                        table_id,
-                                        column_id: col_idx as u32,
-                                        num_distinct_values: distinct_set.len() as u64,
-                                        num_null_values: null_count,
-                                        min_value: None,
-                                        max_value: None,
-                                    },
-                                );
-                            }
-                            stats.update_table_stats(
-                                table_id,
-                                akar_storage::stats::TableStats {
-                                    num_rows: row_count,
-                                    columns,
-                                },
-                            );
-                        }
-                    }
+                for (table_id, table_stats) in collected {
+                    stats.update_table_stats(table_id, table_stats);
                 }
 
                 let table_desc = a.table_name.as_deref().unwrap_or("all tables");
@@ -1073,44 +1011,76 @@ fn is_catalog_mutating_ddl(bound: &BoundStatement) -> bool {
 
 /// Standalone function to write query results to a Parquet file.
 /// Used by both `COPY TO` and `CALL export_parquet()`.
+///
+/// Streams the result chunks column-major into Arrow builders without
+/// materializing an intermediate row-major `Vec<Vec<Value>>` copy (P51.49);
+/// column names and declared-type handling derive inside the writer exactly
+/// as before.
 #[cfg(feature = "parquet-export")]
 pub fn write_parquet_to_file(path: &str, result: &QueryResult) -> Result<(), String> {
-    let mut rows: Vec<Vec<Value>> = Vec::new();
-    for chunk in &result.chunks {
-        for row_idx in 0..chunk.size {
-            let mut row = Vec::with_capacity(chunk.fields.len());
-            for col_idx in 0..chunk.fields.len() {
-                row.push(chunk.get_value(col_idx, row_idx).unwrap_or(Value::Null));
-            }
-            rows.push(row);
-        }
-    }
-
-    let column_names: Vec<String> = result
-        .chunks
-        .first()
-        .map(|chunk| {
-            if chunk.field_names.is_empty() {
-                (0..chunk.fields.len()).map(|i| format!("column_{}", i)).collect()
-            } else {
-                chunk
-                    .field_names
-                    .iter()
-                    .map(|n| {
-                        n.rsplit_once('.')
-                            .map(|(_, base)| base.to_string())
-                            .unwrap_or_else(|| n.clone())
-                    })
-                    .collect()
-            }
-        })
-        .unwrap_or_default();
-
     let declared_types = result.chunks.first().map(|c| c.field_types.as_slice());
-    Ok(akar_storage::parquet_writer::write_parquet(
+    Ok(akar_storage::parquet_writer::write_parquet_from_chunks(
         path,
-        &rows,
-        &column_names,
+        &result.chunks,
+        None,
         declared_types,
     )?)
+}
+
+/// Compute per-column statistics for a node table without holding any lock
+/// (P51.49): rows come straight from each node group's column chunks instead
+/// of a binary-searched global `get_value` per cell. Semantics match the old
+/// path — `get_value_with_snapshot(None, ..)` reduces to a plain chunk read.
+fn analyze_node_table(table_id: u64, table: &akar_storage::table::NodeTable) -> akar_storage::stats::TableStats {
+    let mut columns = HashMap::new();
+    for col_idx in 0..table.columns.len() {
+        let values = table.node_groups.iter().flat_map(move |group| {
+            (0..group.num_nodes as usize).map(move |local_row| group.get_value(local_row, col_idx))
+        });
+        columns.insert(col_idx as u32, scan_column_stats(table_id, col_idx as u32, values));
+    }
+    akar_storage::stats::TableStats {
+        num_rows: table.num_rows,
+        columns,
+    }
+}
+
+/// Compute per-column statistics for a rel table's property columns.
+fn analyze_rel_table(table_id: u64, table: &akar_storage::table::RelTable) -> akar_storage::stats::TableStats {
+    let mut columns = HashMap::new();
+    for col_idx in 0..table.columns.len() {
+        let values = table.get_column(col_idx).into_iter().flatten().map(Some);
+        columns.insert(col_idx as u32, scan_column_stats(table_id, col_idx as u32, values));
+    }
+    akar_storage::stats::TableStats {
+        num_rows: table.num_rows,
+        columns,
+    }
+}
+
+/// Fold one property column's values into `ColumnStats` — shared by the node
+/// and rel ANALYZE paths (P51.49 dedup).
+fn scan_column_stats<'a>(
+    table_id: u64,
+    column_id: u32,
+    values: impl Iterator<Item = Option<&'a Value>>,
+) -> akar_storage::stats::ColumnStats {
+    let mut null_count: u64 = 0;
+    let mut distinct_set = std::collections::HashSet::new();
+    for val in values {
+        match val {
+            Some(Value::Null) | None => null_count += 1,
+            Some(other) => {
+                distinct_set.insert(format!("{other:?}"));
+            }
+        }
+    }
+    akar_storage::stats::ColumnStats {
+        table_id,
+        column_id,
+        num_distinct_values: distinct_set.len() as u64,
+        num_null_values: null_count,
+        min_value: None,
+        max_value: None,
+    }
 }
