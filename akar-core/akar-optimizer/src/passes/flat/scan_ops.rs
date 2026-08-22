@@ -65,7 +65,7 @@ impl OptimizationPass for LimitPushDown {
             if i + 1 < operators.len() {
                 if matches!(operators[i], LogicalOperator::Limit(_))
                     && matches!(operators[i + 1], LogicalOperator::Filter(_))
-                    && !limit_is_order_sensitive(&operators, i)
+                    && !limit_is_order_sensitive(operators, i)
                 {
                     // Swap: push Limit below Filter — only when the Limit is a
                     // plain row-cap (not a top-k after ORDER BY / aggregate /

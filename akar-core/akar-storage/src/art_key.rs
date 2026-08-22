@@ -189,6 +189,7 @@ impl ArtKey {
     /// would collide with an escaped 0x00 prefix and break ordering.
     ///   - 0x00 → 0x01 0x01
     ///   - 0x01 → 0x01 0x02
+    ///
     /// A 0x00 terminator is appended at the end.
     /// This ensures lexicographic ordering is preserved (P52.20).
     fn from_string(s: &str) -> Self {

@@ -171,6 +171,7 @@ fn logical_type_name(t: LogicalTypeID) -> String {
 ///   (PK is written inside the column list, so single-column tables are valid)
 /// - rel tables: `CREATE REL TABLE t (FROM src TO dst, col T, ...);`
 ///   (endpoint node tables resolved by ID, required by the import grammar)
+///
 /// Build the `schema.cypher` file content from a list of catalog entries.
 fn generate_schema_cypher_from_entries(entries: &[akar_catalog::CatalogEntry]) -> String {
     let mut schema = String::new();

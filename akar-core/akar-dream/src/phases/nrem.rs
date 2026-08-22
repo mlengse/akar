@@ -49,7 +49,7 @@ pub fn run_nrem<B: DreamBackend>(backend: &B, config: &DreamConfig) -> PhaseStat
 
     // Collect all activated edges
     let mut activated_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-    for (_seed, activated) in &batch_results {
+    for activated in batch_results.values() {
         for &(node_id, _, _) in activated {
             // Mark edge from seed to activated node
             // (we don't know which seed→node edge was used, so mark all)

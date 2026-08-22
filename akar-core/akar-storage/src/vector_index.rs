@@ -189,7 +189,7 @@ impl VectorIndexTable {
 
             while offset < num_vectors as usize {
                 let (id, vec_data) = nodes[offset];
-                let vec_len = vec_data.len().checked_mul(8).unwrap_or(usize::MAX);
+                let vec_len = vec_data.len().saturating_mul(8);
                 let entry_len = 8 + 4 + vec_len;
                 if pos + entry_len > capacity {
                     // Doesn't fit on this page. If the page is still empty the

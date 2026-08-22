@@ -12,6 +12,7 @@ use hashbrown::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::*;
 
@@ -1111,11 +1112,11 @@ mod tests {
         let build1 = make_i64_chunk(&[1, 1, 5]);
         let build2 = make_i64_chunk(&[1, 1, 1, 7]);
         let probe = make_i64_chunk(&[1, 2]);
-        let build_chunks = vec![build1, build2];
+        let build_chunks = [build1, build2];
         let probe_chunks = vec![probe];
         let result = intersect
             .execute_sides(
-                &vec![vec![build_chunks[0].clone()], vec![build_chunks[1].clone()]],
+                &[vec![build_chunks[0].clone()], vec![build_chunks[1].clone()]],
                 &probe_chunks,
             )
             .unwrap();
@@ -1148,7 +1149,7 @@ mod tests {
             probe_key_col: 1,
             build_key_col: 1,
         };
-        let result = intersect.execute_sides(&vec![vec![build]], &vec![probe]).unwrap();
+        let result = intersect.execute_sides(&[vec![build]], &[probe]).unwrap();
         assert!(!result.is_empty(), "Expected non-empty result");
         assert_eq!(
             result[0].size, 2,
