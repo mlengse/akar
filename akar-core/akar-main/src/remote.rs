@@ -107,16 +107,16 @@ impl WireResponse {
         self.rows.iter().filter_map(|r| r.get(col).cloned().flatten()).collect()
     }
 
-    /// Human-readable summary mirroring [`crate::QueryResult::result_summary`].
+    /// Human-readable summary mirroring [`crate::QueryResult::result_summary`]
+    /// (shared head logic, P51.43).
     pub fn result_summary(&self) -> String {
-        if let Some(msg) = &self.message {
-            return msg.clone();
-        }
-        if !self.success {
-            return format!("Error: {}", self.error_message.as_deref().unwrap_or("Unknown error"));
-        }
-        if self.rows.is_empty() {
-            return "(empty result)".into();
+        if let Some(head) = crate::query_result::result_summary_head(
+            self.message.as_deref(),
+            self.success,
+            self.error_message.as_deref(),
+            !self.rows.is_empty(),
+        ) {
+            return head;
         }
         format!(
             "Returned {} rows in {} columns",
@@ -128,14 +128,13 @@ impl WireResponse {
 
 impl fmt::Display for WireResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(msg) = &self.message {
-            return write!(f, "{msg}");
-        }
-        if !self.success {
-            return write!(f, "Error: {}", self.error_message.as_deref().unwrap_or("Unknown error"));
-        }
-        if self.rows.is_empty() {
-            return write!(f, "(empty result)");
+        if let Some(head) = crate::query_result::result_summary_head(
+            self.message.as_deref(),
+            self.success,
+            self.error_message.as_deref(),
+            !self.rows.is_empty(),
+        ) {
+            return write!(f, "{head}");
         }
         for (i, row) in self.rows.iter().enumerate() {
             if i > 0 {

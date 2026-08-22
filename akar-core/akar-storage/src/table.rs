@@ -9,7 +9,7 @@ use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
 use crate::vector_index::VectorIndexTable;
 use akar_common::error::StorageError;
-use akar_common::types::{LogicalTypeID, Value};
+use akar_common::types::{LogicalTypeID, Value, pk_value_to_string};
 use akar_vector::hnsw::DistanceMetric;
 use dashmap::DashMap;
 use std::collections::HashMap;
@@ -798,28 +798,6 @@ impl NodeTable {
         self.node_groups
             .binary_search_by_key(&row, |g| g.start_offset)
             .unwrap_or_else(|i| if i == 0 { 0 } else { i - 1 })
-    }
-}
-
-/// Convert a Value to its string representation for use as a hash index key.
-fn pk_value_to_string(v: &Value) -> String {
-    match v {
-        Value::Null => "null".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int64(i) => i.to_string(),
-        Value::Int32(i) => i.to_string(),
-        Value::Int16(i) => i.to_string(),
-        Value::Int8(i) => i.to_string(),
-        Value::UInt64(u) => u.to_string(),
-        Value::UInt32(u) => u.to_string(),
-        Value::UInt16(u) => u.to_string(),
-        Value::UInt8(u) => u.to_string(),
-        Value::Double(f) => f.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Date(d) => format!("Date({})", d.0),
-        Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
-        other => format!("{other:?}"),
     }
 }
 

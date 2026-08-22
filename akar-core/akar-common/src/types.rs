@@ -388,6 +388,42 @@ pub fn extract_f64_list(val: &Value) -> Result<Vec<f64>, String> {
     }
 }
 
+/// Render a [`Value`] as the canonical string key used by hash indexes on
+/// primary keys.
+///
+/// Single source of truth shared by `akar-storage` (index build, lookup,
+/// delete) and `akar-main` (DDL/DML lookup paths) so every layer produces
+/// byte-identical keys. Non-scalar values fall back to their `Debug` text.
+pub fn pk_value_to_string(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int16(i) => i.to_string(),
+        Value::Int8(i) => i.to_string(),
+        Value::UInt64(u) => u.to_string(),
+        Value::UInt32(u) => u.to_string(),
+        Value::UInt16(u) => u.to_string(),
+        Value::UInt8(u) => u.to_string(),
+        Value::Double(f) => f.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Date(d) => format!("Date({})", d.0),
+        Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
+        other => format!("{other:?}"),
+    }
+}
+
+/// Render a [`Value`] as a CSV cell: `Null` becomes an empty field, anything
+/// else uses the canonical scalar rendering ([`pk_value_to_string`]).
+pub fn value_to_csv_string(v: &Value) -> String {
+    match v {
+        Value::Null => String::new(),
+        other => pk_value_to_string(other),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +512,46 @@ mod tests {
         assert_eq!(v.physical_type(), PhysicalTypeID::Double);
         let v: Value = "test".into();
         assert_eq!(v.physical_type(), PhysicalTypeID::String);
+    }
+
+    #[test]
+    fn test_pk_value_to_string_canonical_keys() {
+        assert_eq!(pk_value_to_string(&Value::Null), "null");
+        assert_eq!(pk_value_to_string(&Value::Bool(true)), "true");
+        assert_eq!(pk_value_to_string(&Value::Int64(-7)), "-7");
+        assert_eq!(pk_value_to_string(&Value::Int32(9)), "9");
+        // Narrow integer/float widths must render as bare numerics (not
+        // Debug text) so keys built here match lookups in every layer.
+        assert_eq!(pk_value_to_string(&Value::Int16(5)), "5");
+        assert_eq!(pk_value_to_string(&Value::Int8(3)), "3");
+        assert_eq!(pk_value_to_string(&Value::UInt64(u64::MAX)), u64::MAX.to_string());
+        assert_eq!(pk_value_to_string(&Value::UInt32(11)), "11");
+        assert_eq!(pk_value_to_string(&Value::UInt16(12)), "12");
+        assert_eq!(pk_value_to_string(&Value::UInt8(13)), "13");
+        assert_eq!(pk_value_to_string(&Value::Double(1.5)), "1.5");
+        assert_eq!(pk_value_to_string(&Value::Float(0.25)), "0.25");
+        assert_eq!(pk_value_to_string(&Value::String("k".into())), "k");
+        assert_eq!(
+            pk_value_to_string(&Value::Date(Date(20000))),
+            format!("Date({})", 20000)
+        );
+        assert_eq!(
+            pk_value_to_string(&Value::Timestamp(Timestamp(1_700_000_000_000_000))),
+            "Timestamp(1700000000000000)"
+        );
+        // Non-scalars fall back to Debug text.
+        assert_eq!(
+            pk_value_to_string(&Value::List(vec![Value::Int64(1)])),
+            "List([Int64(1)])"
+        );
+    }
+
+    #[test]
+    fn test_value_to_csv_string_null_is_empty_cell() {
+        assert_eq!(value_to_csv_string(&Value::Null), "");
+        assert_eq!(value_to_csv_string(&Value::Bool(false)), "false");
+        assert_eq!(value_to_csv_string(&Value::Int64(42)), "42");
+        assert_eq!(value_to_csv_string(&Value::String("a,b".into())), "a,b");
+        assert_eq!(value_to_csv_string(&Value::UInt8(7)), "7");
     }
 }

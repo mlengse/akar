@@ -135,29 +135,51 @@ impl QueryResult {
 
     /// Get a human-readable summary of the result.
     pub fn result_summary(&self) -> String {
-        if let Some(msg) = &self.message {
-            return msg.clone();
-        }
-        if !self.success {
-            return format!("Error: {}", self.error_message.as_deref().unwrap_or("Unknown error"));
-        }
-        if self.num_rows == 0 {
-            return "(empty result)".into();
+        if let Some(head) = result_summary_head(
+            self.message.as_deref(),
+            self.success,
+            self.error_message.as_deref(),
+            self.num_rows != 0,
+        ) {
+            return head;
         }
         format!("Returned {} rows in {} columns", self.num_rows, self.num_columns)
     }
 }
 
+/// Shared head logic for result summaries (local [`QueryResult`] and remote
+/// [`crate::remote::WireResponse`], DRY P51.43).
+///
+/// Precedence: message → error → empty-result marker. Returns `Some(summary)`
+/// when the result carries no data rows; `None` means the caller should append
+/// its row-count summary (or render rows).
+pub(crate) fn result_summary_head(
+    message: Option<&str>,
+    success: bool,
+    error_message: Option<&str>,
+    has_rows: bool,
+) -> Option<String> {
+    if let Some(msg) = message {
+        return Some(msg.to_string());
+    }
+    if !success {
+        return Some(format!("Error: {}", error_message.unwrap_or("Unknown error")));
+    }
+    if !has_rows {
+        return Some("(empty result)".into());
+    }
+    None
+}
+
 impl fmt::Display for QueryResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(msg) = &self.message {
-            return write!(f, "{msg}");
-        }
-        if !self.success {
-            return write!(f, "Error: {}", self.error_message.as_deref().unwrap_or("Unknown error"));
-        }
-        if self.chunks.is_empty() {
-            return write!(f, "(empty result)");
+        if let Some(head) = result_summary_head(
+            self.message.as_deref(),
+            self.success,
+            self.error_message.as_deref(),
+            !self.chunks.is_empty(),
+        ) {
+            return write!(f, "{head}");
         }
         for (i, chunk) in self.chunks.iter().enumerate() {
             if i > 0 {
@@ -166,5 +188,73 @@ impl fmt::Display for QueryResult {
             write!(f, "Chunk {}: {} rows, {} columns", i, chunk.size, chunk.num_fields())?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_result_summary_cases() {
+        // Message takes precedence over data.
+        let mut r = QueryResult::new(Vec::new());
+        r.message = Some("Table created".into());
+        assert_eq!(r.result_summary(), "Table created");
+
+        // Error rendering.
+        let err = QueryResult::error("boom".into());
+        assert_eq!(err.result_summary(), "Error: boom");
+
+        // Empty result marker.
+        assert_eq!(QueryResult::new(Vec::new()).result_summary(), "(empty result)");
+
+        // Row-count summary.
+        let mut rows = QueryResult::new(Vec::new());
+        rows.num_rows = 3;
+        rows.num_columns = 2;
+        assert_eq!(rows.result_summary(), "Returned 3 rows in 2 columns");
+    }
+
+    fn remote(
+        success: bool,
+        message: Option<&str>,
+        error: Option<&str>,
+        columns: usize,
+        row_count: usize,
+    ) -> crate::remote::WireResponse {
+        crate::remote::WireResponse {
+            success,
+            message: message.map(str::to_string),
+            error_message: error.map(str::to_string),
+            column_names: (0..columns).map(|i| format!("c{i}")).collect(),
+            rows: vec![Vec::new(); row_count],
+        }
+    }
+
+    /// Local and remote results must produce byte-identical summaries for the
+    /// same logical outcome (P51.43 — single shared head logic).
+    #[test]
+    fn test_local_remote_summary_parity() {
+        // Message case.
+        assert_eq!(
+            QueryResult::success_message("Table created".into()).result_summary(),
+            remote(true, Some("Table created"), None, 0, 0).result_summary()
+        );
+        // Error case.
+        assert_eq!(
+            QueryResult::error("boom".into()).result_summary(),
+            remote(false, None, Some("boom"), 0, 0).result_summary()
+        );
+        // Empty case.
+        assert_eq!(
+            QueryResult::new(Vec::new()).result_summary(),
+            remote(true, None, None, 0, 0).result_summary()
+        );
+        // Data case.
+        let mut local = QueryResult::new(Vec::new());
+        local.num_rows = 2;
+        local.num_columns = 3;
+        assert_eq!(local.result_summary(), remote(true, None, None, 3, 2).result_summary());
     }
 }

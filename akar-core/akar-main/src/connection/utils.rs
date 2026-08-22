@@ -84,17 +84,7 @@ pub(crate) fn register_sequence_scalars(registry: &mut akar_function::FunctionRe
 }
 
 /// Convert a Value to its string representation for CSV output.
-pub(crate) fn value_to_csv_string(v: &Value) -> String {
-    match v {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int64(i) => i.to_string(),
-        Value::Int32(i) => i.to_string(),
-        Value::Double(f) => f.to_string(),
-        Value::String(s) => s.clone(),
-        other => format!("{other:?}"),
-    }
-}
+pub(crate) use akar_common::types::value_to_csv_string;
 
 /// Convert a Value to an AST Expression (Constant).
 pub(crate) fn value_to_ast_constant(val: &Value) -> akar_parser::ast::Expression {
@@ -119,20 +109,12 @@ pub(crate) fn ast_constant_to_value(c: &akar_parser::ast::Constant) -> Value {
     }
 }
 
-/// Convert a Value to its string representation for hash index key lookup.
-pub(crate) fn pk_value_to_string(v: &Value) -> String {
-    match v {
-        Value::Null => "null".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int64(i) => i.to_string(),
-        Value::Int32(i) => i.to_string(),
-        Value::Double(f) => f.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Date(d) => format!("Date({})", d.0),
-        Value::Timestamp(ts) => format!("Timestamp({})", ts.0),
-        other => format!("{other:?}"),
-    }
-}
+/// Convert a Value to its canonical hash-index key string.
+///
+/// Thin re-export of the shared renderer in `akar-common` (DRY, P51.43) so
+/// DDL/DML lookups produce keys byte-identical to the ones `akar-storage`
+/// builds when inserting rows.
+pub(crate) use akar_common::types::pk_value_to_string;
 
 /// Convert `Vec<Vec<Value>>` rows into a `DataChunk` with named columns.
 pub(crate) fn rows_to_datachunk(
