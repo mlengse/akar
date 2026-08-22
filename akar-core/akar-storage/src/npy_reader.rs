@@ -229,6 +229,14 @@ fn read_values(raw: &[u8], dtype: &NpyDtype, count: usize) -> Result<Vec<Value>,
         });
     }
 
+    Ok(compute_values(count, dtype, elem_size, raw))
+}
+
+/// Decode `count` little-endian elements of `dtype` from `raw`.
+///
+/// Caller must guarantee `raw` holds at least `count * elem_size` bytes
+/// (`read_values` enforces this before calling).
+fn compute_values(count: usize, dtype: &NpyDtype, elem_size: usize, raw: &[u8]) -> Vec<Value> {
     let mut values = Vec::with_capacity(count);
     for i in 0..count {
         let offset = i * elem_size;
@@ -272,8 +280,7 @@ fn read_values(raw: &[u8], dtype: &NpyDtype, count: usize) -> Result<Vec<Value>,
         };
         values.push(val);
     }
-
-    Ok(values)
+    values
 }
 
 #[cfg(test)]

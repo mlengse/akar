@@ -86,12 +86,7 @@ impl ArtKey {
             Value::DTime(v) => Some(Self::from_int64(*v)),
             Value::Json(v) => Some(Self::from_string(&v.to_string())),
             Value::Union(tag, val) => {
-                let mut bytes = Vec::new();
-                bytes.extend_from_slice(&(tag.len() as u32).to_be_bytes());
-                bytes.extend_from_slice(tag.as_bytes());
-                if let Some(key) = Self::from_value(val) {
-                    bytes.extend_from_slice(&key.bytes);
-                }
+                let bytes = Self::compute_bytes(tag, val);
                 Some(Self { bytes })
             }
             Value::List(_) | Value::Map(_) | Value::Struct(_) => {
@@ -100,6 +95,17 @@ impl ArtKey {
                 None
             }
         }
+    }
+
+    /// Encode a union value as a length-prefixed tag followed by the encoded payload.
+    fn compute_bytes(tag: &str, val: &Value) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(tag.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(tag.as_bytes());
+        if let Some(key) = Self::from_value(val) {
+            bytes.extend_from_slice(&key.bytes);
+        }
+        bytes
     }
 
     /// Create from a boolean value.
