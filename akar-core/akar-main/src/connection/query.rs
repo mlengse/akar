@@ -555,23 +555,24 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
                 file_type,
                 schema_only,
             } => {
-                use std::fs;
-                use std::path::Path;
-                let dir = Path::new(&file_path);
-                fs::create_dir_all(dir)
-                    .map_err(|err| format!("Cannot create export directory '{}': {err}", file_path))?;
-                let catalog = db_sddl.catalog.lock().map_err(|e| format!("Catalog lock: {e}"))?;
-                // Shared schema/copy generators (single source of truth,
-                // P52.13/P52.26: valid rel-table FROM/TO + single-col PK).
-                let schema = super::copy::generate_schema_cypher(&catalog);
-                fs::write(dir.join("schema.cypher"), &schema)
-                    .map_err(|err| format!("Cannot write schema.cypher: {err}"))?;
-                if !schema_only {
-                    let copy = super::copy::generate_copy_cypher(&catalog, &file_type);
-                    fs::write(dir.join("copy.cypher"), &copy)
-                        .map_err(|err| format!("Cannot write copy.cypher: {err}"))?;
-                }
-                Ok(format!("Database exported to '{}'", file_path))
+                // Delegate to the same implementation as the direct
+                // `BoundExportDatabase` path (connection/copy.rs) so the
+                // planner-routed EXPORT also writes the data files, not just
+                // schema.cypher/copy.cypher (DRY, P51.42).
+                let conn = super::Connection::new(&db_sddl);
+                let bound = akar_binder::bound_statement::BoundExportDatabase {
+                    file_path,
+                    file_type,
+                    schema_only,
+                    options: Default::default(),
+                };
+                let result = conn
+                    .execute_export_database(&bound)
+                    .map_err(ProcessorError::Execution)?;
+                let msg = result
+                    .and_then(|r| r.message)
+                    .unwrap_or_else(|| format!("Database exported to '{}'", bound.file_path));
+                Ok(msg)
             }
             SchemaDdlOp::ImportDatabase {
                 file_path,

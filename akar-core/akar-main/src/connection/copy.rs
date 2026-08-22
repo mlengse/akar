@@ -1,7 +1,6 @@
 use super::Connection;
 use crate::query_result::QueryResult;
 use akar_binder::bound_statement::{BoundExportDatabase, BoundImportDatabase};
-use akar_catalog::Catalog;
 use akar_common::types::LogicalTypeID;
 use akar_parser::ast::CopyToFormat;
 
@@ -172,11 +171,6 @@ fn logical_type_name(t: LogicalTypeID) -> String {
 ///   (PK is written inside the column list, so single-column tables are valid)
 /// - rel tables: `CREATE REL TABLE t (FROM src TO dst, col T, ...);`
 ///   (endpoint node tables resolved by ID, required by the import grammar)
-pub(crate) fn generate_schema_cypher(catalog: &Catalog) -> String {
-    let entries: Vec<_> = catalog.all_entries().cloned().collect();
-    generate_schema_cypher_from_entries(&entries)
-}
-
 /// Build the `schema.cypher` file content from a list of catalog entries.
 fn generate_schema_cypher_from_entries(entries: &[akar_catalog::CatalogEntry]) -> String {
     let mut schema = String::new();
@@ -220,12 +214,6 @@ fn generate_schema_cypher_from_entries(entries: &[akar_catalog::CatalogEntry]) -
         }
     }
     schema
-}
-
-/// Build the `copy.cypher` file content for a database export.
-pub(crate) fn generate_copy_cypher(catalog: &Catalog, file_type: &str) -> String {
-    let entries: Vec<_> = catalog.all_entries().cloned().collect();
-    generate_copy_cypher_from_entries(&entries, file_type, None)
 }
 
 /// Build the `copy.cypher` file content from a list of catalog entries.
