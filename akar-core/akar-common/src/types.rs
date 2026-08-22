@@ -362,6 +362,32 @@ impl Interval {
     }
 }
 
+/// Extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
+///
+/// Numeric list items (Double/Int64/Int32/Float) are coerced to `f64`; any
+/// other item or a non-List value produces an error. Shared by the vector
+/// extension and the vector-index write path (DRY, P51.41).
+pub fn extract_f64_list(val: &Value) -> Result<Vec<f64>, String> {
+    match val {
+        Value::List(items) => {
+            let mut result = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::Double(d) => result.push(*d),
+                    Value::Int64(i) => result.push(*i as f64),
+                    Value::Int32(i) => result.push(*i as f64),
+                    Value::Float(f) => result.push(*f as f64),
+                    other => {
+                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
+                    }
+                }
+            }
+            Ok(result)
+        }
+        other => Err(format!("Expected List value for vector, got {:?}", other)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,6 +409,23 @@ mod tests {
         assert_eq!(Value::Int64(1).logical_type(), LogicalTypeID::Int64);
         assert_eq!(Value::String("a".into()).logical_type(), LogicalTypeID::String);
         assert_eq!(Value::List(vec![]).logical_type(), LogicalTypeID::List);
+    }
+
+    #[test]
+    fn test_extract_f64_list() {
+        assert_eq!(
+            extract_f64_list(&Value::List(vec![
+                Value::Double(1.5),
+                Value::Int64(2),
+                Value::Int32(3),
+                Value::Float(4.0),
+            ]))
+            .unwrap(),
+            vec![1.5, 2.0, 3.0, 4.0]
+        );
+        assert!(extract_f64_list(&Value::String("x".into())).is_err());
+        assert!(extract_f64_list(&Value::List(vec![Value::Bool(true)])).is_err());
+        assert_eq!(extract_f64_list(&Value::List(vec![])).unwrap(), Vec::<f64>::new());
     }
 
     #[test]

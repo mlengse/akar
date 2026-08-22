@@ -348,30 +348,10 @@ impl VectorIndexTable {
 
 /// Helper: extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
 pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, StorageError> {
-    match val {
-        Value::List(items) => {
-            let mut result = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    Value::Double(d) => result.push(*d),
-                    Value::Int64(i) => result.push(*i as f64),
-                    Value::Int32(i) => result.push(*i as f64),
-                    Value::Float(f) => result.push(*f as f64),
-                    other => {
-                        return Err(StorageError::TypeMismatch {
-                            expected: "numeric value".into(),
-                            actual: format!("{:?}", other),
-                        });
-                    }
-                }
-            }
-            Ok(result)
-        }
-        other => Err(StorageError::TypeMismatch {
-            expected: "List value for vector".into(),
-            actual: format!("{:?}", other),
-        }),
-    }
+    akar_common::types::extract_f64_list(val).map_err(|e| StorageError::TypeMismatch {
+        expected: "numeric vector".into(),
+        actual: e,
+    })
 }
 
 #[cfg(test)]

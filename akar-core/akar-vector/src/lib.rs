@@ -17,6 +17,7 @@
 
 pub mod hnsw;
 
+use akar_common::types::extract_f64_list;
 use akar_extension::{Extension, ExtensionContext};
 
 /// The Vector extension adds embedding/vector support to Akar.
@@ -121,28 +122,6 @@ impl Extension for VectorExtension {
 
         tracing::info!("Vector extension loaded: 5 functions registered (4 scalar + 1 table)");
         Ok(())
-    }
-}
-
-/// Helper: extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
-fn extract_f64_list(val: &akar_common::types::Value) -> Result<Vec<f64>, String> {
-    match val {
-        akar_common::types::Value::List(items) => {
-            let mut result = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    akar_common::types::Value::Double(d) => result.push(*d),
-                    akar_common::types::Value::Int64(i) => result.push(*i as f64),
-                    akar_common::types::Value::Int32(i) => result.push(*i as f64),
-                    akar_common::types::Value::Float(f) => result.push(*f as f64),
-                    other => {
-                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
-                    }
-                }
-            }
-            Ok(result)
-        }
-        other => Err(format!("Expected List value for vector, got {:?}", other)),
     }
 }
 
