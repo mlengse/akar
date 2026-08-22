@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **security(binder) — IMPORT DATABASE path traversal (CWE-22/CWE-59) (2026-08-23, tanpa id task)** — `bind_import_database` (`akar-binder/src/binder/mod.rs`) membaca `schema/copy/index.cypher` dari `file_path` mentah AST tanpa cek containment; karena `akar-server` mengeksekusi Cypher mentah dari klien TCP remote, path traversal (`'x/../../etc'`) atau `schema.cypher` ber-symlink bisa keluar dari direktori mana pun dan menyuplai file pilihan penyerang ke eksekusi statement. Fix defense-in-depth di bind time: tolak path kosong/NUL dan komponen leksikal `..` apa pun; kanonikalisasi direktori import sebelum akses filesystem; semua bacaan lewat helper `read_file_within_dir` yang re-kanonikalisasi tiap file dan menolak yang resolve di luar direktori import (guard symlink-escape). Path absolut tetap didukung (round-trip EXPORT→IMPORT tak terpengaruh — kairos `repair_schema` aman). 7 tes regresi baru (symlink-escape unix, bentuk backslash windows, NUL/kosong, penolakan di bind sebelum akses fs, containment OK, file hilang). Commit `ed4cc27`. Gate `test [akar-core]`: **1,835 passed / 0 failed / 0 ignored** (121 suite); fmt + clippy `-D warnings` bersih. Metrik tes `SPEC.md` direkonsiliasi 1.751 → 1.835.
+
 ### Changed
 
 - **refactor(storage) — ekstraksi helper `compute_bytes` & `compute_values` (2026-08-23, tanpa id task)** — dua cleanup extract-function di `akar-storage`, perilaku dipertahankan: (1) encoding union `Value::Union(tag, val)` di `ArtKey::from_value` (`art_key.rs`) diekstrak ke helper `ArtKey::compute_bytes(tag, val)`; (2) `read_values` (`npy_reader.rs`) dipecah validasi panjang buffer + loop decode baru `compute_values(count, dtype, elem_size, raw)` dengan preconditions terdokumentasi. Verifikasi ter-scope (bukan gate penuh): `cargo check -p akar-storage` bersih; `cargo test -p akar-storage` **343 passed / 0 failed** (+1 doctest). Commit `6eeaff8`.
