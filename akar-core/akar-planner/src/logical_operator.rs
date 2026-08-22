@@ -669,7 +669,10 @@ pub struct LogicalOptionalExtend {
     pub rel_var: String,
     /// Variable name of the bound source node (e.g., "a").
     pub src_node_var: String,
-    /// Variable name of the bound destination node (e.g., "b").
+    /// Variable name of the bound destination node (e.g., "b"). An empty
+    /// string selects fan-out mode (P53.40): the destination is anonymous
+    /// (`OPTIONAL MATCH (m)-[r:R]-(:T)`), so every edge incident on the source
+    /// becomes one output row.
     pub dst_node_var: String,
     /// Direction of the probe (forward, backward, or both).
     pub direction: akar_parser::ast::EdgeDirection,

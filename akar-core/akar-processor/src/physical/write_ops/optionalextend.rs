@@ -20,6 +20,13 @@ use std::sync::Arc;
 /// are emitted; when no edge exists, those columns are NULL-padded and exactly
 /// one row is still produced (outer-join semantics).
 ///
+/// Fan-out mode (P53.40): when `dst_node_var` is empty the destination is
+/// anonymous — `OPTIONAL MATCH (m)-[r:R]-(:T)` — so EVERY edge incident on the
+/// source becomes one output row (zero edges still yield one NULL-padded row).
+/// This preserves multi-edge cardinality for downstream aggregates such as
+/// `WITH m, COUNT(r) AS cnt`; the previous fallback routed such patterns
+/// through a cross-product merge that duplicated every left row.
+///
 /// Output layout: `[input_fields | rel_properties | {rel_var}._id]`.
 pub struct PhysicalOptionalExtend {
     /// Name of the relationship table to probe.
@@ -31,7 +38,8 @@ pub struct PhysicalOptionalExtend {
     pub rel_var: String,
     /// Variable name of the bound source node (e.g., "a").
     pub src_node_var: String,
-    /// Variable name of the bound destination node (e.g., "b").
+    /// Variable name of the bound destination node (e.g., "b"). Empty string
+    /// selects fan-out mode: all edges incident on the source are emitted.
     pub dst_node_var: String,
     /// Direction of the probe (forward, backward, or both).
     pub direction: EdgeDirection,
@@ -86,6 +94,40 @@ fn probe_edge(
     }
 }
 
+/// Fan-out probe (P53.40): every edge index incident on `src`, honoring the
+/// probe direction. Under `Both` a self-loop appears in both adjacency lists,
+/// so indexes are deduplicated (first-seen adjacency order preserved).
+fn probe_incident_edges(
+    fwd_adj: &HashMap<u64, Vec<(u64, usize)>>,
+    rev_adj: &HashMap<u64, Vec<(u64, usize)>>,
+    src: u64,
+    direction: &EdgeDirection,
+) -> Vec<usize> {
+    let mut idxs: Vec<usize> = Vec::new();
+    match direction {
+        EdgeDirection::LeftToRight => {
+            if let Some(entries) = fwd_adj.get(&src) {
+                idxs.extend(entries.iter().map(|(_, i)| *i));
+            }
+        }
+        EdgeDirection::RightToLeft => {
+            if let Some(entries) = rev_adj.get(&src) {
+                idxs.extend(entries.iter().map(|(_, i)| *i));
+            }
+        }
+        EdgeDirection::Both => {
+            for list in [fwd_adj.get(&src), rev_adj.get(&src)].into_iter().flatten() {
+                for (_, i) in list {
+                    if !idxs.contains(i) {
+                        idxs.push(*i);
+                    }
+                }
+            }
+        }
+    }
+    idxs
+}
+
 impl PhysicalOptionalExtend {
     pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
         if input.is_empty() {
@@ -115,6 +157,7 @@ impl PhysicalOptionalExtend {
         let rel_field_names: Vec<String> = rel_cols.iter().map(|c| format!("{}.{}", rel_prefix, c.name)).collect();
 
         let mut output = Vec::with_capacity(input.len());
+        let fan_out = self.dst_node_var.is_empty();
 
         for chunk in input {
             if chunk.size == 0 {
@@ -123,44 +166,72 @@ impl PhysicalOptionalExtend {
             }
 
             let src_idx = find_node_id_col(&chunk, &self.src_node_var)?;
-            let dst_idx = find_node_id_col(&chunk, &self.dst_node_var)?;
+            // Fan-out mode has no destination variable to resolve.
+            let dst_idx = if fan_out {
+                0
+            } else {
+                find_node_id_col(&chunk, &self.dst_node_var)?
+            };
 
             let num_input_fields = chunk.fields.len();
             let num_out_cols = num_input_fields + num_rel_cols + 1;
-            let mut out_data: Vec<Vec<Value>> = vec![Vec::with_capacity(chunk.size); num_out_cols];
+            let mut out_data: Vec<Vec<Value>> = vec![Vec::new(); num_out_cols];
 
             for i in 0..chunk.size {
-                for col in 0..num_input_fields {
-                    let val = chunk.get_value(col, i).unwrap_or(Value::Null);
-                    out_data[col].push(val);
-                }
+                let input_vals: Vec<Value> = (0..num_input_fields)
+                    .map(|col| chunk.get_value(col, i).unwrap_or(Value::Null))
+                    .collect();
 
-                // Probe the adjacency for an edge between src and dst.
-                let edge_idx = match (chunk.get_value(src_idx, i), chunk.get_value(dst_idx, i)) {
-                    (Some(Value::Int64(s)), Some(Value::Int64(d))) => {
-                        probe_edge(&fwd_adj, &rev_adj, s as u64, d as u64, &self.direction)
+                // Edge matches per input row: fan-out emits one row per
+                // incident edge; the bound-pair probe emits at most one. An
+                // empty match still yields a NULL-padded row (outer join).
+                let matches: Vec<Option<usize>> = if fan_out {
+                    match input_vals.get(src_idx) {
+                        Some(Value::Int64(s)) => {
+                            let found = probe_incident_edges(&fwd_adj, &rev_adj, *s as u64, &self.direction);
+                            if found.is_empty() {
+                                vec![None]
+                            } else {
+                                found.into_iter().map(Some).collect()
+                            }
+                        }
+                        _ => vec![None],
                     }
-                    _ => None,
+                } else {
+                    let edge_idx = match (chunk.get_value(src_idx, i), chunk.get_value(dst_idx, i)) {
+                        (Some(Value::Int64(s)), Some(Value::Int64(d))) => {
+                            probe_edge(&fwd_adj, &rev_adj, s as u64, d as u64, &self.direction)
+                        }
+                        _ => None,
+                    };
+                    vec![edge_idx]
                 };
 
-                for col in 0..num_rel_cols {
-                    let val = match edge_idx {
-                        Some(ei) => rel_props
-                            .get(col)
-                            .and_then(|c| c.get(ei))
-                            .cloned()
-                            .unwrap_or(Value::Null),
+                for edge_idx in matches {
+                    for col in 0..num_input_fields {
+                        out_data[col].push(input_vals[col].clone());
+                    }
+                    for col in 0..num_rel_cols {
+                        let val = match edge_idx {
+                            Some(ei) => rel_props
+                                .get(col)
+                                .and_then(|c| c.get(ei))
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                            None => Value::Null,
+                        };
+                        out_data[num_input_fields + col].push(val);
+                    }
+                    // Internal edge index — non-NULL iff an edge exists, so a
+                    // zero-property rel table still answers `{rel_var} IS NULL`.
+                    out_data[num_input_fields + num_rel_cols].push(match edge_idx {
+                        Some(ei) => Value::Int64(ei as i64),
                         None => Value::Null,
-                    };
-                    out_data[num_input_fields + col].push(val);
+                    });
                 }
-                // Internal edge index — non-NULL iff an edge exists, so a
-                // zero-property rel table still answers `{rel_var} IS NULL`.
-                out_data[num_input_fields + num_rel_cols].push(match edge_idx {
-                    Some(ei) => Value::Int64(ei as i64),
-                    None => Value::Null,
-                });
             }
+
+            let out_size = out_data.first().map(Vec::len).unwrap_or(chunk.size);
 
             // Build output columns.
             let mut fields = Vec::with_capacity(num_out_cols);
@@ -169,9 +240,9 @@ impl PhysicalOptionalExtend {
 
             for col in 0..num_input_fields {
                 let phys_type = chunk.field_types[col];
-                let mut v = ValueVector::new(phys_type, chunk.size);
-                v.resize(chunk.size);
-                for row in 0..chunk.size {
+                let mut v = ValueVector::new(phys_type, out_size);
+                v.resize(out_size);
+                for row in 0..out_size {
                     store_value_in_vector(&mut v, row, &out_data[col][row])?;
                 }
                 fields.push(v);
@@ -188,9 +259,9 @@ impl PhysicalOptionalExtend {
                 } else {
                     PhysicalTypeID::Int64
                 };
-                let mut v = ValueVector::new(phys_type, chunk.size);
-                v.resize(chunk.size);
-                for row in 0..chunk.size {
+                let mut v = ValueVector::new(phys_type, out_size);
+                v.resize(out_size);
+                for row in 0..out_size {
                     store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
                 }
                 fields.push(v);
@@ -198,9 +269,9 @@ impl PhysicalOptionalExtend {
                 field_names.push(rel_field_names[col].clone());
             }
             // Internal edge index column (`{rel_var}._id`).
-            let mut id_v = ValueVector::new(PhysicalTypeID::Int64, chunk.size);
-            id_v.resize(chunk.size);
-            for row in 0..chunk.size {
+            let mut id_v = ValueVector::new(PhysicalTypeID::Int64, out_size);
+            id_v.resize(out_size);
+            for row in 0..out_size {
                 store_value_in_vector(&mut id_v, row, &out_data[num_input_fields + num_rel_cols][row])?;
             }
             fields.push(id_v);
@@ -215,7 +286,7 @@ impl PhysicalOptionalExtend {
             output.push(DataChunk {
                 fields: arrow_fields,
                 field_types: arrow_field_types,
-                size: chunk.size,
+                size: out_size,
                 field_names,
                 sel_vector: None,
             });

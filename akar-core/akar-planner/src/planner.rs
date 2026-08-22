@@ -395,10 +395,7 @@ impl QueryPlanner {
         // column 0; with a trailing RETURN the SET must pass through the matched
         // rows (0 rows when nothing matched) instead of a phantom count row
         // (P53.39 / kairos P59.1).
-        let has_return = query
-            .clauses
-            .iter()
-            .any(|c| matches!(c, BoundClause::BoundReturn(_)));
+        let has_return = query.clauses.iter().any(|c| matches!(c, BoundClause::BoundReturn(_)));
 
         for clause in query.clauses {
             match clause {
@@ -635,12 +632,7 @@ impl QueryPlanner {
                     // by probing the relationship adjacency per input row
                     // (OptionalExtend) rather than scanning + outer-joining, so
                     // the compound `a._id`/`b._id` endpoints survive.
-                    let edge_probe = om.patterns.len() == 2
-                        && om.patterns.iter().all(|p| {
-                            p.node_label.is_none()
-                                && p.properties.is_empty()
-                                && p.node_variable.as_ref().is_some_and(|v| available_vars.contains(v))
-                        })
+                    let probe_edge_shape = om.patterns.len() == 2
                         && om.patterns[0].edge.as_ref().is_some_and(|e| {
                             e.variable.is_some()
                                 && e.label.as_ref().is_some_and(|l| !l.is_empty())
@@ -649,6 +641,35 @@ impl QueryPlanner {
                                 && e.upper_bound.is_none()
                         })
                         && om.patterns[1].edge.is_none();
+
+                    let both_endpoints_bound = probe_edge_shape
+                        && om.patterns.iter().all(|p| {
+                            p.node_label.is_none()
+                                && p.properties.is_empty()
+                                && p.node_variable.as_ref().is_some_and(|v| available_vars.contains(v))
+                        });
+
+                    // P53.40 (kairos Finding #22): anonymous labeled destination —
+                    // `(m)-[r:Connected]-(:Memory)` with `m` bound and no dst
+                    // variable downstream. The rel table's endpoint schema
+                    // guarantees the destination node type, so probing all edges
+                    // incident on the source is equivalent to the full pattern;
+                    // each match fans out one row per edge (zero → one NULL row).
+                    // The previous fallback routed this through the generic
+                    // OptionalMatch merge, which cross-producted when no column
+                    // name is shared and duplicated every left row.
+                    let anon_dst_fanout = probe_edge_shape
+                        && om.patterns[0].node_label.is_none()
+                        && om.patterns[0].properties.is_empty()
+                        && om.patterns[0]
+                            .node_variable
+                            .as_ref()
+                            .is_some_and(|v| available_vars.contains(v))
+                        && om.patterns[1].node_variable.is_none()
+                        && om.patterns[1].properties.is_empty()
+                        && om.patterns[1].node_label.is_some();
+
+                    let edge_probe = both_endpoints_bound || anon_dst_fanout;
 
                     // Build the current required-side pipeline (left child)
                     let mut left_pipeline: Vec<LogicalOperator> = Vec::new();
@@ -674,7 +695,10 @@ impl QueryPlanner {
                     if edge_probe {
                         let edge = om.patterns[0].edge.as_ref().unwrap();
                         let src_var = om.patterns[0].node_variable.clone().unwrap();
-                        let dst_var = om.patterns[1].node_variable.clone().unwrap();
+                        // Anonymous destination (P53.40 fan-out): empty string
+                        // tells the physical operator to emit every incident
+                        // edge instead of probing a specific pair.
+                        let dst_var = om.patterns[1].node_variable.clone().unwrap_or_default();
                         delete_exprs.push(LogicalOperator::OptionalExtend(LogicalOptionalExtend {
                             children: left_pipeline,
                             rel_table_name: edge.label.clone().unwrap(),
@@ -945,10 +969,12 @@ impl QueryPlanner {
         let mut result: Vec<LogicalOperator> = Vec::new();
 
         if scan_ops.is_empty() {
+            // All scans live inside delete_ops children (e.g. an OPTIONAL
+            // MATCH pipeline resets `scan_ops`). The RETURN tail must still be
+            // emitted — this fast path previously dropped ORDER BY and LIMIT
+            // entirely (P53.40).
             result.extend(delete_ops);
-            if let Some(proj) = projection {
-                result.push(LogicalOperator::Projection(proj));
-            }
+            append_return_tail(&mut result, projection, order_by, distinct, limit, skip);
             return Ok(result);
         }
 
@@ -979,86 +1005,105 @@ impl QueryPlanner {
         // the returned expressions (P53.14): `MATCH ... SET ... RETURN ...`.
         result.extend(delete_ops);
 
-        // Project as topmost
-        if let Some(proj) = projection {
-            let group_by = if distinct {
-                Some(
-                    proj.expressions
-                        .iter()
-                        .map(|be| be.expression.clone())
-                        .collect::<Vec<Expression>>(),
-                )
-            } else {
-                None
-            };
+        // Project as topmost, then ORDER BY / LIMIT (shared tail, P53.40)
+        append_return_tail(&mut result, projection, order_by, distinct, limit, skip);
 
-            // When ORDER BY references a column the projection does not output
-            // (e.g. `RETURN m.id, m.label ORDER BY m.access_count`), the sort key
-            // cannot be evaluated against the projected (pruned) chunk. Push the
-            // sort below the projection so it runs against the full pre-projection
-            // columns (P53.37). It stays on top when every key is covered by the
-            // projection output (alias or identical expression), or when DISTINCT
-            // deduplicates above (sorting before dedup would lose the order).
-            let order_by_below_projection = match &order_by {
-                Some(items) => {
-                    group_by.is_none()
-                        && !items
-                            .iter()
-                            .all(|item| projection_covers_sort_key(&proj.expressions, &item.expression.expression))
-                }
-                None => false,
-            };
+        Ok(result)
+    }
+}
 
-            if order_by_below_projection {
-                if let Some(items) = order_by.take() {
-                    let sort_keys: Vec<(Expression, bool)> = items
+/// Append the RETURN projection tail shared by BOTH plan-assembly paths:
+/// the optional below-projection sort (P53.37), the projection itself, the
+/// DISTINCT dedup aggregate, the above-projection sort, and LIMIT/SKIP.
+///
+/// Extracted because the `scan_ops.is_empty()` fast path (e.g. after an
+/// OPTIONAL MATCH resets the scan state) previously returned early with only
+/// `[delete_ops..., Projection]` — silently dropping ORDER BY and LIMIT for
+/// every such query (P53.40, kairos Finding #22).
+fn append_return_tail(
+    result: &mut Vec<LogicalOperator>,
+    projection: Option<LogicalProjection>,
+    mut order_by: Option<Vec<BoundOrderByItem>>,
+    distinct: bool,
+    limit: Option<u64>,
+    skip: Option<u64>,
+) {
+    if let Some(proj) = projection {
+        let group_by = if distinct {
+            Some(
+                proj.expressions
+                    .iter()
+                    .map(|be| be.expression.clone())
+                    .collect::<Vec<Expression>>(),
+            )
+        } else {
+            None
+        };
+
+        // When ORDER BY references a column the projection does not output
+        // (e.g. `RETURN m.id, m.label ORDER BY m.access_count`), the sort key
+        // cannot be evaluated against the projected (pruned) chunk. Push the
+        // sort below the projection so it runs against the full pre-projection
+        // columns (P53.37). It stays on top when every key is covered by the
+        // projection output (alias or identical expression), or when DISTINCT
+        // deduplicates above (sorting before dedup would lose the order).
+        let order_by_below_projection = match &order_by {
+            Some(items) => {
+                group_by.is_none()
+                    && !items
                         .iter()
-                        .map(|item| (item.expression.expression.clone(), item.ascending))
-                        .collect();
-                    result.push(LogicalOperator::OrderBy(LogicalOrderBy {
-                        sort_keys,
-                        children: Vec::new(),
-                        cardinality: 0,
-                    }));
-                }
+                        .all(|item| projection_covers_sort_key(&proj.expressions, &item.expression.expression))
             }
+            None => false,
+        };
 
-            result.push(LogicalOperator::Projection(proj));
-            // DISTINCT is implemented as a hash aggregate with group-by keys and no aggregate functions
-            if let Some(gb) = group_by {
-                result.push(LogicalOperator::Aggregate(LogicalAggregate {
-                    group_by: gb,
-                    aggregates: Vec::new(),
+        if order_by_below_projection {
+            if let Some(items) = order_by.take() {
+                let sort_keys: Vec<(Expression, bool)> = items
+                    .iter()
+                    .map(|item| (item.expression.expression.clone(), item.ascending))
+                    .collect();
+                result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+                    sort_keys,
                     children: Vec::new(),
                     cardinality: 0,
                 }));
             }
         }
 
-        // Insert ORDER BY operator if present
-        if let Some(items) = order_by {
-            let sort_keys: Vec<(Expression, bool)> = items
-                .iter()
-                .map(|item| (item.expression.expression.clone(), item.ascending))
-                .collect();
-            result.push(LogicalOperator::OrderBy(LogicalOrderBy {
-                sort_keys,
+        result.push(LogicalOperator::Projection(proj));
+        // DISTINCT is implemented as a hash aggregate with group-by keys and no aggregate functions
+        if let Some(gb) = group_by {
+            result.push(LogicalOperator::Aggregate(LogicalAggregate {
+                group_by: gb,
+                aggregates: Vec::new(),
                 children: Vec::new(),
                 cardinality: 0,
             }));
         }
+    }
 
-        // Insert LIMIT/SKIP operator if present
-        if limit.is_some() || skip.is_some() {
-            result.push(LogicalOperator::Limit(LogicalLimit {
-                limit: limit.unwrap_or(u64::MAX),
-                offset: skip.unwrap_or(0),
-                children: Vec::new(),
-                cardinality: 0,
-            }));
-        }
+    // Insert ORDER BY operator if present
+    if let Some(items) = order_by {
+        let sort_keys: Vec<(Expression, bool)> = items
+            .iter()
+            .map(|item| (item.expression.expression.clone(), item.ascending))
+            .collect();
+        result.push(LogicalOperator::OrderBy(LogicalOrderBy {
+            sort_keys,
+            children: Vec::new(),
+            cardinality: 0,
+        }));
+    }
 
-        Ok(result)
+    // Insert LIMIT/SKIP operator if present
+    if limit.is_some() || skip.is_some() {
+        result.push(LogicalOperator::Limit(LogicalLimit {
+            limit: limit.unwrap_or(u64::MAX),
+            offset: skip.unwrap_or(0),
+            children: Vec::new(),
+            cardinality: 0,
+        }));
     }
 }
 
@@ -1134,6 +1179,28 @@ mod tests {
             .count();
         assert_eq!(scan_count, 1);
         assert_eq!(proj_count, 1);
+    }
+
+    #[test]
+    fn test_plan_optional_match_keeps_order_by_and_limit() {
+        // P53.40 / kairos Finding #22: the `scan_ops.is_empty()` assembly fast
+        // path (hit whenever OPTIONAL MATCH resets the scan state) previously
+        // returned early and dropped ORDER BY and LIMIT entirely.
+        let binder = setup_binder();
+        let sql = "MATCH (a:Person) OPTIONAL MATCH (a)-[r:Knows]-(:Person) \
+                   RETURN a.name AS id, COUNT(r) AS c ORDER BY id LIMIT 5";
+        let stmt = parse(sql).unwrap();
+        let bound = binder.bind(stmt).unwrap();
+        let planner = QueryPlanner::new();
+        let plan = planner.plan(bound).unwrap();
+        assert!(
+            plan.iter().any(|op| matches!(op, LogicalOperator::OrderBy(_))),
+            "planner must emit OrderBy above the RETURN projection, got: {plan:?}"
+        );
+        assert!(
+            plan.iter().any(|op| matches!(op, LogicalOperator::Limit(_))),
+            "planner must emit Limit above the RETURN projection, got: {plan:?}"
+        );
     }
 
     #[test]

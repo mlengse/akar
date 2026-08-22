@@ -65,10 +65,7 @@ fn test_p5339_match_set_return_no_match_empty() {
     // must return ZERO rows — previously the SET emitted a phantom `count=0`
     // chunk that the RETURN projection turned into `[[0]]`.
     let (_db, conn) = setup_chain();
-    let rows = query_rows(
-        &conn,
-        "MATCH (c:Chain {id: 999}) SET c.value = 42 RETURN c.id",
-    );
+    let rows = query_rows(&conn, "MATCH (c:Chain {id: 999}) SET c.value = 42 RETURN c.id");
     assert_eq!(
         rows,
         Vec::<Vec<String>>::new(),
