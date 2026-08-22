@@ -176,8 +176,7 @@ impl Connection {
         let planner = QueryPlanner::new();
         let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
-        let optimized = optimizer.optimize(logical_plan);
-        Ok(optimized)
+        Ok(optimizer.optimize(logical_plan))
     }
 
     /// Inner query execution (after parsing and binding, before commit/rollback).
