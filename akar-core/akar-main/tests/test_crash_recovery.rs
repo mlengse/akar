@@ -147,8 +147,17 @@ fn test_crash_mid_write_no_commit() {
 fn test_crash_after_checkpoint_clean_recovery() {
     let mut sim = CrashSimulator::spawn("write-and-checkpoint", 100, -1);
 
-    // Wait for child to complete checkpoint and clean exit
-    thread::sleep(Duration::from_secs(5));
+    // Kill as soon as the child signals the CHECKPOINT completed (deterministic;
+    // replaces the old fixed 5 s sleep that wasted wall-clock every run).
+    let done_marker = sim.db_path().to_path_buf().join("checkpoint_done");
+    let start = Instant::now();
+    while !done_marker.exists() {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "child did not complete checkpoint in time"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 
     sim.kill();
 
@@ -183,7 +192,7 @@ fn test_wal_replay_large_record_count() {
         "WAL file did not grow within timeout"
     );
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_millis(200));
     sim.kill();
 
     open_db_after_crash(sim.db_path());

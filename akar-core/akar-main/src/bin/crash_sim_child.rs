@@ -123,6 +123,9 @@ fn main() {
                     .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
                 }
                 conn.query("CHECKPOINT").expect("Failed to checkpoint");
+                // Deterministic completion marker so the parent can kill us
+                // right after the checkpoint instead of sleeping a fixed time.
+                fs::write(db_path.join("checkpoint_done"), b"").expect("Failed to write checkpoint_done marker");
             }
             "ddl-recovery" => {
                 // Cross-process DDL recovery: the `Person` table was created by the

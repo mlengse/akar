@@ -76,8 +76,20 @@ impl TablePersistence {
     }
 
     /// Persist the oversized-value map to the `col_{tid}.ovf` sidecar.
+    ///
+    /// Skipped entirely when no column has oversized values: most tables never
+    /// overflow, and rewriting (create + write + close) an empty sidecar on
+    /// every commit is wasted I/O on the hot commit path.
     fn save_overflow(table_id: u64, oversized: &[HashMap<u64, Vec<u8>>], db_path: &Path) -> Result<(), StorageError> {
         let path = db_path.join(Self::ovf_file_name(table_id));
+        if oversized.iter().all(|m| m.is_empty()) {
+            // No oversized values anywhere. The sidecar only exists if a past
+            // sync wrote one; drop it so recovery sees a consistent state.
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+            return Ok(());
+        }
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&(oversized.len() as u32).to_le_bytes());
         for col in oversized {
