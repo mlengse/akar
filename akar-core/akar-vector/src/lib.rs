@@ -256,21 +256,14 @@ pub fn compute_rerank_score(candidate: &RerankCandidate, weights: &RerankWeights
     // Graph: already in [0,1]
     let graph = candidate.graph_score.clamp(0.0, 1.0);
 
-    weights.embedding * embedding
-        + weights.temporal * temporal
-        + weights.frequency * frequency
-        + weights.graph * graph
+    weights.embedding * embedding + weights.temporal * temporal + weights.frequency * frequency + weights.graph * graph
 }
 
 /// Re-rank candidates by combined multi-signal score and return top-k.
 ///
 /// Candidates are scored using `compute_rerank_score` with the given weights,
 /// then sorted by descending score. Returns at most `top_k` results.
-pub fn rerank_knn(
-    candidates: &[RerankCandidate],
-    weights: &RerankWeights,
-    top_k: usize,
-) -> Vec<(usize, f64)> {
+pub fn rerank_knn(candidates: &[RerankCandidate], weights: &RerankWeights, top_k: usize) -> Vec<(usize, f64)> {
     let mut scored: Vec<(usize, f64)> = candidates
         .iter()
         .map(|c| (c.id, compute_rerank_score(c, weights)))
@@ -384,10 +377,34 @@ mod tests {
     #[test]
     fn test_rerank_top_k() {
         let candidates = vec![
-            RerankCandidate { id: 0, embedding_score: 0.5, age: 100.0, frequency: 10.0, graph_score: 0.5 },
-            RerankCandidate { id: 1, embedding_score: 0.9, age: 0.0, frequency: 100.0, graph_score: 0.9 },
-            RerankCandidate { id: 2, embedding_score: 0.1, age: 500.0, frequency: 1.0, graph_score: 0.1 },
-            RerankCandidate { id: 3, embedding_score: 0.8, age: 10.0, frequency: 50.0, graph_score: 0.7 },
+            RerankCandidate {
+                id: 0,
+                embedding_score: 0.5,
+                age: 100.0,
+                frequency: 10.0,
+                graph_score: 0.5,
+            },
+            RerankCandidate {
+                id: 1,
+                embedding_score: 0.9,
+                age: 0.0,
+                frequency: 100.0,
+                graph_score: 0.9,
+            },
+            RerankCandidate {
+                id: 2,
+                embedding_score: 0.1,
+                age: 500.0,
+                frequency: 1.0,
+                graph_score: 0.1,
+            },
+            RerankCandidate {
+                id: 3,
+                embedding_score: 0.8,
+                age: 10.0,
+                frequency: 50.0,
+                graph_score: 0.7,
+            },
         ];
         let top2 = rerank_knn(&candidates, &DEFAULT_RERANK_WEIGHTS, 2);
         assert_eq!(top2.len(), 2);
@@ -400,11 +417,31 @@ mod tests {
     #[test]
     fn test_rerank_weight_shift() {
         // With only embedding weight, age should not matter
-        let weights = RerankWeights { embedding: 1.0, temporal: 0.0, frequency: 0.0, graph: 0.0 };
-        let c1 = RerankCandidate { id: 0, embedding_score: 0.8, age: 0.0, frequency: 0.0, graph_score: 0.0 };
-        let c2 = RerankCandidate { id: 1, embedding_score: 0.8, age: 999.0, frequency: 0.0, graph_score: 0.0 };
+        let weights = RerankWeights {
+            embedding: 1.0,
+            temporal: 0.0,
+            frequency: 0.0,
+            graph: 0.0,
+        };
+        let c1 = RerankCandidate {
+            id: 0,
+            embedding_score: 0.8,
+            age: 0.0,
+            frequency: 0.0,
+            graph_score: 0.0,
+        };
+        let c2 = RerankCandidate {
+            id: 1,
+            embedding_score: 0.8,
+            age: 999.0,
+            frequency: 0.0,
+            graph_score: 0.0,
+        };
         let s1 = compute_rerank_score(&c1, &weights);
         let s2 = compute_rerank_score(&c2, &weights);
-        assert!((s1 - s2).abs() < 1e-10, "same embedding should give same score when temporal weight is 0");
+        assert!(
+            (s1 - s2).abs() < 1e-10,
+            "same embedding should give same score when temporal weight is 0"
+        );
     }
 }

@@ -4,10 +4,10 @@
 //! result sets, hybrid search (vector + FTS), and multi-perspective
 //! recall with automatic RRF deduplication.
 
-pub mod rrf;
 pub mod hybrid;
 pub mod multi;
+pub mod rrf;
 
-pub use rrf::rrf_fuse_ref;
 pub use hybrid::hybrid_search;
 pub use multi::multi_perspective_recall_with_id;
+pub use rrf::rrf_fuse_ref;

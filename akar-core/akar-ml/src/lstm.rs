@@ -110,11 +110,7 @@ impl LstmModel {
         let mut xavier = |rows: usize, cols: usize| -> Vec<Vec<f64>> {
             let limit = (6.0 / (rows + cols) as f64).sqrt();
             (0..rows)
-                .map(|_| {
-                    (0..cols)
-                        .map(|_| rng.gen_range(-limit..limit))
-                        .collect()
-                })
+                .map(|_| (0..cols).map(|_| rng.gen_range(-limit..limit)).collect())
                 .collect()
         };
 
@@ -297,11 +293,7 @@ pub fn train(
                 let tanh_c: Vec<f64> = cell.cell_state.iter().map(|&v| v.tanh()).collect();
 
                 // d_o = d_h ⊙ tanh(c_t)
-                let d_o: Vec<f64> = d_h
-                    .iter()
-                    .zip(tanh_c.iter())
-                    .map(|(dh, tc)| dh * tc)
-                    .collect();
+                let d_o: Vec<f64> = d_h.iter().zip(tanh_c.iter()).map(|(dh, tc)| dh * tc).collect();
 
                 // d_c += d_h ⊙ o ⊙ (1 - tanh²(c_t))  (accumulate with carry from future)
                 let d_c_local: Vec<f64> = d_h
@@ -315,18 +307,10 @@ pub fn train(
                 }
 
                 // d_f = d_c ⊙ c_prev
-                let d_f: Vec<f64> = d_c
-                    .iter()
-                    .zip(cell.c_prev.iter())
-                    .map(|(dc, cp)| dc * cp)
-                    .collect();
+                let d_f: Vec<f64> = d_c.iter().zip(cell.c_prev.iter()).map(|(dc, cp)| dc * cp).collect();
 
                 // d_i = d_c ⊙ g
-                let d_i: Vec<f64> = d_c
-                    .iter()
-                    .zip(cell.candidate.iter())
-                    .map(|(dc, g)| dc * g)
-                    .collect();
+                let d_i: Vec<f64> = d_c.iter().zip(cell.candidate.iter()).map(|(dc, g)| dc * g).collect();
 
                 // d_g = d_c ⊙ i ⊙ (1 - g²)
                 let d_g: Vec<f64> = d_c
@@ -360,11 +344,7 @@ pub fn train(
                 // Propagate d_c and d_h to previous cell
                 if t > 0 {
                     // d_c_prev = d_c ⊙ f  (gradient through cell state carry)
-                    let d_c_prev: Vec<f64> = d_c
-                        .iter()
-                        .zip(cell.forget_gate.iter())
-                        .map(|(dc, f)| dc * f)
-                        .collect();
+                    let d_c_prev: Vec<f64> = d_c.iter().zip(cell.forget_gate.iter()).map(|(dc, f)| dc * f).collect();
 
                     // d_h_prev = W_hh^T * d_gates
                     let mut d_h_prev = vec![0.0; h];

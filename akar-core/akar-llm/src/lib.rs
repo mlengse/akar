@@ -151,8 +151,9 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     let api_key: &str = match config.api_key.as_deref() {
         Some(k) => k,
         None => {
-            _env_key = std::env::var("OPENAI_API_KEY")
-                .map_err(|_| "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config.".to_string())?;
+            _env_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+                "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass in config.".to_string()
+            })?;
             &_env_key
         }
     };
@@ -171,9 +172,10 @@ fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(HTTP_TIMEOUT))
-            .build()
+            .build(),
     );
-    let response = agent.post(url)
+    let response = agent
+        .post(url)
         .header("Authorization", &format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .send(body_str)
@@ -230,9 +232,10 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(HTTP_TIMEOUT))
-            .build()
+            .build(),
     );
-    let response = agent.post(url)
+    let response = agent
+        .post(url)
         .header("Content-Type", "application/json")
         .send(body_str)
         .map_err(|e| format!("Ollama API request failed: {e}"))?;

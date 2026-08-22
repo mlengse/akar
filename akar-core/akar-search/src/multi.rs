@@ -26,8 +26,7 @@ mod tests {
 
     #[test]
     fn test_multi_perspective_empty() {
-        let result: Vec<FusedItem<i32>> =
-            multi_perspective_recall_with_id(&[], |_q| vec![], |x| *x, DEFAULT_K, 10);
+        let result: Vec<FusedItem<i32>> = multi_perspective_recall_with_id(&[], |_q| vec![], |x| *x, DEFAULT_K, 10);
         assert!(result.is_empty());
     }
 
@@ -36,11 +35,7 @@ mod tests {
         let result = multi_perspective_recall_with_id(
             &["hello"],
             |q| {
-                if q == "hello" {
-                    vec![1, 2, 3]
-                } else {
-                    vec![]
-                }
+                if q == "hello" { vec![1, 2, 3] } else { vec![] }
             },
             |x| *x,
             DEFAULT_K,
@@ -60,13 +55,7 @@ mod tests {
                 _ => vec![],
             }
         };
-        let result = multi_perspective_recall_with_id(
-            &["rust", "graph", "database"],
-            search,
-            |x| *x,
-            DEFAULT_K,
-            10,
-        );
+        let result = multi_perspective_recall_with_id(&["rust", "graph", "database"], search, |x| *x, DEFAULT_K, 10);
         // Item 3 appears in all 3 → highest
         assert_eq!(result[0].item, 3);
         // Items 2 and 4 appear in 2 sets
@@ -82,13 +71,7 @@ mod tests {
                 _ => vec![],
             }
         };
-        let result = multi_perspective_recall_with_id(
-            &["a", "b"],
-            search,
-            |s: &String| s.clone(),
-            DEFAULT_K,
-            10,
-        );
+        let result = multi_perspective_recall_with_id(&["a", "b"], search, |s: &String| s.clone(), DEFAULT_K, 10);
         assert_eq!(result.len(), 3);
         // "y" appears in both → highest
         assert_eq!(result[0].item, "y");

@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **P60.1 — `cargo fmt --all` workspace-wide (2026-08-22)** — seluruh drift rustfmt dirapikan (15 file di akar-algo, akar-binder, akar-dream, akar-llm, akar-ml, akar-search, akar-storage, akar-vector) sehingga `cargo fmt --all -- --check` kini bersih — selaras standar CI. Perubahan murni format, tanpa perubahan semantik. Gate `test [akar-core]`: **1,822 passed / 0 failed / 0 ignored** (122 suite).
+
 ### Fixed
 
 - **P53.40 — kairos Finding #22: WHERE pada alias agregat WITH + OPTIONAL MATCH tujuan anonim (2026-08-22)** — (1) `MATCH (m:T) OPTIONAL MATCH (m)-[r:R]-(:T) WITH m, COUNT(r) AS cnt WHERE cnt < $n RETURN ...` kini memfilter pipeline teragregasi (semantik HAVING); sebelumnya gagal eksekusi `Variable 'cnt' not found in field_names` (binder sudah benar sejak P53.18, jalur eksekusi yang rusak). (2) `OPTIONAL MATCH (m)-[r:R]-(:T)` dengan destination anonim berlabel kini di-route ke edge-probe `OptionalExtend` dalam mode fan-out: satu baris output per edge yang incident pada source (dedup self-loop pada arah `Both`; 0 edge tetap 1 baris NULL-padded) — mempertahankan kardinalitas multi-edge untuk agregat hilir seperti `COUNT(r)`; fallback lama lewat merge generik meng-cross-product dan menduplikasi tiap baris kiri saat tidak ada kolom bersama. (3) Fast-path perakitan plan saat `scan_ops` kosong (semua scan hidup di dalam pipeline OPTIONAL/DELETE) tidak lagi drop ORDER BY/LIMIT/DISTINCT/SKIP — tail RETURN diekstrak ke helper bersama `append_return_tail` (juga membawa sort-below-projection P53.37 ke jalur fast-path). Files: `akar-planner/src/planner.rs`, `akar-planner/src/logical_operator.rs`, `akar-processor/src/physical/write_ops/optionalextend.rs`. Tests: `akar-main/tests/test_p5340_with_where_aggregate.rs` (10 tes: kontrol WITH→RETURN, WHERE alias filter/pass-all/no-optional, bare var group key ×3, OPTIONAL direct count/raw rows/order-limit). Gate: **1,822 passed / 0 failed / 0 ignored** (121 suite).

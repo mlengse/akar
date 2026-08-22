@@ -20,11 +20,7 @@ pub fn run_rem<B: DreamBackend>(backend: &B, config: &DreamConfig) -> PhaseStats
     }
 
     // Filter small communities (isolated)
-    let isolated: Vec<Vec<usize>> = communities
-        .values()
-        .filter(|nodes| nodes.len() < 5)
-        .cloned()
-        .collect();
+    let isolated: Vec<Vec<usize>> = communities.values().filter(|nodes| nodes.len() < 5).cloned().collect();
 
     if isolated.len() < 2 {
         return stats;

@@ -26,10 +26,7 @@ pub fn run_nrem<B: DreamBackend>(backend: &B, config: &DreamConfig) -> PhaseStat
     }
 
     // Build edge list for batch spread activation
-    let edges: Vec<(usize, usize)> = connections
-        .iter()
-        .map(|e| (e.source_id, e.target_id))
-        .collect();
+    let edges: Vec<(usize, usize)> = connections.iter().map(|e| (e.source_id, e.target_id)).collect();
 
     let num_nodes = connections
         .iter()
@@ -58,10 +55,7 @@ pub fn run_nrem<B: DreamBackend>(backend: &B, config: &DreamConfig) -> PhaseStat
             // (we don't know which seed→node edge was used, so mark all)
             for conn in &connections {
                 if conn.source_id == node_id || conn.target_id == node_id {
-                    activated_edges.insert((
-                        conn.source_id.min(conn.target_id),
-                        conn.source_id.max(conn.target_id),
-                    ));
+                    activated_edges.insert((conn.source_id.min(conn.target_id), conn.source_id.max(conn.target_id)));
                 }
             }
         }

@@ -358,18 +358,18 @@ mod tests {
         let bound = binder.bind(parse(sql).unwrap()).unwrap();
         match bound {
             BoundStatement::BoundQuery(q) => {
-                assert!(q
-                    .variables
-                    .iter()
-                    .any(|v| v.name == "cnt"), "alias `cnt` must be in scope");
-                assert!(q
-                    .variables
-                    .iter()
-                    .any(|v| v.name == "a"), "bare variable `a` must carry through WITH");
-                assert!(q
-                    .clauses
-                    .iter()
-                    .any(|c| matches!(c, BoundClause::BoundWhere(_))), "WHERE must bind");
+                assert!(
+                    q.variables.iter().any(|v| v.name == "cnt"),
+                    "alias `cnt` must be in scope"
+                );
+                assert!(
+                    q.variables.iter().any(|v| v.name == "a"),
+                    "bare variable `a` must carry through WITH"
+                );
+                assert!(
+                    q.clauses.iter().any(|c| matches!(c, BoundClause::BoundWhere(_))),
+                    "WHERE must bind"
+                );
             }
             _ => panic!("Expected BoundQuery"),
         }

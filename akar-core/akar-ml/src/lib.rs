@@ -12,4 +12,4 @@
 
 pub mod lstm;
 
-pub use lstm::{LstmCell, LstmModel, LstmConfig, train, TrainingResult};
+pub use lstm::{LstmCell, LstmConfig, LstmModel, TrainingResult, train};

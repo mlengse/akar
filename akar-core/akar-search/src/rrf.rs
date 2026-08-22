@@ -20,12 +20,7 @@ pub struct FusedItem<T> {
 ///
 /// Each set carries its own weight. Rank is 1-based (matching Python convention).
 /// When all weights are 1.0 this is equivalent to unweighted RRF.
-pub fn weighted_rrf_fuse<T, I, F>(
-    sets: Vec<(Vec<T>, f64)>,
-    id_fn: F,
-    k: usize,
-    limit: usize,
-) -> Vec<FusedItem<T>>
+pub fn weighted_rrf_fuse<T, I, F>(sets: Vec<(Vec<T>, f64)>, id_fn: F, k: usize, limit: usize) -> Vec<FusedItem<T>>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,
@@ -45,12 +40,7 @@ where
 
     let mut results: Vec<FusedItem<T>> = scores
         .into_iter()
-        .filter_map(|(id, score)| {
-            id_to_item.remove(&id).map(|item| FusedItem {
-                item,
-                rrf_score: score,
-            })
-        })
+        .filter_map(|(id, score)| id_to_item.remove(&id).map(|item| FusedItem { item, rrf_score: score }))
         .collect();
 
     results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
@@ -61,12 +51,7 @@ where
 /// Fuse N ranked result sets (owned version).
 ///
 /// Simpler API that takes ownership of the result sets.
-pub fn rrf_fuse_owned<T, I, F>(
-    sets: Vec<Vec<T>>,
-    id_fn: F,
-    k: usize,
-    limit: usize,
-) -> Vec<FusedItem<T>>
+pub fn rrf_fuse_owned<T, I, F>(sets: Vec<Vec<T>>, id_fn: F, k: usize, limit: usize) -> Vec<FusedItem<T>>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,
@@ -86,12 +71,7 @@ where
 
     let mut results: Vec<FusedItem<T>> = scores
         .into_iter()
-        .filter_map(|(id, score)| {
-            id_to_item.remove(&id).map(|item| FusedItem {
-                item,
-                rrf_score: score,
-            })
-        })
+        .filter_map(|(id, score)| id_to_item.remove(&id).map(|item| FusedItem { item, rrf_score: score }))
         .collect();
 
     results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
@@ -107,12 +87,7 @@ where
 ///
 /// # Returns
 /// A vector of `(T, f64)` pairs sorted by RRF score descending.
-pub fn rrf_fuse_ref<'a, T, I, F>(
-    sets: &'a [Vec<T>],
-    id_fn: F,
-    k: usize,
-    limit: usize,
-) -> Vec<(&'a T, f64)>
+pub fn rrf_fuse_ref<'a, T, I, F>(sets: &'a [Vec<T>], id_fn: F, k: usize, limit: usize) -> Vec<(&'a T, f64)>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,

@@ -795,13 +795,9 @@ impl NodeTable {
 
     /// Binary-search for the node group that contains `row`.
     fn find_group(&self, row: u64) -> usize {
-        self.node_groups.binary_search_by_key(&row, |g| g.start_offset).unwrap_or_else(|i| {
-            if i == 0 {
-                0
-            } else {
-                i - 1
-            }
-        })
+        self.node_groups
+            .binary_search_by_key(&row, |g| g.start_offset)
+            .unwrap_or_else(|i| if i == 0 { 0 } else { i - 1 })
     }
 }
 
