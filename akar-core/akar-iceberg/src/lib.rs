@@ -207,10 +207,8 @@ impl Extension for IcebergExtension {
                             _ => return Err("iceberg_scan expects a string path argument".into()),
                         };
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("iceberg")?;
                         let sql = format!("SELECT * FROM iceberg_scan('{}')", path.replace('\'', "''"));
-                        helper.query_rows(&sql)?;
+                        akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension("iceberg", None, &sql)?;
                         Ok(())
                     });
 
@@ -232,10 +230,8 @@ impl Extension for IcebergExtension {
                             _ => return Err("iceberg_metadata expects a string path argument".into()),
                         };
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("iceberg")?;
                         let sql = format!("SELECT * FROM iceberg_metadata('{}')", path.replace('\'', "''"));
-                        helper.query_rows(&sql)?;
+                        akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension("iceberg", None, &sql)?;
                         Ok(())
                     });
 
@@ -257,10 +253,8 @@ impl Extension for IcebergExtension {
                             _ => return Err("iceberg_snapshots expects a string path argument".into()),
                         };
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("iceberg")?;
                         let sql = format!("SELECT * FROM iceberg_snapshots('{}')", path.replace('\'', "''"));
-                        helper.query_rows(&sql)?;
+                        akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension("iceberg", None, &sql)?;
                         Ok(())
                     });
 

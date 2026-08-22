@@ -128,23 +128,22 @@ impl Extension for UnityCatalogExtension {
                             return Ok(());
                         }
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("uc_catalog")?;
-
                         let create_secret = format!(
                             "CREATE SECRET (TYPE UC, TOKEN '{}', ENDPOINT '{}')",
                             token.replace('\'', "''"),
                             endpoint.replace('\'', "''")
                         );
-                        helper.execute_batch(&create_secret)?;
 
                         // Quote the user-supplied table name so it cannot break out of the query.
                         let sql = format!(
                             "SELECT * FROM {} LIMIT 1000",
                             akar_common::extension_utils::quote_sql_table_name(&table)
                         );
-                        let rows = helper.query_rows(&sql)?;
-                        let converted = akar_duckdb::result_converter::duckdb_results_to_akar(rows)?;
+                        let converted = akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension(
+                            "uc_catalog",
+                            Some(&create_secret),
+                            &sql,
+                        )?;
                         if let Some(out) = converted.into_iter().next() {
                             *chunk = out;
                         }

@@ -84,11 +84,8 @@ impl Extension for DeltaExtension {
                             _ => return Err("delta_scan expects a string path argument".into()),
                         };
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("delta")?;
-
                         let sql = format!("SELECT * FROM delta_scan('{}')", path.replace('\'', "''"));
-                        helper.query_rows(&sql)?;
+                        akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension("delta", None, &sql)?;
 
                         Ok(())
                     });

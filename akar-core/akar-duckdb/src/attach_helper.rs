@@ -43,6 +43,24 @@ impl DuckDbAttachHelper {
     pub fn execute(&self, sql: &str) -> Result<usize, String> {
         self.manager.execute(sql)
     }
+
+    /// Create a helper, install/load `ext`, optionally run a `setup` batch, then
+    /// run `sql` and convert the rows to Akar chunks.
+    ///
+    /// Collapses the `new → install_and_load → (execute_batch) → query_rows`
+    /// dance that the Delta/Iceberg/Azure/Unity Catalog extensions each repeated
+    /// (DRY, P51.40). `setup` is typically `CREATE SECRET ...` for
+    /// cloud-backed extensions.
+    #[cfg(feature = "bundled")]
+    pub fn query_extension(ext: &str, setup: Option<&str>, sql: &str) -> Result<Vec<akar_function::DataChunk>, String> {
+        let helper = Self::new()?;
+        helper.install_and_load(ext)?;
+        if let Some(setup_sql) = setup {
+            helper.execute_batch(setup_sql)?;
+        }
+        let rows = helper.query_rows(sql)?;
+        crate::result_converter::duckdb_results_to_akar(rows)
+    }
 }
 
 #[cfg(not(feature = "bundled"))]
@@ -64,6 +82,14 @@ impl DuckDbAttachHelper {
     }
 
     pub fn execute(&self, _sql: &str) -> Result<usize, String> {
+        Err("DuckDB support not enabled".into())
+    }
+
+    pub fn query_extension(
+        _ext: &str,
+        _setup: Option<&str>,
+        _sql: &str,
+    ) -> Result<Vec<akar_function::DataChunk>, String> {
         Err("DuckDB support not enabled".into())
     }
 }

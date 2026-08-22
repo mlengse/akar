@@ -102,12 +102,12 @@ impl Extension for AzureExtension {
                             ));
                         }
 
-                        let helper = akar_duckdb::attach_helper::DuckDbAttachHelper::new()?;
-                        helper.install_and_load("httpfs")?;
-                        helper.execute_batch("CREATE SECRET (TYPE AZURE)")?;
-
                         let sql = format!("SELECT * FROM read_parquet('{}')", path.replace('\'', "''"));
-                        helper.query_rows(&sql)?;
+                        akar_duckdb::attach_helper::DuckDbAttachHelper::query_extension(
+                            "httpfs",
+                            Some("CREATE SECRET (TYPE AZURE)"),
+                            &sql,
+                        )?;
                         Ok(())
                     });
 
