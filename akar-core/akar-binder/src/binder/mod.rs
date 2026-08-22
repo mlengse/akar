@@ -1661,34 +1661,24 @@ impl Binder {
     }
 
     fn bind_import_database(&self, i: akar_parser::ast::ImportDatabase) -> Result<BoundStatement, BinderError> {
-        // Validate the import directory exists and read the schema/cypher files
-        let path = std::path::Path::new(&i.file_path);
-        if !path.exists() {
-            return Err(format!("Import directory '{}' not found", i.file_path).into());
-        }
-        if !path.is_dir() {
-            return Err(format!("'{}' is not a directory", i.file_path).into());
-        }
+        // Validate the import directory (path-traversal hardening) and read the
+        // schema/copy/index files through containment-checked helpers.
+        let dir = Self::validate_import_database_dir(&i.file_path)?;
 
-        let schema_path = path.join("schema.cypher");
-        let copy_path = path.join("copy.cypher");
-        let index_path = path.join("index.cypher");
-
-        if !schema_path.exists() {
+        if !dir.join("schema.cypher").exists() {
             return Err(format!("schema.cypher not found in '{}'", i.file_path).into());
         }
 
-        let query = if copy_path.exists() {
-            let schema =
-                std::fs::read_to_string(&schema_path).map_err(|e| format!("Cannot read schema.cypher: {e}"))?;
-            let copy = std::fs::read_to_string(&copy_path).map_err(|e| format!("Cannot read copy.cypher: {e}"))?;
+        let query = if dir.join("copy.cypher").exists() {
+            let schema = Self::read_file_within_dir(&dir, "schema.cypher")?;
+            let copy = Self::read_file_within_dir(&dir, "copy.cypher")?;
             format!("{schema}\n{copy}")
         } else {
-            std::fs::read_to_string(&schema_path).map_err(|e| format!("Cannot read schema.cypher: {e}"))?
+            Self::read_file_within_dir(&dir, "schema.cypher")?
         };
 
-        let index_query = if index_path.exists() {
-            std::fs::read_to_string(&index_path).map_err(|e| format!("Cannot read index.cypher: {e}"))?
+        let index_query = if dir.join("index.cypher").exists() {
+            Self::read_file_within_dir(&dir, "index.cypher")?
         } else {
             String::new()
         };
@@ -1698,6 +1688,60 @@ impl Binder {
             query,
             index_query,
         }))
+    }
+
+    /// Validate a user-supplied `IMPORT DATABASE` directory path and return its
+    /// canonical form.
+    ///
+    /// Security (path traversal, CWE-22/CWE-59): `file_path` is raw text from
+    /// parsed SQL — including queries submitted by remote akar-server clients —
+    /// so it may carry `..` components or symlinks that escape the directory
+    /// the operator intended. We reject any lexical `..` component outright,
+    /// then canonicalize so every later containment check operates on the real
+    /// on-disk location instead of the spelled path.
+    fn validate_import_database_dir(raw_path: &str) -> Result<std::path::PathBuf, BinderError> {
+        if raw_path.is_empty() {
+            return Err("IMPORT DATABASE requires a non-empty directory path".into());
+        }
+        if raw_path.contains('\0') {
+            return Err("IMPORT DATABASE path contains a NUL byte".into());
+        }
+        let path = std::path::Path::new(raw_path);
+        for component in path.components() {
+            if matches!(component, std::path::Component::ParentDir) {
+                return Err(
+                    format!("IMPORT DATABASE path '{raw_path}' contains '..' — path traversal is not allowed").into(),
+                );
+            }
+        }
+        if !path.exists() {
+            return Err(format!("Import directory '{raw_path}' not found").into());
+        }
+        if !path.is_dir() {
+            return Err(format!("'{raw_path}' is not a directory").into());
+        }
+        std::fs::canonicalize(path).map_err(|e| format!("Cannot resolve import directory '{raw_path}': {e}").into())
+    }
+
+    /// Read one fixed-name file from the canonical import directory.
+    ///
+    /// The file must resolve back inside `dir` after symlink resolution — this
+    /// blocks a `schema.cypher -> /etc/passwd` style symlink from escaping the
+    /// directory being imported.
+    fn read_file_within_dir(dir: &std::path::Path, file_name: &str) -> Result<String, BinderError> {
+        let file_path = dir.join(file_name);
+        match std::fs::canonicalize(&file_path) {
+            Ok(resolved) if resolved.starts_with(dir) => {}
+            Ok(resolved) => {
+                return Err(format!(
+                    "'{file_name}' resolves outside the import directory ({})",
+                    resolved.display()
+                )
+                .into());
+            }
+            Err(e) => return Err(format!("Cannot read {file_name}: {e}").into()),
+        }
+        std::fs::read_to_string(&file_path).map_err(|e| format!("Cannot read {file_name}: {e}").into())
     }
 
     /// Bind ANALYZE statement ΓÇö resolve table names to table IDs.
@@ -2205,5 +2249,98 @@ mod tests {
         for item in &bound.items {
             assert_eq!(item.table_id, 999, "first occurrence must win in the index path");
         }
+    }
+
+    // ==================== IMPORT DATABASE path-traversal hardening ====================
+
+    fn unique_temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("akar_binder_sec_{}_{nanos}_{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn import_validator_rejects_parent_dir_components() {
+        for evil in ["..", "../etc", "safe/../../../etc", "a/../b", "x/.."] {
+            let err = Binder::validate_import_database_dir(evil).unwrap_err();
+            assert!(
+                err.to_string().contains("path traversal"),
+                "'{evil}' must be rejected as traversal, got: {err}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn import_validator_rejects_backslash_traversal_on_windows() {
+        for evil in ["..\\etc", "safe\\..\\..\\etc"] {
+            let err = Binder::validate_import_database_dir(evil).unwrap_err();
+            assert!(
+                err.to_string().contains("path traversal"),
+                "'{evil}' must be rejected as traversal, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn import_validator_rejects_empty_and_nul_paths() {
+        assert!(Binder::validate_import_database_dir("").is_err());
+        assert!(Binder::validate_import_database_dir("dir\0x").is_err());
+    }
+
+    #[test]
+    fn import_bind_rejects_traversal_before_filesystem_access() {
+        let b = binder();
+        let stmt = akar_parser::parse("IMPORT DATABASE 'x/../../y'").unwrap();
+        let err = b.bind(stmt).unwrap_err();
+        assert!(
+            err.to_string().contains("path traversal"),
+            "bind must reject traversal, got: {err}"
+        );
+    }
+
+    #[test]
+    fn import_read_helper_accepts_files_inside_directory() {
+        let dir = unique_temp_dir("ok");
+        std::fs::write(
+            dir.join("schema.cypher"),
+            "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id));",
+        )
+        .unwrap();
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        let content = Binder::read_file_within_dir(&canonical, "schema.cypher").unwrap();
+        assert!(content.contains("CREATE NODE TABLE T"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn import_read_helper_errors_for_missing_file() {
+        let dir = unique_temp_dir("missing");
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        assert!(Binder::read_file_within_dir(&canonical, "schema.cypher").is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_read_helper_blocks_symlink_escape() {
+        let dir = unique_temp_dir("sym");
+        let outside = unique_temp_dir("outside");
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, "top secret").unwrap();
+        std::os::unix::fs::symlink(&secret, dir.join("schema.cypher")).unwrap();
+
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        let err = Binder::read_file_within_dir(&canonical, "schema.cypher").unwrap_err();
+        assert!(
+            err.to_string().contains("outside the import directory"),
+            "symlink escape must be blocked, got: {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&outside).ok();
     }
 }
