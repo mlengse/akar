@@ -26,5 +26,9 @@ criterion.workspace = true
 name = "lpa"
 harness = false
 
+[[bench]]
+name = "louvain"
+harness = false
+
 [lints]
 workspace = true

@@ -1448,6 +1448,16 @@ where
         }
     }
 
+    // Scratch buffers for neighbor-community weight aggregation, hoisted out of
+    // the node loop and reused across passes (avoids a map allocation + tree
+    // inserts per node in the hot path). `comm_stamp` provides O(1) generation-
+    // tagged lazy reset; `touched` is kept sorted so iteration order matches the
+    // previous BTreeMap's ascending order, preserving move tie-breaking exactly.
+    let mut comm_scratch: Vec<f64> = vec![0.0; n];
+    let mut comm_stamp: Vec<u64> = vec![0; n];
+    let mut touched: Vec<usize> = Vec::with_capacity(16);
+    let mut generation: u64 = 0;
+
     while improved && pass < max_iterations {
         improved = false;
         pass += 1;
@@ -1466,25 +1476,37 @@ where
             let kv = degree[v];
 
             // Sum of weights from v to each neighboring community
-            let mut comm_weights: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
+            generation += 1;
+            touched.clear();
             for (_rel, dst) in csr.neighbors(v) {
                 let w = dst.offset as usize;
                 if w < n {
-                    let wt = weight_fn(v, w);
-                    *comm_weights.entry(community[w]).or_insert(0.0) += wt;
+                    let c = community[w];
+                    if comm_stamp[c] != generation {
+                        comm_stamp[c] = generation;
+                        comm_scratch[c] = 0.0;
+                        touched.push(c);
+                    }
+                    comm_scratch[c] += weight_fn(v, w);
                 }
             }
+            touched.sort_unstable();
 
-            let sigma_v_current = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
+            let sigma_v_current = if comm_stamp[current_comm] == generation {
+                comm_scratch[current_comm]
+            } else {
+                0.0
+            };
 
             // ΔQ = (Σ_vD - Σ_vC)/m + k_v·(Σ_tot_C - Σ_tot_D - k_v)/(2m²)
             let mut best_comm = current_comm;
             let mut best_gain = min_gain;
 
-            for (&comm, &sigma_v_comm) in &comm_weights {
+            for &comm in &touched {
                 if comm == current_comm {
                     continue;
                 }
+                let sigma_v_comm = comm_scratch[comm];
                 let gain = (sigma_v_comm - sigma_v_current) / m
                     + kv * (sigma_tot[current_comm] - sigma_tot[comm] - kv) / (2.0 * m * m);
                 if gain > best_gain {
