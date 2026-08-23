@@ -1037,6 +1037,74 @@ fn test_date_add() {
     assert!(matches!(result, Value::Date(_)));
 }
 
+// --- Date error-path tests ---
+
+#[test]
+fn test_make_date_basic() {
+    let func = ScalarFunction::Date { op: DateOp::MakeDate };
+    // 2023-06-15 = 19523 days since epoch (see test_date_year_month_day)
+    assert_eq!(
+        evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(6), Value::Int64(15)]).unwrap(),
+        Value::Date(Date(19523))
+    );
+    // Leap day accepted in a leap year
+    let leap = evaluate_scalar(&func, &[Value::Int64(2024), Value::Int64(2), Value::Int64(29)]);
+    assert!(matches!(leap, Ok(Value::Date(_))));
+}
+
+#[test]
+fn test_make_date_invalid_month() {
+    let func = ScalarFunction::Date { op: DateOp::MakeDate };
+    // Month 13 is out of range
+    let err = evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(13), Value::Int64(1)]).unwrap_err();
+    assert!(err.contains("Invalid month: 13"), "unexpected error: {err}");
+    // Month 0 likewise
+    let err = evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(0), Value::Int64(1)]).unwrap_err();
+    assert!(err.contains("Invalid month: 0"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_make_date_invalid_day() {
+    let func = ScalarFunction::Date { op: DateOp::MakeDate };
+    // Non-leap year: Feb 30 does not exist
+    let err = evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(2), Value::Int64(30)]).unwrap_err();
+    assert!(err.contains("Invalid date"), "unexpected error: {err}");
+    // Day 0 rejected too
+    let err = evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(6), Value::Int64(0)]).unwrap_err();
+    assert!(err.contains("Invalid date"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_make_date_argument_errors() {
+    let func = ScalarFunction::Date { op: DateOp::MakeDate };
+    // Too few arguments
+    let err = evaluate_scalar(&func, &[Value::Int64(2023), Value::Int64(6)]).unwrap_err();
+    assert!(err.contains("requires 3 arguments"), "unexpected error: {err}");
+    // Non-integer month
+    let args = [Value::Int64(2023), Value::String("June".into()), Value::Int64(1)];
+    let err = evaluate_scalar(&func, &args).unwrap_err();
+    assert!(err.contains("month must be integer"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_date_trunc_error_paths() {
+    let dt = ScalarFunction::Date { op: DateOp::DateTrunc };
+    let date_val = Value::Date(Date(19600));
+    // Unknown truncation unit
+    let err = evaluate_scalar(&dt, &[Value::String("decade".into()), date_val]).unwrap_err();
+    assert!(err.contains("not supported"), "unexpected error: {err}");
+    // Missing arguments
+    let err = evaluate_scalar(&dt, &[Value::String("year".into())]).unwrap_err();
+    assert!(err.contains("requires 2 arguments"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_date_part_unknown_part() {
+    let dp = ScalarFunction::Date { op: DateOp::DatePart };
+    let err = evaluate_scalar(&dp, &[Value::String("fiscalquarter".into()), Value::Date(Date(19523))]).unwrap_err();
+    assert!(err.contains("Unknown date_part"), "unexpected error: {err}");
+}
+
 // --- Timestamp function tests ---
 
 #[test]
