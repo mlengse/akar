@@ -41,6 +41,7 @@ dependencies = [
  "akar-function",
  "akar-graph",
  "arrow 59.2.0",
+ "criterion",
  "tracing",
 ]
 

@@ -1142,6 +1142,7 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
     let n = csr.num_nodes();
     let mut labels: Vec<usize> = (0..n).collect();
     let mut next_labels = labels.clone();
+    let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
 
     for _ in 0..max_iters {
         let mut changed = false;
@@ -1151,7 +1152,7 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
                 continue;
             }
 
-            let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            counts.clear();
             for (_, dst) in neighbors {
                 let w = dst.offset as usize;
                 if w < n {
