@@ -445,6 +445,10 @@ mod tests {
         assert_eq!(json_type_of(r#""hello""#).unwrap(), "string");
         assert_eq!(json_type_of("[1,2,3]").unwrap(), "array");
         assert_eq!(json_type_of(r#"{"a":1}"#).unwrap(), "object");
+        assert_eq!(json_type_of("-3.14e2").unwrap(), "number");
+        assert!(json_type_of("{invalid}").is_err());
+        assert!(json_type_of("").is_err());
+        assert!(json_type_of("42 42").is_err());
     }
 
     #[test]
