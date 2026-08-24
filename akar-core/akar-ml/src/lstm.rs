@@ -101,8 +101,8 @@ fn vec_add(a: &[f64], b: &[f64]) -> Vec<f64> {
 impl LstmModel {
     /// Create a new model with Xavier-initialized weights.
     pub fn new(config: LstmConfig) -> Self {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use rand::RngExt;
+        let mut rng = rand::rng();
         let h = config.hidden_size;
         let i = config.input_size;
         let o = config.output_size;
@@ -110,7 +110,7 @@ impl LstmModel {
         let mut xavier = |rows: usize, cols: usize| -> Vec<Vec<f64>> {
             let limit = (6.0 / (rows + cols) as f64).sqrt();
             (0..rows)
-                .map(|_| (0..cols).map(|_| rng.gen_range(-limit..limit)).collect())
+                .map(|_| (0..cols).map(|_| rng.random_range(-limit..limit)).collect())
                 .collect()
         };
 
