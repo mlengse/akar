@@ -148,6 +148,10 @@ impl Connection {
 
     /// Extract all table IDs that will be written to by this statement.
     pub(crate) fn extract_write_tables(bound: &BoundStatement) -> Vec<u64> {
+        Self::compute_table_ids(bound)
+    }
+
+    fn compute_table_ids(bound: &BoundStatement) -> Vec<u64> {
         let mut table_ids = Vec::new();
         match bound {
             BoundStatement::BoundCopyFrom(c) => table_ids.push(c.table_id),
