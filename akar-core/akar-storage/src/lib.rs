@@ -545,9 +545,20 @@ impl StorageManager {
         }
 
         // Step 2: Flush in-memory tables to their durable column mirrors so
-        // committed rows survive process restarts.
-        self.persist_all_tables()
-            .map_err(|e| StorageError::LocalStorage(format!("table persist failed during commit: {e}")))?;
+        // committed rows survive process restarts. The SQL write path applies
+        // rows to the tables during execution (MVCC-hidden until publish), and
+        // its WAL records carry no row data — these mirrors are the recovery
+        // source, so they MUST be persisted unless a checkpoint is about to
+        // run: `checkpoint_with_drain` persists the very same tables before
+        // truncating the WAL (P45.4), so persisting here too would double the
+        // per-commit mirror I/O (P60.1). The skip condition mirrors
+        // `maybe_checkpoint`'s decision on the post-commit WAL size.
+        let checkpoint_imminent =
+            checkpoint_threshold < 0 || (checkpoint_threshold > 0 && self.wal_size() > checkpoint_threshold as usize);
+        if !checkpoint_imminent {
+            self.persist_all_tables()
+                .map_err(|e| StorageError::LocalStorage(format!("table persist failed during commit: {e}")))?;
+        }
 
         // Step 3: Flush local storage buffers to the actual tables
         // Pass txn_id so inserts/deletes are recorded in VersionInfo for MVCC
@@ -566,7 +577,9 @@ impl StorageManager {
             .apply(&self.buffer_manager)
             .map_err(|e| StorageError::ShadowFile(format!("ShadowFile apply failed during commit: {e}")))?;
 
-        // Step 5: Auto-checkpoint if needed
+        // Step 5: Auto-checkpoint if needed. When it fires it persists the
+        // durable column mirrors before truncating the WAL (see
+        // `checkpoint_with_drain`), which is why Step 2 can be skipped above.
         if let Err(e) = self.maybe_checkpoint(checkpoint_threshold, drain_fn) {
             tracing::warn!("Checkpoint after commit failed: {e}");
             // Non-fatal — data is already in tables and WAL

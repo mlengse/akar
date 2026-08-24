@@ -228,6 +228,19 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | Overflow pages | `.ovf` sidecar for oversized values |
 | CSV/Parquet readers | Native readers with Arrow type mapping |
 
+**Durability model (P45.4, amended P60.1):** SQL-path rows are applied to the
+in-memory tables during execution (MVCC-hidden until publish) and their WAL
+records carry no row data, so the **durable column mirrors are the recovery
+source**: `recover()` replays typed WAL records when present, otherwise loads
+the mirrors; after a replay it re-persists mirrors and checkpoints. Each
+commit fsyncs the WAL and persists stale mirrors **unless an auto-checkpoint
+is imminent** (`checkpoint_threshold < 0`, or size-based threshold already
+exceeded): `checkpoint_with_drain` persists the same mirrors before
+truncating the WAL, so the standalone persist would be duplicate I/O
+(P60.1). Follow-up (P60.2): emit typed Insert/Delete/Update WAL records from
+the SQL write path to make WAL replay self-sufficient and drop per-commit
+mirror persist entirely.
+
 #### Transaction ([akar-transaction](akar-core/akar-transaction))
 - MVCC with AUTO/MANUAL modes
 - OCC row-level conflict detection (`RowConflictTracker`)
@@ -672,6 +685,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 | Lock poisoning | `.lock().map_err()` across 17 files (75 calls migrated) |
 | File locking | Exclusive/shared file locks for multi-process safety |
 | WAL safety | Atomic rename (`write .tmp → sync → rename → fsync parent`) |
+| Commit durability | Per-commit mirror persist skipped when auto-checkpoint is imminent — checkpoint persists the same mirrors (P60.1) |
 
 ---
 

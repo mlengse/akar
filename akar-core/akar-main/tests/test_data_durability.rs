@@ -1,7 +1,11 @@
 //! P45.4: Data Durability
 //!
 //! Verifies that committed table rows survive process restarts via the
-//! durable column mirrors (`col_{table_id}_{col_idx}` + `.meta` sidecar):
+//! durable column mirrors (`col_{table_id}_{col_idx}` + `.meta` sidecar) —
+//! the recovery source for SQL-path rows, since their WAL records carry no
+//! row data. P60.1 skips the per-commit persist only when a CHECKPOINT is
+//! imminent (the checkpoint persists the same mirrors before truncating
+//! the WAL):
 //! - clean shutdown (with and without an explicit CHECKPOINT),
 //! - crash (process killed mid-write),
 //! - UPDATE/DELETE state,
@@ -156,7 +160,8 @@ fn test_restart_without_checkpoint_restores_rows() {
 
     {
         // Auto-checkpoint disabled (threshold 0): no CHECKPOINT is issued, but
-        // the commit path still persists the durable mirror after each write.
+        // the commit path still persists the durable mirror after each write
+        // (the P60.1 skip only fires when a checkpoint is imminent).
         let db = Arc::new(Database::new(&db_path, config(0)).expect("Failed to create DB"));
         let conn = Connection::new(&db);
         conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")
@@ -338,7 +343,8 @@ fn test_crash_recovers_committed_rows_without_double_apply() {
     let mut sim = CrashSimulator::spawn("write", 60, 0);
 
     // Wait for the child to finish writing AND committing all 60 rows
-    // (each query's commit is durable: WAL flush + column-mirror persist).
+    // (each query's commit is durable: WAL flush + column-mirror persist;
+    // threshold 0 disables auto-checkpoint, so the P60.1 skip never fires).
     // The child then writes `write_done` and waits idle on the signal file.
     // We kill it while idle — a hard SIGKILL with no clean shutdown, but with
     // every committed row already durable. Killing mid-write is deliberately
@@ -347,8 +353,8 @@ fn test_crash_recovers_committed_rows_without_double_apply() {
     let db_dir = sim.db_path().to_path_buf();
     let start = Instant::now();
     let mut done = false;
-    // 60 s budget for 60 individually durable commits. Each commit costs a WAL
-    // fsync plus small mirror file writes; under a fully parallel suite run on
+    // 60 s budget for 60 individually durable commits. Each commit costs a
+    // WAL fsync plus small mirror file writes; under a fully parallel suite run on
     // Windows, disk contention dominates (observed once as a gate flake) — the
     // assertion guards against a hung child, not write throughput. 60 rows is
     // plenty to prove multi-row durability + no double-apply.
