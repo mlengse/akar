@@ -120,7 +120,7 @@ $env:PYO3_PYTHON = ".venv\Scripts\python.exe"   # Windows PowerShell
 
 ### Publishing to PyPI
 
-`akar` 0.1.0 is live on [PyPI](https://pypi.org/project/akar/). Procedure:
+`akar` 0.1.2 is live on [PyPI](https://pypi.org/project/akar/). Procedure:
 
 1. **Build artifacts** (do NOT use `maturin publish` — it rebuilds the whole
    workspace from scratch, ~10 min, and can exceed tool timeouts):
@@ -157,7 +157,7 @@ cd akar-core/akar-python
 cargo test --lib
 ```
 
-25 tests covering: translation layer, parameter interpolation, value conversion, schema bootstrap, vector index, lock management, connection lifecycle.
+39 tests covering: translation layer, parameter interpolation, value conversion, schema bootstrap, vector index / kNN, community detection (Louvain), LSTM bindings, spread activation, lock management, connection lifecycle.
 
 ### Python compatibility harness (pytest)
 

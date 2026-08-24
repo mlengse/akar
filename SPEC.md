@@ -24,8 +24,8 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 
 | Metric | Value |
 |--------|-------|
-| Workspace crates | **32** |
-| Lines of code | **~86K LOC** (pure Rust, git-tracked incl. tests) |
+| Workspace crates | **35** |
+| Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
 | Tests passing | **1,867 total, 0 ignored, 1,867 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. node2vec walk/SGD invariants) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
@@ -51,7 +51,7 @@ akar/
 │   ├── dependabot.yml
 │   └── pull_request_template.md
 │
-├── akar-core/                   # ★ Main Rust workspace (32 crates)
+├── akar-core/                   # ★ Main Rust workspace (35 crates)
 │   ├── Cargo.toml               # Workspace root
 │   ├── Cargo.lock
 │   ├── clippy.toml
@@ -73,7 +73,7 @@ akar/
 │   ├── akar-json/               # JSON extension
 │   ├── akar-fts/                # Full-Text Search (BM25)
 │   ├── akar-vector/             # Vector similarity search
-│   ├── akar-algo/               # 15 graph algorithms
+│   ├── akar-algo/               # 17 graph algorithms
 │   ├── akar-httpfs/             # HTTP/HTTPS/S3 file system
 │   ├── akar-duckdb/             # DuckDB integration
 │   ├── akar-sqlite/             # SQLite integration (rusqlite)

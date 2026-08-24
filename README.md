@@ -72,7 +72,7 @@ No server. No Docker. Just `cargo add akar-main` and query.
 ## Architecture
 
 Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`)
-contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
+contains 35 crates and ~106K lines of pure Rust code (git-tracked, incl. tests):
 
 | Crate | Purpose |
 |-------|---------|
@@ -82,7 +82,7 @@ contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
 | `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
 | `akar-function` | 259 SQL/Cypher functions (244 scalar + 14 aggregate + 1 table) |
-| `akar-algo` | 15 graph algorithms (BFS, Dijkstra, PageRank, SCC, etc.) |
+| `akar-algo` | 17 graph algorithms (PageRank, SCC, Louvain, node2vec, etc.) |
 | `akar-fts` | Full-text search (BM25) |
 | `akar-vector` | Vector similarity search |
 | `akar-server` | Embedded TCP server mode (multi-process access) |
@@ -90,8 +90,8 @@ contains 32 crates and ~86K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **1,594 tests, 0 failed** (5 ignored doc-tests; gate `test [akar-core]`,
-2026-08-11, release v0.1.5). **24 optimizer passes**, **37 logical types**, **58 logical
+**Test suite:** **1,867 tests, 0 failed** (gate `test [akar-core]`,
+2026-08-24). **24 optimizer passes**, **37 logical types**, **59 logical
 operators**, **48 physical operator structs**.
 
 ## Benchmarks
@@ -123,8 +123,9 @@ cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M
 
 ## Extensions
 
-Akar bundles commonly used extensions as compile-time features (`algo`, `fts`, `json`,
-`vector`). No manual installation needed.
+Akar bundles commonly used extensions as compile-time cargo features (`algo-extension`,
+`fts-extension`, `json-extension`, `vector-extension`, plus httpfs, duckdb, sqlite,
+postgres, neo4j, delta, iceberg, azure, unity-catalog, llm). No manual installation needed.
 
 ## Documentation
 

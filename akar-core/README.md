@@ -1,16 +1,16 @@
 # Akar Core
 
-The `akar-core/` workspace contains all 32 Rust crates of **Akar**, a pure-Rust embedded
+The `akar-core/` workspace contains all 35 Rust crates of **Akar**, a pure-Rust embedded
 graph database (KuzuDB reimplementation). The public overview, quick start, benchmarks,
 and contributing guidance live in the repository-wide **[`../README.md`](../README.md)**.
 
 ## Highlights
 
-- **Test suite:** 1,594 total / 5 ignored / 1,589 passed / 0 failed (gate `test [akar-core]`, 2026-08-10)
+- **Test suite:** 1,867 total / 0 ignored / 1,867 passed / 0 failed (gate `test [akar-core]`, 2026-08-24)
 - **Query pipeline:** parser → binder → planner → optimizer (24 passes) → processor
 - **Storage:** columnar disk storage, WAL + replayer, buffer manager, CSR adjacency, ART/HNSW indexes
 - **Extensions:** JSON, FTS, Vector, DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog, LLM, algo, server
-- **GDS:** 15 graph algorithms (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, ...)
+- **GDS:** 17 graph algorithms (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, node2vec, ...)
 - **Public API:** `akar-main` (Database/Connection/QueryResult), `akar-c` FFI, `akar-wasm`, `akar-cli`
 
 ## Documentation
