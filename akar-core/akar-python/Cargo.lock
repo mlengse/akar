@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-algo"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-common",
  "arrow",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "akar-json"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "akar-ml"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rand",
  "serde",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "akar-catalog",
  "akar-common",
