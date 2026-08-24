@@ -5,7 +5,7 @@ This guide covers migration from the legacy C++ Kuzu API to the pure Rust `akar-
 ## Why Migrate?
 
 The Rust port offers:
-- **~100% functional parity** with C++ (1,594 workspace tests, 1,589 passing + 5 ignored)
+- **~100% functional parity** with C++ (gate `test [akar-core]`: 1,872 passed / 0 failed / 0 ignored per 2026-08-24 — lihat CHANGELOG untuk angka terkini)
 - **Memory safety** via Rust's ownership model
 - **Arrow-native execution** — up to 24x faster filtering/numeric expressions
 - **Operator fusing** — fewer physical nodes, less overhead
@@ -17,8 +17,10 @@ The Rust port offers:
 
 ### Prerequisites
 ```bash
-pip install kuzu  # or ladybug (C++ fork)
+pip install akar
 ```
+
+The legacy C++ engine is read via its Python bindings (`kuzu` / `ladybug`) only by `akar-migrate` on the machine that still has the old database.
 
 ### Step 1: Export legacy C++ database
 ```bash
@@ -130,13 +132,11 @@ This replaces the C++ `LOAD 'extensions/JSON'` runtime loading model.
 
 ### Python API
 ```bash
-pip install akar-rust  # or build from source with `make python`
+pip install akar  # PyPI package (Python bindings via maturin)
 ```
 
 ### Node.js API
-```bash
-npm install @vela-engineering/kuzu  # or use the akar-wasm bindings (AkarDatabase wrapper)
-```
+Use the [`akar-wasm`](https://github.com/mlengse/akar) bindings (`AkarDatabase` wrapper) — Akar tidak menerbitkan package npm terpisah.
 
 ### CLI
 ```bash
@@ -208,7 +208,7 @@ Current status: **Rust at parity with C++** (397 µs Rust vs 400 µs C++ for fil
 
 | Issue | Solution |
 |-------|----------|
-| `akar-migrate` Python step fails | Install `pip install kuzu`, verify Python 3.8+ |
+| `akar-migrate` Python step fails | Install `pip install akar`, verify Python 3.8+ |
 | Missing extensions | Enable feature flag in Cargo.toml |
 | Slow queries | `cargo build --release`, verify Arrow-native execution |
 | Windows ETW profiling | Run `cargo-flamegraph` as Administrator |

@@ -109,6 +109,15 @@
 
 - **Dead-code cleanup — phantom classes in `__init__.pyi` (2026-08-22)** — dropped `NodeVal`, `RelVal`, `KNNResult`, `DatabaseType` from the hand-written type stub: none exist in the compiled `akar` module (verified against wheel 0.1.2 export surface: `Database`, `Connection`, `QueryResult` + submodules `search/spread/dream/knn/louvain/lstm`; `akar.knn` has functions only). Leftovers of the deleted `tools/rust_api` crate. Stub-only change — zero runtime impact. Commit `c1eff2c`.
 
+## [0.1.8] - 2026-08-18
+
+### Added
+
+- **Sprint 21 — kairos-native migration (P55–P57)** — 2 crate baru `akar-search` + `akar-dream` (+27 tes), bindings PyO3 `search` + `dream` (P55.5, P57.12). Gate `test [akar-core]` naik.
+- **PyPI `akar` 0.1.0 → 0.1.1** — metadata + penghapusan alias shim `ladybug`.
+- `batch_spread_activation` publish — bump akar-algo 0.1.2 → 0.1.3.
+- Sinkron `Cargo.lock` akar-vector 0.1.2 lintas workspace.
+
 ## [0.1.7] - 2026-08-18
 
 ### Added

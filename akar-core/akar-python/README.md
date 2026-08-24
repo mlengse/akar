@@ -120,7 +120,7 @@ $env:PYO3_PYTHON = ".venv\Scripts\python.exe"   # Windows PowerShell
 
 ### Publishing to PyPI
 
-`akar` 0.1.2 is live on [PyPI](https://pypi.org/project/akar/). Procedure:
+`akar` 0.1.3 is live on [PyPI](https://pypi.org/project/akar/) (wheel cp39-abi3 + sdist, published 2026-08-24). Procedure:
 
 1. **Build artifacts** (do NOT use `maturin publish` — it rebuilds the whole
    workspace from scratch, ~10 min, and can exceed tool timeouts):

@@ -4,7 +4,7 @@ This document describes how to cut a release of Akar (`akar-core/`).
 
 > **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** All 31 publishable
 > crates are live on crates.io at `0.1.x` (bottom-up, dependency-ordered). Latest release
-> **v0.1.6** (2026-08-17); latest GitHub Releases carry prebuilt CLI binaries for
+> **v0.1.10** (2026-08-24); latest GitHub Releases carry prebuilt CLI binaries for
 > Linux/macOS/Windows.
 
 ---
@@ -20,6 +20,11 @@ We follow [Semantic Versioning 2.0.0](https://semver.org/) with the `MAJOR.MINOR
 Pre-release versions use suffixes like `-alpha.1`, `-beta.2`, `-rc.1`.
 
 The current version is tracked in `akar-core/Cargo.toml` under `[workspace.package] version`.
+
+> **Note (2026-08-24):** beberapa crate telah dikonversi dari `version.workspace = true` ke
+> versi eksplisit sendiri (akar-function, akar-json, akar-llm, akar-ml, akar-neo4j,
+> akar-search, akar-dream, dst.) agar bisa di-bump independen. Untuk crate tersebut,
+> bump versi langsung di `Cargo.toml` masing-masing, bukan lewat `[workspace.package]`.
 
 ---
 
@@ -150,9 +155,8 @@ Extension crates (akar-json, akar-fts, etc.) can be published in any order after
 
 ### Status
 
-As of 2026-08-17: **31/31 published** (bottom-up, dependency-ordered). Highest patch:
-`akar-storage` & `akar-main` @ **0.1.4**; `akar-binder`/`akar-planner`/`akar-optimizer`/
-`akar-processor`/`akar-postgres` @ **0.1.3**; `akar-common`/`akar-parser`/`akar-server`/
-`akar-httpfs`/`akar-duckdb`/`akar-sqlite`/`akar-azure`/`akar-delta`/`akar-iceberg`/
-`akar-unity-catalog` @ **0.1.2**; remaining @ **0.1.1**. Latest release tag **v0.1.6**.
+As of 2026-08-24: **31/31 published** (bottom-up, dependency-ordered). Highest patch:
+`akar-storage` & `akar-main` @ **0.1.6**. Latest release tag **v0.1.10**.
+Detail per-crate patch per rilis tercatat di [`CHANGELOG.md`](../CHANGELOG.md) — jangan
+duplikasi tabel versi di sini agar tidak drift.
 Rate limit: 1 crate/min after the initial burst (30).

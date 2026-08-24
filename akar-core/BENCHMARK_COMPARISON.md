@@ -56,7 +56,7 @@ The following representative queries from `benchmark/queries/` are mapped to Rus
 
 ---
 
-## Micro-Benchmark Results (Rust, criterion v0.5)
+## Micro-Benchmark Results (Rust, criterion v0.8)
 
 All times in **median µs** (except where noted). Lower is better.
 Hardware: See `criterion` report in `target/criterion/` for detailed system info.

@@ -32,7 +32,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 | Logical operators | **59** variants |
 | Physical operators | **50** structs (incl. `PhysicalMergeRel` P53.20, `PhysicalOptionalExtend` P53.25) |
 | Extensions | **15** crates |
-| Graph algorithms | **15** |
+| Graph algorithms | **17** |
 
 ---
 
@@ -121,7 +121,7 @@ Cypher text
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
 │ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (24 passes)  │    │ (physical)   │
-│ 33 stmt     │    │33 bound  │    │58 ops    │    │ 18 flat +    │    │ 48 operators │
+│ 33 stmt     │    │33 bound  │    │59 ops    │    │ 18 flat +    │    │ 50 operators │
 │ variants    │    │variants  │    │          │    │ 6 tree       │    │              │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
                                                                              │
@@ -163,7 +163,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 - **Parity:** ~90%
 
 #### Planner ([akar-planner](akar-core/akar-planner))
-- 58 LogicalOperator variants (ScanNode, ScanRel, HashJoin, CrossProduct, TopK, Intersect, SemiJoin, RecursiveExtend, +12 DDL operators)
+- 59 LogicalOperator variants (ScanNode, ScanRel, HashJoin, CrossProduct, TopK, Intersect, SemiJoin, RecursiveExtend, +12 DDL operators)
 - **Parity:** ~90%
 
 #### Optimizer ([akar-optimizer](akar-core/akar-optimizer))
@@ -204,7 +204,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 **Parity:** ~95% (exceeds C++ with 17 passes)
 
 #### Processor ([akar-processor](akar-core/akar-processor))
-- 48 physical operator structs (no single enum; DDL ops wired via mapper)
+- 50 physical operator structs (no single enum; DDL ops wired via mapper)
 - Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`)
 - Parallel aggregation via `AggregateHashTable`
 - Parallel hash join via `JoinHashTable`
@@ -341,18 +341,18 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 | Location | `akar-core/akar-python/` (standalone workspace, not a member of `akar-core`) |
 | Binding layer | PyO3 0.29.2 + maturin |
 | Modules | `akar.Database`, `akar.Connection`, `akar.QueryResult` |
-| PyPI release | **`akar==0.1.1` published 2026-08-18** (wheel cp39-abi3 + sdist) — `pip install akar` |
+| PyPI release | **`akar==0.1.3` published 2026-08-24** (wheel cp39-abi3 + sdist) — `pip install akar` |
 | Compat shim | `kairos/kuzu.py` — `import kuzu` → `import akar` (sys.modules alias; `ladybug` alias removed 2026-08-18) |
 | Harness | `test_kuzu_compat.py` — 53 tests, 0 failed (P53.37–P53.38, re-verified 2026-08-18) |
 | Cypher translation | Kuzu syntax → Akar SQL (DDL idempotent, DML, vector index, EXPORT/IMPORT) |
 | Features | Reentrant lock, close/reopen, UNION DISTINCT, MERGE rel, OPTIONAL MATCH, SET arithmetic, FLOAT read-back, EXPORT/IMPORT with options |
-| Tested against | Kairos `KuzuDBStore` + `KuzuDBDreamBackend` via shim; Kairos E2E remember/recall on PyPI wheel OK |
+| Tested against | Kairos `AkarStore` + `AkarDreamBackend` (`kairos.akar_store`, `kairos.dream_akar_store` — modul lama `KuzuDBStore`/`KuzuDBDreamBackend` dihapus di Phase 3 rename) via shim; Kairos E2E remember/recall on PyPI wheel OK |
 
 ---
 
 ## 8. Graph Data Science (GDS) Framework
 
-15 algorithms implemented in [akar-graph](akar-core/akar-graph) + [akar-algo](akar-core/akar-algo):
+17 algorithms implemented in [akar-graph](akar-core/akar-graph) + [akar-algo](akar-core/akar-algo):
 
 | Algorithm | Description |
 |-----------|-------------|
@@ -371,6 +371,9 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 | Betweenness Centrality | Node betweenness centrality |
 | Closeness Centrality | Node closeness centrality |
 | Triangle Counting | Count triangles in graph |
+| Random Walk | Random-walk sampling (dense/sparse) |
+| node2vec | node2vec walk + SGD embedding training |
+| Spread Activation | Spread-activation algorithm |
 
 **Parity:** ~100%
 
@@ -386,18 +389,18 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 [workspace]
 resolver = "2"
 members = [
-    "akar-common", "akar-storage", "akar-transaction", "akar-catalog",
-    "akar-parser", "akar-binder", "akar-planner", "akar-optimizer",
-    "akar-processor", "akar-function", "akar-graph", "akar-extension",
-    "akar-json", "akar-fts", "akar-vector", "akar-httpfs", "akar-duckdb",
-    "akar-algo", "akar-neo4j", "akar-llm", "akar-sqlite", "akar-delta",
-    "akar-iceberg", "akar-azure", "akar-postgres", "akar-unity-catalog",
-    "akar-main", "akar-cli", "akar-wasm", "akar-migrate", "akar-c",
-    "akar-server",
+    "akar-search", "akar-dream", "akar-common", "akar-storage",
+    "akar-transaction", "akar-catalog", "akar-parser", "akar-binder",
+    "akar-planner", "akar-optimizer", "akar-processor", "akar-function",
+    "akar-graph", "akar-extension", "akar-json", "akar-fts", "akar-vector",
+    "akar-httpfs", "akar-duckdb", "akar-algo", "akar-neo4j", "akar-llm",
+    "akar-sqlite", "akar-delta", "akar-iceberg", "akar-azure",
+    "akar-postgres", "akar-unity-catalog", "akar-ml", "akar-main",
+    "akar-cli", "akar-wasm", "akar-migrate", "akar-c", "akar-server",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 ```
@@ -478,7 +481,7 @@ strip = false
 | 4 | `test-ubuntu` | ubuntu-24.04 | `cargo build + cargo test --workspace` |
 | 5 | `test-macos` | macos-14 | `cargo build + cargo test --workspace` |
 | 6 | `test-windows` | windows-2022 | `cargo build + cargo test --workspace` |
-| 7 | `feature-gated` | ubuntu-24.04 | Build + test with ALL 15 extension features |
+| 7 | `feature-gated` | ubuntu-24.04 | Build + test with ALL 14 extension features |
 | 8 | `wasm-check` | ubuntu-24.04 | `cargo check --target wasm32-unknown-unknown` |
 | 9 | `bench-check` | ubuntu-24.04 | `cargo bench --workspace --no-run` |
 | 10 | `coverage` | ubuntu-24.04 | `cargo-tarpaulin` → Codecov upload |
@@ -496,7 +499,7 @@ Triggered by pushing a version tag (`v*`):
 
 > [!NOTE]
 > crates.io publishing is **active** (since 2026-08-08, P50). All 31 publishable crates are
-> published bottom-up (verified live on crates.io; latest release v0.1.5, 2026-08-11);
+> published bottom-up (verified live on crates.io; latest release v0.1.10, 2026-08-24);
 > GitHub Releases with prebuilt CLI binaries are produced as well.
 
 ---
@@ -695,7 +698,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.4` (highest published crate patch); latest release tag **v0.1.9** (2026-08-23)
+- **Current version:** `0.1.6` (highest published crate patch); latest release tag **v0.1.10** (2026-08-24)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
@@ -716,7 +719,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 ## 18. Known Limitations
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
-2. **Physical operator count** — 48 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
+2. **Physical operator count** — 50 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
 3. **`akar-main` is the primary published crate** — install via `cargo add akar-main`;
    `akar-c` (C FFI) is intentionally not published (build locally)
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j,

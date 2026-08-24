@@ -29,7 +29,7 @@ akar-core/
 ├── akar-catalog/       # Schema management
 ├── akar-parser/        # Cypher PEG grammar (pest.rs)
 ├── akar-binder/        # Semantic analysis
-├── akar-planner/       # Logical plan (58 operators)
+├── akar-planner/       # Logical plan (59 operators)
 ├── akar-optimizer/     # 24 optimization passes
 ├── akar-processor/     # Physical execution engine
 ├── akar-function/      # 259 built-in functions
@@ -53,7 +53,7 @@ cargo check --workspace                     # Fast compile check (no codegen)
 ### Test
 
 ```bash
-cargo test --workspace              # All 1,594 tests (5 ignored doc-tests; P48.14-17 no skip needed)
+cargo test --workspace              # All 1,872 tests (gate 2026-08-24; lihat CHANGELOG untuk angka terkini)
 cargo test -p akar-processor               # Single crate
 cargo test --test test_fts -p akar-main     # Single integration test
 ```
@@ -114,7 +114,7 @@ GitHub Actions runs on every push/PR to `master`/`main`:
 | `test-ubuntu` | Ubuntu | `cargo build --workspace` + `cargo test --workspace` |
 | `test-macos` | macOS | Same |
 | `test-windows` | Windows | Same |
-| `feature-gated` | Ubuntu | Build+test all 11 extension features |
+| `feature-gated` | Ubuntu | Build+test all 14 extension features |
 | `wasm-check` | Ubuntu | `cargo check --target wasm32-unknown-unknown` |
 | `bench-check` | Ubuntu | `cargo bench --workspace --no-run` |
 | `coverage` | Ubuntu | `cargo tarpaulin` + Codecov |
