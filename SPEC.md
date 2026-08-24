@@ -506,36 +506,39 @@ Triggered by pushing a version tag (`v*`):
 
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
-| `akar-common` | 24 | Types (37 LogicalTypes, Value), Vectors, Memory |
-| `akar-parser` | 82 | PEG grammar, 33 Statement variants, operator precedence |
-| `akar-binder` | 87 | Semantic analysis, type inference, symbol resolution |
-| `akar-planner` | 21 | Logical plan construction |
-| `akar-optimizer` | 68 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
-| `akar-processor` | 142 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
-| `akar-function` | 176 | 259 registered functions |
-| `akar-storage` | 341 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
-| `akar-main` (unit) | 70 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 320 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32) |
+| `akar-common` | 36 | Types (37 LogicalTypes, Value), Vectors, Memory |
+| `akar-parser` | 88 | PEG grammar, 33 Statement variants, operator precedence |
+| `akar-binder` | 101 | Semantic analysis, type inference, symbol resolution |
+| `akar-planner` | 22 | Logical plan construction |
+| `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
+| `akar-processor` | 157 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
+| `akar-function` | 182 | 259 registered functions |
+| `akar-storage` | 343 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
+| `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
+| `akar-main` (integration) | 409 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
-| `akar-graph` | 34 | CSR adjacency, all GDS algorithms |
-| `akar-vector` | 22 | Vector similarity search |
-| `akar-json` | 12 | JSON functions |
+| `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
+| `akar-vector` | 26 | Vector similarity search |
+| `akar-json` | 14 | JSON functions |
 | `akar-fts` | 14 | Stemmer, Tokenizer, BM25 |
-| `akar-algo` | 34 | Graph algorithm extensions |
+| `akar-algo` | 79 | Graph algorithm extensions |
+| `akar-search` | 23 | Search utilities |
+| `akar-dream` | 5 | Dream engine |
+| `akar-ml` | 5 | ML functions (node2vec walk/SGD invariants) |
 | `akar-extension` | 15 | Extension framework registry |
-| `akar-c` (FFI) | 14 | `extern "C"` binding tests |
+| `akar-c` (FFI) | 18 | `extern "C"` binding tests |
 | `akar-server` | 12 | TCP framing, session, concurrency |
 | `akar-postgres` | 7 | PostgreSQL integration |
 | `akar-duckdb` | 9 | DuckDB integration |
-| `akar-httpfs` | 7 | HTTP/S3 file reads |
-| `akar-neo4j` | 12 | Bolt protocol |
+| `akar-httpfs` | 10 | HTTP/S3 file reads |
+| `akar-neo4j` | 15 | Bolt protocol |
 | `akar-llm` | 9 | LLM functions |
 | `akar-sqlite` / `akar-azure` / `akar-delta` / `akar-iceberg` / `akar-unity-catalog` | 5 | Integration extensions (1 each) |
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,835** | **1,835 total, 0 ignored, 1,835 passed, 0 failed** (gate `test [akar-core]` 2026-08-23, s.d. IMPORT DATABASE path-traversal hardening) |
+| **Total** | **1,867** | **1,867 total, 0 ignored, 1,867 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.1 commit-path mirror persist skip) |
 
 ### 11.2 Test Datasets
 
@@ -691,7 +694,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.4` (highest published crate patch); latest release tag **v0.1.6** (2026-08-17)
+- **Current version:** `0.1.4` (highest published crate patch); latest release tag **v0.1.9** (2026-08-23)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)

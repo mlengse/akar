@@ -17,7 +17,9 @@ scan_column. RelTable uses CSR adjacency lists (label-keyed) + per-column proper
 
 **WAL:** Write-ahead log with Insert/Delete/Update/Commit/Rollback/ColumnWrite records.
 
-**Checkpoint:** WAL flush → dirty page flush → truncate WAL cycle.
+**Checkpoint:** durable column-mirror persist → WAL flush → dirty page flush → truncate
+WAL cycle. Committed SQL rows are recovered from the mirrors (their WAL records carry
+no row data); the per-commit persist is skipped when a checkpoint is imminent (P60.1).
 
 **Compression:** Constant, Boolean, IntegerBitpacking (int8–int64), and Float compression.
 Tag-aware (compresses payload, never the discriminant byte).
@@ -30,4 +32,4 @@ reading, Arrow->Akar type mapping (Int64->INT64, Utf8->STRING, etc.).
 
 **Index:** Generic hash index with collision resolution.
 
-**Tests:** 328
+**Tests:** 344
