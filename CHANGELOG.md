@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **chore(python) — `akar` 0.1.3 di PyPI: engine refresh tanpa perubahan API (2026-08-24)** — wheel `akar-0.1.3-cp39-abi3-win_amd64.whl` + sdist di-upload via twine ([pypi.org/project/akar/0.1.3](https://pypi.org/project/akar/0.1.3/)); membundel engine Rust baru sejak wheel 0.1.2: security fix IMPORT DATABASE path traversal, WAL durability P60.1/P60.2, perf LPA/Louvain (−24..−53%), adaptasi rand 0.10. Permukaan Python tidak berubah (`akar.search`/`akar.spread`/`akar.dream`, `Database`/`Connection`/`QueryResult`). Verifikasi: `uv run --with akar==0.1.3` — CREATE NODE TABLE + CREATE + MATCH OK; seluruh submodule & binding hadir (catatan penamaan pre-existing: fungsi ter-ekspor sebagai `hybrid_search_py`/`weighted_rrf_fuse_py`). Versi bump di `pyproject.toml` + `Cargo.toml`.
+
 ## [0.1.10] - 2026-08-24
 
 ### Added
