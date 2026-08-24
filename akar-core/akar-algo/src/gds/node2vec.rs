@@ -21,22 +21,16 @@ impl SimpleRng {
     }
 }
 
-/// Compute Node2Vec graph embedding.
-///
-/// Since returning full embeddings via AlgoResult (which expects f64 values)
-/// requires returning a flat array, we return the flattened embedding matrix.
-pub fn compute_node2vec(
+/// Generate `walks` biased random walks per start node from a seeded RNG.
+fn generate_walks(
     csr: &CSRAdjacency,
     p: f64,
     q: f64,
-    dimensions: usize,
     walks: usize,
     window: usize,
-) -> AlgoResult {
+    rng: &mut SimpleRng,
+) -> Vec<Vec<usize>> {
     let n = csr.num_nodes();
-    let mut rng = SimpleRng::new(42);
-
-    // 1. Generate biased random walks
     let mut all_walks = Vec::with_capacity(n * walks);
     for start in 0..n {
         for _ in 0..walks {
@@ -90,14 +84,18 @@ pub fn compute_node2vec(
             all_walks.push(walk);
         }
     }
+    all_walks
+}
 
-    // 2. Simple Skip-gram optimization (stochastic gradient descent)
-    let mut embeddings = vec![0.0; n * dimensions];
-    // Initialize random embeddings
-    for val in embeddings.iter_mut() {
-        *val = (rng.gen_float() - 0.5) / (dimensions as f64);
-    }
-
+/// Skip-gram SGD over the generated walks; mutates `embeddings` in place.
+fn train_embeddings(
+    embeddings: &mut [f64],
+    all_walks: &[Vec<usize>],
+    n: usize,
+    dimensions: usize,
+    window: usize,
+    rng: &mut SimpleRng,
+) {
     let lr = 0.025;
 
     for walk in all_walks {
@@ -111,18 +109,44 @@ pub fn compute_node2vec(
                 }
 
                 // Positive sample
-                update_embedding(&mut embeddings, u, v, dimensions, 1.0, lr);
+                update_embedding(embeddings, u, v, dimensions, 1.0, lr);
 
                 // Negative samples (simplified)
                 for _ in 0..5 {
                     let neg = rng.gen_range(n);
                     if neg != u && neg != v {
-                        update_embedding(&mut embeddings, u, neg, dimensions, 0.0, lr);
+                        update_embedding(embeddings, u, neg, dimensions, 0.0, lr);
                     }
                 }
             }
         }
     }
+}
+
+/// Compute Node2Vec graph embedding.
+///
+/// Since returning full embeddings via AlgoResult (which expects f64 values)
+/// requires returning a flat array, we return the flattened embedding matrix.
+pub fn compute_node2vec(
+    csr: &CSRAdjacency,
+    p: f64,
+    q: f64,
+    dimensions: usize,
+    walks: usize,
+    window: usize,
+) -> AlgoResult {
+    let n = csr.num_nodes();
+    let mut rng = SimpleRng::new(42);
+
+    let all_walks = generate_walks(csr, p, q, walks, window, &mut rng);
+
+    let mut embeddings = vec![0.0; n * dimensions];
+    // Initialize random embeddings
+    for val in embeddings.iter_mut() {
+        *val = (rng.gen_float() - 0.5) / (dimensions as f64);
+    }
+
+    train_embeddings(&mut embeddings, &all_walks, n, dimensions, window, &mut rng);
 
     AlgoResult {
         name: "node2vec".into(),
@@ -272,5 +296,96 @@ mod tests {
         assert_eq!(embeddings, vec![1.0, -0.0125, -0.0125, 1.0]);
         let dot = embeddings[0] * embeddings[2] + embeddings[1] * embeddings[3];
         assert!(dot < 0.0);
+    }
+
+    fn seeded_init_replay(n: usize, dims: usize) -> Vec<f64> {
+        let mut rng = SimpleRng::new(42);
+        (0..n * dims).map(|_| (rng.gen_float() - 0.5) / dims as f64).collect()
+    }
+
+    #[test]
+    fn test_zero_walks_yields_pure_seeded_initialization() {
+        // walks=0 → no walks are generated and no RNG draws happen beyond
+        // init, so the output must equal the raw seeded init sequence.
+        let csr = csr_from_edges(&[(0, 1), (1, 2)], 3);
+        let dims = 4;
+        let result = compute_node2vec(&csr, 1.0, 1.0, dims, 0, 4);
+        assert_eq!(result.values, seeded_init_replay(3, dims));
+    }
+
+    #[test]
+    fn test_window_zero_yields_pure_seeded_initialization() {
+        // window=0 → every walk stops at [start] (`1..0` is empty) and the
+        // context slice degenerates to u itself, so training is a no-op.
+        let csr = csr_from_edges(&[(0, 1), (1, 2)], 3);
+        let dims = 4;
+        let result = compute_node2vec(&csr, 1.0, 1.0, dims, 2, 0);
+        assert_eq!(result.values, seeded_init_replay(3, dims));
+    }
+
+    #[test]
+    fn test_walk_generation_invariants() {
+        // Every walk starts at its seed node, stays within the window bound,
+        // and only ever hops along real CSR edges.
+        let csr = csr_from_edges(&[(0, 1), (1, 2), (2, 0)], 3);
+        let mut rng = SimpleRng::new(7);
+        let walks = generate_walks(&csr, 1.0, 1.0, 4, 5, &mut rng);
+        assert_eq!(walks.len(), 3 * 4);
+        let mut starts_seen = vec![0usize; 3];
+        for walk in walks.iter() {
+            starts_seen[walk[0]] += 1;
+            assert!(walk.len() <= 5);
+            for pair in walk.windows(2) {
+                assert!(csr.neighbors(pair[0]).iter().any(|(_, d)| d.offset as usize == pair[1]));
+            }
+        }
+        // Exactly `walks` replicas per seed node.
+        assert_eq!(starts_seen, vec![4, 4, 4]);
+    }
+
+    #[test]
+    fn test_isolated_node_produces_single_step_walks() {
+        let csr = csr_from_edges(&[(1, 2)], 3);
+        let mut rng = SimpleRng::new(9);
+        let walks = generate_walks(&csr, 1.0, 1.0, 2, 4, &mut rng);
+        assert_eq!(walks[0], vec![0]);
+        assert_eq!(walks[1], vec![0]);
+    }
+
+    #[test]
+    fn test_train_embeddings_pulls_context_pair_together() {
+        // Opposing vectors (dot=-1) must move toward each other under the
+        // positive-skipgram update; skipping training leaves dot at exactly -1.
+        let mut embeddings = vec![1.0, 0.0, -1.0, 0.0];
+        let walks = vec![vec![0usize, 1]];
+        let mut rng = SimpleRng::new(3);
+        train_embeddings(&mut embeddings, &walks, 2, 2, 2, &mut rng);
+        let dot_after = embeddings[0] * embeddings[2] + embeddings[1] * embeddings[3];
+        assert!(dot_after > -1.0);
+    }
+
+    #[test]
+    fn test_extreme_bias_parameters_stay_finite_and_deterministic() {
+        // p=q=0 → 1/p and 1/q are +inf; p=q=∞ → weights collapse to 0.
+        // Both extremes must stay panic-free, finite, and bit-reproducible.
+        let csr = csr_from_edges(&[(0, 1), (1, 2), (2, 0)], 3);
+        for &(p, q) in &[(0.0, 0.0), (f64::INFINITY, f64::INFINITY)] {
+            let first = compute_node2vec(&csr, p, q, 8, 4, 5);
+            let second = compute_node2vec(&csr, p, q, 8, 4, 5);
+            assert_eq!(first.values.len(), 24);
+            assert!(first.values.iter().all(|v| v.is_finite()));
+            assert_eq!(first.values, second.values);
+        }
+    }
+
+    #[test]
+    fn test_self_loop_and_parallel_edges_are_handled() {
+        // A self-loop parks the walk on node 0 and parallel edges duplicate
+        // CSR neighbor entries; neither may panic nor produce non-finite rows.
+        let csr = csr_from_edges(&[(0, 0), (0, 1), (0, 1), (1, 2)], 3);
+        let dims = 4;
+        let result = compute_node2vec(&csr, 1.0, 1.0, dims, 3, 4);
+        assert_eq!(result.values.len(), 3 * dims);
+        assert!(result.values.iter().all(|v| v.is_finite()));
     }
 }
