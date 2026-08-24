@@ -31,6 +31,11 @@ impl LocalWAL {
         Self::default()
     }
 
+    /// Log a pre-built record (drain path for typed SQL-path records, P60.2).
+    pub fn log_record(&mut self, record: &WALRecord) {
+        self.write_record(record);
+    }
+
     /// Serialize a WAL record into the in-memory buffer.
     fn write_record(&mut self, record: &WALRecord) {
         use akar_common::serialization::Serialize;

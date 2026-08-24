@@ -14,7 +14,7 @@ const WAL_MAGIC: &[u8; 4] = b"AKAR";
 const WAL_VERSION: u16 = 2;
 
 /// A record in the WAL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WALRecord {
     Insert {
         table_id: u64,
@@ -80,6 +80,139 @@ pub enum WALRecord {
     CreateSequence {
         table_id: u64,
     },
+}
+
+/// Shared sink that SQL write-path operators push typed records into during
+/// execution (P60.2). The connection layer drains it into the transaction's
+/// `LocalWAL` after the query; commit bulk-copies the buffer into the global
+/// WAL. `None` disables logging (e.g. read-only or non-durable contexts).
+pub type WalSink = std::sync::Arc<std::sync::Mutex<Vec<WALRecord>>>;
+
+/// Push an [`WALRecord::Insert`] for a node-table row onto the sink (no-op when
+/// `sink` is `None`). `row` is serialized with the tagged binary format that
+/// recovery deserializes via `deserialize_values_from_bytes` (P60.2).
+pub fn log_insert_record(sink: &Option<WalSink>, table_id: u64, row: &[akar_common::types::Value]) {
+    if let Some(sink) = sink
+        && let Ok(mut buf) = sink.lock()
+    {
+        buf.push(WALRecord::Insert {
+            table_id,
+            data: crate::serialize_values_to_bytes(row),
+        });
+    }
+}
+
+/// Push an [`WALRecord::Insert`] for a rel-table edge onto the sink. The
+/// payload carries `[src, dst, props…]` so recovery can rebuild the adjacency
+/// entry (`RelTable::insert_rel`) — node offsets are stored as `UInt64`
+/// (P60.2).
+pub fn log_rel_insert_record(
+    sink: &Option<WalSink>,
+    table_id: u64,
+    src: u64,
+    dst: u64,
+    props: &[akar_common::types::Value],
+) {
+    use akar_common::types::Value;
+    let mut row = Vec::with_capacity(props.len() + 2);
+    row.push(Value::UInt64(src));
+    row.push(Value::UInt64(dst));
+    row.extend_from_slice(props);
+    log_insert_record(sink, table_id, &row);
+}
+
+/// Push an [`WALRecord::Delete`] onto the sink (no-op when `sink` is `None`).
+pub fn log_delete_record(sink: &Option<WalSink>, table_id: u64, row_id: u64) {
+    if let Some(sink) = sink
+        && let Ok(mut buf) = sink.lock()
+    {
+        buf.push(WALRecord::Delete { table_id, row_id });
+    }
+}
+
+/// Push an [`WALRecord::Update`] for a single cell onto the sink (no-op when
+/// `sink` is `None`).
+pub fn log_update_record(
+    sink: &Option<WalSink>,
+    table_id: u64,
+    row_id: u64,
+    column: u32,
+    value: &akar_common::types::Value,
+) {
+    if let Some(sink) = sink
+        && let Ok(mut buf) = sink.lock()
+    {
+        buf.push(WALRecord::Update {
+            table_id,
+            row_id,
+            column,
+            data: crate::serialize_values_to_bytes(std::slice::from_ref(value)),
+        });
+    }
+}
+
+/// Decode a bulk-copied `LocalWALData` payload back into individual records.
+///
+/// The buffer uses the same tag format as the WAL file itself (written by
+/// `LocalWAL::write_record`); decoding lets recovery replay SQL-path DML that
+/// arrives inside a single blob record (P60.2). Trailing garbage stops the
+/// decode with an error; callers decide whether to skip or fail.
+pub fn decode_wal_buffer(buffer: &[u8]) -> std::io::Result<Vec<WALRecord>> {
+    use akar_common::serialization::Deserialize;
+    let mut cursor = std::io::Cursor::new(buffer);
+    let mut records = Vec::new();
+    while (cursor.position() as usize) < buffer.len() {
+        let mut tag_buf = [0u8; 1];
+        if cursor.read_exact(&mut tag_buf).is_err() {
+            break;
+        }
+        let record = match tag_buf[0] {
+            b'I' => {
+                let table_id = u64::deserialize(&mut cursor)?;
+                let data_len = u32::deserialize(&mut cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                WALRecord::Insert { table_id, data }
+            }
+            b'D' => {
+                let table_id = u64::deserialize(&mut cursor)?;
+                let row_id = u64::deserialize(&mut cursor)?;
+                WALRecord::Delete { table_id, row_id }
+            }
+            b'U' => {
+                let table_id = u64::deserialize(&mut cursor)?;
+                let row_id = u64::deserialize(&mut cursor)?;
+                let column = u32::deserialize(&mut cursor)?;
+                let data_len = u32::deserialize(&mut cursor)? as usize;
+                let mut data = vec![0u8; data_len];
+                cursor.read_exact(&mut data)?;
+                WALRecord::Update {
+                    table_id,
+                    row_id,
+                    column,
+                    data,
+                }
+            }
+            b'C' => WALRecord::Commit {
+                transaction_id: u64::deserialize(&mut cursor)?,
+            },
+            // Unknown/nested-blob tags cannot be produced by the current
+            // LocalWAL writer. Stop decoding (the stream is misaligned after
+            // such a byte) but keep what decoded so far — recovery prefers
+            // partial data over failing the whole replay.
+            _ => {
+                tracing::warn!(
+                    "LocalWAL blob: unexpected tag byte 0x{:02x} at offset {}; keeping {} decoded record(s)",
+                    tag_buf[0],
+                    cursor.position(),
+                    records.len()
+                );
+                break;
+            }
+        };
+        records.push(record);
+    }
+    Ok(records)
 }
 
 impl fmt::Display for WALRecord {
@@ -692,6 +825,103 @@ impl WAL {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode_wal_buffer_roundtrip() {
+        use crate::local_wal::LocalWAL;
+        use akar_common::types::Value;
+
+        // Serialize typed records through the LocalWAL (exactly what commit
+        // bulk-copies), then decode them back (what recovery does, P60.2).
+        let mut lwal = LocalWAL::new();
+        lwal.log_insert(
+            7,
+            crate::serialize_values_to_bytes(&[Value::Int64(42), Value::String("hi".into())]),
+        );
+        lwal.log_delete(7, 3);
+        lwal.log_update(7, 5, 1, crate::serialize_values_to_bytes(&[Value::Double(2.5)]));
+
+        let decoded = decode_wal_buffer(lwal.buffer()).unwrap();
+        assert_eq!(decoded.len(), 3);
+        match &decoded[0] {
+            WALRecord::Insert { table_id, data } => {
+                assert_eq!(*table_id, 7);
+                let values = crate::deserialize_values_from_bytes(data, 2);
+                assert_eq!(values[0], Value::Int64(42));
+                assert_eq!(values[1], Value::String("hi".into()));
+            }
+            other => panic!("expected Insert, got {other:?}"),
+        }
+        assert_eq!(decoded[1], WALRecord::Delete { table_id: 7, row_id: 3 });
+        match &decoded[2] {
+            WALRecord::Update {
+                table_id,
+                row_id,
+                column,
+                data,
+            } => {
+                assert_eq!(*table_id, 7);
+                assert_eq!(*row_id, 5);
+                assert_eq!(*column, 1);
+                assert_eq!(crate::deserialize_values_from_bytes(data, 1), vec![Value::Double(2.5)]);
+            }
+            other => panic!("expected Update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_decode_wal_buffer_empty_and_unknown_tag() {
+        // Empty buffer decodes to no records.
+        assert!(decode_wal_buffer(&[]).unwrap().is_empty());
+
+        // An unknown tag stops decoding but keeps prior records instead of
+        // failing the whole replay.
+        let mut buf = Vec::new();
+        let mut lwal = crate::local_wal::LocalWAL::new();
+        lwal.log_insert(1, vec![9]);
+        buf.extend_from_slice(lwal.buffer());
+        buf.push(b'Z'); // unknown tag
+        buf.push(0xFF); // garbage that must not be parsed as a record
+
+        let decoded = decode_wal_buffer(&buf).unwrap();
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(
+            decoded[0],
+            WALRecord::Insert {
+                table_id: 1,
+                data: vec![9]
+            }
+        );
+    }
+
+    #[test]
+    fn test_serialize_values_to_bytes_roundtrip() {
+        use akar_common::types::Value;
+        let row = vec![
+            Value::Null,
+            Value::Bool(true),
+            Value::Int64(-17),
+            Value::Double(1.25),
+            Value::String("akar".into()),
+        ];
+        let bytes = crate::serialize_values_to_bytes(&row);
+        assert_eq!(
+            crate::deserialize_values_from_bytes(&bytes, row.len()),
+            row,
+            "serialize_values_to_bytes must roundtrip through the recovery deserializer"
+        );
+    }
+
+    #[test]
+    fn test_log_helpers_noop_without_sink() {
+        use akar_common::types::Value;
+        let none: Option<WalSink> = None;
+        // None sink must not panic and must not record anything.
+        log_insert_record(&none, 1, &[Value::Int64(1)]);
+        log_delete_record(&none, 1, 0);
+        log_update_record(&none, 1, 0, 0, &Value::Null);
+        log_rel_insert_record(&none, 1, 0, 1, &[]);
+    }
 
     #[test]
     fn test_wal_append_clear() {

@@ -1,11 +1,12 @@
-//! P45.4: Data Durability
+//! P45.4: Data Durability (recovery source amended by P60.2)
 //!
-//! Verifies that committed table rows survive process restarts via the
-//! durable column mirrors (`col_{table_id}_{col_idx}` + `.meta` sidecar) —
-//! the recovery source for SQL-path rows, since their WAL records carry no
-//! row data. P60.1 skips the per-commit persist only when a CHECKPOINT is
-//! imminent (the checkpoint persists the same mirrors before truncating
-//! the WAL):
+//! Verifies that committed table rows survive process restarts. Since P60.2
+//! the SQL write path emits typed Insert/Delete/Update WAL records, so the
+//! WAL alone is the durability source for every checkpoint-threshold mode;
+//! the durable column mirrors (`col_{table_id}_{col_idx}` + `.meta` sidecar)
+//! are written only by CHECKPOINT and by recovery itself. Recovery loads the
+//! mirrors (last checkpoint state) FIRST, then replays post-checkpoint WAL
+//! deltas on top. Covered:
 //! - clean shutdown (with and without an explicit CHECKPOINT),
 //! - crash (process killed mid-write),
 //! - UPDATE/DELETE state,
@@ -159,9 +160,9 @@ fn test_restart_without_checkpoint_restores_rows() {
     let db_path = temp_dir.path().join("test_db");
 
     {
-        // Auto-checkpoint disabled (threshold 0): no CHECKPOINT is issued, but
-        // the commit path still persists the durable mirror after each write
-        // (the P60.1 skip only fires when a checkpoint is imminent).
+        // Auto-checkpoint disabled (threshold 0): no CHECKPOINT is issued and
+        // no per-commit mirror persist runs. The rows survive purely via WAL
+        // replay of the typed records emitted by the SQL write path (P60.2).
         let db = Arc::new(Database::new(&db_path, config(0)).expect("Failed to create DB"));
         let conn = Connection::new(&db);
         conn.query("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))")
@@ -177,7 +178,70 @@ fn test_restart_without_checkpoint_restores_rows() {
     assert_eq!(
         db.table_num_rows("Person"),
         5,
-        "rows should survive without an explicit checkpoint"
+        "rows should survive without an explicit checkpoint (WAL replay)"
+    );
+}
+
+#[test]
+fn test_wal_replay_restores_set_delete_and_edges_without_checkpoint() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let db_path = temp_dir.path().join("test_db");
+
+    {
+        // threshold 0: never checkpoint — every row below must come back from
+        // typed WAL records alone: node inserts, an edge insert, a SET update,
+        // and a DELETE (P60.2).
+        let db = Arc::new(Database::new(&db_path, config(0)).expect("Failed to create DB"));
+        let conn = Connection::new(&db);
+        conn.query("CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")
+            .expect("create Person failed");
+        conn.query("CREATE NODE TABLE City(id INT64, name STRING, PRIMARY KEY(id))")
+            .expect("create City failed");
+        conn.query("CREATE REL TABLE LivesIn(FROM Person TO City, since INT64)")
+            .expect("create LivesIn failed");
+        conn.query("CREATE (:Person {id: 1, name: 'alice'})")
+            .expect("insert alice failed");
+        conn.query("CREATE (:Person {id: 2, name: 'bob'})")
+            .expect("insert bob failed");
+        conn.query("CREATE (:City {id: 1, name: 'SF'})")
+            .expect("insert city failed");
+        conn.query(
+            "MATCH (a:Person {id: 1}), (b:City {id: 1}) \
+             CREATE (a)-[:LivesIn {since: 2010}]->(b)",
+        )
+        .expect("insert edge failed");
+        conn.query("MATCH (c:City) SET c.name = 'San Francisco'")
+            .expect("SET failed");
+        conn.query("MATCH (n:Person {name: 'bob'}) DELETE n")
+            .expect("DELETE failed");
+        assert_eq!(db.table_num_rows("Person"), 2, "soft-deleted slot remains pre-restart");
+        assert_eq!(db.table_num_rows("City"), 1);
+    }
+
+    // Reopen with checkpointing still disabled: replay must reconstruct the
+    // post-DML state exactly once.
+    let db = Arc::new(Database::new(&db_path, config(0)).expect("Failed to reopen DB"));
+    let conn = Connection::new(&db);
+
+    assert_eq!(db.table_num_rows("Person"), 2, "alice + soft-deleted bob slot");
+    assert_eq!(db.table_num_rows("City"), 1);
+
+    let names = query_strings(&conn, "MATCH (n:Person) RETURN n.name");
+    assert_eq!(names, vec!["alice".to_string()], "bob must stay deleted after replay");
+
+    let cities = query_strings(&conn, "MATCH (c:City) RETURN c.name");
+    assert_eq!(cities, vec!["San Francisco".to_string()], "SET must survive replay");
+
+    let table_catalog = db.table_catalog();
+    let rel = table_catalog
+        .get_rel_table_by_name("LivesIn")
+        .expect("LivesIn survives");
+    assert_eq!(rel.num_rows, 1, "edge must survive replay");
+    assert_eq!(rel.edges, vec![(0, 0)], "edge endpoints must survive replay");
+    assert_eq!(
+        rel.properties,
+        vec![vec![Value::Int64(2010)]],
+        "edge props must survive replay"
     );
 }
 
@@ -343,21 +407,22 @@ fn test_crash_recovers_committed_rows_without_double_apply() {
     let mut sim = CrashSimulator::spawn("write", 60, 0);
 
     // Wait for the child to finish writing AND committing all 60 rows
-    // (each query's commit is durable: WAL flush + column-mirror persist;
-    // threshold 0 disables auto-checkpoint, so the P60.1 skip never fires).
-    // The child then writes `write_done` and waits idle on the signal file.
-    // We kill it while idle — a hard SIGKILL with no clean shutdown, but with
-    // every committed row already durable. Killing mid-write is deliberately
-    // avoided: it leaves a torn persist/WAL state whose recovery is not
-    // deterministic across OSes (the historical flake).
+    // (each query's commit is durable: the typed WAL records are bulk-copied
+    // into the global WAL and fsynced before commit returns; threshold 0
+    // disables auto-checkpoint and, since P60.2, there is no per-commit
+    // mirror persist at all). The child then writes `write_done` and waits
+    // idle on the signal file. We kill it while idle — a hard SIGKILL with no
+    // clean shutdown. Killing mid-write is deliberately avoided: it leaves a
+    // torn WAL/persist state whose recovery is not deterministic across OSes
+    // (the historical flake).
     let db_dir = sim.db_path().to_path_buf();
     let start = Instant::now();
     let mut done = false;
     // 60 s budget for 60 individually durable commits. Each commit costs a
-    // WAL fsync plus small mirror file writes; under a fully parallel suite run on
-    // Windows, disk contention dominates (observed once as a gate flake) — the
-    // assertion guards against a hung child, not write throughput. 60 rows is
-    // plenty to prove multi-row durability + no double-apply.
+    // WAL fsync; under a fully parallel suite run on Windows, disk
+    // contention dominates (observed once as a gate flake) — the assertion
+    // guards against a hung child, not write throughput. 60 rows is plenty
+    // to prove multi-row durability + no double-apply.
     while start.elapsed() < Duration::from_secs(60) {
         if db_dir.join("write_done").exists() {
             done = true;
@@ -375,11 +440,10 @@ fn test_crash_recovers_committed_rows_without_double_apply() {
     let conn = Connection::new(&db);
 
     let rows = db.table_num_rows("Person");
-    assert!(
-        (1..=60).contains(&rows),
-        "recovered row count {} should be within (0, 60]",
-        rows
-    );
+    // Deterministic since P60.2: every commit fsynced its typed WAL records
+    // before returning, no mirrors were ever written (threshold 0), so the
+    // replay reconstructs exactly the 60 committed rows.
+    assert_eq!(rows, 60, "replay should restore exactly the committed rows");
 
     let names = query_column(&conn, "MATCH (n:Person) RETURN n.name");
     assert_eq!(

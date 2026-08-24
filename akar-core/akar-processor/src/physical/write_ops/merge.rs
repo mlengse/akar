@@ -5,6 +5,7 @@ use crate::physical::write_ops::set::{PhysicalSet, append_pipeline_columns};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
+use akar_storage::wal::{WalSink, log_insert_record};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +22,8 @@ pub struct PhysicalMerge {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so MERGE-created rows survive restarts via replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 /// Build a single-column chunk carrying physical row indices under the `_id`
@@ -160,9 +163,11 @@ impl PhysicalOperatorExec for PhysicalMerge {
                     drop(table_info);
 
                     if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                        let logged_row = self.wal_sink.is_some().then(|| new_values.clone());
                         let row_id = tbl
                             .insert_row_with_txn(new_values, self.txn_id)
                             .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
+                        log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
                         if let Some(sink) = self.undo_sink.as_ref()
                             && let Ok(mut u) = sink.lock()
                         {

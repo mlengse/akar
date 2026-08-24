@@ -4,6 +4,7 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::Constant;
 use akar_storage::table::TableCatalog;
+use akar_storage::wal::{WalSink, log_delete_record};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +24,8 @@ pub struct PhysicalDelete {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so deletions survive restarts via WAL replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalDelete {
@@ -76,6 +79,32 @@ impl PhysicalOperatorExec for PhysicalDelete {
                 }
             }
             if self.detach {
+                // Log the incident edges BEFORE detaching so replay removes
+                // them too — `delete_edge` tombstones by stable index, and
+                // replay applies records in log order, matching live
+                // execution (P60.2).
+                for rel in self.table_catalog.all_rel_tables() {
+                    if rel.src_table_id != self.table_id && rel.dst_table_id != self.table_id {
+                        continue;
+                    }
+                    let rel_id = *rel.key();
+                    for &row_idx in &rows_to_delete {
+                        if rel.src_table_id == self.table_id
+                            && let Some(edges) = rel.fwd_adj.get(&row_idx)
+                        {
+                            for &(_, edge_idx) in edges.iter() {
+                                log_delete_record(&self.wal_sink, rel_id, edge_idx as u64);
+                            }
+                        }
+                        if rel.dst_table_id == self.table_id
+                            && let Some(edges) = rel.rev_adj.get(&row_idx)
+                        {
+                            for &(_, edge_idx) in edges.iter() {
+                                log_delete_record(&self.wal_sink, rel_id, edge_idx as u64);
+                            }
+                        }
+                    }
+                }
                 for &row_idx in &rows_to_delete {
                     self.table_catalog.detach_node(self.table_id, row_idx);
                 }
@@ -92,6 +121,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     }
                     if table.delete_row_with_txn(row_idx, self.txn_id).is_ok() {
                         deleted += 1;
+                        log_delete_record(&self.wal_sink, self.table_id, row_idx);
                     }
                 }
             } else {
@@ -108,6 +138,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
                     }
                     if table.delete_edge(edge_idx as usize).is_ok() {
                         deleted += 1;
+                        log_delete_record(&self.wal_sink, self.table_id, edge_idx);
                     }
                 }
             } else {

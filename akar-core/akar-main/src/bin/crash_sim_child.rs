@@ -85,10 +85,11 @@ fn main() {
                     .unwrap_or_else(|e| panic!("Failed to insert row {}: {}", i, e));
                 }
                 // All rows written and committed (each query's durable commit
-                // completed, including WAL flush + column-mirror persist).
-                // Signal the parent so it can kill us while idle — a hard
-                // kill (SIGKILL) with no clean shutdown, but with all
-                // committed rows already durable on disk.
+                // completed: typed WAL records bulk-copied into the global
+                // WAL and fsynced; since P60.2 there is no per-commit column-
+                // mirror persist). Signal the parent so it can kill us while
+                // idle — a hard kill (SIGKILL) with no clean shutdown, but
+                // with all committed rows already durable on disk.
                 fs::write(db_path.join("write_done"), b"").expect("Failed to write write_done marker");
             }
             "write-burst" => {

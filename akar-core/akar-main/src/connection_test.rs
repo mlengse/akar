@@ -578,14 +578,40 @@ mod integration_tests {
         exec_ok(&conn, &format!("COPY T FROM '{fp}' (HEADER true)")).unwrap();
 
         {
+            // P60.2: the SQL write path emits typed records, bulk-copied at
+            // commit as a single LocalWALData blob between the Commit records.
             let wal = db.storage_manager.wal().lock().unwrap();
+            let commits = wal
+                .records()
+                .iter()
+                .filter(|r| matches!(r, akar_storage::wal::WALRecord::Commit { .. }))
+                .count();
+            assert_eq!(commits, 3, "1 Commit per write operation (no checkpoint)");
             assert!(
                 wal.records()
                     .iter()
-                    .all(|r| matches!(r, akar_storage::wal::WALRecord::Commit { .. })),
-                "WAL should have only Commit records (no Checkpoint)"
+                    .all(|r| !matches!(r, akar_storage::wal::WALRecord::Checkpoint)),
+                "WAL should have no Checkpoint record"
             );
-            assert_eq!(wal.len(), 3, "WAL has 1 Commit record per write operation");
+            // The COPY's typed payload must decode to exactly 2 Insert blobs.
+            let blobs: Vec<&Vec<u8>> = wal
+                .records()
+                .iter()
+                .filter_map(|r| match r {
+                    akar_storage::wal::WALRecord::LocalWALData { data } => Some(data),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(blobs.len(), 1, "COPY bulk-copies one LocalWALData blob");
+            let decoded = akar_storage::wal::decode_wal_buffer(blobs[0]).unwrap();
+            assert_eq!(
+                decoded
+                    .iter()
+                    .filter(|r| matches!(r, akar_storage::wal::WALRecord::Insert { .. }))
+                    .count(),
+                2,
+                "typed replay payload must carry both CSV rows"
+            );
         }
 
         let vals = query_column(&conn, "MATCH (n:T) RETURN n.id");
@@ -607,8 +633,17 @@ mod integration_tests {
         assert_eq!(vals.len(), 2, "Data should be present");
 
         {
+            // P60.2 layout: Commit(DDL) · LocalWALData(typed rows) · Commit(COPY).
             let wal = db.storage_manager.wal().lock().unwrap();
-            assert_eq!(wal.len(), 2, "WAL has 1 Commit per write operation (no checkpoint)");
+            assert_eq!(
+                wal.len(),
+                3,
+                "DDL Commit + bulk-copied typed payload + COPY Commit (no checkpoint)"
+            );
+            assert!(matches!(
+                wal.records()[1],
+                akar_storage::wal::WALRecord::LocalWALData { .. }
+            ));
         }
     }
 }

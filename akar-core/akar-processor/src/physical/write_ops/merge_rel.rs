@@ -7,6 +7,7 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::{EdgeDirection, Expression};
 use akar_storage::table::TableCatalog;
+use akar_storage::wal::{WalSink, log_rel_insert_record};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +34,8 @@ pub struct PhysicalMergeRel {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so MERGE-created edges survive restarts via replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalMergeRel {
@@ -197,6 +200,7 @@ impl PhysicalMergeRel {
 
     /// Insert a new edge, recording an undo record.
     fn insert_rel(&self, src_id: u64, dst_id: u64, values: Vec<Value>) -> Result<u64, ProcessorError> {
+        let logged_values = self.wal_sink.is_some().then(|| values.clone());
         let (edge_idx, table_id) = {
             let mut rel_table = self
                 .table_catalog
@@ -208,6 +212,13 @@ impl PhysicalMergeRel {
                 .map_err(|e| format!("MERGE CREATE edge failed: {e}"))?;
             (edge_idx, rel_table.table_id)
         };
+        log_rel_insert_record(
+            &self.wal_sink,
+            table_id,
+            src_id,
+            dst_id,
+            logged_values.as_deref().unwrap_or(&[]),
+        );
         if let Some(sink) = self.undo_sink.as_ref()
             && let Ok(mut u) = sink.lock()
         {

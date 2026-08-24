@@ -3,6 +3,7 @@ use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::{ColumnDefinition, TableCatalog};
+use akar_storage::wal::{WalSink, log_insert_record, log_rel_insert_record};
 use akar_transaction::UndoRecord;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,8 @@ pub struct PhysicalCopyFrom {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so COPY-loaded rows survive restarts via replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalCopyFrom {
@@ -122,6 +125,11 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             let count = table
                 .insert_rows_batch_with_txn(&rows, self.txn_id)
                 .map_err(|e| format!("Batch insert error: {e}"))?;
+            if self.wal_sink.is_some() {
+                for row in rows.iter().take(count as usize) {
+                    log_insert_record(&self.wal_sink, self.table_id, row);
+                }
+            }
             if let Some(sink) = self.undo_sink.as_ref()
                 && let Ok(mut u) = sink.lock()
             {
@@ -159,6 +167,9 @@ impl PhysicalOperatorExec for PhysicalCopyFrom {
             let count = table
                 .insert_rels_batch(&rels)
                 .map_err(|e| format!("Batch insert rel error: {e}"))?;
+            for (from, to, props) in &rels {
+                log_rel_insert_record(&self.wal_sink, self.table_id, *from, *to, props);
+            }
             if let Some(sink) = self.undo_sink.as_ref()
                 && let Ok(mut u) = sink.lock()
             {

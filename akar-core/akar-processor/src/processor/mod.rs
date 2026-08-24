@@ -33,6 +33,7 @@ use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, TableFunction};
 use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
+use akar_storage::wal::{WALRecord, WalSink};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -135,6 +136,11 @@ pub struct QueryProcessor {
     /// the active transaction by the connection layer so a rollback (including
     /// an OCC conflict loser) can revert the in-place table writes (P52.18).
     undo_records: Arc<Mutex<Vec<UndoRecord>>>,
+    /// Typed WAL records captured by SQL write operators during execution.
+    /// Drained into the transaction's `LocalWAL` by the connection layer and
+    /// bulk-copied into the global WAL at commit, making WAL replay
+    /// self-sufficient without per-commit mirror persistence (P60.2).
+    wal_records: WalSink,
 }
 
 impl QueryProcessor {
@@ -152,6 +158,7 @@ impl QueryProcessor {
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
+            wal_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -170,6 +177,7 @@ impl QueryProcessor {
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
+            wal_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -192,6 +200,7 @@ impl QueryProcessor {
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
+            wal_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -269,6 +278,21 @@ impl QueryProcessor {
     /// entries during execution (P52.18).
     pub fn undo_sink(&self) -> Arc<Mutex<Vec<UndoRecord>>> {
         Arc::clone(&self.undo_records)
+    }
+
+    /// Shared WAL sink handed to write operators so they can log typed
+    /// Insert/Delete/Update records during execution (P60.2).
+    pub fn wal_sink(&self) -> WalSink {
+        Arc::clone(&self.wal_records)
+    }
+
+    /// Take the accumulated typed WAL records (drained by the connection
+    /// layer after execution; empty when nothing was logged).
+    pub fn take_wal_records(&self) -> Vec<WALRecord> {
+        self.wal_records
+            .lock()
+            .map(|mut w| std::mem::take(&mut *w))
+            .unwrap_or_default()
     }
 
     /// Execute a sequence of logical operators by mapping them to physical operators.

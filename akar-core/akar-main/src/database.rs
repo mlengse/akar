@@ -630,31 +630,19 @@ impl Database {
             crate::connection::utils::register_sequence_scalars(&mut reg, db.catalog.clone());
         }
 
-        // Restore durable column mirrors when the WAL has nothing to replay.
-        //
-        // `recover()` returns the number of data records it replayed. When it
-        // returns 0 (fresh database, clean shutdown, or last checkpoint), the
-        // committed rows live in the durable column mirrors and are restored
-        // here. When it replayed WAL records, the mirrors are re-persisted by
-        // recover(), so they are only consulted when they are authoritative —
-        // this avoids double-applying committed rows (P45.4).
-        let recovered = db.storage_manager.recover().unwrap_or_else(|e| {
+        // Recovery (P45.4, amended P60.2): `recover()` loads the durable
+        // column mirrors FIRST — the state at the last checkpoint — then
+        // replays the WAL's typed Insert/Delete/Update records (including
+        // those decoded from LocalWALData blobs) on top. This reconstructs
+        // full state even when no checkpoint ever ran, without double-
+        // applying rows.
+        db.storage_manager.recover().unwrap_or_else(|e| {
             tracing::warn!(
                 "WAL recovery failed (database may need manual repair): {e}. \
                      Starting with fresh state."
             );
             0
         });
-        if recovered == 0 {
-            match db.storage_manager.load_persisted_tables() {
-                Ok(n) => {
-                    if n > 0 {
-                        tracing::info!("Restored {n} table(s) from durable column mirrors");
-                    }
-                }
-                Err(e) => tracing::warn!("Failed to restore tables from column mirrors: {e}"),
-            }
-        }
 
         Ok(db)
     }

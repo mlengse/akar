@@ -21,6 +21,23 @@ impl Connection {
         Ok(txn)
     }
 
+    /// Append typed WAL records captured by write operators during execution
+    /// into this transaction's `LocalWAL` buffer (P60.2). Commit bulk-copies
+    /// the buffer into the global WAL; rollback discards it, so records from
+    /// failed/rolled-back transactions never reach the log.
+    pub(crate) fn append_local_wal(&self, txn_id: u64, records: Vec<akar_storage::wal::WALRecord>) {
+        if records.is_empty() {
+            return;
+        }
+        if let Ok(mut map) = self.txn_resources.lock()
+            && let Some(resources) = map.get_mut(&txn_id)
+        {
+            for record in &records {
+                resources.local_wal.log_record(record);
+            }
+        }
+    }
+
     /// Commit a write transaction: flush resources and clean up.
     ///
     /// The commit pipeline delegates to `StorageManager::commit_transaction()`
@@ -43,7 +60,20 @@ impl Connection {
             None => return Err(format!("No resources found for txn#{txn_id}",)),
         };
 
-        // Step 2: Bulk-copy LocalWAL buffer into the global WAL (before flush)
+        // Step 2: Prepare the TM-side commit (OCC validation + detach from the
+        // lifecycle so the checkpoint drain inside `commit_transaction` does
+        // not wait on this transaction). Locks/write are still held here and
+        // released by `finish_commit` below. This runs BEFORE the WAL bulk-
+        // copy so a conflict loser's typed records never reach the log —
+        // replay would otherwise resurrect rolled-back rows (P60.2).
+        let tm = &self.database.transaction_manager;
+        tm.prepare_commit(txn).map_err(|e| {
+            tracing::error!("Transaction commit failed for txn#{txn_id}: {e}");
+            let _ = self.rollback_write_txn(txn);
+            format!("Transaction commit failed: {e}")
+        })?;
+
+        // Step 3: Bulk-copy LocalWAL buffer into the global WAL (before flush).
         {
             let sm = &self.database.storage_manager;
             let mut wal = sm.wal().lock().map_err(|e| format!("WAL lock: {e}"))?;
@@ -51,17 +81,6 @@ impl Connection {
                 wal.write_raw_buffer(resources.local_wal.buffer());
             }
         }
-
-        // Step 3: Prepare the TM-side commit (OCC validation + detach from the
-        // lifecycle so the checkpoint drain inside `commit_transaction` does
-        // not wait on this transaction). Locks/write are still held here and
-        // released by `finish_commit` below.
-        let tm = &self.database.transaction_manager;
-        tm.prepare_commit(txn).map_err(|e| {
-            tracing::error!("Transaction commit failed for txn#{txn_id}: {e}");
-            let _ = self.rollback_write_txn(txn);
-            format!("Transaction commit failed: {e}")
-        })?;
 
         // Step 4: Flush LocalStorage → tables, ShadowFile → BM, WAL + checkpoint
         // `commit_transaction` handles: Commit record append, WAL flush to disk,

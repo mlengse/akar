@@ -67,7 +67,27 @@ pub use string_dictionary::StringDictionary;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 pub use undo_buffer::UndoBuffer;
 pub use vector_index::{VectorIndexTable, extract_f64_list_from_value};
+pub use wal::WalSink;
 pub use wal_replayer::{ReplayResult, WALReplayer};
+
+/// Shared sink that write-path operators push typed [`WALRecord`]s into
+/// during execution (P60.2). Drained into the transaction's `LocalWAL` by
+/// the connection layer; bulk-copied into the global WAL at commit.
+pub use wal::log_delete_record;
+pub use wal::log_insert_record;
+pub use wal::log_rel_insert_record;
+pub use wal::log_update_record;
+
+/// Serialize a row of values into the tagged binary format expected by
+/// `deserialize_values_from_bytes` (the `WALRecord::Insert`/`Update` payload
+/// format used for SQL-path WAL replay, P60.2).
+pub fn serialize_values_to_bytes(values: &[Value]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(values.len() * 16);
+    for v in values {
+        out.extend_from_slice(&column::Column::serialize_value(v));
+    }
+    out
+}
 
 /// Convert a catalog column definition into a storage-level column definition.
 ///
@@ -510,11 +530,14 @@ impl StorageManager {
     /// Commit a write transaction's data to storage.
     ///
     /// Orchestrates the full commit pipeline:
-    /// 1. Append `Commit` record to the WAL (write-ahead log)
-    /// 2. Flush node/rel tables to their durable column mirrors (P45.4)
-    /// 3. Flush `LocalStorage` buffered writes to the actual tables
-    /// 4. Apply `ShadowFile` copy-on-write pages to the BufferManager
-    /// 5. Optionally checkpoint if the WAL threshold is met
+    /// 1. Append `Commit` record to the WAL (write-ahead log) + fsync
+    /// 2. Flush `LocalStorage` buffered writes to the actual tables
+    /// 3. Apply `ShadowFile` copy-on-write pages to the BufferManager
+    /// 4. Optionally checkpoint if the WAL threshold is met
+    ///
+    /// Since P60.2 the SQL write path emits typed Insert/Delete/Update WAL
+    /// records, so committed data is durable from the WAL alone; the durable
+    /// column mirrors are written only by checkpoints and by `recover()`.
     ///
     /// # Arguments
     ///
@@ -544,23 +567,13 @@ impl StorageManager {
                 .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
         }
 
-        // Step 2: Flush in-memory tables to their durable column mirrors so
-        // committed rows survive process restarts. The SQL write path applies
-        // rows to the tables during execution (MVCC-hidden until publish), and
-        // its WAL records carry no row data — these mirrors are the recovery
-        // source, so they MUST be persisted unless a checkpoint is about to
-        // run: `checkpoint_with_drain` persists the very same tables before
-        // truncating the WAL (P45.4), so persisting here too would double the
-        // per-commit mirror I/O (P60.1). The skip condition mirrors
-        // `maybe_checkpoint`'s decision on the post-commit WAL size.
-        let checkpoint_imminent =
-            checkpoint_threshold < 0 || (checkpoint_threshold > 0 && self.wal_size() > checkpoint_threshold as usize);
-        if !checkpoint_imminent {
-            self.persist_all_tables()
-                .map_err(|e| StorageError::LocalStorage(format!("table persist failed during commit: {e}")))?;
-        }
-
-        // Step 3: Flush local storage buffers to the actual tables
+        // Step 2: Flush local storage buffers to the actual tables.
+        // P60.2: the standalone mirror persist is GONE — the SQL write path
+        // now emits typed Insert/Delete/Update WAL records (bulk-copied into
+        // the global WAL at commit and replayed on top of the checkpoint
+        // mirrors by `recover()`), so per-commit mirror I/O is unnecessary in
+        // every threshold mode. Mirrors are written only by checkpoints
+        // (`checkpoint_with_drain`) and by `recover()` after a replay.
         // Pass txn_id so inserts/deletes are recorded in VersionInfo for MVCC
         let _commit_undo_records = local_storage.flush_to_tables(&self.table_catalog, Some(txn_id))?;
         // Undo records generated during commit for potential rollback-on-failure.
@@ -572,14 +585,14 @@ impl StorageManager {
             txn_id
         );
 
-        // Step 4: Apply shadow pages to the BufferManager
+        // Step 3: Apply shadow pages to the BufferManager
         shadow_file
             .apply(&self.buffer_manager)
             .map_err(|e| StorageError::ShadowFile(format!("ShadowFile apply failed during commit: {e}")))?;
 
-        // Step 5: Auto-checkpoint if needed. When it fires it persists the
+        // Step 4: Auto-checkpoint if needed. When it fires it persists the
         // durable column mirrors before truncating the WAL (see
-        // `checkpoint_with_drain`), which is why Step 2 can be skipped above.
+        // `checkpoint_with_drain`).
         if let Err(e) = self.maybe_checkpoint(checkpoint_threshold, drain_fn) {
             tracing::warn!("Checkpoint after commit failed: {e}");
             // Non-fatal — data is already in tables and WAL
@@ -689,17 +702,34 @@ impl StorageManager {
         Ok(())
     }
 
-    /// Recover state from the WAL after a crash or unclean shutdown.
+    /// Recover state after a crash or unclean shutdown.
     ///
-    /// This loads any on-disk WAL records, replays them against the
-    /// in-memory `TableCatalog`, then takes a checkpoint to reset the WAL.
+    /// Recovery source order (P45.4, amended P60.2):
+    /// 1. **Durable column mirrors** — the state at the last checkpoint — are
+    ///    loaded first;
+    /// 2. **WAL replay** then applies every committed delta since that
+    ///    checkpoint: typed `Insert`/`Delete`/`Update` records emitted by the
+    ///    SQL write path, plus records decoded out of bulk-copied
+    ///    `LocalWALData` blobs. Replaying on top of the mirrors preserves
+    ///    row-id continuity and reconstructs full state even when no
+    ///    checkpoint ever ran (mirrors absent → whole log is replayed).
+    ///
+    /// Finally the recovered tables are re-persisted and a checkpoint resets
+    /// the WAL, so a subsequent startup restores from mirrors alone.
     ///
     /// Call this once during `Database::new()`, **after** table schemas
-    /// have been re-created (e.g., from DDL replay or a persisted catalog).
+    /// have been re-created from the persisted catalog (same table IDs).
     ///
-    /// Returns the number of records recovered, or an error if recovery
-    /// fails (database is corrupt).
+    /// Returns the number of data records applied during replay (0 when the
+    /// WAL was empty), or an error if recovery fails (database is corrupt).
     pub fn recover(&self) -> std::io::Result<usize> {
+        // Phase 1: restore checkpoint state from the durable column mirrors.
+        match self.load_persisted_tables() {
+            Ok(n) if n > 0 => tracing::info!("Restored {n} table(s) from durable column mirrors"),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Failed to restore tables from column mirrors: {e}"),
+        }
+
         let mut wal = self
             .wal
             .lock()
@@ -715,92 +745,8 @@ impl StorageManager {
         let mut data_records = 0usize;
         let catalog = self.table_catalog.clone();
 
-        // Replay each record
-        wal.replay(|record| {
-            use crate::wal::WALRecord;
-            let cat = catalog.clone();
-
-            match record {
-                WALRecord::Insert { table_id, data } => {
-                    // Deserialize the data as Value vec and insert into the
-                    // corresponding node table.
-                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
-                        let values = deserialize_values_from_bytes(data, table.columns.len());
-                        if let Err(e) = table.insert_row(values) {
-                            return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
-                        }
-                        data_records += 1;
-                    }
-                }
-                WALRecord::Delete { table_id, row_id } => {
-                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
-                        if let Err(e) = table.delete_row(*row_id) {
-                            return Err(std::io::Error::other(format!("WAL recovery delete failed: {e}")));
-                        }
-                        data_records += 1;
-                    }
-                }
-                WALRecord::Update {
-                    table_id,
-                    row_id,
-                    column,
-                    data,
-                } => {
-                    if let Some(mut table) = cat.get_node_table_mut(*table_id) {
-                        let values = deserialize_values_from_bytes(data, 1);
-                        if let Some(val) = values.into_iter().next() {
-                            if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
-                                return Err(std::io::Error::other(format!("WAL recovery update failed: {e}")));
-                            }
-                            data_records += 1;
-                        }
-                    }
-                }
-                WALRecord::UpdateFsm { .. } => {
-                    // UpdateFsm records are handled by the FSM recovery directly,
-                    // we can ignore them during the table-level replay.
-                }
-                WALRecord::ColumnWrite { .. } => {
-                    // ColumnWrite records are for the BufferManager-level
-                    // page writes. At the table level, data is already in
-                    // NodeGroup memory, so we skip these during recovery
-                    // (the checkpoint handles page-level persistence).
-                }
-                WALRecord::Commit { .. } | WALRecord::Rollback { .. } => {
-                    // Transaction markers — ignore during recovery since
-                    // all records in the WAL at startup are from already-
-                    // committed transactions (uncommitted ones were lost
-                    // in the crash).
-                }
-                WALRecord::Checkpoint => {
-                    // Checkpoint marker — all data before this is already
-                    // durable. We can clear what we've processed so far.
-                    // In practice, a checkpoint clears the WAL so this
-                    // marker should rarely appear during recovery.
-                }
-                WALRecord::LocalWALData { .. } => {
-                    // LocalWALData is a bulk-copied buffer from a committed
-                    // transaction's LocalWAL. The individual records within
-                    // have already been applied during normal commit flow.
-                    // At recovery time, the raw data is opaque — we skip it
-                    // since the table-level records (Insert/Delete/Update)
-                    // are replayed independently from the same transaction.
-                }
-                // DDL records — metadata-only, no data to replay for now.
-                // DDL operations (CREATE/DROP TABLE, etc.) are captured via
-                // Catalog serialization separately.
-                WALRecord::CreateTable { .. }
-                | WALRecord::DropTable { .. }
-                | WALRecord::AlterTable { .. }
-                | WALRecord::CreateIndex { .. }
-                | WALRecord::DropIndex { .. }
-                | WALRecord::CreateSequence { .. } => {
-                    // DDL records are replayed via catalog snapshot, not
-                    // individual WAL entries. Skip during table-level replay.
-                }
-            }
-            Ok(())
-        })?;
+        // Replay each record on top of the mirror state.
+        wal.replay(|record| replay_data_record(record, &catalog, &mut data_records))?;
 
         // After successful replay, mirror the recovered rows into the durable
         // column mirrors as well, so a subsequent startup with an empty WAL
@@ -824,94 +770,159 @@ impl StorageManager {
 /// Each value is stored as a tag byte followed by type-specific data
 /// (see `column.rs` for the tag format). This is a simplified version
 /// that handles the common primary-key and property types.
+/// Apply one replayed WAL record to the catalog tables.
+///
+/// Handles node **and** rel tables (P60.2): rel inserts carry a
+/// `[src, dst, props…]` payload that rebuilds the adjacency entry via
+/// `RelTable::insert_rel`; deletes/updates dispatch by table kind.
+/// `LocalWALData` blobs are decoded into their individual records and
+/// applied recursively — this is how SQL-path DML reaches recovery, since
+/// commit bulk-copies each transaction's typed records as one blob.
+pub(crate) fn replay_data_record(
+    record: &crate::wal::WALRecord,
+    catalog: &Arc<TableCatalog>,
+    data_records: &mut usize,
+) -> std::io::Result<()> {
+    use crate::wal::WALRecord;
+
+    let as_u64 = |v: &Value| -> Option<u64> {
+        match v {
+            Value::UInt64(x) => Some(*x),
+            Value::Int64(x) => (*x >= 0).then_some(*x as u64),
+            _ => None,
+        }
+    };
+
+    match record {
+        WALRecord::Insert { table_id, data } => {
+            if let Some(mut table) = catalog.get_node_table_mut(*table_id) {
+                let values = deserialize_values_from_bytes(data, table.columns.len());
+                if let Err(e) = table.insert_row(values) {
+                    return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
+                }
+                *data_records += 1;
+            } else if let Some(mut rel) = catalog.get_rel_table_mut(*table_id) {
+                let values = deserialize_values_from_bytes(data, rel.columns.len() + 2);
+                if values.len() < 2 {
+                    return Err(std::io::Error::other("WAL recovery: rel insert payload too short"));
+                }
+                let (Some(src), Some(dst)) = (as_u64(&values[0]), as_u64(&values[1])) else {
+                    return Err(std::io::Error::other("WAL recovery: rel insert endpoints missing"));
+                };
+                if let Err(e) = rel.insert_rel(src, dst, values[2..].to_vec()) {
+                    return Err(std::io::Error::other(format!("WAL recovery rel insert failed: {e}")));
+                }
+                *data_records += 1;
+            } else {
+                tracing::debug!("WAL recovery: table {table_id} not found; skipping Insert");
+            }
+        }
+        WALRecord::Delete { table_id, row_id } => {
+            if let Some(mut table) = catalog.get_node_table_mut(*table_id) {
+                if let Err(e) = table.delete_row(*row_id) {
+                    return Err(std::io::Error::other(format!("WAL recovery delete failed: {e}")));
+                }
+                *data_records += 1;
+            } else if let Some(mut rel) = catalog.get_rel_table_mut(*table_id) {
+                if let Err(e) = rel.delete_edge(*row_id as usize) {
+                    return Err(std::io::Error::other(format!("WAL recovery edge delete failed: {e}")));
+                }
+                *data_records += 1;
+            } else {
+                tracing::debug!("WAL recovery: table {table_id} not found; skipping Delete");
+            }
+        }
+        WALRecord::Update {
+            table_id,
+            row_id,
+            column,
+            data,
+        } => {
+            let values = deserialize_values_from_bytes(data, 1);
+            if let Some(val) = values.into_iter().next() {
+                if let Some(mut table) = catalog.get_node_table_mut(*table_id) {
+                    if let Err(e) = table.update_cell(*row_id, *column as usize, val) {
+                        return Err(std::io::Error::other(format!("WAL recovery update failed: {e}")));
+                    }
+                    *data_records += 1;
+                } else if let Some(mut rel) = catalog.get_rel_table_mut(*table_id) {
+                    if let Err(e) = rel.update_cell(*row_id as usize, *column as usize, val) {
+                        return Err(std::io::Error::other(format!("WAL recovery edge update failed: {e}")));
+                    }
+                    *data_records += 1;
+                } else {
+                    tracing::debug!("WAL recovery: table {table_id} not found; skipping Update");
+                }
+            }
+        }
+        WALRecord::LocalWALData { data } => {
+            for sub in crate::wal::decode_wal_buffer(data)? {
+                replay_data_record(&sub, catalog, data_records)?;
+            }
+        }
+        WALRecord::UpdateFsm { .. } => {
+            // UpdateFsm records are handled by the FSM recovery directly,
+            // we can ignore them during the table-level replay.
+        }
+        WALRecord::ColumnWrite { .. } => {
+            // ColumnWrite records are for the BufferManager-level
+            // page writes. At the table level, data is already in
+            // NodeGroup memory, so we skip these during recovery
+            // (the checkpoint handles page-level persistence).
+        }
+        WALRecord::Commit { .. } | WALRecord::Rollback { .. } => {
+            // Transaction markers — ignore during recovery since
+            // all records in the WAL at startup are from already-
+            // committed transactions (uncommitted ones were lost
+            // in the crash).
+        }
+        WALRecord::Checkpoint => {
+            // Checkpoint marker — all data before this is already
+            // durable. In practice, a checkpoint clears the WAL so this
+            // marker should rarely appear during recovery.
+        }
+        // DDL records — metadata-only, no data to replay for now.
+        // DDL operations (CREATE/DROP TABLE, etc.) are captured via
+        // Catalog serialization separately.
+        WALRecord::CreateTable { .. }
+        | WALRecord::DropTable { .. }
+        | WALRecord::AlterTable { .. }
+        | WALRecord::CreateIndex { .. }
+        | WALRecord::DropIndex { .. }
+        | WALRecord::CreateSequence { .. } => {
+            // DDL records are replayed via catalog snapshot, not
+            // individual WAL entries. Skip during table-level replay.
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn deserialize_values_from_bytes(data: &[u8], expected_count: usize) -> Vec<Value> {
-    use crate::column::*;
-    use std::io::Read;
+    use crate::column::Column;
 
     if data.is_empty() || expected_count == 0 {
         return Vec::new();
     }
 
-    let mut cursor = std::io::Cursor::new(data);
+    // Delegate to the full `Column` value parser so every tag round-trips.
+    // The previous hand-rolled subset silently turned unhandled tags (notably
+    // the UInt64 encoding used for rel endpoints after PK coercion) into Null
+    // AND desynced the cursor, aborting WAL recovery mid-log (P60.2).
     let mut values = Vec::with_capacity(expected_count);
-
+    let mut pos = 0usize;
     for _ in 0..expected_count {
-        let mut tag_buf = [0u8; 1];
-        if cursor.read_exact(&mut tag_buf).is_err() {
+        if pos >= data.len() {
             values.push(Value::Null);
             continue;
         }
-        let tag = tag_buf[0];
-
-        match tag {
-            TAG_NULL => values.push(Value::Null),
-            TAG_BOOL => {
-                let mut buf = [0u8; 1];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Bool(buf[0] != 0));
+        match Column::deserialize_value(data, &mut pos) {
+            Ok(v) => values.push(v),
+            Err(_) => {
+                // Lenient like the old parser: pad rather than fail recovery.
+                while values.len() < expected_count {
+                    values.push(Value::Null);
                 }
-            }
-            TAG_INT64 => {
-                let mut buf = [0u8; 8];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Int64(i64::from_le_bytes(buf)));
-                }
-            }
-            TAG_INT32 => {
-                let mut buf = [0u8; 4];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Int32(i32::from_le_bytes(buf)));
-                }
-            }
-            TAG_DOUBLE => {
-                let mut buf = [0u8; 8];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Double(f64::from_le_bytes(buf)));
-                }
-            }
-            TAG_FLOAT => {
-                let mut buf = [0u8; 4];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Float(f32::from_le_bytes(buf)));
-                }
-            }
-            TAG_STRING => {
-                let mut len_buf = [0u8; 4];
-                if cursor.read_exact(&mut len_buf).is_ok() {
-                    let len = u32::from_le_bytes(len_buf) as usize;
-                    let mut str_buf = vec![0u8; len];
-                    if cursor.read_exact(&mut str_buf).is_ok()
-                        && let Ok(s) = String::from_utf8(str_buf)
-                    {
-                        values.push(Value::String(s));
-                    }
-                }
-            }
-            TAG_DATE => {
-                let mut buf = [0u8; 4];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Date(akar_common::types::Date(i32::from_le_bytes(buf))));
-                }
-            }
-            TAG_TIMESTAMP => {
-                let mut buf = [0u8; 8];
-                if cursor.read_exact(&mut buf).is_ok() {
-                    values.push(Value::Timestamp(akar_common::types::Timestamp(i64::from_le_bytes(buf))));
-                }
-            }
-            TAG_INTERNAL_ID => {
-                let mut table_buf = [0u8; 8];
-                let mut offset_buf = [0u8; 8];
-                if cursor.read_exact(&mut table_buf).is_ok() && cursor.read_exact(&mut offset_buf).is_ok() {
-                    values.push(Value::InternalID(akar_common::types::InternalID {
-                        table_id: u64::from_le_bytes(table_buf),
-                        offset: u64::from_le_bytes(offset_buf),
-                    }));
-                }
-            }
-            // For any other type, skip one byte and push null
-            _ => {
-                values.push(Value::Null);
+                break;
             }
         }
     }

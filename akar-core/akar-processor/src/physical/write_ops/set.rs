@@ -11,6 +11,7 @@ use akar_function::scalar::evaluate_scalar;
 use akar_parser::ast::{BinaryOp, Expression};
 use akar_planner::logical_operator::SetItem;
 use akar_storage::table::{ColumnDefinition, TableCatalog};
+use akar_storage::wal::{WalSink, log_update_record};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -39,6 +40,8 @@ pub struct PhysicalSet {
     /// `count=0` row. False when RETURN follows: empty match must flow 0 rows,
     /// not a phantom count row (P53.39 / kairos P59.1).
     pub emit_count: bool,
+    /// Typed WAL sink so updates survive restarts via WAL replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalSet {
@@ -117,6 +120,13 @@ impl PhysicalOperatorExec for PhysicalSet {
                             .is_ok()
                         {
                             updated += 1;
+                            log_update_record(
+                                &self.wal_sink,
+                                self.table_id,
+                                *row_idx,
+                                col_idx as u32,
+                                &all_values[item_idx][i],
+                            );
                         }
                     }
                 }
@@ -143,6 +153,13 @@ impl PhysicalOperatorExec for PhysicalSet {
                             .is_ok()
                         {
                             updated += 1;
+                            log_update_record(
+                                &self.wal_sink,
+                                self.table_id,
+                                *edge_idx,
+                                col_idx as u32,
+                                &all_values[item_idx][i],
+                            );
                         }
                     }
                 }

@@ -5,6 +5,7 @@ use crate::physical::write_ops::set::evaluate_expression_for_row;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
+use akar_storage::wal::{WalSink, log_insert_record, log_rel_insert_record};
 use akar_transaction::UndoRecord;
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +20,8 @@ pub struct PhysicalInsertNode {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so the row survives restarts via WAL replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsertNode {
@@ -66,10 +69,12 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
                 // Add the row to the node table; capture assigned row_id for OCC.
                 // Errors (e.g. NULL primary key) must surface, not silently skip
                 // the row — otherwise UNWIND+CREATE drops input rows (P53.27).
+                let logged_row = self.wal_sink.is_some().then(|| row_values.clone());
                 let row_id = table
                     .insert_row_with_txn(row_values, self.txn_id)
                     .map_err(|e| format!("INSERT NODE row {row} failed in '{}': {e}", self.table_name))?;
                 assigned_row_ids.push(row_id as i64);
+                log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
                 if let Some(sink) = self.undo_sink.as_ref()
                     && let Ok(mut u) = sink.lock()
                 {
@@ -113,6 +118,8 @@ pub struct PhysicalInsertRel {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<Arc<Mutex<Vec<UndoRecord>>>>,
+    /// Typed WAL sink so the edge survives restarts via WAL replay (P60.2).
+    pub wal_sink: Option<WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsertRel {
@@ -216,6 +223,9 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
             inserted_count = table
                 .insert_rels_batch(&rels_to_insert)
                 .map_err(|e| format!("BatchInsert rel error: {e}"))?;
+            for (src_id, dst_id, props) in &rels_to_insert {
+                log_rel_insert_record(&self.wal_sink, self.table_id, *src_id, *dst_id, props);
+            }
             if let Some(sink) = self.undo_sink.as_ref()
                 && let Ok(mut u) = sink.lock()
             {

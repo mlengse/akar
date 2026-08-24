@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,867 total, 0 ignored, 1,867 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. node2vec walk/SGD invariants) |
+| Tests passing | **1,872 total, 0 ignored, 1,872 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.2 typed-WAL replay) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -228,18 +228,19 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | Overflow pages | `.ovf` sidecar for oversized values |
 | CSV/Parquet readers | Native readers with Arrow type mapping |
 
-**Durability model (P45.4, amended P60.1):** SQL-path rows are applied to the
-in-memory tables during execution (MVCC-hidden until publish) and their WAL
-records carry no row data, so the **durable column mirrors are the recovery
-source**: `recover()` replays typed WAL records when present, otherwise loads
-the mirrors; after a replay it re-persists mirrors and checkpoints. Each
-commit fsyncs the WAL and persists stale mirrors **unless an auto-checkpoint
-is imminent** (`checkpoint_threshold < 0`, or size-based threshold already
-exceeded): `checkpoint_with_drain` persists the same mirrors before
-truncating the WAL, so the standalone persist would be duplicate I/O
-(P60.1). Follow-up (P60.2): emit typed Insert/Delete/Update WAL records from
-the SQL write path to make WAL replay self-sufficient and drop per-commit
-mirror persist entirely.
+**Durability model (P45.4, amended P60.1, P60.2):** SQL-path rows are applied
+to the in-memory tables during execution (MVCC-hidden until publish) and the
+write operators emit **typed Insert/Delete/Update WAL records** (node rows,
+rel edges with `[src, dst, props…]` payloads), buffered per-transaction in a
+`LocalWAL` and bulk-copied into the global WAL after OCC validation succeeds —
+so a conflict loser's records never reach the log. The **WAL alone is the
+recovery source for every checkpoint-threshold mode**: `recover()` loads the
+durable column mirrors (last checkpoint state) FIRST, then replays
+post-checkpoint typed deltas on top; it re-persists mirrors after a replay and
+checkpoints. Mirrors are written only by checkpoints (`checkpoint_with_drain`
+persists them before truncating the WAL) and by `recover()` itself — there is
+no per-commit mirror persist in any threshold mode (P60.1 skip generalized by
+P60.2).
 
 #### Transaction ([akar-transaction](akar-core/akar-transaction))
 - MVCC with AUTO/MANUAL modes
@@ -538,7 +539,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,867** | **1,867 total, 0 ignored, 1,867 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.1 commit-path mirror persist skip) |
+| **Total** | **1,872** | **1,872 total, 0 ignored, 1,872 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.2 typed-WAL replay) |
 
 ### 11.2 Test Datasets
 
@@ -688,7 +689,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 | Lock poisoning | `.lock().map_err()` across 17 files (75 calls migrated) |
 | File locking | Exclusive/shared file locks for multi-process safety |
 | WAL safety | Atomic rename (`write .tmp → sync → rename → fsync parent`) |
-| Commit durability | Per-commit mirror persist skipped when auto-checkpoint is imminent — checkpoint persists the same mirrors (P60.1) |
+| Commit durability | Typed WAL records from the SQL write path, fsynced at commit; per-commit mirror persist removed in every threshold mode — mirrors are written by checkpoints and recovery only (P60.2) |
 
 ---
 

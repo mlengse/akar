@@ -493,6 +493,13 @@ impl Connection {
                 tracing::info!("CREATE DML ({} pattern(s))", c.patterns.len());
 
                 let catalog = self.database.table_catalog();
+                // Typed WAL sink for this statement's inline writes; drained into
+                // the txn's LocalWAL below so replay is self-sufficient (P60.2).
+                // On error mid-statement the sink is dropped and its records are
+                // lost together with the rolled-back transaction.
+                let wal_sink: Option<akar_storage::wal::WalSink> = txn_opt
+                    .as_ref()
+                    .map(|_| std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
                 let mut node_rows: HashMap<String, u64> = HashMap::new();
                 let mut node_table_ids: HashMap<String, u64> = HashMap::new();
                 let mut created: usize = 0;
@@ -541,7 +548,13 @@ impl Connection {
                         }
                     }
 
+                    let logged_row = wal_sink.is_some().then(|| values.clone());
                     let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                    akar_storage::wal::log_insert_record(
+                        &wal_sink,
+                        node.table_id,
+                        logged_row.as_deref().unwrap_or(&[]),
+                    );
                     if let Some(ref mut txn) = txn_opt {
                         txn.record_insert_undo(node.table_id, row_id);
                     }
@@ -617,11 +630,26 @@ impl Connection {
                     }
 
                     let edge_idx = rel.num_rows;
+                    let logged_values = wal_sink.is_some().then(|| values.clone());
                     rel.insert_rel(src, dst, values)?;
+                    akar_storage::wal::log_rel_insert_record(
+                        &wal_sink,
+                        edge.table_id,
+                        src,
+                        dst,
+                        logged_values.as_deref().unwrap_or(&[]),
+                    );
                     if let Some(ref mut txn) = txn_opt {
                         txn.record_insert_undo(edge.table_id, edge_idx);
                     }
                     created += 1;
+                }
+
+                // Drain typed WAL records into the txn's LocalWAL (P60.2).
+                if let (Some(sink), Some(txn)) = (&wal_sink, txn_opt.as_ref())
+                    && let Ok(records) = sink.lock()
+                {
+                    self.append_local_wal(txn.transaction_id, records.clone());
                 }
 
                 Ok(Some(QueryResult::success_message(format!(
@@ -633,6 +661,12 @@ impl Connection {
 
                 // Get the table — DashMap handles locking internally
                 let catalog = self.database.table_catalog();
+                // Typed WAL sink for this statement's inline writes, drained at
+                // the end of the arm (P60.2); dropped (records lost) on error,
+                // matching the transaction rollback.
+                let wal_sink: Option<akar_storage::wal::WalSink> = txn_opt
+                    .as_ref()
+                    .map(|_| std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
                 let mut node_rows: HashMap<String, u64> = HashMap::new();
                 let mut node_table_ids: HashMap<String, u64> = HashMap::new();
                 let mut primary_matched = false;
@@ -706,9 +740,19 @@ impl Connection {
                                         let old_data = table.cell_undo_bytes(row, item.column_idx);
                                         txn.record_undo(m.table_id, row, item.column_idx as u32, old_data);
                                     }
+                                    let logged_val = wal_sink.is_some().then(|| val.clone());
                                     table
                                         .update_cell(row, item.column_idx, val)
                                         .map_err(|e| format!("MERGE ON MATCH SET: {e}"))?;
+                                    if let Some(v) = logged_val.as_ref() {
+                                        akar_storage::wal::log_update_record(
+                                            &wal_sink,
+                                            m.table_id,
+                                            row,
+                                            item.column_idx as u32,
+                                            v,
+                                        );
+                                    }
                                 }
                                 primary_matched = true;
                             }
@@ -740,7 +784,13 @@ impl Connection {
                                 }
                             }
                         }
+                        let logged_row = wal_sink.is_some().then(|| values.clone());
                         let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                        akar_storage::wal::log_insert_record(
+                            &wal_sink,
+                            m.table_id,
+                            logged_row.as_deref().unwrap_or(&[]),
+                        );
                         if let Some(ref mut txn) = txn_opt {
                             txn.record_insert_undo(m.table_id, row_id);
                         }
@@ -796,12 +846,27 @@ impl Connection {
                             }
                         }
                         let edge_idx = rel.num_rows;
+                        let logged_values = wal_sink.is_some().then(|| values.clone());
                         rel.insert_rel(src, dst, values)?;
+                        akar_storage::wal::log_rel_insert_record(
+                            &wal_sink,
+                            edge.table_id,
+                            src,
+                            dst,
+                            logged_values.as_deref().unwrap_or(&[]),
+                        );
                         if let Some(ref mut txn) = txn_opt {
                             txn.record_insert_undo(edge.table_id, edge_idx);
                         }
                         created += 1;
                     }
+                }
+
+                // Drain typed WAL records into the txn's LocalWAL (P60.2).
+                if let (Some(sink), Some(txn)) = (&wal_sink, txn_opt.as_ref())
+                    && let Ok(records) = sink.lock()
+                {
+                    self.append_local_wal(txn.transaction_id, records.clone());
                 }
 
                 if primary_matched {

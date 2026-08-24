@@ -166,6 +166,8 @@ pub struct PhysicalInsert {
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
     pub undo_sink: Option<std::sync::Arc<std::sync::Mutex<Vec<akar_transaction::UndoRecord>>>>,
+    /// Typed WAL sink so inserted rows/edges survive restarts via replay (P60.2).
+    pub wal_sink: Option<akar_storage::wal::WalSink>,
 }
 
 impl PhysicalOperatorExec for PhysicalInsert {
@@ -205,6 +207,9 @@ impl PhysicalOperatorExec for PhysicalInsert {
                 let start = rel_tbl.edges.len();
                 if let Ok(count) = rel_tbl.insert_rels_batch(&rels_to_insert) {
                     inserted += count;
+                    for (src, dst, props) in &rels_to_insert {
+                        akar_storage::wal::log_rel_insert_record(&self.wal_sink, self.table_id, *src, *dst, props);
+                    }
                     if let Some(sink) = self.undo_sink.as_ref()
                         && let Ok(mut u) = sink.lock()
                     {
@@ -219,6 +224,7 @@ impl PhysicalOperatorExec for PhysicalInsert {
             for row_values in &self.values {
                 if let Ok(row_id) = node_tbl.insert_row_with_txn(row_values.clone(), self.txn_id) {
                     inserted += 1;
+                    akar_storage::wal::log_insert_record(&self.wal_sink, self.table_id, row_values);
                     if let Some(sink) = self.undo_sink.as_ref()
                         && let Ok(mut u) = sink.lock()
                     {

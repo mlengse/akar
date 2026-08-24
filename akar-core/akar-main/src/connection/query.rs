@@ -261,6 +261,9 @@ impl Connection {
         if let Some(ref mut txn) = txn_opt {
             let undo = processor.take_undo_records();
             txn.undo_records.extend(undo);
+            // Drain typed WAL records so replay is self-sufficient (P60.2).
+            let wal_records = processor.take_wal_records();
+            self.append_local_wal(txn.transaction_id, wal_records);
         }
 
         // Auto-checkpoint after DML execution
@@ -411,11 +414,14 @@ impl Connection {
         if let Some(ref mut txn) = txn_opt {
             let undo = processor.take_undo_records();
             txn.undo_records.extend(undo);
+            // Drain typed WAL records so replay is self-sufficient (P60.2).
+            let wal_records = processor.take_wal_records();
+            self.append_local_wal(txn.transaction_id, wal_records);
         }
 
-        // Commit or rollback based on result. `commit_write_txn` runs the full
-        // commit pipeline including `persist_all_tables` (durable mirror sync),
-        // so no additional persist is needed here (P51.27).
+        // Commit or rollback based on result. Since P60.2 the commit pipeline
+        // no longer persists the column mirrors per-commit: typed WAL records
+        // make replay self-sufficient, mirrors are written by checkpoints.
         if is_write {
             if let Some(ref mut txn) = txn_opt {
                 self.commit_write_txn(txn)?;
