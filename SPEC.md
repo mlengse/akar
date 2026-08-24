@@ -302,8 +302,14 @@ Special: `ANY`, `NULL`, `RDF_VARIANT`
 | Array | 5 | Array operations |
 | Path | 6 | `nodes`, `rels`, `properties`, `length` |
 | Aggregate | 14 | `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COLLECT`, `PERCENTILE_DISC`, `PERCENTILE_CONT` |
-| Table (CALL) | 22 | `show_tables()`, `table_info()`, `db_version()`, `storage_info()` |
+| Table | 1 | `list_tables()` |
 | Schema/Utility | 17 | Various system functions |
+
+Fungsi `CALL`-able sistem (`show_tables()`, `table_info()`, `db_version()`,
+`storage_info()`, `show_indexes()`, GDS 17, `export_csv()`, dst.) **tidak
+dihitung di registry base** — di-handle sebagai `BoundStandaloneCall` di lapisan
+connection (`akar-main/src/connection/standalone_call.rs`) dan lewat table
+functions GDS (`akar-algo`). Lihat header §6 di atas.
 
 ---
 
