@@ -6,7 +6,7 @@ and contributing guidance live in the repository-wide **[`../README.md`](../READ
 
 ## Highlights
 
-- **Test suite:** 1,872 total / 0 ignored / 1,872 passed / 0 failed (gate `test [akar-core]`, 2026-08-24)
+- **Test suite:** 1,878 total / 0 ignored / 1,878 passed / 0 failed (gate `test [akar-core]`, 2026-08-25)
 - **Query pipeline:** parser → binder → planner → optimizer (24 passes) → processor
 - **Storage:** columnar disk storage, WAL + replayer, buffer manager, CSR adjacency, ART/HNSW indexes
 - **Extensions:** JSON, FTS, Vector, DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog, LLM, algo, server

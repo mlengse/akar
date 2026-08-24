@@ -180,6 +180,55 @@ impl NodeGroup {
         Ok(())
     }
 
+    /// Restore all spilled rows back into the in-memory columns.
+    ///
+    /// Merges every tracked spill file (in creation order) followed by the
+    /// rows appended since the last spill, so the group's columns again hold
+    /// the complete row set. Spill files are cleaned up on success. This is
+    /// the ingest-time counterpart of `flush_with_spiller()`: it keeps the
+    /// in-memory node group authoritative for scans and the column mirror
+    /// after a memory-bounded bulk ingest (P51.44).
+    pub fn restore_spilled(&mut self) -> Result<(), StorageError> {
+        if self.spill_files.is_empty() {
+            return Ok(());
+        }
+        let spiller = self
+            .spiller
+            .clone()
+            .ok_or_else(|| StorageError::Spiller("No spiller attached to NodeGroup".to_string()))?;
+        let num_cols = self.columns.len();
+
+        let mut rows: Vec<Vec<Value>> = Vec::new();
+        let files = std::mem::take(&mut self.spill_files);
+        for sf in &files {
+            let chunks = spiller.restore_columns(sf, num_cols)?;
+            let n = chunks.first().map(|c| c.num_values()).unwrap_or(0);
+            for r in 0..n {
+                let mut row = Vec::with_capacity(num_cols);
+                for c in &chunks {
+                    row.push(c.get(r).cloned().unwrap_or(Value::Null));
+                }
+                rows.push(row);
+            }
+        }
+        for row in self.scan() {
+            rows.push(row);
+        }
+
+        let mut columns: Vec<ColumnChunk> = (0..num_cols).map(|_| ColumnChunk::new()).collect();
+        for row in &rows {
+            for (ci, value) in row.iter().enumerate() {
+                columns[ci].append(value.clone());
+            }
+        }
+        self.columns = columns;
+        self.num_nodes = rows.len() as u64;
+        for sf in &files {
+            let _ = spiller.cleanup(sf);
+        }
+        Ok(())
+    }
+
     /// Flush all data to persistent columns, merging any spilled data.
     ///
     /// This is the spill-aware alternative to `flush()`. It merges all
@@ -251,6 +300,11 @@ impl NodeGroup {
     /// Number of columns in this group.
     pub fn num_columns(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Whether any spill files are still pending merge-back into memory.
+    pub fn has_spill_files(&self) -> bool {
+        !self.spill_files.is_empty()
     }
 
     /// Remaining capacity (number of additional rows that can be appended).
@@ -573,6 +627,29 @@ mod tests {
         // Buffer should still be intact
         assert_eq!(group.num_nodes, 1);
         assert_eq!(cols[0].get_value(0).unwrap(), Value::Int64(1));
+    }
+
+    #[test]
+    fn test_restore_spilled_reconstructs_full_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let spiller = Arc::new(crate::spiller::Spiller::new(dir.path(), 64));
+        let mut group = NodeGroup::new(2, 0);
+        group.set_spiller(spiller.clone());
+
+        // Append enough rows that the group spills mid-way, then more rows.
+        for i in 0i64..20 {
+            group.append_row(vec![Value::Int64(i), Value::Int64(i * 10)]).unwrap();
+        }
+        assert!(!group.spill_files.is_empty(), "low threshold must spill");
+        assert!(group.num_nodes < 20, "spill must have evicted rows from memory");
+
+        group.restore_spilled().unwrap();
+        assert_eq!(group.num_nodes, 20, "restore must recover the full row set");
+        assert!(group.spill_files.is_empty(), "spill files cleaned up after restore");
+        for i in 0i64..20 {
+            assert_eq!(group.get_value(i as usize, 0), Some(&Value::Int64(i)));
+            assert_eq!(group.get_value(i as usize, 1), Some(&Value::Int64(i * 10)));
+        }
     }
 
     #[test]

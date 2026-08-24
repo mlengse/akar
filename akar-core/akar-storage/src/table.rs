@@ -7,12 +7,14 @@ use crate::column_chunk::ColumnChunk;
 use crate::csr::CsrIndex;
 use crate::index::HashIndex;
 use crate::node_group::NodeGroup;
+use crate::spiller::Spiller;
 use crate::vector_index::VectorIndexTable;
 use akar_common::error::StorageError;
 use akar_common::types::{LogicalTypeID, Value, pk_value_to_string};
 use akar_vector::hnsw::DistanceMetric;
 use dashmap::DashMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A column definition within a table.
 #[derive(Debug, Clone)]
@@ -52,6 +54,11 @@ pub struct NodeTable {
     /// Set when an UPDATE/DELETE touches the table. The durable column mirror
     /// (see `persistence.rs`) performs a full rewrite when this flag is set.
     pub persistence_dirty: bool,
+    /// Optional spiller for memory-bounded bulk ingest. When set, newly
+    /// created NodeGroups spill to disk once their buffer exceeds the memory
+    /// threshold, and the spilled rows are merged back into the in-memory
+    /// columns at the end of the insert operation (P51.44).
+    spiller: Option<Arc<Spiller>>,
 }
 
 /// Sentinel for `NodeTable::primary_key_column` when a node table has no PK
@@ -78,7 +85,14 @@ impl NodeTable {
             hash_index: HashIndex::new(),
             art_index: None,
             persistence_dirty: false,
+            spiller: None,
         }
+    }
+
+    /// Attach a spiller to this table so bulk inserts spill to disk once a
+    /// NodeGroup's buffer exceeds the memory threshold (P51.44).
+    pub fn set_spiller(&mut self, spiller: Option<Arc<Spiller>>) {
+        self.spiller = spiller;
     }
 
     /// Widen the table schema with a new column (ALTER TABLE ADD). Every
@@ -167,6 +181,9 @@ impl NodeTable {
             if txn_id.is_some() {
                 new_group.enable_version_info();
             }
+            if let Some(ref spiller) = self.spiller {
+                new_group.set_spiller(spiller.clone());
+            }
             self.node_groups.push(new_group);
         }
 
@@ -176,6 +193,9 @@ impl NodeTable {
             current.enable_version_info();
         }
         current.append_row_with_txn(values.clone(), txn_id)?;
+        // Merge any spilled rows back into the in-memory group so scans and
+        // the column mirror stay authoritative after a memory-bounded ingest.
+        current.restore_spilled()?;
         self.num_rows += 1;
 
         // Update hash index with the PK value for this row
@@ -268,6 +288,9 @@ impl NodeTable {
             if txn_id.is_some() {
                 new_group.enable_version_info();
             }
+            if let Some(ref spiller) = self.spiller {
+                new_group.set_spiller(spiller.clone());
+            }
             self.node_groups.push(new_group);
         }
 
@@ -291,8 +314,17 @@ impl NodeTable {
                 if txn_id.is_some() {
                     new_group.enable_version_info();
                 }
+                if let Some(ref spiller) = self.spiller {
+                    new_group.set_spiller(spiller.clone());
+                }
                 self.node_groups.push(new_group);
             }
+        }
+
+        // Merge any spilled rows back into the in-memory groups so scans and
+        // the column mirror stay authoritative after a memory-bounded ingest.
+        for group in &mut self.node_groups {
+            group.restore_spilled()?;
         }
 
         // Batch update indexes
@@ -1585,6 +1617,7 @@ impl TableCatalog {
 mod tests {
     use super::*;
     use crate::column_chunk::NODE_GROUP_SIZE;
+    use std::sync::Arc;
 
     // ==================== NodeTable tests ====================
 
@@ -1642,6 +1675,36 @@ mod tests {
         assert_eq!(table.num_rows, 2);
         assert_eq!(table.get_value(0, 0), Some(&Value::String("Alice".into())));
         assert_eq!(table.get_value(1, 1), Some(&Value::Int64(25)));
+    }
+
+    #[test]
+    fn test_node_table_batch_insert_with_spiller_restores_all_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let spiller = Arc::new(crate::spiller::Spiller::new(dir.path(), 64));
+        let mut table = NodeTable::new(
+            1,
+            "T".into(),
+            vec![ColumnDefinition {
+                compression: akar_common::enums::CompressionType::Uncompressed,
+                name: "id".into(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: true,
+            }],
+        );
+        table.set_spiller(Some(spiller));
+
+        let rows: Vec<Vec<Value>> = (0..2000).map(|i| vec![Value::Int64(i)]).collect();
+        let inserted = table.insert_rows_batch(&rows).unwrap();
+        assert_eq!(inserted, 2000);
+        assert_eq!(table.num_rows, 2000);
+
+        for i in 0i64..2000 {
+            assert_eq!(table.get_value(i as usize, 0), Some(&Value::Int64(i)));
+        }
+        assert!(
+            table.node_groups.iter().all(|g| !g.has_spill_files()),
+            "spill files must be merged back after the batch"
+        );
     }
 
     #[test]

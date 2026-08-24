@@ -439,6 +439,9 @@ impl Connection {
     /// - 0: never auto-checkpoint (manual only via `CHECKPOINT`).
     /// - N > 0: signal checkpoint when WAL total_size exceeds N bytes.
     pub(crate) fn maybe_auto_checkpoint(&self) -> Result<(), String> {
+        if !self.database.config.auto_checkpoint {
+            return Ok(()); // Auto-checkpoint disabled by config master switch
+        }
         let threshold = self.database.config.checkpoint_threshold;
         if threshold == 0 {
             return Ok(()); // Auto-checkpoint disabled

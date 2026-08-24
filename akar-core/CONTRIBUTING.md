@@ -53,7 +53,7 @@ cargo check --workspace                     # Fast compile check (no codegen)
 ### Test
 
 ```bash
-cargo test --workspace              # All 1,872 tests (gate 2026-08-24; lihat CHANGELOG untuk angka terkini)
+cargo test --workspace              # All 1,878 tests (gate 2026-08-25; lihat CHANGELOG untuk angka terkini)
 cargo test -p akar-processor               # Single crate
 cargo test --test test_fts -p akar-main     # Single integration test
 ```

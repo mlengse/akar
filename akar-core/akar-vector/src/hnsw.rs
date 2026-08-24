@@ -630,6 +630,31 @@ mod tests {
     }
 
     #[test]
+    fn test_cosine_metric_is_scale_invariant() {
+        // P51.46: cosine distance must not assume the stored vector is
+        // pre-normalized. `DistanceMetric::Cosine::compute` normalizes BOTH
+        // operands at query time, so scaling one side must not change the
+        // distance — the write path stores raw (un-normalized) vectors.
+        let query = vec![3.0, 4.0, 0.0];
+        let stored = vec![1.0, 2.0, 2.0];
+        let base = DistanceMetric::Cosine.compute(&query, &stored);
+
+        for scale in [0.5, 2.0, 10.0, 0.001] {
+            let scaled: Vec<f64> = stored.iter().map(|x| x * scale).collect();
+            let d = DistanceMetric::Cosine.compute(&query, &scaled);
+            assert!(
+                (d - base).abs() < 1e-9,
+                "cosine distance must be scale-invariant: {base} vs {d} (scale={scale})"
+            );
+        }
+
+        // Zero-norm stored vector must not panic (guard returns 1.0 = max distance).
+        let zero = vec![0.0, 0.0, 0.0];
+        let d = DistanceMetric::Cosine.compute(&query, &zero);
+        assert!((d - 1.0).abs() < 1e-9, "zero vector should map to max distance");
+    }
+
+    #[test]
     fn test_recall_rate() {
         let mut rng: u64 = 12345;
         let dims = 16;

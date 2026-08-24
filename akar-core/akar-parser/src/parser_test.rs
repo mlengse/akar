@@ -208,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn test_count_star_whitespace_padded() {
+        // P51.45: star detection must be whitespace-tolerant (no text replace).
+        for sql in [
+            "MATCH (a:Person) RETURN COUNT( * )",
+            "MATCH (a:Person) RETURN COUNT( * ) AS n",
+            "MATCH (a:Person) RETURN COUNT( *)",
+            "MATCH (a:Person) RETURN COUNT(* )",
+        ] {
+            assert!(parse(sql).is_ok(), "should parse: {sql}");
+        }
+    }
+
+    #[test]
     fn test_integer_expr() {
         let sql = "MATCH (a) WHERE a.age = 30 RETURN a";
         assert!(parse(sql).is_ok());
@@ -1091,6 +1104,77 @@ mod tests {
         let stmt = parse(sql).unwrap();
         match stmt {
             Statement::Query(q) => assert_eq!(clause_kinds(&q), vec!["match", "optional_match", "return"]),
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_detach_delete_flag_via_ast() {
+        // P51.45: DETACH must be detected from the parse tree, not text sniffing.
+        use crate::ast::{Clause, DeleteClause};
+        let stmt = parse("MATCH (a:Memory) DETACH DELETE a").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let detach = q.clauses.iter().any(|c| match c {
+                    Clause::Delete(DeleteClause { detach, .. }) => *detach,
+                    _ => false,
+                });
+                assert!(detach, "DETACH DELETE must set the detach flag");
+            }
+            _ => panic!("Expected Query"),
+        }
+        let stmt = parse("MATCH (a:Memory) DELETE a").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let detach = q.clauses.iter().any(|c| match c {
+                    Clause::Delete(DeleteClause { detach, .. }) => *detach,
+                    _ => false,
+                });
+                assert!(!detach, "plain DELETE must not set the detach flag");
+            }
+            _ => panic!("Expected Query"),
+        }
+    }
+
+    #[test]
+    fn test_order_by_desc_via_ast() {
+        // P51.45: sort direction must come from the parse tree, not ends_with("DESC").
+        use crate::ast::{Clause, ReturnClause};
+        let stmt = parse("MATCH (a:Memory) RETURN a ORDER BY a.name DESC").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let order = q.clauses.iter().find_map(|c| match c {
+                    Clause::Return(ReturnClause { order_by: Some(o), .. }) => Some(o.clone()),
+                    _ => None,
+                });
+                let order = order.expect("ORDER BY must be parsed");
+                assert_eq!(order.len(), 1);
+                assert!(!order[0].ascending, "DESC must set ascending=false");
+            }
+            _ => panic!("Expected Query"),
+        }
+        let stmt = parse("MATCH (a:Memory) RETURN a ORDER BY a.name ASC").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let order = q.clauses.iter().find_map(|c| match c {
+                    Clause::Return(ReturnClause { order_by: Some(o), .. }) => Some(o.clone()),
+                    _ => None,
+                });
+                let order = order.expect("ORDER BY must be parsed");
+                assert!(order[0].ascending, "ASC must set ascending=true");
+            }
+            _ => panic!("Expected Query"),
+        }
+        let stmt = parse("MATCH (a:Memory) RETURN a ORDER BY a.name").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let order = q.clauses.iter().find_map(|c| match c {
+                    Clause::Return(ReturnClause { order_by: Some(o), .. }) => Some(o.clone()),
+                    _ => None,
+                });
+                let order = order.expect("ORDER BY must be parsed");
+                assert!(order[0].ascending, "no direction defaults to ascending");
+            }
             _ => panic!("Expected Query"),
         }
     }

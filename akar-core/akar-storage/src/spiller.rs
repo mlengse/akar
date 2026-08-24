@@ -49,6 +49,16 @@ pub struct Spiller {
     pub memory_threshold: u64,
 }
 
+impl Clone for Spiller {
+    fn clone(&self) -> Self {
+        Self {
+            tmp_dir: self.tmp_dir.clone(),
+            spill_counter: AtomicU64::new(self.spill_counter.load(Ordering::Relaxed)),
+            memory_threshold: self.memory_threshold,
+        }
+    }
+}
+
 impl Spiller {
     /// Create a new spiller that writes to `tmp_dir`.
     ///

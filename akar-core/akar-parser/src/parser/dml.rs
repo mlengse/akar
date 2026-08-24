@@ -48,12 +48,16 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                             }));
                         }
                         Rule::delete_clause => {
-                            let detach = inner.as_str().to_uppercase().starts_with("DETACH");
-                            let expressions: Result<Vec<_>, _> = inner.into_inner().map(parse_expression).collect();
-                            clauses.push(Clause::Delete(DeleteClause {
-                                detach,
-                                expressions: expressions?,
-                            }));
+                            let mut detach = false;
+                            let mut expressions = Vec::new();
+                            for c in inner.clone().into_inner() {
+                                if c.as_rule() == Rule::detach_kw {
+                                    detach = true;
+                                } else if c.as_rule() == Rule::expression {
+                                    expressions.push(parse_expression(c)?);
+                                }
+                            }
+                            clauses.push(Clause::Delete(DeleteClause { detach, expressions }));
                         }
                         Rule::unwind_clause => {
                             let mut expr = None;
@@ -157,13 +161,16 @@ pub(crate) fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<
                             sub_clauses.push(Clause::Set(SetClause { items: items? }));
                         }
                         Rule::delete_clause => {
-                            let detach = body_inner.as_str().to_uppercase().starts_with("DETACH");
-                            let expressions: Result<Vec<_>, _> =
-                                body_inner.into_inner().map(parse_expression).collect();
-                            sub_clauses.push(Clause::Delete(DeleteClause {
-                                detach,
-                                expressions: expressions?,
-                            }));
+                            let mut detach = false;
+                            let mut expressions = Vec::new();
+                            for c in body_inner.clone().into_inner() {
+                                if c.as_rule() == Rule::detach_kw {
+                                    detach = true;
+                                } else if c.as_rule() == Rule::expression {
+                                    expressions.push(parse_expression(c)?);
+                                }
+                            }
+                            sub_clauses.push(Clause::Delete(DeleteClause { detach, expressions }));
                         }
                         _ => {}
                     }
@@ -362,12 +369,13 @@ fn parse_order_by(pair: &pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>
     let mut items = Vec::new();
     for part in order_by_pair.into_inner() {
         if part.as_rule() == Rule::sort_item {
-            let sort_text = part.as_str().trim().to_uppercase();
-            let ascending = !sort_text.ends_with("DESC");
+            let mut ascending = true;
             let mut expr = None;
             for inner in part.into_inner() {
-                if inner.as_rule() == Rule::expression {
-                    expr = Some(parse_expression(inner).ok()?);
+                match inner.as_rule() {
+                    Rule::sort_dir => ascending = inner.as_str() == "ASC",
+                    Rule::expression => expr = Some(parse_expression(inner).ok()?),
+                    _ => {}
                 }
             }
             items.push(OrderByItem {

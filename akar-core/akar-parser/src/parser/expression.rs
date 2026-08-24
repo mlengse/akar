@@ -98,14 +98,12 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
             {
                 let name = children[0].as_str().to_string();
                 let mut args = Vec::new();
-                let args_text = children[1].as_str().replace(" ", "");
                 for c in children[1].clone().into_inner() {
-                    if c.as_rule() == Rule::expression {
+                    if c.as_rule() == Rule::star {
+                        args.push(Expression::Star);
+                    } else if c.as_rule() == Rule::expression {
                         args.push(parse_expression(c)?);
                     }
-                }
-                if args.is_empty() && args_text == "(*)" {
-                    args.push(Expression::Star);
                 }
                 return Ok(Expression::FunctionCall(name, args));
             }

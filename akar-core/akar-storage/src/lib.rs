@@ -117,6 +117,9 @@ pub struct StorageManager {
     pub(crate) table_catalog: Arc<TableCatalog>,
     /// Durable column mirrors for in-memory tables (P45.4).
     table_persistence: TablePersistence,
+    /// Optional spiller attached to newly created node tables so bulk ingest
+    /// spills to disk once a NodeGroup exceeds the memory threshold (P51.44).
+    spiller: std::sync::RwLock<Option<Arc<Spiller>>>,
 }
 
 /// Storage info returned by CALL storage_info().
@@ -181,7 +184,30 @@ impl StorageManager {
             page_manager: Some(Arc::new(pm)),
             table_catalog: Arc::new(TableCatalog::new()),
             table_persistence: TablePersistence::new(),
+            spiller: std::sync::RwLock::new(None),
         }
+    }
+
+    /// Attach a spiller so node tables spill during bulk ingest once a
+    /// NodeGroup's buffer exceeds the memory threshold (P51.44). Applies to
+    /// tables that already exist as well as future ones. A `None` clears the
+    /// spiller.
+    pub fn set_spiller(&self, spiller: Option<Arc<Spiller>>) {
+        *self.spiller.write().unwrap() = spiller.clone();
+        // Collect IDs first: `all_node_tables()` holds shard read-locks for
+        // the returned refs, so a subsequent `get_node_table_mut` (write-lock
+        // on the same shard) would deadlock (P51.44).
+        let table_ids: Vec<u64> = self.table_catalog.all_node_tables().iter().map(|r| *r.key()).collect();
+        for table_id in table_ids {
+            if let Some(mut table) = self.table_catalog.get_node_table_mut(table_id) {
+                table.set_spiller(spiller.clone());
+            }
+        }
+    }
+
+    /// The currently attached spiller (if any).
+    pub fn spiller(&self) -> Option<Arc<Spiller>> {
+        self.spiller.read().unwrap().clone()
     }
 
     /// Open (or create) a database at `db_path`, initializing all storage
@@ -255,7 +281,20 @@ impl StorageManager {
 
     /// Create a node table in the catalog and return its ID.
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {
-        self.table_catalog.create_node_table(name, columns)
+        let table = self.table_catalog.create_node_table(name, columns);
+        self.attach_spiller(&table);
+        table
+    }
+
+    /// Attach the current spiller (if any) to a freshly created node table so
+    /// bulk ingest spills to disk once a NodeGroup exceeds the memory
+    /// threshold (P51.44).
+    fn attach_spiller(&self, table: &NodeTable) {
+        if let Some(spiller) = self.spiller() {
+            if let Some(mut stored) = self.table_catalog.get_node_table_mut(table.table_id) {
+                stored.set_spiller(Some(spiller));
+            }
+        }
     }
 
     /// Restore a node table at a specific table ID during recovery from a
@@ -283,6 +322,7 @@ impl StorageManager {
 
             let _ = self.table_catalog.create_art_index(&name, index_name);
         }
+        self.attach_spiller(&table);
         table
     }
 

@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,872 total, 0 ignored, 1,872 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.2 typed-WAL replay) |
+| Tests passing | **1,878 total, 0 ignored, 1,878 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P51.44–P51.46 audit cleanup) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -517,19 +517,19 @@ Triggered by pushing a version tag (`v*`):
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
 | `akar-common` | 36 | Types (37 LogicalTypes, Value), Vectors, Memory |
-| `akar-parser` | 88 | PEG grammar, 33 Statement variants, operator precedence |
+| `akar-parser` | 91 | PEG grammar, 33 Statement variants, operator precedence, AST-based DETACH/ORDER BY/star (P51.45) |
 | `akar-binder` | 101 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 22 | Logical plan construction |
 | `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 157 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 182 | 259 registered functions |
-| `akar-storage` | 343 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index |
+| `akar-storage` | 345 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44) |
 | `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
 | `akar-main` (integration) | 409 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
-| `akar-vector` | 26 | Vector similarity search |
+| `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
 | `akar-fts` | 14 | Stemmer, Tokenizer, BM25 |
 | `akar-algo` | 79 | Graph algorithm extensions |
@@ -548,7 +548,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,872** | **1,872 total, 0 ignored, 1,872 passed, 0 failed** (gate `test [akar-core]` 2026-08-24, s.d. P60.2 typed-WAL replay) |
+| **Total** | **1,878** | **1,878 total, 0 ignored, 1,878 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P51.44–P51.46 audit cleanup) |
 
 ### 11.2 Test Datasets
 

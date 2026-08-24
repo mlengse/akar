@@ -158,6 +158,9 @@ impl Database {
     pub fn set_spill_threshold(&self, bytes: u64) {
         self.spill_threshold_override.store(bytes, Ordering::Relaxed);
         self.spill_threshold_overridden.store(true, Ordering::Relaxed);
+        // Propagate the runtime override so bulk ingest on existing node
+        // tables spills at the new threshold (P51.44).
+        self.storage_manager.set_spiller(self.spiller());
     }
 
     /// Get the effective spill threshold in bytes.
@@ -605,6 +608,11 @@ impl Database {
         // Recreate storage-level tables from the restored catalog (if any) so
         // WAL DML replay below operates on the same table IDs.
         db.restore_storage_from_catalog();
+
+        // Propagate the configured spiller (if any) so bulk ingest on the
+        // restored tables spills to disk once a NodeGroup exceeds the memory
+        // threshold (P51.44).
+        db.storage_manager.set_spiller(db.spiller());
 
         // Load built-in extensions
         db.register_builtin_extensions();
