@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-08-25
+
 ### Added
 
 - **feat(server) — P62: akar-server daemon binary (2026-08-25)** — `akar-server` sekarang ship binary `akar_server` (src/bin/akar_server.rs) dengan CLI berbasis clap: `--db`, `--port`, `--addr`, `--auth-token`, `--idle`, `--json-sidecar`, `--read-only`. Fitur: (1) **auth token** — koneksi wajib kirim token di frame pertama; tanpa `--auth-token` semua client diterima; (2) **idle timeout** — monitor thread shut down server setelah tidak ada request selama N detik; (3) **sidecar JSON** — tulis metadata (protocol, host, port, token, pid, started_at) ke file JSON saat startup, hapus saat shutdown; (4) **wire ops baru** — `ping`, `flush`, `stats` (query count + uptime), `export`, `shutdown` via `WireRequest.op`; (5) **graceful shutdown** via `ctrlc` handler + shutdown op. Gate `test [akar-core]`: **1,889 passed / 0 failed / 0 ignored** (121 suite). Akar-server: 12 existing + 11 new tests = 23/23.
