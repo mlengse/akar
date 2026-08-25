@@ -1,11 +1,10 @@
-use akar_main::{Connection, Database, SystemConfig};
-use std::fs;
-use std::process::Command;
-use tempfile::tempdir;
-
 #[test]
 #[cfg(feature = "parquet-export")]
 fn test_migration_ingestion() {
+    use akar_main::{Connection, Database, SystemConfig};
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
     let mock_cpp_dir = tempdir().unwrap();
 
     // 1. Generate Parquet data using our own engine (mocking the C++ export)
