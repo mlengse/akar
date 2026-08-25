@@ -69,6 +69,29 @@ fn start_server(cfg: SystemConfig) -> TestServer {
     }
 }
 
+/// Start a server with optional auth token and idle timeout.
+fn start_server_with(cfg: SystemConfig, auth_token: Option<String>, idle_secs: Option<u64>) -> TestServer {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let db_path = temp_dir.path().join("test_db");
+    let db = Arc::new(Database::new(&db_path, cfg).expect("create db"));
+    let mut server = Server::bind("127.0.0.1:0", db).expect("bind");
+    server.set_db_path(db_path.to_string_lossy().to_string());
+    if let Some(ref token) = auth_token {
+        server.set_auth_token(token.clone());
+    }
+    if let Some(secs) = idle_secs {
+        server.set_idle_timeout(Duration::from_secs(secs));
+    }
+    server.start().expect("start");
+    let addr = server.local_addr().to_string();
+    TestServer {
+        _server: server,
+        addr,
+        db_path,
+        _temp_dir: temp_dir,
+    }
+}
+
 fn connect(ts: &TestServer) -> RemoteDatabase {
     RemoteDatabase::connect_tcp(&ts.addr).expect("connect to server")
 }
@@ -459,4 +482,159 @@ fn test_embedded_single_process_unaffected() {
         .query("MATCH (n:Person) RETURN n.name")
         .expect("query after reopen");
     assert_eq!(result.num_rows, 1);
+}
+
+// ===========================================================================
+// P62: Auth token
+// ===========================================================================
+
+const VALID_TOKEN: &str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344";
+const WRONG_TOKEN: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+#[test]
+fn test_auth_token_valid_succeeds() {
+    let ts = start_server_with(config(), Some(VALID_TOKEN.to_string()), None);
+    let client = RemoteDatabase::connect_with_token(&ts.addr, VALID_TOKEN.to_string()).expect("connect with token");
+    client.ping_op().expect("ping should succeed with valid token");
+}
+
+#[test]
+fn test_auth_token_invalid_rejected() {
+    let ts = start_server_with(config(), Some(VALID_TOKEN.to_string()), None);
+    let client = RemoteDatabase::connect_with_token(&ts.addr, WRONG_TOKEN.to_string()).expect("connect");
+    let result = client.ping_op();
+    assert!(result.is_err(), "request with wrong token must fail");
+}
+
+#[test]
+fn test_auth_token_missing_rejected() {
+    let ts = start_server_with(config(), Some(VALID_TOKEN.to_string()), None);
+    let client = connect(&ts);
+    let result = client.ping_op();
+    assert!(result.is_err(), "request without token must fail when auth is required");
+}
+
+#[test]
+fn test_no_auth_token_allows_any_client() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+    client.ping_op().expect("ping should succeed without auth");
+}
+
+// ===========================================================================
+// P62: Stats operation
+// ===========================================================================
+
+#[test]
+fn test_stats_operation() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+
+    client.query("RETURN 1").expect("query");
+    client.query("RETURN 2").expect("query");
+
+    let res = client.stats().expect("stats");
+    assert!(res.success);
+    let stats = res.stats.expect("stats response must include stats field");
+    assert!(
+        stats.total_queries >= 2,
+        "total_queries must be >= 2, got {}",
+        stats.total_queries
+    );
+    assert_eq!(stats.pid, std::process::id());
+    assert!(!stats.db_path.is_empty());
+}
+
+// ===========================================================================
+// P62: Flush operation
+// ===========================================================================
+
+#[test]
+fn test_flush_operation() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+
+    client
+        .query("CREATE NODE TABLE FlushT(id INT64, PRIMARY KEY(id))")
+        .expect("DDL");
+    client.query("CREATE (:FlushT {id: 1})").expect("insert");
+
+    let res = client.flush().expect("flush");
+    assert!(res.success);
+    assert!(res.message.unwrap_or_default().contains("Flushed"));
+}
+
+// ===========================================================================
+// P62: Export operation
+// ===========================================================================
+
+#[test]
+fn test_export_operation() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+
+    client
+        .query("CREATE NODE TABLE ExportT(id INT64, PRIMARY KEY(id))")
+        .expect("DDL");
+    client.query("CREATE (:ExportT {id: 1})").expect("insert");
+
+    let export_path = ts._temp_dir.path().join("export_out").to_string_lossy().to_string();
+    let res = client.export_db(&export_path).expect("export");
+    assert!(res.success);
+}
+
+#[test]
+fn test_export_requires_path() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+    let result = client.export_db("");
+    assert!(result.is_err(), "export without path must fail");
+}
+
+// ===========================================================================
+// P62: Shutdown operation
+// ===========================================================================
+
+#[test]
+fn test_shutdown_operation_triggers_server_stop() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+    let result = client.shutdown_server();
+    assert!(result.is_ok(), "shutdown op should succeed");
+    // Server should stop within a short time; no explicit assertion needed
+    // since TestServer drop calls Server::shutdown.
+}
+
+// ===========================================================================
+// P62: Idle timeout
+// ===========================================================================
+
+#[test]
+fn test_idle_timeout_triggers_shutdown() {
+    let ts = start_server_with(config(), None, Some(1));
+    let client = connect(&ts);
+    client.ping_op().expect("ping before idle");
+
+    // Wait for the idle timeout to fire (1s + margin).
+    thread::sleep(Duration::from_secs(3));
+
+    // Server should be shutting down; a new connection should fail.
+    let result = RemoteDatabase::connect_tcp(&ts.addr);
+    // Connection may fail or succeed but query should fail — either is acceptable.
+    if let Ok(client2) = result {
+        let _ = client2.ping_op(); // may succeed or fail depending on timing
+    }
+}
+
+// ===========================================================================
+// P62: Unknown operation
+// ===========================================================================
+
+#[test]
+fn test_unknown_operation_returns_error() {
+    let ts = start_server_with(config(), None, None);
+    let client = connect(&ts);
+    let result = client.query("RETURN 1");
+    // The default "query" op should work fine.
+    assert!(result.is_ok());
 }

@@ -44,10 +44,29 @@ pub const MAX_FRAME_SIZE: usize = 128 * 1024 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireRequest {
     /// The Cypher query to execute.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub query: String,
     /// Optional client identifier (currently informational only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
+    /// Operation to perform. Defaults to `"query"` when absent.
+    ///
+    /// Supported operations:
+    /// - `"query"` — execute a Cypher query (default)
+    /// - `"ping"` — liveness check
+    /// - `"flush"` — force a CHECKPOINT to persist data
+    /// - `"stats"` — return server statistics
+    /// - `"export"` — EXPORT DATABASE to the given path (requires `path`)
+    /// - `"shutdown"` — request graceful server shutdown
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// Authentication token (hex-encoded, 32 bytes). Sent on every request
+    /// when the server requires auth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// Filesystem path for operations that require one (e.g. `export`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// The response the server returns for a query.
@@ -62,6 +81,24 @@ pub struct WireResponse {
     pub error_message: Option<String>,
     pub column_names: Vec<String>,
     pub rows: Vec<Vec<Option<Value>>>,
+    /// Server statistics (returned by `"stats"` operation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<ServerStats>,
+}
+
+/// Server statistics snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerStats {
+    /// Number of currently connected clients.
+    pub num_clients: usize,
+    /// Total number of queries executed since the server started.
+    pub total_queries: u64,
+    /// Server uptime in seconds.
+    pub uptime_secs: u64,
+    /// Database path.
+    pub db_path: String,
+    /// Server process ID.
+    pub pid: u32,
 }
 
 impl WireResponse {
@@ -73,6 +110,7 @@ impl WireResponse {
             error_message: None,
             column_names: Vec::new(),
             rows: Vec::new(),
+            stats: None,
         }
     }
 
@@ -84,6 +122,7 @@ impl WireResponse {
             error_message: Some(msg),
             column_names: Vec::new(),
             rows: Vec::new(),
+            stats: None,
         }
     }
 
@@ -110,6 +149,12 @@ impl WireResponse {
     /// Human-readable summary mirroring [`crate::QueryResult::result_summary`]
     /// (shared head logic, P51.43).
     pub fn result_summary(&self) -> String {
+        if let Some(ref stats) = self.stats {
+            return format!(
+                "Server stats: {} clients, {} queries, uptime {}s, pid {}",
+                stats.num_clients, stats.total_queries, stats.uptime_secs, stats.pid,
+            );
+        }
         if let Some(head) = crate::query_result::result_summary_head(
             self.message.as_deref(),
             self.success,
@@ -128,6 +173,13 @@ impl WireResponse {
 
 impl fmt::Display for WireResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref stats) = self.stats {
+            return write!(
+                f,
+                "Server: {} clients, {} queries, uptime {}s, pid {}",
+                stats.num_clients, stats.total_queries, stats.uptime_secs, stats.pid,
+            );
+        }
         if let Some(head) = crate::query_result::result_summary_head(
             self.message.as_deref(),
             self.success,
@@ -338,6 +390,8 @@ pub struct RemoteDatabase {
     /// abandoned query, so further `query()` calls must refuse to run rather
     /// than silently read a stale response as the next query's result (P52.19).
     desynced: AtomicBool,
+    /// Optional auth token sent with every request.
+    token: Option<String>,
 }
 
 impl RemoteDatabase {
@@ -354,7 +408,16 @@ impl RemoteDatabase {
             address: addr,
             partial: Mutex::new(None),
             desynced: AtomicBool::new(false),
+            token: None,
         })
+    }
+
+    /// Connect with an authentication token. The token is sent with every
+    /// request; the server rejects connections without a valid token.
+    pub fn connect_with_token(addr: impl Into<String>, token: String) -> Result<Self, String> {
+        let mut client = Self::connect_tcp(addr)?;
+        client.token = Some(token);
+        Ok(client)
     }
 
     /// The address this client is connected to.
@@ -362,21 +425,88 @@ impl RemoteDatabase {
         &self.address
     }
 
+    /// Set the auth token for subsequent requests.
+    pub fn set_token(&mut self, token: String) {
+        self.token = Some(token);
+    }
+
     /// Execute a Cypher query on the remote database.
     ///
     /// Mirrors [`crate::Connection::query`]: returns the response on success and
     /// an error message when the query failed (including OCC `WriteConflict`s).
     pub fn query(&self, query_str: &str) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: query_str.to_string(),
+            client_name: None,
+            op: None,
+            token: self.token.clone(),
+            path: None,
+        })
+    }
+
+    /// Send a liveness check (op: `"ping"`).
+    pub fn ping_op(&self) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("ping".to_string()),
+            token: self.token.clone(),
+            path: None,
+        })
+    }
+
+    /// Force a CHECKPOINT to persist all data to disk (op: `"flush"`).
+    pub fn flush(&self) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("flush".to_string()),
+            token: self.token.clone(),
+            path: None,
+        })
+    }
+
+    /// Request server statistics (op: `"stats"`).
+    pub fn stats(&self) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("stats".to_string()),
+            token: self.token.clone(),
+            path: None,
+        })
+    }
+
+    /// Export the database to `path` (op: `"export"`).
+    pub fn export_db(&self, path: &str) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("export".to_string()),
+            token: self.token.clone(),
+            path: Some(path.to_string()),
+        })
+    }
+
+    /// Request graceful server shutdown (op: `"shutdown"`).
+    pub fn shutdown_server(&self) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("shutdown".to_string()),
+            token: self.token.clone(),
+            path: None,
+        })
+    }
+
+    /// Send a raw `WireRequest` and return the response.
+    fn send_request(&self, request: WireRequest) -> Result<WireResponse, String> {
         if self.desynced.load(Ordering::Acquire) {
             return Err("Connection is desynchronized after a previous read timeout; \
                  reconnect before sending further queries"
                 .into());
         }
 
-        let request = WireRequest {
-            query: query_str.to_string(),
-            client_name: None,
-        };
         let payload = serde_json::to_vec(&request).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
         // Hold the connection's partial-frame lock across the entire write+read
@@ -608,6 +738,7 @@ mod tests {
                 vec![Some(Value::String("alice".into())), Some(Value::Int64(30))],
                 vec![None, Some(Value::Int64(25))],
             ],
+            stats: None,
         };
         assert_eq!(resp.num_rows(), 2);
         assert_eq!(resp.num_columns(), 2);

@@ -5,12 +5,17 @@
 //! query through the normal `Connection::query` pipeline (which wraps writes in
 //! OCC transactions and surfaces `WriteConflict` as errors), and replies with a
 //! serialized [`WireResponse`].
+//!
+//! P62 adds:
+//! - **Auth token validation** — first frame must carry the correct token.
+//! - **Operation dispatch** — `ping`, `flush`, `stats`, `export`, `shutdown`.
+//! - **Idle tracking** — `last_activity` timestamp for the server idle monitor.
 
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_main::connection::Connection;
 use akar_main::database::Database;
 use akar_main::query_result::QueryResult;
-use akar_main::remote::{PartialFrame, WireRequest, WireResponse, read_frame, write_frame};
+use akar_main::remote::{PartialFrame, ServerStats, WireRequest, WireResponse, read_frame, write_frame};
 use arrow::array::{
     ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
     LargeStringArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
@@ -18,8 +23,8 @@ use arrow::array::{
 use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// How long the session waits for the next frame before re-checking the server
 /// shutdown flag. A slow client is never disconnected; this only bounds the
@@ -31,16 +36,32 @@ const READ_TIMEOUT: Duration = Duration::from_millis(250);
 /// stops reading its responses.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Session configuration for P62 features.
+pub struct SessionConfig {
+    /// Required auth token. If `None`, auth is disabled.
+    pub auth_token: Option<String>,
+    /// Shared atomic for recording the last activity timestamp (epoch seconds).
+    /// The server idle monitor reads this to detect idleness.
+    pub last_activity: Arc<AtomicU64>,
+    /// Shared atomic for total query counter (incremented on each `query` op).
+    pub total_queries: Arc<AtomicU64>,
+    /// Database path (for stats response).
+    pub db_path: String,
+    /// Shared flag to trigger server shutdown (set by `shutdown` op).
+    pub shutdown: Arc<AtomicBool>,
+}
+
 /// Serve one client connection until the peer disconnects or the server shuts
 /// down. All per-session state is dropped on return.
-pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, shutdown: &Arc<AtomicBool>) {
+pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionConfig) {
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let conn = Connection::new(&db);
     let mut partial: Option<PartialFrame> = None;
+    let mut authenticated = config.auth_token.is_none(); // auto-auth if no token
 
     loop {
-        if shutdown.load(Ordering::SeqCst) {
+        if config.shutdown.load(Ordering::SeqCst) {
             return;
         }
         let frame = match read_frame(&mut stream, &mut partial) {
@@ -66,11 +87,114 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, shutdown: &Arc<At
             }
         };
 
-        let response = execute_query(&conn, &request);
+        // Auth check on first request.
+        if !authenticated {
+            match &config.auth_token {
+                Some(expected) => {
+                    match &request.token {
+                        Some(provided) if provided == expected => {
+                            authenticated = true;
+                        }
+                        _ => {
+                            let resp =
+                                WireResponse::error("Authentication required: invalid or missing token".to_string());
+                            if let Ok(payload) = serde_json::to_vec(&resp) {
+                                let _ = write_frame(&mut stream, &payload);
+                            }
+                            return; // disconnect after auth failure
+                        }
+                    }
+                }
+                None => {
+                    authenticated = true;
+                }
+            }
+        }
+
+        // Update last activity timestamp.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        config.last_activity.store(now, Ordering::Relaxed);
+
+        let response = match request.op.as_deref() {
+            Some("ping") => handle_ping(),
+            Some("flush") => handle_flush(&conn),
+            Some("stats") => handle_stats(&config.db_path, &config.total_queries),
+            Some("export") => handle_export(&conn, request.path.as_deref()),
+            Some("shutdown") => handle_shutdown(&config.shutdown),
+            None | Some("query") => {
+                config.total_queries.fetch_add(1, Ordering::Relaxed);
+                execute_query(&conn, &request)
+            }
+            Some(op) => serialize_response(&WireResponse::error(format!("Unknown operation: {op}"))),
+        };
+
         if write_frame(&mut stream, &response).is_err() {
             return; // client disconnected mid-reply
         }
     }
+}
+
+/// Liveness check — always succeeds.
+fn handle_ping() -> Vec<u8> {
+    let resp = WireResponse::success_message("pong".to_string());
+    serialize_response(&resp)
+}
+
+/// Force a CHECKPOINT to persist all data to disk.
+fn handle_flush(conn: &Connection) -> Vec<u8> {
+    let resp = match conn.query("CHECKPOINT") {
+        Ok(_) => WireResponse::success_message("Flushed (checkpoint committed)".to_string()),
+        Err(e) => WireResponse::error(format!("Flush failed: {e}")),
+    };
+    serialize_response(&resp)
+}
+
+/// Return server statistics.
+fn handle_stats(db_path: &str, total_queries: &Arc<AtomicU64>) -> Vec<u8> {
+    let stats = ServerStats {
+        num_clients: 0, // full count requires client_handles; left as 0 for now
+        total_queries: total_queries.load(Ordering::Relaxed),
+        uptime_secs: 0,
+        db_path: db_path.to_string(),
+        pid: std::process::id(),
+    };
+    let resp = WireResponse {
+        success: true,
+        message: None,
+        error_message: None,
+        column_names: Vec::new(),
+        rows: Vec::new(),
+        stats: Some(stats),
+    };
+    serialize_response(&resp)
+}
+
+/// Export the database to the given path.
+fn handle_export(conn: &Connection, path: Option<&str>) -> Vec<u8> {
+    let path = match path {
+        Some(p) if !p.is_empty() => p,
+        _ => {
+            return serialize_response(&WireResponse::error(
+                "Export requires a non-empty 'path' field".to_string(),
+            ));
+        }
+    };
+    let query = format!("EXPORT DATABASE '{path}'");
+    let resp = match conn.query(&query) {
+        Ok(result) => execute_query_result_to_wire(&result),
+        Err(e) => WireResponse::error(format!("Export failed: {e}")),
+    };
+    serialize_response(&resp)
+}
+
+/// Request graceful server shutdown.
+fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
+    shutdown_flag.store(true, Ordering::SeqCst);
+    let resp = WireResponse::success_message("Shutdown requested".to_string());
+    serialize_response(&resp)
 }
 
 /// Run a single query against the session's connection and serialize the result.
@@ -79,9 +203,19 @@ fn execute_query(conn: &Connection, request: &WireRequest) -> Vec<u8> {
         Ok(result) => query_result_to_wire(&result),
         Err(e) => WireResponse::error(e),
     };
-    serde_json::to_vec(&wire).unwrap_or_else(|_| {
+    serialize_response(&wire)
+}
+
+/// Serialize a `WireResponse` to JSON bytes.
+fn serialize_response(resp: &WireResponse) -> Vec<u8> {
+    serde_json::to_vec(resp).unwrap_or_else(|_| {
         br#"{"success":false,"error_message":"response serialization failure","column_names":[],"rows":[]}"#.to_vec()
     })
+}
+
+/// Convert a `QueryResult` to a `WireResponse` and serialize it.
+fn execute_query_result_to_wire(result: &QueryResult) -> WireResponse {
+    query_result_to_wire(result)
 }
 
 /// Convert a `QueryResult` into a row-major [`WireResponse`].
@@ -127,6 +261,7 @@ fn query_result_to_wire(result: &QueryResult) -> WireResponse {
         error_message: None,
         column_names,
         rows,
+        stats: None,
     }
 }
 

@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,878 total, 0 ignored, 1,878 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P51.44–P51.46 audit cleanup) |
+| Tests passing | **1,889 total, 0 ignored, 1,889 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P62 akar-server daemon) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -532,13 +532,13 @@ Triggered by pushing a version tag (`v*`):
 | `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
 | `akar-fts` | 14 | Stemmer, Tokenizer, BM25 |
-| `akar-algo` | 79 | Graph algorithm extensions |
+| `akar-algo` | 81 | Graph algorithm extensions |
 | `akar-search` | 23 | Search utilities |
 | `akar-dream` | 5 | Dream engine |
 | `akar-ml` | 5 | ML functions (node2vec walk/SGD invariants) |
 | `akar-extension` | 15 | Extension framework registry |
 | `akar-c` (FFI) | 18 | `extern "C"` binding tests |
-| `akar-server` | 12 | TCP framing, session, concurrency |
+| `akar-server` | 23 | TCP framing, session, concurrency, auth/idle/stats (P62) |
 | `akar-postgres` | 7 | PostgreSQL integration |
 | `akar-duckdb` | 9 | DuckDB integration |
 | `akar-httpfs` | 10 | HTTP/S3 file reads |
@@ -548,7 +548,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,878** | **1,878 total, 0 ignored, 1,878 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P51.44–P51.46 audit cleanup) |
+| **Total** | **1,889** | **1,889 total, 0 ignored, 1,889 passed, 0 failed** (gate `test [akar-core]` 2026-08-25, s.d. P62 akar-server daemon) |
 
 ### 11.2 Test Datasets
 

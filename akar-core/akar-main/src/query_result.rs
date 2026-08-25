@@ -229,6 +229,7 @@ mod tests {
             error_message: error.map(str::to_string),
             column_names: (0..columns).map(|i| format!("c{i}")).collect(),
             rows: vec![Vec::new(); row_count],
+            stats: None,
         }
     }
 
