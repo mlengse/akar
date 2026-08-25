@@ -4,6 +4,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
+#[cfg(feature = "parquet-export")]
 fn test_migration_ingestion() {
     let mock_cpp_dir = tempdir().unwrap();
 
