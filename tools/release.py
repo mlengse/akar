@@ -645,6 +645,16 @@ def main() -> None:
         else:
             print("  all deps aligned")
 
+    # ── lockfile regeneration ──
+    print("\n=== LOCKFILE ===\n")
+    print("  regenerating Cargo.lock ...")
+    run(["cargo", "update"], cwd=CARGO_ROOT, check=False, capture=True)
+    for sub in ["akar-core/fuzz", "examples/rust", "tools/rust_api"]:
+        sub_path = AKAR_ROOT / sub
+        if (sub_path / "Cargo.lock").exists():
+            run(["cargo", "update"], cwd=sub_path, check=False, capture=True)
+    print("  done")
+
     # ── changelog ──
     print("\n=== CHANGELOG ===\n")
     finalize_changelog(version, tag)
