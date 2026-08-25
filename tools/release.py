@@ -449,15 +449,15 @@ def publish_crate(crate_name: str, version: str) -> bool:
                 replacement = "{" + ", ".join(parts) + "}"
             else:
                 replacement = f'"{ws_dep_val}"'
-            # Match: dep_name = { workspace = true }
+            # Format 1: dep_name = { workspace = true }
             text = re.sub(
                 rf'({re.escape(dep_name)})\s*=\s*\{{\s*workspace\s*=\s*true\s*\}}',
                 rf'\1 = {replacement}',
                 text,
             )
-            # Match: dep_name = "..." (simple string)
+            # Format 2: dep_name.workspace = true (dotted key syntax)
             text = re.sub(
-                rf'^({re.escape(dep_name)})\s*=\s*".*"\s*$',
+                rf'^({re.escape(dep_name)})\.workspace\s*=\s*true\s*$',
                 rf'\1 = {replacement}',
                 text,
                 flags=re.MULTILINE,
