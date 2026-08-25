@@ -484,7 +484,7 @@ def publish_crate(crate_name: str, version: str) -> bool:
 
     if result.returncode != 0:
         output = (result.stdout or "") + (result.stderr or "")
-        if "crate version .* is already uploaded" in output or "already uploaded" in output:
+        if "already uploaded" in output or "already exists" in output or "crate version .* is already" in output:
             print(f"    already on crates.io, skipping")
             return True
         print(f"    FAIL: {output[-1000:]}")
