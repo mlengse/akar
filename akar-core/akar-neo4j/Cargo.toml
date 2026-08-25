@@ -11,8 +11,8 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-function = { path = "../akar-function", version = "0.1.0" }
-akar-extension = { path = "../akar-extension", version = "0.1.0" }
+akar-function = { path = "../akar-function", version = "0.1.2" }
+akar-extension = { path = "../akar-extension", version = "0.1.1" }
 tracing.workspace = true
 
 [lints]

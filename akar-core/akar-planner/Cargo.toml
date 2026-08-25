@@ -11,14 +11,13 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.1.1" }
-akar-binder = { path = "../akar-binder", version = "0.1.2" }
-akar-parser = { path = "../akar-parser", version = "0.1.1" }
-akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
+akar-common = { path = "../akar-common", version = "0.1.3" }
+akar-binder = { path = "../akar-binder", version = "0.1.5" }
+akar-parser = { path = "../akar-parser", version = "0.1.2" }
+akar-catalog = { path = "../akar-catalog", version = "0.1.1" }
 
 [dev-dependencies]
-akar-parser = { path = "../akar-parser", version = "0.1.1" }
-akar-catalog = { path = "../akar-catalog", version = "0.1.0" }
-
+akar-parser = { path = "../akar-parser", version = "0.1.2" }
+akar-catalog = { path = "../akar-catalog", version = "0.1.1" }
 [lints]
 workspace = true

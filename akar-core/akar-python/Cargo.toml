@@ -20,20 +20,19 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.29.2", features = ["abi3-py39", "extension-module", "auto-initialize"] }
 regex = "1"
 serde_json = "1"
-akar-common = { path = "../akar-common", version = "0.1.2" }
-akar-main = { path = "../akar-main", version = "0.1.4", features = [
+akar-common = { path = "../akar-common", version = "0.1.3" }
+akar-main = { path = "../akar-main", version = "0.1.7" }
     "json-extension",
     "fts-extension",
     "vector-extension",
     "parquet-export",
 ] }
-akar-vector = { path = "../akar-vector", version = "0.1.2" }
+akar-vector = { path = "../akar-vector", version = "0.1.3" }
 akar-graph = { path = "../akar-graph", version = "0.1.1" }
-akar-algo = { path = "../akar-algo", version = "0.1.3" }
-akar-ml = { path = "../akar-ml", version = "0.1.1" }
-akar-search = { path = "../akar-search", version = "0.1.0" }
-akar-dream = { path = "../akar-dream", version = "0.1.0" }
-
+akar-algo = { path = "../akar-algo", version = "0.1.6" }
+akar-ml = { path = "../akar-ml", version = "0.1.3" }
+akar-search = { path = "../akar-search", version = "0.1.2" }
+akar-dream = { path = "../akar-dream", version = "0.1.1" }
 [profile.release]
 opt-level = 3
 lto = "thin"

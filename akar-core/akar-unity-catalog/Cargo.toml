@@ -12,10 +12,10 @@ authors.workspace = true
 
 [dependencies]
 arrow.workspace = true
-akar-common = { path = "../akar-common", version = "0.1.1" }
-akar-function = { path = "../akar-function", version = "0.1.0" }
-akar-extension = { path = "../akar-extension", version = "0.1.0" }
-akar-duckdb = { path = "../akar-duckdb", version = "0.1.1", optional = true }
+akar-common = { path = "../akar-common", version = "0.1.3" }
+akar-function = { path = "../akar-function", version = "0.1.2" }
+akar-extension = { path = "../akar-extension", version = "0.1.1" }
+akar-duckdb = { path = "../akar-duckdb", version = "0.1.3", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 ureq = "3.3.0"
