@@ -446,22 +446,33 @@ def publish_crate(crate_name: str, version: str) -> bool:
                 if features:
                     feat_str = ", ".join(f'"{f}"' for f in features)
                     parts.append(f"features = [{feat_str}]")
-                replacement = "{" + ", ".join(parts) + "}"
+                ws_inline = ", ".join(parts)
             else:
-                replacement = f'"{ws_dep_val}"'
-            # Format 1: dep_name = { workspace = true }
+                ws_inline = f'version = "{ws_dep_val}"'
+
+            # Format 1: dep_name = { workspace = true, ...extra }
+            # Capture everything after workspace = true as "extra" fields
+            def _replace_workspace(match, _ws=ws_inline):
+                extra = match.group(2)
+                if extra:
+                    return f"{match.group(1)} = {{{_ws}, {extra}}}"
+                return f"{match.group(1)} = {{{_ws}}}"
+
             text = re.sub(
-                rf'({re.escape(dep_name)})\s*=\s*\{{\s*workspace\s*=\s*true\s*\}}',
-                rf'\1 = {replacement}',
+                rf'({re.escape(dep_name)})\s*=\s*\{{\s*workspace\s*=\s*true\s*(?:,\s*(.*?))?\s*\}}',
+                _replace_workspace,
                 text,
             )
             # Format 2: dep_name.workspace = true (dotted key syntax)
             text = re.sub(
                 rf'^({re.escape(dep_name)})\.workspace\s*=\s*true\s*$',
-                rf'\1 = {replacement}',
+                rf'\1 = {{{ws_inline}}}',
                 text,
                 flags=re.MULTILINE,
             )
+
+        # Remove path = "..." from dependencies (crates.io doesn't accept path deps)
+        text = re.sub(r'\s*,?\s*path\s*=\s*"[^"]*"', '', text)
 
         # Remove [lints] workspace = true section (not needed for crates.io)
         text = re.sub(r'\[lints\]\s*\nworkspace\s*=\s*true\s*\n?', '', text)
