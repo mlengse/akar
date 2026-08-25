@@ -523,6 +523,16 @@ def main() -> None:
         set_workspace_version(version)
     else:
         print(f"  workspace version already {version}")
+    # Bump any crates with explicit versions (version.workspace = false)
+    for crate in PUBLISH_ORDER:
+        cargo_toml = CARGO_ROOT / crate / "Cargo.toml"
+        if not cargo_toml.exists():
+            continue
+        data = load_toml(cargo_toml)
+        ver = data.get("package", {}).get("version")
+        if isinstance(ver, str):
+            set_crate_version(crate, version)
+            print(f"  {crate} → {version}")
 
     # ── dep alignment ──
     if not args.skip_deps:
