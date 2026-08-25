@@ -415,8 +415,8 @@ def publish_crate(crate_name: str, version: str) -> bool:
         ct = standalone_dir / "Cargo.toml"
         text = ct.read_text(encoding="utf-8-sig")
 
-        # Inline workspace.package scalar fields
-        for key in ("edition", "license", "repository", "description", "authors", "rust-version"):
+        # Inline workspace.package scalar fields (version first, then metadata)
+        for key in ("version", "edition", "license", "repository", "description", "authors", "rust-version"):
             if f"{key}.workspace = true" in text and key in ws_pkg:
                 val = ws_pkg[key]
                 if isinstance(val, str):
