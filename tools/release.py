@@ -393,8 +393,8 @@ def publish_crate(crate_name: str, version: str) -> bool:
 
     print(f"  publishing {crate_name}@{version} ...")
     result = run(
-        ["cargo", "publish", "--allow-dirty", "--no-verify"],
-        cwd=crate_dir,
+        ["cargo", "publish", "-p", crate_name, "--allow-dirty", "--no-verify"],
+        cwd=CARGO_ROOT,
         check=False,
         capture=True,
     )
