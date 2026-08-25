@@ -115,3 +115,49 @@ fn test_rel_scan_multi_hop() {
         ]]
     );
 }
+
+/// P63 — rel-scan must not crash when a destination node carries a string
+/// property longer than the legacy 255-byte inline ValueVector cap.
+///
+/// Reproduced via kairos legacy import (Finding #8): any
+/// `MATCH (a)-[r]->(b)` over a Memory node with `content` > 255 bytes made
+/// `connection_count()` / `get_connections()` fail with
+/// `Cannot store string of N bytes: inline string storage limit is 255 bytes`.
+/// The fix routes String columns through the Arrow builder path in
+/// PhysicalExtend / PhysicalOptionalExtend / PhysicalPackedExtend.
+#[test]
+fn test_rel_scan_long_string_dest_property() {
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY(id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE)",
+    );
+    let long = "x".repeat(600);
+    let create = format!("CREATE (a:Memory {{id: 1, content: '{long}'}})");
+    exec(&conn, &create);
+    exec(&conn, "CREATE (a:Memory {id: 2, content: 'short'})");
+    exec(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) CREATE (a)-[:Connected {weight: 0.5}]->(b)",
+    );
+
+    // The 600-byte content must survive the rel-scan (was: crash). The long
+    // content lives on the SOURCE node `a` (id 1); `b` (id 2) is short.
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory)-[r:Connected]->(b:Memory) RETURN a.id, a.content, b.id, b.content",
+    );
+    assert_eq!(rows.len(), 1, "one edge");
+    assert_eq!(rows[0][0], "Int64(1)");
+    assert_eq!(rows[0][1], format!("String({long:?})"), "long content preserved");
+    assert_eq!(rows[0][2], "Int64(2)");
+    assert_eq!(rows[0][3], "String(\"short\")");
+
+    // And a pure count over the rel table must not crash either.
+    let got = query_rows(&conn, "MATCH (a:Memory)-[r:Connected]->(b:Memory) RETURN count(r)");
+    assert_eq!(got, vec![vec!["Int64(1)".to_string()]]);
+}

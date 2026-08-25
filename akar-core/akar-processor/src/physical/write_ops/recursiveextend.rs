@@ -762,11 +762,15 @@ impl PhysicalExtend {
             // Input field names (already prefixed)
             for col in 0..num_input_fields {
                 let phys_type = chunk.field_types[col];
-                let is_complex = matches!(
+                // Strings must go through the Arrow builder path too: the legacy
+                // ValueVector inline storage caps at 255 bytes, so a node column
+                // like `Memory.content` (any long text) would fail on extend.
+                // Arrow StringBuilder handles arbitrary length (P63).
+                let needs_arrow_builder = matches!(
                     phys_type,
-                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct | PhysicalTypeID::String
                 );
-                if is_complex {
+                if needs_arrow_builder {
                     fields.push(
                         crate::expression_evaluator::build_arrow_from_values(&out_data[col], phys_type, total_rows)
                             .map_err(|e| e.to_string())?
@@ -796,13 +800,30 @@ impl PhysicalExtend {
                 } else {
                     PhysicalTypeID::Int64
                 };
-                let mut v = ValueVector::new(phys_type, total_rows);
-                v.resize(total_rows);
-                for row in 0..total_rows {
-                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
+                // Arrow builder path for strings too (255-byte ValueVector cap, P63).
+                if matches!(
+                    phys_type,
+                    PhysicalTypeID::String | PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                ) {
+                    fields.push(
+                        crate::expression_evaluator::build_arrow_from_values(
+                            &out_data[num_input_fields + col],
+                            phys_type,
+                            total_rows,
+                        )
+                        .map_err(|e| e.to_string())?
+                        .array,
+                    );
+                    field_type_ids.push(phys_type);
+                } else {
+                    let mut v = ValueVector::new(phys_type, total_rows);
+                    v.resize(total_rows);
+                    for row in 0..total_rows {
+                        store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
+                    }
+                    fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                    field_type_ids.push(v.physical_type());
                 }
-                fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
-                field_type_ids.push(v.physical_type());
                 let rel_prefix = if self.rel_var.is_empty() {
                     &self.rel_table_name
                 } else {
@@ -819,11 +840,12 @@ impl PhysicalExtend {
                 } else {
                     PhysicalTypeID::Int64
                 };
-                let is_complex = matches!(
+                // Arrow builder path for strings too (255-byte ValueVector cap, P63).
+                let needs_arrow_builder = matches!(
                     phys_type,
-                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                    PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct | PhysicalTypeID::String
                 );
-                if is_complex {
+                if needs_arrow_builder {
                     fields.push(
                         crate::expression_evaluator::build_arrow_from_values(
                             &out_data[num_input_fields + num_rel_cols + col],

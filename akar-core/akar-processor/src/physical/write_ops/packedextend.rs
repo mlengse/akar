@@ -87,28 +87,59 @@ impl PhysicalOperatorExec for PhysicalPackedExtend {
             // Duplicate each input column for every output row
             for col_idx in 0..num_input_cols {
                 let phys_type = chunk.field_types[col_idx];
-                let mut v = ValueVector::new(phys_type, total_output_rows);
-                v.resize(total_output_rows);
-
-                let mut out_pos = 0;
-                for (src_row, neighbors) in per_src_neighbors.iter().enumerate() {
-                    if neighbors.is_empty() {
-                        continue;
-                    }
-                    // Copy source row value once, then duplicate for each neighbor
-                    let is_null = chunk.fields[col_idx].is_null(src_row);
-                    let val = chunk.get_value(col_idx, src_row);
-                    for _ in neighbors {
-                        if is_null {
-                            v.set_null(out_pos, true);
-                        } else if let Some(ref val) = val {
-                            crate::physical::common::store_value_in_vector(&mut v, out_pos, val)?;
+                // Arrow builder path for strings too (255-byte ValueVector cap, P63).
+                if matches!(
+                    phys_type,
+                    akar_common::types::PhysicalTypeID::String
+                        | akar_common::types::PhysicalTypeID::List
+                        | akar_common::types::PhysicalTypeID::Array
+                        | akar_common::types::PhysicalTypeID::Struct
+                ) {
+                    let mut flat: Vec<Value> = Vec::with_capacity(total_output_rows);
+                    let mut out_pos = 0;
+                    for (src_row, neighbors) in per_src_neighbors.iter().enumerate() {
+                        if neighbors.is_empty() {
+                            continue;
                         }
-                        out_pos += 1;
+                        let is_null = chunk.fields[col_idx].is_null(src_row);
+                        let val = chunk.get_value(col_idx, src_row);
+                        for _ in neighbors {
+                            if is_null {
+                                flat.push(Value::Null);
+                            } else {
+                                flat.push(val.clone().unwrap_or(Value::Null));
+                            }
+                            out_pos += 1;
+                        }
                     }
+                    let arr = crate::expression_evaluator::build_arrow_from_values(&flat, phys_type, out_pos)
+                        .map_err(|e| e.to_string())?;
+                    out_fields.push(arr.array);
+                    out_field_types.push(phys_type);
+                } else {
+                    let mut v = ValueVector::new(phys_type, total_output_rows);
+                    v.resize(total_output_rows);
+
+                    let mut out_pos = 0;
+                    for (src_row, neighbors) in per_src_neighbors.iter().enumerate() {
+                        if neighbors.is_empty() {
+                            continue;
+                        }
+                        // Copy source row value once, then duplicate for each neighbor
+                        let is_null = chunk.fields[col_idx].is_null(src_row);
+                        let val = chunk.get_value(col_idx, src_row);
+                        for _ in neighbors {
+                            if is_null {
+                                v.set_null(out_pos, true);
+                            } else if let Some(ref val) = val {
+                                crate::physical::common::store_value_in_vector(&mut v, out_pos, val)?;
+                            }
+                            out_pos += 1;
+                        }
+                    }
+                    out_fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+                    out_field_types.push(phys_type);
                 }
-                out_fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
-                out_field_types.push(phys_type);
             }
 
             // Destination column: flat Int64 of neighbor node IDs

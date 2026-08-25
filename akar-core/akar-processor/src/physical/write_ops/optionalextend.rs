@@ -233,19 +233,31 @@ impl PhysicalOptionalExtend {
 
             let out_size = out_data.first().map(Vec::len).unwrap_or(chunk.size);
 
-            // Build output columns.
-            let mut fields = Vec::with_capacity(num_out_cols);
+            // Build output columns. Arrow arrays directly so long strings
+            // (>255 bytes) survive — the legacy ValueVector inline storage
+            // caps at 255 bytes and would error on e.g. Memory.content (P63).
+            let mut fields: Vec<arrow::array::ArrayRef> = Vec::with_capacity(num_out_cols);
             let mut field_types = Vec::with_capacity(num_out_cols);
             let mut field_names = Vec::with_capacity(num_out_cols);
 
             for col in 0..num_input_fields {
                 let phys_type = chunk.field_types[col];
-                let mut v = ValueVector::new(phys_type, out_size);
-                v.resize(out_size);
-                for row in 0..out_size {
-                    store_value_in_vector(&mut v, row, &out_data[col][row])?;
+                // Arrow builder path for strings too (255-byte ValueVector cap, P63).
+                if matches!(
+                    phys_type,
+                    PhysicalTypeID::String | PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                ) {
+                    let arr = crate::expression_evaluator::build_arrow_from_values(&out_data[col], phys_type, out_size)
+                        .map_err(|e| e.to_string())?;
+                    fields.push(arr.array);
+                } else {
+                    let mut v = ValueVector::new(phys_type, out_size);
+                    v.resize(out_size);
+                    for row in 0..out_size {
+                        store_value_in_vector(&mut v, row, &out_data[col][row])?;
+                    }
+                    fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                 }
-                fields.push(v);
                 field_types.push(phys_type);
                 field_names.push(if col < chunk.field_names.len() {
                     chunk.field_names[col].clone()
@@ -259,12 +271,26 @@ impl PhysicalOptionalExtend {
                 } else {
                     PhysicalTypeID::Int64
                 };
-                let mut v = ValueVector::new(phys_type, out_size);
-                v.resize(out_size);
-                for row in 0..out_size {
-                    store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
+                // Arrow builder path for strings too (255-byte ValueVector cap, P63).
+                if matches!(
+                    phys_type,
+                    PhysicalTypeID::String | PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
+                ) {
+                    let arr = crate::expression_evaluator::build_arrow_from_values(
+                        &out_data[num_input_fields + col],
+                        phys_type,
+                        out_size,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    fields.push(arr.array);
+                } else {
+                    let mut v = ValueVector::new(phys_type, out_size);
+                    v.resize(out_size);
+                    for row in 0..out_size {
+                        store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
+                    }
+                    fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                 }
-                fields.push(v);
                 field_types.push(phys_type);
                 field_names.push(rel_field_names[col].clone());
             }
@@ -274,18 +300,13 @@ impl PhysicalOptionalExtend {
             for row in 0..out_size {
                 store_value_in_vector(&mut id_v, row, &out_data[num_input_fields + num_rel_cols][row])?;
             }
-            fields.push(id_v);
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&id_v).array);
             field_types.push(PhysicalTypeID::Int64);
             field_names.push(format!("{}.{}", rel_prefix, "_id"));
 
-            let arrow_fields = fields
-                .iter()
-                .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-                .collect::<Vec<_>>();
-            let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
             output.push(DataChunk {
-                fields: arrow_fields,
-                field_types: arrow_field_types,
+                fields,
+                field_types,
                 size: out_size,
                 field_names,
                 sel_vector: None,

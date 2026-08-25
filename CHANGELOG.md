@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(processor) - P63: rel-table traversal crashes on strings >255 bytes (2026-08-25)** - `PhysicalExtend` (`recursiveextend.rs`), `PhysicalOptionalExtend` (`optionalextend.rs`), dan `PhysicalPackedExtend` (`packedextend.rs`) menyalin kolom node/rel melalui `ValueVector` legacy yang meng-hard-cap string inline di 255 byte (`store_value_in_vector`/`push_string` di `akar-common/src/vector.rs`), sehingga `MATCH (a:Memory)-[r:Connected]->(b:Memory)` gagal dengan `Cannot store string of N bytes: inline string storage limit is 255 bytes` bila ada node dengan properti string > 255 byte (mis. `Memory.content`). Node-scan sudah handle string panjang via Arrow; hanya jalur extend yang belum. Fix: kolom `String` (plus List/Array/Struct yang sudah lama) dialihkan ke `build_arrow_from_values` (StringBuilder Arrow, tanpa batas inline). Regresi: `test_rel_scan_long_string_dest_property` di `test_p5312_rel_scan_binding.rs` (content 600 byte, dulu crash kini survive + count). Ditemukan via kairos legacy import (kairos Finding #8). Gate `test [akar-core]`: paket akar-main + akar-processor **0 failed** (rel-scan & integration suites hijau).
+
 ## [0.1.11] - 2026-08-25
 
 ### Added
