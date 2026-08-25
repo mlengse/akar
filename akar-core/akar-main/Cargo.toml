@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "akar-main"
 version = "0.1.7"
 edition.workspace = true

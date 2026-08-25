@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "akar-sqlite"
 version = "0.1.2"
 edition.workspace = true

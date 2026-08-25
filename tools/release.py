@@ -119,9 +119,17 @@ def git_tag_exists(tag: str) -> bool:
     return tag in result.stdout
 
 
+def load_toml(path):
+    """Load TOML file, stripping UTF-8 BOM if present."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return tomllib.loads(raw.decode("utf-8"))
+
+
 def parse_workspace_version() -> str:
-    with open(WORKSPACE_TOML, "rb") as f:
-        data = tomllib.load(f)
+    data = load_toml(WORKSPACE_TOML)
     return data["workspace"]["package"]["version"]
 
 
@@ -131,8 +139,7 @@ def parse_crate_version(crate_name: str) -> str | None:
     if not crate_dir.exists():
         return None
     cargo_toml = crate_dir / "Cargo.toml"
-    with open(cargo_toml, "rb") as f:
-        data = tomllib.load(f)
+    data = load_toml(cargo_toml)
     pkg = data.get("package", {})
     ver = pkg.get("version")
     if isinstance(ver, str):
@@ -142,7 +149,7 @@ def parse_crate_version(crate_name: str) -> str | None:
 
 
 def set_workspace_version(version: str) -> None:
-    text = WORKSPACE_TOML.read_text(encoding="utf-8")
+    text = WORKSPACE_TOML.read_text(encoding="utf-8-sig")
     # Replace [workspace.package] version = "x.y.z"
     text = re.sub(
         r'(\[workspace\.package\]\s*version\s*=\s*")([^"]*)(")',
@@ -158,7 +165,7 @@ def set_crate_version(crate_name: str, version: str) -> None:
     cargo_toml = CARGO_ROOT / crate_name / "Cargo.toml"
     if not cargo_toml.exists():
         return
-    text = cargo_toml.read_text(encoding="utf-8")
+    text = cargo_toml.read_text(encoding="utf-8-sig")
     # Match version = "x.y.z" inside [package]
     text = re.sub(
         r'(^version\s*=\s*")[^"]*(")',
@@ -175,7 +182,7 @@ def align_dep_versions(version: str) -> None:
     for cargo_toml in CARGO_ROOT.rglob("Cargo.toml"):
         if cargo_toml == WORKSPACE_TOML:
             continue
-        text = cargo_toml.read_text(encoding="utf-8")
+        text = cargo_toml.read_text(encoding="utf-8-sig")
         original = text
         # Update akar-* version specs: version = "0.1.x" → version = "0.1.y"
         text = re.sub(
@@ -202,7 +209,7 @@ def check_dep_alignment() -> list[str]:
     for cargo_toml in CARGO_ROOT.rglob("Cargo.toml"):
         if cargo_toml == WORKSPACE_TOML:
             continue
-        text = cargo_toml.read_text(encoding="utf-8")
+        text = cargo_toml.read_text(encoding="utf-8-sig")
         for m in re.finditer(
             r'(akar-[a-z0-9_-]+)\s*=\s*\{\s*version\s*=\s*"([^"]*)"',
             text,
@@ -373,8 +380,7 @@ def publish_crate(crate_name: str, version: str) -> bool:
         return True
 
     cargo_toml = crate_dir / "Cargo.toml"
-    with open(cargo_toml, "rb") as f:
-        data = tomllib.load(f)
+    data = load_toml(cargo_toml)
     publish = data.get("package", {}).get("publish", True)
     if publish is False:
         print(f"  SKIP {crate_name}: publish = false")
