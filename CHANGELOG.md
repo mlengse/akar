@@ -27,6 +27,8 @@
 
 - **fix(algo) — koreksi tracing log jumlah registrasi algoritma graph (2026-08-25)** — `tracing::info!` di `AlgoExtension::init` (`akar-algo/src/lib.rs:871`) menampilkan "15 algorithms × canonical + 15 aliases" padahal aktual 17 canonical + 13 aliases = 30 registrasi. Jumlah canonical dihitung ulang dari `register_table_function`: page_rank, wcc, scc_tarjan, scc_kosaraju, k_core, louvain, spread_activation, spanning_forest, lpa, betweenness, closeness, triangle_count, all_sp_destinations, random_walk, node2vec, shortest_path, weighted_shortest_path (17). — `docs-reconciliation`
 
+- **chore(python) — `akar` 0.1.4 di PyPI (2026-08-25)** — wheel `akar-0.1.4-cp39-abi3-win_amd64.whl` di-upload ([pypi.org/project/akar/0.1.4](https://pypi.org/project/akar/0.1.4/)); membundel engine Rust baru (akar-algo 0.1.6 tracing fix + semua perubahan v0.1.10). Permukaan Python tidak berubah.
+
 ## [0.1.10] - 2026-08-24
 
 ### Added
