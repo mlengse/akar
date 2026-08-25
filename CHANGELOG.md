@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-25
+
 ### Changed
 
 - **chore(deps) — align all akar-* dep version specs to actual crate versions (2026-08-25)** — 100+ stale `version =` fields across 35 Cargo.toml files updated to match actual published/inherited versions (e.g. akar-main deps: akar-algo 0.1.0→0.1.6, akar-storage 0.1.3→0.1.7, akar-processor 0.1.2→0.1.5). Workspace resolver ignores these (uses path), but stale specs are misleading for crates.io publishing and IDE hints. All `optional = true` flags preserved. `cargo check` + `cargo test -p akar-main -p akar-processor` pass.
@@ -290,4 +292,5 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.12]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.12
 [0.1.1]: https://github.com/mlengse/akar/releases/tag/v0.1.1
