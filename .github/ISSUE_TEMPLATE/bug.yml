@@ -12,7 +12,7 @@ body:
     attributes:
       label: Akar version
       description: What version of Akar are you using?
-      placeholder: v0.4.0
+      placeholder: v0.1.x
     validations:
       required: false
   - type: input

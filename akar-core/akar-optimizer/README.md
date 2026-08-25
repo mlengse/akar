@@ -45,4 +45,4 @@ Query optimization passes that transform the logical plan for better performance
 - `reorder_joins_greedy()` — tree-based greedy reordering by cardinality
 - `reorder_joins_greedy_first()` — flat-list entry point
 
-**Tests:** 68
+**Tests:** 80

@@ -23,4 +23,4 @@ CALL page_rank('g') RETURN node.id, rank ORDER BY rank DESC LIMIT 10;
 CALL DROP_PROJECTED_GRAPH('g');
 ```
 
-**Tests:** 34
+**Tests:** 53

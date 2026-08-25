@@ -868,7 +868,7 @@ impl Extension for AlgoExtension {
             },
         );
 
-        tracing::info!("ALGO extension loaded: 30 registrations (15 algorithms × canonical + 15 aliases)");
+        tracing::info!("ALGO extension loaded: 30 registrations (17 algorithms × canonical + 13 aliases)");
 
         Ok(())
     }

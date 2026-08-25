@@ -16,4 +16,4 @@ execute`. Handles DDL, DML, COPY FROM, and prepared statements.
 
 **`Database::connect_tcp`** — Remote client for embedded server mode (length-prefixed JSON framing).
 
-**Tests:** 68 unit + 293 integration
+**Tests:** 81 unit + 409 integration

@@ -1,9 +1,8 @@
 # Storage
-src/storage @benjaminwinger
-src/include/storage @benjaminwinger
+akar-core/akar-storage/ @benjaminwinger
 
 # APIs
 
 ## Rust
-tools/rust_api @benjaminwinger
-examples/rust @benjaminwinger
+akar-core/akar-main/ @benjaminwinger
+akar-core/akar-c/ @benjaminwinger

@@ -1,4 +1,4 @@
-# Kuzu Rust vs C++ Performance Comparison
+# Akar vs C++ Performance Comparison
 
 > **Date:** 2026-07-18 (P30.3 Complete — 3-way parity verified)
 > **Rust:** criterion v0.8, cargo bench --workspace

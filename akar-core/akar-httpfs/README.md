@@ -6,4 +6,4 @@ HTTP/HTTPS/S3 file system support for reading remote files in COPY FROM and othe
 
 **Functions:** HTTP/HTTPS/S3 file read operations
 
-**Tests:** 7
+**Tests:** 10

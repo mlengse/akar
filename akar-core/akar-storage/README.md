@@ -32,4 +32,4 @@ reading, Arrow->Akar type mapping (Int64->INT64, Utf8->STRING, etc.).
 
 **Index:** Generic hash index with collision resolution.
 
-**Tests:** 344
+**Tests:** 349

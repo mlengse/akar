@@ -50,7 +50,7 @@ git checkout main
 git pull origin main
 
 # Create a release branch
-git checkout -b release/v0.1.0
+git checkout -b release/vX.Y.Z
 ```
 
 ### 2. Update version
@@ -59,7 +59,7 @@ Update the version in `akar-core/Cargo.toml`:
 
 ```toml
 [workspace.package]
-version = "0.1.0"  # Change to target version
+version = "X.Y.Z"  # Change to target version
 ```
 
 Update any references to the old version in documentation (README.md, etc.).
@@ -83,15 +83,15 @@ cargo test --workspace --no-fail-fast
 
 ```bash
 git add -A
-git commit -m "chore: bump version to 0.1.0"
-git tag v0.1.0
-git push origin release/v0.1.0
-git push origin v0.1.0
+git commit -m "chore: bump version to vX.Y.Z"
+git tag vX.Y.Z
+git push origin release/vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 ### 5. Create PR
 
-Open a pull request from `release/v0.1.0` to `main`. The CI will run automatically.
+Open a pull request from `release/vX.Y.Z` to `main`. The CI will run automatically.
 
 ### 6. Release
 
@@ -106,7 +106,7 @@ Once the PR is merged and the tag is pushed to `main`, the `rust-release.yml` wo
 
 ```bash
 # Download and test the binary
-curl -LO https://github.com/mlengse/akar/releases/download/v0.1.0/akar-cli-linux-amd64
+curl -LO https://github.com/mlengse/akar/releases/download/vX.Y.Z/akar-cli-linux-amd64
 chmod +x akar-cli-linux-amd64
 ./akar-cli-linux-amd64 --version
 ```

@@ -13,4 +13,4 @@ schema/utility, and 14 aggregates.
 **Aggregate state machine:** `AggValueState` enum with Count, Sum, Avg, Min, Max, Collect
 variants. Finalize() produces typed Value.
 
-**Tests:** 176
+**Tests:** 182

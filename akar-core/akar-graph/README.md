@@ -21,4 +21,4 @@ CSR adjacency graph and graph algorithms.
 - Reachable Within (BFS with max distance)
 - Degree Centrality
 
-**Tests:** 34
+**Tests:** 36

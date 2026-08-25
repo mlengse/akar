@@ -32,7 +32,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 | Logical operators | **59** variants |
 | Physical operators | **50** structs (incl. `PhysicalMergeRel` P53.20, `PhysicalOptionalExtend` P53.25) |
 | Extensions | **15** crates |
-| Graph algorithms | **17** |
+| Graph algorithms | **18** |
 
 ---
 
@@ -69,11 +69,14 @@ akar/
 │   ├── akar-function/           # 259 built-in functions
 │   ├── akar-graph/              # CSR adjacency, GDS framework
 │   ├── akar-extension/          # Extension framework trait + registry
+│   ├── akar-search/             # Hybrid search, RRF fusion
+│   ├── akar-dream/              # Dream engine orchestrator
+│   ├── akar-ml/                 # LSTM ML training
 │   │
 │   ├── akar-json/               # JSON extension
 │   ├── akar-fts/                # Full-Text Search (BM25)
 │   ├── akar-vector/             # Vector similarity search
-│   ├── akar-algo/               # 17 graph algorithms
+│   ├── akar-algo/               # 18 graph algorithms
 │   ├── akar-httpfs/             # HTTP/HTTPS/S3 file system
 │   ├── akar-duckdb/             # DuckDB integration
 │   ├── akar-sqlite/             # SQLite integration (rusqlite)
@@ -270,11 +273,11 @@ P60.2).
 
 ### 5.1 Logical Types (37)
 
-Scalar: `BOOL`, `INT8`, `INT16`, `INT32`, `INT64`, `INT128`, `UINT8`, `UINT16`, `UINT32`, `UINT64`, `FLOAT`, `DOUBLE`, `STRING`, `BLOB`, `UUID`, `SERIAL`, `DATE`, `TIMESTAMP`, `TIMESTAMP_NS`, `TIMESTAMP_MS`, `TIMESTAMP_S`, `TIMESTAMP_TZ`, `INTERVAL`
+Scalar (26): `BOOL`, `INT8`, `INT16`, `INT32`, `INT64`, `INT128`, `UINT8`, `UINT16`, `UINT32`, `UINT64`, `UINT128`, `FLOAT`, `DOUBLE`, `DECIMAL`, `STRING`, `BLOB`, `UUID`, `SERIAL`, `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMP_NS`, `TIMESTAMP_MS`, `TIMESTAMP_S`, `TIMESTAMP_TZ`, `INTERVAL`
 
-Composite: `LIST`, `ARRAY`, `MAP`, `STRUCT`, `UNION`, `NODE`, `REL`, `RECURSIVE_REL`, `INTERNAL_ID`
+Composite (9): `LIST`, `ARRAY`, `MAP`, `STRUCT`, `UNION`, `NODE`, `REL`, `RECURSIVE_REL`, `INTERNAL_ID`
 
-Special: `ANY`, `NULL`, `RDF_VARIANT`
+Special (2): `ANY`, `JSON`
 
 ### 5.2 Physical Types (19)
 
@@ -306,7 +309,7 @@ Special: `ANY`, `NULL`, `RDF_VARIANT`
 | Schema/Utility | 17 | Various system functions |
 
 Fungsi `CALL`-able sistem (`show_tables()`, `table_info()`, `db_version()`,
-`storage_info()`, `show_indexes()`, GDS 17, `export_csv()`, dst.) **tidak
+`storage_info()`, `show_indexes()`, GDS 18, `export_csv()`, dst.) **tidak
 dihitung di registry base** — di-handle sebagai `BoundStandaloneCall` di lapisan
 connection (`akar-main/src/connection/standalone_call.rs`) dan lewat table
 functions GDS (`akar-algo`). Lihat header §6 di atas.
@@ -358,7 +361,7 @@ akar-main = { git = "...", features = ["json-extension", "fts-extension", "vecto
 
 ## 8. Graph Data Science (GDS) Framework
 
-17 algorithms implemented in [akar-graph](akar-core/akar-graph) + [akar-algo](akar-core/akar-algo):
+18 algorithms implemented in [akar-graph](akar-core/akar-graph) + [akar-algo](akar-core/akar-algo):
 
 | Algorithm | Description |
 |-----------|-------------|

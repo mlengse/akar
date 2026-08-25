@@ -21,4 +21,4 @@ Cypher query parser using pest.rs PEG grammar.
 
 **AST types:** 33 Statement variants, 10 Clause variants, Expression enum with 10 variants, Constant with 7 variants.
 
-**Tests:** 67
+**Tests:** 91

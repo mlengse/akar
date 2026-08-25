@@ -82,7 +82,7 @@ contains 35 crates and ~106K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
 | `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
 | `akar-function` | 259 SQL/Cypher functions (244 scalar + 14 aggregate + 1 table) |
-| `akar-algo` | 17 graph algorithms (PageRank, SCC, Louvain, node2vec, etc.) |
+| `akar-algo` | 18 graph algorithms (PageRank, SCC, Louvain, node2vec, etc.) |
 | `akar-fts` | Full-text search (BM25) |
 | `akar-vector` | Vector similarity search |
 | `akar-server` | Embedded TCP server mode (multi-process access) |
