@@ -473,6 +473,10 @@ def publish_crate(crate_name: str, version: str) -> bool:
 
         # Remove path = "..." from dependencies (crates.io doesn't accept path deps)
         text = re.sub(r'\s*,?\s*path\s*=\s*"[^"]*"', '', text)
+        # Clean up leading commas in inline tables: {, version → { version
+        text = re.sub(r'\{\s*,', '{', text)
+        # Clean up trailing commas before closing brace
+        text = re.sub(r',\s*\}', '}', text)
 
         # Remove [lints] workspace = true section (not needed for crates.io)
         text = re.sub(r'\[lints\]\s*\nworkspace\s*=\s*true\s*\n?', '', text)
