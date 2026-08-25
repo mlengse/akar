@@ -21,8 +21,10 @@ import argparse
 import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib  # Python 3.11+ built-in
 from pathlib import Path
 
@@ -373,7 +375,12 @@ def push(tag: str) -> None:
 
 
 def publish_crate(crate_name: str, version: str) -> bool:
-    """Publish a single crate to crates.io. Returns True on success."""
+    """Publish a single crate to crates.io. Returns True on success.
+    
+    Creates a standalone temp copy to avoid workspace dependency resolution
+    (Cargo always resolves ALL workspace members, causing chicken-and-egg
+    failures for bottom-up publishing).
+    """
     crate_dir = CARGO_ROOT / crate_name
     if not crate_dir.exists():
         print(f"  SKIP {crate_name}: directory not found")
@@ -392,12 +399,65 @@ def publish_crate(crate_name: str, version: str) -> bool:
         return False
 
     print(f"  publishing {crate_name}@{version} ...")
-    result = run(
-        ["cargo", "publish", "-p", crate_name, "--allow-dirty", "--no-verify"],
-        cwd=CARGO_ROOT,
-        check=False,
-        capture=True,
-    )
+
+    # Create standalone temp copy
+    tmp = tempfile.mkdtemp(prefix=f"akar-publish-{crate_name}-")
+    try:
+        # Copy source files
+        shutil.copytree(crate_dir, os.path.join(tmp, crate_name),
+                        ignore=shutil.ignore_patterns("target", ".git", "*.html", "*.log"))
+        standalone_dir = Path(tmp) / crate_name
+
+        # Inline workspace inheritance in Cargo.toml
+        ws_data = load_toml(WORKSPACE_TOML)
+        ws_pkg = ws_data.get("workspace", {}).get("package", {})
+        ws_deps = ws_data.get("workspace", {}).get("dependencies", {})
+        ws_dev_deps = ws_data.get("workspace", {}).get("dev-dependencies", {})
+        ws_build_deps = ws_data.get("workspace", {}).get("build-dependencies", {})
+
+        ct = standalone_dir / "Cargo.toml"
+        text = ct.read_text(encoding="utf-8-sig")
+
+        # Inline workspace.package fields
+        for key in ("edition", "license", "repository", "homepage", "description", "authors", "rust-version"):
+            if f"{key}.workspace" in text:
+                val = ws_pkg.get(key)
+                if val is not None:
+                    text = text.replace(f'{key}.workspace = true', f'{key} = {tomllib.dumps({key: val}).strip().split("=", 1)[1].strip()}')
+
+        # Inline workspace dependency versions
+        for dep_name in ws_deps:
+            text = re.sub(
+                rf'({re.escape(dep_name)})\s*=\s*\{{\s*workspace\s*=\s*true\s*\}}',
+                rf'\1 = {{"version" = "{ws_deps[dep_name]}"}}',
+                text,
+            )
+            text = re.sub(
+                rf'({re.escape(dep_name)})\s*=\s*".*"',
+                rf'\1 = "{ws_deps[dep_name]}"',
+                text,
+            )
+
+        ct.write_text(text, encoding="utf-8")
+
+        # Create a minimal Cargo.lock so cargo publish doesn't fail
+        result = run(
+            ["cargo", "generate-lockfile"],
+            cwd=str(standalone_dir),
+            check=False,
+            capture=True,
+        )
+
+        # Publish from standalone copy
+        result = run(
+            ["cargo", "publish", "--allow-dirty", "--no-verify"],
+            cwd=str(standalone_dir),
+            check=False,
+            capture=True,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     if result.returncode != 0:
         output = (result.stdout or "") + (result.stderr or "")
         if "crate version .* is already uploaded" in output or "already uploaded" in output:
