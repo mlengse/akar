@@ -707,7 +707,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.6` (highest published crate patch); latest release tag **v0.1.10** (2026-08-24)
+- **Current version:** `0.1.13` (workspace); latest release tag **v0.1.13** (2026-08-26)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
