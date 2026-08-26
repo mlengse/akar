@@ -247,6 +247,8 @@ fn execute_query(conn: &Connection, request: &WireRequest) -> Vec<u8> {
 ///
 /// JSON numbers are mapped to `Int64` when they fit, `Double` otherwise.
 /// JSON strings, booleans, null, and arrays (recursively) map directly.
+/// JSON objects map to `Value::Struct` so ``UNWIND $batch AS row ... row.field``
+/// works for batched row objects (P69).
 fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
     match val {
         serde_json::Value::Null => Ok(Value::Null),
@@ -268,7 +270,15 @@ fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
             }
             Ok(Value::List(items))
         }
-        serde_json::Value::Object(_) => Err("Object parameters are not supported".into()),
+        serde_json::Value::Object(obj) => {
+            let mut fields = Vec::with_capacity(obj.len());
+            for (k, v) in obj {
+                let converted = json_value_to_akar_value(v)
+                    .map_err(|e| format!("Object field {k}: {e}"))?;
+                fields.push((k.clone(), converted));
+            }
+            Ok(Value::Struct(fields))
+        }
     }
 }
 

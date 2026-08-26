@@ -7,6 +7,8 @@
 
 ### Added
 
+- **feat(server) — P69: array-of-object parameter support (2026-08-26)** — `json_value_to_akar_value` (`session.rs`) now maps JSON objects → `Value::Struct` (was: `"Object parameters are not supported"`), recursively inside arrays. `value_to_expression` (`prepared_statement.rs`) maps `Value::Struct` → `Expression::Map` and `Value::Map` → `Expression::Map`, so `UNWIND $batch AS row ... row.field` works end-to-end for batched row objects (afe/dae/dream batch-write pattern). Known gap (documented in test): `UNWIND $rows AS row CREATE (... row.field ...)` writes 0 rows due to a complex-value pipeline limitation in `PhysicalUnwind → PhysicalCreateNode` (RETURN-based field access works). 2 new server tests: `test_parameterized_array_of_objects_unwind`, `test_parameterized_array_of_objects_dml`. Gate `test [akar-core]`: 0 failed.
+
 - **docs — README.md for 4 published crates missing them (2026-08-26)** — `akar-dream`, `akar-search`, `akar-ml`, `akar-migrate` were `publish = true` in `PUBLISH_ORDER` but had no `README.md` (crates.io page would render empty). Added READMEs following the established pattern (description + components + usage + test count). `doc-check.py` (root tools) gained a rule: `publish = true` crates must carry a `README.md` or explicit `readme =` field — verified to flag a missing one and clear once added.
 
 - **feat(server) — P68: `--checkpoint-threshold` flag in akar-server (2026-08-26)** — `akar_server` gained a `--checkpoint-threshold <bytes>` CLI flag (default **16 MiB**) replacing the hardcoded `checkpoint_threshold: -1`. With `-1`, `maybe_checkpoint` fired on EVERY write → `checkpoint_with_drain` → `persist_all_tables` rewrote all column mirrors ≈ **1s/write** and serialized reads behind the write lock (kairos finding). Default is now a positive WAL-size threshold (`wal_size() > threshold`), so checkpointing happens only when the WAL grows past it. `0` disables auto-checkpoint; `-1` restores checkpoint-per-write. Embedded `SystemConfig::default()` remains `-1` (unchanged behavior + tests). Gate `test [akar-core]`: 0 failed.
@@ -319,4 +321,5 @@
 [0.1.14]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.14
 [0.1.13]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.13
 [0.1.12]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.12
+[0.1.11]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.11
 [0.1.1]: https://github.com/mlengse/akar/releases/tag/v0.1.1

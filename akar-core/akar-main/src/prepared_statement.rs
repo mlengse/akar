@@ -420,6 +420,26 @@ fn value_to_expression(value: &Value) -> Result<akar_parser::ast::Expression, St
             }
             Ok(Expression::List(exprs))
         }
+        // JSON objects → Value::Struct → Expression::Map so UNWIND $batch AS
+        // row ... row.field works for batched row objects (P69).
+        Value::Struct(fields) => {
+            let mut entries = Vec::with_capacity(fields.len());
+            for (name, v) in fields {
+                entries.push((name.clone(), value_to_expression(v)?));
+            }
+            Ok(Expression::Map(entries))
+        }
+        Value::Map(pairs) => {
+            let mut entries = Vec::with_capacity(pairs.len());
+            for (k, v) in pairs {
+                let key = match k {
+                    Value::String(s) => s.clone(),
+                    other => return Err(format!("Map key {other:?} is not a string")),
+                };
+                entries.push((key, value_to_expression(v)?));
+            }
+            Ok(Expression::Map(entries))
+        }
         // Scalars: delegate to value_to_constant → Expression::Constant
         other => Ok(Expression::Constant(value_to_constant(other)?)),
     }
