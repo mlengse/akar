@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(server) — P68: `--checkpoint-threshold` flag in akar-server (2026-08-26)** — `akar_server` gained a `--checkpoint-threshold <bytes>` CLI flag (default **16 MiB**) replacing the hardcoded `checkpoint_threshold: -1`. With `-1`, `maybe_checkpoint` fired on EVERY write → `checkpoint_with_drain` → `persist_all_tables` rewrote all column mirrors ≈ **1s/write** and serialized reads behind the write lock (kairos finding). Default is now a positive WAL-size threshold (`wal_size() > threshold`), so checkpointing happens only when the WAL grows past it. `0` disables auto-checkpoint; `-1` restores checkpoint-per-write. Embedded `SystemConfig::default()` remains `-1` (unchanged behavior + tests). Gate `test [akar-core]`: 0 failed.
+
 ## [0.1.14] - 2026-08-26
 
 ### Added

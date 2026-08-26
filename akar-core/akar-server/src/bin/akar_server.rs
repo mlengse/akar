@@ -60,6 +60,14 @@ struct Args {
     /// Enable read-only mode (no writes accepted).
     #[arg(long)]
     read_only: bool,
+
+    /// WAL size in bytes that triggers an auto-checkpoint. Defaults to a
+    /// positive threshold so the daemon checkpoints only when the WAL grows
+    /// past this size, NOT after every write (the historical -1 default
+    /// caused ~1s persist_all_tables rewrites per write). Set to 0 to
+    /// disable auto-checkpoint, or -1 to restore checkpoint-per-write.
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    checkpoint_threshold: i64,
 }
 
 /// Sidecar file written to `--json-sidecar` path on startup.
@@ -92,7 +100,7 @@ fn main() {
     // Open database.
     let config = SystemConfig {
         auto_checkpoint: true,
-        checkpoint_threshold: -1,
+        checkpoint_threshold: args.checkpoint_threshold,
         concurrent_writes: true,
         read_only: args.read_only,
         ..Default::default()
