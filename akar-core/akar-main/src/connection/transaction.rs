@@ -85,14 +85,19 @@ impl Connection {
         // Step 4: Flush LocalStorage → tables, ShadowFile → BM, WAL + checkpoint
         // `commit_transaction` handles: Commit record append, WAL flush to disk,
         // LocalStorage flush to tables, ShadowFile apply to BM, auto-checkpoint.
+        //
+        // No drain for auto-checkpoints: the committing txn is already deregistered
+        // (step 2) and other transactions' writes live in their local buffers, not
+        // in the global WAL/BM. The WAL handles crash recovery regardless. Skipping
+        // the drain avoids the 30-second timeout that fires whenever concurrent
+        // writers are active (Finding #29 / P67).
         let sm = &self.database.storage_manager;
-        let drain_fn = |timeout: std::time::Duration| -> bool { tm.stop_new_txns_and_wait_until_all_leave(timeout) };
         sm.commit_transaction(
             &resources.local_storage,
             &resources.shadow_file,
             self.database.config.checkpoint_threshold,
             txn_id,
-            Some(&drain_fn),
+            None,
         )
         .map_err(|e| {
             tracing::error!("Durable commit failed for txn#{txn_id}: {e}");

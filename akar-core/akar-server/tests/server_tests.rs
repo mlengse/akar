@@ -873,3 +873,45 @@ fn test_dream_control_default_action() {
     assert!(res.success);
     assert_eq!(res.rows[0][0], Some(Value::String("status".to_string())));
 }
+
+#[test]
+fn test_concurrent_writes_no_drain_timeout() {
+    // P67: with checkpoint_threshold=-1 (default), every commit triggers an
+    // auto-checkpoint. The old code passed a drain function that waited up to
+    // 30s for all active transactions to leave — always timing out under
+    // concurrent writers. After the fix, auto-checkpoints skip the drain.
+    // This test runs 3 concurrent writers doing 10 writes each and verifies
+    // the whole batch completes in under 30s (previously it would stall for
+    // 30s per conflicting commit).
+    let ts = start_server(config());
+    let admin = connect(&ts);
+    admin
+        .query("CREATE NODE TABLE P67(id INT64, val STRING, PRIMARY KEY(id))")
+        .expect("DDL");
+
+    let start = std::time::Instant::now();
+    let handles: Vec<_> = (0..3)
+        .map(|thread_id| {
+            let c = connect(&ts);
+            thread::spawn(move || {
+                for i in 0..10 {
+                    let id = thread_id * 10 + i;
+                    c.query(&format!("CREATE (:P67 {{id: {id}, val: 't{thread_id}_{i}'}})"))
+                        .expect("write");
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().expect("writer thread");
+    }
+    let elapsed = start.elapsed();
+
+    let res = admin.query("MATCH (n:P67) RETURN n.id").expect("count");
+    assert_eq!(res.num_rows(), 30, "all 30 writes must commit");
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "30 concurrent writes should finish in <30s, took {elapsed:?}"
+    );
+}
