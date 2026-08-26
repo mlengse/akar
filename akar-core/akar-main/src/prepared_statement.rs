@@ -559,11 +559,7 @@ mod tests {
 
     #[test]
     fn test_value_to_expression_list() {
-        let val = Value::List(vec![
-            Value::Int64(1),
-            Value::Int64(2),
-            Value::Int64(3),
-        ]);
+        let val = Value::List(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]);
         let expr = value_to_expression(&val).unwrap();
         match expr {
             Expression::List(items) => {

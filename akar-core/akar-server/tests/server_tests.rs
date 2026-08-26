@@ -772,10 +772,7 @@ fn test_parameterized_float_array() {
 
     let mut params = HashMap::new();
     // Simulate a 4-element embedding vector
-    params.insert(
-        "emb".to_string(),
-        serde_json::json!([0.1, 0.2, 0.3, 0.4]),
-    );
+    params.insert("emb".to_string(), serde_json::json!([0.1, 0.2, 0.3, 0.4]));
 
     let res = client
         .query_with_params("UNWIND $emb AS v RETURN v", params)

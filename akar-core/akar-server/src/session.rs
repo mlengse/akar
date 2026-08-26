@@ -264,9 +264,7 @@ fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
         serde_json::Value::Array(arr) => {
             let mut items = Vec::with_capacity(arr.len());
             for (i, item) in arr.iter().enumerate() {
-                items.push(json_value_to_akar_value(item).map_err(|e| {
-                    format!("Array element {i}: {e}")
-                })?);
+                items.push(json_value_to_akar_value(item).map_err(|e| format!("Array element {i}: {e}"))?);
             }
             Ok(Value::List(items))
         }
@@ -431,10 +429,7 @@ fn cell_value(field: &ArrayRef, field_type: PhysicalTypeID, row: usize) -> Optio
             let inner = list_arr.value(row);
             let mut items = Vec::with_capacity(inner.len());
             for i in 0..inner.len() {
-                items.push(
-                    akar_common::arrow_vector::convert_arrow_scalar(&inner, i)
-                        .unwrap_or(Value::Null),
-                );
+                items.push(akar_common::arrow_vector::convert_arrow_scalar(&inner, i).unwrap_or(Value::Null));
             }
             Some(Value::List(items))
         }
