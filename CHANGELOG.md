@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-08-26
+
 ### Added
 
 - **feat(server) — P66: `dream_control` op in akar-server (2026-08-26)** — `WireRequest` gains `action: Option<String>` field; akar-server dispatch now routes `"dream_control"` to a stub handler returning `not_available` (DreamBackend integration deferred). Empty/missing action defaults to `"status"`. `RemoteDatabase::dream_control(action)` added for Rust clients. kairos `_rpc_json` routes the op to the wire instead of raising locally. 2 new server tests: `test_dream_control_status`, `test_dream_control_default_action`. Gate `test [akar-core]`: **1,903 total / 0 failed**.
@@ -308,6 +310,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.14]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.14
 [0.1.13]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.13
 [0.1.12]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.12
 [0.1.1]: https://github.com/mlengse/akar/releases/tag/v0.1.1
