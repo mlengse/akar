@@ -13,6 +13,7 @@
 //! - the server holds the exclusive file lock (clients never open the DB dir),
 //! - plain embedded single-process usage is unaffected.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
@@ -637,4 +638,110 @@ fn test_unknown_operation_returns_error() {
     let result = client.query("RETURN 1");
     // The default "query" op should work fine.
     assert!(result.is_ok());
+}
+
+// ===========================================================================
+// P64: Parameter binding via wire protocol
+// ===========================================================================
+
+#[test]
+fn test_parameterized_return_value() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("x".to_string(), serde_json::json!(42));
+
+    let res = client
+        .query_with_params("RETURN $x", params)
+        .expect("parameterized query");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.num_columns(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::Int64(42)));
+}
+
+#[test]
+fn test_parameterized_string_param() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("name".to_string(), serde_json::json!("alice"));
+
+    let res = client.query_with_params("RETURN $name", params).expect("string param");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::String("alice".to_string())));
+}
+
+#[test]
+fn test_parameterized_bool_and_null() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("flag".to_string(), serde_json::json!(true));
+    params.insert("nothing".to_string(), serde_json::json!(null));
+
+    let res = client
+        .query_with_params("RETURN $flag, $nothing", params)
+        .expect("bool and null params");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.num_columns(), 2);
+    assert_eq!(res.cell(0, 0), Some(&Value::Bool(true)));
+    assert_eq!(res.cell(0, 1), None, "null param must round-trip as NULL");
+}
+
+#[test]
+fn test_parameterized_float_param() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("pi".to_string(), serde_json::json!(2.718));
+
+    let res = client.query_with_params("RETURN $pi", params).expect("float param");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::Double(2.718)));
+}
+
+#[test]
+fn test_parameterized_dml_with_params() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    client
+        .query("CREATE NODE TABLE ParamT(name STRING, age INT64, PRIMARY KEY(name))")
+        .expect("DDL");
+
+    // Insert using parameters
+    let mut params = HashMap::new();
+    params.insert("name".to_string(), serde_json::json!("bob"));
+    params.insert("age".to_string(), serde_json::json!(25));
+    client
+        .query_with_params("CREATE (:ParamT {name: $name, age: $age})", params)
+        .expect("parameterized insert");
+
+    // Query using parameters
+    let mut params2 = HashMap::new();
+    params2.insert("min_age".to_string(), serde_json::json!(20));
+    let res = client
+        .query_with_params("MATCH (n:ParamT) WHERE n.age >= $min_age RETURN n.name, n.age", params2)
+        .expect("parameterized query after insert");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::String("bob".to_string())));
+    assert_eq!(res.cell(0, 1), Some(&Value::Int64(25)));
+}
+
+#[test]
+fn test_empty_params_falls_back_to_plain_query() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    // Empty params map should behave like a plain query (no params path).
+    let params = HashMap::new();
+    let res = client
+        .query_with_params("RETURN 1 + 2", params)
+        .expect("empty params fallback");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::Int64(3)));
 }

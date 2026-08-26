@@ -24,6 +24,7 @@
 
 use akar_common::types::Value;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
@@ -67,6 +68,14 @@ pub struct WireRequest {
     /// Filesystem path for operations that require one (e.g. `export`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Optional query parameters as a name→value map.
+    ///
+    /// When present and non-empty, the server executes the query through the
+    /// prepared-statement pipeline with parameter substitution instead of
+    /// plain string execution.  Values are JSON primitives (number, string,
+    /// bool, null) that are converted to Akar [`Value`]s before binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// The response the server returns for a query.
@@ -441,6 +450,26 @@ impl RemoteDatabase {
             op: None,
             token: self.token.clone(),
             path: None,
+            params: None,
+        })
+    }
+
+    /// Execute a parameterized Cypher query.
+    ///
+    /// `params` is a map of parameter names (without the `$` prefix) to JSON
+    /// values.  The server binds them via the prepared-statement pipeline.
+    pub fn query_with_params(
+        &self,
+        query_str: &str,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: query_str.to_string(),
+            client_name: None,
+            op: None,
+            token: self.token.clone(),
+            path: None,
+            params: Some(params),
         })
     }
 
@@ -452,6 +481,7 @@ impl RemoteDatabase {
             op: Some("ping".to_string()),
             token: self.token.clone(),
             path: None,
+            params: None,
         })
     }
 
@@ -463,6 +493,7 @@ impl RemoteDatabase {
             op: Some("flush".to_string()),
             token: self.token.clone(),
             path: None,
+            params: None,
         })
     }
 
@@ -474,6 +505,7 @@ impl RemoteDatabase {
             op: Some("stats".to_string()),
             token: self.token.clone(),
             path: None,
+            params: None,
         })
     }
 
@@ -485,6 +517,7 @@ impl RemoteDatabase {
             op: Some("export".to_string()),
             token: self.token.clone(),
             path: Some(path.to_string()),
+            params: None,
         })
     }
 
@@ -496,6 +529,7 @@ impl RemoteDatabase {
             op: Some("shutdown".to_string()),
             token: self.token.clone(),
             path: None,
+            params: None,
         })
     }
 

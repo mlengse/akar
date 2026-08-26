@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(server) — P64: parameter binding in wire protocol (2026-08-26)** — `WireRequest` gains an optional `params: Option<HashMap<String, serde_json::Value>>` field. When present and non-empty, `akar-server` executes the query through the prepared-statement pipeline (`conn.prepare` + `conn.execute`) with JSON→Akar `Value` conversion, instead of the plain string query path. `RemoteDatabase` gains `query_with_params(query, params)` for Rust clients. kairos `KuzuClientStore._rpc_json` now forwards the `params` dict from `_execute` to the wire. Fixes `RETURN $x` with `{"x":42}` returning `null` in daemon mode (kairos Finding #26). 6 new server tests: `test_parameterized_return_value`, `test_parameterized_string_param`, `test_parameterized_bool_and_null`, `test_parameterized_float_param`, `test_parameterized_dml_with_params`, `test_empty_params_falls_back_to_plain_query`. Gate `test [akar-core]`: **29/29 passed** (akar-server suite).
+
 ## [0.1.12] - 2026-08-25
 
 ### Changed

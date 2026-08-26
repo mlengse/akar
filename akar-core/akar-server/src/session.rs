@@ -20,6 +20,7 @@ use arrow::array::{
     ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
     LargeStringArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -198,12 +199,70 @@ fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
 }
 
 /// Run a single query against the session's connection and serialize the result.
+///
+/// When the request carries `params`, the query is executed through the
+/// prepared-statement pipeline with parameter substitution.  Otherwise the
+/// plain string query path is used.
 fn execute_query(conn: &Connection, request: &WireRequest) -> Vec<u8> {
-    let wire = match conn.query(&request.query) {
-        Ok(result) => query_result_to_wire(&result),
-        Err(e) => WireResponse::error(e),
+    let wire = match &request.params {
+        Some(params) if !params.is_empty() => execute_parameterized_query(conn, request, params),
+        _ => match conn.query(&request.query) {
+            Ok(result) => query_result_to_wire(&result),
+            Err(e) => WireResponse::error(e),
+        },
     };
     serialize_response(&wire)
+}
+
+/// Convert a JSON value to an Akar [`Value`] for parameter binding.
+///
+/// JSON numbers are mapped to `Int64` when they fit, `Double` otherwise.
+/// JSON strings, booleans, and null map directly.
+fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
+    match val {
+        serde_json::Value::Null => Ok(Value::Null),
+        serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Value::Int64(i))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Value::Double(f))
+            } else {
+                Err(format!("JSON number {n} is not a valid i64 or f64"))
+            }
+        }
+        serde_json::Value::String(s) => Ok(Value::String(s.clone())),
+        serde_json::Value::Array(_) => Err("Array parameters are not supported".into()),
+        serde_json::Value::Object(_) => Err("Object parameters are not supported".into()),
+    }
+}
+
+/// Execute a query with parameter binding via the prepared-statement pipeline.
+fn execute_parameterized_query(
+    conn: &Connection,
+    request: &WireRequest,
+    params: &HashMap<String, serde_json::Value>,
+) -> WireResponse {
+    // Convert JSON params → Akar Values
+    let mut akar_params: Vec<(&str, Value)> = Vec::with_capacity(params.len());
+    for (name, json_val) in params {
+        match json_value_to_akar_value(json_val) {
+            Ok(v) => akar_params.push((name.as_str(), v)),
+            Err(e) => return WireResponse::error(format!("Parameter '{name}': {e}")),
+        }
+    }
+
+    // Prepare the query
+    let prepared = match conn.prepare(&request.query) {
+        Ok(p) => p,
+        Err(e) => return WireResponse::error(format!("Prepare error: {e}")),
+    };
+
+    // Execute with bound parameters
+    match conn.execute(&prepared, akar_params) {
+        Ok(result) => query_result_to_wire(&result),
+        Err(e) => WireResponse::error(e),
+    }
 }
 
 /// Serialize a `WireResponse` to JSON bytes.
