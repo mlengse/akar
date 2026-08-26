@@ -7,6 +7,8 @@
 
 ### Added
 
+- **feat(server) — P66: `dream_control` op in akar-server (2026-08-26)** — `WireRequest` gains `action: Option<String>` field; akar-server dispatch now routes `"dream_control"` to a stub handler returning `not_available` (DreamBackend integration deferred). Empty/missing action defaults to `"status"`. `RemoteDatabase::dream_control(action)` added for Rust clients. kairos `_rpc_json` routes the op to the wire instead of raising locally. 2 new server tests: `test_dream_control_status`, `test_dream_control_default_action`. Gate `test [akar-core]`: **1,903 total / 0 failed**.
+
 - **feat(binder/server) — P65: server-side array parameter binding (2026-08-26)** — `json_value_to_akar_value` (`session.rs`) converts JSON `Array` → `Value::List` recursively, enabling array params to flow through the prepared-statement pipeline end-to-end. `cell_value` (`session.rs`) handles `PhysicalTypeID::List` → `Value::List` so arrays round-trip from storage back to the wire. `value_to_expression` (`prepared_statement.rs`) converts `Value::List` → `Expression::List` for parameter substitution; `substitute_params` uses it in the `Parameter` arm. `bind_unwind` (`binder/mod.rs`) now accepts `Expression::Parameter` (resolved at substitute time), so `UNWIND $arr AS x` works with array params. 5 new server tests: `test_int_array_unwind_binding`, `test_float_array_unwind_binding`, `test_string_in_array_binding`, `test_mixed_scalar_and_array_params`, `test_empty_array_param`. Gate `test [akar-core]`: **1,901 total / 0 failed**.
 
 ## [0.1.13] - 2026-08-26

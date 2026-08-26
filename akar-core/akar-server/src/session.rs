@@ -10,6 +10,10 @@
 //! - **Auth token validation** — first frame must carry the correct token.
 //! - **Operation dispatch** — `ping`, `flush`, `stats`, `export`, `shutdown`.
 //! - **Idle tracking** — `last_activity` timestamp for the server idle monitor.
+//!
+//! P66 adds:
+//! - **`dream_control` op** — status/pause/resume for the dream engine (stub
+//!   until DreamBackend is integrated; returns `not_available` for now).
 
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_main::connection::Connection;
@@ -125,6 +129,7 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionC
             Some("stats") => handle_stats(&config.db_path, &config.total_queries),
             Some("export") => handle_export(&conn, request.path.as_deref()),
             Some("shutdown") => handle_shutdown(&config.shutdown),
+            Some("dream_control") => handle_dream_control(request.action.as_deref()),
             None | Some("query") => {
                 config.total_queries.fetch_add(1, Ordering::Relaxed);
                 execute_query(&conn, &request)
@@ -195,6 +200,30 @@ fn handle_export(conn: &Connection, path: Option<&str>) -> Vec<u8> {
 fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
     shutdown_flag.store(true, Ordering::SeqCst);
     let resp = WireResponse::success_message("Shutdown requested".to_string());
+    serialize_response(&resp)
+}
+
+/// Handle dream engine control requests (status/pause/resume).
+///
+/// The dream engine is not yet integrated into akar-server (P66).
+/// Returns a structured response so kairos clients get a meaningful
+/// answer instead of "Unknown operation".
+fn handle_dream_control(action: Option<&str>) -> Vec<u8> {
+    let action = action.filter(|a| !a.is_empty()).unwrap_or("status");
+    let resp = WireResponse {
+        success: true,
+        message: Some(format!("dream_control: {action}")),
+        error_message: None,
+        column_names: vec!["action".into(), "status".into(), "note".into()],
+        rows: vec![vec![
+            Some(Value::String(action.to_string())),
+            Some(Value::String("not_available".into())),
+            Some(Value::String(
+                "dream engine not yet integrated into akar-server (P66)".into(),
+            )),
+        ]],
+        stats: None,
+    };
     serialize_response(&resp)
 }
 

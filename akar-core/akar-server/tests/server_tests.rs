@@ -849,3 +849,27 @@ fn test_parameterized_empty_array() {
         .expect("empty array");
     assert_eq!(res.num_rows(), 0);
 }
+
+#[test]
+fn test_dream_control_status() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let res = client.dream_control("status").expect("dream_control status");
+    assert!(res.success);
+    assert_eq!(res.column_names, vec!["action", "status", "note"]);
+    assert_eq!(res.rows.len(), 1);
+    assert_eq!(res.rows[0][0], Some(Value::String("status".to_string())));
+    assert_eq!(res.rows[0][1], Some(Value::String("not_available".to_string())));
+}
+
+#[test]
+fn test_dream_control_default_action() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    // Empty action should default to "status"
+    let res = client.dream_control("").expect("dream_control default");
+    assert!(res.success);
+    assert_eq!(res.rows[0][0], Some(Value::String("status".to_string())));
+}

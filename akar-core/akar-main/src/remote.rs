@@ -76,6 +76,9 @@ pub struct WireRequest {
     /// bool, null) that are converted to Akar [`Value`]s before binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<HashMap<String, serde_json::Value>>,
+    /// Sub-action for operation dispatch (e.g. `dream_control` action).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 /// The response the server returns for a query.
@@ -451,6 +454,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: None,
+            action: None,
         })
     }
 
@@ -470,6 +474,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: Some(params),
+            action: None,
         })
     }
 
@@ -482,6 +487,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: None,
+            action: None,
         })
     }
 
@@ -494,6 +500,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: None,
+            action: None,
         })
     }
 
@@ -506,6 +513,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: None,
+            action: None,
         })
     }
 
@@ -518,6 +526,7 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: Some(path.to_string()),
             params: None,
+            action: None,
         })
     }
 
@@ -530,6 +539,20 @@ impl RemoteDatabase {
             token: self.token.clone(),
             path: None,
             params: None,
+            action: None,
+        })
+    }
+
+    /// Send a dream_control request (op: `"dream_control"`).
+    pub fn dream_control(&self, action: &str) -> Result<WireResponse, String> {
+        self.send_request(WireRequest {
+            query: String::new(),
+            client_name: None,
+            op: Some("dream_control".to_string()),
+            token: self.token.clone(),
+            path: None,
+            params: None,
+            action: Some(action.to_string()),
         })
     }
 
