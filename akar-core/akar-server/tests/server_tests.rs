@@ -697,11 +697,11 @@ fn test_parameterized_float_param() {
     let client = connect(&ts);
 
     let mut params = HashMap::new();
-    params.insert("pi".to_string(), serde_json::json!(2.718));
+    params.insert("val".to_string(), serde_json::json!(1.234));
 
-    let res = client.query_with_params("RETURN $pi", params).expect("float param");
+    let res = client.query_with_params("RETURN $val", params).expect("float param");
     assert_eq!(res.num_rows(), 1);
-    assert_eq!(res.cell(0, 0), Some(&Value::Double(2.718)));
+    assert_eq!(res.cell(0, 0), Some(&Value::Double(1.234)));
 }
 
 #[test]
