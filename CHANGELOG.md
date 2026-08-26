@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(binder/server) — P65: server-side array parameter binding (2026-08-26)** — `json_value_to_akar_value` (`session.rs`) converts JSON `Array` → `Value::List` recursively, enabling array params to flow through the prepared-statement pipeline end-to-end. `cell_value` (`session.rs`) handles `PhysicalTypeID::List` → `Value::List` so arrays round-trip from storage back to the wire. `value_to_expression` (`prepared_statement.rs`) converts `Value::List` → `Expression::List` for parameter substitution; `substitute_params` uses it in the `Parameter` arm. `bind_unwind` (`binder/mod.rs`) now accepts `Expression::Parameter` (resolved at substitute time), so `UNWIND $arr AS x` works with array params. 5 new server tests: `test_int_array_unwind_binding`, `test_float_array_unwind_binding`, `test_string_in_array_binding`, `test_mixed_scalar_and_array_params`, `test_empty_array_param`. Gate `test [akar-core]`: **1,901 total / 0 failed**.
+
 ## [0.1.13] - 2026-08-26
 
 ### Added
