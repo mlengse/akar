@@ -44,10 +44,10 @@ dependencies = [
 
 [[package]]
 name = "akar-algo"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "akar-graph",
@@ -58,9 +58,9 @@ dependencies = [
 
 [[package]]
 name = "akar-azure"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-duckdb",
  "akar-extension",
  "akar-function",
@@ -72,10 +72,10 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-parser",
  "criterion",
 ]
@@ -84,7 +84,7 @@ dependencies = [
 name = "akar-c"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-main",
  "libc",
 ]
@@ -93,7 +93,7 @@ dependencies = [
 name = "akar-catalog"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "hashbrown 0.17.1",
  "serde",
  "serde_json",
@@ -105,7 +105,7 @@ version = "0.1.13"
 dependencies = [
  "akar-binder",
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-main",
  "dirs",
  "rustyline",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "arrow 59.2.0",
  "flate2",
@@ -128,9 +128,9 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc47679c7e3cb44d50ece79836256b7b8898518802836f86ee831a860a7ec404"
+checksum = "afb0e71a04643425b16daccd543676bb141406cef3ae7190c427dd8a24dde66c"
 dependencies = [
  "arrow 59.2.0",
  "flate2",
@@ -143,9 +143,9 @@ dependencies = [
 
 [[package]]
 name = "akar-delta"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-duckdb",
  "akar-extension",
  "akar-function",
@@ -157,10 +157,10 @@ dependencies = [
 
 [[package]]
 name = "akar-dream"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-algo",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-graph",
  "akar-vector",
  "hashbrown 0.17.1",
@@ -169,9 +169,9 @@ dependencies = [
 
 [[package]]
 name = "akar-duckdb"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "arrow 59.2.0",
@@ -184,7 +184,7 @@ name = "akar-extension"
 version = "0.1.13"
 dependencies = [
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-function",
  "arrow 59.2.0",
  "tracing",
@@ -194,7 +194,7 @@ dependencies = [
 name = "akar-fts"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "regex",
@@ -203,9 +203,9 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "arrow 59.2.0",
  "base64 0.23.1",
  "hashbrown 0.17.1",
@@ -219,16 +219,16 @@ dependencies = [
 name = "akar-graph"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-storage",
  "hashbrown 0.17.1",
 ]
 
 [[package]]
 name = "akar-httpfs"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "arrow 59.2.0",
@@ -239,9 +239,9 @@ dependencies = [
 
 [[package]]
 name = "akar-iceberg"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-duckdb",
  "akar-extension",
  "akar-function",
@@ -254,9 +254,9 @@ dependencies = [
 
 [[package]]
 name = "akar-json"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "serde_json",
@@ -265,9 +265,9 @@ dependencies = [
 
 [[package]]
 name = "akar-llm"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "serde_json",
@@ -277,13 +277,13 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-algo",
  "akar-azure",
  "akar-binder",
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-delta",
  "akar-duckdb",
  "akar-extension",
@@ -319,7 +319,7 @@ dependencies = [
 name = "akar-migrate"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-main",
  "akar-storage",
  "anyhow",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "akar-ml"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "rand 0.10.2",
  "serde",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "akar-neo4j"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-extension",
  "akar-function",
@@ -350,10 +350,10 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-binder",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-parser",
  "akar-planner",
  "akar-storage",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "pest",
  "pest_derive",
@@ -370,20 +370,20 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-binder",
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-parser",
 ]
 
 [[package]]
 name = "akar-postgres"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "tokio",
@@ -393,12 +393,12 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "ahash 0.8.12",
  "akar-binder",
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-fts",
  "akar-function",
  "akar-parser",
@@ -415,16 +415,16 @@ dependencies = [
 
 [[package]]
 name = "akar-search"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "hashbrown 0.17.1",
 ]
 
 [[package]]
 name = "akar-server"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-main",
  "arrow 59.2.0",
  "clap",
@@ -438,9 +438,9 @@ dependencies = [
 
 [[package]]
 name = "akar-sqlite"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "arrow 59.2.0",
@@ -450,10 +450,10 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-catalog",
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-transaction",
  "akar-vector",
  "arrow 59.2.0",
@@ -476,15 +476,15 @@ dependencies = [
 name = "akar-transaction"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "akar-common 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
 [[package]]
 name = "akar-unity-catalog"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-duckdb",
  "akar-extension",
  "akar-function",
@@ -497,9 +497,9 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-extension",
  "akar-function",
  "tracing",
@@ -509,7 +509,7 @@ dependencies = [
 name = "akar-wasm"
 version = "0.1.13"
 dependencies = [
- "akar-common 0.1.12",
+ "akar-common 0.1.13",
  "akar-main",
  "console_error_panic_hook",
  "js-sys",
