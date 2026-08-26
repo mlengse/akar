@@ -745,3 +745,107 @@ fn test_empty_params_falls_back_to_plain_query() {
     assert_eq!(res.num_rows(), 1);
     assert_eq!(res.cell(0, 0), Some(&Value::Int64(3)));
 }
+
+// ── Array parameter tests (P65) ───────────────────────────────────────────
+
+#[test]
+fn test_parameterized_int_array_unwind() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("ids".to_string(), serde_json::json!([10, 20, 30]));
+
+    let res = client
+        .query_with_params("UNWIND $ids AS x RETURN x", params)
+        .expect("int array unwind");
+    assert_eq!(res.num_rows(), 3);
+    assert_eq!(res.cell(0, 0), Some(&Value::Int64(10)));
+    assert_eq!(res.cell(1, 0), Some(&Value::Int64(20)));
+    assert_eq!(res.cell(2, 0), Some(&Value::Int64(30)));
+}
+
+#[test]
+fn test_parameterized_float_array() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    // Simulate a 4-element embedding vector
+    params.insert(
+        "emb".to_string(),
+        serde_json::json!([0.1, 0.2, 0.3, 0.4]),
+    );
+
+    let res = client
+        .query_with_params("UNWIND $emb AS v RETURN v", params)
+        .expect("float array");
+    assert_eq!(res.num_rows(), 4);
+    assert_eq!(res.cell(0, 0), Some(&Value::Double(0.1)));
+    assert_eq!(res.cell(3, 0), Some(&Value::Double(0.4)));
+}
+
+#[test]
+fn test_parameterized_string_array_in() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    client
+        .query("CREATE NODE TABLE ArrT(name STRING, val INT64, PRIMARY KEY(name))")
+        .expect("DDL");
+    client
+        .query("CREATE (:ArrT {name: 'a', val: 1}), (:ArrT {name: 'b', val: 2}), (:ArrT {name: 'c', val: 3})")
+        .expect("seed data");
+
+    let mut params = HashMap::new();
+    params.insert("names".to_string(), serde_json::json!(["a", "c"]));
+
+    let res = client
+        .query_with_params(
+            "MATCH (n:ArrT) WHERE n.name IN $names RETURN n.name, n.val ORDER BY n.name",
+            params,
+        )
+        .expect("string array IN");
+    assert_eq!(res.num_rows(), 2);
+    assert_eq!(res.cell(0, 0), Some(&Value::String("a".to_string())));
+    assert_eq!(res.cell(1, 0), Some(&Value::String("c".to_string())));
+}
+
+#[test]
+fn test_parameterized_mixed_scalar_and_array() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("x".to_string(), serde_json::json!(42));
+    params.insert("ids".to_string(), serde_json::json!([1, 2, 3]));
+
+    let res = client
+        .query_with_params("RETURN $x, $ids", params)
+        .expect("mixed scalar+array");
+    assert_eq!(res.num_rows(), 1);
+    assert_eq!(res.cell(0, 0), Some(&Value::Int64(42)));
+    // The list should be returned as a List value
+    match res.cell(0, 1) {
+        Some(Value::List(items)) => {
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[0], Value::Int64(1));
+            assert_eq!(items[2], Value::Int64(3));
+        }
+        other => panic!("expected List, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parameterized_empty_array() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let mut params = HashMap::new();
+    params.insert("empty".to_string(), serde_json::json!([]));
+
+    let res = client
+        .query_with_params("UNWIND $empty AS x RETURN x", params)
+        .expect("empty array");
+    assert_eq!(res.num_rows(), 0);
+}

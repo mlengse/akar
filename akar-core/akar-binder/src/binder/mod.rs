@@ -1153,10 +1153,12 @@ impl Binder {
     }
 
     fn bind_unwind(&self, u: &akar_parser::ast::UnwindClause) -> Result<BoundUnwindClause, BinderError> {
-        // Validate the expression is a list literal or variable reference to a list
+        // Validate the expression is a list literal, variable reference, or parameter.
+        // Parameters are resolved to lists at substitute_params time.
         match &u.expression {
             akar_parser::ast::Expression::List(_) => {}
             akar_parser::ast::Expression::Variable(_) => {}
+            akar_parser::ast::Expression::Parameter(_) => {}
             _ => return Err(format!("UNWIND requires a list expression, got: {:?}", u.expression).into()),
         }
         if u.variable.is_empty() {

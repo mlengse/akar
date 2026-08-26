@@ -244,7 +244,7 @@ pub fn substitute_params(expr: &Expression, param_values: &HashMap<String, Value
             let value = param_values
                 .get(name)
                 .ok_or_else(|| format!("Missing parameter: ${}", name))?;
-            Ok(Expression::Constant(value_to_constant(value)?))
+            Ok(value_to_expression(value)?)
         }
         Expression::PropertyAccess(obj, prop) => {
             let new_obj = substitute_params(obj, param_values)?;
@@ -405,6 +405,26 @@ fn value_to_constant(value: &Value) -> Result<akar_parser::ast::Constant, String
     }
 }
 
+/// Convert an Akar [`Value`] to an AST [`Expression`].
+///
+/// Like [`value_to_constant`] but supports compound types (List) by
+/// producing `Expression::List` nodes.  Used by `substitute_params`
+/// when a parameter value is a list (e.g. embedding vector, ID array).
+fn value_to_expression(value: &Value) -> Result<akar_parser::ast::Expression, String> {
+    use akar_parser::ast::Expression;
+    match value {
+        Value::List(items) => {
+            let mut exprs = Vec::with_capacity(items.len());
+            for item in items {
+                exprs.push(value_to_expression(item)?);
+            }
+            Ok(Expression::List(exprs))
+        }
+        // Scalars: delegate to value_to_constant → Expression::Constant
+        other => Ok(Expression::Constant(value_to_constant(other)?)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,5 +555,51 @@ mod tests {
         let mut params = Vec::new();
         collect_params_from_expr(&expr, &mut params);
         assert!(params.is_empty());
+    }
+
+    #[test]
+    fn test_value_to_expression_list() {
+        let val = Value::List(vec![
+            Value::Int64(1),
+            Value::Int64(2),
+            Value::Int64(3),
+        ]);
+        let expr = value_to_expression(&val).unwrap();
+        match expr {
+            Expression::List(items) => {
+                assert_eq!(items.len(), 3);
+                // Each item should be a Constant(Integer)
+                for (i, item) in items.iter().enumerate() {
+                    match item {
+                        Expression::Constant(Constant::Integer(n)) => {
+                            assert_eq!(*n, (i + 1) as i64);
+                        }
+                        other => panic!("expected Integer constant at {i}, got {other:?}"),
+                    }
+                }
+            }
+            other => panic!("expected List, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_value_to_expression_nested_list() {
+        let val = Value::List(vec![
+            Value::List(vec![Value::Int64(1), Value::Int64(2)]),
+            Value::List(vec![Value::Int64(3), Value::Int64(4)]),
+        ]);
+        let expr = value_to_expression(&val).unwrap();
+        match expr {
+            Expression::List(outer) => {
+                assert_eq!(outer.len(), 2);
+                match &outer[0] {
+                    Expression::List(inner) => {
+                        assert_eq!(inner.len(), 2);
+                    }
+                    other => panic!("expected inner List, got {other:?}"),
+                }
+            }
+            other => panic!("expected List, got {other:?}"),
+        }
     }
 }

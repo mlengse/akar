@@ -217,7 +217,7 @@ fn execute_query(conn: &Connection, request: &WireRequest) -> Vec<u8> {
 /// Convert a JSON value to an Akar [`Value`] for parameter binding.
 ///
 /// JSON numbers are mapped to `Int64` when they fit, `Double` otherwise.
-/// JSON strings, booleans, and null map directly.
+/// JSON strings, booleans, null, and arrays (recursively) map directly.
 fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
     match val {
         serde_json::Value::Null => Ok(Value::Null),
@@ -232,7 +232,15 @@ fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
             }
         }
         serde_json::Value::String(s) => Ok(Value::String(s.clone())),
-        serde_json::Value::Array(_) => Err("Array parameters are not supported".into()),
+        serde_json::Value::Array(arr) => {
+            let mut items = Vec::with_capacity(arr.len());
+            for (i, item) in arr.iter().enumerate() {
+                items.push(json_value_to_akar_value(item).map_err(|e| {
+                    format!("Array element {i}: {e}")
+                })?);
+            }
+            Ok(Value::List(items))
+        }
         serde_json::Value::Object(_) => Err("Object parameters are not supported".into()),
     }
 }
@@ -388,6 +396,19 @@ fn cell_value(field: &ArrayRef, field_type: PhysicalTypeID, row: usize) -> Optio
             .as_any()
             .downcast_ref::<BinaryArray>()
             .map(|a| Value::Blob(a.value(row).to_vec())),
+        PhysicalTypeID::List => {
+            use arrow::array::ListArray;
+            let list_arr = arr.as_any().downcast_ref::<ListArray>()?;
+            let inner = list_arr.value(row);
+            let mut items = Vec::with_capacity(inner.len());
+            for i in 0..inner.len() {
+                items.push(
+                    akar_common::arrow_vector::convert_arrow_scalar(&inner, i)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            Some(Value::List(items))
+        }
         _ => None,
     };
     value.or_else(|| Some(Value::String(format!("{:?}", field.slice(row, 1)))))
