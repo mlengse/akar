@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-common 0.1.12",
  "hashbrown 0.17.1",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-catalog",
  "akar-common 0.1.12",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-common 0.1.12",
  "akar-extension",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "akar-common 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
