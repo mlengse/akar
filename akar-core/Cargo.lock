@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "akar-c"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "akar-main",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "hashbrown 0.17.1",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "akar-cli"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-catalog",
  "akar-common 0.1.13",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "akar-extension",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "akar-graph"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "akar-storage",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "akar-migrate"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "akar-main",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "akar-wasm"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "akar-common 0.1.13",
  "akar-main",
