@@ -63,7 +63,7 @@ jobs:
   # Build wheels per platform, verify each with smoke_test.py
   # ────────────────────────────────────────────────────────────────
   build:
-    name: wheel (${{ matrix.platform }})
+    name: wheel (${{ matrix.platform }} / ${{ matrix.target }})
     needs: [test]
     runs-on: ${{ matrix.platform }}
     strategy:
@@ -71,42 +71,35 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-24.04
-            target: x86_64
+            target: x86_64-unknown-linux-gnu
           - platform: ubuntu-24.04
-            target: aarch64
+            target: aarch64-unknown-linux-gnu
           - platform: macos-14
-            target: x86_64
+            target: x86_64-apple-darwin
           - platform: macos-14
-            target: aarch64
+            target: aarch64-apple-darwin
           - platform: windows-latest
-            target: x86_64
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install maturin
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install maturin
-      - name: Build wheel
-        shell: bash
-        working-directory: akar-core/akar-python
-        env:
-          PYO3_PYTHON: python
-        run: |
-          maturin build --release --target ${{ matrix.target }} --out ../../dist-${{ runner.os }}
-          if [ -z "$(ls ../../dist-${{ runner.os }})" ]; then exit 1; fi
-      - name: Verify wheel (import + smoke test)
-        shell: bash
-        run: |
-          python -m pip install --force-reinstall dist-${{ runner.os }}/*.whl
-          python akar-core/akar-python/smoke_test.py
+      # pypa/maturin-action handles full Rust target triples, installs cross
+      # standard libraries, and produces a manylinux wheel on linux (via
+      # cargo-zigbuild) without hand-rolled cross-linker setup.
+      - uses: pypa/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto
+          command: build
+          args: --release --out dist
+          working-directory: akar-core/akar-python
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.platform }}-${{ matrix.target }}
-          path: dist-${{ runner.os }}/*.whl
+          path: akar-core/akar-python/dist/*.whl
 
   # ────────────────────────────────────────────────────────────────
   # Collect all wheels and publish to PyPI (tag push only)
@@ -117,6 +110,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -126,6 +120,13 @@ jobs:
           ls -la dist
           COUNT=$(ls dist/*.whl | wc -l)
           if [ "$COUNT" -lt 4 ]; then echo "expected >=4 wheels, got $COUNT"; exit 1; fi
+      - name: Smoke-test the linux x86_64 wheel
+        shell: bash
+        run: |
+          WHEEL=$(ls dist/*manylinux*x86_64*.whl 2>/dev/null | head -1)
+          if [ -z "$WHEEL" ]; then echo "no manylinux x86_64 wheel found"; exit 1; fi
+          python -m pip install --force-reinstall "$WHEEL"
+          python akar-core/akar-python/smoke_test.py
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
