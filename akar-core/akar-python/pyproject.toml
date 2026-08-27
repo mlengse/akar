@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "akar"
-version = "0.1.4"
+version = "0.1.14"
 description = "Akar — pure Rust embedded graph database for AI agent memory (Python bindings)"
 readme = "README.md"
 requires-python = ">=3.9"
