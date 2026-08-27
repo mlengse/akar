@@ -90,13 +90,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install maturin
       - name: Build wheel
+        shell: bash
         working-directory: akar-core/akar-python
         env:
           PYO3_PYTHON: python
         run: |
-          maturin build --release --target ${{ matrix.target }} --out ../../dist-${{ runner.os }} --manylinux auto
+          maturin build --release --target ${{ matrix.target }} --out ../../dist-${{ runner.os }}
           if [ -z "$(ls ../../dist-${{ runner.os }})" ]; then exit 1; fi
       - name: Verify wheel (import + smoke test)
+        shell: bash
         run: |
           python -m pip install --force-reinstall dist-${{ runner.os }}/*.whl
           python akar-core/akar-python/smoke_test.py
