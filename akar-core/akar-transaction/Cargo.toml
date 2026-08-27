@@ -11,7 +11,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = {version = "0.1.14" }
+akar-common = {version = "0.1.15" }
 tracing.workspace = true
 
 [lints]
