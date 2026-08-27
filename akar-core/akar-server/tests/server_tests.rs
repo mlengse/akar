@@ -969,7 +969,10 @@ fn test_parameterized_array_of_objects_dml() {
 
     // Field access via RETURN works.
     let probe = client
-        .query_with_params("UNWIND $rows AS row RETURN row.id, row.name ORDER BY row.id", params.clone())
+        .query_with_params(
+            "UNWIND $rows AS row RETURN row.id, row.name ORDER BY row.id",
+            params.clone(),
+        )
         .expect("probe unwind");
     assert_eq!(probe.num_rows(), 2, "probe should see 2 rows");
     assert_eq!(probe.cell(0, 0), Some(&Value::Int64(1)));
@@ -983,7 +986,9 @@ fn test_parameterized_array_of_objects_dml() {
         .query_with_params("CREATE (:P69T {id: $id, name: $name})", scalar)
         .expect("scalar param create still works");
 
-    let res = client.query("MATCH (n:P69T) RETURN n.id, n.name ORDER BY n.id").expect("readback");
+    let res = client
+        .query("MATCH (n:P69T) RETURN n.id, n.name ORDER BY n.id")
+        .expect("readback");
     assert_eq!(res.num_rows(), 1);
     assert_eq!(res.cell(0, 0), Some(&Value::Int64(1)));
     assert_eq!(res.cell(0, 1), Some(&Value::String("alice".to_string())));

@@ -273,8 +273,7 @@ fn json_value_to_akar_value(val: &serde_json::Value) -> Result<Value, String> {
         serde_json::Value::Object(obj) => {
             let mut fields = Vec::with_capacity(obj.len());
             for (k, v) in obj {
-                let converted = json_value_to_akar_value(v)
-                    .map_err(|e| format!("Object field {k}: {e}"))?;
+                let converted = json_value_to_akar_value(v).map_err(|e| format!("Object field {k}: {e}"))?;
                 fields.push((k.clone(), converted));
             }
             Ok(Value::Struct(fields))

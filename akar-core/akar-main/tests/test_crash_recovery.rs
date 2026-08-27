@@ -523,7 +523,9 @@ fn test_wal_zeroed_out_recovery() {
         fs::write(&wal_path, vec![0u8; wal_size as usize]).expect("Failed to zero WAL");
     }
 
-    // Recovery should not panic
+    // (P61.3) A corrupt WAL must refuse to start (fail-loud) rather than
+    // silently recover to an empty database, which would destroy every
+    // committed write still living only in the WAL.
     let config = SystemConfig {
         buffer_pool_size: 64 * 1024 * 1024,
         auto_checkpoint: true,
@@ -531,7 +533,10 @@ fn test_wal_zeroed_out_recovery() {
         concurrent_writes: true,
         ..Default::default()
     };
-    let _db = Database::new(&db_path, config).expect("Recovery with zeroed WAL should not fail");
+    assert!(
+        Database::new(&db_path, config).is_err(),
+        "zeroed WAL must refuse to start (P61.3)"
+    );
 }
 
 #[test]
@@ -551,7 +556,10 @@ fn test_wal_random_bytes_recovery() {
     fs::write(&wal_path, &random_data).expect("Failed to write random WAL");
 
     let config = SystemConfig::default();
-    let _db = Database::new(&db_path, config).expect("Recovery with random WAL bytes should not fail");
+    assert!(
+        Database::new(&db_path, config).is_err(),
+        "random-byte WAL must refuse to start (P61.3)"
+    );
 }
 
 #[test]
@@ -570,5 +578,8 @@ fn test_wal_single_byte_recovery() {
     fs::write(&wal_path, [0xFF]).expect("Failed to write 1-byte WAL");
 
     let config = SystemConfig::default();
-    let _db = Database::new(&db_path, config).expect("Recovery with 1-byte WAL should not fail");
+    assert!(
+        Database::new(&db_path, config).is_err(),
+        "1-byte WAL must refuse to start (P61.3)"
+    );
 }

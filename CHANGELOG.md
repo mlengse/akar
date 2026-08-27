@@ -13,6 +13,10 @@
 
 - **feat(server) — P68: `--checkpoint-threshold` flag in akar-server (2026-08-26)** — `akar_server` gained a `--checkpoint-threshold <bytes>` CLI flag (default **16 MiB**) replacing the hardcoded `checkpoint_threshold: -1`. With `-1`, `maybe_checkpoint` fired on EVERY write → `checkpoint_with_drain` → `persist_all_tables` rewrote all column mirrors ≈ **1s/write** and serialized reads behind the write lock (kairos finding). Default is now a positive WAL-size threshold (`wal_size() > threshold`), so checkpointing happens only when the WAL grows past it. `0` disables auto-checkpoint; `-1` restores checkpoint-per-write. Embedded `SystemConfig::default()` remains `-1` (unchanged behavior + tests). Gate `test [akar-core]`: 0 failed.
 
+### Fixed
+
+- **fix(storage) — P61: fail-loud WAL recovery (2026-08-27)** — WAL recovery no longer falls back to a fresh, empty database on a corrupt/replay error. That fallback silently destroyed every committed write still living only in the WAL (`Database::new` → `storage_manager.recover()`). It now fails open: `Database::new` returns `Err` ("Refusing to start with an empty database") and the WAL file is left untouched so an operator can repair it. Persist-before-checkpoint and post-replay persist errors likewise abort before WAL truncation instead of warning. Prepared CREATE/MERGE DML now journals a self-sufficient I/U record + COMMIT (was: zero WAL records → rows silently lost on crash). `SystemConfig::default()` behavior unchanged. 3 crash-recovery tests updated to assert the fail-loud contract (`test_wal_zeroed_out_recovery`, `test_wal_random_bytes_recovery`, `test_wal_single_byte_recovery`). Gate `test [akar-core]`: 0 failed.
+
 ## [0.1.14] - 2026-08-26
 
 ### Added
