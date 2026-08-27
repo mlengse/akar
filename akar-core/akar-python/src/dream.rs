@@ -6,7 +6,7 @@ use akar_dream::config::DreamConfig;
 use akar_dream::orchestrator::{DreamStats, PhaseStats};
 
 /// Python-visible dream configuration.
-#[pyclass(module = "akar.dream", frozen)]
+#[pyclass(module = "akar.dream", frozen, from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyDreamConfig {
     inner: DreamConfig,
@@ -101,7 +101,7 @@ impl PyDreamConfig {
 }
 
 /// Python-visible dream phase statistics.
-#[pyclass(module = "akar.dream", frozen)]
+#[pyclass(module = "akar.dream", frozen, from_py_object)]
 #[derive(Debug, Clone, Default)]
 pub struct PyPhaseStats {
     inner: PhaseStats,
@@ -128,7 +128,7 @@ impl PyPhaseStats {
 }
 
 /// Python-visible dream cycle statistics.
-#[pyclass(module = "akar.dream", frozen)]
+#[pyclass(module = "akar.dream", frozen, from_py_object)]
 #[derive(Debug, Clone, Default)]
 pub struct PyDreamStats {
     inner: DreamStats,
