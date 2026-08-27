@@ -33,7 +33,12 @@ jobs:
   # Test the Rust source once before spending the build matrix
   # ────────────────────────────────────────────────────────────────
   test:
-    name: cargo test (akar-python)
+    # Pre-flight gate on the true artifact: build a wheel with maturin and run
+    # the in-repo smoke test against the installed module. Plain `cargo test`
+    # cannot link a PyO3 abi3 + extension-module crate on Linux (undefined Py*
+    # symbols at the test-exe link step), so we exercise the source through the
+    # same maturin path the build matrix uses instead.
+    name: smoke (akar-python source)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -41,13 +46,18 @@ jobs:
         with:
           python-version: '3.11'
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo test --release
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin
+      - name: Build wheel
         working-directory: akar-core/akar-python
         env:
-          # PyO3 abi3 + extension-module needs a Python interpreter to link
-          # libpython when building the test/example executables. Mirrors the
-          # env used by the build matrix (maturin) job below.
           PYO3_PYTHON: python
+        run: maturin build --release --out ../../dist-test
+      - name: Install + smoke test
+        run: |
+          python -m pip install --force-reinstall dist-test/*.whl
+          python akar-core/akar-python/smoke_test.py
+          rm -rf dist-test
 
   # ────────────────────────────────────────────────────────────────
   # Build wheels per platform, verify each with smoke_test.py
