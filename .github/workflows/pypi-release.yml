@@ -1,9 +1,9 @@
 # PyPI Release - akar Python bindings (akar-core/akar-python)
 #
 # Triggered by git tag push (v*) or manual workflow dispatch.
-# Builds abi3 wheels for Linux, macOS, Windows (x86_64 + aarch64 where
-# available), runs the in-repo smoke test against each wheel, then publishes
-# the `akar` package to PyPI.
+# Builds one manylinux x86_64 abi3 wheel on ubuntu-24.04 (the platform kairos
+# CI needs: `pip install akar>=0.1.14` on ubuntu-latest), smoke-tests it, then
+# publishes the `akar` package to PyPI.
 #
 # This is what lets kairos users `pip install akar>=0.1.14` WITHOUT building
 # the Rust crates themselves. Keep it in sync with:
@@ -25,20 +25,15 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # abi3-py39 is set in akar-python (pyo3 feature) so a single wheel per
-  # platform covers CPython >= 3.9.
+  # abi3-py39 is set in akar-python (pyo3 feature) so a single wheel covers
+  # CPython >= 3.9.
 
 jobs:
   # ────────────────────────────────────────────────────────────────
-  # Test the Rust source once before spending the build matrix
+  # Build + smoke-test the wheel (ubuntu-24.04 host, manylinux x86_64)
   # ────────────────────────────────────────────────────────────────
-  test:
-    # Pre-flight gate on the true artifact: build a wheel with maturin and run
-    # the in-repo smoke test against the installed module. Plain `cargo test`
-    # cannot link a PyO3 abi3 + extension-module crate on Linux (undefined Py*
-    # symbols at the test-exe link step), so we exercise the source through the
-    # same maturin path the build matrix uses instead.
-    name: smoke (akar-python source)
+  build:
+    name: build manylinux wheel + smoke
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -48,81 +43,39 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install maturin
         run: python -m pip install --upgrade pip maturin
-      - name: Build wheel
-        working-directory: akar-core/akar-python
-        env:
-          PYO3_PYTHON: python
-        run: maturin build --release --out ../../dist-test
-      - name: Install + smoke test
-        run: |
-          python -m pip install --force-reinstall dist-test/*.whl
-          python akar-core/akar-python/smoke_test.py
-      - name: Upload wheel artifact (linux manylinux x86_64)
-        uses: actions/upload-artifact@v7
-        with:
-          name: wheels-ubuntu-24.04
-          path: dist-test/*.whl
-
-  # ────────────────────────────────────────────────────────────────
-  # Build wheels per platform (macOS, Windows) in parallel with the ubuntu
-  # smoke job above. The linux x86_64 manylinux wheel comes from the test job.
-  # ────────────────────────────────────────────────────────────────
-  build:
-    name: wheel (${{ matrix.platform }})
-    runs-on: ${{ matrix.platform }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - macos-14
-          - windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install maturin
-        run: python -m pip install --upgrade pip maturin
-      # Host build only (same command the green 'smoke' job uses on ubuntu):
-      # no cross target, no docker, no third-party action.
       - name: Build wheel
         working-directory: akar-core/akar-python
         env:
           PYO3_PYTHON: python
         run: maturin build --release --out ../../dist
+      - name: Smoke test the wheel
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+          python akar-core/akar-python/smoke_test.py
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
-          name: wheels-${{ matrix.platform }}
+          name: wheels
           path: dist/*.whl
 
   # ────────────────────────────────────────────────────────────────
-  # Collect all wheels and publish to PyPI (tag push only)
+  # Publish the wheel to PyPI (tag push only)
   # ────────────────────────────────────────────────────────────────
   publish:
     name: publish to PyPI
-    needs: [test, build]
+    needs: [build]
     runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
-      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - name: Check wheel count
+      - name: Check wheel
         run: |
           ls -la dist
           COUNT=$(ls dist/*.whl | wc -l)
-          if [ "$COUNT" -lt 3 ]; then echo "expected >=3 wheels, got $COUNT"; exit 1; fi
-      - name: Smoke-test the linux x86_64 wheel
-        shell: bash
-        run: |
-          WHEEL=$(ls dist/*manylinux*x86_64*.whl 2>/dev/null | head -1)
-          if [ -z "$WHEEL" ]; then echo "no manylinux x86_64 wheel found"; exit 1; fi
-          python -m pip install --force-reinstall "$WHEEL"
-          python akar-core/akar-python/smoke_test.py
+          if [ "$COUNT" -lt 1 ]; then echo "expected >=1 wheel, got $COUNT"; exit 1; fi
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
