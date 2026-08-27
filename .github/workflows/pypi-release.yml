@@ -71,24 +71,27 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
+            target: x86_64
           - platform: ubuntu-24.04
-            target: aarch64-unknown-linux-gnu
+            target: aarch64
           - platform: macos-14
-            target: x86_64-apple-darwin
+            target: x86_64
           - platform: macos-14
-            target: aarch64-apple-darwin
+            target: aarch64
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
+            target: x86_64
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      # pypa/maturin-action handles full Rust target triples, installs cross
-      # standard libraries, and produces a manylinux wheel on linux (via
-      # cargo-zigbuild) without hand-rolled cross-linker setup.
-      - uses: pypa/maturin-action@v1
+      # QEMU is required by maturin-action's manylinux docker cross-builds for
+      # non-x86_64 linux targets (e.g. aarch64). No-op for x86_64/host builds.
+      - uses: docker/setup-qemu-action@v3
+      # PyO3/maturin-action handles full wheel builds + manylinux tagging and
+      # accepts bare arch names ('x86_64'/'aarch64'). See
+      # https://github.com/PyO3/maturin-action
+      - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           manylinux: auto
