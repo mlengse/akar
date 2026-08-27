@@ -63,46 +63,37 @@ jobs:
   # Build wheels per platform, verify each with smoke_test.py
   # ────────────────────────────────────────────────────────────────
   build:
-    name: wheel (${{ matrix.platform }} / ${{ matrix.target }})
+    name: wheel (${{ matrix.platform }})
     needs: [test]
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: ubuntu-24.04
-            target: x86_64
-          - platform: ubuntu-24.04
-            target: aarch64
-          - platform: macos-14
-            target: x86_64
-          - platform: macos-14
-            target: aarch64
-          - platform: windows-latest
-            target: x86_64
+        platform:
+          - ubuntu-24.04
+          - macos-14
+          - windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      # QEMU is required by maturin-action's manylinux docker cross-builds for
-      # non-x86_64 linux targets (e.g. aarch64). No-op for x86_64/host builds.
-      - uses: docker/setup-qemu-action@v3
-      # PyO3/maturin-action handles full wheel builds + manylinux tagging and
-      # accepts bare arch names ('x86_64'/'aarch64'). See
-      # https://github.com/PyO3/maturin-action
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          manylinux: auto
-          command: build
-          args: --release --out dist
-          working-directory: akar-core/akar-python
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin
+      # Host build only (same command the green 'smoke' job uses on ubuntu):
+      # no cross target, no docker, no third-party action. On ubuntu-24.04 this
+      # yields a manylinux x86_64 wheel, which is the one kairos CI needs.
+      - name: Build wheel
+        working-directory: akar-core/akar-python
+        env:
+          PYO3_PYTHON: python
+        run: maturin build --release --out ../../dist
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
-          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
-          path: akar-core/akar-python/dist/*.whl
+          name: wheels-${{ matrix.platform }}
+          path: dist/*.whl
 
   # ────────────────────────────────────────────────────────────────
   # Collect all wheels and publish to PyPI (tag push only)
@@ -122,7 +113,7 @@ jobs:
         run: |
           ls -la dist
           COUNT=$(ls dist/*.whl | wc -l)
-          if [ "$COUNT" -lt 4 ]; then echo "expected >=4 wheels, got $COUNT"; exit 1; fi
+          if [ "$COUNT" -lt 3 ]; then echo "expected >=3 wheels, got $COUNT"; exit 1; fi
       - name: Smoke-test the linux x86_64 wheel
         shell: bash
         run: |
