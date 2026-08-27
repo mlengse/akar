@@ -198,6 +198,11 @@ impl NodeTable {
         current.restore_spilled()?;
         self.num_rows += 1;
 
+        // (P61.3) A row was appended in memory; mark the table dirty so the
+        // next persist (checkpoint/sync) writes it to the durable column
+        // mirrors even when the WAL holds no Insert record for it.
+        self.persistence_dirty = true;
+
         // Update hash index with the PK value for this row
         if self.primary_key_column < self.columns.len() {
             let pk_value = &values[self.primary_key_column];
@@ -326,6 +331,11 @@ impl NodeTable {
         for group in &mut self.node_groups {
             group.restore_spilled()?;
         }
+
+        // (P61.3) Rows were appended in memory; mark the table dirty so the
+        // durable column mirrors capture them at the next persist even if no
+        // WAL Insert records exist for this batch.
+        self.persistence_dirty = true;
 
         // Batch update indexes
         for (i, row) in rows.iter().enumerate() {
@@ -967,6 +977,9 @@ impl RelTable {
             self.properties[col_idx].push(val);
         }
         self.num_rows += 1;
+        // (P61.3) Mark the rel table dirty so the durable mirror is rewritten
+        // even when no WAL insert record exists for this edge.
+        self.persistence_dirty = true;
         Ok(())
     }
 
@@ -1011,6 +1024,9 @@ impl RelTable {
         }
 
         self.num_rows += total as u64;
+        // (P61.3) Mark the rel table dirty so the durable mirror captures the
+        // new edges even when no WAL insert records exist for this batch.
+        self.persistence_dirty = true;
         Ok(total as u64)
     }
 

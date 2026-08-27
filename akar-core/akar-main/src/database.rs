@@ -644,13 +644,17 @@ impl Database {
         // those decoded from LocalWALData blobs) on top. This reconstructs
         // full state even when no checkpoint ever ran, without double-
         // applying rows.
-        db.storage_manager.recover().unwrap_or_else(|e| {
-            tracing::warn!(
+        //
+        // (P61.3) Recovery MUST NOT fall back to a fresh, empty database on
+        // failure: that silently destroys every committed write in the WAL.
+        // On replay/persist error the database fails to open and the WAL file
+        // is left untouched, so an operator can still repair it.
+        if let Err(e) = db.storage_manager.recover() {
+            return Err(format!(
                 "WAL recovery failed (database may need manual repair): {e}. \
-                     Starting with fresh state."
-            );
-            0
-        });
+                     Refusing to start with an empty database — check the WAL."
+            ));
+        }
 
         Ok(db)
     }

@@ -491,9 +491,12 @@ impl StorageManager {
         // checkpoint's BufferManager flush writes them to disk too (P45.4).
         // Done before the checkpoint so a crash after WAL truncation still
         // leaves the mirror consistent with the tables.
-        if let Err(e) = self.persist_all_tables() {
-            tracing::warn!("Persist tables before checkpoint failed: {e}");
-        }
+        // (P61.3) If persisting any table fails we MUST abort BEFORE the WAL is
+        // cleared: clearing the WAL here would permanently lose any committed
+        // write that lived only in the log. Fail loud instead of silently
+        // truncating away the last durable copy.
+        self.persist_all_tables()
+            .map_err(|e| std::io::Error::other(format!("Persist tables before checkpoint failed: {e}")))?;
 
         // Phase 2: Do the actual checkpoint
         let mut wal = self
@@ -791,15 +794,18 @@ impl StorageManager {
         // After successful replay, mirror the recovered rows into the durable
         // column mirrors as well, so a subsequent startup with an empty WAL
         // restores from the mirror instead of the (now truncated) log.
+        // (P61.3) Persisting the mirrors is mandatory: if it fails, recovery
+        // aborts with an error and the WAL is left intact so the replay state
+        // stays recoverable instead of silently vanishing.
         if data_records > 0 {
             self.persist_all_tables()
                 .map_err(|e| std::io::Error::other(format!("WAL recovery: persist tables failed: {e}")))?;
         }
 
         // Take a checkpoint to reset the WAL and make all recovered data durable.
-        if let Err(e) = checkpoint(&mut wal, &self.buffer_manager) {
-            tracing::warn!("WAL recovery: checkpoint after replay failed: {e}");
-        }
+        // (P61.3) A failure here surfaces as an error — never proceed with a
+        // cleared WAL unless both mirrors and pages were flushed successfully.
+        checkpoint(&mut wal, &self.buffer_manager)?;
 
         Ok(data_records)
     }

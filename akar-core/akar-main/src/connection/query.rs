@@ -342,31 +342,78 @@ impl Connection {
         let substituted =
             crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
 
-        // Handle DDL prepared statements
-        if let Some(result) = self.handle_ddl(&substituted, None)? {
-            self.database.persist_catalog()?;
-            self.maybe_auto_checkpoint()?;
-            return Ok(result);
+        // Every write statement is wrapped in a transaction so MVCC records
+        // are populated and rollback/conflict handling works (P52.18). The
+        // txn must exist before `handle_ddl`: it attaches the WAL sink that
+        // journals a self-sufficient insert (`I`) record for prepared
+        // CREATE/MERGE DML. Previously `handle_ddl` received `None`, so the
+        // row was written live with no WAL record at all and was silently
+        // lost on crash (P60.7).
+        let is_write = Connection::is_write_statement(&prepared.bound_statement);
+        let mut txn_opt: Option<akar_transaction::Transaction> =
+            if is_write { Some(self.begin_write_txn()?) } else { None };
+
+        // Handle DDL/DML prepared statements (create/merge/etc.). Pass the live
+        // txn so journaling matches the literal `query()` path.
+        match self.handle_ddl(&substituted, txn_opt.as_mut()) {
+            Ok(Some(result)) => {
+                self.database.persist_catalog()?;
+                self.maybe_auto_checkpoint()?;
+                if is_write {
+                    if let Some(ref mut txn) = txn_opt {
+                        self.commit_write_txn(txn)?;
+                    }
+                }
+                if is_write {
+                    let written = Connection::extract_write_tables(&substituted);
+                    if !written.is_empty() {
+                        self.database.refresh_vector_indexes(&written);
+                    }
+                }
+                return Ok(result);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if is_write {
+                    if let Some(ref mut txn) = txn_opt {
+                        match self.rollback_write_txn(txn) {
+                            Ok(_) => tracing::warn!("Prepared DDL/DML rolled back due to error: {e}"),
+                            Err(rollback_err) => {
+                                tracing::error!("Prepared rollback ALSO failed: {rollback_err} (original: {e})");
+                            }
+                        }
+                    }
+                }
+                return Err(e);
+            }
         }
 
         // Plan
         let planner = QueryPlanner::new();
-        let logical_plan = planner.plan(substituted).map_err(|e| format!("Plan error: {e}"))?;
+        let logical_plan = match planner.plan(substituted) {
+            Ok(p) => p,
+            Err(e) => {
+                if is_write {
+                    if let Some(ref mut txn) = txn_opt {
+                        let _ = self.rollback_write_txn(txn);
+                    }
+                }
+                return Err(format!("Plan error: {e}"));
+            }
+        };
 
         if logical_plan.is_empty() {
+            if is_write {
+                if let Some(ref mut txn) = txn_opt {
+                    self.commit_write_txn(txn)?;
+                }
+            }
             return Ok(QueryResult::success_message("Query executed (no result)".into()));
         }
 
         // Optimize
         let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
         let optimized_plan = optimizer.optimize(logical_plan);
-
-        // Every write statement is wrapped in a transaction so MVCC records
-        // are populated and rollback/conflict handling works (P52.18). This
-        // fixes the prepared path which previously executed DML with no txn.
-        let is_write = Connection::is_write_statement(&prepared.bound_statement);
-        let mut txn_opt: Option<akar_transaction::Transaction> =
-            if is_write { Some(self.begin_write_txn()?) } else { None };
 
         // Capture MVCC snapshot for read isolation
         let (snapshot_ts, history) = if let Some(ref txn) = txn_opt {
@@ -425,6 +472,16 @@ impl Connection {
         if is_write {
             if let Some(ref mut txn) = txn_opt {
                 self.commit_write_txn(txn)?;
+            }
+        }
+
+        // After a successful write, rebuild the HNSW graph of any vector index
+        // on the written node tables so it reflects the current rows (mirrors
+        // the literal path's P52.38 refresh).
+        if is_write {
+            let written = Connection::extract_write_tables(&prepared.bound_statement);
+            if !written.is_empty() {
+                self.database.refresh_vector_indexes(&written);
             }
         }
 
