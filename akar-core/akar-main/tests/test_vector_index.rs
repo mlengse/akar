@@ -268,3 +268,62 @@ fn match_vector_similarity_rewrites_to_vector_scan() {
     };
     assert_eq!(first, 1, "DESC cosine order must put id 1 first (cos 0.994 > 0.110)");
 }
+
+/// P71.5: the whole MATCH ANN read path (P71.4) must stay scale-invariant,
+/// not just `DistanceMetric::Cosine::compute` / `cosine_similarity` (P51.46
+/// unit test). Insert the same two directions but with arbitrary scales, so
+/// the stored vectors are NON-unit-norm; cosine similarity against the query
+/// must be unchanged, so the HNSW ranking and the threshold filter/ORDER BY
+/// (which re-evaluate `cosine_similarity` on the raw stored vectors) must
+/// match the unit-norm case exactly.
+#[test]
+fn match_vector_scan_cosine_scale_invariant() {
+    let (_dir, _db, conn) = setup();
+
+    conn.query("CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=2)")
+        .expect("create vector index");
+
+    // Same directions as the P71.4 test but scaled: [1,0] -> [10,0] (scaled
+    // up), [0,1] -> [0,0.5] (scaled down). Cosine is scale-invariant, so the
+    // similarities against [0.9, 0.1] are still 0.994 (id 1) and 0.110 (id 2).
+    conn.query("CREATE (m:Memory {id: 1, content: 'one', embedding: [10.0, 0.0]})")
+        .expect("insert one");
+    conn.query("CREATE (m:Memory {id: 2, content: 'two', embedding: [0.0, 0.5]})")
+        .expect("insert two");
+
+    // Threshold 0.5 keeps only id 1 (cos 0.994), regardless of vector scale.
+    let sql = "MATCH (m:Memory) \
+        WHERE cosine_similarity(m.embedding, [0.9, 0.1]) > 0.5 \
+        RETURN m.id \
+        ORDER BY cosine_similarity(m.embedding, [0.9, 0.1]) DESC \
+        LIMIT 2";
+    let res = conn.query(sql).expect("vector match query must execute");
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(
+        chunk.size, 1,
+        "scale-invariant: threshold 0.5 must keep only id 1, got {}",
+        chunk.size
+    );
+    match chunk.get_value(0, 0).expect("id present") {
+        Value::Int64(v) => assert_eq!(v, 1),
+        other => panic!("expected id 1, got {other:?}"),
+    }
+
+    // Threshold 0.0 keeps both, still in DESC order id 1 (0.994) then id 2 (0.110).
+    let sql2 = "MATCH (m:Memory) \
+        WHERE cosine_similarity(m.embedding, [0.9, 0.1]) > 0.0 \
+        RETURN m.id \
+        ORDER BY cosine_similarity(m.embedding, [0.9, 0.1]) DESC \
+        LIMIT 2";
+    let res2 = conn.query(sql2).expect("vector match query 2");
+    let chunk2 = res2.chunks.first().expect("one chunk");
+    assert_eq!(chunk2.size, 2, "scale-invariant: both rows pass threshold 0.0");
+    let first = match chunk2.get_value(0, 0).expect("id present") {
+        Value::Int64(v) => v,
+        other => panic!("expected Int64 id, got {other:?}"),
+    };
+    assert_eq!(
+        first, 1,
+        "scale-invariant: DESC cosine order must put id 1 first (cos 0.994 > 0.110)"
+    );
+}
