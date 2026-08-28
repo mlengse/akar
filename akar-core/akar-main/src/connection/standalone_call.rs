@@ -2,6 +2,8 @@ use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
+use akar_processor::physical::write_ops::vectorsimilarityscan::PhysicalVectorSimilarityScan;
+use akar_processor::physical_operator::PhysicalOperatorExec;
 use akar_processor::processor::{StandaloneCallFn, StandaloneCallHandler, StandaloneCallRegistry};
 use std::sync::Arc;
 
@@ -101,6 +103,17 @@ fn eval_ast_expr_to_value(expr: &Expression) -> Value {
     }
 }
 
+/// Evaluate an expression to a Value, descending into list literals so
+/// `CALL vector_similarity_scan(..., [0.1, 0.2, ...], k)` receives a
+/// `Value::List` for the query vector. Scalars come from
+/// `eval_ast_expr_to_value`; any other expression falls back to `Value::Null`.
+fn eval_ast_expr_to_value_deep(expr: &Expression) -> Value {
+    match expr {
+        Expression::List(items) => Value::List(items.iter().map(eval_ast_expr_to_value_deep).collect()),
+        other => eval_ast_expr_to_value(other),
+    }
+}
+
 fn extract_arg_string(args: &[Expression], idx: usize) -> Result<String, String> {
     if idx >= args.len() {
         return Err(format!("Missing argument at index {} ({} provided)", idx, args.len()));
@@ -119,6 +132,10 @@ fn extract_arg_string(args: &[Expression], idx: usize) -> Result<String, String>
 
 impl StandaloneCallHandler for DbStandaloneCallHandler {
     fn execute_call(&self, name: &str, args: &[Expression]) -> Result<Vec<DataChunk>, ProcessorError> {
+        if name.eq_ignore_ascii_case("vector_similarity_scan") {
+            return self.execute_vector_similarity_scan_call(args);
+        }
+
         if let Some(handler) = self.registry.get(name) {
             let result_rows = handler.execute(args)?;
             return Self::format_result(result_rows);
@@ -179,6 +196,114 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
 }
 
 impl DbStandaloneCallHandler {
+    /// Execute `CALL vector_similarity_scan(table, column, query_vector, top_k)`.
+    ///
+    /// This is routed here (before the table-function registry) because
+    /// `vector_similarity_scan` is registered as `TableFunction::Custom`, which
+    /// `FunctionRegistry::execute_table_function` rejects (it has no callback).
+    /// We instead build a `PhysicalVectorSimilarityScan` directly against the
+    /// catalog's HNSW index, so the explicit ANN read path actually runs.
+    fn execute_vector_similarity_scan_call(
+        &self,
+        args: &[Expression],
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
+        if args.len() < 4 {
+            return Err(
+                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k"
+                    .into(),
+            );
+        }
+
+        // Evaluate each argument into a Value (handles constant scalars and list
+        // literals; non-constant expressions evaluate to Null).
+        let values: Vec<Value> = args.iter().map(eval_ast_expr_to_value_deep).collect();
+
+        let table_name = match &values[0] {
+            Value::String(s) => s.clone(),
+            other => {
+                return Err(format!(
+                    "First argument to vector_similarity_scan must be a table name string, got: {other:?}"
+                )
+                .into())
+            }
+        };
+        let column_name = match &values[1] {
+            Value::String(s) => s.clone(),
+            other => {
+                return Err(format!(
+                    "Second argument to vector_similarity_scan must be a column name string, got: {other:?}"
+                )
+                .into())
+            }
+        };
+        let query_vector = match &values[2] {
+            Value::List(items) => {
+                let mut vec = Vec::with_capacity(items.len());
+                for item in items {
+                    match item {
+                        Value::Double(d) => vec.push(*d),
+                        Value::Int64(i) => vec.push(*i as f64),
+                        Value::Int32(i) => vec.push(*i as f64),
+                        Value::Float(f) => vec.push(*f as f64),
+                        Value::UInt64(u) => vec.push(*u as f64),
+                        _ => {
+                            return Err(
+                                "query_vector must be a list of numbers".to_string().into()
+                            )
+                        }
+                    }
+                }
+                vec
+            }
+            other => {
+                return Err(format!(
+                    "Third argument to vector_similarity_scan must be a list of numbers, got: {other:?}"
+                )
+                .into())
+            }
+        };
+        let top_k = match &values[3] {
+            Value::Int64(k) if *k > 0 => *k as u64,
+            other => {
+                return Err(format!(
+                    "Fourth argument to vector_similarity_scan must be a positive integer, got: {other:?}"
+                )
+                .into())
+            }
+        };
+
+        // Resolve the vector index by column (first index on the table whose
+        // indexed column matches), falling back to the first index on the table.
+        let tc = self.database.table_catalog();
+        let index_name = {
+            let mut by_column = None;
+            let mut first_on_table = None;
+            for entry in tc.all_vector_indexes() {
+                if entry.table_name == table_name {
+                    if by_column.is_none() && entry.column_name == column_name {
+                        by_column = Some(entry.name.clone());
+                    }
+                    if first_on_table.is_none() {
+                        first_on_table = Some(entry.name.clone());
+                    }
+                }
+            }
+            by_column.or(first_on_table).ok_or_else(|| {
+                format!("No vector index found on table '{}' for column '{}'", table_name, column_name)
+            })?
+        };
+
+        let scan = PhysicalVectorSimilarityScan {
+            index_name,
+            index_id: 0,
+            query_vector,
+            top_k,
+            table_name,
+            table_catalog: Some(tc),
+        };
+        scan.execute(vec![])
+    }
+
     fn format_result(result_rows: Vec<Vec<Value>>) -> Result<Vec<DataChunk>, ProcessorError> {
         if result_rows.is_empty() {
             Ok(vec![])

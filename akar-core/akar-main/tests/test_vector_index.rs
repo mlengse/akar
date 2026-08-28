@@ -154,3 +154,55 @@ fn complex_type_array_cosine_similarity_returns_double() {
         other => panic!("expected Value::Double, got {other:?}"),
     }
 }
+
+/// P71.1: `CALL vector_similarity_scan('Table','col',[q], k)` must actually run
+/// the HNSW ANN scan and return the k nearest rows plus a distance column,
+/// instead of erroring in the table-function registry (which rejects
+/// `TableFunction::Custom`). The call is routed in
+/// `DbStandaloneCallHandler::execute_vector_similarity_scan_call` directly to a
+/// `PhysicalVectorSimilarityScan`.
+#[test]
+fn call_vector_similarity_scan_runs_hnsw() {
+    let (_dir, _db, conn) = setup();
+
+    conn.query("CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=2)")
+        .expect("create vector index");
+
+    conn.query("CREATE (m:Memory {id: 1, content: 'one', embedding: [1.0, 0.0]})")
+        .expect("insert one");
+    conn.query("CREATE (m:Memory {id: 2, content: 'two', embedding: [0.0, 1.0]})")
+        .expect("insert two");
+
+    // dims=2 vectors and k=2: both rows are candidates. Query [0.9, 0.1] is
+    // far closer to [1,0] (id 1) than to [0,1] (id 2).
+    let res = conn
+        .query("CALL vector_similarity_scan('Memory', 'embedding', [0.9, 0.1], 2)")
+        .expect("vector_similarity_scan must execute (previously errored)");
+
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 2, "expected 2 nearest rows, got {}", chunk.size);
+
+    // Output layout: all table columns [id, content, embedding] + distance in
+    // the final column (Memory has 3 columns, so distance is column index 3).
+    let distance_col = 3;
+    let mut ids = vec![];
+    for row in 0..chunk.size {
+        let id = chunk.get_value(0, row).expect("id column present");
+        ids.push(id.clone());
+        let dist = chunk.get_value(distance_col, row).expect("distance column present");
+        match dist {
+            Value::Double(_) => {}
+            other => panic!("distance must be a Double, got {other:?}"),
+        }
+    }
+
+    let mut got: Vec<i64> = ids
+        .into_iter()
+        .map(|v| match v {
+            Value::Int64(i) => i,
+            other => panic!("id must be Int64, got {other:?}"),
+        })
+        .collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![1, 2], "both inserted rows should be returned");
+}
