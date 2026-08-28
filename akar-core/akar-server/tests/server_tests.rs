@@ -946,11 +946,11 @@ fn test_parameterized_array_of_objects_unwind() {
 #[test]
 fn test_parameterized_array_of_objects_dml() {
     // P69 end-to-end: UNWIND array-of-objects + CREATE with field access.
-    // NOTE: RETURN-based field access works; CREATE-with-row.field currently
-    // writes 0 rows (complex-value pipeline limitation in PhysicalUnwind →
-    // PhysicalCreateNode, tracked as a known akar gap). This test asserts the
-    // RETURN path (which works) and documents the CREATE-path gap rather than
-    // failing on it.
+    // P73.0 finding: the write persists correctly (PhysicalInsertNode); only
+    // the CREATE pipeline's returned result payload is malformed (a
+    // mismatched count/ids chunk), so tests assert the readback rather than
+    // the CREATE query's own RETURN. This test asserts the RETURN-based probe
+    // (which works) plus the scalar-param CREATE write.
     let ts = start_server(config());
     let client = connect(&ts);
 
@@ -992,4 +992,63 @@ fn test_parameterized_array_of_objects_dml() {
     assert_eq!(res.num_rows(), 1);
     assert_eq!(res.cell(0, 0), Some(&Value::Int64(1)));
     assert_eq!(res.cell(0, 1), Some(&Value::String("alice".to_string())));
+}
+
+// ── P73.0: server-path batch CREATE write isolation ─────────────────────────
+
+#[test]
+fn test_server_unwind_param_create_persists() {
+    // P73.0 finding: `UNWIND $rows AS row CREATE (... row.field ...)` via the
+    // server wire protocol (kairos production path) MUST persist N rows. The
+    // write persists correctly (PhysicalInsertNode); P73.1 fixes the returned
+    // result so the CREATE query reports the true row count and `RETURN
+    // m.field` projects the real node values (not the old malformed chunk).
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    client
+        .query("CREATE NODE TABLE P73T(id INT64, label STRING, content STRING, salience DOUBLE, PRIMARY KEY (id))")
+        .expect("DDL");
+
+    let mut params = HashMap::new();
+    params.insert(
+        "batch".to_string(),
+        serde_json::json!([
+            {"id": 1, "label": "l1", "content": "c1", "salience": 0.5},
+            {"id": 2, "label": "l2", "content": "c2", "salience": 0.4}
+        ]),
+    );
+
+    // kairos debug.py "batch create" shape, no RETURN: result reports 2 rows.
+    let q = "UNWIND $batch AS row CREATE (m:P73T {id: row.id, label: row.label, content: row.content, salience: row.salience})";
+    let res = client.query_with_params(q, params.clone()).expect("batch create");
+    assert_eq!(res.num_rows(), 2, "server CREATE (no RETURN) must report 2 rows");
+
+    let readback = client
+        .query("MATCH (n:P73T) RETURN n.id ORDER BY n.id")
+        .expect("readback");
+    assert_eq!(readback.num_rows(), 2, "server UNWIND->CREATE must persist 2 nodes");
+    assert_eq!(readback.cell(0, 0), Some(&Value::Int64(1)));
+    assert_eq!(readback.cell(1, 0), Some(&Value::Int64(2)));
+    // Sanity: the full property set is written too (id + label + content + salience).
+    let full = client
+        .query("MATCH (n:P73T {id: 1}) RETURN n.label, n.content, n.salience")
+        .expect("full readback");
+    assert_eq!(full.cell(0, 0), Some(&Value::String("l1".to_string())));
+    assert_eq!(full.cell(0, 1), Some(&Value::String("c1".to_string())));
+    assert_eq!(full.cell(0, 2), Some(&Value::Double(0.5)));
+
+    // RETURN-variant: the projection must resolve the created node's property
+    // values (P73.1). Separate table so the ids don't collide as PKs.
+    client
+        .query("CREATE NODE TABLE P73R(id INT64, content STRING, PRIMARY KEY(id))")
+        .expect("DDL2");
+    let q =
+        "UNWIND $batch AS row CREATE (m:P73R {id: row.id, content: row.content}) RETURN m.id, m.content ORDER BY m.id";
+    let res = client.query_with_params(q, params).expect("batch create + return");
+    assert_eq!(res.num_rows(), 2, "server CREATE ... RETURN must report 2 rows");
+    assert_eq!(res.cell(0, 0), Some(&Value::Int64(1)));
+    assert_eq!(res.cell(0, 1), Some(&Value::String("c1".to_string())));
+    assert_eq!(res.cell(1, 0), Some(&Value::Int64(2)));
+    assert_eq!(res.cell(1, 1), Some(&Value::String("c2".to_string())));
 }

@@ -2,7 +2,7 @@
 
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::set::evaluate_expression_for_row;
-use akar_common::types::{PhysicalTypeID, Value};
+use akar_common::types::{PhysicalTypeID, Value, physical_type_from_logical};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
 use akar_storage::wal::{WalSink, log_insert_record, log_rel_insert_record};
@@ -37,6 +37,7 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
         }
 
         let mut assigned_row_ids: Vec<i64> = Vec::new();
+        let mut output_rows: Vec<Vec<Value>> = Vec::new();
         let mut table = self
             .table_catalog
             .get_node_table_by_name_mut(&self.table_name)
@@ -71,9 +72,10 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
                 // the row — otherwise UNWIND+CREATE drops input rows (P53.27).
                 let logged_row = self.wal_sink.is_some().then(|| row_values.clone());
                 let row_id = table
-                    .insert_row_with_txn(row_values, self.txn_id)
+                    .insert_row_with_txn(row_values.clone(), self.txn_id)
                     .map_err(|e| format!("INSERT NODE row {row} failed in '{}': {e}", self.table_name))?;
                 assigned_row_ids.push(row_id as i64);
+                output_rows.push(row_values);
                 log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
                 if let Some(sink) = self.undo_sink.as_ref()
                     && let Ok(mut u) = sink.lock()
@@ -86,23 +88,57 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
         let inserted_count = assigned_row_ids.len();
         tracing::info!("INSERT NODE: added {inserted_count} rows to '{}'", self.table_name);
 
-        let mut count_v = ValueVector::new(PhysicalTypeID::Int64, 1);
-        count_v.resize(1);
-        count_v.set_i64(0, inserted_count as i64);
-        let arr_count = akar_common::arrow_vector::ArrowVector::from_legacy(&count_v).array;
-
-        // Column 1: assigned row IDs (used by record_insert_writes for OCC row-level tracking)
-        let mut ids_v = ValueVector::new(PhysicalTypeID::Int64, assigned_row_ids.len());
-        ids_v.resize(assigned_row_ids.len());
-        for (i, rid) in assigned_row_ids.iter().enumerate() {
-            ids_v.set_i64(i, *rid);
+        // Nothing was created (the earlier guard also covers all-empty input):
+        // return an empty result with zero rows (P53.25).
+        if inserted_count == 0 {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
-        let arr_ids = akar_common::arrow_vector::ArrowVector::from_legacy(&ids_v).array;
 
-        Ok(vec![DataChunk::new(
-            vec![arr_count, arr_ids],
-            vec![PhysicalTypeID::Int64, PhysicalTypeID::Int64],
-        )])
+        let n = inserted_count;
+
+        // Column 0: `_id` — assigned internal row offsets, exposed for OCC
+        // write-set tracking (record_insert_writes reads the `_id` field name,
+        // matching the convention used by MERGE/set.rs).
+        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, n);
+        id_v.resize(n);
+        for (i, rid) in assigned_row_ids.iter().enumerate() {
+            id_v.set_i64(i, *rid);
+        }
+        let mut fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&id_v).array];
+        let mut types = vec![PhysicalTypeID::Int64];
+        let mut names = vec!["_id".to_string()];
+
+        // Columns 1..: the created node's property columns bound to `out_var_name`
+        // (e.g. `n.id`, `n.name`) so `RETURN n.id, n.name` resolves to the real
+        // values and the no-RETURN result reports num_rows = n (P73.1). Every row
+        // maps 1:1 to one inserted node. Complex-typed columns (List/Struct) that
+        // the plain ValueVector cannot materialise are skipped to avoid regressing
+        // write-only CREATE of vector/struct node columns.
+        for (col_idx, col) in table.columns.iter().enumerate() {
+            let ptype = physical_type_from_logical(col.logical_type);
+            let mut cv = ValueVector::new(ptype, n);
+            cv.resize(n);
+            let mut buildable = true;
+            for (row_i, row_values) in output_rows.iter().enumerate() {
+                if cv.set_value(row_i, &row_values[col_idx]).is_err() {
+                    buildable = false;
+                    break;
+                }
+            }
+            if !buildable {
+                tracing::warn!(
+                    "INSERT NODE: skipping complex output column '{}' in '{}'",
+                    col.name,
+                    self.table_name
+                );
+                continue;
+            }
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&cv).array);
+            types.push(ptype);
+            names.push(format!("{}.{}", self.out_var_name, col.name));
+        }
+
+        Ok(vec![DataChunk::new(fields, types).with_names(names)])
     }
 }
 
