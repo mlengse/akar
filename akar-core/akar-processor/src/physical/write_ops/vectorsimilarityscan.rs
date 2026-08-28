@@ -91,60 +91,45 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
             }
         }
 
-        // Convert column-major Vec<Vec<Value>> to DataChunks
+        // Convert column-major Vec<Vec<Value>> into an Arrow-native DataChunk.
+        // Every column is built via arrow_array_from_values, which encodes
+        // `Value::List` into a proper ListArray. The previous ValueVector path
+        // collapsed FLOAT[] (List) columns to NULL when read back downstream,
+        // breaking the cosine threshold filter / ORDER BY re-evaluation (P71.4).
+        use akar_common::arrow_vector::{ArrowVector, arrow_array_from_values};
         use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
-        use akar_common::vector::ValueVector;
 
         let mut fields = Vec::with_capacity(num_cols + 2);
+        let mut field_types = Vec::with_capacity(num_cols + 2);
 
         // Add table columns — typed per column from the node table schema
         // (P52.40: forcing every column to Double corrupted Int64/String data).
         for col_idx in 0..num_cols {
             let phys_type = physical_type_from_logical(node_table.columns[col_idx].logical_type);
-            let col_data = &output_columns[col_idx];
-            let mut v = ValueVector::new(phys_type, num_results);
-            v.resize(num_results);
-            for (i, val) in col_data.iter().enumerate() {
-                // set_value coerces numeric types; oversized strings degrade to NULL.
-                if v.set_value(i, val).is_err() {
-                    v.set_null(i, true);
-                }
-            }
-            fields.push(v);
+            fields.push(ArrowVector::new(
+                arrow_array_from_values(&output_columns[col_idx]),
+                phys_type,
+            ));
+            field_types.push(phys_type);
         }
 
-        // Add distance column
-        let dist_data = &output_columns[num_cols];
-        let mut dist_v = ValueVector::new(PhysicalTypeID::Double, num_results);
-        dist_v.resize(num_results);
-        for (i, val) in dist_data.iter().enumerate() {
-            if let Value::Double(d) = val {
-                dist_v.set_double(i, *d);
-            } else {
-                dist_v.set_null(i, true);
-            }
-        }
-        fields.push(dist_v);
+        // Add the distance column (Double).
+        fields.push(ArrowVector::new(
+            arrow_array_from_values(&output_columns[num_cols]),
+            PhysicalTypeID::Double,
+        ));
+        field_types.push(PhysicalTypeID::Double);
 
         // Add internal `_id` (physical row offset) column, found by name by
         // DELETE/SET/INSERT/extend machinery (row_id_column_index).
-        let id_data = &output_columns[num_cols + 1];
-        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, num_results);
-        id_v.resize(num_results);
-        for (i, val) in id_data.iter().enumerate() {
-            if let Value::Int64(v) = val {
-                id_v.set_i64(i, *v);
-            } else {
-                id_v.set_null(i, true);
-            }
-        }
-        fields.push(id_v);
+        fields.push(ArrowVector::new(
+            arrow_array_from_values(&output_columns[num_cols + 1]),
+            PhysicalTypeID::Int64,
+        ));
+        field_types.push(PhysicalTypeID::Int64);
 
-        let arrow_fields = fields
-            .iter()
-            .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
-            .collect::<Vec<_>>();
-        let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
+        let arrow_fields = fields.iter().map(|v| v.array.clone()).collect::<Vec<_>>();
+        let arrow_field_types = field_types;
 
         let mut field_names: Vec<String> = node_table.columns.iter().map(|c| c.name.clone()).collect();
         field_names.push("distance".to_string());

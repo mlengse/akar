@@ -156,7 +156,16 @@ pub fn map_and_execute_scan(
                 table_name: vs.table_name.clone(),
                 table_catalog: Some(tc),
             };
-            let result = scan.execute(current_input)?;
+            let mut result = scan.execute(current_input)?;
+            // Prefix the output field names with the node alias (like the
+            // ScanNode branch) so downstream Filter/OrderBy/Projection, which
+            // reference `alias.col`, can resolve their columns. The bare CALL
+            // path has `alias: None` and keeps unprefixed names (distance, _id).
+            if let Some(alias) = &vs.alias {
+                for chunk in &mut result {
+                    chunk.field_names = chunk.field_names.iter().map(|n| format!("{alias}.{n}")).collect();
+                }
+            }
             Ok(result)
         }
         LogicalOperator::ArtIndexRangeScan(ars) => {

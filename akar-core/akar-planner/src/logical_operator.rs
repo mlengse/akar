@@ -418,6 +418,10 @@ pub struct LogicalVectorSimilarityScan {
     pub column_name: String,
     pub query_vector: Vec<f64>,
     pub top_k: u64,
+    /// Node alias for field-name prefixing (e.g. `n` in
+    /// `MATCH (n:Memory) ...`). `None` for the bare `CALL vector_similarity_scan`
+    /// path, which emits unprefixed output columns like `distance`/`_id`.
+    pub alias: Option<String>,
     pub cardinality: u64,
 }
 

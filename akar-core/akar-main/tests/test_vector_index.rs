@@ -218,3 +218,53 @@ fn call_vector_similarity_scan_runs_hnsw() {
     got.sort_unstable();
     assert_eq!(got, vec![1, 2], "both inserted rows should be returned");
 }
+
+/// P71.4: `MATCH (m:Memory) WHERE cosine_similarity(m.embedding, [q]) > thr
+/// RETURN ... ORDER BY cosine_similarity(...) DESC LIMIT k` is rewritten by the
+/// optimizer's `VectorSimilarityDetection` pass into a `VectorSimilarityScan`
+/// while preserving the distance threshold, the RETURN projection and the
+/// LIMIT. The results must be identical to the un-accelerated path.
+#[test]
+fn match_vector_similarity_rewrites_to_vector_scan() {
+    let (_dir, _db, conn) = setup();
+
+    conn.query("CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=2)")
+        .expect("create vector index");
+
+    conn.query("CREATE (m:Memory {id: 1, content: 'one', embedding: [1.0, 0.0]})")
+        .expect("insert one");
+    conn.query("CREATE (m:Memory {id: 2, content: 'two', embedding: [0.0, 1.0]})")
+        .expect("insert two");
+
+    // Query [0.9, 0.1]: cosine with [1,0] (id 1) ≈ 0.994, with [0,1] (id 2)
+    // ≈ 0.110. Threshold 0.5 keeps only id 1; DESC order + LIMIT 2 → [1].
+    let sql = "MATCH (m:Memory) \
+        WHERE cosine_similarity(m.embedding, [0.9, 0.1]) > 0.5 \
+        RETURN m.id \
+        ORDER BY cosine_similarity(m.embedding, [0.9, 0.1]) DESC \
+        LIMIT 2";
+    let res = conn.query(sql).expect("vector match query must execute");
+
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 1, "threshold 0.5 must keep only id 1, got {}", chunk.size);
+    match chunk.get_value(0, 0).expect("id present") {
+        Value::Int64(v) => assert_eq!(v, 1),
+        other => panic!("expected id 1, got {other:?}"),
+    }
+
+    // With a threshold below both similarities, both rows are returned and the
+    // DESC order must put id 1 (cos 0.994) before id 2 (cos 0.110).
+    let sql2 = "MATCH (m:Memory) \
+        WHERE cosine_similarity(m.embedding, [0.9, 0.1]) > 0.0 \
+        RETURN m.id \
+        ORDER BY cosine_similarity(m.embedding, [0.9, 0.1]) DESC \
+        LIMIT 2";
+    let res2 = conn.query(sql2).expect("vector match query 2");
+    let chunk2 = res2.chunks.first().expect("one chunk");
+    assert_eq!(chunk2.size, 2, "both rows pass threshold 0.0");
+    let first = match chunk2.get_value(0, 0).expect("id present") {
+        Value::Int64(v) => v,
+        other => panic!("expected Int64 id, got {other:?}"),
+    };
+    assert_eq!(first, 1, "DESC cosine order must put id 1 first (cos 0.994 > 0.110)");
+}

@@ -220,6 +220,7 @@ impl QueryPlanner {
                 column_name,
                 query_vector,
                 top_k,
+                alias: None,
                 cardinality: top_k,
             },
         )])

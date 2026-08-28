@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,905 total, 0 ignored, 1,905 passed, 0 failed** (gate `test [akar-core]` 2026-08-28, s.d. P71.2; P71 vector tests are feature-gated) |
+| Tests passing | **1,909 total, 0 ignored, 1,909 passed, 0 failed** (gate `test [akar-core]` 2026-08-28, s.d. P71.4; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -182,7 +182,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 6 | AggregateDetection | Detects aggregation boundaries |
 | 7 | JoinOptimization | Cardinality-aware join reordering |
 | 8 | TopKOptimization | Converts OrderBy + Limit to TopK |
-| 9 | VectorSimilarityDetection | **NO-OP (audit P52.5)** — old rewrite dropped the distance threshold and consumed Projection/OrderBy/Limit; also unreachable after FilterPushDown folds the predicate into the ScanNode |
+| 9 | VectorSimilarityDetection | **ACTIVE (P71.4)** — rewrites `MATCH ... WHERE cosine_similarity(n.col, q) >/= thr ORDER BY cos DESC LIMIT k` → `[VectorSimilarityScan, Filter(cos>thr), OrderBy, Projection, Limit]`, preserving threshold / RETURN projection / `_id`; regexes the post-FilterPushDown `ScanNode.predicate` |
 | 10 | ArtRangeScanDetection | Detects ART index range scan patterns — **fixed conservatively (P52.4)**: rewrites only when the WHOLE filter is bounds on one property; never merges different-column conjuncts or drops predicates |
 | 11 | LimitPushDown | Pushes limits closer to scans |
 | 12 | CommonSubexpressionElimination | **NO-OP (audit P52.2)** — dedup changed the positional RETURN arity; the mapping was never applied to downstream consumers |
@@ -551,7 +551,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,905** | **1,905 total, 0 ignored, 1,905 passed, 0 failed** (gate `test [akar-core]` 2026-08-28, s.d. P71.2; P71 vector tests are feature-gated) |
+| **Total** | **1,909** | **1,909 total, 0 ignored, 1,909 passed, 0 failed** (gate `test [akar-core]` 2026-08-28, s.d. P71.4; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 
@@ -733,9 +733,10 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
    `akar-c` (C FFI) is intentionally not published (build locally)
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j,
    HTTPFS, Delta, Iceberg, Azure, Unity Catalog)
-5. **Vector index (HNSW) is write-only from SQL** — optimizer pass `VectorSimilarityDetection` is a
-   documented NO-OP (P52.5), so `VectorSimilarityScan` is unreachable from queries; the index is
-   still maintained (refreshed after DML, P52.38) but vector queries go through normal scan+filter.
+5. **Vector ANN read path is active from SQL** — the optimizer pass `VectorSimilarityDetection` (P71.4)
+   rewrites `MATCH ... WHERE cosine_similarity(n.col, q) >/= thr ORDER BY cos DESC LIMIT k` into a `VectorSimilarityScan`
+   (HNSW) with threshold/projection/order preserved; `CALL vector_similarity_scan(...)` (P71.1–P71.3) is the explicit
+   path. The HNSW index is still maintained (refreshed after DML, P52.38).
     GDS table functions (`shortest_path`, `page_rank`, ...) read the graph from `TableCatalog` via
     `CatalogGraphSource` (P52.46, committed `0290a8c`); a hard-coded 5-node sample ring fallback is
     used only when no catalog is available (registry/direct-call paths)
