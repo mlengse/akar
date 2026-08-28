@@ -18,8 +18,22 @@ mod tests {
                 assert_eq!(t.primary_key, "name");
                 assert_eq!(t.columns[0].name, "name");
                 assert_eq!(t.columns[0].type_name, "STRING");
+                assert!(!t.if_not_exists);
             }
             _ => panic!("Expected CreateNodeTable"),
+        }
+    }
+
+    #[test]
+    fn test_create_node_table_if_not_exists() {
+        let sql = "CREATE NODE TABLE IF NOT EXISTS Person(name STRING, age INT64, PRIMARY KEY (name))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateNodeTable(t) => {
+                assert_eq!(t.name, "Person");
+                assert!(t.if_not_exists);
+            }
+            _ => panic!("Expected CreateNodeTable, got {:?}", stmt),
         }
     }
 
@@ -319,8 +333,22 @@ mod tests {
             Statement::CreateRelTable(t) => {
                 assert_eq!(t.name, "Knows");
                 assert_eq!(t.columns.len(), 1);
+                assert!(!t.if_not_exists);
             }
             _ => panic!("Expected CreateRelTable"),
+        }
+    }
+
+    #[test]
+    fn test_create_rel_table_if_not_exists() {
+        let sql = "CREATE REL TABLE IF NOT EXISTS Knows(FROM Person TO Person, since INT64)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateRelTable(t) => {
+                assert_eq!(t.name, "Knows");
+                assert!(t.if_not_exists);
+            }
+            _ => panic!("Expected CreateRelTable, got {:?}", stmt),
         }
     }
 

@@ -12,8 +12,10 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
             let mut name = String::new();
             let mut columns = Vec::new();
             let mut pk = String::new();
+            let mut if_not_exists = false;
             for inner in pair.into_inner() {
                 match inner.as_rule() {
+                    Rule::if_not_exists => if_not_exists = true,
                     Rule::identifier if name.is_empty() => name = inner.as_str().to_string(),
                     Rule::column_definitions => {
                         for col in inner.into_inner() {
@@ -49,6 +51,7 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
                 name,
                 columns,
                 primary_key: pk,
+                if_not_exists,
             }))
         }
         Rule::create_rel_table => {
@@ -56,8 +59,10 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
             let mut from = String::new();
             let mut to = String::new();
             let mut columns = Vec::new();
+            let mut if_not_exists = false;
             for inner in pair.into_inner() {
                 match inner.as_rule() {
+                    Rule::if_not_exists => if_not_exists = true,
                     Rule::identifier => {
                         if name.is_empty() {
                             name = inner.as_str().to_string();
@@ -95,6 +100,7 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
                 from,
                 to,
                 columns,
+                if_not_exists,
             }))
         }
         Rule::drop_table => {

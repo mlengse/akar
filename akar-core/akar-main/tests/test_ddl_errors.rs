@@ -10,6 +10,38 @@ fn test_create_table_already_exists() {
 }
 
 #[test]
+fn test_create_node_table_if_not_exists_idempotent() {
+    let (_db, conn) = setup_db();
+    // First create succeeds.
+    exec(
+        &conn,
+        "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))",
+    );
+    // IF NOT EXISTS on an existing table is a no-op, not an error.
+    exec(
+        &conn,
+        "CREATE NODE TABLE IF NOT EXISTS Person(id INT64, name STRING, PRIMARY KEY (id))",
+    );
+    // The existing table (and its data) is untouched and still usable.
+    exec(&conn, "CREATE (:Person {id: 1, name: 'alice'})");
+    let rows = query_column(&conn, "MATCH (p:Person) RETURN p.name");
+    assert_eq!(rows, vec![Value::String("alice".to_string())]);
+}
+
+#[test]
+fn test_create_rel_table_if_not_exists_idempotent() {
+    let (_db, conn) = setup_db();
+    exec(&conn, "CREATE NODE TABLE A(id INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE NODE TABLE B(id INT64, PRIMARY KEY (id))");
+    exec(&conn, "CREATE REL TABLE IF NOT EXISTS Knows(FROM A TO B, since INT64)");
+    // Second IF NOT EXISTS create is a no-op, not an error.
+    exec(&conn, "CREATE REL TABLE IF NOT EXISTS Knows(FROM A TO B, since INT64)");
+    // Same rel name without the clause still errors (existing behavior).
+    let err = exec_err(&conn, "CREATE REL TABLE Knows(FROM A TO B, since INT64)");
+    assert!(err.contains("already exists") || err.contains("Error"));
+}
+
+#[test]
 fn test_drop_table_does_not_exist() {
     let (_db, conn) = setup_db();
     let err = exec_err(&conn, "DROP TABLE NonExistent");

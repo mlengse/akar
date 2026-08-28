@@ -233,6 +233,7 @@ impl QueryPlanner {
             name: t.name,
             columns: t.columns,
             primary_key: t.primary_key,
+            if_not_exists: t.if_not_exists,
             cardinality: 1,
         })])
     }
@@ -243,6 +244,7 @@ impl QueryPlanner {
             from: t.from,
             to: t.to,
             columns: t.columns,
+            if_not_exists: t.if_not_exists,
             cardinality: 1,
         })])
     }

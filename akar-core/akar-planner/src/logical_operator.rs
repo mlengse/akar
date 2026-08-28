@@ -836,6 +836,7 @@ pub struct LogicalCreateNodeTable {
     pub name: String,
     pub columns: Vec<CatalogColumn>,
     pub primary_key: String,
+    pub if_not_exists: bool,
     pub cardinality: u64,
 }
 
@@ -846,6 +847,7 @@ pub struct LogicalCreateRelTable {
     pub from: String,
     pub to: String,
     pub columns: Vec<CatalogColumn>,
+    pub if_not_exists: bool,
     pub cardinality: u64,
 }
 

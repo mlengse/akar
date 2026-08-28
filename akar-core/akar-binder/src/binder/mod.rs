@@ -961,6 +961,11 @@ impl Binder {
         let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.create_node_table(t.name.clone(), columns.clone()) {
             CatalogResult::Created { .. } => {}
+            CatalogResult::AlreadyExists if t.if_not_exists => {
+                // IF NOT EXISTS: leave any existing table untouched; the
+                // physical executor also skips, so this is an idempotent
+                // no-op for schema-ensure (P72).
+            }
             CatalogResult::AlreadyExists => {
                 return Err(format!("Table '{}' already exists", t.name).into());
             }
@@ -971,6 +976,7 @@ impl Binder {
             name: t.name,
             columns,
             primary_key: t.primary_key,
+            if_not_exists: t.if_not_exists,
         }))
     }
 
@@ -1127,6 +1133,9 @@ impl Binder {
         let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
         match catalog.create_rel_table(t.name.clone(), src_id, dst_id, columns.clone()) {
             CatalogResult::Created { .. } => {}
+            CatalogResult::AlreadyExists if t.if_not_exists => {
+                // IF NOT EXISTS: leave any existing rel table untouched (P72).
+            }
             CatalogResult::AlreadyExists => {
                 return Err(format!("Rel table '{}' already exists", t.name).into());
             }
@@ -1140,6 +1149,7 @@ impl Binder {
             src_table_id: src_id,
             dst_table_id: dst_id,
             columns,
+            if_not_exists: t.if_not_exists,
         }))
     }
 

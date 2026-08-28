@@ -420,6 +420,7 @@ pub struct CreateNodeTable {
     pub name: String,
     pub columns: Vec<ColumnDef>,
     pub primary_key: String,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -428,6 +429,7 @@ pub struct CreateRelTable {
     pub from: String,
     pub to: String,
     pub columns: Vec<ColumnDef>,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

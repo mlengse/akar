@@ -48,6 +48,11 @@ pub fn map_and_execute_ddl(
                 .table_catalog
                 .as_ref()
                 .ok_or("CREATE NODE TABLE requires a table catalog")?;
+            if c.if_not_exists && tc.get_node_table_by_name(&c.name).is_some() {
+                // IF NOT EXISTS: table already present — idempotent no-op (P72).
+                tracing::info!("CREATE NODE TABLE IF NOT EXISTS: '{}' already exists, skipping", c.name);
+                return Ok(ddl_success_chunk(&format!("Node table '{}' already exists", c.name)));
+            }
             let columns: Vec<akar_storage::table::ColumnDefinition> = c
                 .columns
                 .iter()
@@ -75,6 +80,11 @@ pub fn map_and_execute_ddl(
                 .table_catalog
                 .as_ref()
                 .ok_or("CREATE REL TABLE requires a table catalog")?;
+            if c.if_not_exists && tc.get_rel_table_by_name(&c.name).is_some() {
+                // IF NOT EXISTS: rel table already present — idempotent no-op (P72).
+                tracing::info!("CREATE REL TABLE IF NOT EXISTS: '{}' already exists, skipping", c.name);
+                return Ok(ddl_success_chunk(&format!("Rel table '{}' already exists", c.name)));
+            }
             let from_id = tc
                 .get_node_table_by_name(&c.from)
                 .map(|t| t.table_id)

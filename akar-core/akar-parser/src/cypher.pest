@@ -219,11 +219,11 @@ query_clause = {
 // ==================== DDL ====================
 
 create_node_table = {
-    "CREATE" ~ "NODE" ~ "TABLE" ~ identifier ~ "(" ~ column_definitions ~ "," ~ primary_key ~ ")"
+    "CREATE" ~ "NODE" ~ "TABLE" ~ if_not_exists? ~ identifier ~ "(" ~ column_definitions ~ "," ~ primary_key ~ ")"
 }
 
 create_rel_table = {
-    "CREATE" ~ "REL" ~ "TABLE" ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ ("," ~ column_definitions)? ~ ")"
+    "CREATE" ~ "REL" ~ "TABLE" ~ if_not_exists? ~ identifier ~ "(" ~ "FROM" ~ identifier ~ "TO" ~ identifier ~ ("," ~ column_definitions)? ~ ")"
 }
 
 drop_table = {

@@ -283,6 +283,7 @@ pub struct BoundCreateNodeTable {
     pub name: String,
     pub columns: Vec<akar_catalog::CatalogColumn>,
     pub primary_key: String,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +294,7 @@ pub struct BoundCreateRelTable {
     pub src_table_id: u64,
     pub dst_table_id: u64,
     pub columns: Vec<akar_catalog::CatalogColumn>,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone)]
