@@ -10,8 +10,26 @@ use crate::join_order::{build_join_tree, build_wcoj_intersect, flatten_join_plan
 use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
 use akar_common::error::PlannerError;
+use akar_common::types::{Value, extract_f64_list};
 use akar_parser::ast::Expression;
 use std::collections::HashSet;
+
+/// Evaluate a constant expression (or list literal of constants) to a `Value`
+/// for planning standalone calls that take literal arguments (e.g.
+/// `vector_similarity_scan`). Non-constant expressions evaluate to `None`.
+fn eval_standalone_expr(expr: &Expression) -> Option<Value> {
+    match expr {
+        Expression::Constant(c) => match c {
+            akar_parser::ast::Constant::String(s) => Some(Value::String(s.clone())),
+            akar_parser::ast::Constant::Integer(i) => Some(Value::Int64(*i)),
+            akar_parser::ast::Constant::Float(f) => Some(Value::Double(*f)),
+            akar_parser::ast::Constant::Bool(b) => Some(Value::Bool(*b)),
+            akar_parser::ast::Constant::Null => Some(Value::Null),
+        },
+        Expression::List(items) => Some(Value::List(items.iter().filter_map(eval_standalone_expr).collect())),
+        _ => None,
+    }
+}
 
 /// Whether an ORDER BY key expression is produced by the projection output.
 ///
@@ -158,11 +176,53 @@ impl QueryPlanner {
     }
 
     fn plan_standalone_call(&self, c: BoundStandaloneCall) -> Result<Vec<LogicalOperator>, PlannerError> {
+        if c.function_name.eq_ignore_ascii_case("vector_similarity_scan") {
+            return self.plan_vector_similarity_scan_call(c.args);
+        }
         Ok(vec![LogicalOperator::StandaloneCall(LogicalStandaloneCall {
             function_name: c.function_name,
             args: c.args,
             cardinality: 1,
         })])
+    }
+
+    /// Plan `CALL vector_similarity_scan(table, column, query_vector, top_k)`
+    /// into a `LogicalOperator::VectorSimilarityScan` so the scan flows through
+    /// the normal operator pipeline (mapper → `PhysicalVectorSimilarityScan`)
+    /// instead of a bespoke standalone-call handler build.
+    fn plan_vector_similarity_scan_call(&self, args: Vec<Expression>) -> Result<Vec<LogicalOperator>, PlannerError> {
+        if args.len() < 4 {
+            return Err(
+                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into(),
+            );
+        }
+        let table_name = match eval_standalone_expr(&args[0]) {
+            Some(Value::String(s)) => s,
+            _ => return Err("First argument to vector_similarity_scan must be a table name string".into()),
+        };
+        let column_name = match eval_standalone_expr(&args[1]) {
+            Some(Value::String(s)) => s,
+            _ => return Err("Second argument to vector_similarity_scan must be a column name string".into()),
+        };
+        let query_vector = match eval_standalone_expr(&args[2]) {
+            Some(v) => extract_f64_list(&v).map_err(|_| {
+                format!("Third argument to vector_similarity_scan must be a list of numbers, got: {v:?}")
+            })?,
+            None => return Err("Third argument to vector_similarity_scan must be a list of numbers".into()),
+        };
+        let top_k = match eval_standalone_expr(&args[3]) {
+            Some(Value::Int64(k)) if k > 0 => k as u64,
+            _ => return Err("Fourth argument to vector_similarity_scan must be a positive integer".into()),
+        };
+        Ok(vec![LogicalOperator::VectorSimilarityScan(
+            LogicalVectorSimilarityScan {
+                table_name,
+                column_name,
+                query_vector,
+                top_k,
+                cardinality: top_k,
+            },
+        )])
     }
 
     // ==================== DDL Planning ====================

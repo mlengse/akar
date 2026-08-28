@@ -121,13 +121,40 @@ pub fn map_and_execute_scan(
             Ok(result)
         }
         LogicalOperator::VectorSimilarityScan(vs) => {
+            let tc = ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| "No table catalog available for VECTOR SIMILARITY SCAN".to_string())?;
+            // Resolve the HNSW index by column (first index on the table whose
+            // indexed column matches), falling back to the first index on the
+            // table — same convention as the explicit CALL handler.
+            let index_name = {
+                let mut by_column = None;
+                let mut first_on_table = None;
+                for entry in tc.all_vector_indexes() {
+                    if entry.table_name == vs.table_name {
+                        if by_column.is_none() && entry.column_name == vs.column_name {
+                            by_column = Some(entry.name.clone());
+                        }
+                        if first_on_table.is_none() {
+                            first_on_table = Some(entry.name.clone());
+                        }
+                    }
+                }
+                by_column.or(first_on_table).ok_or_else(|| {
+                    format!(
+                        "No vector index found on table '{}' for column '{}'",
+                        vs.table_name, vs.column_name
+                    )
+                })?
+            };
             let scan = PhysicalVectorSimilarityScan {
-                index_name: vs.index_name.clone(),
-                index_id: vs.index_id,
+                index_name,
+                index_id: 0,
                 query_vector: vs.query_vector.clone(),
                 top_k: vs.top_k,
                 table_name: vs.table_name.clone(),
-                table_catalog: ctx.table_catalog.clone(),
+                table_catalog: Some(tc),
             };
             let result = scan.execute(current_input)?;
             Ok(result)

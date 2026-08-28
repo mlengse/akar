@@ -414,11 +414,10 @@ pub struct LogicalArtIndexRangeScan {
 
 #[derive(Debug, Clone)]
 pub struct LogicalVectorSimilarityScan {
-    pub index_name: String,
-    pub index_id: u64,
+    pub table_name: String,
+    pub column_name: String,
     pub query_vector: Vec<f64>,
     pub top_k: u64,
-    pub table_name: String,
     pub cardinality: u64,
 }
 
