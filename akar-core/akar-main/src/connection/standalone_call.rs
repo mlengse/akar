@@ -203,14 +203,10 @@ impl DbStandaloneCallHandler {
     /// `FunctionRegistry::execute_table_function` rejects (it has no callback).
     /// We instead build a `PhysicalVectorSimilarityScan` directly against the
     /// catalog's HNSW index, so the explicit ANN read path actually runs.
-    fn execute_vector_similarity_scan_call(
-        &self,
-        args: &[Expression],
-    ) -> Result<Vec<DataChunk>, ProcessorError> {
+    fn execute_vector_similarity_scan_call(&self, args: &[Expression]) -> Result<Vec<DataChunk>, ProcessorError> {
         if args.len() < 4 {
             return Err(
-                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k"
-                    .into(),
+                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into(),
             );
         }
 
@@ -224,7 +220,7 @@ impl DbStandaloneCallHandler {
                 return Err(format!(
                     "First argument to vector_similarity_scan must be a table name string, got: {other:?}"
                 )
-                .into())
+                .into());
             }
         };
         let column_name = match &values[1] {
@@ -233,7 +229,7 @@ impl DbStandaloneCallHandler {
                 return Err(format!(
                     "Second argument to vector_similarity_scan must be a column name string, got: {other:?}"
                 )
-                .into())
+                .into());
             }
         };
         let query_vector = match &values[2] {
@@ -246,11 +242,7 @@ impl DbStandaloneCallHandler {
                         Value::Int32(i) => vec.push(*i as f64),
                         Value::Float(f) => vec.push(*f as f64),
                         Value::UInt64(u) => vec.push(*u as f64),
-                        _ => {
-                            return Err(
-                                "query_vector must be a list of numbers".to_string().into()
-                            )
-                        }
+                        _ => return Err("query_vector must be a list of numbers".to_string().into()),
                     }
                 }
                 vec
@@ -259,7 +251,7 @@ impl DbStandaloneCallHandler {
                 return Err(format!(
                     "Third argument to vector_similarity_scan must be a list of numbers, got: {other:?}"
                 )
-                .into())
+                .into());
             }
         };
         let top_k = match &values[3] {
@@ -268,7 +260,7 @@ impl DbStandaloneCallHandler {
                 return Err(format!(
                     "Fourth argument to vector_similarity_scan must be a positive integer, got: {other:?}"
                 )
-                .into())
+                .into());
             }
         };
 
@@ -289,7 +281,10 @@ impl DbStandaloneCallHandler {
                 }
             }
             by_column.or(first_on_table).ok_or_else(|| {
-                format!("No vector index found on table '{}' for column '{}'", table_name, column_name)
+                format!(
+                    "No vector index found on table '{}' for column '{}'",
+                    table_name, column_name
+                )
             })?
         };
 

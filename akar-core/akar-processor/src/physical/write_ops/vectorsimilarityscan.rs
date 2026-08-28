@@ -72,12 +72,15 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         let num_cols = node_table.columns.len();
         let num_results = results.len();
 
-        // Build output columns: all table columns + distance column
-        let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols + 1];
+        // Build output columns: all table columns + distance + internal `_id`
+        // (physical row offset, the identity column other operators resolve).
+        // Convention matches `PhysicalArtIndexRangeScan` (copyfrom.rs).
+        let mut output_columns: Vec<Vec<Value>> = vec![Vec::with_capacity(num_results); num_cols + 2];
 
         for (dist, row_id) in &results {
-            // Add distance as the last column
+            // Add distance (second-to-last) and `_id` (last) columns.
             output_columns[num_cols].push(Value::Double(*dist));
+            output_columns[num_cols + 1].push(Value::Int64(*row_id as i64));
 
             // Look up each column value from the node table
             for (col_idx, out_col) in output_columns.iter_mut().enumerate().take(num_cols) {
@@ -92,7 +95,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
         use akar_common::vector::ValueVector;
 
-        let mut fields = Vec::with_capacity(num_cols + 1);
+        let mut fields = Vec::with_capacity(num_cols + 2);
 
         // Add table columns — typed per column from the node table schema
         // (P52.40: forcing every column to Double corrupted Int64/String data).
@@ -123,17 +126,35 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
         }
         fields.push(dist_v);
 
+        // Add internal `_id` (physical row offset) column, found by name by
+        // DELETE/SET/INSERT/extend machinery (row_id_column_index).
+        let id_data = &output_columns[num_cols + 1];
+        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, num_results);
+        id_v.resize(num_results);
+        for (i, val) in id_data.iter().enumerate() {
+            if let Value::Int64(v) = val {
+                id_v.set_i64(i, *v);
+            } else {
+                id_v.set_null(i, true);
+            }
+        }
+        fields.push(id_v);
+
         let arrow_fields = fields
             .iter()
             .map(|v| akar_common::arrow_vector::ArrowVector::from_legacy(v).array)
             .collect::<Vec<_>>();
         let arrow_field_types = fields.iter().map(|v| v.physical_type()).collect::<Vec<_>>();
 
+        let mut field_names: Vec<String> = node_table.columns.iter().map(|c| c.name.clone()).collect();
+        field_names.push("distance".to_string());
+        field_names.push("_id".to_string());
+
         Ok(vec![DataChunk {
             fields: arrow_fields,
             field_types: arrow_field_types,
             size: num_results,
-            field_names: vec![],
+            field_names,
             sel_vector: None,
         }])
     }

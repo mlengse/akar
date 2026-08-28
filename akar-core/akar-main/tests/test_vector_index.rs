@@ -182,9 +182,16 @@ fn call_vector_similarity_scan_runs_hnsw() {
     let chunk = res.chunks.first().expect("one chunk");
     assert_eq!(chunk.size, 2, "expected 2 nearest rows, got {}", chunk.size);
 
-    // Output layout: all table columns [id, content, embedding] + distance in
-    // the final column (Memory has 3 columns, so distance is column index 3).
+    // P71.2: output schema is named — [table columns..., distance, _id].
+    assert_eq!(
+        chunk.field_names,
+        vec!["id", "content", "embedding", "distance", "_id"],
+        "vector-scan chunk must carry real field names (was empty)"
+    );
+
+    // Output layout: id at 0, distance at 3, _id at 4 (Memory has 3 columns).
     let distance_col = 3;
+    let id_col = 4;
     let mut ids = vec![];
     for row in 0..chunk.size {
         let id = chunk.get_value(0, row).expect("id column present");
@@ -193,6 +200,11 @@ fn call_vector_similarity_scan_runs_hnsw() {
         match dist {
             Value::Double(_) => {}
             other => panic!("distance must be a Double, got {other:?}"),
+        }
+        let row_id = chunk.get_value(id_col, row).expect("_id column present");
+        match row_id {
+            Value::Int64(_) => {}
+            other => panic!("_id must be an Int64 physical row offset, got {other:?}"),
         }
     }
 
