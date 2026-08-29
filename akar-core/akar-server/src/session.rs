@@ -59,6 +59,12 @@ pub struct SessionConfig {
 /// Serve one client connection until the peer disconnects or the server shuts
 /// down. All per-session state is dropped on return.
 pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionConfig) {
+    // On Windows the accepted socket inherits nonblocking mode from the
+    // listener (which the accept loop sets nonblocking). A nonblocking socket
+    // ignores `set_read_timeout`, so `read_frame` returns `WouldBlock`
+    // immediately and the session loop busy-spins one core per connection.
+    // Force blocking mode so the read timeout actually parks the thread.
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let conn = Connection::new(&db);
