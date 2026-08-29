@@ -332,8 +332,8 @@ order_by  = {
 sort_item = { expression ~ sort_dir? }
 sort_dir  = { "ASC" | "DESC" }
 
-limit  = { "LIMIT" ~ integer ~ offset? }
-offset = { "SKIP" ~ integer }
+limit  = { "LIMIT" ~ (integer | parameter) ~ offset? }
+offset = { "SKIP" ~ (integer | parameter) }
 
 // ==================== Expressions ====================
 

@@ -231,6 +231,12 @@ pub struct ReturnClause {
     pub limit: Option<u64>,
     /// Optional SKIP — number of rows to skip before returning.
     pub skip: Option<u64>,
+    /// Parameter name (e.g. `$limit`) referenced by LIMIT, resolved to a value
+    /// at prepare/execution time. Mutually exclusive with `limit`.
+    pub limit_param: Option<String>,
+    /// Parameter name (e.g. `$skip`) referenced by SKIP, resolved to a value
+    /// at prepare/execution time. Mutually exclusive with `skip`.
+    pub skip_param: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

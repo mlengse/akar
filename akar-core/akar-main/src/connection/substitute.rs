@@ -44,8 +44,41 @@ pub(crate) fn substitute_params_in_statement(
                             expressions: new_exprs?,
                             distinct: r.distinct,
                             order_by: new_order_by,
-                            limit: r.limit,
-                            skip: r.skip,
+                            limit: resolve_limit(r, params)?,
+                            skip: resolve_skip(r, params)?,
+                            limit_param: None,
+                            skip_param: None,
+                        })
+                    }
+                    BoundClause::BoundWith(r) => {
+                        let new_exprs: Result<Vec<_>, _> = r
+                            .expressions
+                            .iter()
+                            .map(|e| substitute_in_bound_expr(e, params))
+                            .collect();
+                        let new_order_by = r
+                            .order_by
+                            .as_ref()
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .map(|item| {
+                                        Ok(akar_binder::bound_statement::BoundOrderByItem {
+                                            expression: substitute_in_bound_expr(&item.expression, params)?,
+                                            ascending: item.ascending,
+                                        })
+                                    })
+                                    .collect::<Result<Vec<_>, String>>()
+                            })
+                            .transpose()?;
+                        BoundClause::BoundWith(BoundReturnClause {
+                            expressions: new_exprs?,
+                            distinct: r.distinct,
+                            order_by: new_order_by,
+                            limit: resolve_limit(r, params)?,
+                            skip: resolve_skip(r, params)?,
+                            limit_param: None,
+                            skip_param: None,
                         })
                     }
                     BoundClause::BoundWhere(w) => {
@@ -299,6 +332,45 @@ fn substitute_in_bound_expr(
         is_constant: expr.is_constant,
         alias: expr.alias.clone(),
     })
+}
+
+/// Resolve a LIMIT value on a bound RETURN after parameter substitution.
+///
+/// A literal `LIMIT n` is used as-is; a parameterized `LIMIT $name` is read
+/// from `params` and converted to a non-negative `u64`. The caller clears
+/// `limit_param` so the downstream planner/physical sees a concrete integer.
+fn resolve_limit(r: &BoundReturnClause, params: &HashMap<String, Value>) -> Result<Option<u64>, String> {
+    if let Some(lit) = r.limit {
+        return Ok(Some(lit));
+    }
+    if let Some(name) = &r.limit_param {
+        return param_to_u64(&format!("LIMIT `${name}`"), name, params);
+    }
+    Ok(None)
+}
+
+/// Resolve a SKIP value on a bound RETURN after parameter substitution.
+fn resolve_skip(r: &BoundReturnClause, params: &HashMap<String, Value>) -> Result<Option<u64>, String> {
+    if let Some(lit) = r.skip {
+        return Ok(Some(lit));
+    }
+    if let Some(name) = &r.skip_param {
+        return param_to_u64(&format!("SKIP `${name}`"), name, params);
+    }
+    Ok(None)
+}
+
+/// Read a parameter value and convert it to a non-negative `u64`.
+fn param_to_u64(what: &str, name: &str, params: &HashMap<String, Value>) -> Result<Option<u64>, String> {
+    let value = params
+        .get(name)
+        .ok_or_else(|| format!("Missing parameter: ${}", name))?;
+    let n = match value {
+        Value::UInt64(u) => *u,
+        Value::Int64(i) if *i >= 0 => *i as u64,
+        _ => return Err(format!("{what} must be a non-negative integer, got `{value:?}`")),
+    };
+    Ok(Some(n))
 }
 
 /// Substitute a FOREACH loop variable with a concrete value in a BoundStatement.

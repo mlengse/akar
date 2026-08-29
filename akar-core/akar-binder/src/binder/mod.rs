@@ -587,6 +587,8 @@ impl Binder {
             order_by,
             limit: r.limit,
             skip: r.skip,
+            limit_param: r.limit_param.clone(),
+            skip_param: r.skip_param.clone(),
         })
     }
 

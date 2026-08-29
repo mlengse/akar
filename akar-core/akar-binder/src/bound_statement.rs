@@ -263,6 +263,10 @@ pub struct BoundReturnClause {
     pub limit: Option<u64>,
     /// Bound SKIP.
     pub skip: Option<u64>,
+    /// Parameter name referenced by LIMIT (resolved to `limit` at substitution).
+    pub limit_param: Option<String>,
+    /// Parameter name referenced by SKIP (resolved to `skip` at substitution).
+    pub skip_param: Option<String>,
 }
 
 /// A bound sort item for ORDER BY.

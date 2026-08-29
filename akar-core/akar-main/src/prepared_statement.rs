@@ -75,6 +75,12 @@ fn collect_params_from_statement(bound: &BoundStatement, params: &mut Vec<String
                                 collect_params_from_expr(&item.expression.expression, params);
                             }
                         }
+                        if let Some(name) = &r.limit_param {
+                            params.push(name.clone());
+                        }
+                        if let Some(name) = &r.skip_param {
+                            params.push(name.clone());
+                        }
                     }
                     akar_binder::bound_statement::BoundClause::BoundWhere(w) => {
                         collect_params_from_expr(&w.expression.expression, params);
@@ -361,6 +367,8 @@ fn substitute_params_in_query(query: &Query, param_values: &HashMap<String, Valu
                     order_by: r.order_by.clone(),
                     limit: r.limit,
                     skip: r.skip,
+                    limit_param: r.limit_param.clone(),
+                    skip_param: r.skip_param.clone(),
                 })
             }
             other => other.clone(),
