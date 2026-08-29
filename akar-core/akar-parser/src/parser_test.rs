@@ -116,6 +116,21 @@ mod tests {
     }
 
     #[test]
+    fn test_create_node_table_array_with_dims() {
+        // P80: `FLOAT[384]` (array with a capacity) must parse — previously the
+        // grammar only accepted the empty-bracket form `FLOAT[]`.
+        let sql = "CREATE NODE TABLE Memory(id INT64, embedding FLOAT[384], empty FLOAT[], PRIMARY KEY (id))";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateNodeTable(t) => {
+                assert_eq!(t.columns[1].type_name, "FLOAT[384]");
+                assert_eq!(t.columns[2].type_name, "FLOAT[]");
+            }
+            _ => panic!("Expected CreateNodeTable"),
+        }
+    }
+
+    #[test]
     fn test_match_return() {
         let sql = "MATCH (a:Person) RETURN a.name, a.age";
         let stmt = parse(sql).unwrap();

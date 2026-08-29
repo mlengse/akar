@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(ddl/cypher) — P80: `CREATE NODE TABLE` accepted type array-with-dimension `FLOAT[384]` → `List` (2026-08-30)** — a column declared with a capacity (e.g. `embedding FLOAT[384]`) now parses and binds instead of failing, so `akar-server` can self-bootstrap a fresh `Memory`/Metadata schema whose embedding column is declared `FLOAT[384]` (blokir kairos P1). Path A — the engine treats `FLOAT[384]` exactly like the empty form `FLOAT[]`: grammar `type_name` (`akar-core/akar-parser/src/cypher.pest`) adds `array_suffix = { "[" ~ integer? ~ "]" }` after `primitive_type` (accepts `[]` and `[N]`, repeatable; `map_type`/`struct_type`/`union_type` precedence unchanged); the DDL parser already carries the raw `type_name` string (`parser/ddl.rs`) so no change there; the binder `parse_type` (`akar-binder/src/binder/mod.rs`) now maps any primitive followed by a bracket group to `LogicalTypeID::List` (was `ends_with("[]")` only → `FLOAT[384]` errored `Unknown type`). The numeric dimension is intentionally not tracked at engine level — this mirrors the existing Python translator and vector dims remain declared separately via `CREATE VECTOR INDEX ... WITH (dims=N)`. 2 unit tests (parser `test_create_node_table_array_with_dims`; binder `parse_type_array_with_dims_maps_to_list`) + 1 end-to-end integration `test_p80_array_dims_ddl.rs` (create `Memory` with `FLOAT[384]`, insert a list, read back as `Value::List`). Gate `test [akar-core]` default: **0 failed / 0 ignored** across the workspace; fmt + clippy `-D warnings` bersih. Full catalog-level dimension fidelity deferred to P81 (separate, non-blocker).
+
 ## [0.1.17] - 2026-08-30
 
 ### Added

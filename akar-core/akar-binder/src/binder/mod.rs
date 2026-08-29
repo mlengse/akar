@@ -113,8 +113,13 @@ impl Binder {
     pub fn parse_type(type_name: &str) -> Result<LogicalTypeID, BinderError> {
         let upper = type_name.to_uppercase();
 
-        // Handle compound types with no child-type tracking (parse only)
-        if upper.ends_with("[]") {
+        // Handle compound types with no child-type tracking (parse only).
+        // An array suffix (`[]` or `[N]`) — any primitive followed by one or
+        // more bracket groups — maps to List; the dimension is not tracked at
+        // engine level (P80, mirrors the Python translator). Arrays are the
+        // only bracket form, so this never collides with MAP/STRUCT/UNION (()
+        // delimited) or a scalar primitive (no brackets).
+        if upper.contains('[') && upper.ends_with(']') {
             return Ok(LogicalTypeID::List);
         }
         if upper.starts_with("MAP(") {
@@ -2356,5 +2361,17 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn parse_type_array_with_dims_maps_to_list() {
+        // P80: `FLOAT[384]` (array with a capacity) must map to List, matching
+        // the existing empty-bracket `FLOAT[]` form and the Python translator.
+        assert_eq!(Binder::parse_type("FLOAT[384]").unwrap(), LogicalTypeID::List);
+        assert_eq!(Binder::parse_type("FLOAT[]").unwrap(), LogicalTypeID::List);
+        assert_eq!(Binder::parse_type("FLOAT[384][]").unwrap(), LogicalTypeID::List);
+        // Scalars without brackets must still parse to their primitive type.
+        assert_eq!(Binder::parse_type("FLOAT").unwrap(), LogicalTypeID::Float);
+        assert_eq!(Binder::parse_type("INT64").unwrap(), LogicalTypeID::Int64);
     }
 }

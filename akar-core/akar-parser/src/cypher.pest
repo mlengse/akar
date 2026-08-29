@@ -236,8 +236,9 @@ type_name          = {
     map_type
   | struct_type
   | union_type
-  | primitive_type ~ ("[" ~ "]")*
+  | primitive_type ~ array_suffix*
 }
+array_suffix       = { "[" ~ integer? ~ "]" }
 
 primitive_type     = {
     "STRING"
