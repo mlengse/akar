@@ -1,9 +1,15 @@
 # PyPI Release - akar Python bindings (akar-core/akar-python)
 #
-# Triggered by git tag push (v*) or manual workflow dispatch.
-# Builds one manylinux x86_64 abi3 wheel on ubuntu-24.04 (the platform kairos
-# CI needs: `pip install akar>=0.1.14` on ubuntu-latest), smoke-tests it, then
-# publishes the `akar` package to PyPI.
+# MANUAL ONLY (workflow_dispatch) — deliberately NOT triggered by git tag
+# push (v*).
+#
+# Reason: the `v*` tag is shared by the RUST release path (crates.io +
+# rust-release.yml → GitHub Release/CLI binaries). PyPI wheels are built with
+# maturin and published with twine (pypa/gh-action-pypi-publish) using
+# secrets.PYPI_TOKEN — a separate artifact owned by the Python package, not
+# the Rust crates. Auto-triggering off `v*` would publish every Rust release
+# to PyPI without anyone asking for it. Run this job explicitly when you want
+# to cut a Python wheel release.
 #
 # This is what lets kairos users `pip install akar>=0.1.14` WITHOUT building
 # the Rust crates themselves. Keep it in sync with:
@@ -13,9 +19,6 @@
 name: PyPI Release (akar wheels)
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -59,13 +62,13 @@ jobs:
           path: dist/*.whl
 
   # ────────────────────────────────────────────────────────────────
-  # Publish the wheel to PyPI (tag push only)
+  # Publish the wheel to PyPI (manual dispatch; skipped on dry-run)
   # ────────────────────────────────────────────────────────────────
   publish:
     name: publish to PyPI
     needs: [build]
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ !inputs.dry_run }}
     steps:
       - uses: actions/download-artifact@v8
         with:
