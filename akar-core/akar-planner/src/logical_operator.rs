@@ -972,6 +972,7 @@ pub struct LogicalCreateRel {
     pub table_id: u64,
     pub src_node_name: String,
     pub dst_node_name: String,
+    pub out_var_name: String,
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
     pub cardinality: u64,
 }

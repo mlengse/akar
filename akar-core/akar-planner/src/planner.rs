@@ -1004,6 +1004,7 @@ impl QueryPlanner {
                                 table_id: edge.rel_table_id.unwrap_or(0),
                                 src_node_name,
                                 dst_node_name,
+                                out_var_name: edge.variable.clone().unwrap_or_default(),
                                 properties: edge.properties.clone(),
                                 cardinality: 0,
                             }));

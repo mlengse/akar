@@ -88,6 +88,7 @@ pub fn map_and_execute_update(
                 table_id: cr.table_id,
                 src_node_name: cr.src_node_name.clone(),
                 dst_node_name: cr.dst_node_name.clone(),
+                out_var_name: cr.out_var_name.clone(),
                 properties: cr.properties.clone(),
                 table_catalog,
                 txn_id: ctx.txn_id,

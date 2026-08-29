@@ -148,6 +148,7 @@ pub struct PhysicalInsertRel {
     pub table_id: u64,
     pub src_node_name: String,
     pub dst_node_name: String,
+    pub out_var_name: String,
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
     pub table_catalog: Arc<TableCatalog>,
     /// Active transaction id for MVCC + undo recording (P52.18).
@@ -178,6 +179,16 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
 
         let num_cols = table.columns.len();
         let mut rels_to_insert = Vec::new();
+        let mut rel_props: Vec<Vec<Value>> = Vec::new();
+
+        // Flatten the input in row-major form so the write operator's output can
+        // carry the source/destination node columns (`a.id`, `b.id`, `a._id`, ...)
+        // forward for RETURN projection, mirroring the node path (P73.2). The
+        // column schema (names + physical types) is taken from the first chunk;
+        // every input row maps 1:1 to one inserted relationship.
+        let base_names: Vec<String> = input.first().map(|c| c.field_names.clone()).unwrap_or_default();
+        let base_types: Vec<PhysicalTypeID> = input.first().map(|c| c.field_types.clone()).unwrap_or_default();
+        let mut context_rows: Vec<Vec<Value>> = Vec::new();
 
         for chunk in &input {
             let src_name_id = format!("{}.{}", self.src_node_name, "_id");
@@ -250,9 +261,21 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
                     }
                 }
 
-                rels_to_insert.push((src_id, dst_id, props));
+                rels_to_insert.push((src_id, dst_id, props.clone()));
+                rel_props.push(props);
+
+                let mut ctx_row = Vec::with_capacity(chunk.fields.len());
+                for col in 0..chunk.fields.len() {
+                    ctx_row.push(chunk.get_value(col, row).unwrap_or(Value::Null));
+                }
+                context_rows.push(ctx_row);
             }
         }
+
+        // The edge indices assigned to this batch begin at the current edge count;
+        // the batch inserts `rels_to_insert` in order, so edge i gets id
+        // `start_edge_idx + i` (used for the `_id` output column and OCC).
+        let start_edge_idx = table.edges.len() as i64;
 
         // Batch insert the collected relationships
         if !rels_to_insert.is_empty() {
@@ -274,10 +297,77 @@ impl PhysicalOperatorExec for PhysicalInsertRel {
 
         tracing::info!("INSERT REL: added {inserted_count} rels to '{}'", self.table_name);
 
-        let mut v = ValueVector::new(PhysicalTypeID::Int64, 1);
-        v.resize(1);
-        v.set_i64(0, inserted_count as i64);
-        let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-        Ok(vec![DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])])
+        let n = inserted_count as usize;
+        if n == 0 {
+            return Ok(vec![DataChunk::new(vec![], vec![])]);
+        }
+
+        // Column 0: `_id` — assigned internal edge offsets, placed FIRST so OCC
+        // `record_insert_writes` resolves this exact `_id` before any source/dest
+        // `.*_id` node columns carried through below (P73.2).
+        let mut id_v = ValueVector::new(PhysicalTypeID::Int64, n);
+        id_v.resize(n);
+        for (i, _) in context_rows.iter().enumerate().take(n) {
+            id_v.set_i64(i, start_edge_idx + i as i64);
+        }
+        let mut fields = vec![akar_common::arrow_vector::ArrowVector::from_legacy(&id_v).array];
+        let mut types = vec![PhysicalTypeID::Int64];
+        let mut names = vec!["_id".to_string()];
+
+        // Pass through the input (source/destination node) columns so RETURN
+        // projection like `a.id, b.id` resolves to the real values (P73.2).
+        // Complex-typed columns (List/Struct) the plain ValueVector cannot
+        // materialise are skipped to avoid regressing vector/struct passthrough.
+        for (col, name) in base_names.iter().enumerate() {
+            let ptype = base_types.get(col).copied().unwrap_or(PhysicalTypeID::Any);
+            let mut cv = ValueVector::new(ptype, n);
+            cv.resize(n);
+            let mut buildable = true;
+            for (row_i, ctx_row) in context_rows.iter().enumerate().take(n) {
+                if cv.set_value(row_i, &ctx_row[col]).is_err() {
+                    buildable = false;
+                    break;
+                }
+            }
+            if !buildable {
+                tracing::warn!(
+                    "INSERT REL: skipping complex output column '{}' in '{}'",
+                    name,
+                    self.table_name
+                );
+                continue;
+            }
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&cv).array);
+            types.push(ptype);
+            names.push(name.clone());
+        }
+
+        // Rel property columns bound to `out_var_name` (e.g. `r.weight`, `r.type`)
+        // so RETURN projection resolves the created relationship's real values (P73.2).
+        for (col_idx, col) in table.columns.iter().enumerate() {
+            let ptype = physical_type_from_logical(col.logical_type);
+            let mut cv = ValueVector::new(ptype, n);
+            cv.resize(n);
+            let mut buildable = true;
+            for (row_i, props) in rel_props.iter().enumerate().take(n) {
+                if cv.set_value(row_i, &props[col_idx]).is_err() {
+                    buildable = false;
+                    break;
+                }
+            }
+            if !buildable {
+                tracing::warn!(
+                    "INSERT REL: skipping complex output column '{}' in '{}'",
+                    col.name,
+                    self.table_name
+                );
+                continue;
+            }
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&cv).array);
+            types.push(ptype);
+            names.push(format!("{}.{}", self.out_var_name, col.name));
+        }
+
+        Ok(vec![DataChunk::new(fields, types).with_names(names)])
     }
 }

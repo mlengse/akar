@@ -171,7 +171,15 @@ fn param_unwind_createrel_batch_persists() {
     let prepared = conn.prepare(q).unwrap();
     let res = conn.execute(&prepared, vec![("rows", rows.clone())]);
     match res {
-        Ok(result) => eprintln!("createrel summary = {}", result.result_summary()),
+        Ok(result) => {
+            eprintln!("createrel summary = {}", result.result_summary());
+            assert_eq!(
+                result.num_rows,
+                2,
+                "CREATE REL (no RETURN) must report 2 rows, summary: {}",
+                result.result_summary()
+            );
+        }
         Err(e) => panic!("param UNWIND->CREATE REL errored: {e}"),
     }
     let readback = query_rows(
@@ -185,31 +193,49 @@ fn param_unwind_createrel_batch_persists() {
         "UNWIND->CREATE REL must persist 2 edges, got: {readback:?}"
     );
 
-    // With RETURN — capture projection output for the rel path.
+    // With RETURN — the projection must resolve the created rel + source/dest
+    // node values into N rows of real columns (P73.2), not the old single-row
+    // `[[Int64(2)]]` count collapse.
     let q = "UNWIND $rows AS row \
              MATCH (a:Memory {id: row.src}), (b:Memory {id: row.tgt}) \
              CREATE (a)-[r:R {weight: row.weight, type: row.type}]->(b) \
              RETURN a.id, b.id, r.weight, r.type";
     let prepared = conn.prepare(q).unwrap();
     let res = conn.execute(&prepared, vec![("rows", rows)]);
-    match res {
-        Ok(result) => {
-            let out: Vec<Vec<String>> = result
-                .chunks
-                .iter()
-                .flat_map(|c| {
-                    c.iter_rows().map(|r| {
-                        (0..c.fields.len())
-                            .map(|ci| match c.get_value(ci, r) {
-                                Some(v) => format!("{v:?}"),
-                                None => "null".into(),
-                            })
-                            .collect::<Vec<_>>()
-                    })
+    let out: Vec<Vec<String>> = match res {
+        Ok(result) => result
+            .chunks
+            .iter()
+            .flat_map(|c| {
+                c.iter_rows().map(|r| {
+                    (0..c.fields.len())
+                        .map(|ci| match c.get_value(ci, r) {
+                            Some(v) => format!("{v:?}"),
+                            None => "null".into(),
+                        })
+                        .collect::<Vec<_>>()
                 })
-                .collect();
-            eprintln!("createrel RETURN output = {out:?}");
-        }
+            })
+            .collect(),
         Err(e) => panic!("param UNWIND->CREATE REL RETURN errored: {e}"),
-    }
+    };
+    eprintln!("createrel RETURN output = {out:?}");
+    assert_eq!(
+        out,
+        vec![
+            vec![
+                "Int64(1)".to_string(),
+                "Int64(2)".to_string(),
+                "Double(0.5)".to_string(),
+                "String(\"SUPPORTS\")".to_string(),
+            ],
+            vec![
+                "Int64(2)".to_string(),
+                "Int64(1)".to_string(),
+                "Double(0.4)".to_string(),
+                "String(\"BRIDGE\")".to_string(),
+            ],
+        ],
+        "CREATE REL ... RETURN must project a.id,b.id,r.weight,r.type as N real rows, got: {out:?}"
+    );
 }
