@@ -168,13 +168,8 @@ impl ArtPrimaryKeyIndex {
             }
 
             let byte = key_bytes[depth];
-            match current.get_child(byte) {
-                Some(child) => {
-                    current = child;
-                    depth += 1;
-                }
-                None => return None,
-            }
+            current = current.get_child(byte)?;
+            depth += 1;
         }
     }
 
