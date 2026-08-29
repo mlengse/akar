@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "arrow",
  "flate2",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-common",
  "arrow",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "pest",
  "pest_derive",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-common",
  "tracing",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "akar-common",
  "akar-extension",

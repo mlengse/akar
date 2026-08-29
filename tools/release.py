@@ -28,6 +28,17 @@ import tempfile
 import tomllib  # Python 3.11+ built-in
 from pathlib import Path
 
+if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower().startswith("cp"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if sys.stderr and sys.stderr.encoding and sys.stderr.encoding.lower().startswith("cp"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 AKAR_ROOT = Path(__file__).resolve().parent.parent
 CARGO_ROOT = AKAR_ROOT / "akar-core"
 WORKSPACE_TOML = CARGO_ROOT / "Cargo.toml"
