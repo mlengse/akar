@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-08-30
+
 ### Added
 
 - **feat(parser/binder) — P74: `LIMIT $limit` / `SKIP $skip` parameterized; kairos tak lagi perlu inline `LIMIT {int(limit)}` (2026-08-30)** — the `limit`/`offset` grammar rules (`akar-core/akar-parser/src/cypher.pest`) now accept a `parameter` in addition to a literal integer, so `RETURN ... LIMIT $limit` (and `SKIP $skip`) parse instead of being rejected/dropped. `parse_limit_skip` (`parser/dml.rs`) emits the parameter name (mutually exclusive with a literal `u64`); the AST and bound `ReturnClause`/`BoundReturnClause` carry `limit_param`/`skip_param` alongside `limit`/`skip`. The bound parameter is resolved to a concrete non-negative `u64` in `substitute_params_in_statement` (`akar-main/src/connection/substitute.rs`) — the same per-execution stage that resolves `$ch`/`$rows` etc. — via new `resolve_limit`/`resolve_skip`/`param_to_u64` helpers (UInt64 accepted, non-negative Int64 accepted, everything else errors). `prepared_statement.rs` now collects `limit_param`/`skip_param` into the declared parameter list so a missing `$limit` still errors, and the AST/bound substitution paths thread the two new fields through. Because resolution happens at the substitution layer, the optimizer/planner/physical stay on a concrete `u64` (`LogicalLimit`/`PhysicalLimit` untouched) — P74.3 satisfied by design. 7 new integration tests (`tests/test_p74_limit_param.rs`): literal control, `LIMIT $limit`, `LIMIT $limit SKIP $skip`, positive `Int64`, missing-param error, negative rejected, non-integer rejected. Gate `test [akar-core]` default: **1,925 total / 0 failed / 0 ignored** (was 1,918 + 7 new tests); fmt + clippy `-D warnings` bersih; doc-check PASS.
@@ -356,6 +358,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.17]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.17
 [0.1.16]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.16
 [0.1.15]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.15
 [0.1.14]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.14
