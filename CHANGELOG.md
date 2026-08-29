@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-08-29
+
 ### Added
 
 - **feat(adbc) — P70: real Arrow translation + parameter binding in ADBC surface (2026-08-28)** — `AdbcStatement::execute_arrow` (`akar-main/src/adbc.rs`) no longer returns a dummy empty batch: it wraps each query-result `DataChunk`'s columnar Arrow arrays into a schema'd `RecordBatch` (one batch per chunk), deriving column names from `field_names` (fallback `column_{i}`) and each column's Arrow type from the underlying array — correct even for all-null columns. `AdbcPreparedStatement::bind` (was a no-op `Ok(())`) now parses each string bind value into a typed `Value` (bool / int64 / float / string) and `execute` runs through `Connection::prepare` + `Connection::execute` so `$name` params are substituted exactly like the wire path; bind arity is validated against the declared parameters. 5 new tests: real batch schema/values, 0-row match (schema-typed empty batch), DDL no-chunks, bind+execute with re-bind, wrong-arity error. Gate `test [akar-core]`: **1,905 total / 0 failed**; fmt + clippy `-D warnings` bersih. [Uncommitted]
@@ -348,6 +350,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.16]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.16
 [0.1.15]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.15
 [0.1.14]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.14
 [0.1.13]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.13
