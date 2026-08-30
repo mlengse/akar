@@ -8,16 +8,21 @@ impl Connection {
     /// Returns the transaction on success.
     pub(crate) fn begin_write_txn(&self) -> Result<Transaction, String> {
         let tm = &self.database.transaction_manager;
-        let txn = tm.begin_write()?;
+        let mut txn = tm.begin_write()?;
         let resources = TxnResources {
             local_storage: LocalStorage::new(),
             local_wal: LocalWAL::new(),
             shadow_file: ShadowFile::new(),
         };
-        self.txn_resources
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?
-            .insert(txn.transaction_id, resources);
+        // Early-error path: acquire_write in TM::begin_write has already
+        // registered the txn and taken the write lock. If storing the per-txn
+        // resources fails (poisoned lock) the txn must be rolled back here,
+        // otherwise it leaks as an active txn holding the write lock forever.
+        let mut resources_map = self.txn_resources.lock().map_err(|e| {
+            tm.rollback(&mut txn);
+            format!("Lock error: {e}")
+        })?;
+        resources_map.insert(txn.transaction_id, resources);
         Ok(txn)
     }
 
