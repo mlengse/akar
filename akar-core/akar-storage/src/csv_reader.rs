@@ -972,8 +972,10 @@ mod tests {
         let csv_path = dir.path().join("nulls.csv");
         std::fs::write(&csv_path, "name,age\nNULL,5\n\"\",7\n").unwrap();
 
-        let mut config = CsvReaderConfig::default();
-        config.null_str = "NULL".into();
+        let config = CsvReaderConfig {
+            null_str: "NULL".into(),
+            ..Default::default()
+        };
 
         let rows = read_csv(
             csv_path.to_str().unwrap(),
@@ -995,8 +997,10 @@ mod tests {
         let csv_path = dir.path().join("nested.csv");
         std::fs::write(&csv_path, "tags,props\n\"[NULL, NA, x]\",\"{a=NA, b=x}\"\n").unwrap();
 
-        let mut config = CsvReaderConfig::default();
-        config.null_str = "NA".into();
+        let config = CsvReaderConfig {
+            null_str: "NA".into(),
+            ..Default::default()
+        };
 
         let schema = vec![
             CatalogColumn {
