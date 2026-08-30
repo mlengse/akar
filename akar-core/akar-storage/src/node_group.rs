@@ -162,6 +162,10 @@ impl NodeGroup {
     ///
     /// The spill file is tracked so that `flush_with_spiller()` can later
     /// merge all spilled data back into the persistent columns.
+    ///
+    /// Version info is reset together with the buffer: the records reference
+    /// local row offsets that are about to be reused, so carrying them over
+    /// would mis-label rows appended after the spill at the same offsets.
     pub fn spill_and_clear(&mut self) -> Result<(), StorageError> {
         let spiller = self
             .spiller
@@ -177,6 +181,9 @@ impl NodeGroup {
             self.spill_files.push(sf);
         }
         self.num_nodes = 0;
+        if let Some(ref vi) = self.version_info {
+            vi.reset();
+        }
         Ok(())
     }
 
@@ -223,6 +230,12 @@ impl NodeGroup {
         }
         self.columns = columns;
         self.num_nodes = rows.len() as u64;
+        // The rebuild re-numbers rows (spill files first, then in-memory), so
+        // any version-info records still referencing pre-restore offsets are
+        // stale. Reset them rather than mis-labelling the restored rows.
+        if let Some(ref vi) = self.version_info {
+            vi.reset();
+        }
         for sf in &files {
             let _ = spiller.cleanup(sf);
         }
@@ -473,6 +486,11 @@ impl NodeGroup {
             chunk.clear();
         }
         self.num_nodes = 0;
+        // The buffer is being emptied for reuse; stale version-info records
+        // would mis-label future rows appended at the same offsets.
+        if let Some(ref vi) = self.version_info {
+            vi.reset();
+        }
     }
 }
 
@@ -659,6 +677,52 @@ mod tests {
         group.clear();
         assert_eq!(group.num_nodes, 0);
         assert!(group.is_empty());
+    }
+
+    #[test]
+    fn test_clear_resets_version_info() {
+        let mut group = NodeGroup::new(2, 0);
+        group.enable_version_info();
+        group
+            .append_row_with_txn(vec![Value::Int64(1), Value::Int64(2)], Some(7))
+            .unwrap();
+        assert_eq!(group.version_info.as_ref().unwrap().num_inserters(), 1);
+
+        group.clear();
+
+        // Buffer reuse must not carry stale version records into new rows.
+        assert_eq!(group.version_info.as_ref().unwrap().num_inserters(), 0);
+        assert!(group.is_row_visible(0, 0, &[(7, 10)]));
+    }
+
+    #[test]
+    fn test_spill_and_clear_resets_version_info() {
+        let dir = tempfile::tempdir().unwrap();
+        let spiller = Arc::new(crate::spiller::Spiller::new(dir.path(), 64));
+        let mut group = NodeGroup::new(2, 0);
+        group.set_spiller(spiller.clone());
+        group.enable_version_info();
+
+        // Large batch with MVCC tracking: the low threshold forces an
+        // auto-spill mid-way, then more rows are appended at reused offsets.
+        for i in 0i64..20 {
+            group
+                .append_row_with_txn(vec![Value::Int64(i), Value::Int64(i * 10)], Some(7))
+                .unwrap();
+        }
+        assert!(!group.spill_files.is_empty(), "low threshold must spill");
+
+        // After restore (which re-numbers rows), the group holds the full row
+        // set and no stale version records survive. Every row must be visible
+        // at any snapshot — a lingering pre-spill record at a reused offset
+        // would wrongly hide rows until a commit timestamp that never arrives.
+        group.restore_spilled().unwrap();
+        assert_eq!(group.num_nodes, 20);
+        let vi = group.version_info.as_ref().unwrap();
+        assert_eq!(vi.num_inserters(), 0, "stale spill records must be dropped");
+        for i in 0usize..20 {
+            assert!(group.is_row_visible(i, 0, &[(7, 10)]), "row {i} visible by default");
+        }
     }
 
     #[test]

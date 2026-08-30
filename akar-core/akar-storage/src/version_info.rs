@@ -57,6 +57,16 @@ impl VectorVersionInfo {
         del.entry(txn_id).or_default().push(row_in_vector);
     }
 
+    /// Drop all recorded inserts and deletes for this vector.
+    ///
+    /// Called when the owning node group's in-memory buffer is cleared for
+    /// reuse (spill/restore), so stale row-offset records do not collide
+    /// with rows appended afterwards at the same offsets.
+    pub fn reset(&self) {
+        self.inserted.lock().unwrap().clear();
+        self.deleted.lock().unwrap().clear();
+    }
+
     /// Check whether a specific row is visible at the given snapshot.
     ///
     /// A row is visible if it was inserted by a committed transaction
@@ -169,6 +179,27 @@ impl VersionInfo {
         }
     }
 
+    /// Drop all recorded inserts and deletes across every vector.
+    ///
+    /// Called when the owning node group's in-memory buffer is cleared for
+    /// reuse (spill/restore), so stale row-offset records do not collide
+    /// with rows appended afterwards at the same offsets.
+    pub fn reset(&self) {
+        for v in &self.vectors {
+            v.reset();
+        }
+    }
+
+    /// Total number of unique inserting transactions across all vectors.
+    pub fn num_inserters(&self) -> usize {
+        self.vectors.iter().map(|v| v.num_inserters()).sum()
+    }
+
+    /// Total number of unique deleting transactions across all vectors.
+    pub fn num_deleters(&self) -> usize {
+        self.vectors.iter().map(|v| v.num_deleters()).sum()
+    }
+
     /// Check whether global `row` is visible at `snapshot_ts`.
     pub fn is_visible(&self, row: u32, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
         let v_idx = self.vector_idx(row);
@@ -220,6 +251,41 @@ mod tests {
 
         assert!(!vvi.is_visible(7, 10, &history)); // Deleted
         assert!(vvi.is_visible(7, 5, &history)); // Before delete committed
+    }
+
+    #[test]
+    fn test_version_info_reset_clears_all_records() {
+        let vi = VersionInfo::new(NODE_GROUP_SIZE);
+        let history = vec![(1u64, 10u64), (2u64, 20u64)];
+
+        vi.insert(1, 5);
+        vi.delete(2, 10);
+        assert_eq!(vi.num_inserters(), 1);
+        assert_eq!(vi.num_deleters(), 1);
+
+        vi.reset();
+
+        assert_eq!(vi.num_inserters(), 0);
+        assert_eq!(vi.num_deleters(), 0);
+        // No records remain — every row is visible by default.
+        assert!(vi.is_visible(5, 0, &history));
+        assert!(vi.is_visible(5, 10, &history));
+        assert!(vi.is_visible(10, 0, &history));
+    }
+
+    #[test]
+    fn test_vector_version_info_reset_clears_all_records() {
+        let vvi = VectorVersionInfo::new();
+        vvi.insert(1, 42);
+        vvi.delete(2, 7);
+        assert_eq!(vvi.num_inserters(), 1);
+        assert_eq!(vvi.num_deleters(), 1);
+
+        vvi.reset();
+        assert_eq!(vvi.num_inserters(), 0);
+        assert_eq!(vvi.num_deleters(), 0);
+        assert!(vvi.is_visible(42, 0, &[(1u64, 10u64)]));
+        assert!(vvi.is_visible(7, 0, &[(2u64, 10u64)]));
     }
 
     // Need NODE_GROUP_SIZE for the VersionInfo::new() test
