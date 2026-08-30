@@ -1,6 +1,8 @@
 //! Miscellaneous physical operators (EmptyResult, MultiplicityReducer, Skip, UnionAllScan).
 
+use crate::physical::common::hash_row;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use akar_common::types::Value;
 use akar_common::vector::{DataChunk, ValueVector};
 
 /// Physical operator that always returns an empty result.
@@ -32,19 +34,35 @@ impl PhysicalOperatorExec for PhysicalMultiplicityReducer {
         }
 
         let mut result = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        // Hash-bucket membership index over kept keys: hash -> indices into
+        // `kept_keys`. Exact row equality is checked only on hash collision,
+        // so two distinct rows sharing a hash are never wrongly merged. This
+        // replaces the old per-row `format!("{:?}", row_keys)` allocation +
+        // `HashSet<String>` dedup (O(1) per row, deterministic equality).
+        let mut buckets: std::collections::HashMap<u64, Vec<usize>> = std::collections::HashMap::new();
+        let mut kept_keys: Vec<Vec<Value>> = Vec::new();
 
         for chunk in input {
             let mut filter_mask = vec![false; chunk.size];
             for i in 0..chunk.size {
-                let mut row_keys = Vec::new();
+                let mut row_keys = Vec::with_capacity(self.key_columns.len());
                 for &col_idx in &self.key_columns {
-                    let val = chunk.get_value(col_idx, i).unwrap_or(akar_common::types::Value::Null);
+                    let val = chunk.get_value(col_idx, i).unwrap_or(Value::Null);
                     row_keys.push(val);
                 }
 
-                // Using debug format as a fallback hashable representation for arbitrary Value types
-                if seen.insert(format!("{:?}", row_keys)) {
+                let hash = hash_row(&row_keys);
+                let is_dup = buckets
+                    .get(&hash)
+                    .is_some_and(|bucket| bucket.iter().any(|&k| kept_keys[k] == row_keys));
+                if !is_dup {
+                    match buckets.get_mut(&hash) {
+                        Some(bucket) => bucket.push(kept_keys.len()),
+                        None => {
+                            buckets.insert(hash, vec![kept_keys.len()]);
+                        }
+                    }
+                    kept_keys.push(row_keys);
                     filter_mask[i] = true;
                 }
             }
@@ -294,5 +312,113 @@ impl PhysicalOperatorExec for PhysicalExtensionClause {
             field_names: vec!["message".into()],
             sel_vector: None,
         }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_common::types::PhysicalTypeID;
+
+    fn make_chunk(cols: &[Vec<Value>], names: &[&str]) -> DataChunk {
+        let mut fields = Vec::with_capacity(cols.len());
+        let mut types = Vec::with_capacity(cols.len());
+        for col in cols {
+            let first = col
+                .iter()
+                .find(|v| !matches!(v, Value::Null))
+                .unwrap_or(&Value::Int64(0));
+            let ptype = match first {
+                Value::Int64(_) => PhysicalTypeID::Int64,
+                Value::Double(_) => PhysicalTypeID::Double,
+                Value::Float(_) => PhysicalTypeID::Float,
+                Value::Bool(_) => PhysicalTypeID::Bool,
+                Value::String(_) => PhysicalTypeID::String,
+                _ => PhysicalTypeID::Int64,
+            };
+            let mut v = ValueVector::new(ptype, col.len().max(1));
+            for (i, val) in col.iter().enumerate() {
+                let _ = v.set_value(i, val);
+            }
+            v.resize(col.len());
+            fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+            types.push(ptype);
+        }
+        let mut chunk = DataChunk::new(fields, types);
+        chunk.field_names = names.iter().map(|s| s.to_string()).collect();
+        chunk
+    }
+
+    fn reducer(key_columns: Vec<usize>) -> PhysicalMultiplicityReducer {
+        PhysicalMultiplicityReducer { key_columns }
+    }
+
+    #[test]
+    fn test_multiplicity_reducer_empty_input_returns_empty() {
+        let out = reducer(vec![0]).execute(Vec::new()).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_multiplicity_reducer_dedup_across_chunks() {
+        // The same key appearing in a later chunk must be dropped (the seen set
+        // persists across all input chunks); first-seen order is preserved.
+        let c1 = make_chunk(&[vec![Value::Int64(1), Value::Int64(2)]], &["x"]);
+        let c2 = make_chunk(&[vec![Value::Int64(2), Value::Int64(3)]], &["x"]);
+        let out = reducer(vec![0]).execute(vec![c1, c2]).unwrap();
+        assert_eq!(out.len(), 2, "one output chunk per non-empty filtered chunk");
+        assert_eq!(out[0].size, 2);
+        assert_eq!(out[1].size, 1, "row 2 is a duplicate of c1's row 2");
+        assert_eq!(out[0].get_value(0, 0), Some(Value::Int64(1)));
+        assert_eq!(out[0].get_value(0, 1), Some(Value::Int64(2)));
+        assert_eq!(out[1].get_value(0, 0), Some(Value::Int64(3)));
+    }
+
+    #[test]
+    fn test_multiplicity_reducer_key_columns_subset() {
+        // Only key_columns participate in the dedup key: second row shares its
+        // key with the first so it is dropped even though col 1 differs.
+        let chunk = make_chunk(
+            &[
+                vec![Value::Int64(1), Value::Int64(1)],
+                vec![Value::String("a".into()), Value::String("b".into())],
+            ],
+            &["id", "tag"],
+        );
+        let out = reducer(vec![0]).execute(vec![chunk]).unwrap();
+        assert_eq!(out[0].size, 1);
+        assert_eq!(out[0].get_value(0, 0), Some(Value::Int64(1)));
+        assert_eq!(out[0].get_value(1, 0), Some(Value::String("a".into())));
+    }
+
+    #[test]
+    fn test_multiplicity_reducer_multicolumn_key() {
+        // The key is the whole tuple of key_columns, not the first one alone:
+        // rows sharing col 0 but differing in col 1 are distinct.
+        let chunk = make_chunk(
+            &[
+                vec![Value::Int64(1), Value::Int64(1), Value::Int64(1)],
+                vec![
+                    Value::String("a".into()),
+                    Value::String("b".into()),
+                    Value::String("a".into()),
+                ],
+            ],
+            &["id", "tag"],
+        );
+        let out = reducer(vec![0, 1]).execute(vec![chunk]).unwrap();
+        assert_eq!(out[0].size, 2, "(1,a) and (1,b) kept; (1,a) repeated dropped");
+        assert_eq!(out[0].get_value(0, 0), Some(Value::Int64(1)));
+        assert_eq!(out[0].get_value(1, 0), Some(Value::String("a".into())));
+        assert_eq!(out[0].get_value(1, 1), Some(Value::String("b".into())));
+    }
+
+    #[test]
+    fn test_multiplicity_reducer_nan_not_deduped() {
+        // IEEE equality: NaN != NaN, so two NaN keys are both kept. The old
+        // string-format key would have merged them (debug "NaN" == "NaN").
+        let chunk = make_chunk(&[vec![Value::Double(f64::NAN), Value::Double(f64::NAN)]], &["x"]);
+        let out = reducer(vec![0]).execute(vec![chunk]).unwrap();
+        assert_eq!(out[0].size, 2);
     }
 }

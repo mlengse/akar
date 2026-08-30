@@ -196,6 +196,20 @@ pub(crate) fn hash_value_into(val: &Value, hasher: &mut impl std::hash::Hasher) 
     }
 }
 
+/// Stable hash for a row of values; hashes each value plus its position so
+/// permutations of a row do not collide. Used by UNION DISTINCT and
+/// MultiplicityReducer as the hash-bucket key (exact equality on collision).
+#[inline]
+pub(crate) fn hash_row(row: &[Value]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (i, val) in row.iter().enumerate() {
+        i.hash(&mut hasher);
+        hash_value_into(val, &mut hasher);
+    }
+    hasher.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

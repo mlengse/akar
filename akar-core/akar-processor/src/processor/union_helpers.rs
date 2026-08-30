@@ -1,4 +1,4 @@
-use crate::physical::common::{hash_value_into, value_hash};
+use crate::physical::common::{hash_row, value_hash};
 use crate::processor::chunk_helpers::{extract_all_rows_from_chunks, rows_to_columns};
 use akar_common::error::ProcessorError;
 use akar_common::types::Value;
@@ -11,18 +11,6 @@ pub fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
         LogicalOperator::Projection(p) if p.expressions.is_empty() => p.children.clone(),
         other => vec![other.clone()],
     }
-}
-
-/// Stable hash for a row of values; hashes each value plus its position so
-/// permutations of a row do not collide.
-fn hash_row(row: &[Value]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for (i, val) in row.iter().enumerate() {
-        i.hash(&mut hasher);
-        hash_value_into(val, &mut hasher);
-    }
-    hasher.finish()
 }
 
 pub fn merge_union_chunks(
