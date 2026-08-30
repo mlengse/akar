@@ -1,25 +1,7 @@
 use crate::AlgoResult;
 use akar_graph::CSRAdjacency;
 
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
-    }
-    fn next_u32(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (self.state >> 32) as u32
-    }
-    fn gen_range(&mut self, bound: usize) -> usize {
-        (self.next_u32() as usize) % bound
-    }
-    fn gen_float(&mut self) -> f64 {
-        (self.next_u32() as f64) / (u32::MAX as f64)
-    }
-}
+use super::rng::SimpleRng;
 
 /// Generate `walks` biased random walks per start node from a seeded RNG.
 fn generate_walks(

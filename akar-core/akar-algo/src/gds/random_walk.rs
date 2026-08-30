@@ -1,25 +1,7 @@
 use crate::AlgoResult;
 use akar_graph::CSRAdjacency;
 
-/// A simple Linear Congruential Generator for random walks without extra dependencies
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (self.state >> 32) as u32
-    }
-
-    fn gen_range(&mut self, bound: usize) -> usize {
-        (self.next_u32() as usize) % bound
-    }
-}
+use super::rng::SimpleRng;
 
 /// Compute random walk on a graph.
 ///
