@@ -1,4 +1,4 @@
-use crate::physical::common::value_hash;
+use crate::physical::common::{hash_value_into, value_hash};
 use crate::processor::chunk_helpers::{extract_all_rows_from_chunks, rows_to_columns};
 use akar_common::error::ProcessorError;
 use akar_common::types::Value;
@@ -11,6 +11,18 @@ pub fn flatten_union_child(op: &LogicalOperator) -> Vec<LogicalOperator> {
         LogicalOperator::Projection(p) if p.expressions.is_empty() => p.children.clone(),
         other => vec![other.clone()],
     }
+}
+
+/// Stable hash for a row of values; hashes each value plus its position so
+/// permutations of a row do not collide.
+fn hash_row(row: &[Value]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (i, val) in row.iter().enumerate() {
+        i.hash(&mut hasher);
+        hash_value_into(val, &mut hasher);
+    }
+    hasher.finish()
 }
 
 pub fn merge_union_chunks(
@@ -42,9 +54,17 @@ pub fn merge_union_chunks(
 
     let mut deduped: Vec<Vec<Value>> = Vec::with_capacity(left_rows.len());
     if !all {
+        // O(n) dedup: hash-bucket membership index, exact equality only on
+        // hash collisions (rows hold arbitrary Value types).
+        let mut seen: HashMap<u64, Vec<usize>> = HashMap::with_capacity(left_rows.len());
         for row in &left_rows {
-            if !deduped.contains(row) {
+            let h = hash_row(row);
+            let is_new = !seen
+                .get(&h)
+                .is_some_and(|bucket| bucket.iter().any(|&i| deduped[i] == *row));
+            if is_new {
                 deduped.push(row.clone());
+                seen.entry(h).or_default().push(deduped.len() - 1);
             }
         }
     } else {
