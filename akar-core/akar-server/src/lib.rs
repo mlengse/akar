@@ -247,7 +247,7 @@ fn accept_loop(
     db_path: String,
     auth_token: Option<String>,
 ) {
-    let dream = dream::DreamControl::new();
+    let dream = dream::DreamControl::with_db(db.clone());
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
