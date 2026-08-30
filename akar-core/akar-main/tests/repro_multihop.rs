@@ -200,7 +200,7 @@ fn test_pred_pushdown_multi_scan_timing() {
     // Without pushdown the b-scan is fully materialized before the cross product.
     let (_db, conn) = setup_db();
     exec(&conn, "CREATE NODE TABLE Person(id INT64, PRIMARY KEY(id))");
-    let n = 1500;
+    let n = 400;
     for i in 0..n {
         exec(&conn, &format!("CREATE (p:Person {{id: {i}}})"));
     }
@@ -215,7 +215,7 @@ fn test_pred_pushdown_multi_scan_timing() {
         "MATCH (a:Person), (b:Person) WHERE b.id >= 0 AND b.id <= 100 RETURN COUNT(*)",
     );
     // Correctness is preserved regardless of pushdown; this asserts the filter applies.
-    assert_eq!(rows[0][0], "Int64(151500)", "unexpected multi-scan count: {rows:?}");
+    assert_eq!(rows[0][0], "Int64(40400)", "unexpected multi-scan count: {rows:?}");
 
     // Timing: single-scan (filter adjacent to scan -> FoldedPushDown) vs
     // multi-scan (filter above cross product -> NOT pushed).

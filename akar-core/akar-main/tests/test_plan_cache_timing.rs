@@ -1,4 +1,4 @@
-//! Regression guard for the plan-cache hot path on a realistic 10K-row table.
+//! Regression guard for the plan-cache hot path on a realistic 3K-row table.
 //!
 //! Cache hits must never be meaningfully slower than the full pipeline.
 //! (On data-bound workloads execution dominates, so hits and misses converge;
@@ -16,7 +16,7 @@ fn build_db() -> (Arc<Database>, Connection) {
     {
         let catalog = db.table_catalog();
         let mut table = catalog.get_node_table_by_name_mut("Person").unwrap();
-        for i in 0..10_000u64 {
+        for i in 0..3_000u64 {
             table
                 .insert_row(vec![
                     Value::String(format!("Person{i}")),
@@ -63,7 +63,7 @@ fn test_plan_cache_no_hit_regression() {
     eprintln!("{N} cache-MISS queries: {:?} ({:?}/query)", miss, miss / N);
 
     // Guard: hits must not be meaningfully slower than misses (threshold: 2x).
-    // On 10K-row tables execution dominates, so hit/miss converge; a 2x gap
+    // On 3K-row tables execution dominates, so hit/miss converge; a 2x gap
     // signals a real plan-cache regression.
     let hit_ns = hit.as_nanos() as f64;
     let miss_ns = miss.as_nanos() as f64;

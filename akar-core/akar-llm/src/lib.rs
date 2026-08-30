@@ -11,6 +11,13 @@ use std::time::Duration;
 /// Default HTTP timeout for LLM API requests.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Default TCP connect timeout for LLM API requests.
+///
+/// A short connect timeout makes "provider not running" fail fast instead
+/// of lingering on a slow-to-refuse endpoint (P83.7). A refused connection
+/// still errors immediately; this only bounds the wait before giving up.
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// The LLM embedding extension.
 pub struct LlmExtension;
 
@@ -232,6 +239,7 @@ fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, Strin
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(HTTP_TIMEOUT))
+            .timeout_connect(Some(CONNECT_TIMEOUT))
             .build(),
     );
     let response = agent

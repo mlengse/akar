@@ -158,6 +158,11 @@ impl Server {
         self.total_queries.load(Ordering::Relaxed)
     }
 
+    /// Whether shutdown has been initiated (e.g. by the idle timeout).
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
+    }
+
     /// Stop the accept loop and wait for all client sessions to exit.
     ///
     /// Client threads observe the shutdown flag between frames and exit (the

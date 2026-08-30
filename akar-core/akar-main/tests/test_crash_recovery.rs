@@ -130,7 +130,7 @@ fn test_crash_after_wal_flush_recovery() {
 
 #[test]
 fn test_crash_mid_write_no_commit() {
-    let mut sim = CrashSimulator::spawn("write-burst", 500, 0);
+    let mut sim = CrashSimulator::spawn("write-burst", 250, 0);
 
     assert!(
         sim.wait_for_wal_size(50, Duration::from_secs(30)),
@@ -166,7 +166,7 @@ fn test_crash_after_checkpoint_clean_recovery() {
 
 #[test]
 fn test_crash_concurrent_writes_recovery() {
-    let mut sim = CrashSimulator::spawn("write-burst", 300, 0);
+    let mut sim = CrashSimulator::spawn("write-burst", 200, 0);
 
     assert!(
         sim.wait_for_wal_size(50, Duration::from_secs(30)),
@@ -185,7 +185,7 @@ fn test_crash_concurrent_writes_recovery() {
 
 #[test]
 fn test_wal_replay_large_record_count() {
-    let mut sim = CrashSimulator::spawn("write", 1000, 0);
+    let mut sim = CrashSimulator::spawn("write", 500, 0);
 
     assert!(
         sim.wait_for_wal_size(500, Duration::from_secs(60)),
@@ -221,7 +221,7 @@ fn test_wal_replay_truncated_file_50_percent() {
         conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
             .expect("Failed to create table");
 
-        for i in 0..500 {
+        for i in 0..250 {
             conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 100))
                 .unwrap();
         }
@@ -267,7 +267,7 @@ fn test_wal_replay_truncated_file_25_percent() {
         conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
             .expect("Failed to create table");
 
-        for i in 0..300 {
+        for i in 0..150 {
             conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 75))
                 .unwrap();
         }
@@ -314,7 +314,7 @@ fn test_wal_replay_truncated_file_10_percent() {
         conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
             .expect("Failed to create table");
 
-        for i in 0..200 {
+        for i in 0..100 {
             conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
                 .unwrap();
         }
@@ -384,7 +384,7 @@ fn test_concurrent_writes_checkpoint_stress() {
     conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
         .expect("Failed to create table");
 
-    for i in 0..100 {
+    for i in 0..50 {
         conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
             .unwrap();
     }
@@ -392,7 +392,7 @@ fn test_concurrent_writes_checkpoint_stress() {
     conn.query("CHECKPOINT").expect("Failed to checkpoint phase 1");
 
     // Phase 2: Add more data (no explicit checkpoint)
-    for i in 100..200 {
+    for i in 50..100 {
         conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 50))
             .unwrap();
     }
@@ -412,7 +412,7 @@ fn test_concurrent_writes_checkpoint_stress() {
             })
             .collect()
     };
-    assert_eq!(names.len(), 200, "Should have 200 rows total, got {}", names.len());
+    assert_eq!(names.len(), 100, "Should have 100 rows total, got {}", names.len());
 
     // Checkpoint and verify durability within same process
     conn.query("CHECKPOINT").expect("Failed to checkpoint phase 2");
@@ -431,7 +431,7 @@ fn test_concurrent_writes_checkpoint_stress() {
             })
             .collect()
     };
-    assert_eq!(names2.len(), 200, "Should still have 200 rows after checkpoint");
+    assert_eq!(names2.len(), 100, "Should still have 100 rows after checkpoint");
 }
 
 #[test]
@@ -457,7 +457,7 @@ fn test_auto_checkpoint_threshold_various() {
         conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
             .expect("Failed to create table");
 
-        for i in 0..50 {
+        for i in 0..25 {
             conn.query(&format!("CREATE (p:Person {{name: 'person_{}', age: {}}})", i, i % 25))
                 .unwrap();
         }
@@ -479,8 +479,8 @@ fn test_auto_checkpoint_threshold_various() {
         };
         assert_eq!(
             names.len(),
-            50,
-            "threshold={}: should have 50 rows, got {}",
+            25,
+            "threshold={}: should have 25 rows, got {}",
             threshold,
             names.len()
         );

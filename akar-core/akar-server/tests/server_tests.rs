@@ -619,12 +619,8 @@ fn test_idle_timeout_triggers_shutdown() {
     // Wait for the idle timeout to fire (1s + margin).
     thread::sleep(Duration::from_secs(3));
 
-    // Server should be shutting down; a new connection should fail.
-    let result = RemoteDatabase::connect_tcp(&ts.addr);
-    // Connection may fail or succeed but query should fail — either is acceptable.
-    if let Ok(client2) = result {
-        let _ = client2.ping_op(); // may succeed or fail depending on timing
-    }
+    // The idle monitor must have initiated shutdown after the 1s timeout.
+    assert!(ts._server.is_shutting_down(), "idle timeout should trigger shutdown");
 }
 
 // ===========================================================================

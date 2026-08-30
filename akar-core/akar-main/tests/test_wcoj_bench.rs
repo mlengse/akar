@@ -115,19 +115,19 @@ fn test_wcoj_star_vs_hashjoin() {
     // Wall-clock timing (informational, not asserted).
     let mut total = 0;
     let t = Instant::now();
-    for _ in 0..5 {
+    for _ in 0..2 {
         let r = conn.query(star_sql).unwrap();
         total += r.num_rows;
     }
-    println!("star (WCOJ Intersect) 5x: {:?} ({total} rows)", t.elapsed());
+    println!("star (WCOJ Intersect) 2x: {:?} ({total} rows)", t.elapsed());
 
     let mut total = 0;
     let t = Instant::now();
-    for _ in 0..5 {
+    for _ in 0..2 {
         let r = conn.query(chain_sql).unwrap();
         total += r.num_rows;
     }
-    println!("chain (HashJoin) 5x: {:?} ({total} rows)", t.elapsed());
+    println!("chain (HashJoin) 2x: {:?} ({total} rows)", t.elapsed());
 }
 
 #[test]
