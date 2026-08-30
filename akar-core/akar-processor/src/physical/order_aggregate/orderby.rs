@@ -87,18 +87,39 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
         // Use BlockMergeSorter for large data, simple sort for small
         let block_size = 10000usize;
         let indices = if total_rows > block_size && !self.sort_keys.is_empty() {
-            let sorter = BlockMergeSorter::new(block_size, self.sort_keys.clone());
-            // Multi-block path still needs collected key values for k-way merge
-            let mut all_values: Vec<Vec<(Value, bool)>> =
-                (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
-            for global_row in 0..total_rows {
-                for col in 0..num_fields {
-                    let val = accessor.get_value(col, global_row);
-                    let is_null = accessor.is_null(col, global_row);
-                    all_values[col].push((val, is_null));
+            // Collect key values for k-way merge. Only the sort-key columns are
+            // materialized (not the full O(rows × fields) matrix); indices are
+            // remapped to the compact column set (P79).
+            let mut sort_cols: Vec<u32> = Vec::new();
+            for &(col, _) in &self.sort_keys {
+                if (col as usize) < num_fields && !sort_cols.contains(&col) {
+                    sort_cols.push(col);
                 }
             }
-            sorter.sort(&all_values, num_fields)
+            if sort_cols.is_empty() {
+                (0..total_rows).collect()
+            } else {
+                let mut key_values: Vec<Vec<(Value, bool)>> =
+                    sort_cols.iter().map(|_| Vec::with_capacity(total_rows)).collect();
+                for global_row in 0..total_rows {
+                    for (ci, &col) in sort_cols.iter().enumerate() {
+                        let val = accessor.get_value(col as usize, global_row);
+                        let is_null = accessor.is_null(col as usize, global_row);
+                        key_values[ci].push((val, is_null));
+                    }
+                }
+                let compact_keys: Vec<(u32, bool)> = self
+                    .sort_keys
+                    .iter()
+                    .filter(|&&(col, _)| (col as usize) < num_fields)
+                    .map(|&(col, asc)| {
+                        let idx = sort_cols.iter().position(|&c| c == col).unwrap() as u32;
+                        (idx, asc)
+                    })
+                    .collect();
+                let sorter = BlockMergeSorter::new(block_size, compact_keys);
+                sorter.sort(&key_values, sort_cols.len())
+            }
         } else {
             let mut indices: Vec<usize> = (0..total_rows).collect();
             if !self.sort_keys.is_empty() {

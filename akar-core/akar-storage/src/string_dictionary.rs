@@ -5,14 +5,18 @@
 //! by ID, reducing storage for low-cardinality string columns.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// A dictionary-encoded string column.
 #[derive(Debug, Clone)]
 pub struct StringDictionary {
-    /// The dictionary: string_id -> string value.
-    strings: Vec<String>,
-    /// Reverse lookup: string value -> string_id.
-    lookup: HashMap<String, u32>,
+    /// The dictionary: string_id -> string value. Each unique string is stored
+    /// once via `Rc<str>` and shared with the reverse-lookup map key, so the
+    /// bytes of a string have a single heap allocation (P79).
+    strings: Vec<Rc<str>>,
+    /// Reverse lookup: string value -> string_id. Keys share the heap
+    /// allocation of the corresponding `strings` entry.
+    lookup: HashMap<Rc<str>, u32>,
 }
 
 impl StringDictionary {
@@ -48,14 +52,15 @@ impl StringDictionary {
             return id;
         }
         let id = self.strings.len() as u32;
-        self.strings.push(s.to_string());
-        self.lookup.insert(s.to_string(), id);
+        let owned: Rc<str> = Rc::from(s);
+        self.strings.push(Rc::clone(&owned));
+        self.lookup.insert(owned, id);
         id
     }
 
     /// Look up a string by ID. Returns `None` if ID is out of range.
     pub fn lookup(&self, id: u32) -> Option<&str> {
-        self.strings.get(id as usize).map(|s| s.as_str())
+        self.strings.get(id as usize).map(|s| s.as_ref())
     }
 
     /// Look up a string value and return its ID. Returns `None` if not found.
@@ -116,23 +121,25 @@ impl StringDictionary {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             offset += len;
             let id = dict.strings.len() as u32;
-            dict.strings.push(s.clone());
-            dict.lookup.insert(s, id);
+            let owned: Rc<str> = Rc::from(s);
+            dict.strings.push(Rc::clone(&owned));
+            dict.lookup.insert(owned, id);
         }
         Ok(dict)
     }
 
     /// Compute the memory usage in bytes.
+    ///
+    /// String bytes are counted once: the `Rc<str>` in `strings` and the map key
+    /// share a single heap allocation, so the reverse-lookup keys add only the
+    /// `Rc` pointer/refcount overhead, not a second copy of the data.
     pub fn memory_usage(&self) -> usize {
         let mut total = std::mem::size_of::<Self>();
-        total += self.strings.capacity() * std::mem::size_of::<String>();
+        total += self.strings.capacity() * std::mem::size_of::<Rc<str>>();
         for s in &self.strings {
-            total += s.capacity();
+            total += std::mem::size_of::<Rc<str>>() + s.len();
         }
-        total += self.lookup.capacity() * (std::mem::size_of::<String>() + std::mem::size_of::<u32>());
-        for k in self.lookup.keys() {
-            total += k.capacity();
-        }
+        total += self.lookup.capacity() * std::mem::size_of::<(Rc<str>, u32)>();
         total
     }
 

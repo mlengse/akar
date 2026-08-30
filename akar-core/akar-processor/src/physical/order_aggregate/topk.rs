@@ -94,44 +94,34 @@ impl PhysicalOperatorExec for PhysicalTopK {
 
         let num_fields = input[0].num_fields();
 
-        // Collect all values for random access
-        let mut all_values: Vec<Vec<(Value, bool)>> = (0..num_fields).map(|_| Vec::with_capacity(total_rows)).collect();
+        // Stream rows into a bounded max-heap directly from the chunks instead
+        // of materializing all values into a full O(rows × fields) matrix. Only
+        // the sort-key values are needed for the heap (P79).
+        let mut heap: BinaryHeap<TopKHeapEntry> = BinaryHeap::with_capacity(capacity.min(total_rows) + 1);
+        let mut row_idx: usize = 0;
         for chunk in &input {
             for row in 0..chunk.size {
-                for col in 0..num_fields {
-                    if let Some(field) = chunk.fields.get(col) {
-                        let val = chunk.get_value(col, row).unwrap_or(Value::Null);
-                        let is_null = field.is_null(row);
-                        all_values[col].push((val, is_null));
-                    }
+                let sort_key: Vec<DirectedSortKey> = self
+                    .sort_keys
+                    .iter()
+                    .map(|&(col, asc)| {
+                        let val = if col as usize >= num_fields {
+                            Value::Null
+                        } else {
+                            chunk.get_value(col as usize, row).unwrap_or(Value::Null)
+                        };
+                        if asc {
+                            DirectedSortKey::Asc(val)
+                        } else {
+                            DirectedSortKey::Desc(val)
+                        }
+                    })
+                    .collect();
+                heap.push(TopKHeapEntry { sort_key, row_idx });
+                row_idx += 1;
+                if heap.len() > capacity {
+                    heap.pop();
                 }
-            }
-        }
-
-        // BinaryHeap (max-heap): worst entry at top, popped when > capacity.
-        let mut heap: BinaryHeap<TopKHeapEntry> = BinaryHeap::with_capacity(capacity.min(total_rows) + 1);
-
-        for row_idx in 0..total_rows {
-            let sort_key: Vec<DirectedSortKey> = self
-                .sort_keys
-                .iter()
-                .map(|&(col, asc)| {
-                    let val = if col as usize >= num_fields {
-                        Value::Null
-                    } else {
-                        all_values[col as usize][row_idx].0.clone()
-                    };
-                    if asc {
-                        DirectedSortKey::Asc(val)
-                    } else {
-                        DirectedSortKey::Desc(val)
-                    }
-                })
-                .collect();
-
-            heap.push(TopKHeapEntry { sort_key, row_idx });
-            if heap.len() > capacity {
-                heap.pop();
             }
         }
 
