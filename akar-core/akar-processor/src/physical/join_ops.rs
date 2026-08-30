@@ -441,13 +441,19 @@ impl PhysicalIntersect {
         }
 
         // Partition the flat build chunk list into per-side groups. Each build
-        // side in the plan produces the same number of chunks, so we split evenly.
-        let chunk_group_size = (build_chunks.len() / num_builds).max(1);
+        // side in the plan produces the same number of chunks, so we split
+        // evenly; the leftover chunks (len % num_builds) are distributed one
+        // each to the first sides so no chunk is dropped and no slice out of
+        // range occurs when len < num_builds.
+        let base = build_chunks.len() / num_builds;
+        let extra = build_chunks.len() % num_builds;
         let mut sides: Vec<Vec<DataChunk>> = Vec::with_capacity(num_builds);
+        let mut start = 0usize;
         for side in 0..num_builds {
-            let start = side * chunk_group_size;
-            let end = (start + chunk_group_size).min(build_chunks.len());
+            let size = base + usize::from(side < extra);
+            let end = start + size;
             sides.push(build_chunks[start..end].to_vec());
+            start = end;
         }
 
         self.execute_sides(&sides, probe_chunks)

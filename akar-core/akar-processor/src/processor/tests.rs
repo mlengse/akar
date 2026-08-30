@@ -1158,6 +1158,50 @@ mod tests {
     }
 
     #[test]
+    fn test_intersect_uneven_chunks_no_drop() {
+        // P79 (audit): execute_binary split build chunks by num_build_sides. The
+        // old `len / num_builds` split dropped the leftover chunks; with 5 chunks
+        // and 2 sides the 5th is silently discarded. The even split (base +
+        // extra distributes to the first sides) must use every chunk: 3 + 2.
+        let intersect = PhysicalIntersect {
+            num_build_sides: 2,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
+        let build_chunks: Vec<DataChunk> = (0..5).map(|_| make_i64_chunk(&[7])).collect();
+        let probe_chunks = vec![make_i64_chunk(&[7])];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
+        assert!(
+            !result.is_empty() && result[0].size == 6,
+            "expected 3x2 cross product (no chunk dropped), got {:?}",
+            result.first().map(|c| c.size)
+        );
+    }
+
+    #[test]
+    fn test_intersect_less_chunks_than_sides_no_panic() {
+        // P79 (audit): with fewer flat chunks than build sides the old slice
+        // `build_chunks[start..end]` went out of range (start >= len) and
+        // panicked. The even split must produce empty (or empty build) sides
+        // instead of panicking.
+        let intersect = PhysicalIntersect {
+            num_build_sides: 3,
+            probe_key_col: 0,
+            build_key_col: 0,
+        };
+        let build_chunks = vec![make_i64_chunk(&[9])];
+        let probe_chunks = vec![make_i64_chunk(&[9])];
+        let result = intersect.execute_binary(&build_chunks, &probe_chunks).unwrap();
+        // 1 >= 3 chunk split: one side has data, the other two are empty, and
+        // execute_sides returns an empty result (key not in every side).
+        assert!(
+            result.is_empty() || result[0].size == 0,
+            "expected empty result, got {:?}",
+            result.first().map(|c| c.size)
+        );
+    }
+
+    #[test]
     fn test_skip_long_string_no_panic() {
         // P52.41: PhysicalSkip used to panic via .unwrap() when set_value fails
         // on a string > 255 bytes; must degrade to NULL instead.
