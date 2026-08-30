@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,936 total, 0 ignored, 1,936 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P77b; P71 vector tests are feature-gated) |
+| Tests passing | **1,938 total, 0 ignored, 1,938 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P78; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -185,11 +185,11 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 9 | VectorSimilarityDetection | **ACTIVE (P71.4)** — rewrites `MATCH ... WHERE cosine_similarity(n.col, q) >/= thr ORDER BY cos DESC LIMIT k` → `[VectorSimilarityScan, Filter(cos>thr), OrderBy, Projection, Limit]`, preserving threshold / RETURN projection / `_id`; regexes the post-FilterPushDown `ScanNode.predicate` |
 | 10 | ArtRangeScanDetection | Detects ART index range scan patterns — **fixed conservatively (P52.4)**: rewrites only when the WHOLE filter is bounds on one property; never merges different-column conjuncts or drops predicates |
 | 11 | LimitPushDown | Pushes limits closer to scans |
-| 12 | CommonSubexpressionElimination | **NO-OP (audit P52.2)** — dedup changed the positional RETURN arity; the mapping was never applied to downstream consumers |
-| 13 | OrderByPushDown | Pushes ORDER BY below UNION ALL — **NO-OP (audit P52.6)**: per-branch sort is not a global sort under UNION concat; the old rewrite dropped the global ORDER BY |
+| 12 | CommonSubexpressionElimination | **off-by-design (NO-OP, audit P52.2)** — dedup changed the positional RETURN arity; the mapping was never applied to downstream consumers. Do not implement without a proven cost model (see plan P75). |
+| 13 | OrderByPushDown | **off-by-design (NO-OP, audit P52.6)** — pushes ORDER BY below UNION ALL; per-branch sort is **not** a global sort under UNION concat (executed as plain concatenation, no merge), so the old rewrite dropped the global ORDER BY. Correct push-down needs a new `MergeUnion` operator (feature, not a flat pass) — see plan P75. |
 | 14 | UnwindDedup | Deduplicates consecutive UNWIND |
 | 15 | CountRelTable | Replaces ScanRel+COUNT with CSR metadata |
-| 16 | AggregateFusion | Fuses aggregate operations — **NO-OP (audit P52.7)**: fusion resolved the outer agg's args to NULL and changed COUNT(*) from groups to raw rows |
+| 16 | AggregateFusion | **off-by-design (NO-OP, audit P52.7)** — fuses aggregate operations; fusion resolves the outer agg's args to NULL (they reference the inner agg's output) and changes COUNT(*) from per-group to raw rows. Correct fusion needs a rewrite against a merged output schema that a flat pass cannot express — see plan P75. |
 | 17 | SortElision | Eliminates redundant sorts |
 | 18 | ExpressionInline | Inlines trivial expressions |
 
@@ -525,7 +525,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-planner` | 22 | Logical plan construction |
 | `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 157 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
-| `akar-function` | 182 | 259 registered functions |
+| `akar-function` | 184 | 259 registered functions |
 | `akar-storage` | 345 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44) |
 | `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
 | `akar-main` (integration) | 411 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72) |
@@ -551,7 +551,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,936** | **1,936 total, 0 ignored, 1,936 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P77b; P71 vector tests are feature-gated) |
+| **Total** | **1,938** | **1,938 total, 0 ignored, 1,938 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P78; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 
