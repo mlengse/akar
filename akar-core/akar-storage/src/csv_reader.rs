@@ -203,7 +203,14 @@ pub fn read_csv(
         let mut row = Vec::with_capacity(columns.len());
         for (col_idx, field) in record.iter().enumerate() {
             let col = &columns[col_idx];
-            let value = coerce_string_to_value(field, col.logical_type, line_number, col_idx, &col.name)?;
+            let value = coerce_string_to_value(
+                field,
+                col.logical_type,
+                line_number,
+                col_idx,
+                &col.name,
+                &config.null_str,
+            )?;
             row.push(value);
         }
 
@@ -222,11 +229,12 @@ fn coerce_string_to_value(
     line: usize,
     column: usize,
     column_name: &str,
+    null_str: &str,
 ) -> CsvResult<Value> {
     let trimmed = field.trim();
 
     // Handle NULL / empty
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+    if trimmed == null_str || trimmed.eq_ignore_ascii_case("null") {
         return Ok(Value::Null);
     }
 
@@ -252,9 +260,11 @@ fn coerce_string_to_value(
         LogicalTypeID::TimestampTz => coerce_timestamp_tz(trimmed, line, column, column_name),
         LogicalTypeID::Interval => coerce_interval(trimmed, line, column, column_name),
         LogicalTypeID::Blob => Ok(Value::Blob(parse_blob(trimmed))),
-        LogicalTypeID::List => Ok(Value::List(parse_list(trimmed))),
-        LogicalTypeID::Map => Ok(Value::Map(parse_map(trimmed))),
-        LogicalTypeID::Struct | LogicalTypeID::Node | LogicalTypeID::Rel => Ok(Value::Struct(parse_struct(trimmed))),
+        LogicalTypeID::List => Ok(Value::List(parse_list(trimmed, null_str))),
+        LogicalTypeID::Map => Ok(Value::Map(parse_map(trimmed, null_str))),
+        LogicalTypeID::Struct | LogicalTypeID::Node | LogicalTypeID::Rel => {
+            Ok(Value::Struct(parse_struct(trimmed, null_str)))
+        }
         // Fallback: keep as string
         _ => Ok(Value::String(trimmed.to_string())),
     }
@@ -607,7 +617,7 @@ fn parse_blob(s: &str) -> Vec<u8> {
 /// Parse a list in `[item1, item2, ...]` format.
 ///
 /// Items are coerced to `Value::String` for now (no recursive type inference).
-fn parse_list(s: &str) -> Vec<Value> {
+fn parse_list(s: &str, null_str: &str) -> Vec<Value> {
     let s = s.trim();
     if s.is_empty() || s == "[]" {
         return Vec::new();
@@ -629,7 +639,7 @@ fn parse_list(s: &str) -> Vec<Value> {
         .into_iter()
         .map(|item| {
             let trimmed = item.trim();
-            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+            if trimmed == null_str || trimmed.eq_ignore_ascii_case("null") {
                 Value::Null
             } else {
                 Value::String(trimmed.to_string())
@@ -643,7 +653,7 @@ fn parse_list(s: &str) -> Vec<Value> {
 /// Parse a struct in `{key1: value1, key2: value2, ...}` format.
 ///
 /// Values are coerced to `Value::String` for now.
-fn parse_struct(s: &str) -> Vec<(String, Value)> {
+fn parse_struct(s: &str, null_str: &str) -> Vec<(String, Value)> {
     let s = s.trim();
     if s.is_empty() || s == "{}" {
         return Vec::new();
@@ -672,7 +682,7 @@ fn parse_struct(s: &str) -> Vec<(String, Value)> {
             if let Some(colon_idx) = trimmed.find(':') {
                 let key = trimmed[..colon_idx].trim().to_string();
                 let val_str = trimmed[colon_idx + 1..].trim();
-                let value = if val_str.is_empty() || val_str.eq_ignore_ascii_case("null") {
+                let value = if val_str == null_str || val_str.eq_ignore_ascii_case("null") {
                     Value::Null
                 } else {
                     Value::String(val_str.to_string())
@@ -690,7 +700,7 @@ fn parse_struct(s: &str) -> Vec<(String, Value)> {
 /// Parse a map in `{key1=value1, key2=value2, ...}` format.
 ///
 /// Akar uses `=` as key-value separator for maps (vs `:` for structs).
-fn parse_map(s: &str) -> Vec<(Value, Value)> {
+fn parse_map(s: &str, null_str: &str) -> Vec<(Value, Value)> {
     let s = s.trim();
     if s.is_empty() || s == "{}" {
         return Vec::new();
@@ -718,12 +728,12 @@ fn parse_map(s: &str) -> Vec<(Value, Value)> {
             if let Some(eq_idx) = trimmed.find('=') {
                 let key_str = trimmed[..eq_idx].trim();
                 let val_str = trimmed[eq_idx + 1..].trim();
-                let key = if key_str.is_empty() || key_str.eq_ignore_ascii_case("null") {
+                let key = if key_str == null_str || key_str.eq_ignore_ascii_case("null") {
                     Value::Null
                 } else {
                     Value::String(key_str.to_string())
                 };
-                let value = if val_str.is_empty() || val_str.eq_ignore_ascii_case("null") {
+                let value = if val_str == null_str || val_str.eq_ignore_ascii_case("null") {
                     Value::Null
                 } else {
                     Value::String(val_str.to_string())
@@ -954,6 +964,76 @@ mod tests {
         assert_eq!(rows[0][1], Value::Null);
         assert_eq!(rows[0][2], Value::Null);
         assert_eq!(rows[0][3], Value::Null);
+    }
+
+    #[test]
+    fn test_read_csv_custom_null_str() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("nulls.csv");
+        std::fs::write(&csv_path, "name,age\nNULL,5\n\"\",7\n").unwrap();
+
+        let mut config = CsvReaderConfig::default();
+        config.null_str = "NULL".into();
+
+        let rows = read_csv(
+            csv_path.to_str().unwrap(),
+            &akar_common::file_system::VirtualFileSystemRegistry::new(),
+            &test_schema()[..2],
+            &config,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], Value::Null);
+        assert_eq!(rows[0][1], Value::Int64(5));
+        assert_eq!(rows[1][0], Value::String(String::new()));
+        assert_eq!(rows[1][1], Value::Int64(7));
+    }
+
+    #[test]
+    fn test_read_csv_custom_null_str_nested() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv_path = dir.path().join("nested.csv");
+        std::fs::write(&csv_path, "tags,props\n\"[NULL, NA, x]\",\"{a=NA, b=x}\"\n").unwrap();
+
+        let mut config = CsvReaderConfig::default();
+        config.null_str = "NA".into();
+
+        let schema = vec![
+            CatalogColumn {
+                compression: akar_common::enums::CompressionType::Uncompressed,
+                name: "tags".into(),
+                logical_type: LogicalTypeID::List,
+                is_primary_key: false,
+                default_value: None,
+            },
+            CatalogColumn {
+                compression: akar_common::enums::CompressionType::Uncompressed,
+                name: "props".into(),
+                logical_type: LogicalTypeID::Map,
+                is_primary_key: false,
+                default_value: None,
+            },
+        ];
+
+        let rows = read_csv(
+            csv_path.to_str().unwrap(),
+            &akar_common::file_system::VirtualFileSystemRegistry::new(),
+            &schema,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0][0],
+            Value::List(vec![Value::Null, Value::Null, Value::String("x".into())])
+        );
+        assert_eq!(
+            rows[0][1],
+            Value::Map(vec![
+                (Value::String("a".into()), Value::Null),
+                (Value::String("b".into()), Value::String("x".into())),
+            ])
+        );
     }
 
     #[test]
@@ -1270,12 +1350,14 @@ mod tests {
         opts.insert("DELIM".into(), "|".into());
         opts.insert("QUOTE".into(), "'".into());
         opts.insert("ESCAPE".into(), "`".into());
+        opts.insert("NULL".into(), "NA".into());
 
         let config = CsvReaderConfig::from_options(&opts);
         assert!(!config.has_header);
         assert_eq!(config.delimiter, b'|');
         assert_eq!(config.quote, b'\'');
         assert_eq!(config.escape, b'`');
+        assert_eq!(config.null_str, "NA");
     }
 
     #[test]
