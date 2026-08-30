@@ -88,7 +88,11 @@ fn main() -> Result<()> {
 
         // Idempotency: skip CREATE + COPY for tables already present in the
         // destination DB (e.g. re-running migration on an already-migrated DB).
-        if rust_db.get_table_id(table_name).is_some() {
+        if rust_db
+            .get_table_id(table_name)
+            .map_err(|e| anyhow::anyhow!(e))?
+            .is_some()
+        {
             println!("Skipping {} (already exists)", table_name);
             continue;
         }
@@ -145,7 +149,11 @@ fn main() -> Result<()> {
 
         // Idempotency: skip CREATE + COPY for tables already present in the
         // destination DB (e.g. re-running migration on an already-migrated DB).
-        if rust_db.get_table_id(table_name).is_some() {
+        if rust_db
+            .get_table_id(table_name)
+            .map_err(|e| anyhow::anyhow!(e))?
+            .is_some()
+        {
             println!("Skipping {} (already exists)", table_name);
             continue;
         }

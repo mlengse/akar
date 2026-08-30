@@ -119,7 +119,13 @@ impl Connection {
     ) -> Result<Vec<akar_transaction::UndoRecord>, String> {
         let txn_id = txn.transaction_id;
         // Remove resources (discard them) — try to get them for cleanup
-        let resources = self.txn_resources.lock().ok().and_then(|mut map| map.remove(&txn_id));
+        let resources = match self.txn_resources.lock() {
+            Ok(mut map) => map.remove(&txn_id),
+            Err(e) => {
+                tracing::error!("txn_resources lock poisoned during rollback of txn#{txn_id}: {e}");
+                None
+            }
+        };
 
         // Rollback via TransactionManager
         let tm = &self.database.transaction_manager;

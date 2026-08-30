@@ -435,8 +435,12 @@ impl Database {
     }
 
     /// Get table IDs for write operations (used by transaction locking).
-    pub fn get_table_id(&self, name: &str) -> Option<u64> {
-        self.catalog.lock().ok()?.get_table_id(name)
+    ///
+    /// Propagates a poisoned catalog lock instead of silently treating it as a
+    /// missing table (Audit 2 NIT).
+    pub fn get_table_id(&self, name: &str) -> Result<Option<u64>, String> {
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        Ok(catalog.get_table_id(name))
     }
 
     /// Path of the persisted catalog file for this database.
