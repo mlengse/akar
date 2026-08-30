@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(server/dream) — P77: `dream_control` op live dari stub `not_available` → lifecycle `status`/`pause`/`resume`/`run` di akar-server (2026-08-30)** — the `dream_control` wire op (added P66) no longer returns a hardcoded `not_available` row. `akar-server` now depends on `akar-dream`; a new `akar-server/src/dream.rs` module owns the per-server dream lifecycle: `DreamControl` holds `Arc<Mutex<DreamOrchestrator<GraceBackend>>>` + paused flag + last-stats, with `state()`/`run()`/`pause()`/`resume()`/`last_stats()`; `GraceBackend` implements all 17 `DreamBackend` methods as documented no-ops returning zero/empty (so a full 7-phase `run_cycle` executes safely against an empty graph, identical semantics to the existing `#[cfg(test)] MockBackend`). `SessionConfig` gained `dream: Arc<DreamControl>`, threaded once per server in `accept_loop` (`lib.rs:262`). `handle_dream_control` (`session.rs:214`) maps action → lifecycle op, returns columns `[action, status, note, dream_id]` where `status` is `idle`/`running`/`paused`; `""`/unknown default to `status` (backward-compatible with kairos `resume`/`status`/`pause` senders). 2 unit tests (`dream.rs`: state transitions, all-zero graceful backend) + 2 new integration tests (`run_advances_dream_id`, `pause_resume`) + the 2 existing `server_tests.rs` dream assertions updated `not_available`→`idle`/`running`/`paused`/`dream_id`. The 17-method production mapping onto the akar graph DB is a separate tracked task **P77b** (plan). Gate `test [akar-core]`: **1,932 total / 0 failed / 0 ignored** (was 1,928 + 4 new tests); fmt + clippy `-D warnings` bersih. [Uncommitted]
+
 ## [0.1.18] - 2026-08-30
 
 ### Added

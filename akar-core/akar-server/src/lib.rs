@@ -28,6 +28,7 @@
 //! # Ok::<(), String>(())
 //! ```
 
+pub mod dream;
 pub mod session;
 
 use akar_main::database::Database;
@@ -246,6 +247,7 @@ fn accept_loop(
     db_path: String,
     auth_token: Option<String>,
 ) {
+    let dream = dream::DreamControl::new();
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
@@ -258,12 +260,14 @@ fn accept_loop(
                 let last_activity = last_activity.clone();
                 let total_queries = total_queries.clone();
                 let db_path = db_path.clone();
+                let dream = dream.clone();
                 let config = SessionConfig {
                     auth_token: auth_token.clone(),
                     last_activity,
                     total_queries,
                     db_path,
                     shutdown: shutdown.clone(),
+                    dream,
                 };
                 match thread::Builder::new().name("akar-server-client".into()).spawn(move || {
                     tracing::debug!("Client connected: {peer}");

@@ -400,6 +400,7 @@ name = "akar-server"
 version = "0.1.18"
 dependencies = [
  "akar-common",
+ "akar-dream",
  "akar-main",
  "arrow 59.2.0",
  "clap",

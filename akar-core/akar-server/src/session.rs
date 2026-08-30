@@ -54,6 +54,8 @@ pub struct SessionConfig {
     pub db_path: String,
     /// Shared flag to trigger server shutdown (set by `shutdown` op).
     pub shutdown: Arc<AtomicBool>,
+    /// Shared dream engine lifecycle (P77). Built once per server.
+    pub dream: Arc<crate::dream::DreamControl>,
 }
 
 /// Serve one client connection until the peer disconnects or the server shuts
@@ -135,7 +137,7 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionC
             Some("stats") => handle_stats(&config.db_path, &config.total_queries),
             Some("export") => handle_export(&conn, request.path.as_deref()),
             Some("shutdown") => handle_shutdown(&config.shutdown),
-            Some("dream_control") => handle_dream_control(request.action.as_deref()),
+            Some("dream_control") => handle_dream_control(request.action.as_deref(), &config.dream),
             None | Some("query") => {
                 config.total_queries.fetch_add(1, Ordering::Relaxed);
                 execute_query(&conn, &request)
@@ -209,24 +211,69 @@ fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
     serialize_response(&resp)
 }
 
-/// Handle dream engine control requests (status/pause/resume).
+/// Handle dream engine control requests (status/pause/resume/run).
 ///
-/// The dream engine is not yet integrated into akar-server (P66).
-/// Returns a structured response so kairos clients get a meaningful
-/// answer instead of "Unknown operation".
-fn handle_dream_control(action: Option<&str>) -> Vec<u8> {
+/// The request carries an `action` string; empty/unknown actions default to
+/// `status` for backward compatibility with kairos callers. The action maps to
+/// a lifecycle op on the shared [`DreamControl`](crate::dream::DreamControl);
+/// a `run`/`resume` executes a consolidation cycle and reports its `dream_id`
+/// and duration.
+fn handle_dream_control(action: Option<&str>, dream: &Arc<crate::dream::DreamControl>) -> Vec<u8> {
+    use crate::dream::DreamState;
     let action = action.filter(|a| !a.is_empty()).unwrap_or("status");
+    let (state, note, dream_id) = match action {
+        "run" => {
+            let stats = dream.run();
+            (
+                dream.state(),
+                Some(format!("dream cycle completed in {:.0} ms", stats.duration_ms)),
+                Some(stats.dream_id),
+            )
+        }
+        "resume" => {
+            let stats = dream.resume();
+            (
+                dream.state(),
+                Some(format!("dream cycle resumed in {:.0} ms", stats.duration_ms)),
+                Some(stats.dream_id),
+            )
+        }
+        "pause" => {
+            dream.pause();
+            (dream.state(), Some("dream engine paused".to_string()), None)
+        }
+        "status" => {
+            let last = dream.last_stats();
+            let note = match (&last, dream.state()) {
+                (Some(s), DreamState::Running) => {
+                    Some(format!("last dream #{} in {:.0} ms", s.dream_id, s.duration_ms))
+                }
+                _ => None,
+            };
+            (dream.state(), note, last.map(|s| s.dream_id))
+        }
+        other => (
+            dream.state(),
+            Some(format!("unknown action '{other}' (fallback to status)")),
+            dream.last_stats().map(|s| s.dream_id),
+        ),
+    };
+
+    let status = match state {
+        DreamState::Idle => "idle",
+        DreamState::Running => "running",
+        DreamState::Paused => "paused",
+    };
     let resp = WireResponse {
         success: true,
         message: Some(format!("dream_control: {action}")),
         error_message: None,
-        column_names: vec!["action".into(), "status".into(), "note".into()],
+        column_names: vec!["action".into(), "status".into(), "note".into(), "dream_id".into()],
         rows: vec![vec![
             Some(Value::String(action.to_string())),
-            Some(Value::String("not_available".into())),
-            Some(Value::String(
-                "dream engine not yet integrated into akar-server (P66)".into(),
-            )),
+            Some(Value::String(status.to_string())),
+            note.map(Value::String),
+            dream_id.map(Value::UInt64),
         ]],
         stats: None,
     };

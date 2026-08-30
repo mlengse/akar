@@ -854,14 +854,16 @@ fn test_dream_control_status() {
 
     let res = client.dream_control("status").expect("dream_control status");
     assert!(res.success);
-    assert_eq!(res.column_names, vec!["action", "status", "note"]);
+    assert_eq!(res.column_names, vec!["action", "status", "note", "dream_id"]);
     assert_eq!(res.rows.len(), 1);
     assert_eq!(res.rows[0][0], Some(Value::String("status".to_string())));
-    assert_eq!(res.rows[0][1], Some(Value::String("not_available".to_string())));
+    // Fresh engine: not paused, no cycle yet → idle.
+    assert_eq!(res.rows[0][1], Some(Value::String("idle".to_string())));
+    assert_eq!(res.rows[0][3], None);
 }
 
 #[test]
-fn test_dream_control_default_action() {
+fn test_dream_control_empty_defaults_to_status() {
     let ts = start_server(config());
     let client = connect(&ts);
 
@@ -869,6 +871,47 @@ fn test_dream_control_default_action() {
     let res = client.dream_control("").expect("dream_control default");
     assert!(res.success);
     assert_eq!(res.rows[0][0], Some(Value::String("status".to_string())));
+    assert_eq!(res.rows[0][1], Some(Value::String("idle".to_string())));
+}
+
+#[test]
+fn test_dream_control_run_advances_dream_id() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let res = client.dream_control("run").expect("dream_control run");
+    assert!(res.success);
+    assert_eq!(res.rows[0][0], Some(Value::String("run".to_string())));
+    // A run executes one cycle (graceful backend → stats all zero) and reports
+    // the resulting state as running with dream_id = 1.
+    assert_eq!(res.rows[0][1], Some(Value::String("running".to_string())));
+    assert_eq!(res.rows[0][3], Some(Value::UInt64(1)));
+
+    // status afterwards still reports running + last dream id.
+    let st = client.dream_control("status").expect("dream_control status");
+    assert_eq!(st.rows[0][1], Some(Value::String("running".to_string())));
+    assert_eq!(st.rows[0][3], Some(Value::UInt64(1)));
+}
+
+#[test]
+fn test_dream_control_pause_resume() {
+    let ts = start_server(config());
+    let client = connect(&ts);
+
+    let paused = client.dream_control("pause").expect("dream_control pause");
+    assert!(paused.success);
+    assert_eq!(paused.rows[0][1], Some(Value::String("paused".to_string())));
+
+    // While paused, a run is a no-op: dream_id stays at the default 0 (no
+    // real cycle executed).
+    let run_paused = client.dream_control("run").expect("run while paused");
+    assert_eq!(run_paused.rows[0][3], Some(Value::UInt64(0)));
+    assert_eq!(run_paused.rows[0][1], Some(Value::String("paused".to_string())));
+
+    let resumed = client.dream_control("resume").expect("dream_control resume");
+    assert!(resumed.success);
+    assert_eq!(resumed.rows[0][1], Some(Value::String("running".to_string())));
+    assert_eq!(resumed.rows[0][3], Some(Value::UInt64(1)));
 }
 
 #[test]
