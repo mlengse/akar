@@ -400,7 +400,7 @@ struct TransactionLifecycle {
     next_id: AtomicU64,
     next_commit_ts: AtomicU64,
     active_transactions: Mutex<HashMap<u64, Transaction>>,
-    commit_history: Mutex<Vec<(u64, u64)>>,
+    commit_history: Mutex<HashMap<u64, u64>>,
     active_txn_count: AtomicU32,
 }
 
@@ -410,7 +410,7 @@ impl TransactionLifecycle {
             next_id: AtomicU64::new(1),
             next_commit_ts: AtomicU64::new(1),
             active_transactions: Mutex::new(HashMap::new()),
-            commit_history: Mutex::new(Vec::new()),
+            commit_history: Mutex::new(HashMap::new()),
             active_txn_count: AtomicU32::new(0),
         }
     }
@@ -443,22 +443,18 @@ impl TransactionLifecycle {
 
     fn push_commit_history(&self, txn_id: u64, commit_ts: u64) {
         if let Ok(mut history) = self.commit_history.lock() {
-            history.push((txn_id, commit_ts));
+            history.insert(txn_id, commit_ts);
         }
     }
 
     fn is_visible(&self, txn_id: u64, snapshot_ts: u64) -> bool {
         if let Ok(history) = self.commit_history.lock() {
-            for &(id, commit_ts) in history.iter() {
-                if id == txn_id {
-                    return commit_ts <= snapshot_ts;
-                }
-            }
+            return history.get(&txn_id).is_some_and(|&commit_ts| commit_ts <= snapshot_ts);
         }
         false
     }
 
-    fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
+    fn commit_history_snapshot(&self) -> HashMap<u64, u64> {
         self.commit_history.lock().map(|h| h.clone()).unwrap_or_default()
     }
 
@@ -949,7 +945,7 @@ impl TransactionManager {
         self.lifecycle.is_visible(txn_id, snapshot_ts)
     }
 
-    pub fn commit_history_snapshot(&self) -> Vec<(u64, u64)> {
+    pub fn commit_history_snapshot(&self) -> HashMap<u64, u64> {
         self.lifecycle.commit_history_snapshot()
     }
 

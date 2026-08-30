@@ -19,6 +19,7 @@ use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int8Builder, Int16Builder, Int32Builder, Int64Builder,
     StringBuilder, UInt64Builder,
 };
+use std::collections::HashMap;
 
 /// Default number of rows per column chunk (matches C++ Akar default).
 pub const NODE_GROUP_SIZE: usize = 4096;
@@ -134,7 +135,7 @@ impl ColumnChunk {
         &self,
         idx: usize,
         snapshot_ts: Option<u64>,
-        _commit_history: &[(u64, u64)],
+        _commit_history: &HashMap<u64, u64>,
     ) -> Option<&Value> {
         if idx >= self.values.len() {
             return None;
@@ -164,7 +165,7 @@ impl ColumnChunk {
         &self,
         idx: usize,
         snapshot_ts: Option<u64>,
-        _commit_history: &[(u64, u64)],
+        _commit_history: &HashMap<u64, u64>,
     ) -> Option<Value> {
         if idx >= self.values.len() {
             return None;

@@ -35,6 +35,7 @@ use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
 use akar_storage::wal::{WALRecord, WalSink};
 use akar_transaction::UndoRecord;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub type SequenceFn = Arc<dyn Fn(&str, bool) -> Result<Value, ProcessorError> + Send + Sync>;
@@ -124,7 +125,7 @@ pub struct QueryProcessor {
     /// MVCC snapshot timestamp for read isolation.
     snapshot_ts: Option<u64>,
     /// Commit history for MVCC visibility checks.
-    commit_history: Vec<(u64, u64)>,
+    commit_history: HashMap<u64, u64>,
     /// Row-level write set accumulated during execution.
     /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
     /// Read by the connection layer after execution for OCC conflict detection.
@@ -154,7 +155,7 @@ impl QueryProcessor {
             subquery_fn: None,
             schema_ddl_fn: None,
             snapshot_ts: None,
-            commit_history: Vec::new(),
+            commit_history: HashMap::new(),
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
@@ -173,7 +174,7 @@ impl QueryProcessor {
             subquery_fn: None,
             schema_ddl_fn: None,
             snapshot_ts: None,
-            commit_history: Vec::new(),
+            commit_history: HashMap::new(),
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
@@ -196,7 +197,7 @@ impl QueryProcessor {
             subquery_fn: None,
             schema_ddl_fn: None,
             snapshot_ts: None,
-            commit_history: Vec::new(),
+            commit_history: HashMap::new(),
             written_rows: Mutex::new(Vec::new()),
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
@@ -229,7 +230,7 @@ impl QueryProcessor {
     }
 
     /// Set MVCC snapshot parameters for read isolation.
-    pub fn with_snapshot(mut self, snapshot_ts: Option<u64>, commit_history: Vec<(u64, u64)>) -> Self {
+    pub fn with_snapshot(mut self, snapshot_ts: Option<u64>, commit_history: HashMap<u64, u64>) -> Self {
         self.snapshot_ts = snapshot_ts;
         self.commit_history = commit_history;
         self

@@ -75,7 +75,7 @@ impl VectorVersionInfo {
     ///
     /// `commit_history` is used to look up commit timestamps for
     /// transaction IDs.
-    pub fn is_visible(&self, row_in_vector: u32, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
+    pub fn is_visible(&self, row_in_vector: u32, snapshot_ts: u64, commit_history: &HashMap<u64, u64>) -> bool {
         // Check deletions: if any committed txn with commit_ts ≤ snapshot_ts
         // deleted this row, it's not visible.
         if let Ok(del) = self.deleted.lock() {
@@ -112,14 +112,11 @@ impl VectorVersionInfo {
     }
 }
 
-/// Helper: check if a transaction's commit timestamp ≤ snapshot_ts.
-fn is_txn_committed_before(txn_id: u64, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
-    for &(id, commit_ts) in commit_history {
-        if id == txn_id {
-            return commit_ts <= snapshot_ts;
-        }
-    }
-    false // Not yet committed at this snapshot
+/// Helper: check if a transaction's commit timestamp ≤ snapshot_ts (O(1) lookup).
+fn is_txn_committed_before(txn_id: u64, snapshot_ts: u64, commit_history: &HashMap<u64, u64>) -> bool {
+    commit_history
+        .get(&txn_id)
+        .is_some_and(|&commit_ts| commit_ts <= snapshot_ts)
 }
 
 /// Per-node-group version tracking.
@@ -201,7 +198,7 @@ impl VersionInfo {
     }
 
     /// Check whether global `row` is visible at `snapshot_ts`.
-    pub fn is_visible(&self, row: u32, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
+    pub fn is_visible(&self, row: u32, snapshot_ts: u64, commit_history: &HashMap<u64, u64>) -> bool {
         let v_idx = self.vector_idx(row);
         if v_idx < self.vectors.len() {
             self.vectors[v_idx].is_visible(self.row_in_vector(row), snapshot_ts, commit_history)
@@ -218,7 +215,7 @@ mod tests {
     #[test]
     fn test_version_info_basic() {
         let vi = VersionInfo::new(NODE_GROUP_SIZE);
-        let history = vec![(1u64, 10u64), (2u64, 20u64)];
+        let history = HashMap::from([(1u64, 10u64), (2u64, 20u64)]);
 
         vi.insert(1, 5);
         vi.delete(2, 10);
@@ -237,7 +234,7 @@ mod tests {
     fn test_vector_version_info_insert() {
         let vvi = VectorVersionInfo::new();
         vvi.insert(1, 42);
-        let history = vec![(1u64, 5u64)];
+        let history = HashMap::from([(1u64, 5u64)]);
 
         assert!(vvi.is_visible(42, 5, &history));
         assert!(!vvi.is_visible(42, 3, &history)); // Before commit
@@ -247,16 +244,37 @@ mod tests {
     fn test_vector_version_info_delete() {
         let vvi = VectorVersionInfo::new();
         vvi.delete(1, 7);
-        let history = vec![(1u64, 10u64)];
+        let history = HashMap::from([(1u64, 10u64)]);
 
         assert!(!vvi.is_visible(7, 10, &history)); // Deleted
         assert!(vvi.is_visible(7, 5, &history)); // Before delete committed
     }
 
     #[test]
+    fn test_version_info_history_lookup_semantics() {
+        // Commit history is now a HashMap: absent txn, committed-before, and
+        // committed-after must resolve identically to the old slice scan.
+        let vi = VersionInfo::new(NODE_GROUP_SIZE);
+        vi.insert(1, 5);
+        vi.delete(2, 10);
+
+        // txn#1 committed at ts=10: visible at 10, invisible before.
+        assert!(vi.is_visible(5, 10, &HashMap::from([(1u64, 10u64), (2u64, 20u64)])));
+        assert!(!vi.is_visible(5, 9, &HashMap::from([(1u64, 10u64), (2u64, 20u64)])));
+        // txn#1 absent from history: invisible at any snapshot.
+        assert!(!vi.is_visible(5, 10, &HashMap::from([(2u64, 20u64)])));
+        // Row 10 was deleted by txn#2 (commit_ts=20): invisible once committed.
+        assert!(!vi.is_visible(10, 20, &HashMap::from([(1u64, 10u64), (2u64, 20u64)])));
+        // Empty history: inserted row invisible; deleted row still visible
+        // (delete txn absent => not committed, so no tombstone applies).
+        assert!(!vi.is_visible(5, 10, &HashMap::new()));
+        assert!(vi.is_visible(10, 10, &HashMap::new()));
+    }
+
+    #[test]
     fn test_version_info_reset_clears_all_records() {
         let vi = VersionInfo::new(NODE_GROUP_SIZE);
-        let history = vec![(1u64, 10u64), (2u64, 20u64)];
+        let history = HashMap::from([(1u64, 10u64), (2u64, 20u64)]);
 
         vi.insert(1, 5);
         vi.delete(2, 10);
@@ -284,8 +302,8 @@ mod tests {
         vvi.reset();
         assert_eq!(vvi.num_inserters(), 0);
         assert_eq!(vvi.num_deleters(), 0);
-        assert!(vvi.is_visible(42, 0, &[(1u64, 10u64)]));
-        assert!(vvi.is_visible(7, 0, &[(2u64, 10u64)]));
+        assert!(vvi.is_visible(42, 0, &HashMap::from([(1u64, 10u64)])));
+        assert!(vvi.is_visible(7, 0, &HashMap::from([(2u64, 10u64)])));
     }
 
     // Need NODE_GROUP_SIZE for the VersionInfo::new() test

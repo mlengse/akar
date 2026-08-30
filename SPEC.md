@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,954 total, 0 ignored, 1,954 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| Tests passing | **1,955 total, 0 ignored, 1,955 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P82 batch: `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); sebelum P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -526,7 +526,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 157 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 184 | 259 registered functions |
-| `akar-storage` | 345 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44) |
+| `akar-storage` | 346 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
 | `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
 | `akar-main` (integration) | 411 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
@@ -551,7 +551,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,954** | **1,954 total, 0 ignored, 1,954 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **1,955** | **1,955 total, 0 ignored, 1,955 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P82 batch: `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); sebelum P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 

@@ -423,7 +423,7 @@ impl NodeTable {
         start: u64,
         count: u64,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Vec<Value> {
         if col_idx >= self.columns.len() || start >= self.num_rows {
             return Vec::new();
@@ -642,7 +642,7 @@ impl NodeTable {
     /// Get a single value at (row, col) by locating the correct `NodeGroup`
     /// and `ColumnChunk`.
     pub fn get_value(&self, row: usize, col: usize) -> Option<&Value> {
-        self.get_value_with_snapshot(row, col, None, &[])
+        self.get_value_with_snapshot(row, col, None, &HashMap::new())
     }
 
     /// Get a single value with MVCC snapshot isolation.
@@ -654,7 +654,7 @@ impl NodeTable {
         row: usize,
         col: usize,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Option<&Value> {
         if col >= self.columns.len() || row as u64 >= self.num_rows {
             return None;
@@ -709,7 +709,7 @@ impl NodeTable {
     pub fn to_column_major_data_with_snapshot(
         &self,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Vec<Vec<Value>> {
         let num_cols = self.columns.len();
         let mut result = vec![Vec::new(); num_cols];
@@ -734,7 +734,7 @@ impl NodeTable {
         &self,
         predicate: Option<(usize, &str, &Value)>,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Vec<Vec<Value>> {
         let num_cols = self.columns.len();
         let mut result = vec![Vec::new(); num_cols];
@@ -805,7 +805,7 @@ impl NodeTable {
         &self,
         predicate: Option<(usize, &str, &Value)>,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> (Vec<Vec<Value>>, Vec<u64>) {
         let num_cols = self.columns.len();
         let mut result = vec![Vec::new(); num_cols];
@@ -1802,7 +1802,7 @@ mod tests {
         for i in 0..100 {
             table.insert_row(vec![Value::Int64(i)]).unwrap();
         }
-        let scanned = table.scan_column(0, 10, 5, None, &[]);
+        let scanned = table.scan_column(0, 10, 5, None, &HashMap::new());
         assert_eq!(scanned.len(), 5);
         assert_eq!(scanned[0], Value::Int64(10));
         assert_eq!(scanned[4], Value::Int64(14));

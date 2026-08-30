@@ -14,6 +14,7 @@ use akar_function::registry::FunctionRegistry;
 use akar_planner::logical_operator::LogicalOperator;
 use akar_storage::table::TableCatalog;
 use arrow::array::ArrayRef;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::{SchemaDdlFn, SequenceFn, StandaloneCallHandler, SubqueryFn};
@@ -31,8 +32,8 @@ pub struct ExecutionContext<'p> {
     /// MVCC snapshot timestamp. When `Some(ts)`, reads are isolated to data
     /// committed at or before `ts`. `None` means read最新 (no isolation).
     pub snapshot_ts: Option<u64>,
-    /// Commit history for MVCC visibility checks: `(txn_id, commit_ts)` pairs.
-    pub commit_history: Vec<(u64, u64)>,
+    /// Commit history for MVCC visibility checks: `txn_id -> commit_ts`.
+    pub commit_history: HashMap<u64, u64>,
     /// Row-level write set for OCC conflict detection.
     /// Populated by the mapper after each write operation (SET, DELETE, INSERT).
     /// The connection layer reads this after execution and calls `record_write()`.

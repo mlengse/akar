@@ -989,6 +989,7 @@ mod integration_tests {
     use crate::wal::WALRecord;
     use akar_common::enums::CompressionType;
     use akar_common::types::{LogicalTypeID, Value};
+    use std::collections::HashMap;
 
     // -----------------------------------------------------------------
     // Helper: create a StorageManager + column pair
@@ -1044,11 +1045,11 @@ mod integration_tests {
         assert_eq!(table.get_value(1, 1), Some(&Value::Int64(25)));
 
         // 4. Read back via scan_column across node groups
-        let names = table.scan_column(0, 0, 3, None, &[]);
+        let names = table.scan_column(0, 0, 3, None, &HashMap::new());
         assert_eq!(names.len(), 3);
         assert_eq!(names[0], Value::String("Alice".into()));
 
-        let ages = table.scan_column(1, 1, 2, None, &[]);
+        let ages = table.scan_column(1, 1, 2, None, &HashMap::new());
         assert_eq!(ages.len(), 2);
         assert_eq!(ages[0], Value::Int64(25));
     }
@@ -1275,14 +1276,14 @@ mod integration_tests {
         );
 
         // Scan column 0 across the entire table
-        let scanned = table.scan_column(0, 0, total_rows as u64, None, &[]);
+        let scanned = table.scan_column(0, 0, total_rows as u64, None, &HashMap::new());
         assert_eq!(scanned.len(), total_rows);
         assert_eq!(scanned[0], Value::Int64(0));
         assert_eq!(scanned[NODE_GROUP_SIZE], Value::Int64(NODE_GROUP_SIZE as i64));
         assert_eq!(scanned[total_rows - 1], Value::Int64((total_rows - 1) as i64));
 
         // Scan column 1 with offset and count spanning both groups
-        let scan_mid = table.scan_column(1, (NODE_GROUP_SIZE - 100) as u64, 200, None, &[]);
+        let scan_mid = table.scan_column(1, (NODE_GROUP_SIZE - 100) as u64, 200, None, &HashMap::new());
         assert_eq!(scan_mid.len(), 200);
         assert_eq!(scan_mid[0], Value::Int64(((NODE_GROUP_SIZE - 100) * 2) as i64));
         assert_eq!(scan_mid[199], Value::Int64(((NODE_GROUP_SIZE + 99) * 2) as i64));

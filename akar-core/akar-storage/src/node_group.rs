@@ -16,6 +16,7 @@ use crate::spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 use crate::version_info::VersionInfo;
 use akar_common::error::StorageError;
 use akar_common::types::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// A node group stores up to `NODE_GROUP_SIZE` rows in columnar format.
@@ -433,7 +434,7 @@ impl NodeGroup {
         local_row: usize,
         col_idx: usize,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Option<&Value> {
         // Check version info visibility (inserts/deletes)
         if let Some(ts) = snapshot_ts
@@ -457,7 +458,7 @@ impl NodeGroup {
         local_row: usize,
         col_idx: usize,
         snapshot_ts: Option<u64>,
-        commit_history: &[(u64, u64)],
+        commit_history: &HashMap<u64, u64>,
     ) -> Option<Value> {
         // Check version info visibility (inserts/deletes)
         if let Some(ts) = snapshot_ts
@@ -473,7 +474,7 @@ impl NodeGroup {
 
     /// Check whether a row is visible at the given snapshot timestamp.
     /// Returns `true` if no version tracking is active (backward compat).
-    pub fn is_row_visible(&self, local_row: usize, snapshot_ts: u64, commit_history: &[(u64, u64)]) -> bool {
+    pub fn is_row_visible(&self, local_row: usize, snapshot_ts: u64, commit_history: &HashMap<u64, u64>) -> bool {
         match &self.version_info {
             Some(vi) => vi.is_visible(local_row as u32, snapshot_ts, commit_history),
             None => true, // No version tracking → always visible
@@ -692,7 +693,7 @@ mod tests {
 
         // Buffer reuse must not carry stale version records into new rows.
         assert_eq!(group.version_info.as_ref().unwrap().num_inserters(), 0);
-        assert!(group.is_row_visible(0, 0, &[(7, 10)]));
+        assert!(group.is_row_visible(0, 0, &HashMap::new()));
     }
 
     #[test]
@@ -721,7 +722,10 @@ mod tests {
         let vi = group.version_info.as_ref().unwrap();
         assert_eq!(vi.num_inserters(), 0, "stale spill records must be dropped");
         for i in 0usize..20 {
-            assert!(group.is_row_visible(i, 0, &[(7, 10)]), "row {i} visible by default");
+            assert!(
+                group.is_row_visible(i, 0, &HashMap::new()),
+                "row {i} visible by default"
+            );
         }
     }
 
