@@ -151,8 +151,6 @@ pub fn stem_word(word: &str) -> String {
         w[..w.len() - 4].to_string()
     } else if w.ends_with("ible") && w.len() > 4 {
         w[..w.len() - 4].to_string()
-    } else if w.ends_with("ment") && w.len() > 4 {
-        w[..w.len() - 4].to_string()
     } else if w.ends_with("ful") && w.len() > 3 {
         w[..w.len() - 3].to_string()
     } else if w.ends_with("al") && w.len() > 3 {
@@ -288,6 +286,14 @@ mod tests {
         assert_eq!(stem_word("enjoyment"), "enjoy");
         assert_eq!(stem_word("happiness"), "happi");
         assert_eq!(stem_word("goodness"), "good");
+    }
+
+    #[test]
+    fn test_stem_ingly_edly_after_ing() {
+        // -ingly/-edly are separate branches and must still fire: a word ending
+        // in "ingly" does not end in "ing" (last three chars are "gly").
+        assert_eq!(stem_word("amazingly"), "amaz");
+        assert_eq!(stem_word("reportedly"), "report");
     }
 
     #[test]
