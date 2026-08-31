@@ -16,7 +16,7 @@
   5. **Fix pendukung** — hasil `collect(...)` (kolom `List`) tidak bisa disimpan via `store_value_in_vector` (menandai List null — bug laten yang terkuak P88); kolom tersebut kini dibangun langsung via `arrow_array_from_values` (`build_output_direct`, `aggregatehashtable.rs`).
   6. 2 tes baru: `test_aggregate_distinct_parses` (unit parser: nama `count_distinct`, tolak `abs(DISTINCT …)`) + `test_aggregate_distinct` (integration: COUNT/SUM/collect DISTINCT, GROUP BY `COUNT(*)`, NULL-exclusion, DROP). Follow-up kairos: `_translate_collect_distinct` (`akar_compat.py`) bisa dihapus.
 
-  Gate `test [akar-core]`: **1,964 total / 0 ignored / 1,964 passed / 0 failed** (was 1,962 + 2 tes baru); fmt + clippy `--all-targets -D warnings` bersih. [Uncommitted]
+  Gate `test [akar-core]`: **1,964 total / 0 ignored / 1,964 passed / 0 failed** (was 1,962 + 2 tes baru); fmt + clippy `--all-targets -D warnings` bersih. — `0127912`
 
 - **docs(parser/binder/planner) — P87: parity eksplisit superset akar vs C++ & gap terakhir didokumentasikan (2026-08-31)** — audit & dokumentasi (BUKAN implementasi):
   1. **Parser:** 33 `Statement` vs 22 C++ `oC_Statement` grammar rules (`Cypher.g4:8-30`); akar superset (semua statement C++ non-auth 1:1; +13 varian akar).
@@ -25,7 +25,7 @@
   4. Gap essential terakhir (kategori c) = per-aggregate-function `DISTINCT` — tercatat SPEC §18 #3 → **P88** (kini telah ditutup oleh P88).
   5. SPEC §3.3 diperbarui (catatan parity + §18 #2 dikoreksi 58). Dokumentasi murni — tanpa perubahan kode produksi.
 
-  Gate `test [akar-core]`: tidak berubah (docs-only); doc-check PASS. [Uncommitted]
+  Gate `test [akar-core]`: tidak berubah (docs-only); doc-check PASS. — `0127912`
 
 - **docs(processor) — P85: parity matrix operator fisik C++ 58 ↔ akar 55 di SPEC §3.3 (audit + dokumentasi; bukan implementasi) (2026-08-31)** — audit eksplisit tiap `PhysicalOperatorType` (kuzu-vela `src/include/processor/operator/physical_operator.h:17-76`) → operator akar, dikategorikan (a)/(b)/(c):
 
