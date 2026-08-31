@@ -207,13 +207,86 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 **Parity:** ~95% (exceeds C++ with 17 passes)
 
 #### Processor ([akar-processor](akar-core/akar-processor))
-- 50 physical operator structs (no single enum; DDL ops wired via mapper)
+- 55 physical operator executors: 50 `Physical*` structs + 5 infra structs in `physical/missing_ops.rs`
+  (`ResultCollector`, `DummySink`, `DummySimpleSink`, `Profile`, `Partitioner`); no single enum;
+  DDL ops wired via mapper
 - Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`)
 - Parallel aggregation via `AggregateHashTable`
 - Parallel hash join via `JoinHashTable`
 - `BlockMergeSort` + `RadixSort` for ORDER BY
 - `BinaryHeap` O(n log k) TopK
-- **Parity:** ~90% essential, ~66% total count (split-phase accounting)
+- **Parity (P85, audited 2026-08-31):** ~100% essential — **all 58** C++ `PhysicalOperatorType`
+  entries (kuzu-vela `src/include/processor/operator/physical_operator.h:17-76`) have a functional
+  akar counterpart; **no operator is genuinely missing** (category c = ∅). Source of the old
+  "~66% total count" claim: split-phase accounting — 9 C++ ops merge into 4 akar ops and 17
+  read/DDL/admin ops execute inline at the connection layer (not as pipeline operators).
+
+**C++ ↔ akar operator parity matrix (58 C++ entries → 55 akar executors):**
+
+| C++ `PhysicalOperatorType` | akar counterpart | category |
+|---|---|---|
+| `AGGREGATE` | `PhysicalAggregate` | 1:1 |
+| `AGGREGATE_FINALIZE` | `PhysicalAggregateFinalize` (`order_aggregate/splitaggregation.rs`) | 1:1 |
+| `AGGREGATE_SCAN` | `PhysicalAggregateScan` (`order_aggregate/splitaggregation.rs`) | 1:1 |
+| `BATCH_INSERT` | `PhysicalBatchInsert` | 1:1 |
+| `CREATE_TYPE` | inline `BoundCreateType` (`connection/ddl.rs:186`) | (b) connection |
+| `CROSS_PRODUCT` | `PhysicalCrossProduct` | 1:1 |
+| `DELETE_` | `PhysicalDelete` | 1:1 |
+| `EMPTY_RESULT` | `PhysicalEmptyResult` (`misc.rs`) | 1:1 |
+| `EXTENSION_CLAUSE` | `PhysicalExtensionClause` (`misc.rs`; wired `mapper/map_ddl.rs:436`) | 1:1 |
+| `FILTER` | `PhysicalFilter` | 1:1 |
+| `FLATTEN` | `PhysicalFlatten` | 1:1 |
+| `HASH_JOIN_BUILD` | `PhysicalHashJoin` (`mapper/map_join.rs:29`) | (a) merge 2→1 |
+| `HASH_JOIN_PROBE` | `PhysicalHashJoin` | (a) merge 2→1 |
+| `INDEX_LOOKUP` | `PhysicalIndexLookup` | 1:1 |
+| `INSERT` | `PhysicalInsert` + `PhysicalInsertNode`/`PhysicalInsertRel` | 1:1 / 1:3 split |
+| `INTERSECT_BUILD` | `PhysicalIntersect` (`mapper/map_join.rs:107`) | (a) merge 2→1 |
+| `INTERSECT` | `PhysicalIntersect` | (a) merge 2→1 |
+| `LIMIT` | `PhysicalLimit` | 1:1 |
+| `MERGE` | `PhysicalMerge` + `PhysicalMergeRel` | 1:1 / 1:2 split |
+| `MULTIPLICITY_REDUCER` | `PhysicalMultiplicityReducer` (`misc.rs`) | 1:1 |
+| `PARTITIONER` | `Partitioner` (`physical/missing_ops.rs`; wired `mapper/map_projection.rs:381`) | 1:1 |
+| `PATH_PROPERTY_PROBE` | `PhysicalPathPropertyProbe` | 1:1 |
+| `PRIMARY_KEY_SCAN_NODE_TABLE` | `PhysicalPrimaryKeyScan` | 1:1 |
+| `PROJECTION` | `PhysicalProjection` | 1:1 |
+| `PROFILE` | `Profile` (`physical/missing_ops.rs`) | 1:1 |
+| `RECURSIVE_EXTEND` | `PhysicalRecursiveExtend` (+ `PhysicalExtend`/`OptionalExtend`/`PackedExtend`) | 1:1 / 1:4 split |
+| `SCAN_NODE_TABLE` | `PhysicalScan` | 1:1 |
+| `SCAN_REL_TABLE` | `PhysicalScanRel` | 1:1 |
+| `SEMI_MASKER` | internalized in `PhysicalSemiJoin`/`PhysicalAntiJoin` (`mapper/map_join.rs:52/77`) — no standalone masker op | (b) internalized |
+| `SET_PROPERTY` | `PhysicalSet` | 1:1 |
+| `SKIP` | `PhysicalSkip` | 1:1 |
+| `STANDALONE_CALL` | `PhysicalStandaloneCall` | 1:1 |
+| `TABLE_FUNCTION_CALL` | no physical op — executed via `FunctionRegistry.execute_table_function` (`connection/standalone_call.rs:151`) | (b) inline registry |
+| `TOP_K` | `PhysicalTopK` (`mapper/map_projection.rs:346`) | (a) merge 2→1 |
+| `TOP_K_SCAN` | `PhysicalTopK` | (a) merge 2→1 |
+| `ORDER_BY` | `PhysicalOrderBy` (`mapper/map_projection.rs:357`) | (a) merge 3→1 |
+| `ORDER_BY_MERGE` | `PhysicalOrderBy` (BlockMergeSort internal) | (a) merge 3→1 |
+| `ORDER_BY_SCAN` | `PhysicalOrderBy` | (a) merge 3→1 |
+| `UNION_ALL_SCAN` | `PhysicalUnionAllScan` | 1:1 |
+| `UNWIND` | `PhysicalUnwind` (incl. `PhysicalForeach`) | 1:1 |
+| `ALTER` | inline `BoundAlterTable` (`connection/ddl.rs:425`) | (b) connection |
+| `ATTACH_DATABASE` | inline `BoundAttachDatabase` (`connection/ddl.rs:134`) | (b) connection |
+| `COPY_TO` | inline `BoundCopyTo` (`connection/ddl.rs:243`) → `export_csv`/`export_parquet` (`standalone_call.rs:849`) | (b) connection |
+| `CREATE_MACRO` | inline `BoundCreateMacro` (`connection/ddl.rs:987`) | (b) connection |
+| `CREATE_SEQUENCE` | inline `BoundCreateSequence` (`connection/ddl.rs:924`) | (b) connection |
+| `CREATE_TABLE` | inline `BoundCreateNodeTable`/`BoundCreateRelTable` (`connection/ddl.rs:308/326`) | (b) connection |
+| `DETACH_DATABASE` | inline `BoundDetachDatabase` (`connection/ddl.rs:158`) | (b) connection |
+| `DROP` | inline `BoundDropTable`/`BoundDropIndex`/`BoundDropSequence` (`connection/ddl.rs:347`) | (b) connection |
+| `DUMMY_SINK` | `DummySink` (`physical/missing_ops.rs`) | 1:1 infra |
+| `DUMMY_SIMPLE_SINK` | `DummySimpleSink` (`physical/missing_ops.rs`) | 1:1 infra |
+| `EXPORT_DATABASE` | inline `execute_export_database` (`connection/copy.rs`) | (b) connection |
+| `IMPORT_DATABASE` | inline `execute_import_database` (`connection/copy.rs`) | (b) connection |
+| `INSTALL_EXTENSION` | inline `BoundExtension` (`connection/ddl.rs:106`) — compile-time feature message | (b) connection |
+| `LOAD_EXTENSION` | inline `BoundExtension` (`connection/ddl.rs:106`) | (b) connection |
+| `RESULT_COLLECTOR` | `ResultCollector` (`physical/missing_ops.rs`) | 1:1 infra |
+| `TRANSACTION` | inline `BoundTransaction` (`connection/ddl.rs:42`) | (b) connection |
+| `UNINSTALL_EXTENSION` | inline `BoundExtension` (`connection/ddl.rs:106`) | (b) connection |
+| `USE_DATABASE` | inline `BoundUseDatabase` (`connection/ddl.rs:170`) | (b) connection |
+
+**Akar executors with no C++ enum counterpart** (akar-only, feature/extension scope): `PhysicalCopyFrom`,
+`PhysicalArtIndexRangeScan`, `PhysicalExplain`, `PhysicalCountRelTable`, `PhysicalCreateFtsIndex`,
+`PhysicalFtsScan`, `PhysicalVectorSimilarityScan` (HNSW), `PhysicalAccumulate`, `PhysicalUnion` (inline-handled).
 
 #### Storage ([akar-storage](akar-core/akar-storage))
 
@@ -728,7 +801,12 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 ## 18. Known Limitations
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
-2. **Physical operator count** — 50 vs C++ 67 (split-phase accounting difference; essential parity ~90%)
+2. **Physical operator parity** — akar 55 executors vs **C++ 58** `PhysicalOperatorType` entries
+   (P85 audit: kuzu-vela `physical_operator.h:17-76` — earlier "67" was miscounted; the enum has 58,
+   and `EXTENSION_CLAUSE`/`CREATE_TYPE`-class entries fall through the string-switch default). Essential
+   parity **~100%** and **no operator genuinely missing** (P85 category c = ∅) — the count gap is
+   split-phase merging (9 C++ ops → 4 akar ops) plus 17 admin/DDL/table-function ops that akar executes
+   inline at the connection layer instead of as pipeline operators. Full mapping in §3.3 Processor.
 3. **`akar-main` is the primary published crate** — install via `cargo add akar-main`;
    `akar-c` (C FFI) is intentionally not published (build locally)
 4. **WASM** — some extensions excluded from WASM builds (DuckDB, SQLite, Postgres, Neo4j,
