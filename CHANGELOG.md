@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-08-31
+
 ### Added
 
 - **feat(parser/binder/planner/processor) — P88: aggregate-function `DISTINCT` (`COUNT(DISTINCT x)`, `collect(DISTINCT x)`, dst.) kini didukung; menutup gap parity essential terakhir §18 #3 (2026-08-31)** — desain non-breaking: `Expression::FunctionCall(String, Vec<Expression>)` tetap tuple-2 (39 match sites tak disentuh); parser me-mangle nama → `{lower}_distinct` (`count_distinct`), di-demangle hanya saat menghasilkan nama output:
@@ -450,6 +452,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.19]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.19
 [0.1.18]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.18
 [0.1.17]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.17
 [0.1.16]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.16
