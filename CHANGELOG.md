@@ -7,6 +7,26 @@
 
 ### Added
 
+- **feat(parser/binder/planner/processor) — P88: aggregate-function `DISTINCT` (`COUNT(DISTINCT x)`, `collect(DISTINCT x)`, dst.) kini didukung; menutup gap parity essential terakhir §18 #3 (2026-08-31)** — desain non-breaking: `Expression::FunctionCall(String, Vec<Expression>)` tetap tuple-2 (39 match sites tak disentuh); parser me-mangle nama → `{lower}_distinct` (`count_distinct`), di-demangle hanya saat menghasilkan nama output:
+
+  1. **Parser** (`cypher.pest` + `parser/expression.rs`) — `function_args` menerima leading `distinct_flag`; `mangle_distinct_aggregate` allow-list (count/sum/avg/min/max/collect/stddev/variance) → `DISTINCT` pada fungsi non-agregat error (`"DISTINCT is only supported in aggregate functions, got '{name}'"`); validasi argumen ≥1 non-star.
+  2. **Binder** (`binder/mod.rs`) — return type di-resolve dari `base` (nama tanpa suffix `_DISTINCT`).
+  3. **Optimizer** (`aggregate_detection.rs`) — `is_aggregate_name` strip suffix `_DISTINCT`; `aggregate_ref_name` demangle untuk nama kolom output.
+  4. **Processor (split-aggregation)** — `split_distinct_name`; `SharedAggregateState` + `distinct_flags` + akumulator single-pass `distinct_accum` (per-(group,function) seen-set `Vec<Value>`, NULL dibuang, linear scan first-seen). Seen-set **tidak bisa di-merge antar shard** → jalur distinct melewati seluruh fast path Arrow + shard-merge; finalize melepas seen-set lalu `AggregateHashTable::build_output`.
+  5. **Fix pendukung** — hasil `collect(...)` (kolom `List`) tidak bisa disimpan via `store_value_in_vector` (menandai List null — bug laten yang terkuak P88); kolom tersebut kini dibangun langsung via `arrow_array_from_values` (`build_output_direct`, `aggregatehashtable.rs`).
+  6. 2 tes baru: `test_aggregate_distinct_parses` (unit parser: nama `count_distinct`, tolak `abs(DISTINCT …)`) + `test_aggregate_distinct` (integration: COUNT/SUM/collect DISTINCT, GROUP BY `COUNT(*)`, NULL-exclusion, DROP). Follow-up kairos: `_translate_collect_distinct` (`akar_compat.py`) bisa dihapus.
+
+  Gate `test [akar-core]`: **1,964 total / 0 ignored / 1,964 passed / 0 failed** (was 1,962 + 2 tes baru); fmt + clippy `--all-targets -D warnings` bersih. [Uncommitted]
+
+- **docs(parser/binder/planner) — P87: parity eksplisit superset akar vs C++ & gap terakhir didokumentasikan (2026-08-31)** — audit & dokumentasi (BUKAN implementasi):
+  1. **Parser:** 33 `Statement` vs 22 C++ `oC_Statement` grammar rules (`Cypher.g4:8-30`); akar superset (semua statement C++ non-auth 1:1; +13 varian akar).
+  2. **Binder:** 33 `BoundStatement` vs 20 C++ `StatementType` (`statement_type.h:8-29`).
+  3. **Planner:** 59 `LogicalOperator` vs 50 C++ `LogicalOperatorType` (`logical_operator.h:13-64`), kategorisasi 1:1 (37) / merge (6) / inline connection-layer (7).
+  4. Gap essential terakhir (kategori c) = per-aggregate-function `DISTINCT` — tercatat SPEC §18 #3 → **P88** (kini telah ditutup oleh P88).
+  5. SPEC §3.3 diperbarui (catatan parity + §18 #2 dikoreksi 58). Dokumentasi murni — tanpa perubahan kode produksi.
+
+  Gate `test [akar-core]`: tidak berubah (docs-only); doc-check PASS. [Uncommitted]
+
 - **docs(processor) — P85: parity matrix operator fisik C++ 58 ↔ akar 55 di SPEC §3.3 (audit + dokumentasi; bukan implementasi) (2026-08-31)** — audit eksplisit tiap `PhysicalOperatorType` (kuzu-vela `src/include/processor/operator/physical_operator.h:17-76`) → operator akar, dikategorikan (a)/(b)/(c):
 
   1. **Hasil audit:** enum C++ sebenarnya **58 entries**, bukan 67 (klaim lama SPEC §18 #2 & plan miscounted; `EXTENSION_CLAUSE` di enum tapi jatuh ke default string-switch). Akar: **55 executors** = 50 `Physical*` + 5 infra (`ResultCollector`, `DummySink`, `DummySimpleSink`, `Profile`, `Partitioner`).

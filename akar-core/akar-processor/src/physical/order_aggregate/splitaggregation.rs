@@ -1,6 +1,7 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::order_aggregate::{
     AggregateHashTable, build_group_key, hash_group_key, keys_equal, resolve_agg_col_indices, update_states_row,
+    update_states_row_distinct,
 };
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use akar_common::types::Value;
@@ -27,11 +28,27 @@ pub struct SharedAggregateState {
     pub funcs: Vec<AggregateFunction>,
     pub group_by_cols: Vec<u32>,
     pub agg_expressions: Vec<Vec<Expression>>,
+    /// Per-function DISTINCT flag (P88) — parser encodes `COUNT(DISTINCT x)`
+    /// as name `COUNT_DISTINCT`, map_aggregate splits it into base + this flag.
+    pub distinct_flags: Vec<bool>,
     shards: Vec<std::sync::Mutex<ShardMap>>,
+    /// Dedicated accumulator for DISTINCT aggregates (P88): per-group states
+    /// plus a per-function `Vec<Value>` of already-seen argument values. Used
+    /// instead of the sharded map because distinct seen-sets cannot be merged
+    /// across shards; accumulation is single-pass sequential.
+    distinct_accum: std::sync::Mutex<DistinctShardMap>,
 }
 
+/// Bucket entry for the DISTINCT accumulator: (group_key, states, per-function seen values).
+type DistinctShardMap = hashbrown::HashMap<u64, Vec<(Value, Vec<AggValueState>, Vec<Vec<Value>>)>>;
+
 impl SharedAggregateState {
-    pub fn new(funcs: Vec<AggregateFunction>, group_by_cols: Vec<u32>, agg_expressions: Vec<Vec<Expression>>) -> Self {
+    pub fn new(
+        funcs: Vec<AggregateFunction>,
+        group_by_cols: Vec<u32>,
+        agg_expressions: Vec<Vec<Expression>>,
+        distinct_flags: Vec<bool>,
+    ) -> Self {
         let mut shards = Vec::with_capacity(NUM_SHARDS);
         for _ in 0..NUM_SHARDS {
             shards.push(std::sync::Mutex::new(hashbrown::HashMap::new()));
@@ -40,7 +57,9 @@ impl SharedAggregateState {
             funcs,
             group_by_cols,
             agg_expressions,
+            distinct_flags,
             shards,
+            distinct_accum: std::sync::Mutex::new(hashbrown::HashMap::new()),
         }
     }
 
@@ -109,6 +128,14 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
             &self.shared_state.agg_expressions,
             input.first().map(|c| c.field_names.as_slice()).unwrap_or(&[]),
         );
+
+        // P88 DISTINCT aggregates (COUNT(DISTINCT x), ...): none of the Arrow
+        // compute fast paths below understand per-function distinct seen-sets,
+        // and sharded states cannot merge distinct sets. Route to a dedicated
+        // single-pass sequential accumulator instead.
+        if self.shared_state.distinct_flags.iter().any(|&d| d) {
+            return self.accumulate_distinct(&input, &col_indices);
+        }
 
         // Fast path: scalar COUNT aggregates (no GROUP BY, all COUNT/COUNT_STAR)
         if group_cols.is_empty()
@@ -231,6 +258,42 @@ impl PhysicalOperatorExec for PhysicalAggregateScan {
 }
 
 impl PhysicalAggregateScan {
+    /// P88: accumulate DISTINCT aggregates (single-pass sequential, no shard
+    /// merge). Per group, each DISTINCT function keeps a `Vec<Value>` of
+    /// already-seen argument values; NULLs and repeat values are skipped so the
+    /// underlying `AggValueState` only ever sees distinct non-null inputs.
+    fn accumulate_distinct(&self, input: &[DataChunk], col_indices: &[Option<usize>]) -> OperatorResult {
+        let funcs = &self.shared_state.funcs;
+        let group_cols = &self.shared_state.group_by_cols;
+        let distinct_flags = &self.shared_state.distinct_flags;
+
+        let mut accum = self
+            .shared_state
+            .distinct_accum
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+
+        for chunk in input {
+            for row in 0..chunk.size {
+                let hash = hash_group_key(chunk, group_cols, row);
+                let bucket = accum.entry(hash).or_default();
+                let entry = bucket
+                    .iter_mut()
+                    .find(|(k, _, _)| keys_equal(k, chunk, group_cols, row));
+                if let Some((_, states, seen)) = entry {
+                    update_states_row_distinct(states, seen, chunk, funcs, col_indices, distinct_flags, row);
+                } else {
+                    let key = build_group_key(chunk, group_cols, row);
+                    let mut states: Vec<AggValueState> = funcs.iter().map(AggValueState::new).collect();
+                    let mut seen: Vec<Vec<Value>> = (0..funcs.len()).map(|_| Vec::new()).collect();
+                    update_states_row_distinct(&mut states, &mut seen, chunk, funcs, col_indices, distinct_flags, row);
+                    bucket.push((key, states, seen));
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
     /// Batch GROUP BY with Arrow compute: partition rows by group key,
     /// then compute aggregates per group using `take()` directly on ArrayRef
     /// — avoids per-row Value boxing/unboxing entirely.
@@ -432,6 +495,31 @@ impl PhysicalOperatorExec for PhysicalAggregateFinalize {
     }
 
     fn execute(&self, _input: Vec<DataChunk>) -> OperatorResult {
+        // DISTINCT aggregates (P88) accumulate in the dedicated single-pass
+        // map — strip the per-function seen-sets and feed build_output directly
+        // (no shard merge; the distinct accumulator is already global).
+        if self.shared_state.distinct_flags.iter().any(|&d| d) {
+            let accum = self
+                .shared_state
+                .distinct_accum
+                .lock()
+                .map_err(|e| format!("Lock poisoned: {e}"))?;
+            let mut merged: ShardMap = hashbrown::HashMap::with_capacity(accum.len());
+            for (hash, bucket) in accum.iter() {
+                let mapped: Vec<(Value, Vec<AggValueState>)> = bucket
+                    .iter()
+                    .map(|(k, states, _)| (k.clone(), states.clone()))
+                    .collect();
+                merged.insert(*hash, mapped);
+            }
+            let table = AggregateHashTable::new(
+                self.shared_state.funcs.clone(),
+                self.shared_state.group_by_cols.clone(),
+                self.shared_state.agg_expressions.clone(),
+            );
+            return table.build_output(&merged);
+        }
+
         // Merge all thread-local shards into one map
         let merged = self.shared_state.merge_all_shards();
 

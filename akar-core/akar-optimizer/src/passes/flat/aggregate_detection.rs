@@ -168,8 +168,13 @@ fn extract_aggregate_function(expr: &Expression) -> Option<(String, Vec<Expressi
     }
 }
 
-/// Is `name` (already uppercased) a known aggregate function?
+/// Is `name` (already uppercased) a known aggregate function? A `_DISTINCT`
+/// suffix (produced by the parser for `COUNT(DISTINCT x)` etc., P88) is
+/// stripped first, so DISTINCT aggregates are detected like their base form.
 fn is_aggregate_name(name: &str) -> bool {
+    if let Some(base) = name.strip_suffix("_DISTINCT") {
+        return is_aggregate_name(base);
+    }
     matches!(
         name,
         "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "STDDEV" | "VARIANCE" | "COLLECT"
@@ -243,8 +248,11 @@ fn rewrite_aggregates(expr: &Expression, out: &mut Vec<(String, Vec<Expression>)
 
 /// The field name of an aggregate's output column. MUST stay in sync with
 /// `aggregate_field_names` in akar-processor `map_aggregate.rs` — the rewritten
-/// projection resolves the aggregate result by this name.
+/// projection resolves the aggregate result by this name. A `_DISTINCT` suffix
+/// (from `COUNT(DISTINCT x)`, P88) is demangled so the user-facing column name
+/// reads `COUNT(x)` — identical on both sides.
 fn aggregate_ref_name(name: &str, args: &[Expression]) -> String {
+    let name = name.strip_suffix("_DISTINCT").unwrap_or(name);
     if name == "COUNT" && args.iter().any(|e| matches!(e, Expression::Star)) {
         "COUNT(*)".to_string()
     } else if args.len() == 1 {

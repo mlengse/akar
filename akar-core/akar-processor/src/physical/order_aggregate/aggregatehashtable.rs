@@ -307,6 +307,16 @@ impl AggregateHashTable {
             }
         }
 
+        // Non-scalar aggregate results (e.g. `collect(DISTINCT x)` → Value::List)
+        // cannot be stored through `store_value_in_vector` (it marks List rows
+        // null). Build those columns directly as Arrow arrays (P88).
+        if agg_results
+            .iter()
+            .any(|r| r.iter().any(|v| matches!(v, Value::List(_))))
+        {
+            return self.build_output_direct(&group_keys, &agg_results);
+        }
+
         let num_group_cols = self.group_by_cols.len();
         let num_rows = group_keys.len();
         let mut output = Vec::with_capacity(num_group_cols + self.funcs.len());
@@ -394,6 +404,56 @@ impl AggregateHashTable {
         }
 
         Ok(chunks)
+    }
+
+    /// Build aggregate output when a result column is non-scalar (Value::List,
+    /// e.g. `collect(DISTINCT x)`, P88) — `store_value_in_vector` cannot
+    /// represent lists. Group-key columns go through the scalar ValueVector
+    /// path; aggregate columns are built with `arrow_array_from_values`.
+    fn build_output_direct(&self, group_keys: &[Value], agg_results: &[Vec<Value>]) -> OperatorResult {
+        let num_rows = group_keys.len();
+        let num_group_cols = self.group_by_cols.len();
+        let mut arrow_fields = Vec::with_capacity(num_group_cols + self.funcs.len());
+        let mut arrow_types = Vec::with_capacity(num_group_cols + self.funcs.len());
+
+        for gc_idx in 0..num_group_cols {
+            let first_key = &group_keys[0];
+            let inner_val = match first_key {
+                Value::List(vals) if num_group_cols > 1 => vals.get(gc_idx).cloned().unwrap_or(Value::Null),
+                _ => first_key.clone(),
+            };
+            let phys_type = inner_val.physical_type();
+            let mut v = ValueVector::new(phys_type, num_rows);
+            v.resize(num_rows);
+            for (row, key) in group_keys.iter().enumerate() {
+                let val = match key {
+                    Value::List(vals) if num_group_cols > 1 => vals.get(gc_idx).cloned().unwrap_or(Value::Null),
+                    _ => key.clone(),
+                };
+                if matches!(val, Value::Null) {
+                    v.set_null(row, true);
+                } else {
+                    store_value_in_vector(&mut v, row, &val)?;
+                }
+            }
+            arrow_fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
+            arrow_types.push(phys_type);
+        }
+
+        for results in agg_results {
+            arrow_fields.push(akar_common::arrow_vector::arrow_array_from_values(results));
+            let phys = if results.iter().any(|v| matches!(v, Value::List(_))) {
+                PhysicalTypeID::List
+            } else {
+                results
+                    .first()
+                    .map(|v| v.physical_type())
+                    .unwrap_or(PhysicalTypeID::Any)
+            };
+            arrow_types.push(phys);
+        }
+
+        Ok(vec![DataChunk::new(arrow_fields, arrow_types)])
     }
 }
 
@@ -640,6 +700,61 @@ pub fn update_states_row(
             .map(|_| chunk.get_value(col_idx, row))
             .unwrap_or(Some(Value::Null))
             .unwrap_or(Value::Null);
+        state.update(&val);
+    }
+}
+
+/// Update aggregate states for a single row, honoring per-function DISTINCT
+/// flags (P88, `COUNT(DISTINCT x)` → name `COUNT_DISTINCT` + this flag).
+/// For DISTINCT functions, NULLs and argument values already seen for this
+/// (group, function) are skipped, so the state only ever accumulates distinct
+/// non-null values. Seen-values use a linear `Vec<Value>` scan — fine for the
+/// rarity of DISTINCT aggregates; dedicated fast paths cover the common cases.
+pub fn update_states_row_distinct(
+    states: &mut [AggValueState],
+    seen: &mut [Vec<Value>],
+    chunk: &DataChunk,
+    funcs: &[AggregateFunction],
+    col_indices: &[Option<usize>],
+    distinct_flags: &[bool],
+    row: usize,
+) {
+    for (i, state) in states.iter_mut().enumerate() {
+        if matches!(funcs[i], AggregateFunction::CountStar) {
+            if let AggValueState::Count(n) = state {
+                *n += 1;
+            }
+            continue;
+        }
+        if col_indices.get(i).copied().flatten().is_none() && matches!(funcs[i], AggregateFunction::Count) {
+            if let AggValueState::Count(n) = state {
+                *n += 1;
+            }
+            continue;
+        }
+        let col_idx = col_indices
+            .get(i)
+            .copied()
+            .flatten()
+            .unwrap_or_else(|| i.min(chunk.fields.len().saturating_sub(1)));
+        let val = chunk
+            .fields
+            .get(col_idx)
+            .map(|_| chunk.get_value(col_idx, row))
+            .unwrap_or(Some(Value::Null))
+            .unwrap_or(Value::Null);
+        if distinct_flags[i] {
+            // DISTINCT aggregates ignore NULLs (COUNT(DISTINCT x) counts only
+            // distinct non-null x) and already-seen values within the group.
+            if matches!(val, Value::Null) {
+                continue;
+            }
+            let seen_list = &mut seen[i];
+            if seen_list.contains(&val) {
+                continue;
+            }
+            seen_list.push(val.clone());
+        }
         state.update(&val);
     }
 }

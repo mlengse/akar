@@ -426,7 +426,15 @@ exists_subquery = { "EXISTS" ~ "{" ~ query_statement ~ "}" }
 
 parameter = { "$" ~ identifier }
 
-function_args = { "(" ~ (star | expression ~ ("," ~ expression)*)? ~ ")" }
+function_args = {
+    "("
+    ~ (
+        star
+      | distinct_flag ~ expression ~ ("," ~ expression)*
+      | expression ~ ("," ~ expression)*
+    )?
+    ~ ")"
+}
 star         = { "*" }
 
 // ==================== Literals ====================

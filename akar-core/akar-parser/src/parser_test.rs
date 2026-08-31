@@ -250,6 +250,41 @@ mod tests {
     }
 
     #[test]
+    fn test_aggregate_distinct_parses() {
+        // P88: DISTINCT inside an aggregate function invocation is encoded as
+        // the mangled base name `{name}_distinct` (demangled downstream).
+        let stmt = parse("MATCH (a:Person) RETURN COUNT(DISTINCT a.age)").unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let ret = q.clauses.iter().find(|c| matches!(c, Clause::Return(_)));
+                match ret {
+                    Some(Clause::Return(r)) => assert!(matches!(
+                        &r.expressions[0].expression,
+                        Expression::FunctionCall(name, args) if name == "count_distinct" && args.len() == 1
+                    )),
+                    _ => panic!("Expected Return clause"),
+                }
+            }
+            _ => panic!("Expected Query"),
+        }
+
+        for sql in [
+            "MATCH (a:Person) RETURN SUM(DISTINCT a.age)",
+            "MATCH (a:Person) RETURN collect(DISTINCT a.name)",
+            "MATCH (a:Person) RETURN COUNT(DISTINCT a.age) AS n",
+            "MATCH (a:Person) RETURN a.name, COUNT(DISTINCT a.age)",
+        ] {
+            assert!(parse(sql).is_ok(), "should parse: {sql}");
+        }
+
+        // DISTINCT is rejected on scalar (non-aggregate) functions.
+        assert!(
+            parse("MATCH (a:Person) RETURN abs(DISTINCT a.age)").is_err(),
+            "DISTINCT on scalar function must be rejected"
+        );
+    }
+
+    #[test]
     fn test_integer_expr() {
         let sql = "MATCH (a) WHERE a.age = 30 RETURN a";
         assert!(parse(sql).is_ok());

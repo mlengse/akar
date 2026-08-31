@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,955 total, 0 ignored, 1,955 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P83 batch: gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelum P83: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| Tests passing | **1,964 total, 0 ignored, 1,964 passed, 0 failed** (gate `test [akar-core]` 2026-08-31, s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -157,17 +157,50 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 - **Engine:** `pest.rs` PEG (replaces ANTLR4 C++)
 - **Grammar:** `cypher.pest` — modular, composable rules
 - **AST:** 33 Statement variants (DDL, DML, Transaction, Extension, Attach/Detach/Use DB) + 10 Clause sub-variants
-- **Parity:** ~95%
+- **Parity (P87, audited 2026-08-31):** ~100% essential — akar is a **superset**: 33 Statement
+  variants vs **22 C++ `oC_Statement` grammar rules** (`kuzu-vela/src/antlr4/Cypher.g4:8-30`).
+  All 20 non-auth C++ statement rules have an akar `Statement` variant 1:1
+  (`kU_Drop`→`DropTable`/`DropIndex`/`DropSequence`, `kU_CopyFrom`/`kU_CopyFromByColumn`→`CopyFrom`,
+  `kU_CommentOn`→`CommentOnTable`); the only C++ rules without akar counterpart are Vela-only
+  `kU_CreateUser`/`kU_CreateRole` (auth — out of graph-refactor scope). akar **adds 13 statements**
+  C++ lacks (`CreateVectorIndex`, `CreateIndex`, `DropIndex`, `DropSequence`, `Union`, `Merge`,
+  `CreateDml`, `Analyze`, `CreateFtsIndex`, `LoadFrom`, `CreateGraph`/`UseGraph`/`DropGraph`).
+  Per-aggregate-function `DISTINCT` (`COUNT(DISTINCT x)`, `collect(DISTINCT x)`) is supported since
+  **P88** — `function_args` accepts a leading `DISTINCT` flag, so no parser-parity gap remains.
+  `RETURN DISTINCT` itself also parses & dedups.
 
 #### Binder ([akar-binder](akar-core/akar-binder))
 - Symbol resolution via `Arc<Mutex<Catalog>>`
-- 33 BoundStatement variants
+- 33 BoundStatement variants (1:1 with parser Statement, `bound_statement.rs:10-44`)
 - Property type resolution via catalog (not hardcoded)
-- **Parity:** ~90%
+- **Parity (P87, audited 2026-08-31):** ~100% essential — akar **superset**: 33 BoundStatement
+  variants vs **20 C++ `StatementType`** (`kuzu-vela/src/include/common/enums/statement_type.h:8-29`);
+  every C++ statement type has a bound counterpart (extra akar: vector/FTS/graph/analyze/index/sequence).
 
 #### Planner ([akar-planner](akar-core/akar-planner))
-- 59 LogicalOperator variants (ScanNode, ScanRel, HashJoin, CrossProduct, TopK, Intersect, SemiJoin, RecursiveExtend, +12 DDL operators)
-- **Parity:** ~90%
+- 59 LogicalOperator variants (ScanNode, ScanRel, HashJoin, CrossProduct, TopK, Intersect, SemiJoin, RecursiveExtend, +DDL operators)
+- **Parity (P87, audited 2026-08-31):** ~100% essential — akar **superset**: 59 LogicalOperator
+  variants vs **50 C++ `LogicalOperatorType`** (`kuzu-vela/src/include/planner/operator/logical_operator.h:13-64`);
+  every C++ logical operator has a functional akar counterpart via one of three categories:
+  1. **1:1 direct (37 C++ ops):** `ACCUMULATE`, `AGGREGATE`, `ALTER`, `COPY_FROM`, `CREATE_SEQUENCE`,
+     `CROSS_PRODUCT`, `DELETE`, `DROP`, `EMPTY_RESULT`, `EXPLAIN`, `EXPRESSIONS_SCAN`, `EXTEND`, `EXTENSION`,
+     `EXPORT_DATABASE`, `FILTER`, `FLATTEN`, `HASH_JOIN`, `IMPORT_DATABASE`, `INDEX_LOOK_UP`, `INTERSECT`,
+     `INSERT`, `LIMIT`, `MERGE`, `MULTIPLICITY_REDUCER`, `ORDER_BY`, `PARTITIONER`, `PATH_PROPERTY_PROBE`,
+     `PROJECTION`, `RECURSIVE_EXTEND`, `SCAN_NODE_TABLE`, `SET_PROPERTY`, `STANDALONE_CALL`,
+     `TABLE_FUNCTION_CALL`, `UNION_ALL`→`Union`, `UNWIND`, `EXTENSION_CLAUSE` (some 1:2/1:3 splits:
+     `CREATE_TABLE`→`CreateNodeTable`/`CreateRelTable`, `DELETE`→`Delete`/`Merge`; `MERGE`→`Merge`/`MergeRel`).
+  2. **(a) merged into an existing akar operator (6 C++ ops):** `DISTINCT`→`Aggregate` (RETURN DISTINCT
+     dedup via hash-aggregate with group-by keys, `planner.rs:1144`); `SEMI_MASKER`→`SemiJoin`/`AntiJoin`;
+     `NODE_LABEL_FILTER`→label filter inside `ScanNode`; `DUMMY_SCAN`→`ExpressionsScan`/`StandaloneCall`;
+     `DUMMY_SINK`→`EmptyResult` + physical `DummySink`/`ResultCollector`; `NOOP`→no-op (dev/optimizer).
+  3. **(b) inline at connection layer (7 C++ ops, no pipeline operator):** `ATTACH`/`DETACH`/`USE_DATABASE`,
+     `TRANSACTION`, `CREATE_MACRO`, `CREATE_TYPE`, `COPY_TO` (→`export_csv`/`export_parquet`).
+  akar-extra (~19 ops with no C++ enum counterpart): `ScanRel`, `VectorSimilarityScan`,
+  `ArtIndexRangeScan`, `TopK` (C++ folds ORDER BY+LIMIT at physical), `Union`, `OptionalMatch`,
+  `OptionalExtend`, `SemiJoin`, `AntiJoin`, `FtsScan`, `CountRelTable`, `CreateVectorIndex`,
+  `CreateIndex`, `DropIndex`, `DropSequence`, `CreateDml`/`CreateNode`/`CreateRel`, `CreateFtsIndex`,
+  `Skip`, `ExtensionClause` (used for graph DDL). Per-aggregate-function `DISTINCT` (`COUNT(DISTINCT x)`,
+  `collect(DISTINCT x)`) supported since **P88** (name-mangled `count_distinct`/`collect_distinct`).
 
 #### Optimizer ([akar-optimizer](akar-core/akar-optimizer))
 **18 Flat Passes:**
@@ -593,7 +626,7 @@ Triggered by pushing a version tag (`v*`):
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
 | `akar-common` | 36 | Types (37 LogicalTypes, Value), Vectors, Memory |
-| `akar-parser` | 93 | PEG grammar, 33 Statement variants, operator precedence, AST-based DETACH/ORDER BY/star (P51.45), CREATE [NODE\|REL] TABLE IF NOT EXISTS (P72) |
+| `akar-parser` | 94 | PEG grammar, 33 Statement variants, operator precedence, AST-based DETACH/ORDER BY/star (P51.45), CREATE [NODE\|REL] TABLE IF NOT EXISTS (P72), aggregate `DISTINCT` parse (P88) |
 | `akar-binder` | 101 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 22 | Logical plan construction |
 | `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
@@ -601,7 +634,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 184 | 259 registered functions |
 | `akar-storage` | 346 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
 | `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 411 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72) |
+| `akar-main` (integration) | 412 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
@@ -624,7 +657,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,955** | **1,955 total, 0 ignored, 1,955 passed, 0 failed** (gate `test [akar-core]` 2026-08-30, s.d. P83 batch: gate runtime ~7m57s → ~5m via workload cuts; sebelum P83: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **1,964** | **1,964 total, 0 ignored, 1,964 passed, 0 failed** (gate `test [akar-core]` 2026-08-31, s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 

@@ -769,7 +769,11 @@ impl Binder {
                 let resolved_args: Result<Vec<BoundExpression>, BinderError> =
                     args.iter().map(|a| self.resolve_expression(a, variables)).collect();
                 let _args = resolved_args?;
-                let return_type = match name.to_uppercase().as_str() {
+                // P88: `COUNT_DISTINCT` (from `COUNT(DISTINCT x)`) resolves to
+                // the base function's type.
+                let upper = name.to_uppercase();
+                let base = upper.strip_suffix("_DISTINCT").unwrap_or(&upper);
+                let return_type = match base {
                     "COUNT" | "SUM" | "MIN" | "MAX" | "AVG" => LogicalTypeID::Int64,
                     "NEXTVAL" | "CURRVAL" => LogicalTypeID::Int64,
                     "STARTS_WITH" | "ENDS_WITH" | "CONTAINS" => LogicalTypeID::Bool,

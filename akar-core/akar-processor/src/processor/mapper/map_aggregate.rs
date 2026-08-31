@@ -13,19 +13,24 @@ pub fn map_and_execute_aggregate(
 ) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Aggregate(a) => {
-            let funcs: Vec<akar_function::AggregateFunction> = a
-                .aggregates
-                .iter()
-                .map(|(n, args)| {
-                    // Detect COUNT(*) from Star arg: override name to get CountStar
-                    let effective_name = if n == "COUNT" && args.iter().any(|e| matches!(e, Expression::Star)) {
-                        "COUNT(*)"
-                    } else {
-                        n
-                    };
-                    crate::physical::order_aggregate::parse_aggregate_function(effective_name)
-                })
-                .collect();
+            // P88 DISTINCT aggregates: the parser encodes `COUNT(DISTINCT x)`
+            // as function name `COUNT_DISTINCT`; split back into the base
+            // function + a per-function distinct flag.
+            let mut funcs: Vec<akar_function::AggregateFunction> = Vec::with_capacity(a.aggregates.len());
+            let mut distinct_flags: Vec<bool> = Vec::with_capacity(a.aggregates.len());
+            for (n, args) in &a.aggregates {
+                let (base, distinct) = split_distinct_name(n);
+                distinct_flags.push(distinct);
+                // Detect COUNT(*) from Star arg: override name to get CountStar
+                let effective_name = if base == "COUNT" && args.iter().any(|e| matches!(e, Expression::Star)) {
+                    "COUNT(*)"
+                } else {
+                    base
+                };
+                funcs.push(crate::physical::order_aggregate::parse_aggregate_function(
+                    effective_name,
+                ));
+            }
             let agg_expressions: Vec<Vec<Expression>> = a.aggregates.iter().map(|(_, args)| args.clone()).collect();
 
             // Resolve GROUP BY expressions to actual column indices using input field_names
@@ -40,6 +45,7 @@ pub fn map_and_execute_aggregate(
                 funcs,
                 group_by_cols,
                 agg_expressions,
+                distinct_flags,
             ));
 
             let agg_scan = crate::physical::order_aggregate::PhysicalAggregateScan {
@@ -80,6 +86,16 @@ pub fn map_and_execute_aggregate(
     }
 }
 
+/// Split an aggregate name that may carry the parser's DISTINCT encoding
+/// (P88): `COUNT_DISTINCT` → (`COUNT`, true). Aggregate names reach the
+/// processor uppercased by aggregate_detection.
+fn split_distinct_name(name: &str) -> (&str, bool) {
+    match name.strip_suffix("_DISTINCT") {
+        Some(base) => (base, true),
+        None => (name, false),
+    }
+}
+
 /// Build output field names for an aggregate result: the group-by variable
 /// names followed by the aggregate function names (P52.56). Group-by naming
 /// mirrors `expression_field_name` in map_projection.rs so the projection above
@@ -101,6 +117,7 @@ fn aggregate_field_names(a: &akar_planner::logical_operator::LogicalAggregate) -
         })
         .collect();
     for (fname, args) in &a.aggregates {
+        let (fname, _) = split_distinct_name(fname);
         let effective = if fname == "COUNT" && args.iter().any(|e| matches!(e, Expression::Star)) {
             "COUNT(*)".to_string()
         } else if args.len() == 1 {
@@ -114,10 +131,10 @@ fn aggregate_field_names(a: &akar_planner::logical_operator::LogicalAggregate) -
                     }
                 }
                 Expression::Star => format!("{fname}(*)"),
-                _ => fname.clone(),
+                _ => fname.to_string(),
             }
         } else {
-            fname.clone()
+            fname.to_string()
         };
         names.push(effective);
     }

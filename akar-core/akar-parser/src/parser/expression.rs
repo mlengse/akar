@@ -96,13 +96,22 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
                 && children[0].as_rule() == Rule::variable
                 && children[1].as_rule() == Rule::function_args
             {
-                let name = children[0].as_str().to_string();
+                let mut name = children[0].as_str().to_string();
                 let mut args = Vec::new();
+                let mut pending_distinct = false;
                 for c in children[1].clone().into_inner() {
-                    if c.as_rule() == Rule::star {
+                    if c.as_rule() == Rule::distinct_flag {
+                        pending_distinct = true;
+                    } else if c.as_rule() == Rule::star {
                         args.push(Expression::Star);
                     } else if c.as_rule() == Rule::expression {
                         args.push(parse_expression(c)?);
+                    }
+                }
+                if pending_distinct {
+                    name = mangle_distinct_aggregate(&name)?;
+                    if args.len() != 1 || matches!(args[0], Expression::Star) {
+                        return Err("DISTINCT requires exactly one non-* argument".into());
                     }
                 }
                 return Ok(Expression::FunctionCall(name, args));
@@ -227,12 +236,22 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
                 return Ok(Expression::Constant(Constant::Null));
             }
             // Extract function name from siblings in parent
-            let name = pair.as_str().split('(').next().unwrap_or("").to_string();
-            let args = children
-                .into_iter()
-                .filter(|c| c.as_rule() == Rule::expression)
-                .map(parse_expression)
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut name = pair.as_str().split('(').next().unwrap_or("").to_string();
+            let mut pending_distinct = false;
+            let mut args: Vec<Expression> = Vec::new();
+            for c in children.into_iter() {
+                if c.as_rule() == Rule::distinct_flag {
+                    pending_distinct = true;
+                } else if c.as_rule() == Rule::expression {
+                    args.push(parse_expression(c)?);
+                }
+            }
+            if pending_distinct {
+                name = mangle_distinct_aggregate(&name)?;
+                if args.len() != 1 {
+                    return Err("DISTINCT requires exactly one argument".into());
+                }
+            }
             Ok(Expression::FunctionCall(name, args))
         }
         Rule::property_access => Err("property_access should be handled within postfix_expr".into()),
@@ -410,6 +429,26 @@ pub fn parse_literal(pair: pest::iterators::Pair<Rule>) -> Result<Expression, St
         Rule::null_literal => Ok(Expression::Constant(Constant::Null)),
         _ => Err(format!("Unknown literal: {:?}", pair.as_rule())),
     }
+}
+
+/// Mangle a `DISTINCT` aggregate function name into the `{name}_distinct`
+/// internal form carried through parse → bind → (optimizer/aggregate_detection
+/// strips the suffix back, sees it as the base aggregate) → processor
+/// (map_aggregate splits it into `base` + a distinct flag). Only the engine's
+/// known aggregate functions accept `DISTINCT`, mirroring C++ behavior
+/// (`kuzu-vela` throws for `DISTINCT` on scalar functions).
+fn mangle_distinct_aggregate(name: &str) -> Result<String, String> {
+    let lower = name.to_lowercase();
+    let is_aggregate = matches!(
+        lower.as_str(),
+        "count" | "sum" | "avg" | "min" | "max" | "collect" | "stddev" | "variance"
+    );
+    if !is_aggregate {
+        return Err(format!(
+            "DISTINCT is only supported in aggregate functions, got '{name}'"
+        ));
+    }
+    Ok(format!("{lower}_distinct"))
 }
 
 /// Unescape a string literal — handles \n, \t, \r, \\, \", \'.

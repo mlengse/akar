@@ -1328,6 +1328,77 @@ fn test_mixed_scalar_aggregates() {
 }
 
 #[test]
+fn test_aggregate_distinct() {
+    // P88: `DISTINCT` inside aggregate function invocations
+    // (COUNT(DISTINCT x), SUM(DISTINCT x), collect(DISTINCT x), ...).
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE D(id INT64, grp STRING, val INT64, PRIMARY KEY (id))",
+    );
+    exec(&conn, "CREATE (d:D {id: 1, grp: 'a', val: 10})");
+    exec(&conn, "CREATE (d:D {id: 2, grp: 'a', val: 10})");
+    exec(&conn, "CREATE (d:D {id: 3, grp: 'a', val: 20})");
+    exec(&conn, "CREATE (d:D {id: 4, grp: 'b', val: 30})");
+    exec(&conn, "CREATE (d:D {id: 5, grp: 'b', val: 30})");
+    exec(&conn, "CREATE (d:D {id: 6, grp: 'b', val: 40})");
+
+    // Scalar COUNT(DISTINCT val): distinct {10,20,30,40} → 4.
+    let rows = query_rows(&conn, "MATCH (d:D) RETURN COUNT(DISTINCT d.val)");
+    assert_eq!(rows[0][0], "Int64(4)", "COUNT(DISTINCT d.val), got: {rows:?}");
+
+    // SUM(DISTINCT val): 10+20+30+40 = 100 (10 and 30 counted once).
+    let rows = query_rows(&conn, "MATCH (d:D) RETURN SUM(DISTINCT d.val)");
+    assert_eq!(rows[0][0], "Int64(100)", "SUM(DISTINCT d.val), got: {rows:?}");
+
+    // collect(DISTINCT val): deduplicated list in first-seen order.
+    let rows = query_rows(&conn, "MATCH (d:D) RETURN collect(DISTINCT d.val)");
+    assert_eq!(
+        rows[0][0], "List([Int64(10), Int64(20), Int64(30), Int64(40)])",
+        "collect(DISTINCT d.val), got: {rows:?}"
+    );
+
+    // GROUP BY mixing plain and DISTINCT aggregates on the same table.
+    let rows = query_rows(
+        &conn,
+        "MATCH (d:D) RETURN d.grp, COUNT(*), COUNT(DISTINCT d.val) ORDER BY d.grp",
+    );
+    assert_eq!(
+        rows[0],
+        vec![
+            "String(\"a\")".to_string(),
+            "Int64(3)".to_string(),
+            "Int64(2)".to_string()
+        ],
+        "group a, got: {rows:?}"
+    );
+    assert_eq!(
+        rows[1],
+        vec![
+            "String(\"b\")".to_string(),
+            "Int64(3)".to_string(),
+            "Int64(2)".to_string()
+        ],
+        "group b, got: {rows:?}"
+    );
+
+    // NULLs are excluded from DISTINCT counts.
+    exec(&conn, "CREATE (d:D {id: 7, grp: 'c', val: NULL})");
+    exec(&conn, "CREATE (d:D {id: 8, grp: 'c', val: 50})");
+    let rows = query_rows(&conn, "MATCH (d:D) RETURN COUNT(DISTINCT d.val)");
+    assert_eq!(
+        rows[0][0], "Int64(5)",
+        "NULL excluded from COUNT(DISTINCT), got: {rows:?}"
+    );
+
+    // DISTINCT is rejected on scalar (non-aggregate) functions.
+    let res = conn.query("MATCH (d:D) RETURN abs(DISTINCT d.val)");
+    assert!(res.is_err(), "DISTINCT on scalar function must error");
+
+    exec(&conn, "DROP TABLE D");
+}
+
+#[test]
 fn test_ddl_pipeline_multiple_alter_operations() {
     let (_db, conn) = setup_db();
 
