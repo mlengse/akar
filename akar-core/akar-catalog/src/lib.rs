@@ -265,6 +265,30 @@ impl ScalarMacroEntry {
     }
 }
 
+/// A user-defined type alias: `CREATE TYPE name AS base_type` (P84).
+///
+/// Ported from C++ `UserDefinedTypeCatalogEntry` / `LogicalCreateType`.
+/// The alias is resolved back to a built-in `LogicalTypeID` by the binder:
+/// after `CREATE TYPE Age AS INT64`, `CREATE NODE TABLE P(id INT64, age Age)`
+/// binds the `age` column as `Int64` (see `Binder::parse_type_resolved`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeAliasEntry {
+    pub type_alias_id: u64,
+    pub name: String,
+    /// The base (built-in or chained alias) type name this alias maps to.
+    pub type_name: String,
+}
+
+impl TypeAliasEntry {
+    pub fn new(type_alias_id: u64, name: String, type_name: String) -> Self {
+        Self {
+            type_alias_id,
+            name,
+            type_name,
+        }
+    }
+}
+
 /// Information about a projected graph entry in the catalog.
 ///
 /// Ported from C++ `ParsedGraphEntry` / `GraphEntrySet` system.
@@ -410,6 +434,12 @@ pub struct Catalog {
     /// FTS index name → source (table, column) mapping (P52.39).
     #[serde(default)]
     fts_indexes: HashMap<String, FtsIndexEntry>,
+    /// User-defined type aliases keyed by lowercase name (P84).
+    #[serde(default)]
+    type_aliases: HashMap<String, TypeAliasEntry>,
+    /// Table comments keyed by lowercase table name (P84).
+    #[serde(default)]
+    table_comments: HashMap<String, String>,
 }
 
 impl Catalog {
@@ -851,6 +881,65 @@ impl Catalog {
                 self.entries.get(self.name_to_id.get(&upper).unwrap()),
                 Some(CatalogEntry::Macro(_))
             )
+    }
+
+    // ==================== Type alias & table comment methods (P84) ====================
+
+    /// Create a user-defined type alias. Returns error if the name already exists.
+    pub fn create_type_alias(&mut self, name: String, type_name: String) -> Result<(), CatalogError> {
+        let key = name.to_lowercase();
+        if self.type_aliases.contains_key(&key) {
+            return Err(CatalogError::AlreadyExists(format!("type alias '{}'", name)));
+        }
+        let type_alias_id = self.next_id;
+        self.next_id += 1;
+        self.type_aliases
+            .insert(key, TypeAliasEntry::new(type_alias_id, name, type_name));
+        self.bump_version();
+        Ok(())
+    }
+
+    /// Get a type alias entry by name (case-insensitive).
+    pub fn get_type_alias(&self, name: &str) -> Option<&TypeAliasEntry> {
+        self.type_aliases.get(&name.to_lowercase())
+    }
+
+    /// Resolve a type name to its final builtin base (or the name itself when
+    /// it is not an alias). Follows alias chains with a cycle guard (P84).
+    pub fn resolve_type_alias(&self, name: &str) -> Option<String> {
+        let mut current = name.to_string();
+        for _ in 0..32 {
+            match self.get_type_alias(&current) {
+                Some(alias) if alias.type_name.eq_ignore_ascii_case(&current) => return None,
+                Some(alias) => current = alias.type_name.clone(),
+                None => return Some(current),
+            }
+        }
+        None
+    }
+
+    /// List all user-defined type aliases.
+    pub fn type_aliases(&self) -> Vec<&TypeAliasEntry> {
+        self.type_aliases.values().collect()
+    }
+
+    /// Set (or replace) the comment on a table (case-insensitive).
+    pub fn set_table_comment(&mut self, table_name: &str, comment: String) {
+        self.table_comments.insert(table_name.to_lowercase(), comment);
+        self.bump_version();
+    }
+
+    /// Get the comment on a table (case-insensitive).
+    pub fn get_table_comment(&self, table_name: &str) -> Option<&String> {
+        self.table_comments.get(&table_name.to_lowercase())
+    }
+
+    /// List all table comments as (table_name, comment) pairs.
+    pub fn table_comments(&self) -> Vec<(String, String)> {
+        self.table_comments
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Create a foreign table entry in the catalog.

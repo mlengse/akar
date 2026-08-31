@@ -160,6 +160,20 @@ impl Binder {
         }
     }
 
+    /// Map a string type name to `LogicalTypeID`, resolving user-defined type
+    /// aliases (P84). Follows alias chains (alias-of-alias); falls back to the
+    /// plain builtin `parse_type` error when no alias matches.
+    pub fn parse_type_resolved(&self, type_name: &str) -> Result<LogicalTypeID, BinderError> {
+        if let Ok(t) = Self::parse_type(type_name) {
+            return Ok(t);
+        }
+        let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+        let base = catalog
+            .resolve_type_alias(type_name)
+            .ok_or_else(|| format!("Unknown type: {type_name}"))?;
+        Self::parse_type(&base)
+    }
+
     /// Parse compression option.
     pub fn parse_compression(comp: Option<&str>) -> Result<akar_common::enums::CompressionType, BinderError> {
         use akar_common::enums::CompressionType;
@@ -944,7 +958,7 @@ impl Binder {
 
         let mut columns = Vec::new();
         for col in &t.columns {
-            let logical_type = Self::parse_type(&col.type_name)?;
+            let logical_type = self.parse_type_resolved(&col.type_name)?;
             let compression = Self::parse_compression(col.compression.as_deref())?;
             columns.push(CatalogColumn {
                 name: col.name.clone(),
@@ -961,7 +975,7 @@ impl Binder {
 
         // Verify primary key exists
         if !columns.iter().any(|c| c.is_primary_key) {
-            return Err(format!("Primary key column '{}' not found in columns", t.primary_key).into());
+            return Err(format!("CREATE NODE TABLE requires a PRIMARY KEY (missing '{}')", t.primary_key).into());
         }
 
         // Register with catalog
@@ -1125,7 +1139,7 @@ impl Binder {
 
         let mut columns = Vec::new();
         for col in &t.columns {
-            let logical_type = Self::parse_type(&col.type_name)?;
+            let logical_type = self.parse_type_resolved(&col.type_name)?;
             let compression = Self::parse_compression(col.compression.as_deref())?;
             columns.push(CatalogColumn {
                 name: col.name.clone(),
@@ -1823,8 +1837,15 @@ impl Binder {
     }
 
     fn bind_create_type(&self, t: CreateType) -> Result<BoundStatement, BinderError> {
-        // Validate the type name is a known type
-        Self::parse_type(&t.type_name)?;
+        // Validate the type name is a known type (builtin or predefined alias)
+        self.parse_type_resolved(&t.type_name)?;
+        // Reject re-creating an existing alias
+        {
+            let catalog = self.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
+            if catalog.get_type_alias(&t.name).is_some() {
+                return Err(format!("Type alias '{}' already exists", t.name).into());
+            }
+        }
         Ok(BoundStatement::BoundCreateType(BoundCreateType {
             name: t.name,
             type_name: t.type_name,
@@ -1989,7 +2010,7 @@ impl Binder {
         // Validate alter action
         match &a.action {
             akar_parser::ast::AlterAction::AddColumn { name: _, type_name } => {
-                Self::parse_type(type_name)?;
+                self.parse_type_resolved(type_name)?;
             }
             akar_parser::ast::AlterAction::DropColumn { name } => {
                 if !has_name(&col_names, name) {

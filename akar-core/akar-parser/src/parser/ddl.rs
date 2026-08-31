@@ -17,29 +17,55 @@ pub(crate) fn parse_ddl(pair: pest::iterators::Pair<Rule>) -> Result<Statement, 
                 match inner.as_rule() {
                     Rule::if_not_exists => if_not_exists = true,
                     Rule::identifier if name.is_empty() => name = inner.as_str().to_string(),
-                    Rule::column_definitions => {
-                        for col in inner.into_inner() {
-                            let mut cn = String::new();
-                            let mut ct = String::new();
-                            let mut comp = None;
-                            for part in col.into_inner() {
-                                match part.as_rule() {
-                                    Rule::identifier => cn = part.as_str().to_string(),
-                                    Rule::type_name => ct = part.as_str().to_string(),
-                                    Rule::string => comp = Some(unescape_string(part.as_str())),
-                                    _ => {}
+                    Rule::column_definitions | Rule::table_elements => {
+                        for mut col in inner.into_inner() {
+                            // `table_elements` wraps each element in a
+                            // `table_element` that may hold a `primary_key` or
+                            // a `column_def` (P84 type-alias grammar change).
+                            if col.as_rule() == Rule::table_element {
+                                col = match col.into_inner().next() {
+                                    Some(inner) => inner,
+                                    None => continue,
+                                };
+                            }
+                            match col.as_rule() {
+                                Rule::primary_key => {
+                                    for part in col.into_inner() {
+                                        if part.as_rule() == Rule::identifier {
+                                            if !pk.is_empty() {
+                                                return Err("Only one PRIMARY KEY clause is allowed per table".into());
+                                            }
+                                            pk = part.as_str().to_string();
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let mut cn = String::new();
+                                    let mut ct = String::new();
+                                    let mut comp = None;
+                                    for part in col.into_inner() {
+                                        match part.as_rule() {
+                                            Rule::identifier => cn = part.as_str().to_string(),
+                                            Rule::type_name => ct = part.as_str().to_string(),
+                                            Rule::string => comp = Some(unescape_string(part.as_str())),
+                                            _ => {}
+                                        }
+                                    }
+                                    columns.push(ColumnDef {
+                                        name: cn,
+                                        type_name: ct,
+                                        compression: comp,
+                                    });
                                 }
                             }
-                            columns.push(ColumnDef {
-                                name: cn,
-                                type_name: ct,
-                                compression: comp,
-                            });
                         }
                     }
                     Rule::primary_key => {
                         for part in inner.into_inner() {
                             if part.as_rule() == Rule::identifier {
+                                if !pk.is_empty() {
+                                    return Err("Only one PRIMARY KEY clause is allowed per table".into());
+                                }
                                 pk = part.as_str().to_string();
                             }
                         }

@@ -333,7 +333,12 @@ impl StandaloneCallFn for ShowTablesHandler {
                     akar_catalog::CatalogEntry::VectorIndex(_) => "VECTOR_INDEX",
                     akar_catalog::CatalogEntry::Foreign(_) => "FOREIGN",
                 };
-                vec![Value::String(e.name().to_string()), Value::String(kind.to_string())]
+                let comment = catalog.get_table_comment(e.name()).cloned().unwrap_or_default();
+                vec![
+                    Value::String(e.name().to_string()),
+                    Value::String(kind.to_string()),
+                    Value::String(comment),
+                ]
             })
             .collect();
         Ok(entries)

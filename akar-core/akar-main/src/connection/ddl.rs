@@ -184,21 +184,34 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateType(t) => {
-                // Type aliases have no catalog backing store. Reporting success
-                // here would be a lie — the type is not persisted and cannot be
-                // used by the binder (P52.27).
-                Err(format!(
-                    "CREATE TYPE '{}' AS '{}' is not supported yet: type aliases have no catalog backing store",
-                    t.name, t.type_name
-                ))
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
+                match catalog.create_type_alias(t.name.clone(), t.type_name.clone()) {
+                    Ok(()) => {
+                        tracing::info!("Created type alias '{}' AS '{}'", t.name, t.type_name);
+                        Ok(Some(QueryResult::success_message(format!(
+                            "Type alias '{}' created",
+                            t.name
+                        ))))
+                    }
+                    Err(e) => Err(format!("CREATE TYPE '{}' failed: {e}", t.name)),
+                }
             }
             BoundStatement::BoundCommentOnTable(c) => {
-                // Table comments have no catalog backing store. Report an error
-                // instead of claiming the comment was stored (P52.27).
-                Err(format!(
-                    "COMMENT ON TABLE '{}' is not supported yet: table comments have no catalog backing store",
+                let mut catalog = self
+                    .database
+                    .catalog
+                    .lock()
+                    .map_err(|e| format!("Lock poisoned: {e}"))?;
+                catalog.set_table_comment(&c.table_name, c.comment.clone());
+                tracing::info!("COMMENT ON TABLE '{}' = '{}'", c.table_name, c.comment);
+                Ok(Some(QueryResult::success_message(format!(
+                    "Comment set on table '{}'",
                     c.table_name
-                ))
+                ))))
             }
             BoundStatement::BoundCreateGraph(g) => {
                 let mut cat = self.database.catalog.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -418,8 +431,12 @@ impl Connection {
                     .map_err(|e| format!("Lock poisoned: {e}"))?;
                 match &a.action {
                     akar_parser::ast::AlterAction::AddColumn { name, type_name } => {
+                        let resolved = {
+                            let cat = &catalog;
+                            cat.resolve_type_alias(type_name).unwrap_or_else(|| type_name.clone())
+                        };
                         let logical_type =
-                            akar_binder::Binder::parse_type(type_name).map_err(|e| format!("ALTER ADD: {e}"))?;
+                            akar_binder::Binder::parse_type(&resolved).map_err(|e| format!("ALTER ADD: {e}"))?;
                         catalog
                             .add_column(
                                 &a.table_name,
