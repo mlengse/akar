@@ -223,7 +223,10 @@ fn handle_dream_control(action: Option<&str>, dream: &Arc<crate::dream::DreamCon
     let action = action.filter(|a| !a.is_empty()).unwrap_or("status");
     let (state, note, dream_id) = match action {
         "run" => {
-            let stats = dream.run();
+            let stats = dream.run(
+                #[cfg(feature = "embed")]
+                None,
+            );
             (
                 dream.state(),
                 Some(format!("dream cycle completed in {:.0} ms", stats.duration_ms)),

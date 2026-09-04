@@ -10,6 +10,9 @@ pub mod storage_driver;
 #[cfg(feature = "adbc")]
 pub mod adbc;
 
+#[cfg(all(feature = "ml-extension", not(akar_wasm)))]
+pub mod ml;
+
 #[cfg(test)]
 mod connection_test;
 

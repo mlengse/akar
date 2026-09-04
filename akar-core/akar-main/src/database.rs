@@ -721,6 +721,13 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(all(feature = "ml-extension", not(akar_wasm)))]
+        {
+            let ext = Box::new(akar_ml::extension::MlExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
         #[cfg(all(feature = "sqlite-extension", not(akar_wasm)))]
         {
             let ext = Box::new(akar_sqlite::SqliteExtension::new());

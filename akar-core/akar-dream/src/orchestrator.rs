@@ -1,5 +1,7 @@
 //! Dream engine orchestrator.
 
+#[cfg(feature = "embed")]
+use crate::EmbeddingProvider;
 use crate::backend::DreamBackend;
 use crate::config::DreamConfig;
 use crate::phases;
@@ -48,7 +50,11 @@ impl<B: DreamBackend> DreamOrchestrator<B> {
     }
 
     /// Run a full dream cycle: NREM → SUPERSEDES → REM → Insight → AFE → Synthesis → DAE.
-    pub fn run_cycle(&mut self) -> DreamStats {
+    #[cfg_attr(
+        feature = "embed",
+        doc = "When `embed` feature is enabled, accepts an optional embedding provider for the REM phase."
+    )]
+    pub fn run_cycle(&mut self, #[cfg(feature = "embed")] embedding: Option<&dyn EmbeddingProvider>) -> DreamStats {
         let start = std::time::Instant::now();
         let mut stats = DreamStats::default();
         self.dream_count += 1;
@@ -66,7 +72,12 @@ impl<B: DreamBackend> DreamOrchestrator<B> {
 
         // REM
         if self.config.enable_rem {
-            stats.rem = phases::rem::run_rem(&self.backend, &self.config);
+            stats.rem = phases::rem::run_rem(
+                &self.backend,
+                &self.config,
+                #[cfg(feature = "embed")]
+                embedding,
+            );
         }
 
         // INSIGHT
@@ -107,7 +118,10 @@ mod tests {
     fn test_orchestrator_default_config() {
         let backend = MockBackend::new();
         let mut orchestrator = DreamOrchestrator::new(DreamConfig::default(), backend);
-        let stats = orchestrator.run_cycle();
+        let stats = orchestrator.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(stats.dream_id, 1);
         assert!(stats.duration_ms >= 0.0);
     }
@@ -116,8 +130,14 @@ mod tests {
     fn test_orchestrator_incremental_dream_id() {
         let backend = MockBackend::new();
         let mut orchestrator = DreamOrchestrator::new(DreamConfig::default(), backend);
-        let s1 = orchestrator.run_cycle();
-        let s2 = orchestrator.run_cycle();
+        let s1 = orchestrator.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        let s2 = orchestrator.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(s1.dream_id, 1);
         assert_eq!(s2.dream_id, 2);
     }
@@ -132,7 +152,10 @@ mod tests {
             ..Default::default()
         };
         let mut orchestrator = DreamOrchestrator::new(cfg, backend);
-        let stats = orchestrator.run_cycle();
+        let stats = orchestrator.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
         // Skipped phases have default (zero) stats
         assert_eq!(stats.nrem.strengthened, 0);
         assert_eq!(stats.rem.bridges, 0);
@@ -159,7 +182,10 @@ mod tests {
         }
 
         let mut orchestrator = DreamOrchestrator::new(DreamConfig::default(), backend);
-        let stats = orchestrator.run_cycle();
+        let stats = orchestrator.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(stats.dream_id, 1);
         // NREM should have processed edges
         assert!(stats.nrem.strengthened > 0 || stats.nrem.weakened > 0 || stats.nrem.pruned > 0);

@@ -252,7 +252,16 @@ fn accept_loop(
     db_path: String,
     auth_token: Option<String>,
 ) {
-    let dream = dream::DreamControl::with_db(db.clone());
+    let dream = {
+        #[cfg(feature = "ml-extension")]
+        {
+            dream::DreamControl::with_db_and_provider(db.clone(), akar_main::ml::shared_embedding_provider())
+        }
+        #[cfg(not(feature = "ml-extension"))]
+        {
+            dream::DreamControl::with_db(db.clone())
+        }
+    };
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;

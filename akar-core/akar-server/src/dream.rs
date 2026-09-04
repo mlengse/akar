@@ -126,6 +126,8 @@ impl DreamBackend for GraceBackend {
 /// but fully live once kairos has seeded graph data into the same database.
 pub struct GraphBackend {
     conn: Connection,
+    #[cfg(feature = "embed")]
+    provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>,
 }
 
 impl GraphBackend {
@@ -133,6 +135,21 @@ impl GraphBackend {
     pub fn new(db: &Arc<Database>) -> Self {
         Self {
             conn: Connection::new(db),
+            #[cfg(feature = "embed")]
+            provider: None,
+        }
+    }
+
+    /// Create a backend bound to `db` with an optional embedding provider.
+    ///
+    /// When `provider` is `Some`, the REM phase's `find_bridges` computes real
+    /// community embeddings (fetching `Memory.content` from the graph and
+    /// embedding it) instead of returning empty. `None` keeps the graceful stub.
+    #[cfg(feature = "embed")]
+    pub fn with_embedding(db: &Arc<Database>, provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>) -> Self {
+        Self {
+            conn: Connection::new(db),
+            provider,
         }
     }
 
@@ -195,6 +212,234 @@ impl GraphBackend {
             _ => String::new(),
         }
     }
+
+    /// Fetch `content` for the given memory ids from the graph.
+    ///
+    /// Returns a map keyed by node id (missing ids are absent). Degrades to an
+    /// empty map (no error) if the query fails, so a bridge pass can never crash
+    /// a dream cycle.
+    #[cfg(feature = "embed")]
+    fn fetch_contents(&self, ids: &[usize]) -> std::collections::HashMap<usize, String> {
+        let mut out = std::collections::HashMap::new();
+        if ids.is_empty() {
+            return out;
+        }
+        let list: Vec<Value> = ids.iter().map(|&id| Value::Int64(id as i64)).collect();
+        let Some(res) = self.q(
+            "UNWIND $ids AS id MATCH (m:Memory {id: id}) \
+             RETURN m.id AS id, COALESCE(m.content, '') AS content",
+            &[("ids", Value::List(list))],
+        ) else {
+            return out;
+        };
+        for r in self.rows(&res) {
+            let by_name = |name: &str| {
+                r.iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or(Value::Null)
+            };
+            out.insert(Self::as_usize(&by_name("id")), Self::as_string(&by_name("content")));
+        }
+        out
+    }
+
+    /// Compute real REM bridges by embedding each isolated community's content
+    /// with the provider, then pairing the two closest communities by centroid
+    /// cosine. Returns `None` when embeddings cannot be produced (all-empty or
+    /// under two communities), so the caller degrades gracefully.
+    #[cfg(feature = "embed")]
+    fn find_bridges_with_provider(
+        &self,
+        provider: &dyn akar_dream::EmbeddingProvider,
+        communities: &[Vec<usize>],
+        max_bridges: usize,
+    ) -> Option<Vec<(usize, usize)>> {
+        if communities.len() < 2 {
+            return Some(Vec::new());
+        }
+
+        // Gather all node ids, embed their content in one batch.
+        let mut id_to_index: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut texts: Vec<&str> = Vec::new();
+        let mut ids_in_order: Vec<usize> = Vec::new();
+        for nodes in communities {
+            for &id in nodes {
+                if id_to_index.contains_key(&id) {
+                    continue;
+                }
+                id_to_index.insert(id, ids_in_order.len());
+                ids_in_order.push(id);
+                texts.push("");
+            }
+        }
+        let contents = self.fetch_contents(&ids_in_order);
+        for (i, id) in ids_in_order.iter().enumerate() {
+            texts[i] = contents.get(id).map(String::as_str).unwrap_or("");
+        }
+
+        // Skip empty embedded communities; a community with all-empty vectors
+        // yields a zero centroid that cannot be compared meaningfully.
+        let vectors: Vec<Vec<f64>> = provider
+            .embed_dense(&texts)
+            .ok()?
+            .into_iter()
+            .map(|v| v.into_iter().map(|x| x as f64).collect())
+            .collect();
+        if vectors.is_empty() || vectors.iter().any(|v| v.is_empty()) {
+            return Some(Vec::new());
+        }
+
+        // Per-community centroid + a representative node nearest its centroid.
+        let mut centroids: Vec<Vec<f64>> = Vec::with_capacity(communities.len());
+        let mut reps: Vec<usize> = Vec::with_capacity(communities.len());
+        for nodes in communities {
+            let idx: Vec<usize> = nodes.iter().filter_map(|id| id_to_index.get(id).copied()).collect();
+            let viable: Vec<usize> = idx
+                .iter()
+                .copied()
+                .filter(|&i| vectors[i].iter().any(|&x| x != 0.0))
+                .collect();
+            if viable.is_empty() {
+                continue;
+            }
+            let dim = vectors[viable[0]].len();
+            let mut centroid = vec![0.0f64; dim];
+            for &i in &viable {
+                for (d, &x) in vectors[i].iter().enumerate() {
+                    centroid[d] += x;
+                }
+            }
+            let n = viable.len() as f64;
+            for x in &mut centroid {
+                *x /= n;
+            }
+            let rep_i = *viable
+                .iter()
+                .max_by(|&&a, &&b| {
+                    Self::cosine(&vectors[a], &centroid).total_cmp(&Self::cosine(&vectors[b], &centroid))
+                })
+                .unwrap();
+            let rep = id_to_index.iter().find(|(_, v)| **v == rep_i).map(|(k, _)| *k).unwrap();
+            centroids.push(centroid);
+            reps.push(rep);
+        }
+
+        if centroids.len() < 2 {
+            return Some(Vec::new());
+        }
+
+        // Greedily pair the closest distinct communities up to max_bridges.
+        keeper_distance_bridge(centroids, reps, max_bridges)
+    }
+
+    /// Compute bridges from caller-supplied per-node embeddings.
+    ///
+    /// Assumes `embeddings` is aligned with `communities.iter().flatten()`
+    /// node order (the same layout `run_rem` produces). Returns `None` when the
+    /// layout can't be resolved or there are fewer than two viable communities.
+    fn bridges_from_embeddings(
+        communities: &[Vec<usize>],
+        embeddings: &[[f64; 384]],
+        max_bridges: usize,
+    ) -> Option<Vec<(usize, usize)>> {
+        let total: usize = communities.iter().map(|c| c.len()).sum();
+        if total != embeddings.len() {
+            return None;
+        }
+        // Rebuild the flattened order to index embeddings correctly.
+        let flat: Vec<usize> = communities.iter().flatten().copied().collect();
+        let position: std::collections::HashMap<usize, usize> =
+            flat.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+
+        let mut centroids: Vec<Vec<f64>> = Vec::with_capacity(communities.len());
+        let mut reps: Vec<usize> = Vec::with_capacity(communities.len());
+        for nodes in communities {
+            let idx: Vec<usize> = nodes.iter().filter_map(|id| position.get(id).copied()).collect();
+            let viable: Vec<usize> = idx
+                .iter()
+                .copied()
+                .filter(|&i| embeddings[i].iter().any(|&x| x != 0.0))
+                .collect();
+            if viable.is_empty() {
+                continue;
+            }
+            let mut centroid = vec![0.0f64; 384];
+            for &i in &viable {
+                for (d, &x) in embeddings[i].iter().enumerate() {
+                    centroid[d] += x;
+                }
+            }
+            let n = viable.len() as f64;
+            for x in &mut centroid {
+                *x /= n;
+            }
+            let (rep_pos, _) = viable
+                .iter()
+                .enumerate()
+                .map(|(pos, &i)| (pos, Self::cosine(&embeddings[i], &centroid)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))?;
+            reps.push(nodes[rep_pos]);
+            centroids.push(centroid);
+        }
+
+        keeper_distance_bridge(centroids, reps, max_bridges)
+    }
+
+    /// Normalized cosine similarity (0.0 for a zero vector on either side).
+    fn cosine(a: &[f64], b: &[f64]) -> f64 {
+        let mut dot = 0.0;
+        let mut na = 0.0;
+        let mut nb = 0.0;
+        for (x, y) in a.iter().zip(b.iter()) {
+            dot += x * y;
+            na += x * x;
+            nb += y * y;
+        }
+        if na == 0.0 || nb == 0.0 {
+            return 0.0;
+        }
+        dot / (na.sqrt() * nb.sqrt())
+    }
+}
+
+/// Pair distinct communities greedily by descending centroid similarity.
+///
+/// `centroids` and `reps` are index-aligned (reps[i] is the representative node
+/// of the i-th centroid). Each community appears in at most one bridge.
+fn keeper_distance_bridge(
+    centroids: Vec<Vec<f64>>,
+    reps: Vec<usize>,
+    max_bridges: usize,
+) -> Option<Vec<(usize, usize)>> {
+    if centroids.len() < 2 {
+        return Some(Vec::new());
+    }
+    let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
+    for a in 0..centroids.len() {
+        for b in (a + 1)..centroids.len() {
+            pairs.push((a, b, GraphBackend::cosine(&centroids[a], &centroids[b])));
+        }
+    }
+    pairs.sort_by(|p, q| q.2.total_cmp(&p.2));
+
+    let mut used: Vec<bool> = vec![false; centroids.len()];
+    let mut bridges: Vec<(usize, usize)> = Vec::new();
+    for (a, b, _) in pairs {
+        if bridges.len() >= max_bridges {
+            break;
+        }
+        if used[a] || used[b] {
+            continue;
+        }
+        if reps[a] == reps[b] {
+            continue;
+        }
+        used[a] = true;
+        used[b] = true;
+        bridges.push((reps[a], reps[b]));
+    }
+    Some(bridges)
 }
 
 impl DreamBackend for GraphBackend {
@@ -350,13 +595,26 @@ impl DreamBackend for GraphBackend {
 
     fn find_bridges(
         &self,
-        _communities: &[Vec<usize>],
-        _embeddings: &[[f64; 384]],
-        _max_bridges: usize,
+        communities: &[Vec<usize>],
+        embeddings: &[[f64; 384]],
+        max_bridges: usize,
     ) -> Vec<(usize, usize)> {
-        // The akar-dream REM phase passes no real embeddings today; bridge
-        // discovery needs per-community centroids we don't yet model in the
-        // server schema. Return empty (matches the mock semantics).
+        #[cfg(feature = "embed")]
+        {
+            // Prefer the injected embedding provider (real REM). When no
+            // provider is available, fall through to the provided embeddings.
+            if let Some(provider) = &self.provider {
+                if let Some(bridges) = self.find_bridges_with_provider(provider.as_ref(), communities, max_bridges) {
+                    return bridges;
+                }
+            }
+        }
+        // Provided-embeddings path (rare today: run_rem passes an empty slice).
+        if !embeddings.is_empty() && !communities.is_empty() {
+            if let Some(bridges) = Self::bridges_from_embeddings(communities, embeddings, max_bridges) {
+                return bridges;
+            }
+        }
         Vec::new()
     }
 
@@ -474,10 +732,19 @@ enum DreamEngine {
 }
 
 impl DreamEngine {
-    fn run_cycle(&mut self) -> DreamStats {
+    fn run_cycle(
+        &mut self,
+        #[cfg(feature = "embed")] embedding: Option<&dyn akar_dream::EmbeddingProvider>,
+    ) -> DreamStats {
         match self {
-            DreamEngine::Grace(o) => o.run_cycle(),
-            DreamEngine::Graph(o) => o.run_cycle(),
+            DreamEngine::Grace(o) => o.run_cycle(
+                #[cfg(feature = "embed")]
+                embedding,
+            ),
+            DreamEngine::Graph(o) => o.run_cycle(
+                #[cfg(feature = "embed")]
+                embedding,
+            ),
         }
     }
 }
@@ -502,10 +769,35 @@ impl DreamControl {
     /// real consolidation work when kairos has seeded `Memory`/`Connected`
     /// graph data, and degrades gracefully otherwise.
     pub fn with_db(db: Arc<Database>) -> Arc<Self> {
+        #[cfg(feature = "embed")]
+        {
+            Self::with_db_and_provider(db, None)
+        }
+        #[cfg(not(feature = "embed"))]
+        {
+            Arc::new(Self {
+                orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamOrchestrator::new(
+                    DreamConfig::default(),
+                    GraphBackend::new(&db),
+                )))),
+                paused: AtomicBool::new(false),
+                last_stats: Mutex::new(None),
+            })
+        }
+    }
+
+    /// Create an engine backed by the akar graph with an optional embedding
+    /// provider (P89.5). When `provider` is `Some`, the REM phase computes real
+    /// community embeddings for bridge discovery instead of returning empty.
+    #[cfg(feature = "embed")]
+    pub fn with_db_and_provider(
+        db: Arc<Database>,
+        provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamOrchestrator::new(
                 DreamConfig::default(),
-                GraphBackend::new(&db),
+                GraphBackend::with_embedding(&db, provider),
             )))),
             paused: AtomicBool::new(false),
             last_stats: Mutex::new(None),
@@ -526,7 +818,7 @@ impl DreamControl {
     /// Run a full consolidation cycle, recording the resulting stats.
     ///
     /// No-op (and returns the current state) when the engine is paused.
-    pub fn run(&self) -> DreamStats {
+    pub fn run(&self, #[cfg(feature = "embed")] embedding: Option<&dyn akar_dream::EmbeddingProvider>) -> DreamStats {
         if self.paused.load(Ordering::SeqCst) {
             return self.last_stats().unwrap_or_default();
         }
@@ -534,7 +826,10 @@ impl DreamControl {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let stats = guard.run_cycle();
+        let stats = guard.run_cycle(
+            #[cfg(feature = "embed")]
+            embedding,
+        );
         drop(guard);
         if let Ok(mut slot) = self.last_stats.lock() {
             *slot = Some(stats.clone());
@@ -545,7 +840,10 @@ impl DreamControl {
     /// Optionally execute a cycle when unpaused; used by `run`/`resume`.
     pub fn resume(&self) -> DreamStats {
         self.paused.store(false, Ordering::SeqCst);
-        self.run()
+        self.run(
+            #[cfg(feature = "embed")]
+            None,
+        )
     }
 
     pub fn pause(&self) {
@@ -606,14 +904,20 @@ mod tests {
         let ctrl = DreamControl::new();
         assert_eq!(ctrl.state(), DreamState::Idle);
 
-        let stats = ctrl.run();
+        let stats = ctrl.run(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(stats.dream_id, 1);
         assert_eq!(ctrl.state(), DreamState::Running);
 
         // Paused: run() is a no-op and state flips to paused.
         ctrl.pause();
         assert_eq!(ctrl.state(), DreamState::Paused);
-        let paused_stats = ctrl.run();
+        let paused_stats = ctrl.run(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(paused_stats.dream_id, 1, "paused run should not advance dream_id");
 
         // Resume restores running and runs a new cycle.
@@ -679,7 +983,10 @@ mod tests {
         let (db, _dir) = seeded_db();
         let ctrl = DreamControl::with_db(db);
 
-        let stats = ctrl.run();
+        let stats = ctrl.run(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(stats.dream_id, 1);
         // NREM has a chain of 5 edges against a real backend: it should have
         // strengthened/weakened/pruned at least one edge.
@@ -705,8 +1012,108 @@ mod tests {
         assert_eq!(backend.recompute_dae(), 0);
 
         let ctrl = DreamControl::with_db(db);
-        let stats = ctrl.run();
+        let stats = ctrl.run(
+            #[cfg(feature = "embed")]
+            None,
+        );
         assert_eq!(stats.dream_id, 1);
         assert!(stats.nrem.strengthened + stats.nrem.weakened + stats.nrem.pruned == 0);
+    }
+
+    #[cfg(feature = "embed")]
+    mod embed_tests {
+        use super::*;
+        use akar_ml::embed::EmbeddingError;
+
+        /// Deterministic provider: distinct, non-empty content maps to distinct
+        /// 384-dim vectors so community centroids differ and a bridge is found.
+        struct MockProvider;
+
+        fn mock_vec(text: &str) -> Vec<f32> {
+            let mut v = vec![0.0f32; 384];
+            if text.is_empty() {
+                return v;
+            }
+            for (i, b) in text.bytes().enumerate() {
+                v[(i % 383) + 1] += (b as f32) / 255.0;
+            }
+            v[0] = text.len() as f32;
+            v
+        }
+
+        impl akar_dream::EmbeddingProvider for MockProvider {
+            fn embed_dense(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+                Ok(texts.iter().map(|t| mock_vec(t)).collect())
+            }
+            fn dimensions(&self) -> usize {
+                384
+            }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
+        }
+
+        /// A db with two isolated communities so REM has content to bridge:
+        /// community 0 = {0}, community 1 = {1, 2} (each < 5 nodes).
+        fn seeded_bridge_db() -> (Arc<Database>, TempDir) {
+            let dir = TempDir::new().expect("temp dir");
+            let db = Arc::new(Database::new(dir.path().join("test_db"), config()).expect("create db"));
+            let conn = Connection::new(&db);
+            conn.query(
+                "CREATE NODE TABLE Memory(id INT64, salience DOUBLE, created_at DOUBLE, \
+                 content STRING, community INT64, PRIMARY KEY (id))",
+            )
+            .expect("create Memory");
+            conn.query("CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE)")
+                .expect("create Connected");
+            for (id, comm, content) in [
+                (0i64, 0i64, "graph database storage engine"),
+                (1i64, 1i64, "concurrent transaction processing"),
+                (2i64, 1i64, "lock free data structures"),
+            ] {
+                conn.query(&format!(
+                    "CREATE (:Memory {{id: {id}, salience: 0.5, created_at: 1000.0, \
+                     content: '{content}', community: {comm}}})"
+                ))
+                .expect("seed memory");
+            }
+            (db, dir)
+        }
+
+        #[test]
+        fn test_akar_dream_backend_bridge() {
+            // A full orchestrator cycle against a provider-backed backend must
+            // complete without error (mock storage + mock provider).
+            let (db, _dir) = seeded_bridge_db();
+            let backend = GraphBackend::with_embedding(&db, Some(Arc::new(MockProvider)));
+            let mut orch = DreamOrchestrator::new(DreamConfig::default(), backend);
+            let stats = orch.run_cycle(None);
+            assert_eq!(stats.dream_id, 1);
+        }
+
+        #[test]
+        fn test_dream_without_ml_extension() {
+            // No provider → REM is a stub that finds no bridges.
+            let (db, _dir) = seeded_bridge_db();
+            let ctrl = DreamControl::with_db(db);
+            let stats = ctrl.run(None);
+            assert_eq!(
+                stats.rem.bridges, 0,
+                "REM without a provider must not fabricate bridges: {stats:?}"
+            );
+        }
+
+        #[test]
+        fn test_dream_with_ml_extension() {
+            // With a provider, REM embeds community content and finds a bridge
+            // between the two isolated communities.
+            let (db, _dir) = seeded_bridge_db();
+            let ctrl = DreamControl::with_db_and_provider(db, Some(Arc::new(MockProvider)));
+            let stats = ctrl.run(None);
+            assert!(
+                stats.rem.bridges >= 1,
+                "provider-backed REM should discover a bridge: {stats:?}"
+            );
+        }
     }
 }

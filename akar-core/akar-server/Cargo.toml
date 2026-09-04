@@ -14,6 +14,7 @@ authors.workspace = true
 akar-main = { path = "../akar-main", version = "0.1.7" }
 akar-common = { path = "../akar-common", version = "0.1.3" }
 akar-dream = { path = "../akar-dream", version = "0.1.18" }
+akar-ml = { path = "../akar-ml", version = "0.1.19" }
 arrow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +22,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3"
+
+[features]
+default = []
+embed = ["akar-dream/embed"]
+ml-extension = ["embed", "akar-main/ml-extension"]
 
 [dev-dependencies]
 tempfile = "3"

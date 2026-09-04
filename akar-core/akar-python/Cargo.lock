@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-algo"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "arrow",
  "flate2",
@@ -76,14 +76,14 @@ dependencies = [
 
 [[package]]
 name = "akar-dream"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-algo",
 ]
 
 [[package]]
 name = "akar-extension"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "arrow",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "akar-graph"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "akar-storage",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "akar-json"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -165,17 +165,18 @@ dependencies = [
 
 [[package]]
 name = "akar-ml"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "thiserror",
  "tracing",
 ]
 
 [[package]]
 name = "akar-optimizer"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -187,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "pest",
  "pest_derive",
@@ -195,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -205,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -225,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "akar-python"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-algo",
  "akar-common",
@@ -242,14 +243,14 @@ dependencies = [
 
 [[package]]
 name = "akar-search"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "hashbrown 0.17.1",
 ]
 
 [[package]]
 name = "akar-storage"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -270,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "tracing",
@@ -278,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -1626,6 +1627,26 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]

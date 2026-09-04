@@ -9,6 +9,9 @@ pub mod config;
 pub mod orchestrator;
 pub mod phases;
 
+#[cfg(feature = "embed")]
+pub use akar_ml::embed::EmbeddingProvider;
+
 pub use backend::DreamBackend;
 pub use config::DreamConfig;
 pub use orchestrator::{DreamOrchestrator, DreamStats};

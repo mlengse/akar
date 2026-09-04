@@ -22,6 +22,7 @@ duckdb-extension = ["dep:akar-duckdb"]
 algo-extension = ["dep:akar-algo"]
 neo4j-extension = ["dep:akar-neo4j"]
 llm-extension = ["dep:akar-llm"]
+ml-extension = ["dep:akar-ml", "akar-ml/extension"]
 sqlite-extension = ["dep:akar-sqlite"]
 delta-extension = ["dep:akar-delta"]
 delta-native = ["dep:akar-delta", "akar-delta/native"]
@@ -53,6 +54,7 @@ akar-duckdb = { path = "../akar-duckdb", version = "0.1.3", optional = true }
 akar-algo = { path = "../akar-algo", version = "0.1.6", optional = true }
 akar-neo4j = { path = "../akar-neo4j", version = "0.1.2", optional = true }
 akar-llm = { path = "../akar-llm", version = "0.1.2", optional = true }
+akar-ml = { path = "../akar-ml", version = "0.1.19", optional = true }
 akar-sqlite = { path = "../akar-sqlite", version = "0.1.2", optional = true }
 akar-delta = { path = "../akar-delta", version = "0.1.3", optional = true }
 akar-iceberg = { path = "../akar-iceberg", version = "0.1.3", optional = true }
