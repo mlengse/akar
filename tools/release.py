@@ -197,12 +197,10 @@ def align_dep_versions(version: str) -> None:
             continue
         text = cargo_toml.read_text(encoding="utf-8-sig")
         original = text
-        # Update akar-* version specs: version = "0.1.x" → version = "0.1.y".
-        # Matches inline tables regardless of key order, e.g.
-        # akar-ml = { path = "../akar-ml", version = "0.1.19", optional = true }.
+        # Update akar-* version specs: version = "0.1.x" → version = "0.1.y"
         text = re.sub(
-            r'(akar-[a-z0-9_-]+)\s*=\s*\{([^{}]*?)version\s*=\s*"[^"]*"',
-            lambda m: f'{m.group(1)} = {{{m.group(2)}version = "{version}"',
+            r'(akar-[a-z0-9_-]+)\s*=\s*\{\s*version\s*=\s*"[^"]*"',
+            rf'\1 = {{version = "{version}"',
             text,
         )
         # Also handle simple: akar-xxx = "0.1.x"
@@ -226,10 +224,10 @@ def check_dep_alignment() -> list[str]:
             continue
         text = cargo_toml.read_text(encoding="utf-8-sig")
         for m in re.finditer(
-            r'(akar-[a-z0-9_-]+)\s*=\s*\{([^{}]*?)version\s*=\s*"([^"]*)"',
+            r'(akar-[a-z0-9_-]+)\s*=\s*\{\s*version\s*=\s*"([^"]*)"',
             text,
         ):
-            dep_name, dep_ver = m.group(1), m.group(3)
+            dep_name, dep_ver = m.group(1), m.group(2)
             if dep_ver != ws_ver:
                 issues.append(
                     f"  {cargo_toml.parent.name}: {dep_name} has version "
