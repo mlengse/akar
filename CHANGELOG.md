@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-09-04
+
 ### Added
 
 - **feat(ml) — P89.7: integrasi end-to-end — offline weights, batch/parallel, errors, docs di akar-ml (2026-09-04)** — final polish task menutup serial P89.1–P89.7 fastembed integration. `FastEmbedProvider::new_from_dir(model_dir, dims)` baru: memuat `.onnx` + tokenizer (`tokenizer.json`, `config.json`, `special_tokens_map.json`, `tokenizer_config.json`) dari local path tanpa HF Hub download, meneruskan ke `TextEmbedding::try_new_from_user_defined` (via `UserDefinedEmbeddingModel` + `TokenizerFiles`); helper `find_onnx_file` (prefer plain `.onnx` atas `*_int8.onnx`) dan `read_required_token_file`. Batch: `EmbedProviderConfig` + `FastEmbedInner` menyimpan `batch_size` (default `DEFAULT_BATCH_SIZE = 256`, `0` → default); `embed_texts()` meneruskan `Some(batch_size)` ke ONNX; `embed_texts_batched(&self, texts, batch_size)` baru (override eksplisit); `par_embed_texts(&self, texts)` baru — paralelisasi sound via rayon `par_iter()`: karena `TextEmbedding` session tidak `Sync`, tiap worker membangun session sendiri dari init-options yang sama (weights di-cache disk oleh shared session yang di-pre-warm), hasil digabung urutan input identik dengan jalur sequential. Error handling: semua ONNX init/compute error dibungkus `Result<_, EmbeddingError>` (`InitFailed`/`ComputeFailed`). Forward-compat: `#[non_exhaustive]` pada `EmbeddingError`, `SparseEmbedding`, `EmbeddingModelChoice`, `EmbedProviderConfig`, `RerankProviderConfig`, `RerankProvider`, `FastEmbedProvider`. `// SAFETY:` tidak ditambahkan (tidak ada blok `unsafe` di module; `par_embed_texts` dikomentari penuh tentang soundness non-Sync session). Doc comments `# Errors`/`# Panics` ditambahkan pada public API. `akar-ml/Cargo.toml`: optional `rayon.workspace = true` digate ke `onnx-embedding` feature. 6 tests baru (feature-gated, tidak mengubah gate count): `test_offline_weights_load`, `test_new_from_dir_prefers_plain_onnx`, `test_batch_embed_parallel`, `test_batched_matches_default`, `test_error_conversion`, `test_non_exhaustive_struct` — semuanya lulus (termasuk jalur real-model ter-cache). Gate default `test [akar-core]` tetap **1,964 / 0 failed** (module `embed` + tests digate `onnx-embedding`, off di gate default); fmt + clippy `-D warnings` clean.
@@ -474,6 +476,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.20]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.20
 [0.1.19]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.19
 [0.1.18]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.18
 [0.1.17]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.17
