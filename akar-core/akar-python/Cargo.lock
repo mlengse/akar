@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "akar-python"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "akar-algo",
  "akar-common",
