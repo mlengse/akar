@@ -11,8 +11,8 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-algo = { path = "../akar-algo", version = "0.1.6" }
-akar-ml = { path = "../akar-ml", version = "0.1.19", optional = true }
+akar-algo = { path = "../akar-algo", version = "0.1.20" }
+akar-ml = { path = "../akar-ml", version = "0.1.20", optional = true }
 
 [features]
 embed = ["akar-ml", "akar-ml?/onnx-embedding"]

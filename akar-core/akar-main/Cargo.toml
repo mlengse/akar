@@ -35,32 +35,32 @@ unity-catalog-extension = ["dep:akar-unity-catalog"]
 unity-catalog-native = ["dep:akar-unity-catalog", "akar-unity-catalog/native"]
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.1.3" }
-akar-storage = { path = "../akar-storage", version = "0.1.7" }
-akar-transaction = { path = "../akar-transaction", version = "0.1.1" }
-akar-catalog = { path = "../akar-catalog", version = "0.1.1" }
-akar-parser = { path = "../akar-parser", version = "0.1.2" }
-akar-binder = { path = "../akar-binder", version = "0.1.5" }
-akar-planner = { path = "../akar-planner", version = "0.1.5" }
-akar-optimizer = { path = "../akar-optimizer", version = "0.1.4" }
-akar-processor = { path = "../akar-processor", version = "0.1.5" }
-akar-function = { path = "../akar-function", version = "0.1.2" }
-akar-extension = { path = "../akar-extension", version = "0.1.1" }
-akar-json = { path = "../akar-json", version = "0.1.2", optional = true }
-akar-fts = { path = "../akar-fts", version = "0.1.1", optional = true }
-akar-vector = { path = "../akar-vector", version = "0.1.3", optional = true }
-akar-httpfs = { path = "../akar-httpfs", version = "0.1.2", optional = true }
-akar-duckdb = { path = "../akar-duckdb", version = "0.1.3", optional = true }
-akar-algo = { path = "../akar-algo", version = "0.1.6", optional = true }
-akar-neo4j = { path = "../akar-neo4j", version = "0.1.2", optional = true }
-akar-llm = { path = "../akar-llm", version = "0.1.2", optional = true }
-akar-ml = { path = "../akar-ml", version = "0.1.19", optional = true }
-akar-sqlite = { path = "../akar-sqlite", version = "0.1.2", optional = true }
-akar-delta = { path = "../akar-delta", version = "0.1.3", optional = true }
-akar-iceberg = { path = "../akar-iceberg", version = "0.1.3", optional = true }
-akar-azure = { path = "../akar-azure", version = "0.1.3", optional = true }
-akar-postgres = { path = "../akar-postgres", version = "0.1.3", optional = true }
-akar-unity-catalog = { path = "../akar-unity-catalog", version = "0.1.3", optional = true }
+akar-common = { path = "../akar-common", version = "0.1.20" }
+akar-storage = { path = "../akar-storage", version = "0.1.20" }
+akar-transaction = { path = "../akar-transaction", version = "0.1.20" }
+akar-catalog = { path = "../akar-catalog", version = "0.1.20" }
+akar-parser = { path = "../akar-parser", version = "0.1.20" }
+akar-binder = { path = "../akar-binder", version = "0.1.20" }
+akar-planner = { path = "../akar-planner", version = "0.1.20" }
+akar-optimizer = { path = "../akar-optimizer", version = "0.1.20" }
+akar-processor = { path = "../akar-processor", version = "0.1.20" }
+akar-function = { path = "../akar-function", version = "0.1.20" }
+akar-extension = { path = "../akar-extension", version = "0.1.20" }
+akar-json = { path = "../akar-json", version = "0.1.20", optional = true }
+akar-fts = { path = "../akar-fts", version = "0.1.20", optional = true }
+akar-vector = { path = "../akar-vector", version = "0.1.20", optional = true }
+akar-httpfs = { path = "../akar-httpfs", version = "0.1.20", optional = true }
+akar-duckdb = { path = "../akar-duckdb", version = "0.1.20", optional = true }
+akar-algo = { path = "../akar-algo", version = "0.1.20", optional = true }
+akar-neo4j = { path = "../akar-neo4j", version = "0.1.20", optional = true }
+akar-llm = { path = "../akar-llm", version = "0.1.20", optional = true }
+akar-ml = { path = "../akar-ml", version = "0.1.20", optional = true }
+akar-sqlite = { path = "../akar-sqlite", version = "0.1.20", optional = true }
+akar-delta = { path = "../akar-delta", version = "0.1.20", optional = true }
+akar-iceberg = { path = "../akar-iceberg", version = "0.1.20", optional = true }
+akar-azure = { path = "../akar-azure", version = "0.1.20", optional = true }
+akar-postgres = { path = "../akar-postgres", version = "0.1.20", optional = true }
+akar-unity-catalog = { path = "../akar-unity-catalog", version = "0.1.20", optional = true }
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
