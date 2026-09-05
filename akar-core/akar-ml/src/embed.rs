@@ -806,6 +806,64 @@ impl RerankProvider {
         })
     }
 
+    /// Create a provider from user-defined reranker ONNX model bytes (offline/air-gapped).
+    ///
+    /// No HuggingFace Hub download required. The caller supplies the ONNX model
+    /// file bytes and tokenizer files directly.
+    pub fn try_from_user_defined(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+    ) -> Result<Self, EmbeddingError> {
+        let user_model = fastembed::UserDefinedRerankingModel::new(onnx_bytes, tokenizer_files);
+
+        let reranker = fastembed::TextRerank::try_new_from_user_defined(user_model, Default::default())
+            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
+
+        let model_name = "user-defined".to_string();
+
+        Ok(Self {
+            inner: Arc::new(RerankInner {
+                model_name,
+                session: parking_lot::Mutex::new(Some(reranker)),
+                init_options: Default::default(),
+            }),
+        })
+    }
+
+    /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped).
+    ///
+    /// The model is loaded entirely from a local directory — no HuggingFace Hub
+    /// download is performed. The directory must contain a `.onnx` file and the
+    /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
+    /// and `tokenizer_config.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the directory is unreadable, the
+    /// ONNX file or a required tokenizer file is missing, or the ONNX session
+    /// cannot be built from the given bytes.
+    pub fn new_from_dir(model_dir: impl AsRef<Path>) -> Result<Self, EmbeddingError> {
+        let dir = model_dir.as_ref();
+
+        let model = SbyoLoad::from_dir(dir)?;
+        let user_model = fastembed::UserDefinedRerankingModel::new(model.onnx, model.tokenizer);
+        let reranker = fastembed::TextRerank::try_new_from_user_defined(user_model, Default::default())
+            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
+
+        let model_name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "user-defined".to_string());
+
+        Ok(Self {
+            inner: Arc::new(RerankInner {
+                model_name,
+                session: parking_lot::Mutex::new(Some(reranker)),
+                init_options: Default::default(),
+            }),
+        })
+    }
+
     /// Rerank documents by relevance to the query.
     ///
     /// Returns results sorted by score in descending order.
@@ -1108,6 +1166,63 @@ mod tests {
     fn test_rerank_provider_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<RerankProvider>();
+    }
+
+    #[test]
+    fn test_rerank_provider_offline_load() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Empty directory → no .onnx model.
+        match RerankProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(msg)) => {
+                assert!(msg.contains("onnx"), "expected missing-onnx message, got: {msg}");
+            }
+            other => panic!("expected InitFailed for empty dir, got {other:?}"),
+        }
+
+        // Directory with an ONNX file but no tokenizer files.
+        std::fs::write(dir.path().join("model.onnx"), b"not-a-real-onnx").unwrap();
+        match RerankProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(msg)) => {
+                assert!(
+                    msg.contains("tokenizer"),
+                    "expected missing-tokenizer message, got: {msg}"
+                );
+            }
+            other => panic!("expected InitFailed for missing tokenizer, got {other:?}"),
+        }
+
+        // Directory with an ONNX file + tokenizer files. The bytes are garbage,
+        // so ONNX Runtime must fail from the *local bytes* (never a network
+        // download) — proving the offline path read the files off disk.
+        for name in [
+            "tokenizer.json",
+            "config.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+        ] {
+            std::fs::write(dir.path().join(name), b"{}").unwrap();
+        }
+        match RerankProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(_)) => {}
+            Ok(_) => {}
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_rerank_provider_try_from_user_defined_invalid_bytes() {
+        let tokenizer = fastembed::TokenizerFiles {
+            tokenizer_file: b"{}".to_vec(),
+            config_file: b"{}".to_vec(),
+            special_tokens_map_file: b"{}".to_vec(),
+            tokenizer_config_file: b"{}".to_vec(),
+        };
+        match RerankProvider::try_from_user_defined(b"not-an-onnx".to_vec(), tokenizer) {
+            Err(EmbeddingError::InitFailed(_)) => {}
+            Ok(_) => {}
+            other => panic!("expected InitFailed for garbage bytes, got {other:?}"),
+        }
     }
 
     // ── P89.7: offline weights, batching, errors, non_exhaustive ──
