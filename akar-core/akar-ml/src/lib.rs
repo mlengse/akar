@@ -18,6 +18,9 @@ pub mod embed;
 #[cfg(feature = "onnx-embedding")]
 pub(crate) mod sbyo;
 
+#[cfg(feature = "onnx-embedding")]
+mod sparse;
+
 #[cfg(feature = "extension")]
 pub mod extension;
 

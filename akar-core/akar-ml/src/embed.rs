@@ -33,6 +33,7 @@ use fastembed::{
 };
 
 use crate::sbyo::SbyoLoad;
+use crate::sparse::NativeSparseSession;
 
 /// Default ONNX batch size used when the caller does not specify one.
 const DEFAULT_BATCH_SIZE: usize = 256;
@@ -496,9 +497,20 @@ pub struct SparseEmbedProvider {
     inner: Arc<SparseEmbedInner>,
 }
 
+/// A lazily initialized sparse inference session.
+///
+/// The `Fastembed` variant is used by the online path (model downloaded on first
+/// use); the `Native` variant backs the SBYO offline path, which builds an ort
+/// session directly from user-supplied bytes because fastembed exposes no
+/// `try_new_from_user_defined` for sparse embeddings.
+enum SparseSessionImpl {
+    Fastembed(SparseTextEmbedding),
+    Native(NativeSparseSession),
+}
+
 struct SparseEmbedInner {
     model_name: String,
-    session: parking_lot::Mutex<Option<SparseTextEmbedding>>,
+    session: parking_lot::Mutex<Option<SparseSessionImpl>>,
     init_options: SparseInitOptions,
     batch_size: usize,
 }
@@ -549,6 +561,66 @@ impl SparseEmbedProvider {
         })
     }
 
+    /// Create a provider from a user-defined SPLADE ONNX model (offline/air-gapped).
+    ///
+    /// The ONNX model and tokenizer files are supplied by the caller, so no
+    /// HuggingFace Hub download is performed. The ONNX session is built natively
+    /// via `ort` (fastembed has no `try_new_from_user_defined` for sparse models)
+    /// and SPLADE post-processing is replicated for bit-identical output.
+    ///
+    /// Only SPLADE-style models (3-D `(batch, seq, vocab)` output) are supported;
+    /// BGE-M3 sparse requires external initializers and embedded projection
+    /// weights and is therefore rejected with [`EmbeddingError::ComputeFailed`]
+    /// at embed time.
+    pub fn try_from_user_defined(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+    ) -> Result<Self, EmbeddingError> {
+        let session = NativeSparseSession::try_new(&onnx_bytes, tokenizer_files)?;
+
+        Ok(Self {
+            inner: Arc::new(SparseEmbedInner {
+                model_name: "user-defined".to_string(),
+                session: parking_lot::Mutex::new(Some(SparseSessionImpl::Native(session))),
+                init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
+            }),
+        })
+    }
+
+    /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped).
+    ///
+    /// The model is loaded entirely from a local directory — no HuggingFace Hub
+    /// download is performed. The directory must contain a `.onnx` file and the
+    /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
+    /// and `tokenizer_config.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the directory is unreadable, the
+    /// ONNX file or a required tokenizer file is missing, or the ONNX session
+    /// cannot be built from the given bytes.
+    pub fn new_from_dir(model_dir: impl AsRef<Path>) -> Result<Self, EmbeddingError> {
+        let dir = model_dir.as_ref();
+
+        let model = SbyoLoad::from_dir(dir)?;
+        let session = NativeSparseSession::try_new(&model.onnx, model.tokenizer)?;
+
+        let model_name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "user-defined".to_string());
+
+        Ok(Self {
+            inner: Arc::new(SparseEmbedInner {
+                model_name,
+                session: parking_lot::Mutex::new(Some(SparseSessionImpl::Native(session))),
+                init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
+            }),
+        })
+    }
+
     /// Compute sparse embeddings for a batch of texts.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<Vec<SparseEmbedding>, EmbeddingError> {
         self.embed_texts_batched(texts, self.inner.batch_size)
@@ -566,8 +638,10 @@ impl SparseEmbedProvider {
     ) -> Result<Vec<SparseEmbedding>, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
-            SparseTextEmbedding::try_new(self.inner.init_options.clone())
-                .expect("failed to initialize sparse embedding model — is ONNX Runtime available?")
+            SparseSessionImpl::Fastembed(
+                SparseTextEmbedding::try_new(self.inner.init_options.clone())
+                    .expect("failed to initialize sparse embedding model — is ONNX Runtime available?"),
+            )
         });
 
         let bs = if batch_size == 0 {
@@ -575,10 +649,14 @@ impl SparseEmbedProvider {
         } else {
             batch_size
         };
-        session
-            .embed(texts, Some(bs))
-            .map(|v| v.into_iter().map(SparseEmbedding::from).collect())
-            .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
+
+        match session {
+            SparseSessionImpl::Fastembed(s) => s
+                .embed(texts, Some(bs))
+                .map(|v| v.into_iter().map(SparseEmbedding::from).collect())
+                .map_err(|e| EmbeddingError::ComputeFailed(e.to_string())),
+            SparseSessionImpl::Native(s) => s.embed(texts, bs),
+        }
     }
 
     /// Embed a single text and return the sparse vector.
@@ -1547,6 +1625,111 @@ mod tests {
             assert_eq!(x.values.len(), y.values.len());
             for (p, q) in x.values.iter().zip(y.values.iter()) {
                 assert!((p - q).abs() < 1e-4, "cached re-init sparse values diverge");
+            }
+        }
+    }
+
+    #[test]
+    fn test_sparse_provider_offline_load() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Empty directory → no .onnx model.
+        match SparseEmbedProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(msg)) => {
+                assert!(msg.contains("onnx"), "expected missing-onnx message, got: {msg}");
+            }
+            other => panic!("expected InitFailed for empty dir, got {other:?}"),
+        }
+
+        // Directory with an ONNX file but no tokenizer files.
+        std::fs::write(dir.path().join("model.onnx"), b"not-a-real-onnx").unwrap();
+        match SparseEmbedProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(msg)) => {
+                assert!(
+                    msg.contains("tokenizer"),
+                    "expected missing-tokenizer message, got: {msg}"
+                );
+            }
+            other => panic!("expected InitFailed for missing tokenizer, got {other:?}"),
+        }
+
+        // Directory with an ONNX file + tokenizer files. The bytes are garbage,
+        // so ONNX Runtime must fail from the *local bytes* (never a network
+        // download) — proving the native offline path read the files off disk.
+        for name in [
+            "tokenizer.json",
+            "config.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+        ] {
+            std::fs::write(dir.path().join(name), b"{}").unwrap();
+        }
+        match SparseEmbedProvider::new_from_dir(dir.path()) {
+            Err(EmbeddingError::InitFailed(_)) => {}
+            other => panic!("expected InitFailed for garbage onnx bytes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sparse_provider_try_from_user_defined_invalid_bytes() {
+        let tokenizer = fastembed::TokenizerFiles {
+            tokenizer_file: b"{}".to_vec(),
+            config_file: b"{}".to_vec(),
+            special_tokens_map_file: b"{}".to_vec(),
+            tokenizer_config_file: b"{}".to_vec(),
+        };
+        // Garbage ONNX bytes must fail from the local bytes — never a network
+        // download — proving the offline user-defined sparse path (P90.2).
+        match SparseEmbedProvider::try_from_user_defined(b"not-an-onnx".to_vec(), tokenizer) {
+            Err(EmbeddingError::InitFailed(_)) => {}
+            other => panic!("expected InitFailed for garbage bytes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sparse_native_matches_fastembed() {
+        // Ensure the SPLADE model is available: downloads once into the crate-level
+        // HF cache on the first run, re-uses it offline afterwards.
+        let first = match SparseEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return, // no network and no cache — nothing to compare against
+        };
+        let texts: Vec<&str> = vec![
+            "native parity check",
+            "SPLADE offline embedding",
+            "bring your own model",
+        ];
+        let expected = first.embed_texts(&texts).unwrap();
+
+        let cache_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".fastembed_cache");
+        let snapshots_dir = cache_root.join("models--Qdrant--Splade_PP_en_v1").join("snapshots");
+        let snapshot = match std::fs::read_dir(&snapshots_dir).ok().and_then(|rd| {
+            rd.into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .find(|p| p.is_dir())
+        }) {
+            Some(p) => p,
+            None => return, // cache structure unexpected — nothing to compare against
+        };
+
+        // Build the native SBYO session directly from the cached snapshot files —
+        // no fastembed sparse session, no network.
+        let native = match SparseEmbedProvider::new_from_dir(&snapshot) {
+            Ok(p) => p,
+            Err(e) => panic!("native SBYO SPLADE load failed from cached model: {e}"),
+        };
+        let got = native.embed_texts(&texts).unwrap();
+
+        assert_eq!(got.len(), expected.len());
+        for (x, y) in got.iter().zip(expected.iter()) {
+            assert_eq!(x.indices, y.indices, "native sparse indices diverge from fastembed");
+            assert_eq!(x.values.len(), y.values.len());
+            for (p, q) in x.values.iter().zip(y.values.iter()) {
+                assert!(
+                    (p - q).abs() < 1e-4,
+                    "native sparse value {p} diverges from fastembed {q}"
+                );
             }
         }
     }
