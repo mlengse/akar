@@ -154,6 +154,9 @@ impl From<Bgem3EmbeddingOutput> for MultiEmbeddingOutput {
 pub enum EmbeddingModelChoice {
     /// Dense embedding model (e.g., BGE-small-en-v1.5, 384d).
     Dense(EmbeddingModel),
+    /// Quantized dense embedding model (e.g., `bge-small-en-v1.5-Q`, 384d;
+    /// `Gemma-300M-Q4` is 4-bit). Faster inference at slightly lower quality.
+    DenseQ(EmbeddingModel),
     /// Sparse embedding model (SPLADE++ or BGE-M3 sparse, vocabulary-sized).
     Sparse(SparseModel),
     /// BGE-M3 multi-modal model (dense + sparse + ColBERT, 1024d dense).
@@ -1125,12 +1128,17 @@ mod tests {
     #[test]
     fn test_model_choice_parse() {
         let dense = EmbeddingModelChoice::Dense(EmbeddingModel::BGESmallENV15);
+        let dense_q = EmbeddingModelChoice::DenseQ(EmbeddingModel::BGESmallENV15Q);
         let sparse = EmbeddingModelChoice::Sparse(SparseModel::SPLADEPPV1);
         let multi = EmbeddingModelChoice::Multi(Bgem3Model::BGEM3Q);
 
         match &dense {
             EmbeddingModelChoice::Dense(m) => assert_eq!(*m, EmbeddingModel::BGESmallENV15),
             _ => panic!("expected Dense"),
+        }
+        match &dense_q {
+            EmbeddingModelChoice::DenseQ(m) => assert_eq!(*m, EmbeddingModel::BGESmallENV15Q),
+            _ => panic!("expected DenseQ"),
         }
         match &sparse {
             EmbeddingModelChoice::Sparse(m) => assert_eq!(*m, SparseModel::SPLADEPPV1),
@@ -1474,5 +1482,129 @@ mod tests {
         // EmbedProviderConfig defaults must be usable even though non_exhaustive.
         let cfg = EmbedProviderConfig::default();
         assert_eq!(cfg.batch_size, DEFAULT_BATCH_SIZE);
+    }
+
+    // ── P90.6: offline bytes path + HF cache re-use per provider ──
+
+    #[test]
+    fn test_dense_provider_try_from_user_defined_invalid_bytes() {
+        let tokenizer = fastembed::TokenizerFiles {
+            tokenizer_file: b"{}".to_vec(),
+            config_file: b"{}".to_vec(),
+            special_tokens_map_file: b"{}".to_vec(),
+            tokenizer_config_file: b"{}".to_vec(),
+        };
+        // Garbage ONNX bytes must fail from the local bytes — never a network
+        // download — proving the offline user-defined path for the dense provider.
+        match FastEmbedProvider::try_from_user_defined(b"not-an-onnx".to_vec(), tokenizer, 384) {
+            Err(EmbeddingError::InitFailed(_)) => {}
+            Ok(_) => {}
+            other => panic!("expected InitFailed for garbage bytes, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_dense_cache_reuse_matches() {
+        let first = match FastEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let texts: Vec<&str> = vec!["reuse one", "reuse two", "reuse three"];
+        let a = first.embed_texts(&texts).unwrap();
+
+        // A second provider re-hydrated from the same HF model cache must
+        // produce identical output to the first instance.
+        let second = match FastEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let b = second.embed_texts(&texts).unwrap();
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            for (p, q) in x.iter().zip(y.iter()) {
+                assert!((p - q).abs() < 1e-4, "cached re-init diverges");
+            }
+        }
+    }
+
+    #[test]
+    fn test_sparse_cache_reuse_matches() {
+        let first = match SparseEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let texts: Vec<&str> = vec!["reuse one", "sparse reuse two", "cache hit"];
+        let a = first.embed_texts(&texts).unwrap();
+
+        let second = match SparseEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let b = second.embed_texts(&texts).unwrap();
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.indices, y.indices, "cached re-init sparse indices diverge");
+            assert_eq!(x.values.len(), y.values.len());
+            for (p, q) in x.values.iter().zip(y.values.iter()) {
+                assert!((p - q).abs() < 1e-4, "cached re-init sparse values diverge");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bgem3_cache_reuse_matches() {
+        let first = match Bgem3Provider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let texts: Vec<&str> = vec!["reuse one", "bgem3 cache two"];
+        let a = first.embed_texts(&texts).unwrap();
+
+        let second = match Bgem3Provider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let b = second.embed_texts(&texts).unwrap();
+        assert_eq!(a.dense.len(), b.dense.len());
+        assert_eq!(a.sparse.len(), b.sparse.len());
+        assert_eq!(a.colbert.len(), b.colbert.len());
+        for (x, y) in a.dense.iter().zip(b.dense.iter()) {
+            for (p, q) in x.iter().zip(y.iter()) {
+                assert!((p - q).abs() < 1e-4, "cached re-init dense diverges");
+            }
+        }
+    }
+
+    #[test]
+    fn test_rerank_provider_cache_reuse_stable_ranking() {
+        let first = match RerankProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let query = "What is the capital of France?";
+        let documents: Vec<&str> = vec![
+            "The sky is blue on a clear day.",
+            "Paris is the capital of France.",
+            "Cats make affectionate household pets.",
+        ];
+        let a = first.rerank(query, &documents).unwrap();
+        assert_eq!(a.len(), documents.len());
+        assert!(
+            a.windows(2).all(|w| w[0].score >= w[1].score),
+            "rerank results must be sorted by score descending"
+        );
+
+        // A second provider re-hydrated from the same HF cache must rank the
+        // documents identically.
+        let second = match RerankProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let b = second.rerank(query, &documents).unwrap();
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.index, y.index, "cached re-init rerank index diverges");
+            assert!((x.score - y.score).abs() < 1e-4, "cached re-init rerank score diverges");
+        }
     }
 }
