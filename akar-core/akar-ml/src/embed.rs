@@ -170,6 +170,42 @@ impl Default for EmbeddingModelChoice {
     }
 }
 
+impl EmbeddingModelChoice {
+    /// The dense model selected by this choice, if any.
+    ///
+    /// Returns the wrapped [`EmbeddingModel`] for the [`Dense`] and [`DenseQ`]
+    /// variants (both resolve to a dense provider; `DenseQ` selects a quantized
+    /// checkpoint such as `bge-small-en-v1.5-Q`). Sparse and multi-modal variants
+    /// have no dense model and return `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use akar_ml::embed::EmbeddingModelChoice;
+    /// use fastembed::{EmbeddingModel, SparseModel};
+    ///
+    /// let q = EmbeddingModelChoice::DenseQ(EmbeddingModel::BGESmallENV15Q);
+    /// assert_eq!(q.dense_model(), Some(&EmbeddingModel::BGESmallENV15Q));
+    /// assert_eq!(
+    ///     EmbeddingModelChoice::default().dense_model(),
+    ///     Some(&EmbeddingModel::BGESmallENV15)
+    /// );
+    /// assert_eq!(
+    ///     EmbeddingModelChoice::Sparse(SparseModel::SPLADEPPV1).dense_model(),
+    ///     None
+    /// );
+    /// ```
+    ///
+    /// [`Dense`]: EmbeddingModelChoice::Dense
+    /// [`DenseQ`]: EmbeddingModelChoice::DenseQ
+    pub fn dense_model(&self) -> Option<&EmbeddingModel> {
+        match self {
+            Self::Dense(model) | Self::DenseQ(model) => Some(model),
+            Self::Sparse(_) | Self::Multi(_) => None,
+        }
+    }
+}
+
 // ── Dense embedding provider (P89.1) ────────────────────────────────
 
 /// A thread-safe wrapper around fastembed's [`TextEmbedding`].
@@ -234,12 +270,64 @@ impl Default for EmbedProviderConfig {
     }
 }
 
+impl EmbedProviderConfig {
+    /// Default configuration for a quantized dense model.
+    ///
+    /// Selects `bge-small-en-v1.5-Q` (`Qdrant/bge-small-en-v1.5-onnx-Q`,
+    /// `model_optimized.onnx`): the INT8 quantized release of the default model,
+    /// still 384 dims but faster inference at slightly lower quality than
+    /// [`EmbeddingModel::BGESmallENV15`]. The session loads lazily, so no
+    /// download happens until the first embed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use akar_ml::embed::{EmbedProviderConfig, FastEmbedProvider};
+    /// use fastembed::EmbeddingModel;
+    ///
+    /// let config = EmbedProviderConfig::dense_q();
+    /// assert_eq!(config.model, EmbeddingModel::BGESmallENV15Q);
+    /// assert_eq!(config.batch_size, 256);
+    ///
+    /// let provider = FastEmbedProvider::try_new(config).expect("provider must build");
+    /// assert_eq!(provider.dimensions(), 384);
+    /// assert_eq!(provider.model_name(), "BGESmallENV15Q");
+    /// ```
+    pub fn dense_q() -> Self {
+        Self {
+            model: EmbeddingModel::BGESmallENV15Q,
+            ..Self::default()
+        }
+    }
+}
+
 impl FastEmbedProvider {
     /// Create a provider with default model (`BGE-small-en-v1.5`, 384 dims).
     ///
     /// Downloads the model on first call; subsequent calls use the cached copy.
     pub fn try_default() -> Result<Self, EmbeddingError> {
         Self::try_new(EmbedProviderConfig::default())
+    }
+
+    /// Create a provider with the default quantized dense model
+    /// (`bge-small-en-v1.5-Q`, 384 dims).
+    ///
+    /// Same as [`Self::try_default`] but selects [`EmbeddingModel::BGESmallENV15Q`],
+    /// the INT8 quantized checkpoint (`Qdrant/bge-small-en-v1.5-onnx-Q`): faster
+    /// inference at slightly lower quality. Downloads the model on first embed;
+    /// subsequent calls use the cached copy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use akar_ml::embed::FastEmbedProvider;
+    ///
+    /// let provider = FastEmbedProvider::try_q_default().expect("provider must build");
+    /// assert_eq!(provider.dimensions(), 384);
+    /// assert_eq!(provider.model_name(), "BGESmallENV15Q");
+    /// ```
+    pub fn try_q_default() -> Result<Self, EmbeddingError> {
+        Self::try_new(EmbedProviderConfig::dense_q())
     }
 
     /// Create a provider with a specific model configuration.
@@ -1230,6 +1318,36 @@ mod tests {
         // Default is Dense(BGESmallENV15)
         let default = EmbeddingModelChoice::default();
         assert!(matches!(default, EmbeddingModelChoice::Dense(_)));
+    }
+
+    #[test]
+    fn test_model_choice_dense_model_selector() {
+        let dense = EmbeddingModelChoice::Dense(EmbeddingModel::BGESmallENV15);
+        let dense_q = EmbeddingModelChoice::DenseQ(EmbeddingModel::BGESmallENV15Q);
+        let sparse = EmbeddingModelChoice::Sparse(SparseModel::SPLADEPPV1);
+        let multi = EmbeddingModelChoice::Multi(Bgem3Model::BGEM3Q);
+
+        assert_eq!(dense.dense_model(), Some(&EmbeddingModel::BGESmallENV15));
+        assert_eq!(dense_q.dense_model(), Some(&EmbeddingModel::BGESmallENV15Q));
+        assert_eq!(sparse.dense_model(), None);
+        assert_eq!(multi.dense_model(), None);
+    }
+
+    #[test]
+    fn test_provider_config_dense_q_default() {
+        let config = EmbedProviderConfig::dense_q();
+        assert_eq!(config.model, EmbeddingModel::BGESmallENV15Q);
+        assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
+        assert!(config.cache_dir.is_none());
+        assert!(config.max_length.is_none());
+        assert!(config.intra_threads.is_none());
+    }
+
+    #[test]
+    fn test_provider_try_q_default() {
+        let provider = FastEmbedProvider::try_q_default().expect("Q provider must build");
+        assert_eq!(provider.dimensions(), 384);
+        assert_eq!(provider.model_name(), "BGESmallENV15Q");
     }
 
     // ── Sparse provider (P89.2) ──
