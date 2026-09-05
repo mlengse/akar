@@ -468,6 +468,8 @@ pub struct SparseProviderConfig {
     pub max_length: Option<usize>,
     /// Number of intra-op threads. `None` uses ONNX default.
     pub intra_threads: Option<usize>,
+    /// ONNX batch size for each forward pass. `0` uses the library default (256).
+    pub batch_size: usize,
 }
 
 impl Default for SparseProviderConfig {
@@ -477,6 +479,7 @@ impl Default for SparseProviderConfig {
             cache_dir: None,
             max_length: None,
             intra_threads: None,
+            batch_size: DEFAULT_BATCH_SIZE,
         }
     }
 }
@@ -494,12 +497,14 @@ struct SparseEmbedInner {
     model_name: String,
     session: parking_lot::Mutex<Option<SparseTextEmbedding>>,
     init_options: SparseInitOptions,
+    batch_size: usize,
 }
 
 impl std::fmt::Debug for SparseEmbedInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SparseEmbedInner")
             .field("model_name", &self.model_name)
+            .field("batch_size", &self.batch_size)
             .finish_non_exhaustive()
     }
 }
@@ -525,25 +530,50 @@ impl SparseEmbedProvider {
             opts = opts.with_intra_threads(threads);
         }
 
+        let batch_size = if config.batch_size == 0 {
+            DEFAULT_BATCH_SIZE
+        } else {
+            config.batch_size
+        };
+
         Ok(Self {
             inner: Arc::new(SparseEmbedInner {
                 model_name,
                 session: parking_lot::Mutex::new(None),
                 init_options: opts,
+                batch_size,
             }),
         })
     }
 
     /// Compute sparse embeddings for a batch of texts.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<Vec<SparseEmbedding>, EmbeddingError> {
+        self.embed_texts_batched(texts, self.inner.batch_size)
+    }
+
+    /// Compute sparse embeddings with an explicit batch size.
+    ///
+    /// Splits `texts` into chunks of `batch_size` and embeds each through the
+    /// shared ONNX session. A `batch_size` of `0` falls back to the configured
+    /// default. Results are identical to [`Self::embed_texts`].
+    pub fn embed_texts_batched(
+        &self,
+        texts: &[&str],
+        batch_size: usize,
+    ) -> Result<Vec<SparseEmbedding>, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
             SparseTextEmbedding::try_new(self.inner.init_options.clone())
                 .expect("failed to initialize sparse embedding model — is ONNX Runtime available?")
         });
 
+        let bs = if batch_size == 0 {
+            self.inner.batch_size
+        } else {
+            batch_size
+        };
         session
-            .embed(texts, None)
+            .embed(texts, Some(bs))
             .map(|v| v.into_iter().map(SparseEmbedding::from).collect())
             .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
     }
@@ -572,6 +602,8 @@ pub struct Bgem3ProviderConfig {
     pub max_length: Option<usize>,
     /// Number of intra-op threads. `None` uses ONNX default.
     pub intra_threads: Option<usize>,
+    /// ONNX batch size for each forward pass. `0` uses the library default (256).
+    pub batch_size: usize,
 }
 
 impl Default for Bgem3ProviderConfig {
@@ -581,6 +613,7 @@ impl Default for Bgem3ProviderConfig {
             cache_dir: None,
             max_length: None,
             intra_threads: None,
+            batch_size: DEFAULT_BATCH_SIZE,
         }
     }
 }
@@ -599,6 +632,7 @@ struct Bgem3Inner {
     dense_dimensions: usize,
     session: parking_lot::Mutex<Option<fastembed::Bgem3Embedding>>,
     init_options: Bgem3InitOptions,
+    batch_size: usize,
 }
 
 impl std::fmt::Debug for Bgem3Inner {
@@ -606,6 +640,7 @@ impl std::fmt::Debug for Bgem3Inner {
         f.debug_struct("Bgem3Inner")
             .field("model_name", &self.model_name)
             .field("dense_dimensions", &self.dense_dimensions)
+            .field("batch_size", &self.batch_size)
             .finish_non_exhaustive()
     }
 }
@@ -634,12 +669,19 @@ impl Bgem3Provider {
             opts = opts.with_intra_threads(threads);
         }
 
+        let batch_size = if config.batch_size == 0 {
+            DEFAULT_BATCH_SIZE
+        } else {
+            config.batch_size
+        };
+
         Ok(Self {
             inner: Arc::new(Bgem3Inner {
                 model_name,
                 dense_dimensions,
                 session: parking_lot::Mutex::new(None),
                 init_options: opts,
+                batch_size,
             }),
         })
     }
@@ -666,6 +708,7 @@ impl Bgem3Provider {
                 dense_dimensions: 1024,
                 session: parking_lot::Mutex::new(Some(embedding)),
                 init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
             }),
         })
     }
@@ -702,20 +745,39 @@ impl Bgem3Provider {
                 dense_dimensions: 1024,
                 session: parking_lot::Mutex::new(Some(embedding)),
                 init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
             }),
         })
     }
 
     /// Compute dense + sparse + ColBERT embeddings in a single pass.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
+        self.embed_texts_batched(texts, self.inner.batch_size)
+    }
+
+    /// Compute dense + sparse + ColBERT embeddings with an explicit batch size.
+    ///
+    /// Splits `texts` into chunks of `batch_size` and embeds each through the
+    /// shared ONNX session. A `batch_size` of `0` falls back to the configured
+    /// default. Results are identical to [`Self::embed_texts`].
+    pub fn embed_texts_batched(
+        &self,
+        texts: &[&str],
+        batch_size: usize,
+    ) -> Result<MultiEmbeddingOutput, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
             fastembed::Bgem3Embedding::try_new(self.inner.init_options.clone())
                 .expect("failed to initialize BGE-M3 model — is ONNX Runtime available?")
         });
 
+        let bs = if batch_size == 0 {
+            self.inner.batch_size
+        } else {
+            batch_size
+        };
         session
-            .embed(texts, None)
+            .embed(texts, Some(bs))
             .map(MultiEmbeddingOutput::from)
             .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
     }
@@ -739,7 +801,7 @@ impl Bgem3Provider {
 // ── Cross-encoder reranking provider ─────────────────────────────────
 
 /// Configuration for creating a [`RerankProvider`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RerankProviderConfig {
     /// The reranker model to use.
@@ -750,6 +812,20 @@ pub struct RerankProviderConfig {
     pub max_length: Option<usize>,
     /// Number of intra-op threads. `None` uses ONNX default.
     pub intra_threads: Option<usize>,
+    /// ONNX batch size for each forward pass. `0` uses the library default (256).
+    pub batch_size: usize,
+}
+
+impl Default for RerankProviderConfig {
+    fn default() -> Self {
+        Self {
+            model: RerankerModel::default(),
+            cache_dir: None,
+            max_length: None,
+            intra_threads: None,
+            batch_size: DEFAULT_BATCH_SIZE,
+        }
+    }
 }
 
 /// A thread-safe wrapper around fastembed's [`TextRerank`].
@@ -766,12 +842,14 @@ struct RerankInner {
     model_name: String,
     session: parking_lot::Mutex<Option<TextRerank>>,
     init_options: RerankInitOptions,
+    batch_size: usize,
 }
 
 impl std::fmt::Debug for RerankInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RerankInner")
             .field("model_name", &self.model_name)
+            .field("batch_size", &self.batch_size)
             .finish_non_exhaustive()
     }
 }
@@ -797,11 +875,18 @@ impl RerankProvider {
             opts = opts.with_intra_threads(threads);
         }
 
+        let batch_size = if config.batch_size == 0 {
+            DEFAULT_BATCH_SIZE
+        } else {
+            config.batch_size
+        };
+
         Ok(Self {
             inner: Arc::new(RerankInner {
                 model_name,
                 session: parking_lot::Mutex::new(None),
                 init_options: opts,
+                batch_size,
             }),
         })
     }
@@ -826,6 +911,7 @@ impl RerankProvider {
                 model_name,
                 session: parking_lot::Mutex::new(Some(reranker)),
                 init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
             }),
         })
     }
@@ -860,6 +946,7 @@ impl RerankProvider {
                 model_name,
                 session: parking_lot::Mutex::new(Some(reranker)),
                 init_options: Default::default(),
+                batch_size: DEFAULT_BATCH_SIZE,
             }),
         })
     }
@@ -875,7 +962,7 @@ impl RerankProvider {
         });
 
         session
-            .rerank(query, documents, false, None)
+            .rerank(query, documents, false, Some(self.inner.batch_size))
             .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
     }
 
@@ -888,7 +975,7 @@ impl RerankProvider {
         });
 
         session
-            .rerank(query, documents, true, None)
+            .rerank(query, documents, true, Some(self.inner.batch_size))
             .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
     }
 
@@ -1065,6 +1152,7 @@ mod tests {
     fn test_sparse_provider_config_default() {
         let config = SparseProviderConfig::default();
         assert_eq!(config.model, SparseModel::SPLADEPPV1);
+        assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
     }
 
     #[test]
@@ -1073,18 +1161,49 @@ mod tests {
         assert_send_sync::<SparseEmbedProvider>();
     }
 
+    #[test]
+    fn test_sparse_batched_matches_default() {
+        let provider = match SparseEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let texts: Vec<&str> = vec!["hello", "world", "sparse", "embedding"];
+        let default = provider.embed_texts(&texts).unwrap();
+        let batched = provider.embed_texts_batched(&texts, 2).unwrap();
+        assert_eq!(default.len(), batched.len());
+        for (a, b) in default.iter().zip(batched.iter()) {
+            assert_eq!(a.indices, b.indices);
+            assert_eq!(a.values.len(), b.values.len());
+        }
+    }
+
     // ── BGE-M3 provider (P89.2) ──
 
     #[test]
     fn test_bgem3_provider_config_default() {
         let config = Bgem3ProviderConfig::default();
         assert_eq!(config.model, Bgem3Model::BGEM3Q);
+        assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
     }
 
     #[test]
     fn test_bgem3_provider_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Bgem3Provider>();
+    }
+
+    #[test]
+    fn test_bgem3_batched_matches_default() {
+        let provider = match Bgem3Provider::try_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let texts: Vec<&str> = vec!["hello", "world", "bge-m3"];
+        let default = provider.embed_texts(&texts).unwrap();
+        let batched = provider.embed_texts_batched(&texts, 2).unwrap();
+        assert_eq!(default.dense.len(), batched.dense.len());
+        assert_eq!(default.sparse.len(), batched.sparse.len());
+        assert_eq!(default.colbert.len(), batched.colbert.len());
     }
 
     #[test]
@@ -1160,6 +1279,7 @@ mod tests {
         let config = RerankProviderConfig::default();
         // Default model is whatever RerankerModel::default() is
         assert!(config.cache_dir.is_none());
+        assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
     }
 
     #[test]
