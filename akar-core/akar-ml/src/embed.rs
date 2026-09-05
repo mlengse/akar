@@ -27,9 +27,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fastembed::{
-    Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, RerankInitOptions, RerankResult, RerankerModel,
-    SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank,
-    UserDefinedEmbeddingModel,
+    Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, Pooling, RerankInitOptions, RerankResult,
+    RerankerModel, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank,
 };
 
 use crate::sbyo::SbyoLoad;
@@ -256,6 +255,9 @@ pub struct EmbedProviderConfig {
     pub intra_threads: Option<usize>,
     /// ONNX batch size for each forward pass. `0` uses the library default (256).
     pub batch_size: usize,
+    /// Pooling strategy applied after the last hidden state. `None` keeps the
+    /// model's default (CLS for the BGE family, mean for MiniLM/Nomic/etc.).
+    pub pooling: Option<Pooling>,
 }
 
 impl Default for EmbedProviderConfig {
@@ -266,6 +268,7 @@ impl Default for EmbedProviderConfig {
             max_length: None,
             intra_threads: None,
             batch_size: DEFAULT_BATCH_SIZE,
+            pooling: None,
         }
     }
 }
@@ -298,6 +301,26 @@ impl EmbedProviderConfig {
             model: EmbeddingModel::BGESmallENV15Q,
             ..Self::default()
         }
+    }
+
+    /// Configures the pooling strategy applied when embedding.
+    ///
+    /// Honored by the offline path ([`FastEmbedProvider::try_from_user_defined_with_config`]
+    /// and [`FastEmbedProvider::new_from_dir_with_config`]). `None` keeps the model's
+    /// default pooling (CLS for the BGE family, mean for MiniLM/Nomic family).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use akar_ml::embed::EmbedProviderConfig;
+    /// use fastembed::Pooling;
+    ///
+    /// let config = EmbedProviderConfig::default().with_pooling(Pooling::Mean);
+    /// assert!(config.pooling == Some(Pooling::Mean));
+    /// ```
+    pub fn with_pooling(mut self, pooling: Pooling) -> Self {
+        self.pooling = Some(pooling);
+        self
     }
 }
 
@@ -368,18 +391,57 @@ impl FastEmbedProvider {
     /// Create a provider from user-defined ONNX model bytes (offline/air-gapped).
     ///
     /// No HuggingFace Hub download required. The caller supplies the ONNX model
-    /// file bytes and tokenizer files directly.
+    /// file bytes and tokenizer files directly. Equivalent to
+    /// [`Self::try_from_user_defined_with_config`] with an `EmbedProviderConfig::default()`.
     pub fn try_from_user_defined(
         onnx_bytes: Vec<u8>,
         tokenizer_files: fastembed::TokenizerFiles,
         dimensions: usize,
     ) -> Result<Self, EmbeddingError> {
-        let user_model = fastembed::UserDefinedEmbeddingModel::new(onnx_bytes, tokenizer_files);
+        Self::try_from_user_defined_with_config(
+            onnx_bytes,
+            tokenizer_files,
+            dimensions,
+            &EmbedProviderConfig::default(),
+        )
+    }
+
+    /// Create a provider from user-defined ONNX model bytes (offline/air-gapped),
+    /// honoring the pooling strategy from `config`.
+    ///
+    /// No HuggingFace Hub download required. The caller supplies the ONNX model
+    /// file bytes and tokenizer files directly. `config.model`, `cache_dir`,
+    /// `max_length`, and `intra_threads` are ignored on this path; only
+    /// [`EmbedProviderConfig::pooling`] takes effect.
+    pub fn try_from_user_defined_with_config(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+        dimensions: usize,
+        config: &EmbedProviderConfig,
+    ) -> Result<Self, EmbeddingError> {
+        Self::build_user_defined(
+            onnx_bytes,
+            tokenizer_files,
+            config.pooling.clone(),
+            "user-defined".to_string(),
+            dimensions,
+        )
+    }
+
+    fn build_user_defined(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+        pooling: Option<Pooling>,
+        model_name: String,
+        dimensions: usize,
+    ) -> Result<Self, EmbeddingError> {
+        let mut user_model = fastembed::UserDefinedEmbeddingModel::new(onnx_bytes, tokenizer_files);
+        if let Some(pooling) = pooling {
+            user_model = user_model.with_pooling(pooling);
+        }
 
         let embedding = TextEmbedding::try_new_from_user_defined(user_model, Default::default())
             .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
-
-        let model_name = "user-defined".to_string();
 
         Ok(Self {
             inner: Arc::new(FastEmbedInner {
@@ -409,27 +471,42 @@ impl FastEmbedProvider {
     /// ONNX file or a required tokenizer file is missing, or the ONNX session
     /// cannot be built from the given bytes.
     pub fn new_from_dir(model_dir: impl AsRef<Path>, dimensions: usize) -> Result<Self, EmbeddingError> {
+        Self::new_from_dir_with_config(model_dir, dimensions, &EmbedProviderConfig::default())
+    }
+
+    /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped),
+    /// honoring the pooling strategy from `config`.
+    ///
+    /// The model is loaded entirely from a local directory — no HuggingFace Hub
+    /// download is performed. The directory must contain a `.onnx` file and the
+    /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
+    /// and `tokenizer_config.json`. `config.model`, `cache_dir`, `max_length`, and
+    /// `intra_threads` are ignored on this path; only
+    /// [`EmbedProviderConfig::pooling`] takes effect.
+    ///
+    /// `dimensions` is the latent embedding dimensionality of the ONNX model's
+    /// output (e.g. 384 for BGE-small-en-v1.5). It cannot be reliably inferred
+    /// from the opaque session, so the caller supplies it.
+    pub fn new_from_dir_with_config(
+        model_dir: impl AsRef<Path>,
+        dimensions: usize,
+        config: &EmbedProviderConfig,
+    ) -> Result<Self, EmbeddingError> {
         let dir = model_dir.as_ref();
 
         let model = SbyoLoad::from_dir(dir)?;
-        let user_model = UserDefinedEmbeddingModel::new(model.onnx, model.tokenizer);
-        let embedding = TextEmbedding::try_new_from_user_defined(user_model, Default::default())
-            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
-
         let model_name = dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "user-defined".to_string());
 
-        Ok(Self {
-            inner: Arc::new(FastEmbedInner {
-                model_name,
-                dimensions,
-                session: parking_lot::Mutex::new(Some(embedding)),
-                init_options: Default::default(),
-                batch_size: DEFAULT_BATCH_SIZE,
-            }),
-        })
+        Self::build_user_defined(
+            model.onnx,
+            model.tokenizer,
+            config.pooling.clone(),
+            model_name,
+            dimensions,
+        )
     }
 
     /// Compute dense embeddings for a batch of texts.
@@ -1723,6 +1800,102 @@ mod tests {
             Ok(_) => {}
             other => panic!("expected InitFailed for garbage bytes, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_pooling_config_applied_to_dense_offline() {
+        // Ensure the BGE-small model is available: downloads once into the crate
+        // level HF cache on the first run, re-uses it offline afterwards.
+        let _ = match FastEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return, // no network and no cache — nothing to compare against
+        };
+        let snapshot = match std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".fastembed_cache")
+                .join("models--Xenova--bge-small-en-v1.5")
+                .join("snapshots"),
+        )
+        .ok()
+        .and_then(|rd| {
+            rd.into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .find(|p| p.is_dir())
+        }) {
+            Some(p) => p,
+            None => return, // cache structure unexpected — nothing to compare against
+        };
+
+        let read_or = |name: &str| std::fs::read(snapshot.join(name)).ok();
+        let onnx_path = if snapshot.join("onnx").join("model.onnx").is_file() {
+            snapshot.join("onnx").join("model.onnx")
+        } else {
+            snapshot.join("model.onnx")
+        };
+        let bytes = match (
+            std::fs::read(&onnx_path).ok(),
+            read_or("tokenizer.json"),
+            read_or("config.json"),
+            read_or("special_tokens_map.json"),
+            read_or("tokenizer_config.json"),
+        ) {
+            (
+                Some(onnx),
+                Some(tokenizer_file),
+                Some(config_file),
+                Some(special_tokens_map_file),
+                Some(tokenizer_config_file),
+            ) => (
+                onnx,
+                fastembed::TokenizerFiles {
+                    tokenizer_file,
+                    config_file,
+                    special_tokens_map_file,
+                    tokenizer_config_file,
+                },
+            ),
+            _ => return, // tokenizer/ONNX file missing — nothing to build a session from
+        };
+
+        let texts: Vec<&str> = vec!["pooling offline mean", "pooling offline cls"];
+
+        // None → model default (CLS for BGE-small) must still produce valid embeddings.
+        let none_cfg = EmbedProviderConfig::default();
+        let mean_cfg = EmbedProviderConfig::default().with_pooling(Pooling::Mean);
+        let cls_cfg = EmbedProviderConfig::default().with_pooling(Pooling::Cls);
+
+        let mean_emb =
+            FastEmbedProvider::try_from_user_defined_with_config(bytes.0.clone(), bytes.1.clone(), 384, &mean_cfg)
+                .map(|p| p.embed_texts(&texts))
+                .expect("offline user-defined path with mean pooling must initialize")
+                .expect("embedding with mean pooling must compute");
+        let cls_emb =
+            FastEmbedProvider::try_from_user_defined_with_config(bytes.0.clone(), bytes.1.clone(), 384, &cls_cfg)
+                .map(|p| p.embed_texts(&texts))
+                .expect("offline user-defined path with cls pooling must initialize")
+                .expect("embedding with cls pooling must compute");
+        let none_emb = FastEmbedProvider::try_from_user_defined_with_config(bytes.0, bytes.1, 384, &none_cfg)
+            .map(|p| p.embed_texts(&texts))
+            .expect("offline user-defined path with default pooling must initialize")
+            .expect("embedding with default pooling must compute");
+
+        for emb in [&mean_emb, &cls_emb, &none_emb] {
+            assert_eq!(emb.len(), texts.len(), "one embedding per input text");
+            for v in emb {
+                assert_eq!(v.len(), 384, "BGE-small output must be 384-dimensional");
+                assert!(
+                    v.iter().all(|x| x.is_finite()),
+                    "embedding must contain only finite values"
+                );
+            }
+        }
+
+        // The pooling strategy must change the output — CLS vs mean vectors differ.
+        assert_ne!(
+            mean_emb[0], cls_emb[0],
+            "mean and cls pooling must not produce identical embeddings"
+        );
     }
 
     #[test]
