@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(ml) — P90.1: reusable SBYO offline-load helper `SbyoModel` + `SbyoLoad::from_dir` (2026-09-06)** — new `pub(crate)` module `sbyo` in `akar-ml/src/sbyo.rs` (gated behind `onnx-embedding`): `SbyoModel { onnx: Vec<u8>, tokenizer: TokenizerFiles }` + `SbyoLoad::from_dir(dir)` reading `tokenizer.json`/`config.json`/`special_tokens_map.json`/`tokenizer_config.json` + ONNX; `find_onnx_file` pulled to `pub(crate)` (prefers plain `.onnx` over `*_int8.onnx`) for cross-provider reuse (basis P90.2–P90.5). 4 new unit tests. Gate `test [akar-core]` unchanged **1,964 total / 0 ignored / 1,964 passed / 0 failed**; fmt + clippy `-D warnings` clean. — `21229b4`
+
+### Changed
+
+- **refactor(ml) — P90.1: dense `FastEmbedProvider::new_from_dir` delegates to `SbyoLoad::from_dir` (2026-09-06)** — load logic moved from `embed.rs` (`new_from_dir`, `find_onnx_file`, `read_required_token_file`) into the SBYO helper with identical read order + error messages (no behavior change); `test_new_from_dir_prefers_plain_onnx` updated to use `crate::sbyo::find_onnx_file`. — `21229b4`
+
 ## [0.1.20] - 2026-09-04
 
 ### Added

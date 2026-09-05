@@ -28,9 +28,11 @@ use std::sync::Arc;
 
 use fastembed::{
     Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, RerankInitOptions, RerankResult, RerankerModel,
-    SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank, TokenizerFiles,
+    SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank,
     UserDefinedEmbeddingModel,
 };
+
+use crate::sbyo::SbyoLoad;
 
 /// Default ONNX batch size used when the caller does not specify one.
 const DEFAULT_BATCH_SIZE: usize = 256;
@@ -317,25 +319,8 @@ impl FastEmbedProvider {
     pub fn new_from_dir(model_dir: impl AsRef<Path>, dimensions: usize) -> Result<Self, EmbeddingError> {
         let dir = model_dir.as_ref();
 
-        // Locate the ONNX model file, preferring an un-quantized model when both exist.
-        let onnx_path = find_onnx_file(dir)?;
-        let onnx_bytes = std::fs::read(&onnx_path).map_err(|e| {
-            EmbeddingError::InitFailed(format!("failed to read ONNX model {}: {e}", onnx_path.display()))
-        })?;
-
-        let tokenizer_file = read_required_token_file(dir, "tokenizer.json")?;
-        let config_file = read_required_token_file(dir, "config.json")?;
-        let special_tokens_map_file = read_required_token_file(dir, "special_tokens_map.json")?;
-        let tokenizer_config_file = read_required_token_file(dir, "tokenizer_config.json")?;
-
-        let tokenizer_files = TokenizerFiles {
-            tokenizer_file,
-            config_file,
-            special_tokens_map_file,
-            tokenizer_config_file,
-        };
-
-        let user_model = UserDefinedEmbeddingModel::new(onnx_bytes, tokenizer_files);
+        let model = SbyoLoad::from_dir(dir)?;
+        let user_model = UserDefinedEmbeddingModel::new(model.onnx, model.tokenizer);
         let embedding = TextEmbedding::try_new_from_user_defined(user_model, Default::default())
             .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
 
@@ -687,42 +672,6 @@ impl Bgem3Provider {
     pub fn model_name(&self) -> &str {
         &self.inner.model_name
     }
-}
-
-/// Locate the ONNX model file in a local model directory.
-///
-/// Prefers a non-quantized `*.onnx` file over a quantized `*_int8.onnx` when both
-/// are present. Returns [`EmbeddingError::InitFailed`] when no `.onnx` file exists.
-fn find_onnx_file(dir: &Path) -> Result<std::path::PathBuf, EmbeddingError> {
-    let mut fallback = None;
-    for entry in std::fs::read_dir(dir)
-        .map_err(|e| EmbeddingError::InitFailed(format!("cannot read model directory {}: {e}", dir.display())))?
-    {
-        let path = entry
-            .map_err(|e| EmbeddingError::InitFailed(format!("cannot read model directory entry: {e}")))?
-            .path();
-        if path.extension().is_some_and(|ext| ext == "onnx") {
-            if path.to_string_lossy().ends_with("_int8.onnx") {
-                fallback.get_or_insert(path);
-            } else {
-                return Ok(path);
-            }
-        }
-    }
-    fallback.ok_or_else(|| {
-        EmbeddingError::InitFailed(format!(
-            "no .onnx model found in {} (expected a plain .onnx or *_int8.onnx file)",
-            dir.display()
-        ))
-    })
-}
-
-/// Read a required tokenizer file from a local model directory.
-fn read_required_token_file(dir: &Path, name: &str) -> Result<Vec<u8>, EmbeddingError> {
-    let path = dir.join(name);
-    std::fs::read(&path).map_err(|e| {
-        EmbeddingError::InitFailed(format!("missing or unreadable tokenizer file {}: {e}", path.display()))
-    })
 }
 
 // ── Cross-encoder reranking provider ─────────────────────────────────
@@ -1092,8 +1041,8 @@ mod tests {
         std::fs::write(dir.path().join("model_int8.onnx"), b"int8").unwrap();
         std::fs::write(dir.path().join("model.onnx"), b"plain").unwrap();
 
-        // Locate the plain .onnx via find_onnx_file (private helper, same module).
-        let found = find_onnx_file(dir.path()).unwrap();
+        // Locate the plain .onnx via find_onnx_file (pub(crate) helper in sbyo).
+        let found = crate::sbyo::find_onnx_file(dir.path()).unwrap();
         assert_eq!(found.file_name().unwrap(), "model.onnx");
         assert!(!found.to_string_lossy().ends_with("_int8.onnx"));
     }

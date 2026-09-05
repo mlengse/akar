@@ -15,6 +15,9 @@ pub mod lstm;
 #[cfg(feature = "onnx-embedding")]
 pub mod embed;
 
+#[cfg(feature = "onnx-embedding")]
+pub(crate) mod sbyo;
+
 #[cfg(feature = "extension")]
 pub mod extension;
 
