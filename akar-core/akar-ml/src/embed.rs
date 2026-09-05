@@ -1350,6 +1350,32 @@ mod tests {
         assert_eq!(provider.model_name(), "BGESmallENV15Q");
     }
 
+    // Real-model embed through the quantized *Q path: triggers a lazy session
+    // (downloads Qdrant/bge-small-en-v1.5-onnx-Q into the local HF cache on first
+    // run) and asserts the Q variant yields 384-dim finite embeddings end-to-end.
+    #[test]
+    fn test_provider_q_real_embed_dimension() {
+        let provider = match FastEmbedProvider::try_q_default() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        assert_eq!(provider.dimensions(), 384);
+        assert_eq!(provider.model_name(), "BGESmallENV15Q");
+
+        let texts: Vec<&str> = vec![
+            "hello from the quantized model",
+            "akar graph database embedding",
+            "bge-small english quantized",
+            "last sample for dimension check",
+        ];
+        let embeddings = provider.embed_texts(&texts).expect("Q model embeds must work");
+        assert_eq!(embeddings.len(), texts.len());
+        for v in &embeddings {
+            assert_eq!(v.len(), 384, "each Q embedding must be 384-dimensional");
+            assert!(v.iter().all(|x| x.is_finite()), "Q embedding values must be finite");
+        }
+    }
+
     // ── Sparse provider (P89.2) ──
 
     #[test]
