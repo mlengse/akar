@@ -277,6 +277,13 @@ pub struct EmbedProviderConfig {
     /// Quantization applied to the model weights on load. `None` keeps the
     /// model's default (no quantization).
     pub quantization: Option<QuantizationMode>,
+    /// Execution providers for the ONNX session, in registration order. Empty
+    /// (the default) keeps ORT's CPU provider. Pass the dispatch from
+    /// [`directml_execution_provider`] to prefer the DirectML GPU provider on
+    /// Windows. Honored by [`FastEmbedProvider::try_new`] and the config-bearing
+    /// offline paths (`try_from_user_defined_with_config` /
+    /// `new_from_dir_with_config`).
+    pub execution_providers: Vec<ort::ep::ExecutionProviderDispatch>,
 }
 
 impl Default for EmbedProviderConfig {
@@ -289,6 +296,7 @@ impl Default for EmbedProviderConfig {
             batch_size: DEFAULT_BATCH_SIZE,
             pooling: None,
             quantization: None,
+            execution_providers: Default::default(),
         }
     }
 }
@@ -363,6 +371,16 @@ impl EmbedProviderConfig {
         self.quantization = Some(quantization);
         self
     }
+
+    /// Configures the execution providers used when the ONNX session is built.
+    ///
+    /// Takes the providers in registration order; an empty list keeps ORT's
+    /// default CPU provider. Combine with [`directml_execution_provider`] to
+    /// prefer the DirectML GPU provider on Windows.
+    pub fn with_execution_providers(mut self, execution_providers: Vec<ort::ep::ExecutionProviderDispatch>) -> Self {
+        self.execution_providers = execution_providers;
+        self
+    }
 }
 
 impl FastEmbedProvider {
@@ -413,6 +431,7 @@ impl FastEmbedProvider {
         if let Some(threads) = config.intra_threads {
             opts = opts.with_intra_threads(threads);
         }
+        opts = opts.with_execution_providers(config.execution_providers);
 
         let batch_size = if config.batch_size == 0 {
             DEFAULT_BATCH_SIZE
@@ -456,8 +475,9 @@ impl FastEmbedProvider {
     /// No HuggingFace Hub download required. The caller supplies the ONNX model
     /// file bytes and tokenizer files directly. `config.model`, `cache_dir`,
     /// `max_length`, `intra_threads`, and `batch_size` are ignored on this path;
-    /// only [`EmbedProviderConfig::pooling`] and
-    /// [`EmbedProviderConfig::quantization`] take effect.
+    /// only [`EmbedProviderConfig::pooling`],
+    /// [`EmbedProviderConfig::quantization`], and
+    /// [`EmbedProviderConfig::execution_providers`] take effect.
     pub fn try_from_user_defined_with_config(
         onnx_bytes: Vec<u8>,
         tokenizer_files: fastembed::TokenizerFiles,
@@ -493,8 +513,11 @@ impl FastEmbedProvider {
             user_model = user_model.with_quantization(quantization);
         }
 
-        let embedding = TextEmbedding::try_new_from_user_defined(user_model, Default::default())
-            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
+        let embedding = TextEmbedding::try_new_from_user_defined(
+            user_model,
+            fastembed::InitOptionsUserDefined::default().with_execution_providers(config.execution_providers.clone()),
+        )
+        .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
 
         Ok(Self {
             inner: Arc::new(FastEmbedInner {
@@ -538,8 +561,9 @@ impl FastEmbedProvider {
     /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
     /// and `tokenizer_config.json`. `config.model`, `cache_dir`, `max_length`,
     /// `intra_threads`, and `batch_size` are ignored on this path; only
-    /// [`EmbedProviderConfig::pooling`] and
-    /// [`EmbedProviderConfig::quantization`] take effect.
+    /// [`EmbedProviderConfig::pooling`],
+    /// [`EmbedProviderConfig::quantization`], and
+    /// [`EmbedProviderConfig::execution_providers`] take effect.
     ///
     /// `dimensions` is the latent embedding dimensionality of the ONNX model's
     /// output (e.g. 384 for BGE-small-en-v1.5). It cannot be reliably inferred
@@ -729,6 +753,13 @@ pub struct SparseProviderConfig {
     pub intra_threads: Option<usize>,
     /// ONNX batch size for each forward pass. `0` uses the library default (256).
     pub batch_size: usize,
+    /// Execution providers for the ONNX session, in registration order. Empty
+    /// (the default) keeps ORT's CPU provider. Pass the dispatch from
+    /// [`directml_execution_provider`] to prefer the DirectML GPU provider on
+    /// Windows. Honored by [`SparseEmbedProvider::try_new`]; the SBYO offline
+    /// paths (`try_from_user_defined` / `new_from_dir`) take no config and keep
+    /// ORT's CPU provider.
+    pub execution_providers: Vec<ort::ep::ExecutionProviderDispatch>,
 }
 
 impl Default for SparseProviderConfig {
@@ -739,7 +770,20 @@ impl Default for SparseProviderConfig {
             max_length: None,
             intra_threads: None,
             batch_size: DEFAULT_BATCH_SIZE,
+            execution_providers: Default::default(),
         }
+    }
+}
+
+impl SparseProviderConfig {
+    /// Configures the execution providers used when the ONNX session is built.
+    ///
+    /// Takes the providers in registration order; an empty list keeps ORT's
+    /// default CPU provider. Combine with [`directml_execution_provider`] to
+    /// prefer the DirectML GPU provider on Windows.
+    pub fn with_execution_providers(mut self, execution_providers: Vec<ort::ep::ExecutionProviderDispatch>) -> Self {
+        self.execution_providers = execution_providers;
+        self
     }
 }
 
@@ -799,6 +843,7 @@ impl SparseEmbedProvider {
         if let Some(threads) = config.intra_threads {
             opts = opts.with_intra_threads(threads);
         }
+        opts = opts.with_execution_providers(config.execution_providers);
 
         let batch_size = if config.batch_size == 0 {
             DEFAULT_BATCH_SIZE
@@ -940,6 +985,13 @@ pub struct Bgem3ProviderConfig {
     pub intra_threads: Option<usize>,
     /// ONNX batch size for each forward pass. `0` uses the library default (256).
     pub batch_size: usize,
+    /// Execution providers for the ONNX session, in registration order. Empty
+    /// (the default) keeps ORT's CPU provider. Pass the dispatch from
+    /// [`directml_execution_provider`] to prefer the DirectML GPU provider on
+    /// Windows. Honored by [`Bgem3Provider::try_new`] and the config-bearing
+    /// offline paths (`try_from_user_defined_with_config` /
+    /// `new_from_dir_with_config`).
+    pub execution_providers: Vec<ort::ep::ExecutionProviderDispatch>,
 }
 
 impl Default for Bgem3ProviderConfig {
@@ -950,7 +1002,20 @@ impl Default for Bgem3ProviderConfig {
             max_length: None,
             intra_threads: None,
             batch_size: DEFAULT_BATCH_SIZE,
+            execution_providers: Default::default(),
         }
+    }
+}
+
+impl Bgem3ProviderConfig {
+    /// Configures the execution providers used when the ONNX session is built.
+    ///
+    /// Takes the providers in registration order; an empty list keeps ORT's
+    /// default CPU provider. Combine with [`directml_execution_provider`] to
+    /// prefer the DirectML GPU provider on Windows.
+    pub fn with_execution_providers(mut self, execution_providers: Vec<ort::ep::ExecutionProviderDispatch>) -> Self {
+        self.execution_providers = execution_providers;
+        self
     }
 }
 
@@ -1004,6 +1069,7 @@ impl Bgem3Provider {
         if let Some(threads) = config.intra_threads {
             opts = opts.with_intra_threads(threads);
         }
+        opts = opts.with_execution_providers(config.execution_providers);
 
         let batch_size = if config.batch_size == 0 {
             DEFAULT_BATCH_SIZE
@@ -1126,6 +1192,7 @@ impl Bgem3Provider {
     /// Build the offline init options for the BGE-M3 user-defined path from a
     /// config. A set `max_length` wins over fastembed's default; `None` keeps
     /// the default (512 for BGE-M3). `intra_threads` is forwarded when set.
+    /// `execution_providers` is forwarded (empty keeps ORT's CPU provider).
     /// `model`/`cache_dir` are irrelevant on the offline path and ignored.
     fn offline_init_options(config: &Bgem3ProviderConfig) -> fastembed::InitOptionsUserDefined {
         let mut opts = fastembed::InitOptionsUserDefined::default();
@@ -1134,6 +1201,9 @@ impl Bgem3Provider {
         }
         if let Some(threads) = config.intra_threads {
             opts = opts.with_intra_threads(threads);
+        }
+        if !config.execution_providers.is_empty() {
+            opts = opts.with_execution_providers(config.execution_providers.clone());
         }
         opts
     }
@@ -1202,6 +1272,13 @@ pub struct RerankProviderConfig {
     pub intra_threads: Option<usize>,
     /// ONNX batch size for each forward pass. `0` uses the library default (256).
     pub batch_size: usize,
+    /// Execution providers for the ONNX session, in registration order. Empty
+    /// (the default) keeps ORT's CPU provider. Pass the dispatch from
+    /// [`directml_execution_provider`] to prefer the DirectML GPU provider on
+    /// Windows. Honored by [`RerankProvider::try_new`]; the SBYO offline paths
+    /// (`try_from_user_defined` / `new_from_dir`) take no config and keep ORT's
+    /// CPU provider.
+    pub execution_providers: Vec<ort::ep::ExecutionProviderDispatch>,
 }
 
 impl Default for RerankProviderConfig {
@@ -1212,7 +1289,20 @@ impl Default for RerankProviderConfig {
             max_length: None,
             intra_threads: None,
             batch_size: DEFAULT_BATCH_SIZE,
+            execution_providers: Default::default(),
         }
+    }
+}
+
+impl RerankProviderConfig {
+    /// Configures the execution providers used when the ONNX session is built.
+    ///
+    /// Takes the providers in registration order; an empty list keeps ORT's
+    /// default CPU provider. Combine with [`directml_execution_provider`] to
+    /// prefer the DirectML GPU provider on Windows.
+    pub fn with_execution_providers(mut self, execution_providers: Vec<ort::ep::ExecutionProviderDispatch>) -> Self {
+        self.execution_providers = execution_providers;
+        self
     }
 }
 
@@ -1262,6 +1352,7 @@ impl RerankProvider {
         if let Some(threads) = config.intra_threads {
             opts = opts.with_intra_threads(threads);
         }
+        opts = opts.with_execution_providers(config.execution_providers);
 
         let batch_size = if config.batch_size == 0 {
             DEFAULT_BATCH_SIZE
@@ -1724,6 +1815,7 @@ mod tests {
         assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
         assert!(config.max_length.is_none());
         assert!(config.intra_threads.is_none());
+        assert!(config.execution_providers.is_empty());
     }
 
     #[test]
@@ -1753,6 +1845,45 @@ mod tests {
         let opts = Bgem3Provider::offline_init_options(&config);
         assert_eq!(opts.max_length, 8192);
         assert_eq!(opts.intra_threads, Some(2));
+
+        // `execution_providers` is forwarded when set; the default stays empty so
+        // ORT keeps its CPU provider.
+        let config = Bgem3ProviderConfig::default().with_execution_providers(vec![ort::ep::CPU::default().build()]);
+        let opts = Bgem3Provider::offline_init_options(&config);
+        assert_eq!(opts.execution_providers.len(), 1);
+        assert!(
+            opts.execution_providers[0].downcast_ref::<ort::ep::CPU>().is_some(),
+            "the forwarded dispatch must be the CPU EP"
+        );
+    }
+
+    #[test]
+    fn test_provider_configs_execution_providers_default_and_builder() {
+        let cpu_ep = || vec![ort::ep::CPU::default().build()];
+
+        let dense = EmbedProviderConfig::default();
+        assert!(dense.execution_providers.is_empty());
+        let dense = dense.with_execution_providers(cpu_ep());
+        assert_eq!(dense.execution_providers.len(), 1);
+        assert!(dense.execution_providers[0].downcast_ref::<ort::ep::CPU>().is_some());
+
+        let sparse = SparseProviderConfig::default();
+        assert!(sparse.execution_providers.is_empty());
+        let sparse = sparse.with_execution_providers(cpu_ep());
+        assert_eq!(sparse.execution_providers.len(), 1);
+        assert!(sparse.execution_providers[0].downcast_ref::<ort::ep::CPU>().is_some());
+
+        let bgem3 = Bgem3ProviderConfig::default();
+        assert!(bgem3.execution_providers.is_empty());
+        let bgem3 = bgem3.with_execution_providers(cpu_ep());
+        assert_eq!(bgem3.execution_providers.len(), 1);
+        assert!(bgem3.execution_providers[0].downcast_ref::<ort::ep::CPU>().is_some());
+
+        let rerank = RerankProviderConfig::default();
+        assert!(rerank.execution_providers.is_empty());
+        let rerank = rerank.with_execution_providers(cpu_ep());
+        assert_eq!(rerank.execution_providers.len(), 1);
+        assert!(rerank.execution_providers[0].downcast_ref::<ort::ep::CPU>().is_some());
     }
 
     #[test]
