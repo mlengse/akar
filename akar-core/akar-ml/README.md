@@ -33,3 +33,14 @@ Known constraints, honored automatically:
   the DirectML provider cannot place fall back to CPU per-node by default.
 - The SBYO sparse offline path builds its own native ort session that takes no
   execution providers and always runs on CPU.
+
+### Bundled model assets, air-gapped (feature `bundle-default-models`)
+
+Ships one or more lightweight ONNX + tokenizer models with the crate so offline
+deployments never touch the network. Canonical per-model layout is
+`models/<name>/` (see [models/README.md](models/README.md) for the full
+schema). At build time `build.rs` copies the git-ignored staging tree
+`models/.staging/<name>/` into `$OUT_DIR/assets/<name>/` (minimal, idempotent,
+no network); the runtime accessor is `assets::bundled_model_dir(name)`. No
+staged assets at build time degrades to `None` — the feature is additive, the
+default gate is unaffected.

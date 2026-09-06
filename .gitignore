@@ -53,3 +53,7 @@ dataset/ldbc-1/csv
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+
+
+# akar-ml bundled model staging (air-gapped assets prepared locally, never committed)
+akar-core/akar-ml/models/.staging/

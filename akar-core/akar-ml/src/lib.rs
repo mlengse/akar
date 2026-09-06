@@ -36,6 +36,18 @@
 //! - The SBYO sparse offline path ([`embed::SparseEmbedProvider`]
 //!   `try_from_user_defined` / `new_from_dir`) builds its own native ort
 //!   session that takes no execution providers and always runs on CPU.
+//!
+//! ## Bundled model assets, air-gapped (feature `bundle-default-models`)
+//!
+//! Ships one or more lightweight ONNX + tokenizer models with the crate so
+//! offline deployments never touch the network. The per-model layout is the
+//! canonical `models/<name>/` directory — `model.onnx`, `tokenizer.json`,
+//! `config.json`, `special_tokens_map.json`, `tokenizer_config.json` — see
+//! `akar-ml/models/README.md`. At build time `build.rs` copies the git-ignored
+//! staging tree `models/.staging/<name>/` into `$OUT_DIR/assets/<name>/`
+//! (idempotent, no network); the runtime accessor is
+//! [`assets::bundled_model_dir`]. No staged assets at build time degrades to
+//! `None` (the feature is additive; the default gate is unaffected).
 
 pub mod lstm;
 
@@ -44,6 +56,9 @@ pub mod embed;
 
 #[cfg(feature = "onnx-embedding")]
 pub(crate) mod sbyo;
+
+#[cfg(feature = "bundle-default-models")]
+pub mod assets;
 
 #[cfg(feature = "onnx-embedding")]
 mod sparse;

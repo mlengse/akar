@@ -24,6 +24,7 @@ akar-extension = { path = "../akar-extension", version = "0.1.1", optional = tru
 
 [features]
 default = []
+bundle-default-models = []
 onnx-embedding = ["fastembed", "parking_lot", "rayon", "dep:ort", "dep:tokenizers", "dep:ndarray"]
 directml = ["onnx-embedding", "fastembed/directml", "ort/directml"]
 extension = ["dep:akar-common", "dep:akar-function", "dep:akar-extension", "onnx-embedding"]
