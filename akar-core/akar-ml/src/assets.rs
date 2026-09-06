@@ -37,6 +37,17 @@ pub fn bundled_model_dir(name: &str) -> Option<PathBuf> {
     dir.join("model.onnx").is_file().then_some(dir)
 }
 
+/// Path of a bundled model by canonical name, guaranteed complete.
+///
+/// Like [`bundled_model_dir`] but additionally requires every
+/// [`BUNDLE_FILES`] entry to be present, so the returned directory is ready to
+/// hand to an offline loader (e.g. [`crate::embed::FastEmbedProvider::new_from_dir`])
+/// without a partial-extraction surprise.
+pub fn bundled_model(name: &str) -> Option<PathBuf> {
+    let dir = bundled_model_dir(name)?;
+    is_complete_bundle(&dir).then_some(dir)
+}
+
 /// `true` when every [`BUNDLE_FILES`] entry is present under `dir`.
 ///
 /// Use before handing a directory to a loader ([`crate::embed`] offline

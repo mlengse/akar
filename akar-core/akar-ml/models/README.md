@@ -43,7 +43,22 @@ no network, no toolchain):
 **Preparing staging** (on a networked machine, once): download a model snapshot
 (e.g. Hugging Face `Xenova/bge-small-en-v1.5`), flatten its files into
 `models/.staging/<name>/`, and record `manifest.json` (P98.2 wires real
-models; P98.3 adds license + blob sizes).
+models; P98.3 adds license + blob sizes). HF snapshots nest the graph under
+`onnx/model.onnx` — staging is **flat** (`model.onnx` at the bundle root), so
+flatten on copy:
+
+```powershell
+$snap = "$env:USERPROFILE\.cache\huggingface\hub\models--Xenova--bge-small-en-v1.5\snapshots\*\"
+Copy-Item "$snap\onnx\model.onnx"              models\.staging\bge-small-en-v1.5\model.onnx
+Copy-Item "$snap\tokenizer.json"               models\.staging\bge-small-en-v1.5\tokenizer.json
+Copy-Item "$snap\config.json"                  models\.staging\bge-small-en-v1.5\config.json
+Copy-Item "$snap\special_tokens_map.json"      models\.staging\bge-small-en-v1.5\special_tokens_map.json
+Copy-Item "$snap\tokenizer_config.json"        models\.staging\bge-small-en-v1.5\tokenizer_config.json
+```
+
+`bge-small-en-v1.5` is currently staged locally (model.onnx ≈ 127 MB) and is
+the reference bundle for deterministic offline verification (`new_from_dir` +
+`assets::bundled_model`, P98.2/P98.4).
 
 **Refreshing a bundle:** staging is only re-read when `cargo:rerun-if-changed`
 fires (staging files change). To force a refresh remove the extracted

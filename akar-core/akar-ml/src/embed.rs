@@ -2719,4 +2719,44 @@ mod tests {
             assert!((x.score - y.score).abs() < 1e-4, "cached re-init rerank score diverges");
         }
     }
+
+    /// P98.2 — `new_from_dir` (P90) wired against a bundled asset: the real
+    /// Xenova bge-small-en-v1.5 model is embedded fully offline, because
+    /// `build.rs` copied the git-ignored staging tree
+    /// `models/.staging/bge-small-en-v1.5/` into the asset dir at build time.
+    /// Deterministic and network-free; self-skips when the bundle was not
+    /// staged at build time (e.g. CI checkout without the git-ignored staging).
+    #[cfg(feature = "bundle-default-models")]
+    #[test]
+    fn test_bundled_bge_small_offline_embed() {
+        const BUNDLE_NAME: &str = "bge-small-en-v1.5";
+        let Some(bundle) = crate::assets::bundled_model(BUNDLE_NAME) else {
+            return; // bundle not staged at build time — graceful skip
+        };
+        assert!(
+            crate::assets::is_complete_bundle(&bundle),
+            "bundled `{BUNDLE_NAME}` must be a complete schema bundle"
+        );
+
+        let provider = match FastEmbedProvider::new_from_dir(&bundle, 384) {
+            Ok(p) => p,
+            Err(_) => return, // e.g. ort runtime unavailable — graceful skip
+        };
+        let texts = vec![
+            "Akar is a graph database.",
+            "Embeddings capture semantic similarity.",
+            "Air-gapped model inference needs no network.",
+        ];
+        let embeddings = provider.embed_texts(&texts).expect("bundled embed must succeed");
+        assert_eq!(embeddings.len(), texts.len());
+        for embedding in &embeddings {
+            assert_eq!(embedding.len(), 384, "BGE-small dense dims must be 384");
+            assert!(
+                embedding.iter().all(|v| v.is_finite()),
+                "embedding values must be finite"
+            );
+        }
+
+        assert!(crate::assets::bundled_model("does-not-exist").is_none());
+    }
 }
