@@ -2757,6 +2757,25 @@ mod tests {
             );
         }
 
+        // P98.4 — determinism: re-embedding the same texts on the same session
+        // must be bit-identical, and a second provider re-built from the same
+        // bundle must produce the same output (offline path is reproducible —
+        // no stochasticity, no re-download).
+        let repeat = provider.embed_texts(&texts).expect("repeat embed must succeed");
+        assert_eq!(embeddings, repeat, "same-session re-embed must be bit-identical");
+
+        let second = match FastEmbedProvider::new_from_dir(&bundle, 384) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let from_second = second.embed_texts(&texts).expect("second bundled embed must succeed");
+        assert_eq!(embeddings.len(), from_second.len());
+        for (x, y) in embeddings.iter().zip(from_second.iter()) {
+            for (p, q) in x.iter().zip(y.iter()) {
+                assert!((p - q).abs() < 1e-4, "bundled re-build diverges");
+            }
+        }
+
         assert!(crate::assets::bundled_model("does-not-exist").is_none());
     }
 }
