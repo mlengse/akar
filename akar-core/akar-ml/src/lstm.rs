@@ -396,12 +396,22 @@ pub fn train(
 // ─────────────────────── Save / Load ───────────────────────
 
 /// Save model weights to a JSON file.
+///
+/// # Errors
+///
+/// Returns an error string if serialization fails or the file cannot be
+/// written.
 pub fn save_model(model: &LstmModel, path: &str) -> Result<(), String> {
     let json = serde_json::to_string_pretty(model).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(path, json).map_err(|e| format!("write: {e}"))
 }
 
 /// Load model weights from a JSON file.
+///
+/// # Errors
+///
+/// Returns an error string if the file cannot be read or its contents do not
+/// deserialize into an [`LstmModel`].
 pub fn load_model(path: &str) -> Result<LstmModel, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     serde_json::from_str(&json).map_err(|e| format!("deserialize: {e}"))

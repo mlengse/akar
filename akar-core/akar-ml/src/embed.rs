@@ -399,6 +399,11 @@ impl FastEmbedProvider {
     /// Create a provider with default model (`BGE-small-en-v1.5`, 384 dims).
     ///
     /// Downloads the model on first call; subsequent calls use the cached copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be downloaded,
+    /// located in the cache, or the ONNX session cannot be built.
     pub fn try_default() -> Result<Self, EmbeddingError> {
         Self::try_new(EmbedProviderConfig::default())
     }
@@ -410,6 +415,11 @@ impl FastEmbedProvider {
     /// the INT8 quantized checkpoint (`Qdrant/bge-small-en-v1.5-onnx-Q`): faster
     /// inference at slightly lower quality. Downloads the model on first embed;
     /// subsequent calls use the cached copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be downloaded,
+    /// located in the cache, or the ONNX session cannot be built.
     ///
     /// # Examples
     ///
@@ -425,6 +435,11 @@ impl FastEmbedProvider {
     }
 
     /// Create a provider with a specific model configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be loaded or
+    /// the ONNX session cannot be built from the given configuration.
     pub fn try_new(config: EmbedProviderConfig) -> Result<Self, EmbeddingError> {
         let model_name = config.model.to_string();
         let dimensions = TextEmbedding::get_model_info(&config.model)
@@ -721,6 +736,12 @@ impl FastEmbedProvider {
     }
 
     /// Embed a single text and return the vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the text, or [`EmbeddingError::InitFailed`] if it could
+    /// not be lazily initialized.
     pub fn embed_text(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
         self.embed_texts(&[text]).map(|mut v| v.remove(0))
     }
@@ -837,11 +858,21 @@ impl std::fmt::Debug for SparseEmbedInner {
 
 impl SparseEmbedProvider {
     /// Create a provider with default model (`SPLADE++_en_v1`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be downloaded,
+    /// located in the cache, or the ONNX session cannot be built.
     pub fn try_default() -> Result<Self, EmbeddingError> {
         Self::try_new(SparseProviderConfig::default())
     }
 
     /// Create a provider with a specific model configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be loaded or
+    /// the ONNX session cannot be built from the given configuration.
     pub fn try_new(config: SparseProviderConfig) -> Result<Self, EmbeddingError> {
         let model_name = format!("{:?}", config.model);
 
@@ -934,6 +965,12 @@ impl SparseEmbedProvider {
     }
 
     /// Compute sparse embeddings for a batch of texts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the batch, or [`EmbeddingError::InitFailed`] if it could
+    /// not be lazily initialized.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<Vec<SparseEmbedding>, EmbeddingError> {
         self.embed_texts_batched(texts, self.inner.batch_size)
     }
@@ -972,6 +1009,12 @@ impl SparseEmbedProvider {
     }
 
     /// Embed a single text and return the sparse vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the text, or [`EmbeddingError::InitFailed`] if it could
+    /// not be lazily initialized.
     pub fn embed_text(&self, text: &str) -> Result<SparseEmbedding, EmbeddingError> {
         self.embed_texts(&[text]).map(|mut v| v.remove(0))
     }
@@ -1060,11 +1103,21 @@ impl std::fmt::Debug for Bgem3Inner {
 
 impl Bgem3Provider {
     /// Create a provider with default model (`bge-m3-onnx-int8`, 1024d dense).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be downloaded,
+    /// located in the cache, or the ONNX session cannot be built.
     pub fn try_default() -> Result<Self, EmbeddingError> {
         Self::try_new(Bgem3ProviderConfig::default())
     }
 
     /// Create a provider with a specific model configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be loaded or
+    /// the ONNX session cannot be built from the given configuration.
     pub fn try_new(config: Bgem3ProviderConfig) -> Result<Self, EmbeddingError> {
         let model_name = format!("{:?}", config.model);
 
@@ -1221,6 +1274,12 @@ impl Bgem3Provider {
     }
 
     /// Compute dense + sparse + ColBERT embeddings in a single pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the batch, or [`EmbeddingError::InitFailed`] if it could
+    /// not be lazily initialized.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
         self.embed_texts_batched(texts, self.inner.batch_size)
     }
@@ -1253,6 +1312,12 @@ impl Bgem3Provider {
     }
 
     /// Embed a single text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the text, or [`EmbeddingError::InitFailed`] if it could
+    /// not be lazily initialized.
     pub fn embed_text(&self, text: &str) -> Result<MultiEmbeddingOutput, EmbeddingError> {
         self.embed_texts(&[text])
     }
@@ -1346,11 +1411,21 @@ impl std::fmt::Debug for RerankInner {
 
 impl RerankProvider {
     /// Create a provider with default reranker model.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be downloaded,
+    /// located in the cache, or the ONNX session cannot be built.
     pub fn try_default() -> Result<Self, EmbeddingError> {
         Self::try_new(RerankProviderConfig::default())
     }
 
     /// Create a provider with a specific model configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the model cannot be loaded or
+    /// the ONNX session cannot be built from the given configuration.
     pub fn try_new(config: RerankProviderConfig) -> Result<Self, EmbeddingError> {
         let model_name = format!("{:?}", config.model);
 
@@ -1445,6 +1520,12 @@ impl RerankProvider {
     /// Rerank documents by relevance to the query.
     ///
     /// Returns results sorted by score in descending order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the reranker session could not
+    /// be lazily initialized, or [`EmbeddingError::ComputeFailed`] if inference
+    /// fails.
     pub fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
@@ -1458,6 +1539,12 @@ impl RerankProvider {
     }
 
     /// Rerank and return documents with their scores.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the reranker session could not
+    /// be lazily initialized, or [`EmbeddingError::ComputeFailed`] if inference
+    /// fails.
     pub fn rerank_with_documents(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
