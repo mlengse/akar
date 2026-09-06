@@ -38,6 +38,20 @@ use crate::sparse::NativeSparseSession;
 /// Default ONNX batch size used when the caller does not specify one.
 const DEFAULT_BATCH_SIZE: usize = 256;
 
+/// ONNX Runtime dispatch for the DirectML execution provider (Windows, DirectX 12).
+///
+/// Available under the `directml` Cargo feature (which also enables
+/// `onnx-embedding`). Returns a ready-to-use `ort::ep::ExecutionProviderDispatch`
+/// that can be passed to a provider config's `execution_providers` list so ONNX
+/// sessions prefer the GPU. Constructing the dispatch never requires a GPU;
+/// if DirectML registration is not supported at session build time the runtime
+/// falls back to the CPU provider (unless the dispatch is set to error on
+/// failure).
+#[cfg(feature = "directml")]
+pub fn directml_execution_provider() -> ort::ep::ExecutionProviderDispatch {
+    ort::ep::DirectML::default().build()
+}
+
 // ── Error type ──────────────────────────────────────────────────────
 
 /// Errors that can occur during embedding operations.
@@ -1364,6 +1378,18 @@ impl RerankProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── DirectML execution provider (P94.1) ──
+
+    #[cfg(feature = "directml")]
+    #[test]
+    fn test_directml_execution_provider_dispatch() {
+        let ep = directml_execution_provider();
+        assert!(
+            ep.downcast_ref::<ort::ep::DirectML>().is_some(),
+            "dispatch must wrap the DirectML EP"
+        );
+    }
 
     // ── Dense provider (P89.1) ──
 
