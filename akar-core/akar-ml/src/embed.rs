@@ -43,10 +43,22 @@ const DEFAULT_BATCH_SIZE: usize = 256;
 /// Available under the `directml` Cargo feature (which also enables
 /// `onnx-embedding`). Returns a ready-to-use `ort::ep::ExecutionProviderDispatch`
 /// that can be passed to a provider config's `execution_providers` list so ONNX
-/// sessions prefer the GPU. Constructing the dispatch never requires a GPU;
-/// if DirectML registration is not supported at session build time the runtime
-/// falls back to the CPU provider (unless the dispatch is set to error on
-/// failure).
+/// sessions prefer the GPU over the CPU provider.
+///
+/// # DirectML constraints (handled automatically)
+///
+/// - fastembed disables ORT's memory-pattern optimization and parallel
+///   execution whenever a DirectML EP is registered on the session
+///   (`with_memory_pattern(false)` + `with_parallel_execution(false)`), so
+///   both are off for DirectML sessions.
+/// - Constructing the dispatch never requires a GPU. At session build time a
+///   machine without a DirectX-12 device fails EP registration; prefer
+///   `dispatch.fail_silently()` so the session keeps ORT's CPU provider as a
+///   fallback. Ops the DirectML provider cannot place fall back to CPU per-node
+///   by default (`disable_cpu_fallback` is not yet exposed by akar configs).
+/// - The SBYO sparse offline path (`SparseEmbedProvider::try_from_user_defined`
+///   / `new_from_dir`) builds its own native ort session that takes no
+///   execution providers, so it always runs on CPU.
 #[cfg(feature = "directml")]
 pub fn directml_execution_provider() -> ort::ep::ExecutionProviderDispatch {
     ort::ep::DirectML::default().build()
@@ -1480,6 +1492,49 @@ mod tests {
             ep.downcast_ref::<ort::ep::DirectML>().is_some(),
             "dispatch must wrap the DirectML EP"
         );
+    }
+
+    #[cfg(feature = "directml")]
+    #[test]
+    fn test_directml_session_builds_with_cpu_fallback() {
+        // GPU-optional (P94.3): builds a real session under the DirectML
+        // dispatch and embeds. The dispatch is registered `fail_silently`, so
+        // a machine without a DirectX-12 GPU silently keeps ORT's CPU provider
+        // (fallback CPU) instead of failing registration, while a GPU machine
+        // runs the session on DirectML. fastembed disables memory-pattern +
+        // parallel execution whenever a DirectML EP is in the list. Self-skips
+        // when the bge-small-en-v1.5 snapshot is not in the local cache.
+        let Some(snapshot) = bge_small_snapshot_dir() else {
+            return; // no offline fixture — gracefully skip
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let onnx_src = if snapshot.join("onnx").join("model.onnx").is_file() {
+            snapshot.join("onnx").join("model.onnx")
+        } else {
+            snapshot.join("model.onnx")
+        };
+        std::fs::copy(&onnx_src, dir.path().join("model.onnx")).unwrap();
+        for name in [
+            "tokenizer.json",
+            "config.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+        ] {
+            std::fs::copy(snapshot.join(name), dir.path().join(name)).unwrap();
+        }
+
+        let config = EmbedProviderConfig::default()
+            .with_execution_providers(vec![directml_execution_provider().fail_silently()]);
+        let provider = FastEmbedProvider::new_from_dir_with_config(dir.path(), 384, &config)
+            .expect("session must build under the DirectML dispatch (CPU fallback when no GPU)");
+        let embeddings = provider
+            .embed_texts(&["directml hello", "second"])
+            .expect("embed must succeed with the DirectML dispatch");
+        assert_eq!(embeddings.len(), 2);
+        for vector in &embeddings {
+            assert_eq!(vector.len(), 384);
+            assert!(vector.iter().all(|x| x.is_finite()));
+        }
     }
 
     // ── Dense provider (P89.1) ──
