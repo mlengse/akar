@@ -27,8 +27,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fastembed::{
-    Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, Pooling, RerankInitOptions, RerankResult,
-    RerankerModel, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank,
+    Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, Pooling, QuantizationMode, RerankInitOptions,
+    RerankResult, RerankerModel, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions,
+    TextRerank,
 };
 
 use crate::sbyo::SbyoLoad;
@@ -258,6 +259,9 @@ pub struct EmbedProviderConfig {
     /// Pooling strategy applied after the last hidden state. `None` keeps the
     /// model's default (CLS for the BGE family, mean for MiniLM/Nomic/etc.).
     pub pooling: Option<Pooling>,
+    /// Quantization applied to the model weights on load. `None` keeps the
+    /// model's default (no quantization).
+    pub quantization: Option<QuantizationMode>,
 }
 
 impl Default for EmbedProviderConfig {
@@ -269,6 +273,7 @@ impl Default for EmbedProviderConfig {
             intra_threads: None,
             batch_size: DEFAULT_BATCH_SIZE,
             pooling: None,
+            quantization: None,
         }
     }
 }
@@ -320,6 +325,27 @@ impl EmbedProviderConfig {
     /// ```
     pub fn with_pooling(mut self, pooling: Pooling) -> Self {
         self.pooling = Some(pooling);
+        self
+    }
+
+    /// Configures the weight quantization applied when the model is loaded.
+    ///
+    /// Honored by the offline path
+    /// ([`FastEmbedProvider::try_from_user_defined_with_config`] and
+    /// [`FastEmbedProvider::new_from_dir_with_config`]) once wired (P92.2).
+    /// `None` keeps the model's default (`QuantizationMode::None`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use akar_ml::embed::EmbedProviderConfig;
+    /// use fastembed::QuantizationMode;
+    ///
+    /// let config = EmbedProviderConfig::default().with_quantization(QuantizationMode::Static);
+    /// assert!(config.quantization == Some(QuantizationMode::Static));
+    /// ```
+    pub fn with_quantization(mut self, quantization: QuantizationMode) -> Self {
+        self.quantization = Some(quantization);
         self
     }
 }
@@ -1244,6 +1270,22 @@ mod tests {
         let config = EmbedProviderConfig::default();
         assert_eq!(config.model, EmbeddingModel::BGESmallENV15);
         assert!(config.cache_dir.is_none());
+        assert!(config.pooling.is_none());
+        assert!(config.quantization.is_none());
+    }
+
+    #[test]
+    fn test_provider_config_quantization_builder() {
+        let config = EmbedProviderConfig::default().with_quantization(QuantizationMode::Static);
+        assert_eq!(config.quantization, Some(QuantizationMode::Static));
+        assert!(config.pooling.is_none(), "quantization builder must not touch pooling");
+        let config = config.with_quantization(QuantizationMode::Dynamic);
+        assert_eq!(config.quantization, Some(QuantizationMode::Dynamic));
+        let config = config
+            .with_pooling(Pooling::Mean)
+            .with_quantization(QuantizationMode::None);
+        assert_eq!(config.quantization, Some(QuantizationMode::None));
+        assert_eq!(config.pooling, Some(Pooling::Mean));
     }
 
     #[test]
