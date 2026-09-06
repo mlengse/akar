@@ -609,6 +609,13 @@ impl FastEmbedProvider {
     /// shared session pre-warms on the first call) and embeds a distinct chunk.
     /// Output is concatenated in input order, so results match [`Self::embed_texts`].
     ///
+    /// Caveat: a dynamically quantized model ([`QuantizationMode::Dynamic`])
+    /// re-scales each batch independently, so the concatenated per-chunk output
+    /// is not mutually comparable — the same limitation as
+    /// [`Self::embed_texts_batched`], which this parallel variant does not guard.
+    /// Use a single batch (via [`Self::embed_texts_batched`]) or a
+    /// static/no-quantization model under dynamic quantization.
+    ///
     /// # Errors
     ///
     /// Returns [`EmbeddingError::InitFailed`] if a worker session cannot be built,
