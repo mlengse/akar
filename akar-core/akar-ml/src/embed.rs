@@ -1088,16 +1088,9 @@ impl Bgem3Provider {
     ) -> Result<Self, EmbeddingError> {
         let user_model = fastembed::UserDefinedBgem3Model::new(onnx_bytes, tokenizer_files);
 
-        let mut opts = fastembed::InitOptionsUserDefined::default();
-        if let Some(len) = config.max_length {
-            opts = opts.with_max_length(len);
-        }
-        if let Some(threads) = config.intra_threads {
-            opts = opts.with_intra_threads(threads);
-        }
-
-        let embedding = fastembed::Bgem3Embedding::try_new_from_user_defined(user_model, opts)
-            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
+        let embedding =
+            fastembed::Bgem3Embedding::try_new_from_user_defined(user_model, Self::offline_init_options(config))
+                .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
 
         let batch_size = if config.batch_size == 0 {
             DEFAULT_BATCH_SIZE
@@ -1114,6 +1107,21 @@ impl Bgem3Provider {
                 batch_size,
             }),
         })
+    }
+
+    /// Build the offline init options for the BGE-M3 user-defined path from a
+    /// config. A set `max_length` wins over fastembed's default; `None` keeps
+    /// the default (512 for BGE-M3). `intra_threads` is forwarded when set.
+    /// `model`/`cache_dir` are irrelevant on the offline path and ignored.
+    fn offline_init_options(config: &Bgem3ProviderConfig) -> fastembed::InitOptionsUserDefined {
+        let mut opts = fastembed::InitOptionsUserDefined::default();
+        if let Some(len) = config.max_length {
+            opts = opts.with_max_length(len);
+        }
+        if let Some(threads) = config.intra_threads {
+            opts = opts.with_intra_threads(threads);
+        }
+        opts
     }
 
     /// Compute dense + sparse + ColBERT embeddings in a single pass.
@@ -1688,6 +1696,37 @@ mod tests {
         let config = Bgem3ProviderConfig::default();
         assert_eq!(config.model, Bgem3Model::BGEM3Q);
         assert_eq!(config.batch_size, DEFAULT_BATCH_SIZE);
+        assert!(config.max_length.is_none());
+        assert!(config.intra_threads.is_none());
+    }
+
+    #[test]
+    fn test_bgem3_offline_max_length_forwarded() {
+        // Default offline options keep fastembed's default (BGE-M3 => 512).
+        let opts = Bgem3Provider::offline_init_options(&Bgem3ProviderConfig::default());
+        assert_eq!(
+            opts.max_length,
+            fastembed::InitOptionsUserDefined::default().max_length,
+            "default must not override fastembed's model default"
+        );
+
+        // An explicit 8192 is forwarded intact to the offline init options.
+        let config = Bgem3ProviderConfig {
+            max_length: Some(8192),
+            ..Default::default()
+        };
+        let opts = Bgem3Provider::offline_init_options(&config);
+        assert_eq!(opts.max_length, 8192);
+
+        // `intra_threads` is forwarded too.
+        let config = Bgem3ProviderConfig {
+            max_length: Some(8192),
+            intra_threads: Some(2),
+            ..Default::default()
+        };
+        let opts = Bgem3Provider::offline_init_options(&config);
+        assert_eq!(opts.max_length, 8192);
+        assert_eq!(opts.intra_threads, Some(2));
     }
 
     #[test]
