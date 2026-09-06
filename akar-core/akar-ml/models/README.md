@@ -43,7 +43,8 @@ no network, no toolchain):
 **Preparing staging** (on a networked machine, once): download a model snapshot
 (e.g. Hugging Face `Xenova/bge-small-en-v1.5`), flatten its files into
 `models/.staging/<name>/`, and record `manifest.json` (P98.2 wires real
-models; P98.3 adds license + blob sizes). HF snapshots nest the graph under
+models; P98.3 records per-model license + exact blob sizes — a model stays
+out of the registry until it is staged). HF snapshots nest the graph under
 `onnx/model.onnx` — staging is **flat** (`model.onnx` at the bundle root), so
 flatten on copy:
 
@@ -58,7 +59,9 @@ Copy-Item "$snap\tokenizer_config.json"        models\.staging\bge-small-en-v1.5
 
 `bge-small-en-v1.5` is currently staged locally (model.onnx ≈ 127 MB) and is
 the reference bundle for deterministic offline verification (`new_from_dir` +
-`assets::bundled_model`, P98.2/P98.4).
+`assets::bundled_model`, P98.2/P98.4). It is the only entry in the registry
+below. (A `synthetic` subdirectory in `.staging/` is a local test fixture used
+by `assets.rs` tests — not a real model, so never registered.)
 
 **Refreshing a bundle:** staging is only re-read when `cargo:rerun-if-changed`
 fires (staging files change). To force a refresh remove the extracted
@@ -74,7 +77,9 @@ directory (`$OUT_DIR/assets/<name>`) and rebuild.
 ## Registry: `manifest.json`
 
 `models/manifest.json` (repo root of this folder) lists every registered
-bundle. Entries are added as real models are bundled (P98.2/P98.3):
+bundle together with its **license** and the **byte size of each blob** in the
+bundle (exact sizes from the staged files, P98.3). Entries are added as real
+models are bundled:
 
 ```json
 {
@@ -83,8 +88,14 @@ bundle. Entries are added as real models are bundled (P98.2/P98.3):
     {
       "name": "bge-small-en-v1.5",
       "source": "https://huggingface.co/Xenova/bge-small-en-v1.5",
-      "license": "apache-2.0",
-      "files": { "model.onnx": 133763373, "tokenizer.json": 466103 }
+      "license": "mit",
+      "files": {
+        "model.onnx": 133093490,
+        "tokenizer.json": 711396,
+        "config.json": 683,
+        "special_tokens_map.json": 125,
+        "tokenizer_config.json": 366
+      }
     }
   ]
 }
@@ -92,3 +103,23 @@ bundle. Entries are added as real models are bundled (P98.2/P98.3):
 
 `manifest.json` is a reference record (metadata, license, blob sizes); the
 build-time staging is the source of truth for what gets copied.
+
+## Per-model licenses
+
+Each model is distributed under its own upstream license, which we verify from
+the source repository / model card before registration. The registry records
+that license per model; bundling a model never changes its license.
+
+| Bundle name | Upstream source | License | Notes |
+|---|---|---|---|
+| `bge-small-en-v1.5` | `Xenova/bge-small-en-v1.5` (Hugging Face) | MIT | ONNX conversion of `BAAI/bge-small-en-v1.5`; Xenova card carries no separate license, so MIT is inherited from the base BAAI model |
+| `bge-small-en-v1.5-Q` | `Qdrant/bge-small-en-v1.5-onnx-Q` | Apache-2.0 | Quantized dense model, not yet bundled |
+| `splade-pp-en-v1` | `Qdrant/Splade_PP_en_v1` | Apache-2.0 | Sparse model, not yet bundled |
+| `bge-m3` | `BAAI/bge-m3` | MIT | Multi-vector (dense + sparse + ColBERT), not yet bundled |
+| `bge-reranker-base` | `BAAI/bge-reranker-base` | MIT | Cross-encoder reranker, not yet bundled |
+
+Only models actually staged under `models/.staging/<name>/` are bundleable
+(the feature `bundle-default-models` decides at build time); the table above
+additionally records the license for the models `akar-ml` can target, so a
+future bundle can be registered without re-checking. Re-verify the license
+against the source model card when pulling a fresh snapshot.

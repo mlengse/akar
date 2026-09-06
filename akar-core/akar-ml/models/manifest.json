@@ -1,4 +1,17 @@
 {
   "format": 1,
-  "models": []
+  "models": [
+    {
+      "name": "bge-small-en-v1.5",
+      "source": "https://huggingface.co/Xenova/bge-small-en-v1.5",
+      "license": "mit",
+      "files": {
+        "model.onnx": 133093490,
+        "tokenizer.json": 711396,
+        "config.json": 683,
+        "special_tokens_map.json": 125,
+        "tokenizer_config.json": 366
+      }
+    }
+  ]
 }
