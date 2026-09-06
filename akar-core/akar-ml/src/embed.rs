@@ -1315,6 +1315,22 @@ mod tests {
 
     // ── Dense provider (P89.1) ──
 
+    /// Locate the Xenova bge-small-en-v1.5 snapshot directory in the crate-level
+    /// HF cache. `None` when the model is not cached (first run offline, evicted,
+    /// ...) — callers should gracefully skip rather than fail.
+    fn bge_small_snapshot_dir() -> Option<std::path::PathBuf> {
+        std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".fastembed_cache")
+                .join("models--Xenova--bge-small-en-v1.5")
+                .join("snapshots"),
+        )
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+    }
+
     /// Load the Xenova bge-small-en-v1.5 ONNX + tokenizer bytes from the crate
     /// level HF cache so the offline (`new_from_dir`/`try_from_user_defined`)
     /// path can be exercised without a network. `None` when the model is not in
@@ -1327,16 +1343,7 @@ mod tests {
             Ok(p) => p,
             Err(_) => return None, // no network and no cache — nothing to compare against
         };
-        let snapshot = std::fs::read_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(".fastembed_cache")
-                .join("models--Xenova--bge-small-en-v1.5")
-                .join("snapshots"),
-        )
-        .ok()?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .find(|p| p.is_dir())?;
+        let snapshot = bge_small_snapshot_dir()?;
         let read_or = |name: &str| std::fs::read(snapshot.join(name)).ok();
         let onnx_path = if snapshot.join("onnx").join("model.onnx").is_file() {
             snapshot.join("onnx").join("model.onnx")
@@ -1852,6 +1859,56 @@ mod tests {
         let found = crate::sbyo::find_onnx_file(dir.path()).unwrap();
         assert_eq!(found.file_name().unwrap(), "model.onnx");
         assert!(!found.to_string_lossy().ends_with("_int8.onnx"));
+    }
+
+    #[test]
+    fn test_new_from_dir_with_external_initializer_companion() {
+        // P93.3 — fixture: a split/quantized ONNX model keeps its weights in an
+        // external initializer file referenced via `model.onnx_data_location`.
+        // No such model is cached offline, so the fixture simulates the layout:
+        // a real cached model (bge-small) copied into a temp dir plus a
+        // synthetic `model.onnx_data` sidecar. This exercises the full P93
+        // plumbing end-to-end — companion discovery → `external_initializers`
+        // → `with_external_initializer` → session build — through
+        // `new_from_dir` (the ONNX Runtime ignores an external initializer that
+        // the model does not reference).
+        let Some(snapshot) = bge_small_snapshot_dir() else {
+            return; // no offline fixture — gracefully skip
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let onnx_src = if snapshot.join("onnx").join("model.onnx").is_file() {
+            snapshot.join("onnx").join("model.onnx")
+        } else {
+            snapshot.join("model.onnx")
+        };
+        std::fs::copy(&onnx_src, dir.path().join("model.onnx")).unwrap();
+        for name in [
+            "tokenizer.json",
+            "config.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+        ] {
+            std::fs::copy(snapshot.join(name), dir.path().join(name)).unwrap();
+        }
+        std::fs::write(dir.path().join("model.onnx_data"), b"synthetic-external-weights").unwrap();
+
+        // The loader surfaces the sidecar as an external initializer.
+        let sbyo = crate::sbyo::SbyoLoad::from_dir(dir.path()).unwrap();
+        assert_eq!(
+            sbyo.external_initializers,
+            [("model.onnx_data".to_string(), b"synthetic-external-weights".to_vec())]
+        );
+
+        // Full dense path: discovery → with_external_initializer → session builds.
+        let provider = FastEmbedProvider::new_from_dir(dir.path(), 384)
+            .expect("session must build from the offline fixture + companion");
+        let texts = ["first text", "second text", "a third"];
+        let embeddings = provider.embed_texts(&texts).unwrap();
+        assert_eq!(embeddings.len(), 3);
+        for vector in &embeddings {
+            assert_eq!(vector.len(), 384);
+            assert!(vector.iter().all(|x| x.is_finite()));
+        }
     }
 
     #[test]
