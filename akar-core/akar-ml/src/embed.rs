@@ -1017,22 +1017,24 @@ impl Bgem3Provider {
         onnx_bytes: Vec<u8>,
         tokenizer_files: fastembed::TokenizerFiles,
     ) -> Result<Self, EmbeddingError> {
-        let user_model = fastembed::UserDefinedBgem3Model::new(onnx_bytes, tokenizer_files);
+        Self::try_from_user_defined_with_config(onnx_bytes, tokenizer_files, &Bgem3ProviderConfig::default())
+    }
 
-        let embedding = fastembed::Bgem3Embedding::try_new_from_user_defined(user_model, Default::default())
-            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
-
-        let model_name = "user-defined".to_string();
-
-        Ok(Self {
-            inner: Arc::new(Bgem3Inner {
-                model_name,
-                dense_dimensions: 1024,
-                session: parking_lot::Mutex::new(Some(embedding)),
-                init_options: Default::default(),
-                batch_size: DEFAULT_BATCH_SIZE,
-            }),
-        })
+    /// Create a provider from user-defined BGE-M3 ONNX model bytes (offline/air-gapped),
+    /// honoring `max_length`, `intra_threads`, and `batch_size` from `config`.
+    ///
+    /// No HuggingFace Hub download required. The caller supplies the ONNX model
+    /// file bytes and tokenizer files directly. `config.model` and `config.cache_dir`
+    /// are ignored on this path; the dense embedding dimensionality is fixed at
+    /// 1024 for BGE-M3. Setting `max_length` (e.g. 8192 for BGE-M3's long-context
+    /// capability) raises the tokenizer truncation limit; `None` keeps fastembed's
+    /// default (512).
+    pub fn try_from_user_defined_with_config(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+        config: &Bgem3ProviderConfig,
+    ) -> Result<Self, EmbeddingError> {
+        Self::build_user_defined(onnx_bytes, tokenizer_files, config, "user-defined".to_string())
     }
 
     /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped).
@@ -1049,17 +1051,59 @@ impl Bgem3Provider {
     /// ONNX file or a required tokenizer file is missing, or the ONNX session
     /// cannot be built from the given bytes.
     pub fn new_from_dir(model_dir: impl AsRef<Path>) -> Result<Self, EmbeddingError> {
+        Self::new_from_dir_with_config(model_dir, &Bgem3ProviderConfig::default())
+    }
+
+    /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped),
+    /// honoring `max_length`, `intra_threads`, and `batch_size` from `config`.
+    ///
+    /// The model is loaded entirely from a local directory — no HuggingFace Hub
+    /// download is performed. The directory must contain a `.onnx` file and the
+    /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
+    /// and `tokenizer_config.json`. `config.model` and `config.cache_dir` are
+    /// ignored on this path; the dense embedding dimensionality is fixed at 1024
+    /// for BGE-M3. Setting `max_length` (e.g. 8192 for BGE-M3's long-context
+    /// capability) raises the tokenizer truncation limit; `None` keeps fastembed's
+    /// default (512).
+    pub fn new_from_dir_with_config(
+        model_dir: impl AsRef<Path>,
+        config: &Bgem3ProviderConfig,
+    ) -> Result<Self, EmbeddingError> {
         let dir = model_dir.as_ref();
 
         let model = SbyoLoad::from_dir(dir)?;
-        let user_model = fastembed::UserDefinedBgem3Model::new(model.onnx, model.tokenizer);
-        let embedding = fastembed::Bgem3Embedding::try_new_from_user_defined(user_model, Default::default())
-            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
-
         let model_name = dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "user-defined".to_string());
+
+        Self::build_user_defined(model.onnx, model.tokenizer, config, model_name)
+    }
+
+    fn build_user_defined(
+        onnx_bytes: Vec<u8>,
+        tokenizer_files: fastembed::TokenizerFiles,
+        config: &Bgem3ProviderConfig,
+        model_name: String,
+    ) -> Result<Self, EmbeddingError> {
+        let user_model = fastembed::UserDefinedBgem3Model::new(onnx_bytes, tokenizer_files);
+
+        let mut opts = fastembed::InitOptionsUserDefined::default();
+        if let Some(len) = config.max_length {
+            opts = opts.with_max_length(len);
+        }
+        if let Some(threads) = config.intra_threads {
+            opts = opts.with_intra_threads(threads);
+        }
+
+        let embedding = fastembed::Bgem3Embedding::try_new_from_user_defined(user_model, opts)
+            .map_err(|e| EmbeddingError::InitFailed(e.to_string()))?;
+
+        let batch_size = if config.batch_size == 0 {
+            DEFAULT_BATCH_SIZE
+        } else {
+            config.batch_size
+        };
 
         Ok(Self {
             inner: Arc::new(Bgem3Inner {
@@ -1067,7 +1111,7 @@ impl Bgem3Provider {
                 dense_dimensions: 1024,
                 session: parking_lot::Mutex::new(Some(embedding)),
                 init_options: Default::default(),
-                batch_size: DEFAULT_BATCH_SIZE,
+                batch_size,
             }),
         })
     }
