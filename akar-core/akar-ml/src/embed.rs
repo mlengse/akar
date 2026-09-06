@@ -452,6 +452,7 @@ impl FastEmbedProvider {
     ) -> Result<Self, EmbeddingError> {
         Self::build_user_defined(
             onnx_bytes,
+            Vec::new(),
             tokenizer_files,
             config,
             "user-defined".to_string(),
@@ -461,12 +462,16 @@ impl FastEmbedProvider {
 
     fn build_user_defined(
         onnx_bytes: Vec<u8>,
+        external_initializers: Vec<(String, Vec<u8>)>,
         tokenizer_files: fastembed::TokenizerFiles,
         config: &EmbedProviderConfig,
         model_name: String,
         dimensions: usize,
     ) -> Result<Self, EmbeddingError> {
         let mut user_model = fastembed::UserDefinedEmbeddingModel::new(onnx_bytes, tokenizer_files);
+        for (file_name, buffer) in external_initializers {
+            user_model = user_model.with_external_initializer(file_name, buffer);
+        }
         if let Some(pooling) = config.pooling.clone() {
             user_model = user_model.with_pooling(pooling);
         }
@@ -494,7 +499,9 @@ impl FastEmbedProvider {
     /// The model is loaded entirely from a local directory — no HuggingFace Hub
     /// download is performed. The directory must contain a `.onnx` file and the
     /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
-    /// and `tokenizer_config.json`.
+    /// and `tokenizer_config.json`. External-initializer sidecar files (`*.onnx_data`
+    /// or the files referenced by `model.onnx_data_location`) are discovered and
+    /// loaded automatically for models that keep weights out of line.
     ///
     /// `dimensions` is the latent embedding dimensionality of the ONNX model's
     /// output (e.g. 384 for BGE-small-en-v1.5). It cannot be reliably inferred
@@ -536,7 +543,14 @@ impl FastEmbedProvider {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "user-defined".to_string());
 
-        Self::build_user_defined(model.onnx, model.tokenizer, config, model_name, dimensions)
+        Self::build_user_defined(
+            model.onnx,
+            model.external_initializers,
+            model.tokenizer,
+            config,
+            model_name,
+            dimensions,
+        )
     }
 
     /// Compute dense embeddings for a batch of texts.
