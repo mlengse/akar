@@ -230,6 +230,7 @@ struct FastEmbedInner {
     session: parking_lot::Mutex<Option<TextEmbedding>>,
     init_options: TextInitOptions,
     batch_size: usize,
+    quantization: QuantizationMode,
 }
 
 impl std::fmt::Debug for FastEmbedInner {
@@ -386,6 +387,8 @@ impl FastEmbedProvider {
             .map(|info| info.dim)
             .unwrap_or(384);
 
+        let quantization = TextEmbedding::get_quantization_mode(&config.model);
+
         let mut opts = TextInitOptions::new(config.model);
         if let Some(dir) = &config.cache_dir {
             opts = opts.with_cache_dir(dir.clone());
@@ -410,6 +413,7 @@ impl FastEmbedProvider {
                 session: parking_lot::Mutex::new(None),
                 init_options: opts,
                 batch_size,
+                quantization,
             }),
         })
     }
@@ -480,6 +484,7 @@ impl FastEmbedProvider {
                 session: parking_lot::Mutex::new(Some(embedding)),
                 init_options: Default::default(),
                 batch_size: DEFAULT_BATCH_SIZE,
+                quantization: config.quantization.unwrap_or(QuantizationMode::None),
             }),
         })
     }
@@ -544,7 +549,10 @@ impl FastEmbedProvider {
     ///
     /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
     /// fails to embed the batch. Returns [`EmbeddingError::InitFailed`] if the
-    /// session could not be lazily initialized.
+    /// session could not be lazily initialized. For a dynamically quantized
+    /// model ([`QuantizationMode::Dynamic`]) with more texts than the configured
+    /// batch size, returns [`EmbeddingError::ComputeFailed`] — see
+    /// [`Self::embed_texts_batched`] for the limitation and workaround.
     pub fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         self.embed_texts_batched(texts, self.inner.batch_size)
     }
@@ -554,6 +562,20 @@ impl FastEmbedProvider {
     /// Splits `texts` into chunks of `batch_size` and embeds each through the
     /// shared ONNX session. A `batch_size` of `0` falls back to the configured
     /// default. Results are identical to [`Self::embed_texts`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::ComputeFailed`] if the underlying ONNX session
+    /// fails to embed the batch, and [`EmbeddingError::InitFailed`] if the
+    /// session could not be lazily initialized.
+    ///
+    /// When the model uses [`QuantizationMode::Dynamic`] (fastembed limitation,
+    /// `text_embedding/impl.rs:337-365`: dynamic quantization re-scales each
+    /// batch, so a split input yields mutually incompatible embeddings) a
+    /// `batch_size` smaller than the number of texts is rejected with a clear
+    /// [`EmbeddingError::ComputeFailed`]. Pass a `batch_size` at least as large
+    /// as `texts.len()` (or `0`), or use a [`QuantizationMode::Static`]/
+    /// no-quantization model, to embed under dynamic quantization.
     pub fn embed_texts_batched(&self, texts: &[&str], batch_size: usize) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         let mut session_guard = self.inner.session.lock();
         let session = session_guard.get_or_insert_with(|| {
@@ -566,6 +588,14 @@ impl FastEmbedProvider {
         } else {
             batch_size
         };
+        if self.inner.quantization == QuantizationMode::Dynamic && bs < texts.len() {
+            let len = texts.len();
+            return Err(EmbeddingError::ComputeFailed(format!(
+                "Dynamic quantization cannot be used with batching: this model re-scales each batch, so \
+                 split chunks produce incompatible embeddings ({len} texts, batch_size {bs}). Pass batch_size >= \
+                 {len} (or 0 for a single batch), or use a static/no-quantization model.",
+            )));
+        }
         session
             .embed(texts, Some(bs))
             .map_err(|e| EmbeddingError::ComputeFailed(e.to_string()))
@@ -1979,6 +2009,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_dynamic_quantization_batching_guard() {
+        let Some(bytes) = crate::embed::tests::load_bge_small_offline_bytes() else {
+            return; // model not in cache — nothing to build a session from
+        };
+
+        let cfg = EmbedProviderConfig::default().with_quantization(QuantizationMode::Dynamic);
+        let provider = FastEmbedProvider::try_from_user_defined_with_config(bytes.0, bytes.1, 384, &cfg)
+            .expect("offline initialization with dynamic quantization must succeed");
+
+        let texts: Vec<&str> = vec!["dynamic one", "dynamic two", "dynamic three"];
+
+        // Split batches are incompatible under dynamic quantization — the guard
+        // must reject with a clear message instead of forwarding an opaque
+        // fastembed error.
+        let err = provider
+            .embed_texts_batched(&texts, 1)
+            .expect_err("dynamic quantization + batch_size < len must be rejected");
+        assert!(
+            err.to_string().contains("Dynamic quantization"),
+            "error must explain the dynamic-quantization limitation: {err}"
+        );
+
+        // A batch_size covering all texts (or 0 → single batch) is allowed.
+        let ok = provider
+            .embed_texts_batched(&texts, texts.len())
+            .expect("full-size batch must embed");
+        assert_eq!(ok.len(), texts.len());
+        for v in &ok {
+            assert_eq!(v.len(), 384);
+            assert!(v.iter().all(|x| x.is_finite()), "embedding must be finite");
+        }
+
+        let ok_default = provider
+            .embed_texts(&texts)
+            .expect("embed_texts (default batch) must embed");
+        assert_eq!(ok_default.len(), texts.len());
     }
 
     #[test]
