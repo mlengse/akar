@@ -332,8 +332,8 @@ impl EmbedProviderConfig {
     ///
     /// Honored by the offline path
     /// ([`FastEmbedProvider::try_from_user_defined_with_config`] and
-    /// [`FastEmbedProvider::new_from_dir_with_config`]) once wired (P92.2).
-    /// `None` keeps the model's default (`QuantizationMode::None`).
+    /// [`FastEmbedProvider::new_from_dir_with_config`]). `None` keeps the
+    /// model's default (`QuantizationMode::None`).
     ///
     /// # Examples
     ///
@@ -433,12 +433,13 @@ impl FastEmbedProvider {
     }
 
     /// Create a provider from user-defined ONNX model bytes (offline/air-gapped),
-    /// honoring the pooling strategy from `config`.
+    /// honoring the pooling strategy and weight quantization from `config`.
     ///
     /// No HuggingFace Hub download required. The caller supplies the ONNX model
     /// file bytes and tokenizer files directly. `config.model`, `cache_dir`,
-    /// `max_length`, and `intra_threads` are ignored on this path; only
-    /// [`EmbedProviderConfig::pooling`] takes effect.
+    /// `max_length`, `intra_threads`, and `batch_size` are ignored on this path;
+    /// only [`EmbedProviderConfig::pooling`] and
+    /// [`EmbedProviderConfig::quantization`] take effect.
     pub fn try_from_user_defined_with_config(
         onnx_bytes: Vec<u8>,
         tokenizer_files: fastembed::TokenizerFiles,
@@ -448,7 +449,7 @@ impl FastEmbedProvider {
         Self::build_user_defined(
             onnx_bytes,
             tokenizer_files,
-            config.pooling.clone(),
+            config,
             "user-defined".to_string(),
             dimensions,
         )
@@ -457,13 +458,16 @@ impl FastEmbedProvider {
     fn build_user_defined(
         onnx_bytes: Vec<u8>,
         tokenizer_files: fastembed::TokenizerFiles,
-        pooling: Option<Pooling>,
+        config: &EmbedProviderConfig,
         model_name: String,
         dimensions: usize,
     ) -> Result<Self, EmbeddingError> {
         let mut user_model = fastembed::UserDefinedEmbeddingModel::new(onnx_bytes, tokenizer_files);
-        if let Some(pooling) = pooling {
+        if let Some(pooling) = config.pooling.clone() {
             user_model = user_model.with_pooling(pooling);
+        }
+        if let Some(quantization) = config.quantization {
+            user_model = user_model.with_quantization(quantization);
         }
 
         let embedding = TextEmbedding::try_new_from_user_defined(user_model, Default::default())
@@ -501,14 +505,15 @@ impl FastEmbedProvider {
     }
 
     /// Create a provider from ONNX + tokenizer files on disk (offline / air-gapped),
-    /// honoring the pooling strategy from `config`.
+    /// honoring the pooling strategy and weight quantization from `config`.
     ///
     /// The model is loaded entirely from a local directory — no HuggingFace Hub
     /// download is performed. The directory must contain a `.onnx` file and the
     /// tokenizer files `tokenizer.json`, `config.json`, `special_tokens_map.json`,
-    /// and `tokenizer_config.json`. `config.model`, `cache_dir`, `max_length`, and
-    /// `intra_threads` are ignored on this path; only
-    /// [`EmbedProviderConfig::pooling`] takes effect.
+    /// and `tokenizer_config.json`. `config.model`, `cache_dir`, `max_length`,
+    /// `intra_threads`, and `batch_size` are ignored on this path; only
+    /// [`EmbedProviderConfig::pooling`] and
+    /// [`EmbedProviderConfig::quantization`] take effect.
     ///
     /// `dimensions` is the latent embedding dimensionality of the ONNX model's
     /// output (e.g. 384 for BGE-small-en-v1.5). It cannot be reliably inferred
@@ -526,13 +531,7 @@ impl FastEmbedProvider {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "user-defined".to_string());
 
-        Self::build_user_defined(
-            model.onnx,
-            model.tokenizer,
-            config.pooling.clone(),
-            model_name,
-            dimensions,
-        )
+        Self::build_user_defined(model.onnx, model.tokenizer, config, model_name, dimensions)
     }
 
     /// Compute dense embeddings for a batch of texts.
@@ -1265,6 +1264,60 @@ mod tests {
 
     // ── Dense provider (P89.1) ──
 
+    /// Load the Xenova bge-small-en-v1.5 ONNX + tokenizer bytes from the crate
+    /// level HF cache so the offline (`new_from_dir`/`try_from_user_defined`)
+    /// path can be exercised without a network. `None` when the model is not in
+    /// the cache (first run offline, cache evicted, ...) — callers should
+    /// gracefully skip rather than fail.
+    fn load_bge_small_offline_bytes() -> Option<(Vec<u8>, fastembed::TokenizerFiles)> {
+        // Ensure the model is available: downloads once into the crate level HF
+        // cache on the first run, re-uses it offline afterwards.
+        let _ = match crate::embed::FastEmbedProvider::try_default() {
+            Ok(p) => p,
+            Err(_) => return None, // no network and no cache — nothing to compare against
+        };
+        let snapshot = std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".fastembed_cache")
+                .join("models--Xenova--bge-small-en-v1.5")
+                .join("snapshots"),
+        )
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_dir())?;
+        let read_or = |name: &str| std::fs::read(snapshot.join(name)).ok();
+        let onnx_path = if snapshot.join("onnx").join("model.onnx").is_file() {
+            snapshot.join("onnx").join("model.onnx")
+        } else {
+            snapshot.join("model.onnx")
+        };
+        match (
+            std::fs::read(onnx_path).ok(),
+            read_or("tokenizer.json"),
+            read_or("config.json"),
+            read_or("special_tokens_map.json"),
+            read_or("tokenizer_config.json"),
+        ) {
+            (
+                Some(onnx),
+                Some(tokenizer_file),
+                Some(config_file),
+                Some(special_tokens_map_file),
+                Some(tokenizer_config_file),
+            ) => Some((
+                onnx,
+                fastembed::TokenizerFiles {
+                    tokenizer_file,
+                    config_file,
+                    special_tokens_map_file,
+                    tokenizer_config_file,
+                },
+            )),
+            _ => None, // tokenizer/ONNX file missing — nothing to build a session from
+        }
+    }
+
     #[test]
     fn test_provider_config_default() {
         let config = EmbedProviderConfig::default();
@@ -1846,58 +1899,8 @@ mod tests {
 
     #[test]
     fn test_pooling_config_applied_to_dense_offline() {
-        // Ensure the BGE-small model is available: downloads once into the crate
-        // level HF cache on the first run, re-uses it offline afterwards.
-        let _ = match FastEmbedProvider::try_default() {
-            Ok(p) => p,
-            Err(_) => return, // no network and no cache — nothing to compare against
-        };
-        let snapshot = match std::fs::read_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(".fastembed_cache")
-                .join("models--Xenova--bge-small-en-v1.5")
-                .join("snapshots"),
-        )
-        .ok()
-        .and_then(|rd| {
-            rd.into_iter()
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .find(|p| p.is_dir())
-        }) {
-            Some(p) => p,
-            None => return, // cache structure unexpected — nothing to compare against
-        };
-
-        let read_or = |name: &str| std::fs::read(snapshot.join(name)).ok();
-        let onnx_path = if snapshot.join("onnx").join("model.onnx").is_file() {
-            snapshot.join("onnx").join("model.onnx")
-        } else {
-            snapshot.join("model.onnx")
-        };
-        let bytes = match (
-            std::fs::read(&onnx_path).ok(),
-            read_or("tokenizer.json"),
-            read_or("config.json"),
-            read_or("special_tokens_map.json"),
-            read_or("tokenizer_config.json"),
-        ) {
-            (
-                Some(onnx),
-                Some(tokenizer_file),
-                Some(config_file),
-                Some(special_tokens_map_file),
-                Some(tokenizer_config_file),
-            ) => (
-                onnx,
-                fastembed::TokenizerFiles {
-                    tokenizer_file,
-                    config_file,
-                    special_tokens_map_file,
-                    tokenizer_config_file,
-                },
-            ),
-            _ => return, // tokenizer/ONNX file missing — nothing to build a session from
+        let Some(bytes) = crate::embed::tests::load_bge_small_offline_bytes() else {
+            return; // model not in cache — nothing to build a session from
         };
 
         let texts: Vec<&str> = vec!["pooling offline mean", "pooling offline cls"];
@@ -1938,6 +1941,44 @@ mod tests {
             mean_emb[0], cls_emb[0],
             "mean and cls pooling must not produce identical embeddings"
         );
+    }
+
+    #[test]
+    fn test_quantization_config_applied_to_dense_offline() {
+        let Some(bytes) = crate::embed::tests::load_bge_small_offline_bytes() else {
+            return; // model not in cache — nothing to build a session from
+        };
+
+        let texts: Vec<&str> = vec!["quantization offline static", "quantization offline default"];
+
+        // Static quantization is batching-safe (fastembed transform: Dynamic is
+        // the only mode that rejects explicit batch sizes). None keeps the
+        // model default — both must produce valid embeddings.
+        let static_cfg = EmbedProviderConfig::default()
+            .with_quantization(QuantizationMode::Static)
+            .with_pooling(Pooling::Cls);
+        let none_cfg = EmbedProviderConfig::default().with_quantization(QuantizationMode::None);
+
+        let static_emb =
+            FastEmbedProvider::try_from_user_defined_with_config(bytes.0.clone(), bytes.1.clone(), 384, &static_cfg)
+                .map(|p| p.embed_texts(&texts))
+                .expect("offline user-defined path with static quantization must initialize")
+                .expect("embedding with static quantization must compute");
+        let none_emb = FastEmbedProvider::try_from_user_defined_with_config(bytes.0, bytes.1, 384, &none_cfg)
+            .map(|p| p.embed_texts(&texts))
+            .expect("offline user-defined path with explicit None quantization must initialize")
+            .expect("embedding with None quantization must compute");
+
+        for emb in [&static_emb, &none_emb] {
+            assert_eq!(emb.len(), texts.len(), "one embedding per input text");
+            for v in emb {
+                assert_eq!(v.len(), 384, "BGE-small output must be 384-dimensional");
+                assert!(
+                    v.iter().all(|x| x.is_finite()),
+                    "embedding must contain only finite values"
+                );
+            }
+        }
     }
 
     #[test]
