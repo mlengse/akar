@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-09-07
+
 ### Added
 
 - **feat(ml/server) — P96.1: tes kualitas/parity — dense subset `embed_multi` >= `embed_dense` & rerank ordering (2026-09-07)** — (1) akar-ml `test_multi_dense_subset_parity_offline`: mock `DenseParityProvider` menirukan delegasi BGE-M3 (`embed_multi` & `embed_dense` sama-sama fan-out ke satu delegate), di-coerce lewat `&dyn EmbeddingProvider::as_multi()` persis seperti konsumen (find_bridges) — dense part `embed_multi` bit-identical ke `embed_dense` (1 vektor/text, panjang == dimensi model), `sparse`/`colbert` selaras n-text → mengodekan invariant "embed_multi >= embed_dense (dense subset)" sepenuhnya offline (tanpa download, CI-safe); (2) akar-ml `test_rerank_orders_results_descending`: kontrak reranker = hasil terurut skor menurun, input tak-terurut benar-benar dire-order (deterministik; jalur model nyata tetap dicakup `test_rerank_provider_cache_reuse_stable_ranking`); (3) akar-server `test_find_bridges_rerank_ordering_reorders_candidates`: 4 komunitas → 2 kandidat bridge, `LengthReranker` skor berbasis panjang konten (lepas dari jarak centroid) — hasil `find_bridges` mustahil hanya memakai urutan centroid: diuji cocok dengan top-2 **skor rerank** yang direkonstruksi dari `scored` terekam. Semua tes fitur-gate (`#[cfg(feature)]`) sehingga gate default tidak berubah. Gate `test [akar-core]` tetap **1,964 total / 0 ignored / 1,964 passed / 0 failed**; jalur `--features onnx-embedding` akar-ml `--lib` **70/70 passed** (was 68, +2 tes parity/ordering), akar-server `--features embed --lib` **12 passed** (was 11, +1 tes ordering konsumen); `cargo fmt --all -- --check` clean; clippy `-D warnings --all-targets` (`onnx-embedding` & akar-server `embed`) clean; doc-check PASS 0/0/0 — 7f821df
@@ -527,6 +529,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.1.21]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.21
 [0.1.20]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.20
 [0.1.19]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.19
 [0.1.18]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.18
