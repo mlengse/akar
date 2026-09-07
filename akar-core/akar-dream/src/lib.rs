@@ -10,7 +10,9 @@ pub mod orchestrator;
 pub mod phases;
 
 #[cfg(feature = "embed")]
-pub use akar_ml::embed::EmbeddingProvider;
+pub use akar_ml::embed::{
+    EmbeddingProvider, MultiEmbeddingOutput, MultiEmbeddingProvider, RerankResult, RerankerProvider, SparseEmbedding,
+};
 
 pub use backend::DreamBackend;
 pub use config::DreamConfig;

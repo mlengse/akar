@@ -128,6 +128,8 @@ pub struct GraphBackend {
     conn: Connection,
     #[cfg(feature = "embed")]
     provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>,
+    #[cfg(feature = "embed")]
+    reranker: Option<Arc<dyn akar_dream::RerankerProvider>>,
 }
 
 impl GraphBackend {
@@ -137,6 +139,8 @@ impl GraphBackend {
             conn: Connection::new(db),
             #[cfg(feature = "embed")]
             provider: None,
+            #[cfg(feature = "embed")]
+            reranker: None,
         }
     }
 
@@ -147,9 +151,28 @@ impl GraphBackend {
     /// embedding it) instead of returning empty. `None` keeps the graceful stub.
     #[cfg(feature = "embed")]
     pub fn with_embedding(db: &Arc<Database>, provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>) -> Self {
+        Self::with_embedding_and_reranker(db, provider, None)
+    }
+
+    /// Create a backend bound to `db` with an optional embedding provider and
+    /// an optional cross-encoder reranker (P96).
+    ///
+    /// The embedding provider is selected *by capability*: providers that also
+    /// implement [`akar_dream::MultiEmbeddingProvider`] are upgraded through
+    /// `embed_multi` (dense + sparse + ColBERT) for higher bridge recall. When
+    /// `reranker` is `Some`, candidate bridges discovered by centroid cosine
+    /// are re-scored by the cross-encoder so only the `max_bridges` most
+    /// relevant pairs survive (precision).
+    #[cfg(feature = "embed")]
+    pub fn with_embedding_and_reranker(
+        db: &Arc<Database>,
+        provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>,
+        reranker: Option<Arc<dyn akar_dream::RerankerProvider>>,
+    ) -> Self {
         Self {
             conn: Connection::new(db),
             provider,
+            reranker,
         }
     }
 
@@ -280,12 +303,27 @@ impl GraphBackend {
 
         // Skip empty embedded communities; a community with all-empty vectors
         // yields a zero centroid that cannot be compared meaningfully.
-        let vectors: Vec<Vec<f64>> = provider
-            .embed_dense(&texts)
-            .ok()?
-            .into_iter()
-            .map(|v| v.into_iter().map(|x| x as f64).collect())
-            .collect();
+        //
+        // Capability selection (P96): when the provider advertises the multi
+        // capability it is dispatched through `embed_multi` (dense + sparse +
+        // ColBERT), otherwise it falls back to the base dense contract. Both
+        // yield the dense vectors that drive centroids.
+        let vectors: Vec<Vec<f64>> = if let Some(multi) = provider.as_multi() {
+            multi
+                .embed_multi(&texts)
+                .ok()?
+                .dense
+                .into_iter()
+                .map(|v| v.into_iter().map(|x| x as f64).collect())
+                .collect()
+        } else {
+            provider
+                .embed_dense(&texts)
+                .ok()?
+                .into_iter()
+                .map(|v| v.into_iter().map(|x| x as f64).collect())
+                .collect()
+        };
         if vectors.is_empty() || vectors.iter().any(|v| v.is_empty()) {
             return Some(Vec::new());
         }
@@ -329,8 +367,36 @@ impl GraphBackend {
             return Some(Vec::new());
         }
 
-        // Greedily pair the closest distinct communities up to max_bridges.
-        keeper_distance_bridge(centroids, reps, max_bridges)
+        // Greedily pair the closest distinct communities. Ask for double the
+        // bridge budget as rerank candidates so the cross-encoder still has
+        // room to trim for precision (P96).
+        let mut bridges = keeper_distance_bridge(&centroids, &reps, max_bridges)?;
+
+        if let Some(reranker) = &self.reranker {
+            let budget = max_bridges.saturating_mul(2).max(1);
+            let candidates = keeper_distance_bridge(&centroids, &reps, budget)?;
+            if !candidates.is_empty() {
+                // Re-score each candidate pair by cross-encoding its
+                // representatives' content, then keep the top `max_bridges`.
+                // A reranker that fails to score a pair (init/download/empty
+                // content) falls back to the centroid ordering for that pair.
+                let mut scored: Vec<(usize, usize, f64)> = Vec::with_capacity(candidates.len());
+                for (a, b) in candidates {
+                    let query = contents.get(&a).map(String::as_str).unwrap_or("");
+                    let doc = contents.get(&b).map(String::as_str).unwrap_or("");
+                    let score = reranker
+                        .rerank(query, &[doc])
+                        .ok()
+                        .and_then(|r| r.first().map(|hit| hit.score as f64))
+                        .unwrap_or(f64::MIN);
+                    scored.push((a, b, score));
+                }
+                scored.sort_by(|x, y| y.2.total_cmp(&x.2));
+                bridges = scored.into_iter().take(max_bridges).map(|(a, b, _)| (a, b)).collect();
+            }
+        }
+
+        Some(bridges)
     }
 
     /// Compute bridges from caller-supplied per-node embeddings.
@@ -383,7 +449,7 @@ impl GraphBackend {
             centroids.push(centroid);
         }
 
-        keeper_distance_bridge(centroids, reps, max_bridges)
+        keeper_distance_bridge(&centroids, &reps, max_bridges)
     }
 
     /// Normalized cosine similarity (0.0 for a zero vector on either side).
@@ -407,11 +473,7 @@ impl GraphBackend {
 ///
 /// `centroids` and `reps` are index-aligned (reps[i] is the representative node
 /// of the i-th centroid). Each community appears in at most one bridge.
-fn keeper_distance_bridge(
-    centroids: Vec<Vec<f64>>,
-    reps: Vec<usize>,
-    max_bridges: usize,
-) -> Option<Vec<(usize, usize)>> {
+fn keeper_distance_bridge(centroids: &[Vec<f64>], reps: &[usize], max_bridges: usize) -> Option<Vec<(usize, usize)>> {
     if centroids.len() < 2 {
         return Some(Vec::new());
     }
@@ -1023,7 +1085,8 @@ mod tests {
     #[cfg(feature = "embed")]
     mod embed_tests {
         use super::*;
-        use akar_ml::embed::EmbeddingError;
+        use akar_dream::RerankResult;
+        use akar_ml::embed::{EmbeddingError, MultiEmbeddingOutput, SparseEmbedding};
 
         /// Deterministic provider: distinct, non-empty content maps to distinct
         /// 384-dim vectors so community centroids differ and a bridge is found.
@@ -1113,6 +1176,114 @@ mod tests {
             assert!(
                 stats.rem.bridges >= 1,
                 "provider-backed REM should discover a bridge: {stats:?}"
+            );
+        }
+
+        /// Deterministic multi-capability provider: like `MockProvider`, but
+        /// advertises `MultiEmbeddingProvider` and records every `embed_multi`
+        /// call so tests can assert the consumer selected the richer capability.
+        struct MockMultiProvider {
+            multi_calls: Arc<std::sync::Mutex<usize>>,
+        }
+
+        impl akar_dream::EmbeddingProvider for MockMultiProvider {
+            fn embed_dense(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+                Ok(texts.iter().map(|t| mock_vec(t)).collect())
+            }
+            fn dimensions(&self) -> usize {
+                384
+            }
+            fn model_name(&self) -> &str {
+                "mock-multi"
+            }
+            fn as_multi(&self) -> Option<&dyn akar_dream::MultiEmbeddingProvider> {
+                Some(self)
+            }
+        }
+
+        impl akar_dream::MultiEmbeddingProvider for MockMultiProvider {
+            fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
+                *self.multi_calls.lock().unwrap() += 1;
+                Ok(MultiEmbeddingOutput {
+                    dense: texts.iter().map(|t| mock_vec(t)).collect(),
+                    sparse: vec![SparseEmbedding::default(); texts.len()],
+                    colbert: Vec::new(),
+                })
+            }
+            fn dense_dimensions(&self) -> usize {
+                384
+            }
+        }
+
+        /// Cross-encoder mock: scores each candidate query/document pair and
+        /// records it. Delegation through `akar_dream::RerankerProvider` proves
+        /// the capability re-export is usable from the server crate.
+        struct MockReranker {
+            scored: Arc<std::sync::Mutex<Vec<(String, String, f32)>>>,
+        }
+
+        impl akar_dream::RerankerProvider for MockReranker {
+            fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
+                let score = query.len() as f32 * 0.01;
+                let mut hits = Vec::with_capacity(documents.len());
+                for doc in documents {
+                    self.scored
+                        .lock()
+                        .unwrap()
+                        .push((query.to_string(), (*doc).to_string(), score));
+                    hits.push(RerankResult {
+                        document: None,
+                        score,
+                        index: 0,
+                    });
+                }
+                Ok(hits)
+            }
+        }
+
+        /// P96.1: `find_bridges` must dispatch through the multi capability
+        /// (`embed_multi`) when the provider advertises it, not the base dense
+        /// contract — the consumers select providers by capability.
+        #[test]
+        fn test_find_bridges_upgrades_to_multi_capability() {
+            let (db, _dir) = seeded_bridge_db();
+            let calls = Arc::new(std::sync::Mutex::new(0usize));
+            let provider: Arc<dyn akar_dream::EmbeddingProvider> = Arc::new(MockMultiProvider {
+                multi_calls: calls.clone(),
+            });
+            let backend = GraphBackend::with_embedding(&db, Some(provider.clone()));
+            let communities = vec![vec![0usize], vec![1usize, 2usize]];
+            let bridges = backend
+                .find_bridges_with_provider(provider.as_ref(), &communities, 4)
+                .expect("find_bridges must not fail with a multi provider");
+            assert_eq!(
+                bridges.len(),
+                1,
+                "two isolated communities yield one bridge: {bridges:?}"
+            );
+            assert!(
+                *calls.lock().unwrap() >= 1,
+                "find_bridges must embed communities through embed_multi, not embed_dense"
+            );
+        }
+
+        /// P96.1: with a reranker injected, `find_bridges` re-scores candidate
+        /// bridges through the cross-encoder and keeps the top `max_bridges`.
+        #[test]
+        fn test_find_bridges_refines_through_rerank_capability() {
+            let (db, _dir) = seeded_bridge_db();
+            let scored = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let provider: Arc<dyn akar_dream::EmbeddingProvider> = Arc::new(MockProvider);
+            let reranker = Arc::new(MockReranker { scored: scored.clone() });
+            let backend = GraphBackend::with_embedding_and_reranker(&db, Some(provider.clone()), Some(reranker));
+            let communities = vec![vec![0usize], vec![1usize, 2usize]];
+            let bridges = backend
+                .find_bridges_with_provider(provider.as_ref(), &communities, 4)
+                .expect("find_bridges must not fail with a reranker");
+            assert_eq!(bridges.len(), 1, "rerank keeps the top candidate bridge: {bridges:?}");
+            assert!(
+                !scored.lock().unwrap().is_empty(),
+                "candidate bridges must be cross-encoded by the injected reranker"
             );
         }
     }

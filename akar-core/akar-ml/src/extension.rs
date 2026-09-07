@@ -50,9 +50,7 @@ fn build_provider() -> Result<Arc<dyn EmbeddingProvider>, String> {
         .map_err(|e: String| format!("embed_text: {e}"))?;
     let config = crate::embed::EmbedProviderConfig {
         model,
-        cache_dir: None,
-        max_length: None,
-        intra_threads: None,
+        ..crate::embed::EmbedProviderConfig::default()
     };
     let provider = FastEmbedProvider::try_new(config)
         .map_err(|e| format!("embed_text: failed to init model '{model_name}': {e}"))?;
@@ -98,9 +96,20 @@ impl Extension for MlExtension {
                     };
 
                     let provider = shared_provider()?;
-                    let vector = provider
-                        .embed_dense(&[text.as_str()])
-                        .map_err(|e| format!("embed_text: {e}"))?;
+                    // Capability selection (P96): a provider that also exposes
+                    // `MultiEmbeddingProvider` is dispatched through
+                    // `embed_multi` (dense output is identical to `embed_dense`);
+                    // dense-only providers keep the base contract unchanged.
+                    let vector = if let Some(multi) = provider.as_multi() {
+                        multi
+                            .embed_multi(&[text.as_str()])
+                            .map_err(|e| format!("embed_text: {e}"))?
+                            .dense
+                    } else {
+                        provider
+                            .embed_dense(&[text.as_str()])
+                            .map_err(|e| format!("embed_text: {e}"))?
+                    };
                     let vector = vector
                         .into_iter()
                         .next()

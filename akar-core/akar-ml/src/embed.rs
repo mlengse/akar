@@ -100,6 +100,19 @@ pub trait EmbeddingProvider: Send + Sync {
 
     /// Return a human-readable model name.
     fn model_name(&self) -> &str;
+
+    /// Capability view (P96): if this provider can also produce multi-vector
+    /// embeddings (dense + sparse + ColBERT) in a single pass, expose them
+    /// through [`MultiEmbeddingProvider`].
+    ///
+    /// Consumers holding a `dyn EmbeddingProvider` can select the richer
+    /// capability (sparse/ColBERT for higher recall) without changing the base
+    /// contract: `None` means the provider is dense-only, `Some` upgrades the
+    /// consumer to `embed_multi`. Defaults to [`None`]; providers that also
+    /// implement [`MultiEmbeddingProvider`] override it.
+    fn as_multi(&self) -> Option<&dyn MultiEmbeddingProvider> {
+        None
+    }
 }
 
 // ── Multi-embedding provider trait ──────────────────────────────────
@@ -156,7 +169,7 @@ pub trait RerankerProvider: Send + Sync {
 /// Sparse embeddings are used for lexical search (SPLADE) and multi-vector
 /// retrieval (BGE-M3 sparse branch). The `indices` are vocabulary token IDs
 /// and `values` are their corresponding importance weights.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct SparseEmbedding {
     /// Vocabulary indices with non-zero weights.
@@ -1396,6 +1409,24 @@ impl MultiEmbeddingProvider for Bgem3Provider {
     }
 }
 
+impl EmbeddingProvider for Bgem3Provider {
+    fn embed_dense(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        self.embed_texts(texts).map(|out| out.dense)
+    }
+
+    fn dimensions(&self) -> usize {
+        Bgem3Provider::dense_dimensions(self)
+    }
+
+    fn model_name(&self) -> &str {
+        Bgem3Provider::model_name(self)
+    }
+
+    fn as_multi(&self) -> Option<&dyn MultiEmbeddingProvider> {
+        Some(self)
+    }
+}
+
 // ── Cross-encoder reranking provider ─────────────────────────────────
 
 /// Configuration for creating a [`RerankProvider`].
@@ -1809,6 +1840,28 @@ mod tests {
     fn test_rerank_provider_impl_reranker() {
         let provider = RerankProvider::try_default().unwrap();
         let dyn_provider: &dyn RerankerProvider = &provider;
+        let _ = dyn_provider;
+    }
+
+    /// P96.1: an `EmbeddingProvider` that also implements
+    /// `MultiEmbeddingProvider` selects the richer capability through
+    /// `EmbeddingProvider::as_multi`, while a dense-only provider stays `None`.
+    /// Constructors are session-lazy, so this never touches the network.
+    #[test]
+    fn test_embedding_provider_capability_view() {
+        let bge_m3 = Bgem3Provider::try_default().unwrap();
+        let dyn_provider: &dyn EmbeddingProvider = &bge_m3;
+        assert!(
+            dyn_provider.as_multi().is_some(),
+            "BGE-M3 must advertise its multi capability through as_multi"
+        );
+
+        let dense = FastEmbedProvider::try_default().unwrap();
+        let dyn_provider: &dyn EmbeddingProvider = &dense;
+        assert!(
+            dyn_provider.as_multi().is_none(),
+            "dense-only providers must not advertise a multi capability"
+        );
         let _ = dyn_provider;
     }
 
