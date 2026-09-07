@@ -28,9 +28,12 @@ use std::sync::Arc;
 
 use fastembed::{
     Bgem3EmbeddingOutput, Bgem3InitOptions, Bgem3Model, EmbeddingModel, Pooling, QuantizationMode, RerankInitOptions,
-    RerankResult, RerankerModel, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions,
-    TextRerank,
+    RerankerModel, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextInitOptions, TextRerank,
 };
+
+// Re-export the cross-encoder rerank result so consumers can name the return
+// type of [`RerankerProvider::rerank`] without depending on fastembed.
+pub use fastembed::RerankResult;
 
 use crate::sbyo::SbyoLoad;
 use crate::sparse::NativeSparseSession;
@@ -97,6 +100,53 @@ pub trait EmbeddingProvider: Send + Sync {
 
     /// Return a human-readable model name.
     fn model_name(&self) -> &str;
+}
+
+// ── Multi-embedding provider trait ──────────────────────────────────
+
+/// Generic interface for providers that return multi-vector embeddings
+/// (dense + sparse + ColBERT) in a single pass.
+///
+/// Kept separate from [`EmbeddingProvider`] so that consumers that only need
+/// dense vectors keep using the object-safe [`EmbeddingProvider::embed_dense`],
+/// while providers that can produce more (e.g. BGE-M3) are dispatched through
+/// this trait via `dyn`. Both traits are deliberately not super-trait of each
+/// other; each stays object-safe on its own.
+pub trait MultiEmbeddingProvider: Send + Sync {
+    /// Compute dense + sparse + ColBERT embeddings for a batch of texts.
+    ///
+    /// Returns one [`MultiEmbeddingOutput`] per call containing all three
+    /// representations for every input text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the session could not be
+    /// lazily initialized, or [`EmbeddingError::ComputeFailed`] if inference
+    /// fails.
+    fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError>;
+
+    /// Return the dense dimensionality of this provider.
+    fn dense_dimensions(&self) -> usize;
+}
+
+// ── Reranker trait ──────────────────────────────────────────────────
+
+/// Generic interface for cross-encoder rerankers.
+///
+/// Kept separate from [`EmbeddingProvider`] so that dense-only consumers keep
+/// the minimal object-safe trait and reranking capability is opt-in via `dyn`
+/// [`RerankerProvider`].
+pub trait RerankerProvider: Send + Sync {
+    /// Rerank documents by relevance to the query.
+    ///
+    /// Returns results sorted by score in descending order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmbeddingError::InitFailed`] if the session could not be
+    /// lazily initialized, or [`EmbeddingError::ComputeFailed`] if inference
+    /// fails.
+    fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError>;
 }
 
 // ── Sparse embedding output type ────────────────────────────────────
@@ -1622,6 +1672,99 @@ mod tests {
             assert_eq!(vector.len(), 384);
             assert!(vector.iter().all(|x| x.is_finite()));
         }
+    }
+
+    // ── Capability traits (P96.1): object safety & re-export ──
+
+    /// Minimal stand-in for a multi-vector provider (BGE-M3 adds sparse +
+    /// ColBERT on top of dense). Implements the trait only to prove the
+    /// capability traits are object-safe and usable through `dyn`.
+    struct TestMultiProvider;
+
+    impl MultiEmbeddingProvider for TestMultiProvider {
+        fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
+            Ok(MultiEmbeddingOutput {
+                dense: texts.iter().map(|_| vec![0.0; 384]).collect(),
+                sparse: texts
+                    .iter()
+                    .map(|_| SparseEmbedding {
+                        indices: vec![],
+                        values: vec![],
+                    })
+                    .collect(),
+                colbert: Vec::new(),
+            })
+        }
+
+        fn dense_dimensions(&self) -> usize {
+            384
+        }
+    }
+
+    /// Minimal stand-in for a cross-encoder reranker.
+    struct TestRerankerProvider;
+
+    impl RerankerProvider for TestRerankerProvider {
+        fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
+            let _ = query;
+            Ok(documents
+                .iter()
+                .enumerate()
+                .map(|(index, doc)| RerankResult {
+                    document: Some((*doc).to_string()),
+                    score: (index as f32).recip(),
+                    index,
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn test_multi_embedding_provider_object_safe() {
+        let provider: &dyn MultiEmbeddingProvider = &TestMultiProvider;
+        let out = provider
+            .embed_multi(&["one", "two"])
+            .expect("mock embed_multi must succeed");
+        assert_eq!(out.dense.len(), 2);
+        assert_eq!(out.dense[0].len(), 384);
+        assert_eq!(out.sparse.len(), 2);
+        assert_eq!(provider.dense_dimensions(), 384);
+    }
+
+    #[test]
+    fn test_reranker_provider_object_safe() {
+        let provider: &dyn RerankerProvider = &TestRerankerProvider;
+        let results = provider
+            .rerank("who wins?", &["dog", "cat", "ferret"])
+            .expect("mock rerank must succeed");
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].index, 0);
+        assert!(results[0].score > results[2].score);
+    }
+
+    #[test]
+    fn test_capability_types_reexported_from_crate_root() {
+        // P96.1 re-exports: consumers can name the output types and capability
+        // traits without going through fastembed or the private module path.
+        // Coercing each to a trait object fails to compile if the name does not
+        // resolve and if the trait is not object-safe.
+        let e: Option<&dyn crate::EmbeddingProvider> = None;
+        let m: Option<&dyn crate::MultiEmbeddingProvider> = None;
+        let r: Option<&dyn crate::RerankerProvider> = None;
+        let multi: crate::MultiEmbeddingOutput = MultiEmbeddingOutput {
+            dense: vec![],
+            sparse: vec![],
+            colbert: vec![],
+        };
+        let sparse: crate::SparseEmbedding = SparseEmbedding {
+            indices: vec![],
+            values: vec![],
+        };
+        assert!(e.is_none());
+        assert!(m.is_none());
+        assert!(r.is_none());
+        assert_eq!(multi.dense.len(), 0);
+        assert_eq!(sparse.len(), 0);
     }
 
     // ── Dense provider (P89.1) ──

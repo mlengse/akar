@@ -54,6 +54,11 @@ pub mod lstm;
 #[cfg(feature = "onnx-embedding")]
 pub mod embed;
 
+// Re-exported so consumers can name embedding output types and the capability
+// traits (P96) from the crate root: `akar_ml::{MultiEmbeddingProvider, ...}`.
+#[cfg(feature = "onnx-embedding")]
+pub use embed::{EmbeddingProvider, MultiEmbeddingOutput, MultiEmbeddingProvider, RerankerProvider, SparseEmbedding};
+
 #[cfg(feature = "onnx-embedding")]
 pub(crate) mod sbyo;
 
