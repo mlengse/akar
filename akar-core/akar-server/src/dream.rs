@@ -1241,6 +1241,35 @@ mod tests {
             }
         }
 
+        /// Cross-encoder mock that scores each pair by the total content
+        /// length, so rerank ordering is data-driven and decoupled from the
+        /// centroid distances `keeper_distance_bridge` used to select the
+        /// candidates.
+        struct LengthReranker {
+            scored: Arc<std::sync::Mutex<Vec<(String, String, f32)>>>,
+        }
+
+        impl akar_dream::RerankerProvider for LengthReranker {
+            fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
+                let hits: Vec<RerankResult> = documents
+                    .iter()
+                    .map(|doc| {
+                        let score = (query.len() + doc.len()) as f32;
+                        self.scored
+                            .lock()
+                            .unwrap()
+                            .push((query.to_string(), (*doc).to_string(), score));
+                        RerankResult {
+                            document: None,
+                            score,
+                            index: 0,
+                        }
+                    })
+                    .collect();
+                Ok(hits)
+            }
+        }
+
         /// P96.1: `find_bridges` must dispatch through the multi capability
         /// (`embed_multi`) when the provider advertises it, not the base dense
         /// contract — the consumers select providers by capability.
@@ -1284,6 +1313,64 @@ mod tests {
             assert!(
                 !scored.lock().unwrap().is_empty(),
                 "candidate bridges must be cross-encoded by the injected reranker"
+            );
+        }
+
+        /// P96.1 (tes parity): with several candidate pairs, `find_bridges`
+        /// must return the top `max_bridges` candidates **by rerank score**,
+        /// not by centroid distance — the rerank ordering drives the final
+        /// bridge selection.
+        #[test]
+        fn test_find_bridges_rerank_ordering_reorders_candidates() {
+            let dir = TempDir::new().expect("temp dir");
+            let db = Arc::new(Database::new(dir.path().join("test_db"), config()).expect("create db"));
+            let conn = Connection::new(&db);
+            conn.query(
+                "CREATE NODE TABLE Memory(id INT64, salience DOUBLE, created_at DOUBLE, \
+                 content STRING, community INT64, PRIMARY KEY (id))",
+            )
+            .expect("create Memory");
+            conn.query("CREATE REL TABLE Connected(FROM Memory TO Memory, weight DOUBLE)")
+                .expect("create Connected");
+            let contents = vec![(0i64, "alpha"), (1i64, "bbbb"), (2i64, "ccccccc"), (3i64, "dddddddddd")];
+            for (id, content) in &contents {
+                conn.query(&format!(
+                    "CREATE (:Memory {{id: {id}, salience: 0.5, created_at: 1000.0, \
+                     content: '{content}', community: {id}}})"
+                ))
+                .expect("seed memory");
+            }
+
+            let scored = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let provider: Arc<dyn akar_dream::EmbeddingProvider> = Arc::new(MockProvider);
+            let reranker = Arc::new(LengthReranker { scored: scored.clone() });
+            let backend = GraphBackend::with_embedding_and_reranker(&db, Some(provider.clone()), Some(reranker));
+            let communities = vec![vec![0usize], vec![1usize], vec![2usize], vec![3usize]];
+
+            let bridges = backend
+                .find_bridges_with_provider(provider.as_ref(), &communities, 2)
+                .expect("find_bridges with reranker must succeed");
+
+            // Rebuild the rerank-preferred top-2 straight from the recorded
+            // scores; the returned bridges must match it exactly.
+            let id_of = |content: &str| contents.iter().find(|(_, c)| *c == content).map(|(id, _)| *id as usize);
+            let mut candidates: Vec<(usize, usize, f32)> = scored
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(q, d, s)| (id_of(q).unwrap(), id_of(d).unwrap(), *s))
+                .collect();
+            candidates.sort_by(|x, y| y.2.total_cmp(&x.2));
+            let expected: Vec<(usize, usize)> = candidates.into_iter().take(2).map(|(a, b, _)| (a, b)).collect();
+
+            assert_eq!(
+                bridges.len(),
+                expected.len(),
+                "rerank trims candidates down to the requested budget: {bridges:?}"
+            );
+            assert_eq!(
+                bridges, expected,
+                "find_bridges must select the top bridges by rerank score, not centroid distance"
             );
         }
     }

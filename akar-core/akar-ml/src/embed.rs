@@ -1881,6 +1881,134 @@ mod tests {
         let _ = dyn_provider;
     }
 
+    /// P96.1 (tes parity): a provider advertising `as_multi` must expose a
+    /// dense output that is a superset of the base dense contract — embedding
+    /// the same texts once, the dense part of `embed_multi` must be exactly
+    /// what `embed_dense` returns (BGE-M3 delegates both to `embed_texts`).
+    /// This mock mirrors that delegation so the parity property is asserted
+    /// fully offline, through the same `dyn` face the consumers use.
+    struct DenseParityProvider;
+
+    fn parity_vec(text: &str) -> Vec<f32> {
+        let mut v = vec![0.0f32; 384];
+        if text.is_empty() {
+            return v;
+        }
+        v[0] = text.len() as f32;
+        for (i, b) in text.bytes().enumerate() {
+            v[(i % 383) + 1] += (b as f32) / 255.0;
+        }
+        v
+    }
+
+    impl EmbeddingProvider for DenseParityProvider {
+        fn embed_dense(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+            Ok(texts.iter().map(|t| parity_vec(t)).collect())
+        }
+        fn dimensions(&self) -> usize {
+            384
+        }
+        fn model_name(&self) -> &str {
+            "parity-mock"
+        }
+        fn as_multi(&self) -> Option<&dyn MultiEmbeddingProvider> {
+            Some(self)
+        }
+    }
+
+    impl MultiEmbeddingProvider for DenseParityProvider {
+        fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
+            Ok(MultiEmbeddingOutput::new(
+                texts.iter().map(|t| parity_vec(t)).collect(),
+                (0..texts.len()).map(|_| SparseEmbedding::default()).collect(),
+                Vec::new(),
+            ))
+        }
+        fn dense_dimensions(&self) -> usize {
+            384
+        }
+    }
+
+    #[test]
+    fn test_multi_dense_subset_parity_offline() {
+        let provider = DenseParityProvider;
+        let via_embedding: &dyn EmbeddingProvider = &provider;
+        let texts = [
+            "storage engine coffee bean",
+            "concurrent transactions",
+            "vector quantization",
+        ];
+
+        let multi = via_embedding
+            .as_multi()
+            .expect("multi-capable provider must advertise the capability")
+            .embed_multi(&texts)
+            .expect("embed_multi must succeed");
+        let dense = via_embedding.embed_dense(&texts).expect("embed_dense must succeed");
+
+        assert_eq!(multi.dense.len(), texts.len(), "one dense vector per text");
+        assert_eq!(multi.sparse.len(), texts.len(), "one sparse vector per text");
+        assert_eq!(
+            multi.dense.len(),
+            dense.len(),
+            "multi dense and dense path agree in count"
+        );
+        for (m, d) in multi.dense.iter().zip(&dense) {
+            assert_eq!(
+                m.len(),
+                provider.dimensions(),
+                "dense vectors must match the model dimensions"
+            );
+            assert_eq!(m.len(), d.len());
+            assert!(
+                m.iter().zip(d).all(|(x, y)| x.to_bits() == y.to_bits()),
+                "the multi dense subset must be bit-identical to the dense path for the same texts"
+            );
+        }
+    }
+
+    /// P96.1 (tes parity): the reranker contract returns results ordered by
+    /// score descending, reordering an unsorted input. Kept as a deterministic
+    /// offline assertion; the real model path is covered separately by
+    /// `test_rerank_provider_cache_reuse_stable_ranking`.
+    struct TestOrderingReranker;
+
+    impl RerankerProvider for TestOrderingReranker {
+        fn rerank(&self, _query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
+            let mut hits: Vec<RerankResult> = documents
+                .iter()
+                .enumerate()
+                .map(|(index, doc)| RerankResult {
+                    document: Some((*doc).to_string()),
+                    score: doc.len() as f32,
+                    index,
+                })
+                .collect();
+            hits.sort_by(|x, y| y.score.total_cmp(&x.score));
+            Ok(hits)
+        }
+    }
+
+    #[test]
+    fn test_rerank_orders_results_descending() {
+        // Input deliberately not sorted by length, so a useful ordering must
+        // actually reorder instead of reflecting input order.
+        let docs = ["cc", "a", "bbbb"];
+        let results = TestOrderingReranker
+            .rerank("q", &docs)
+            .expect("mock rerank must succeed");
+        assert!(
+            results.windows(2).all(|w| w[0].score >= w[1].score),
+            "rerank results must be ordered by score descending"
+        );
+        let order: Vec<Option<&str>> = results.iter().map(|r| r.document.as_deref()).collect();
+        assert_eq!(
+            order,
+            vec![Some("bbbb"), Some("cc"), Some("a")],
+            "rerank must reorder the input by content score"
+        );
+    }
+
     // ── Dense provider (P89.1) ──
 
     /// Locate the Xenova bge-small-en-v1.5 snapshot directory in the crate-level
