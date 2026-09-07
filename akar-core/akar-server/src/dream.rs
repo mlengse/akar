@@ -1204,11 +1204,11 @@ mod tests {
         impl akar_dream::MultiEmbeddingProvider for MockMultiProvider {
             fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
                 *self.multi_calls.lock().unwrap() += 1;
-                Ok(MultiEmbeddingOutput {
-                    dense: texts.iter().map(|t| mock_vec(t)).collect(),
-                    sparse: vec![SparseEmbedding::default(); texts.len()],
-                    colbert: Vec::new(),
-                })
+                Ok(MultiEmbeddingOutput::new(
+                    texts.iter().map(|t| mock_vec(t)).collect(),
+                    vec![SparseEmbedding::default(); texts.len()],
+                    Vec::new(),
+                ))
             }
             fn dense_dimensions(&self) -> usize {
                 384

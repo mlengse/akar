@@ -214,6 +214,7 @@ impl From<fastembed::SparseEmbedding> for SparseEmbedding {
 
 /// Output from BGE-M3: dense + sparse + ColBERT representations in a single pass.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MultiEmbeddingOutput {
     /// Dense vectors, one per input text.
     pub dense: Vec<Vec<f32>>,
@@ -221,6 +222,17 @@ pub struct MultiEmbeddingOutput {
     pub sparse: Vec<SparseEmbedding>,
     /// ColBERT multi-vector representations (per-token), one `Vec<Vec<f32>>` per input text.
     pub colbert: Vec<Vec<Vec<f32>>>,
+}
+
+impl MultiEmbeddingOutput {
+    /// Creates an output from ready-made dense, sparse, and ColBERT vectors.
+    ///
+    /// [`MultiEmbeddingOutput`] is `#[non_exhaustive]` so its fields can grow
+    /// without breaking external crates; this constructor is the public
+    /// construction path for consumers.
+    pub fn new(dense: Vec<Vec<f32>>, sparse: Vec<SparseEmbedding>, colbert: Vec<Vec<Vec<f32>>>) -> Self {
+        Self { dense, sparse, colbert }
+    }
 }
 
 impl From<Bgem3EmbeddingOutput> for MultiEmbeddingOutput {
@@ -838,6 +850,7 @@ impl EmbeddingProvider for FastEmbedProvider {
 
 /// Configuration for creating a [`SparseEmbedProvider`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SparseProviderConfig {
     /// The sparse model to use.
     pub model: SparseModel,
@@ -888,6 +901,7 @@ impl SparseProviderConfig {
 /// Provides sparse text embedding via ONNX Runtime. The model is loaded lazily
 /// on first use.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SparseEmbedProvider {
     inner: Arc<SparseEmbedInner>,
 }
@@ -1092,6 +1106,7 @@ impl SparseEmbedProvider {
 
 /// Configuration for creating a [`Bgem3Provider`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Bgem3ProviderConfig {
     /// The BGE-M3 model variant.
     pub model: Bgem3Model,
@@ -1142,6 +1157,7 @@ impl Bgem3ProviderConfig {
 /// Provides joint dense + sparse + ColBERT embedding via ONNX Runtime
 /// in a single forward pass. The model is loaded lazily on first use.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Bgem3Provider {
     inner: Arc<Bgem3Inner>,
 }
@@ -2607,6 +2623,17 @@ mod tests {
         // EmbedProviderConfig defaults must be usable even though non_exhaustive.
         let cfg = EmbedProviderConfig::default();
         assert_eq!(cfg.batch_size, DEFAULT_BATCH_SIZE);
+
+        // MultiEmbeddingOutput (P96 output type) is #[non_exhaustive] too;
+        // its public constructor is the external construction path.
+        let out = MultiEmbeddingOutput::new(
+            vec![vec![0.5, 0.25]],
+            vec![SparseEmbedding::default()],
+            vec![vec![vec![0.1, 0.2]]],
+        );
+        assert_eq!(out.dense, vec![vec![0.5, 0.25]]);
+        assert_eq!(out.sparse.len(), 1);
+        assert_eq!(out.colbert, vec![vec![vec![0.1, 0.2]]]);
     }
 
     // ── P90.6: offline bytes path + HF cache re-use per provider ──
