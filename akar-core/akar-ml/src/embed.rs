@@ -1383,6 +1383,19 @@ impl Bgem3Provider {
     }
 }
 
+// ── Capability trait impl (P96.1) — BGE-M3 ─────────────────────────
+
+impl MultiEmbeddingProvider for Bgem3Provider {
+    fn embed_multi(&self, texts: &[&str]) -> Result<MultiEmbeddingOutput, EmbeddingError> {
+        self.embed_texts(texts)
+    }
+
+    fn dense_dimensions(&self) -> usize {
+        // Call through the inherent method to keep the delegation path obvious.
+        Bgem3Provider::dense_dimensions(self)
+    }
+}
+
 // ── Cross-encoder reranking provider ─────────────────────────────────
 
 /// Configuration for creating a [`RerankProvider`].
@@ -1613,6 +1626,17 @@ impl RerankProvider {
     }
 }
 
+// ── Capability trait impl (P96.1) — reranker ────────────────────────
+
+impl RerankerProvider for RerankProvider {
+    fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<RerankResult>, EmbeddingError> {
+        // The inherent method and the trait method share a name; the qualified
+        // call disambiguates to the inherent implementation so this trait method
+        // delegates instead of recursing into itself.
+        RerankProvider::rerank(self, query, documents)
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1765,6 +1789,27 @@ mod tests {
         assert!(r.is_none());
         assert_eq!(multi.dense.len(), 0);
         assert_eq!(sparse.len(), 0);
+    }
+
+    /// P96.1: the real BGE-M3 provider dispatches through `dyn
+    /// MultiEmbeddingProvider`. Construction does not download the model — the
+    /// ONNX session is lazy — so this never touches the network.
+    #[test]
+    fn test_bgem3_provider_impl_multi_embedding() {
+        let provider = Bgem3Provider::try_default().unwrap();
+        let dyn_provider: &dyn MultiEmbeddingProvider = &provider;
+        assert_eq!(dyn_provider.dense_dimensions(), 1024);
+    }
+
+    /// P96.1: the real reranker dispatches through `dyn RerankerProvider`.
+    /// Construction does not download the model — the ONNX session is lazy — so
+    /// the coercion proves the `impl RerankerProvider` exists and is object-safe
+    /// without touching the network.
+    #[test]
+    fn test_rerank_provider_impl_reranker() {
+        let provider = RerankProvider::try_default().unwrap();
+        let dyn_provider: &dyn RerankerProvider = &provider;
+        let _ = dyn_provider;
     }
 
     // ── Dense provider (P89.1) ──
