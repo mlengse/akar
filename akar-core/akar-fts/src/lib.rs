@@ -10,6 +10,8 @@
 //! (stem_word, tokenize, bm25, etc.) are called directly by the physical
 //! operators in `Akar-processor`.
 
+pub mod schema;
+
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
 

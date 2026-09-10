@@ -8,6 +8,7 @@
 ### Added
 
 - **feat(fts) — P100.1: tambah tantivy 0.26.2 sebagai dependency `akar-fts` (2026-09-10)** — `tantivy = { version = "0.26.2", default-features = false, features = ["mmap", "lz4-compression", "stemmer", "stopwords"] }` ditambahkan ke `akar-fts/Cargo.toml`. `akar-core` tetap zero-Tantivy deps — `fts-extension` feature gate di `akar-main` tetap mengaktifkan `akar-fts` secara opsional. Verifikasi: `cargo tree -p akar-fts` resolve tantivy v0.26.2 dari crates.io; `cargo tree -p akar-core` 0 tantivy entries; `cargo check -p akar-fts` OK; clippy `-D warnings` OK; fmt OK. Gate `test [akar-core]` **1,964 passed / 0 failed / 0 ignored** — tanpa perubahan jumlah tes.
+- **feat(fts) — P101.1: schema mapping Akar `LogicalTypeID` → Tantivy field types (2026-09-10)** — modul baru `akar-fts/src/schema.rs` mendefinisikan `build_tantivy_schema(&[ColumnDefinition]) -> Schema`: `String` → `TEXT | STORED` (indexed + stored untuk full-text retrieval), `Int64`/`Int32`/`Int16`/`Int8` → `I64 FAST`, `UInt64`/`UInt32`/`UInt16`/`UInt8` → `U64 FAST`, `Float`/`Double` → `F64 FAST`, `Bool` → `INDEXED | STORED`, Date/Timestamp → `STORED`. Tipe relasional (`Node`, `Rel`, `List`, `Map`, `Struct`, dll.) di-skip. 7 unit tests: schema document 4 kolom, string→TEXT indexed+stored, int64→I64 FAST, float→F64 FAST, bool→indexed+stored, relational types skipped, mixed columns. Dependensi baru: `akar-storage` (untuk `ColumnDefinition`). Gate `test [akar-core]` **1,971 passed / 0 failed** (+7 tes baru).
 
 ## [0.1.21] - 2026-09-07
 
