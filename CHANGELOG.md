@@ -7,7 +7,7 @@
 
 ### Added
 
-- **feat(fts) — P100.1: tambah tantivy 0.27.0 sebagai dependency `akar-fts` (2026-09-10)** — `tantivy = { path = "../../../tantivy", version = "0.27", default-features = false, features = ["mmap", "lz4-compression", "stemmer", "stopwords"] }` ditambahkan langsung ke `akar-fts/Cargo.toml` (path dependency ke clone lokal `tantivy/` sementara v0.27 belum published ke crates.io). `akar-core` tetap zero-Tantivy deps — `fts-extension` feature gate di `akar-main` tetap mengaktifkan `akar-fts` secara opsional. Verifikasi: `cargo tree -p akar-fts` resolve tantivy v0.27.0; `cargo tree -p akar-core` 0 tantivy entries; `cargo check -p akar-fts` OK; clippy `-D warnings` OK; fmt OK. Gate `test [akar-core]` **1,964 passed / 0 failed / 0 ignored** — tanpa perubahan jumlah tes.
+- **feat(fts) — P100.1: tambah tantivy 0.26.2 sebagai dependency `akar-fts` (2026-09-10)** — `tantivy = { version = "0.26.2", default-features = false, features = ["mmap", "lz4-compression", "stemmer", "stopwords"] }` ditambahkan ke `akar-fts/Cargo.toml`. `akar-core` tetap zero-Tantivy deps — `fts-extension` feature gate di `akar-main` tetap mengaktifkan `akar-fts` secara opsional. Verifikasi: `cargo tree -p akar-fts` resolve tantivy v0.26.2 dari crates.io; `cargo tree -p akar-core` 0 tantivy entries; `cargo check -p akar-fts` OK; clippy `-D warnings` OK; fmt OK. Gate `test [akar-core]` **1,964 passed / 0 failed / 0 ignored** — tanpa perubahan jumlah tes.
 
 ## [0.1.21] - 2026-09-07
 
