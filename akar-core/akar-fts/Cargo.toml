@@ -14,6 +14,7 @@ authors.workspace = true
 akar-common = { path = "../akar-common", version = "0.1.3" }
 akar-function = { path = "../akar-function", version = "0.1.2" }
 akar-extension = { path = "../akar-extension", version = "0.1.1" }
+tantivy = { path = "../../../tantivy", version = "0.27", default-features = false, features = ["mmap", "lz4-compression", "stemmer", "stopwords"] }
 regex.workspace = true
 tracing.workspace = true
 
