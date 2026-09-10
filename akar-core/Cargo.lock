@@ -168,6 +168,7 @@ dependencies = [
  "akar-storage",
  "regex",
  "tantivy",
+ "tempfile",
  "tracing",
 ]
 

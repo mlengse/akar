@@ -1,8 +1,8 @@
 //! Full-Text Search (FTS) extension for Akar.
 //!
 //! Enables full-text indexing and querying:
-//! - `STEM` — stem words using a Porter-style English stemmer
-//! - `TOKENIZE` — tokenize text into words
+//! - `STEM` — stem words with Tantivy's `en_stem` (Snowball Porter2) tokenizer
+//! - `TOKENIZE` — tokenize text into lowercased, stemmed word tokens
 //!
 //! FTS index creation and querying are handled **natively** via the DDL and
 //! MATCH clause (`CREATE FTS INDEX`, `MATCH ... USING FTS INDEX`), which
@@ -10,7 +10,9 @@
 //! (stem_word, tokenize, bm25, etc.) are called directly by the physical
 //! operators in `Akar-processor`.
 
+pub mod index;
 pub mod schema;
+pub mod tokenizer;
 
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
@@ -39,7 +41,7 @@ impl Extension for FtsExtension {
         use akar_common::types::Value;
         use akar_function::registry::ScalarFunction;
 
-        // Register `stem(word)` — applies Porter-style stemming
+        // Register `stem(word)` — applies Tantivy en_stem (Porter2) stemming
         context.register_scalar_function(
             "stem",
             ScalarFunction::CustomScalar {
@@ -84,126 +86,21 @@ impl Extension for FtsExtension {
 
 // ==================== Stemming ====================
 
-/// A minimal Porter-style stemmer for English.
-///
-/// Removes common suffixes: -ing, -ly, -ed, -es, -s, -ment, -ness, -tion, -able, -ible, -al, -ial, -ful, -ous, -ive, -ize, -er, -or, -ion
+/// Stem a single English word using the Tantivy `en_stem` tokenizer
+/// (Snowball Porter2-derived). Applied uniformly at index and query time by
+/// the FTS physical operators in `Akar-processor`.
 pub fn stem_word(word: &str) -> String {
-    let word = word.trim().to_lowercase();
-    if word.len() < 3 {
-        return word;
-    }
-
-    let w = word;
-
-    // Rule 1a: -sses → -ss, -ies → -i, -es → -e, -s → (remove s if not -ss)
-    let w = if w.ends_with("sses") {
-        w[..w.len() - 2].to_string()
-    } else if w.ends_with("ies") && w.len() > 4 {
-        format!("{}i", &w[..w.len() - 3])
-    } else if w.ends_with("es") && w.len() > 4 && !w.ends_with("aes") && !w.ends_with("ees") && !w.ends_with("oes") {
-        format!("{}e", &w[..w.len() - 2])
-    } else if w.ends_with("s") && !w.ends_with("ss") && w.len() > 3 {
-        w[..w.len() - 1].to_string()
-    } else {
-        w
-    };
-
-    // Rule 1b: -eed → -ee if root has consonant before
-    //          -ed → remove (if root has vowel)
-    //          -ing → remove (if root has vowel)
-    let w = if w.ends_with("eed") && w.len() > 3 {
-        format!("{}ee", &w[..w.len() - 3])
-    } else if w.ends_with("ed") && w.len() > 3 && contains_vowel(&w[..w.len() - 2]) {
-        let stem = &w[..w.len() - 2];
-        handle_double_consonant(stem)
-    } else if w.ends_with("ing") && w.len() > 4 && contains_vowel(&w[..w.len() - 3]) {
-        let stem = &w[..w.len() - 3];
-        handle_double_consonant(stem)
-    } else if w.ends_with("ingly") && w.len() > 5 && contains_vowel(&w[..w.len() - 5]) {
-        let stem = &w[..w.len() - 5];
-        handle_double_consonant(stem)
-    } else if w.ends_with("edly") && w.len() > 4 && contains_vowel(&w[..w.len() - 4]) {
-        let stem = &w[..w.len() - 4];
-        handle_double_consonant(stem)
-    } else {
-        w
-    };
-
-    // Rule 2: -ational → -ate, -ization → -ize, -iveness → -ive, etc.
-
-    if w.ends_with("ational") && w.len() > 7 {
-        format!("{}ate", &w[..w.len() - 7])
-    } else if w.ends_with("ization") && w.len() > 8 {
-        format!("{}ize", &w[..w.len() - 8])
-    } else if w.ends_with("iveness") && w.len() > 7 {
-        format!("{}ive", &w[..w.len() - 7])
-    } else if w.ends_with("fulness") && w.len() > 7 {
-        format!("{}ful", &w[..w.len() - 7])
-    } else if w.ends_with("ousness") && w.len() > 7 {
-        format!("{}ous", &w[..w.len() - 7])
-    } else if w.ends_with("biliti") && w.len() > 6 {
-        format!("{}ble", &w[..w.len() - 6])
-    } else if w.ends_with("ation") && w.len() > 5 {
-        format!("{}ate", &w[..w.len() - 5])
-    } else if w.ends_with("ment") && w.len() > 4 {
-        w[..w.len() - 4].to_string()
-    } else if w.ends_with("ness") && w.len() > 4 {
-        w[..w.len() - 4].to_string()
-    } else if w.ends_with("able") && w.len() > 4 {
-        w[..w.len() - 4].to_string()
-    } else if w.ends_with("ible") && w.len() > 4 {
-        w[..w.len() - 4].to_string()
-    } else if w.ends_with("ful") && w.len() > 3 {
-        w[..w.len() - 3].to_string()
-    } else if w.ends_with("al") && w.len() > 3 {
-        w[..w.len() - 2].to_string()
-    } else if w.ends_with("ive") && w.len() > 3 {
-        w[..w.len() - 3].to_string()
-    } else if w.ends_with("ize") && w.len() > 3 {
-        w[..w.len() - 3].to_string()
-    } else if w.ends_with("er") && w.len() > 3 {
-        w[..w.len() - 2].to_string()
-    } else if w.ends_with("or") && w.len() > 3 {
-        w[..w.len() - 2].to_string()
-    } else if w.ends_with("ion") && w.len() > 3 {
-        w[..w.len() - 3].to_string()
-    } else if w.ends_with("ly") && w.len() > 3 {
-        w[..w.len() - 2].to_string()
-    } else {
-        w
-    }
-}
-
-/// Check if a string slice contains a vowel.
-fn contains_vowel(s: &str) -> bool {
-    s.chars().any(|c| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u'))
-}
-
-/// Handle double consonant at end of stem: if stem ends in double consonant,
-/// remove one (e.g., "runn" → "run").
-fn handle_double_consonant(stem: &str) -> String {
-    if stem.len() >= 2 {
-        let chars: Vec<char> = stem.chars().collect();
-        let last = chars.len() - 1;
-        if last > 0 && chars[last] == chars[last - 1] {
-            return chars[..last].iter().collect();
-        }
-    }
-    stem.to_string()
+    crate::tokenizer::stem(word)
 }
 
 // ==================== Tokenization ====================
 
-/// Regex for splitting text into word tokens, compiled exactly once.
-/// `Regex::new` is expensive; compiling it on every `tokenize()` call made the
-/// FTS index build / query hot path pay a regex compile per document (P51.18).
-static TOKEN_RE: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"[a-zA-Z0-9]+([''][a-zA-Z]+)?").expect("valid token regex"));
-
-/// Tokenize a text string into words.
-/// Splits on whitespace and punctuation, lowercases all tokens.
+/// Tokenize a text string into lowercased, stemmed word tokens.
+///
+/// Delegates to the Tantivy `en_stem` pipeline, so the tokens equal what a
+/// full-text field indexed with `en_stem` produces.
 pub fn tokenize(text: &str) -> Vec<String> {
-    TOKEN_RE.find_iter(text).map(|m| m.as_str().to_lowercase()).collect()
+    crate::tokenizer::tokenize(text)
 }
 
 /// Compute TF-IDF score for a term in a document.
@@ -278,9 +175,10 @@ mod tests {
 
     #[test]
     fn test_stem_ly() {
+        // Tantivy Snowball-Porter2 keeps the trailing "-li" from step 1c (y→i).
         assert_eq!(stem_word("quickly"), "quick");
-        assert_eq!(stem_word("happily"), "happi");
-        assert_eq!(stem_word("slowly"), "slow");
+        assert_eq!(stem_word("happily"), "happili");
+        assert_eq!(stem_word("slowly"), "slowli");
     }
 
     #[test]
@@ -313,9 +211,10 @@ mod tests {
 
     #[test]
     fn test_tokenize_with_punctuation() {
+        // Tantivy SimpleTokenizer splits on non-alphanumeric chars (so
+        // apostrophes split the word), then lowercases + stems each token.
         let tokens = tokenize("It's a nice day, isn't it?");
-        assert!(tokens.iter().any(|t| t == "it's"));
-        assert!(tokens.iter().any(|t| t == "isn't"));
+        assert_eq!(tokens, vec!["it", "s", "a", "nice", "day", "isn", "t", "it"]);
     }
 
     #[test]
@@ -370,9 +269,9 @@ mod tests {
     fn test_stem_complex() {
         assert_eq!(stem_word("happiness"), "happi");
         assert_eq!(stem_word("enjoyment"), "enjoy");
-        // "justification" → "justificate" (Porter step 2: -ation → -ate)
-        // A full Porter2 stemmer would further reduce this to "justif"
-        assert!(stem_word("justification").starts_with("justif"));
+        // "justification" → "justif" (Tantivy Snowball-Porter2, step 2: -ation → -ate
+        // then step 4: -ate → remove).
+        assert_eq!(stem_word("justification"), "justif");
     }
 
     #[test]

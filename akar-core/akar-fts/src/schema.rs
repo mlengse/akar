@@ -1,18 +1,20 @@
 //! Schema mapping: Akar `LogicalTypeID` → Tantivy field types.
 //!
-//! | Akar LogicalTypeID | Tantivy type | Flags          |
-//! |--------------------|--------------|----------------|
-//! | `String`           | `TEXT`       | INDEXED+STORED  |
-//! | `Int64`            | `I64`        | FAST            |
-//! | `Float64`          | `F64`        | FAST            |
-//! | `Bool`             | `BOOL`       | INDEXED+STORED  |
+//! | Akar LogicalTypeID | Tantivy type | Flags                         |
+//! |--------------------|--------------|-------------------------------|
+//! | `String`           | `TEXT`       | INDEXED+STORED, tokenizer `en_stem` |
+//! | `Int64`            | `I64`        | FAST                          |
+//! | `Float64`          | `F64`        | FAST                          |
+//! | `Bool`             | `BOOL`       | INDEXED+STORED                |
 //!
 //! Complex / relational types (`Node`, `Rel`, `List`, `Map`, `Struct`, …) are
 //! **skipped** — they cannot be meaningfully indexed for full-text search.
 
 use akar_common::types::LogicalTypeID;
 use akar_storage::table::ColumnDefinition;
-use tantivy::schema::{Schema, SchemaBuilder, TEXT, INDEXED, STORED, FAST};
+use tantivy::schema::{FAST, INDEXED, IndexRecordOption, STORED, Schema, SchemaBuilder, TEXT, TextFieldIndexing};
+
+use crate::tokenizer::EN_STEM;
 
 /// Build a Tantivy [`Schema`] from Akar source-table column definitions.
 ///
@@ -32,13 +34,23 @@ pub fn build_tantivy_schema(columns: &[ColumnDefinition]) -> Schema {
 fn add_field(builder: &mut SchemaBuilder, col: &ColumnDefinition) -> Option<tantivy::schema::Field> {
     let name = &col.name;
     match col.logical_type {
-        // ── Text: full-text indexed + stored for retrieval ──
-        LogicalTypeID::String => Some(builder.add_text_field(name, TEXT | STORED)),
+        // ── Text: full-text indexed with `en_stem` + stored for retrieval ──
+        // The tokenizer name is resolved from the index's TokenizerManager at
+        // index/query time (registered by `TantivyIndex` constructors).
+        LogicalTypeID::String => Some(
+            builder.add_text_field(
+                name,
+                TEXT.set_indexing_options(
+                    TextFieldIndexing::default()
+                        .set_tokenizer(EN_STEM)
+                        .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+                )
+                .set_stored(),
+            ),
+        ),
 
         // ── Numerics: FAST for sorting / faceting ──
-        LogicalTypeID::Int64 | LogicalTypeID::Serial => {
-            Some(builder.add_i64_field(name, FAST))
-        }
+        LogicalTypeID::Int64 | LogicalTypeID::Serial => Some(builder.add_i64_field(name, FAST)),
         LogicalTypeID::Float => Some(builder.add_f64_field(name, FAST)),
         LogicalTypeID::Double => Some(builder.add_f64_field(name, FAST)),
 
@@ -54,15 +66,11 @@ fn add_field(builder: &mut SchemaBuilder, col: &ColumnDefinition) -> Option<tant
         | LogicalTypeID::TimestampTz => Some(builder.add_date_field(name, STORED)),
 
         // ── Integers that map to i64 ──
-        LogicalTypeID::Int32 | LogicalTypeID::Int16 | LogicalTypeID::Int8 => {
-            Some(builder.add_i64_field(name, FAST))
-        }
+        LogicalTypeID::Int32 | LogicalTypeID::Int16 | LogicalTypeID::Int8 => Some(builder.add_i64_field(name, FAST)),
 
         // ── Unsigned integers → u64 FAST ──
         LogicalTypeID::UInt64 => Some(builder.add_u64_field(name, FAST)),
-        LogicalTypeID::UInt32 | LogicalTypeID::UInt16 | LogicalTypeID::UInt8 => {
-            Some(builder.add_u64_field(name, FAST))
-        }
+        LogicalTypeID::UInt32 | LogicalTypeID::UInt16 | LogicalTypeID::UInt8 => Some(builder.add_u64_field(name, FAST)),
 
         // ── Unsupported / relational types: skip ──
         LogicalTypeID::Any

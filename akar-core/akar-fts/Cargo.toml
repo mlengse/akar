@@ -19,5 +19,8 @@ tantivy = { version = "0.26.2", default-features = false, features = ["mmap", "l
 regex.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true
