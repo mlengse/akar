@@ -1,7 +1,7 @@
 //! `akar-server` daemon binary (P62).
 //!
 //! A standalone process that owns the Akar `Database` and serves TCP clients.
-//! Designed to replace the Python daemon (`kairos.kuzu_daemon`) as the single
+//! Designed to replace the Python daemon (`sulur.kuzu_daemon`) as the single
 //! DB owner, eliminating race conditions between interpreters.
 //!
 //! # Usage

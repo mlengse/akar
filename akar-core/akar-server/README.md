@@ -1,5 +1,12 @@
 # Akar Server
 
+> **Boundary note (ADR-02, §13):** Akar is an **embedded library** — it ships
+> no server product. This crate is the *broker reference* transport (TCP
+> framing, auth, idle shutdown) consumed by the **sulur** daemon lifecycle.
+> Spawn/adopt, sidecar discovery, health, and all lifecycle tooling
+> (`tools/sulur_daemon_ctl.py`, `tools/sulur_doctor.py`) are permanently
+> sulur-side. Do not add orchestration, policy, or memory semantics here.
+
 Embedded TCP server mode — multi-process access to a single Akar database (P47).
 
 One process owns the `Database` (and its exclusive file lock) while N client

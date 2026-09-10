@@ -1,8 +1,8 @@
 //! Akar Python bindings (PyO3).
 //!
-//! Scaffold ("rumah") untuk drop-in replacement KuzuDB di proyek Kairos.
-//! Meniru API surface `kuzu` Python client agar `import kuzu` → `import akar`
-//! cukup mengubah satu baris:
+//! Drop-in replacement for the KuzuDB Python client. Mirrors the `kuzu`
+//! Python API surface so `import kuzu` → `import akar` needs a single-line
+//! change:
 //!
 //! - `akar.Database(path)`
 //! - `akar.Connection(db)`

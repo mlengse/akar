@@ -214,7 +214,7 @@ fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
 /// Handle dream engine control requests (status/pause/resume/run).
 ///
 /// The request carries an `action` string; empty/unknown actions default to
-/// `status` for backward compatibility with kairos callers. The action maps to
+/// `status` for backward compatibility with sulur callers. The action maps to
 /// a lifecycle op on the shared [`DreamControl`](crate::dream::DreamControl);
 /// a `run`/`resume` executes a consolidation cycle and reports its `dream_id`
 /// and duration.
