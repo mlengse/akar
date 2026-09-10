@@ -1238,11 +1238,30 @@ pub struct TableCatalog {
     /// Map from index name to index ID for vector indexes.
     vector_index_name_to_id: DashMap<String, u64>,
     next_table_id: std::sync::atomic::AtomicU64,
+    /// Filesystem root of the owning database, set once by
+    /// [`crate::StorageManager::new`]. Extensions that keep side-car indexes on
+    /// disk (e.g. the Tantivy FTS index under `<db_path>/fts/<index_name>`)
+    /// read it here. `None` for in-memory (`:memory:`) or standalone catalogs.
+    db_path: std::sync::RwLock<Option<std::path::PathBuf>>,
 }
 
 impl TableCatalog {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Record the database's filesystem root (called by
+    /// [`crate::StorageManager::new`]). Last write wins.
+    pub fn set_db_path(&self, path: std::path::PathBuf) {
+        if let Ok(mut guard) = self.db_path.write() {
+            *guard = Some(path);
+        }
+    }
+
+    /// The database's filesystem root, if known. `None` for in-memory or
+    /// standalone catalogs.
+    pub fn db_path(&self) -> Option<std::path::PathBuf> {
+        self.db_path.read().ok().and_then(|guard| guard.clone())
     }
 
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {

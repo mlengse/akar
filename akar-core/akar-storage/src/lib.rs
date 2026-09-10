@@ -176,13 +176,19 @@ impl StorageManager {
         let fsm = Arc::new(free_space_manager::FreeSpaceManager::new());
         let existing_pages = 0u64; // Will be determined by file metadata
         let pm = PageManager::new(db_path.clone(), page::DEFAULT_PAGE_SIZE, existing_pages, fsm);
+        let table_catalog = Arc::new(TableCatalog::new());
+        // Expose the storage root to extensions that persist side-car indexes
+        // (e.g. the Tantivy FTS index, P104.1). `:memory:` has no usable root.
+        if db_path.to_string_lossy() != ":memory:" {
+            table_catalog.set_db_path(db_path.clone());
+        }
         Self {
             db_path,
             buffer_manager: Arc::new(Mutex::new(bm)),
             wal: Arc::new(Mutex::new(wal)),
             memory_manager,
             page_manager: Some(Arc::new(pm)),
-            table_catalog: Arc::new(TableCatalog::new()),
+            table_catalog,
             table_persistence: TablePersistence::new(),
             spiller: std::sync::RwLock::new(None),
         }

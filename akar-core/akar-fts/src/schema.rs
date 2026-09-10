@@ -16,6 +16,27 @@ use tantivy::schema::{FAST, INDEXED, IndexRecordOption, STORED, Schema, SchemaBu
 
 use crate::tokenizer::EN_STEM;
 
+/// Name of the internal numeric field that stores the source row id in an FTS
+/// index. Marked `FAST | STORED` so search results map back to source rows.
+pub const DOC_ID_FIELD: &str = "doc_id";
+
+/// Build a Tantivy [`Schema`] for an FTS index: an internal [`DOC_ID_FIELD`]
+/// (`I64`, `FAST | STORED`) followed by the source table's indexable columns.
+///
+/// A source column named `doc_id` is skipped to avoid clashing with the
+/// internal field.
+pub fn build_index_schema(columns: &[ColumnDefinition]) -> Schema {
+    let mut builder = SchemaBuilder::new();
+    let _ = builder.add_i64_field(DOC_ID_FIELD, FAST | STORED);
+    for col in columns {
+        if col.name == DOC_ID_FIELD {
+            continue;
+        }
+        let _ = add_field(&mut builder, col);
+    }
+    builder.build()
+}
+
 /// Build a Tantivy [`Schema`] from Akar source-table column definitions.
 ///
 /// Each column is mapped according to the table above. Columns whose

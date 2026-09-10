@@ -157,3 +157,27 @@ fn test_fts_catches_up_rows_after_index() -> Result<(), String> {
 
     Ok(())
 }
+
+/// P104.1: `CREATE FTS INDEX` must build a persistent Tantivy index on disk
+/// under `<db_path>/fts/<index_name>` (not just the backward-compat macro
+/// tables).
+#[test]
+fn test_create_fts_index_persists_tantivy_index() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'A fast graph database in Rust'})")?;
+    conn.query("CREATE (d:Document {id: 2, title: 'Python', content: 'A slow scripting language'})")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    let index_dir = dir.path().join("fts").join("doc_idx");
+    assert!(
+        index_dir.join("meta.json").exists(),
+        "Tantivy index metadata must be persisted at {}",
+        index_dir.display()
+    );
+
+    Ok(())
+}

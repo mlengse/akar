@@ -67,7 +67,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
         // while acquiring a write lock on the same shard self-deadlocks on this
         // thread. Because DashMap's hasher is random-seeded per catalog, the
         // shard collision is intermittent (the FTS test flake) (P53.x).
-        let (col_idx, num_rows, source_data) = {
+        let (columns, col_idx, num_rows, source_data) = {
             let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
                 Some(t) => t,
                 None => return Err(format!("Table '{}' not found", self.table_name).into()),
@@ -78,12 +78,39 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 .position(|c| c.name == self.column_name)
                 .ok_or_else(|| format!("Column '{}' not found in '{}'", self.column_name, self.table_name))?;
             (
+                source_table.columns.clone(),
                 col_idx,
                 source_table.num_rows as usize,
                 source_table.to_column_major_data(),
             )
         };
 
+        // Materialize the (doc_id, text) rows from the source snapshot.
+        let mut rows: Vec<(i64, String)> = Vec::with_capacity(num_rows);
+        for row_idx in 0..num_rows {
+            let text = source_data
+                .get(col_idx)
+                .and_then(|col| col.get(row_idx))
+                .and_then(|v| match v {
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            rows.push((row_idx as i64, text));
+        }
+
+        // Build the Tantivy index (P104.1) — this is now the FTS backend. The
+        // index is persisted under `<db_path>/fts/<index_name>` for disk-backed
+        // catalogs, in-memory otherwise. Terms/postings for the backward-compat
+        // macro tables are derived with the same `en_stem` pipeline.
+        let index_dir = self
+            .table_catalog
+            .db_path()
+            .filter(|p| p.to_string_lossy() != ":memory:")
+            .map(|p| p.join("fts").join(&self.index_name));
+        let index_data = akar_fts::build::build_index(&columns, &self.column_name, index_dir.as_deref(), &rows)?;
+
+        // ---- Backward-compat macro tables (P104.1) ----
         // Ensure macro tables exist; create if needed
         if self.table_catalog.get_node_table_by_name(&self.docs_table).is_none() {
             let docs_cols = vec![
@@ -127,63 +154,21 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 .create_node_table(self.terms_table.clone(), terms_cols);
         }
 
-        // term -> (term_id, doc_freq)
-        let mut term_map: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
-        // (doc_id, text) rows
-        let mut doc_rows: Vec<Vec<Value>> = Vec::new();
-        // posting: (term_id, doc_id, term_freq)
-        let mut postings: Vec<(i64, i64, i64)> = Vec::new();
-
-        for row_idx in 0..num_rows {
-            let text = if let Some(col_data) = source_data.get(col_idx) {
-                if let Some(Value::String(s)) = col_data.get(row_idx) {
-                    s.clone()
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-
-            let doc_id = row_idx as i64;
-            doc_rows.push(vec![Value::Int64(doc_id), Value::String(text.clone())]);
-
-            // Tokenize using Akar-fts utilities
-            let tokens = akar_fts::tokenize(&text);
-            let mut freq_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-            for token in tokens {
-                let stemmed = akar_fts::stem_word(&token);
-                if !akar_fts::STOP_WORDS.contains(&stemmed.as_str()) {
-                    *freq_map.entry(stemmed).or_insert(0) += 1;
-                }
-            }
-
-            for (term, freq) in freq_map {
-                let next_id = term_map.len() as i64;
-                let (term_id, doc_freq) = term_map.entry(term).or_insert((next_id, 0));
-                *doc_freq += 1;
-                postings.push((*term_id, doc_id, freq));
-            }
-        }
-
-        // Insert docs
+        // Insert docs (doc_id, text)
         {
             let mut docs_table = self.table_catalog.get_node_table_by_name_mut(&self.docs_table).unwrap();
-            for row in doc_rows {
-                docs_table.insert_row(row)?;
+            for (doc_id, text) in index_data.docs {
+                docs_table.insert_row(vec![Value::Int64(doc_id), Value::String(text)])?;
             }
         }
 
-        // Insert terms
-        if self.table_catalog.get_node_table_by_name(&self.terms_table).is_some() {
+        // Insert terms (term_id, term, doc_freq)
+        {
             let mut terms_table = self
                 .table_catalog
                 .get_node_table_by_name_mut(&self.terms_table)
                 .unwrap();
-            let mut term_list: Vec<(String, i64, i64)> =
-                term_map.into_iter().map(|(t, (id, df))| (t, id, df)).collect();
-            term_list.sort_by_key(|(_, id, _)| *id);
-            for (term, term_id, doc_freq) in term_list {
+            for (term_id, term, doc_freq) in index_data.terms {
                 terms_table.insert_row(vec![Value::Int64(term_id), Value::String(term), Value::Int64(doc_freq)])?;
             }
         }
@@ -221,7 +206,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 .table_catalog
                 .get_rel_table_by_name_mut(&self.posting_table)
                 .unwrap();
-            for (term_id, doc_id, freq) in postings {
+            for (term_id, doc_id, freq) in index_data.postings {
                 posting_table.insert_rel(term_id as u64, doc_id as u64, vec![Value::Int64(freq)])?;
             }
         }

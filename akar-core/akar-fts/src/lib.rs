@@ -10,6 +10,7 @@
 //! (stem_word, tokenize, bm25, etc.) are called directly by the physical
 //! operators in `Akar-processor`.
 
+pub mod build;
 pub mod index;
 pub mod schema;
 pub mod tokenizer;
