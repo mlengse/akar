@@ -627,4 +627,83 @@ mod tests {
             "registry must return the same handle so reload-at-commit reaches every scan"
         );
     }
+
+    /// P107.3 — crash recovery: Tantivy's segment commit is the crash boundary.
+    ///
+    /// `IndexWriter::commit` is the only point at which pending increments are
+    /// persisted ("in case of a crash ... it will be possible to resume indexing
+    /// from this point" — tantivy `index_writer.rs`); dropping a writer without
+    /// `commit()` discards its uncommitted ops, which is exactly the effect of a
+    /// crash between two commits. Reopening the directory must therefore yield
+    /// the **last committed state** — uncorrupted, with the uncommitted
+    /// increment gone — and the index must remain writable so the commit-time
+    /// sync can resume after a restart.
+    #[test]
+    fn test_fts_crash_recovery_last_committed_survives() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema = test_schema();
+        let title = schema.get_field("title").unwrap();
+        let body = schema.get_field("body").unwrap();
+
+        // Baseline committed before the crash.
+        {
+            let idx = TantivyIndex::create_on_disk(dir.path(), schema).unwrap();
+            let mut writer = idx.writer(1, MIN_MEMORY_PER_THREAD).unwrap();
+            writer
+                .add_document(tantivy::doc!(title => "survivor", body => "committed before the crash"))
+                .unwrap();
+            writer.commit().unwrap();
+        }
+
+        // Simulated crash: the increment is handed to a writer that is dropped
+        // WITHOUT commit() — the uncommitted ops a crash discards.
+        {
+            let idx = TantivyIndex::open_on_disk(dir.path()).unwrap();
+            let writer = idx.writer(1, MIN_MEMORY_PER_THREAD).unwrap();
+            writer
+                .add_document(tantivy::doc!(title => "ephemeral", body => "never committed"))
+                .unwrap();
+        }
+
+        // Recovery: reopening the directory must see exactly the last committed
+        // state — no corruption, no over-visibility, no lost committed data.
+        let idx = TantivyIndex::open_on_disk(dir.path()).unwrap();
+        let reader = idx.reader().unwrap();
+        reader.reload().unwrap();
+        assert_eq!(
+            reader.searcher().num_docs(),
+            1,
+            "a crash must lose only the uncommitted increment"
+        );
+        assert_eq!(
+            TantivyIndex::search(&reader, "survivor", vec![title, body], 10)
+                .unwrap()
+                .len(),
+            1,
+            "the last committed doc must be searchable after the crash"
+        );
+        assert!(
+            TantivyIndex::search(&reader, "ephemeral", vec![title, body], 10)
+                .unwrap()
+                .is_empty(),
+            "an uncommitted doc must never be searchable after the crash"
+        );
+
+        // Recovery resumes: a new writer committed after the restart lands
+        // cleanly in the same index (the commit-time sync re-opens a writer per
+        // commit, so it keeps working on the reopened handle).
+        {
+            let mut writer = idx.writer(1, MIN_MEMORY_PER_THREAD).unwrap();
+            writer
+                .add_document(tantivy::doc!(title => "recovered", body => "written after restart"))
+                .unwrap();
+            writer.commit().unwrap();
+        }
+        reader.reload().unwrap();
+        assert_eq!(
+            reader.searcher().num_docs(),
+            2,
+            "the index must be writable again after restart"
+        );
+    }
 }

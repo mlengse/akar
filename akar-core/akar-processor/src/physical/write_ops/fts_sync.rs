@@ -14,6 +14,14 @@
 //! reader — never opening, reloading, or writing. Failures here are non-fatal
 //! by contract — they are surfaced as warnings by the caller so a stale index
 //! can never roll back an already-durable commit.
+//!
+//! **Crash recovery (P107.3):** the Tantivy segment commit is the crash
+//! boundary. A crash between the durable akar commit and this hook's
+//! `apply_doc_writes` commit loses only the in-flight increment (the index ends
+//! *stale*, never over-visible, never corrupt — `FtsIndexHandle::open_on_disk`
+//! reopens the last committed generation); the last committed state always
+//! survives. Pinned by `test_fts_crash_recovery_last_committed_survives`
+//! (akar-fts) and `test_fts_crash_recovery_across_db_reopen` (akar-main).
 
 use std::sync::Arc;
 

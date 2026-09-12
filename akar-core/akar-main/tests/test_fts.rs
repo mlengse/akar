@@ -402,3 +402,60 @@ fn test_fts_read_after_write_across_commits() -> Result<(), String> {
 
     Ok(())
 }
+
+/// P107.3 — crash recovery at the SQL boundary: the on-disk Tantivy index is
+/// the recovery source.
+///
+/// Committed rows are durable (akar storage) and synced into
+/// `<db_path>/fts/<idx>` (Tantivy segment commit — the crash boundary; a crash
+/// touches nothing between two commits). A crash+restart is simulated here by
+/// dropping the DB without further writes and reopening it from the same
+/// directory: the fresh catalog has an *empty* FTS runtime registry, so the
+/// shared handle is lazily reopened from disk, exposing exactly the last
+/// committed state. DML after the restart must keep syncing into that same
+/// reopened index (commit-time recovery resumes).
+#[test]
+fn test_fts_crash_recovery_across_db_reopen() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db_path = dir.path().to_str().unwrap();
+
+    // Phase 1: commit rows, then "crash" (drop the DB without further writes).
+    {
+        let db = Arc::new(Database::new(db_path, SystemConfig::default()).map_err(|e| e.to_string())?);
+        let conn = Connection::new(&db);
+        conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+        conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+        conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'a fast graph database in Rust'})")?;
+        conn.query("CREATE (d:Document {id: 2, title: 'Python', content: 'a slow scripting language'})")?;
+    }
+
+    // Phase 2: restart — fresh catalog, empty FTS registry; the committed
+    // Tantivy directory is reopened and the last committed state is visible.
+    let db = Arc::new(Database::new(db_path, SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('rust') RETURN d.id")?),
+        vec![1],
+        "last committed state must survive a crash+restart"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('language') RETURN d.id")?),
+        vec![2],
+        "both committed rows (here doc 2) must be searchable after recovery"
+    );
+
+    // Recovery resumes: rows committed after the restart sync into the same index.
+    conn.query("CREATE (d:Document {id: 3, title: 'Katana', content: 'katana rust embedded database'})")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?),
+        vec![3],
+        "commit-time sync must resume after crash recovery"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('database') RETURN d.id")?),
+        vec![1, 3],
+        "pre-crash and post-restart rows coexist in the reopened index"
+    );
+
+    Ok(())
+}
