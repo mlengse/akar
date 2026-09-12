@@ -175,7 +175,10 @@ impl Connection {
     fn build_optimized_plan(&self, bound: &BoundStatement) -> Result<Vec<LogicalOperator>, String> {
         let planner = QueryPlanner::new();
         let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
-        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
+        let optimizer = Optimizer::with_stats_and_fts(
+            self.database.stats_store.clone(),
+            super::fts_estimate::build(self.database.table_catalog()),
+        );
         Ok(optimizer.optimize(logical_plan))
     }
 
@@ -412,7 +415,10 @@ impl Connection {
         }
 
         // Optimize
-        let optimizer = Optimizer::with_stats(self.database.stats_store.clone());
+        let optimizer = Optimizer::with_stats_and_fts(
+            self.database.stats_store.clone(),
+            super::fts_estimate::build(self.database.table_catalog()),
+        );
         let optimized_plan = optimizer.optimize(logical_plan);
 
         // Capture MVCC snapshot for read isolation
@@ -679,7 +685,10 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
             let planner = QueryPlanner::new();
             let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
-            let optimizer = Optimizer::with_stats(db_qf.stats_store.clone());
+            let optimizer = Optimizer::with_stats_and_fts(
+                db_qf.stats_store.clone(),
+                super::fts_estimate::build(db_qf.table_catalog()),
+            );
             let optimized_plan = optimizer.optimize(logical_plan);
 
             let processor = QueryProcessor::with_catalog(
@@ -723,7 +732,10 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
             let planner = QueryPlanner::new();
             let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
-            let optimizer = Optimizer::with_stats(db_sq.stats_store.clone());
+            let optimizer = Optimizer::with_stats_and_fts(
+                db_sq.stats_store.clone(),
+                super::fts_estimate::build(db_sq.table_catalog()),
+            );
             let optimized_plan = optimizer.optimize(logical_plan);
 
             let catalog_inner = db_sq.catalog.clone();

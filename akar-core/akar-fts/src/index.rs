@@ -222,6 +222,37 @@ impl FtsIndexHandle {
         let reader = self.reader()?;
         reader.reload().map(|_| ())
     }
+
+    /// Estimate how many documents match `query_str` against `column_name`
+    /// (P108.2 — cardinality estimation hook).
+    ///
+    /// Cheap by design: no search is executed. The query is parsed and its
+    /// positive terms probed against the segment dictionaries via
+    /// [`tantivy::Searcher::doc_freq`]; the **rarest** term's document
+    /// frequency is taken as a conservative bound on the match set (the
+    /// default query parser combines terms conjunctively). When no term is
+    /// extractable (regex-only, `*`, …) the full document count is returned.
+    pub fn estimate_match_count(&self, column_name: &str, query_str: &str) -> tantivy::Result<u64> {
+        let reader = self.reader()?;
+        let searcher = reader.searcher();
+        let total = searcher.num_docs();
+        if total == 0 {
+            return Ok(0);
+        }
+        let text_field = searcher.index().schema().get_field(column_name)?;
+        let mut parser = QueryParser::for_index(searcher.index(), vec![text_field]);
+        parser.allow_regexes();
+        let query = parser.parse_query(query_str)?;
+        let mut rarest = total;
+        let mut found = false;
+        query.query_terms(&mut |term: &tantivy::schema::Term, _exclude: bool| {
+            if let Ok(freq) = searcher.doc_freq(term) {
+                rarest = rarest.min(freq);
+                found = true;
+            }
+        });
+        Ok(if found { rarest.min(total) } else { total })
+    }
 }
 
 /// Resolve the shared [`FtsIndexHandle`] for an on-disk FTS index, lazily
@@ -598,6 +629,49 @@ mod tests {
         );
         let hits = TantivyIndex::search_doc_ids(&handle.reader().unwrap(), "rust", vec![content], doc_id, 10).unwrap();
         assert_eq!(hits.len(), 1, "reloaded reader must find the written doc");
+    }
+
+    /// P108.2 — estimate_match_count derives the match count from term
+    /// statistics (doc_freq of the rarest positive term), without executing a
+    /// search.
+    #[test]
+    fn test_fts_handle_estimate_match_count() {
+        use crate::schema::build_index_schema;
+        use akar_common::enums::CompressionType;
+        use akar_common::types::LogicalTypeID;
+        use akar_storage::table::ColumnDefinition;
+
+        let col = ColumnDefinition {
+            name: "content".to_string(),
+            logical_type: LogicalTypeID::String,
+            is_primary_key: false,
+            compression: CompressionType::Uncompressed,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let schema = build_index_schema(&[col.clone()]);
+        {
+            let _idx = TantivyIndex::create_on_disk(dir.path(), schema).unwrap();
+        }
+        let handle = FtsIndexHandle::open_on_disk(dir.path()).unwrap();
+
+        // Empty index → 0 matches regardless of the query.
+        assert_eq!(handle.estimate_match_count("content", "rust").unwrap(), 0);
+
+        // Two docs; "rust" appears once, "database" once, "embedded" once.
+        let writes = vec![
+            (0i64, Some("rust embedded database".to_string())),
+            (1i64, Some("machine learning model".to_string())),
+        ];
+        crate::build::apply_doc_writes(handle.inner(), "content", &writes).unwrap();
+        handle.reload().unwrap();
+        assert_eq!(handle.reader().unwrap().searcher().num_docs(), 2);
+
+        // Single term → exact doc_freq.
+        assert_eq!(handle.estimate_match_count("content", "rust").unwrap(), 1);
+        // Multi-term conjunction → bounded by the rarest positive term.
+        assert_eq!(handle.estimate_match_count("content", "rust model").unwrap(), 1);
+        // Term absent from the dictionary → 0.
+        assert_eq!(handle.estimate_match_count("content", "nonexistent").unwrap(), 0);
     }
 
     /// P107.2 — the table-catalog runtime registry is single-flight: the commit

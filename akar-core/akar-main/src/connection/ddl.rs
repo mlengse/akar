@@ -380,7 +380,10 @@ impl Connection {
             BoundStatement::BoundUnion(u) => {
                 tracing::info!("UNION ALL query");
                 let planner = akar_planner::QueryPlanner::new();
-                let optimizer = akar_optimizer::Optimizer::with_stats(self.database.stats_store.clone());
+                let optimizer = akar_optimizer::Optimizer::with_stats_and_fts(
+                    self.database.stats_store.clone(),
+                    super::fts_estimate::build(self.database.table_catalog()),
+                );
 
                 // Capture an MVCC snapshot so both sides read a consistent view
                 // (previously neither side used a snapshot, mixing committed and

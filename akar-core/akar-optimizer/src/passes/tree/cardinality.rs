@@ -5,6 +5,7 @@
 // selectivity constants (no storage dependency).
 // ========================================================================
 
+use crate::fts_estimate::FtsCardinalityEstimator;
 use crate::passes::{OptimizationPass, TreeOptimizationPass};
 use akar_planner::logical_operator::*;
 use akar_storage::stats::StatsStore;
@@ -17,13 +18,28 @@ const EQUALITY_PREDICATE_SELECTIVITY: f64 = 0.01;
 ///
 /// When a `StatsStore` is provided, scan node cardinality is queried from
 /// actual table statistics. Otherwise, static heuristics are used.
+///
+/// When an [`FtsCardinalityEstimator`] is additionally provided, a scan whose
+/// node carries an `fts_query` is refined with index-based selectivity: the
+/// FTS match estimate caps the plain table row count (P108.2).
 pub struct CardinalityEstimation {
     stats: Option<Arc<Mutex<StatsStore>>>,
+    fts_estimator: Option<Arc<dyn FtsCardinalityEstimator>>,
 }
 
 impl CardinalityEstimation {
     pub fn new(stats: Option<Arc<Mutex<StatsStore>>>) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            fts_estimator: None,
+        }
+    }
+
+    /// Attach an FTS selectivity estimator (P108.2). When `None`, scans with an
+    /// `fts_query` fall back to the plain table row count.
+    pub fn with_fts_estimator(mut self, fts_estimator: Option<Arc<dyn FtsCardinalityEstimator>>) -> Self {
+        self.fts_estimator = fts_estimator;
+        self
     }
 
     /// Estimate cardinality of a scan node using storage stats when available.
@@ -34,15 +50,27 @@ impl CardinalityEstimation {
                     return 0;
                 }
                 // Try to get real stats from the stats store
-                if let Some(ref stats_store) = self.stats
+                let base_card = if let Some(ref stats_store) = self.stats
                     && let Ok(store) = stats_store.lock()
                     && let Some(table_stats) = store.get_table_stats(s.table_id)
                     && table_stats.num_rows > 0
                 {
-                    return table_stats.num_rows;
+                    table_stats.num_rows
+                } else {
+                    // Fallback heuristic: 1000 nodes per table
+                    1000
+                };
+                // P108.2: an FTS query narrows the scan to the matching docs.
+                // The Tantivy-backed estimator (when present) supplies the
+                // expected match count; it caps the plain table cardinality.
+                if let Some(fts) = s.fts_query.as_ref()
+                    && let Some(estimator) = self.fts_estimator.as_ref()
+                    && let Some(est) =
+                        estimator.estimate_match_count(&fts.index_name, &fts.column_name, &fts.query_string)
+                {
+                    return std::cmp::min(base_card, est);
                 }
-                // Fallback heuristic: 1000 nodes per table
-                1000
+                base_card
             }
             LogicalOperator::ScanRel(s) => {
                 // Try to get real stats from the stats store

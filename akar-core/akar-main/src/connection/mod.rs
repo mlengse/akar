@@ -17,6 +17,7 @@
 pub mod copy;
 pub mod ddl;
 pub mod dml;
+pub mod fts_estimate;
 pub mod plan_cache;
 pub mod query;
 pub mod standalone_call;

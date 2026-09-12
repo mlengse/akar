@@ -78,6 +78,18 @@ impl Optimizer {
 
     /// Create an optimizer with a stats store for storage-backed cardinality estimation.
     pub fn with_stats(stats: Arc<Mutex<StatsStore>>) -> Self {
+        Self::with_stats_and_fts(stats, None)
+    }
+
+    /// Create an optimizer with storage-backed cardinality estimation plus an
+    /// optional FTS selectivity estimator (P108.2).
+    ///
+    /// The FTS estimator refines scan cardinality for `USING FTS INDEX`
+    /// queries — when `None`, such scans are estimated at full table size.
+    pub fn with_stats_and_fts(
+        stats: Arc<Mutex<StatsStore>>,
+        fts_estimator: Option<Arc<dyn crate::fts_estimate::FtsCardinalityEstimator>>,
+    ) -> Self {
         let passes: Vec<Box<dyn OptimizationPass>> = vec![
             Box::new(RemoveUnnecessaryOperators),
             Box::new(FilterPushDown),
@@ -107,7 +119,7 @@ impl Optimizer {
             // Remove redundant GROUP BY keys (functional dependency analysis)
             Box::new(AggKeyDependency),
             // Use storage-backed cardinality estimation with real stats
-            Box::new(CardinalityEstimation::new(Some(stats))),
+            Box::new(CardinalityEstimation::new(Some(stats)).with_fts_estimator(fts_estimator)),
             // Route FTS queries onto the scan of the index's base table
             Box::new(FtsPredicatePushdown),
         ];

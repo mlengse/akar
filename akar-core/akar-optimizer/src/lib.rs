@@ -1,5 +1,6 @@
 //! Query optimizer — applies optimization passes to logical plans.
 
+pub mod fts_estimate;
 pub mod join_order;
 pub mod optimizer;
 pub mod passes;

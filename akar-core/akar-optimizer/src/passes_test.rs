@@ -830,4 +830,61 @@ mod tests {
         assert_eq!(table, "Author");
         assert!(fts.is_none(), "FTS without a matching table scan must be detached");
     }
+
+    #[test]
+    fn test_cardinality_estimation_fts_query_refines_scan_cardinality() {
+        // P108.2: a ScanNode carrying an `fts_query` is estimated at the
+        // FTS match count (capped by the table rows), not the full table size.
+
+        // Mock estimator returning 50 matching docs for any (index, column, query).
+        struct MockFtsEstimator;
+        impl crate::fts_estimate::FtsCardinalityEstimator for MockFtsEstimator {
+            fn estimate_match_count(&self, _index_name: &str, _column_name: &str, _query: &str) -> Option<u64> {
+                Some(50)
+            }
+        }
+
+        let mut scan = make_scan_with_fts("Document", "Document");
+
+        // Without an estimator, the scan is estimated by the table heuristic (1000).
+        CardinalityEstimation::new(None).apply_tree(&mut scan);
+        assert_eq!(scan.cardinality(), 1000, "no estimator → plain fallback heuristic");
+
+        // With an estimator, cardinality = min(table_card, fts_estimate) = 50.
+        let pass = CardinalityEstimation::new(None).with_fts_estimator(Some(std::sync::Arc::new(MockFtsEstimator)));
+        let mut scan = make_scan_with_fts("Document", "Document");
+        pass.apply_tree(&mut scan);
+        assert_eq!(scan.cardinality(), 50, "FTS estimate caps the scan cardinality");
+    }
+
+    #[test]
+    fn test_cardinality_estimation_fts_query_capped_by_table_rows() {
+        // P108.2: the FTS match estimate is only a *cap* — a table smaller than
+        // the estimated match count keeps its table cardinality.
+        struct LargeFtsEstimator;
+        impl crate::fts_estimate::FtsCardinalityEstimator for LargeFtsEstimator {
+            fn estimate_match_count(&self, _index_name: &str, _column_name: &str, _query: &str) -> Option<u64> {
+                Some(10_000)
+            }
+        }
+
+        let stats = std::sync::Arc::new(std::sync::Mutex::new(akar_storage::stats::StatsStore::new()));
+        {
+            let mut store = stats.lock().unwrap();
+            store.update_table_stats(
+                0,
+                akar_storage::stats::TableStats {
+                    num_rows: 5,
+                    columns: Default::default(),
+                },
+            );
+        }
+        let pass =
+            CardinalityEstimation::new(Some(stats)).with_fts_estimator(Some(std::sync::Arc::new(LargeFtsEstimator)));
+
+        // table_id here is 0 (make_scan_with_fts) → capped to the real 5 rows.
+        let mut scan = make_scan_with_fts("Document", "Document");
+        pass.apply_tree(&mut scan);
+        assert_eq!(scan.cardinality(), 5, "FTS estimate cannot exceed table rows");
+    }
 }
