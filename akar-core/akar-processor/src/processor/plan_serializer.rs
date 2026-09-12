@@ -6,7 +6,10 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
     let prefix = if depth > 0 { "├─ " } else { "" };
 
     let op_name = match op {
-        LogicalOperator::ScanNode(s) => format!("ScanNode({})", s.table_name),
+        LogicalOperator::ScanNode(s) => match &s.fts_query {
+            Some(fq) => format!("ScanNode({}) FTS[{}({})]", s.table_name, fq.index_name, fq.query_string),
+            None => format!("ScanNode({})", s.table_name),
+        },
         LogicalOperator::ScanRel(s) => format!("ScanRel({})", s.table_name),
         LogicalOperator::Filter(_) => "Filter".to_string(),
         LogicalOperator::Projection(p) => format!("Projection({} cols)", p.expressions.len()),

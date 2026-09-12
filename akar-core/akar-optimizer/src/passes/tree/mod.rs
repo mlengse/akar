@@ -5,6 +5,7 @@ pub mod agg_key_dep;
 pub mod cardinality;
 pub mod factorization;
 pub mod foreign_join;
+pub mod fts_predicate_pushdown;
 pub mod subquery_unnesting;
 
 pub use acc_hash_join::AccHashJoinOptimization;
@@ -12,4 +13,5 @@ pub use agg_key_dep::AggKeyDependency;
 pub use cardinality::CardinalityEstimation;
 pub use factorization::FactorizationRewriting;
 pub use foreign_join::ForeignJoinPushDown;
+pub use fts_predicate_pushdown::FtsPredicatePushdown;
 pub use subquery_unnesting::CorrelatedSubqueryUnnesting;

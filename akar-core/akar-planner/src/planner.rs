@@ -31,6 +31,32 @@ fn eval_standalone_expr(expr: &Expression) -> Option<Value> {
     }
 }
 
+/// Take the FTS query only when it targets `table`, so a `USING FTS INDEX`
+/// clause filters the scan of the index's base table — never a sibling scan of
+/// a different table (P108.1).
+fn take_fts_if_table(fts: &mut Option<LogicalFtsScan>, table: &str) -> Option<LogicalFtsScan> {
+    if fts.as_ref().is_some_and(|f| f.table_name == table) {
+        fts.take()
+    } else {
+        None
+    }
+}
+
+/// Recursively attach `fts` to every `ScanNode` whose table matches (skipping
+/// scans that already carry a query). Used by the WCOJ intersect path, which
+/// builds its starting scan nodes with `fts_query: None` (P108.1).
+fn attach_fts_to_matching_scans(op: &mut LogicalOperator, fts: &LogicalFtsScan) {
+    if let LogicalOperator::ScanNode(s) = op {
+        if s.table_name == fts.table_name && s.fts_query.is_none() {
+            s.fts_query = Some(fts.clone());
+        }
+        return;
+    }
+    for child in op.children_mut() {
+        attach_fts_to_matching_scans(child, fts);
+    }
+}
+
 /// Whether an ORDER BY key expression is produced by the projection output.
 ///
 /// A key is covered when it matches a projection item's alias or is identical
@@ -491,7 +517,13 @@ impl QueryPlanner {
                     // WCOJ pass: `MATCH (a)-[:r1]->(b), (a)-[:r2]->(c)` becomes a single
                     // Intersect that probes the shared node once across all build sides.
                     // Triangle queries additionally get closure-edge Extend+Filter ops.
-                    if let Some((wcoj_op, wcoj_trailing)) = build_wcoj_intersect(&patterns) {
+                    if let Some((mut wcoj_op, wcoj_trailing)) = build_wcoj_intersect(&patterns) {
+                        // The intersect builds its shared-node scans with no FTS query —
+                        // attach the clause to every matching scan so the document-id
+                        // filter runs at the shared leaf (P108.1).
+                        if let Some(ref fts) = fts_to_assign {
+                            attach_fts_to_matching_scans(&mut wcoj_op, fts);
+                        }
                         scan_ops.push(wcoj_op);
                         extend_ops.extend(wcoj_trailing);
                     } else {
@@ -526,13 +558,14 @@ impl QueryPlanner {
                                         node_var.as_ref().is_some_and(|v| available_vars.contains(v));
                                     if !skip_current_node_scan && !var_len_src_bound {
                                         if let Some(label) = pattern.node_label {
+                                            let fts_for_scan = take_fts_if_table(&mut fts_to_assign, &label);
                                             scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                                 table_name: label,
                                                 table_id: pattern.node_table_id.unwrap_or(0),
                                                 alias: node_var.clone(),
                                                 columns: Vec::new(),
                                                 cardinality: 0,
-                                                fts_query: fts_to_assign.take(),
+                                                fts_query: fts_for_scan,
                                                 predicate: None,
                                             }));
                                             if let Some(v) = node_var {
@@ -579,13 +612,14 @@ impl QueryPlanner {
                                     src_node_var.as_ref().is_some_and(|v| available_vars.contains(v));
                                 if !skip_current_node_scan && !src_already_bound {
                                     if let Some(label) = &pattern.node_label {
+                                        let fts_for_scan = take_fts_if_table(&mut fts_to_assign, label);
                                         scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                             table_name: label.clone(),
                                             table_id: pattern.node_table_id.unwrap_or(0),
                                             alias: src_node_var.clone(),
                                             columns: Vec::new(),
                                             cardinality: 0,
-                                            fts_query: fts_to_assign.take(),
+                                            fts_query: fts_for_scan,
                                             predicate: None,
                                         }));
                                         if let Some(v) = &src_node_var {
@@ -631,13 +665,14 @@ impl QueryPlanner {
                                 if let Some(label) = pattern.node_label {
                                     let var = pattern.node_variable.clone();
                                     if !var.as_ref().is_some_and(|v| available_vars.contains(v)) {
+                                        let fts_for_scan = take_fts_if_table(&mut fts_to_assign, &label);
                                         scan_ops.push(LogicalOperator::ScanNode(LogicalScanNode {
                                             table_name: label,
                                             table_id: pattern.node_table_id.unwrap_or(0),
                                             alias: var.clone(),
                                             columns: Vec::new(),
                                             cardinality: 0,
-                                            fts_query: fts_to_assign.take(),
+                                            fts_query: fts_for_scan,
                                             predicate: None,
                                         }));
                                         if let Some(v) = var {

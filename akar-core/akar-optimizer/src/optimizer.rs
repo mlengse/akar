@@ -70,6 +70,8 @@ impl Optimizer {
             Box::new(AggKeyDependency),
             // Tree pass 6: Annotate operators with estimated row counts (static heuristics)
             Box::new(CardinalityEstimation::new(None)),
+            // Tree pass 7: Route FTS queries onto the scan of the index's base table
+            Box::new(FtsPredicatePushdown),
         ];
         Self { passes, tree_passes }
     }
@@ -106,6 +108,8 @@ impl Optimizer {
             Box::new(AggKeyDependency),
             // Use storage-backed cardinality estimation with real stats
             Box::new(CardinalityEstimation::new(Some(stats))),
+            // Route FTS queries onto the scan of the index's base table
+            Box::new(FtsPredicatePushdown),
         ];
         Self { passes, tree_passes }
     }
@@ -177,7 +181,8 @@ mod tests {
         assert!(names.contains(&"aggregate_fusion"));
         assert!(names.contains(&"sort_elision"));
         assert!(names.contains(&"expression_inline"));
-        assert_eq!(names.len(), 24);
+        assert!(names.contains(&"fts_predicate_pushdown"));
+        assert_eq!(names.len(), 25);
     }
 
     #[test]

@@ -750,4 +750,84 @@ mod tests {
             _ => panic!("Expected Aggregate"),
         }
     }
+
+    fn make_scan_with_fts(table: &str, fts_target: &str) -> LogicalOperator {
+        LogicalOperator::ScanNode(LogicalScanNode {
+            predicate: None,
+            table_name: table.into(),
+            table_id: 0,
+            alias: Some(table.into()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: Some(LogicalFtsScan {
+                index_name: "idx".into(),
+                query_string: "rust".into(),
+                table_name: fts_target.into(),
+                column_name: "content".into(),
+                cardinality: 0,
+            }),
+        })
+    }
+
+    fn scan_fts(op: &LogicalOperator) -> (String, Option<LogicalFtsScan>) {
+        match op {
+            LogicalOperator::ScanNode(s) => (s.table_name.clone(), s.fts_query.clone()),
+            _ => panic!("Expected ScanNode, got {op:?}"),
+        }
+    }
+
+    #[test]
+    fn test_fts_predicate_pushdown_routes_to_correct_table() {
+        let misplaced = make_scan_with_fts("Author", "Document");
+        let target = LogicalOperator::ScanNode(LogicalScanNode {
+            predicate: None,
+            table_name: "Document".into(),
+            table_id: 1,
+            alias: Some("d".into()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+        });
+        let mut plan = LogicalOperator::Union(LogicalUnion {
+            left: Box::new(misplaced),
+            right: Box::new(target),
+            all: true,
+            cardinality: 0,
+        });
+
+        FtsPredicatePushdown.apply_tree(&mut plan);
+
+        match &plan {
+            LogicalOperator::Union(u) => {
+                let (left_table, left_fts) = scan_fts(&u.left);
+                assert_eq!(left_table, "Author", "Author scan keeps its table");
+                assert!(left_fts.is_none(), "misplaced FTS must be detached from Author");
+                let (right_table, right_fts) = scan_fts(&u.right);
+                assert_eq!(right_table, "Document");
+                let fts = right_fts.expect("FTS should be routed onto the Document scan");
+                assert_eq!(fts.index_name, "idx");
+                assert_eq!(fts.table_name, "Document");
+            }
+            _ => panic!("Expected Union"),
+        }
+    }
+
+    #[test]
+    fn test_fts_predicate_pushdown_keeps_correct_placement() {
+        let mut plan = make_scan_with_fts("Document", "Document");
+        FtsPredicatePushdown.apply_tree(&mut plan);
+        let (table, fts) = scan_fts(&plan);
+        assert_eq!(table, "Document");
+        let fts = fts.expect("FTS already on the right table must stay");
+        assert_eq!(fts.table_name, "Document");
+    }
+
+    #[test]
+    fn test_fts_predicate_pushdown_detaches_when_no_matching_scan() {
+        let mut plan = make_scan_with_fts("Author", "Document");
+        FtsPredicatePushdown.apply_tree(&mut plan);
+        let (table, fts) = scan_fts(&plan);
+        assert_eq!(table, "Author");
+        assert!(fts.is_none(), "FTS without a matching table scan must be detached");
+    }
 }
