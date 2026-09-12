@@ -17,6 +17,8 @@ pub mod recursiveextend;
 pub use recursiveextend::*;
 pub mod ddl_fts;
 pub use ddl_fts::*;
+pub mod fts_sync;
+pub use fts_sync::*;
 pub mod packedextend;
 pub use packedextend::*;
 pub mod standalonecall;

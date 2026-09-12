@@ -51,6 +51,13 @@ impl Connection {
     pub(crate) fn commit_write_txn(&self, txn: &mut Transaction) -> Result<(), String> {
         let txn_id = txn.transaction_id;
 
+        // Step 0: Snapshot the txn's written rows for FTS propagation (P107.1).
+        // Derived from `undo_records` — the single complete write set for every
+        // DML path (processor ops AND inline DDL both record undo). Taken now
+        // while the txn is still fully populated; the hook below runs against
+        // this stable snapshot.
+        let fts_written = fts_written_rows(txn);
+
         // Step 1: Take the resources out of the map while the txn is still
         // ACTIVE in the TransactionManager. If any later step fails we can roll
         // back cleanly — the txn is never published as committed before its
@@ -109,6 +116,30 @@ impl Connection {
             let _ = self.rollback_write_txn(txn);
             format!("Commit failed: {e}")
         })?;
+
+        // Step 4.5: Propagate the committed row writes into any FTS indexes
+        // over touched tables (P107.1). Non-fatal by contract: the durable
+        // commit already succeeded, so a failed or absent index must never
+        // fail or roll back the transaction — it only degrades searchability.
+        if !fts_written.is_empty() {
+            match self.database.catalog.lock() {
+                Ok(catalog) => {
+                    let entries = catalog.fts_index_entries();
+                    if !entries.is_empty() {
+                        if let Err(e) = akar_processor::physical::write_ops::fts_sync::sync_indexes_on_commit(
+                            &self.database.table_catalog(),
+                            &entries,
+                            &fts_written,
+                        ) {
+                            tracing::warn!("FTS: commit-time index sync failed for txn#{txn_id}: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("FTS: catalog lock error during commit-time sync for txn#{txn_id}: {e}");
+                }
+            }
+        }
 
         // Step 5: Publish the commit and release locks/write. The durable
         // pipeline succeeded, so the txn is now genuinely committed (P51.29).
@@ -252,4 +283,19 @@ impl Connection {
         table_ids.dedup();
         table_ids
     }
+}
+
+/// Deduplicate a transaction's undo records into `(table_id, row_id)` pairs —
+/// the write set the FTS commit hook propagates into on-disk Tantivy indexes
+/// (P107.1). `undo_records` is the single complete write source: both the
+/// processor DML path and inline DDL record undo for every written row.
+fn fts_written_rows(txn: &Transaction) -> Vec<(u64, u64)> {
+    let mut seen = std::collections::HashSet::with_capacity(txn.undo_records.len());
+    let mut out = Vec::with_capacity(txn.undo_records.len());
+    for record in &txn.undo_records {
+        if seen.insert((record.table_id, record.row_id)) {
+            out.push((record.table_id, record.row_id));
+        }
+    }
+    out
 }

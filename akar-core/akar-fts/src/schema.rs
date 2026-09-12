@@ -17,7 +17,12 @@ use tantivy::schema::{FAST, INDEXED, IndexRecordOption, STORED, Schema, SchemaBu
 use crate::tokenizer::EN_STEM;
 
 /// Name of the internal numeric field that stores the source row id in an FTS
-/// index. Marked `FAST | STORED` so search results map back to source rows.
+/// index.
+///
+/// Marked `INDEXED | STORED` (P107.1): the commit-time propagation hook deletes
+/// terms via `delete_term(Term::from_field_i64(doc_id, row))`, which requires
+/// the field to be indexed; `STORED` keeps the value retrievable so search
+/// results map back to source rows.
 pub const DOC_ID_FIELD: &str = "doc_id";
 
 /// Build a Tantivy [`Schema`] for an FTS index: an internal [`DOC_ID_FIELD`]
@@ -27,7 +32,7 @@ pub const DOC_ID_FIELD: &str = "doc_id";
 /// internal field.
 pub fn build_index_schema(columns: &[ColumnDefinition]) -> Schema {
     let mut builder = SchemaBuilder::new();
-    let _ = builder.add_i64_field(DOC_ID_FIELD, FAST | STORED);
+    let _ = builder.add_i64_field(DOC_ID_FIELD, INDEXED | STORED);
     for col in columns {
         if col.name == DOC_ID_FIELD {
             continue;

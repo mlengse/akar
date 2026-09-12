@@ -295,3 +295,60 @@ fn test_fts_advanced_query_types() -> Result<(), String> {
 
     Ok(())
 }
+
+/// P107.1 — the commit-time hook propagates INSERT/UPDATE/DELETE into the
+/// Tantivy index.
+///
+/// Rows written after `CREATE FTS INDEX` synchronise the index at commit, so a
+/// new row is searchable immediately, an updated row matches only its new text
+/// (the old term disappears — `delete_term`), and a deleted row stops matching.
+/// No scan-side catch-up is involved; the scan is read-only now.
+#[test]
+fn test_fts_commit_hook_syncs_dml() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'a fast graph database'})")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('fast') RETURN d.id")?),
+        vec![1],
+        "row present before the index build must match"
+    );
+
+    // INSERT after CREATE FTS INDEX → searchable immediately (propagated at commit).
+    conn.query("CREATE (d:Document {id: 2, title: 'Katana', content: 'katana rust embedded database'})")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?),
+        vec![2],
+        "inserted row must be searchable (commit-time propagation)"
+    );
+
+    // UPDATE (SET) → old term gone, new term present.
+    conn.query("MATCH (d:Document) WHERE d.id = 2 SET d.content = 'rust zero copy engine'")?;
+    assert!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?).is_empty(),
+        "old term must stop matching after SET"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('engine') RETURN d.id")?),
+        vec![2],
+        "new term must match after SET"
+    );
+
+    // DELETE → the row stops matching; untouched rows still match.
+    conn.query("MATCH (d:Document) WHERE d.id = 2 DELETE d")?;
+    assert!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('engine') RETURN d.id")?).is_empty(),
+        "deleted row must not match"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('fast') RETURN d.id")?),
+        vec![1],
+        "untouched row must still match"
+    );
+
+    Ok(())
+}

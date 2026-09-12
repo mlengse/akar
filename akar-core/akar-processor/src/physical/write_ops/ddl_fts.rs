@@ -131,7 +131,8 @@ pub struct PhysicalFtsScan {
     pub index_name: String,
     pub query_string: String,
     /// Source node table/column the index was created on (P52.39) — used to
-    /// catch up newly inserted rows and filter deleted ones at query time.
+    /// filter deleted rows at query time (P107.1 keeps the index in sync at
+    /// commit, so no scan-side catch-up is needed).
     pub table_name: String,
     pub column_name: String,
     pub table_catalog: Arc<TableCatalog>,
@@ -148,17 +149,9 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 .to_string()
         })?;
 
-        let columns = {
-            let source_table = self
-                .table_catalog
-                .get_node_table_by_name(&self.table_name)
-                .ok_or_else(|| format!("Table '{}' not found", self.table_name))?;
-            source_table.columns.clone()
-        };
-
-        // Catch up rows appended after CREATE FTS INDEX (P52.39) — now an
-        // incremental Tantivy write (P105.3), no macro tables to rebuild.
-        let (_index, reader) = self.catch_up(&index_dir, &columns)?;
+        // P107.1: the index is kept in sync at commit time (the commit hook is
+        // the single incremental writer); the scan only opens it read-only.
+        let (_index, reader) = self.open_index(&index_dir)?;
 
         // Parse and run the query against the Tantivy searcher (P105.1).
         let searcher = reader.searcher();
@@ -244,17 +237,13 @@ impl PhysicalFtsScan {
             .map(|p| p.join("fts").join(&self.index_name))
     }
 
-    /// Incrementally bring the Tantivy index in line with the source node
-    /// table (P52.39, re-implemented on the Tantivy writer — P105.3).
-    ///
-    /// Rows appended to the source after `CREATE FTS INDEX` are added via
-    /// [`akar_fts::build::append_docs`] and committed once. Soft-deleted rows
-    /// are simply not re-inserted, and the scoring pass filters them by source
-    /// state, so no deletion propagation is required.
-    fn catch_up(
+    /// Open the on-disk Tantivy index read-only and return a fresh reader
+    /// (P107.1). Propagation to the index happens at commit time via
+    /// [`crate::physical::write_ops::fts_sync::sync_indexes_on_commit`] — the
+    /// scan must not write, and there is no scan-side catch-up anymore.
+    fn open_index(
         &self,
         index_dir: &std::path::Path,
-        columns: &[akar_storage::table::ColumnDefinition],
     ) -> Result<(akar_fts::index::TantivyIndex, akar_fts::index::IndexReader), String> {
         if !index_dir.join("meta.json").exists() {
             return Err(format!(
@@ -264,40 +253,10 @@ impl PhysicalFtsScan {
             ));
         }
 
-        let schema = akar_fts::schema::build_index_schema(columns);
-        let index = akar_fts::index::TantivyIndex::create_on_disk(index_dir, schema)
+        let index = akar_fts::index::TantivyIndex::open_on_disk(index_dir)
             .map_err(|e| format!("FTS: open index '{}': {e}", self.index_name))?;
         let reader = index.reader().map_err(|e| format!("FTS: reader: {e}"))?;
         reader.reload().map_err(|e| format!("FTS: reload: {e}"))?;
-
-        let indexed_count = reader.searcher().num_docs() as usize;
-
-        // Snapshot the source rows not yet indexed. The read `Ref` is scoped
-        // out before the Tantivy writer is opened (DashMap not re-entrant).
-        let new_docs: Vec<(i64, String)> = {
-            let source_table = match self.table_catalog.get_node_table_by_name(&self.table_name) {
-                Some(t) => t,
-                None => return Ok((index, reader)),
-            };
-            let Some(col_idx) = source_table.columns.iter().position(|c| c.name == self.column_name) else {
-                return Ok((index, reader));
-            };
-            let source_count = source_table.num_rows as usize;
-            let mut docs = Vec::new();
-            for row_id in indexed_count..source_count {
-                if let Some(Value::String(s)) = source_table.get_value(row_id, col_idx) {
-                    docs.push((row_id as i64, s.clone()));
-                }
-            }
-            docs
-        };
-
-        if !new_docs.is_empty() {
-            akar_fts::build::append_docs(&index, columns, &self.column_name, &new_docs)?;
-            reader
-                .reload()
-                .map_err(|e| format!("FTS: reload after catch-up: {e}"))?;
-        }
 
         Ok((index, reader))
     }

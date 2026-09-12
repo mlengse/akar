@@ -511,6 +511,16 @@ impl Catalog {
             .map(|f| (f.table_name.as_str(), f.column_name.as_str()))
     }
 
+    /// Snapshot of every registered FTS index as `(name, table_name,
+    /// column_name)` tuples (P107.1). Consumed by the commit-time propagation
+    /// hook, which must apply committed source-table writes to each index.
+    pub fn fts_index_entries(&self) -> Vec<(String, String, String)> {
+        self.fts_indexes
+            .values()
+            .map(|f| (f.name.clone(), f.table_name.clone(), f.column_name.clone()))
+            .collect()
+    }
+
     /// Create a node table. Returns error if name already exists.
     pub fn create_node_table(&mut self, name: String, columns: Vec<CatalogColumn>) -> CatalogResult {
         if self.name_to_id.contains_key(&name) {
