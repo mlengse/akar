@@ -353,6 +353,87 @@ fn test_fts_commit_hook_syncs_dml() -> Result<(), String> {
     Ok(())
 }
 
+/// P107.4 — insert + search in the same transaction: results are visible only
+/// after the transaction's commit.
+///
+/// The FTS visibility boundary is the akar COMMIT. The commit-time hook
+/// (P107.1) propagates written rows and reloads the shared reader (P107.2)
+/// exactly once, at the *durable* commit — Step 4.5 runs only after
+/// `commit_transaction` succeeded. This test pins the transaction-consistency
+/// flip side of the crash contract (P107.3) at the SQL boundary, inside
+/// `BEGIN`/`COMMIT`/`ROLLBACK`:
+///
+/// - a row inserted and searched in the same transaction is searchable to that
+///   search once its write statement commits, and stays searchable after the
+///   explicit `COMMIT`;
+/// - an insert whose write statement is aborted (duplicate primary key → the
+///   connection wrapper rolls the transaction back) is NEVER searchable — not
+///   inside the transaction, not after `ROLLBACK` — because the sync hook runs
+///   only on a successful durable commit;
+/// - committed rows remain searchable throughout: the on-disk index is never
+///   desynchronised by an aborted write.
+#[test]
+fn test_fts_insert_search_same_transaction_visible_after_commit() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    // Baseline committed row.
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'a fast graph database'})")?;
+
+    // Begin an explicit transaction: insert + search in the SAME transaction.
+    conn.query("BEGIN")?;
+
+    // A search over the committed baseline is visible inside the transaction.
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('fast') RETURN d.id")?),
+        vec![1],
+        "committed rows stay searchable inside the transaction"
+    );
+
+    // INSERT inside the transaction → searchable to a same-transaction search,
+    // and still searchable after the explicit COMMIT.
+    conn.query("CREATE (d:Document {id: 2, title: 'Katana', content: 'katana rust embedded database'})")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?),
+        vec![2],
+        "a same-transaction insert must be searchable by a same-transaction search"
+    );
+    conn.query("COMMIT")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?),
+        vec![2],
+        "the inserted row must remain searchable after the transaction commits"
+    );
+
+    // A transaction whose write is aborted must leave no trace on the index.
+    conn.query("BEGIN")?;
+    assert!(
+        conn.query("CREATE (d:Document {id: 2, title: 'Dup', content: 'katana duplicate'})")
+            .is_err(),
+        "duplicate primary key aborts the write statement (transaction rolled back)"
+    );
+    assert!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('duplicate') RETURN d.id")?).is_empty(),
+        "an aborted insert must not be searchable even inside the transaction"
+    );
+    conn.query("ROLLBACK")?;
+    assert!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('duplicate') RETURN d.id")?).is_empty(),
+        "an aborted insert must never leak into the index after ROLLBACK"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('katana') RETURN d.id")?),
+        vec![2],
+        "committed rows must remain searchable after an aborted write"
+    );
+
+    Ok(())
+}
+
 /// P107.2 — read-after-write consistency with a shared, commit-reloaded reader.
 ///
 /// Between the commit hook and the scan, the engine keeps ONE cached
