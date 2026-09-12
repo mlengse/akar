@@ -1226,7 +1226,7 @@ impl RelTable {
 /// Write operations synchronize on individual entries rather than
 /// the entire catalog, allowing concurrent writers to different
 /// tables to proceed in parallel.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TableCatalog {
     node_tables: DashMap<u64, NodeTable>,
     rel_tables: DashMap<u64, RelTable>,
@@ -1243,6 +1243,30 @@ pub struct TableCatalog {
     /// disk (e.g. the Tantivy FTS index under `<db_path>/fts/<index_name>`)
     /// read it here. `None` for in-memory (`:memory:`) or standalone catalogs.
     db_path: std::sync::RwLock<Option<std::path::PathBuf>>,
+    /// Runtime handles for side-car indexes (currently the Tantivy FTS index,
+    /// P107.2). Keyed by index name; values are type-erased
+    /// `Arc<dyn Any + Send + Sync>` so this crate does not depend on the owning
+    /// crate (`akar-fts`, whose dependency graph includes this one) — the
+    /// owning crate downcasts on retrieval. This is how the commit-time sync
+    /// hook and the read scans share ONE live reader (reloaded only at commit).
+    /// Not persisted.
+    fts_runtime_handles: DashMap<String, Arc<dyn std::any::Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for TableCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableCatalog")
+            .field("node_tables", &self.node_tables)
+            .field("rel_tables", &self.rel_tables)
+            .field("vector_indexes", &self.vector_indexes)
+            .field("node_name_to_id", &self.node_name_to_id)
+            .field("rel_name_to_id", &self.rel_name_to_id)
+            .field("vector_index_name_to_id", &self.vector_index_name_to_id)
+            .field("next_table_id", &self.next_table_id)
+            .field("db_path", &self.db_path)
+            .field("fts_runtime_handles", &self.fts_runtime_handles.len())
+            .finish()
+    }
 }
 
 impl TableCatalog {
@@ -1262,6 +1286,21 @@ impl TableCatalog {
     /// standalone catalogs.
     pub fn db_path(&self) -> Option<std::path::PathBuf> {
         self.db_path.read().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Get the runtime handle registered for side-car index `name` (FTS,
+    /// P107.2), if any. The value is type-erased; the owning crate downcasts it
+    /// via [`std::any::Any::downcast_arc`].
+    pub fn fts_runtime_handle(&self, name: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.fts_runtime_handles.get(name).map(|guard| guard.clone())
+    }
+
+    /// Register (or replace) the runtime handle for side-car index `name`.
+    ///
+    /// Used by the FTS extension to make the commit-time sync hook and the read
+    /// scans share ONE live `IndexReader` (reloaded only at commit, P107.2).
+    pub fn set_fts_runtime_handle(&self, name: &str, handle: Arc<dyn std::any::Any + Send + Sync>) {
+        self.fts_runtime_handles.insert(name.to_string(), handle);
     }
 
     pub fn create_node_table(&self, name: String, columns: Vec<ColumnDefinition>) -> NodeTable {

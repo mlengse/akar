@@ -8,10 +8,12 @@
 //! an update replaces the row's document, a delete (NULL / missing column)
 //! removes it.
 //!
-//! This is the *single* incremental writer: the `PhysicalFtsScan` read path
-//! only opens + reloads + searches. Failures here are non-fatal by contract —
-//! they are surfaced as warnings by the caller so a stale index can never
-//! roll back an already-durable commit.
+//! This is the *single* incremental writer AND the *single* reloader: the hook
+//! reloads the shared [`akar_fts::index::FtsIndexHandle`] reader after applying
+//! writes (P107.2). The `PhysicalFtsScan` read path only reuses that cached
+//! reader — never opening, reloading, or writing. Failures here are non-fatal
+//! by contract — they are surfaced as warnings by the caller so a stale index
+//! can never roll back an already-durable commit.
 
 use std::sync::Arc;
 
@@ -97,10 +99,17 @@ pub fn sync_indexes_on_commit(
             continue;
         }
 
-        let index = akar_fts::index::TantivyIndex::open_on_disk(&index_dir)
+        let handle = akar_fts::index::runtime_handle(table_catalog, name, &index_dir)
             .map_err(|e| format!("FTS: open index '{name}': {e}"))?;
-        akar_fts::build::apply_doc_writes(&index, column_name, &writes)
+        akar_fts::build::apply_doc_writes(handle.inner(), column_name, &writes)
             .map_err(|e| format!("FTS: sync index '{name}': {e}"))?;
+        // P107.2: reload the shared reader HERE, at the akar commit point.
+        // Scans reuse the same cached reader, so this single reload makes every
+        // subsequent scan see the rows just committed — read-after-write
+        // consistency with reload() called only on commit.
+        handle
+            .reload()
+            .map_err(|e| format!("FTS: reload index '{name}': {e}"))?;
         synced += writes.len();
     }
 

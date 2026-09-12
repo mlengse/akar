@@ -149,9 +149,10 @@ impl PhysicalOperatorExec for PhysicalFtsScan {
                 .to_string()
         })?;
 
-        // P107.1: the index is kept in sync at commit time (the commit hook is
-        // the single incremental writer); the scan only opens it read-only.
-        let (_index, reader) = self.open_index(&index_dir)?;
+        // P107.1/P107.2: the index is kept in sync at commit time (the commit
+        // hook is the single incremental writer AND the single reloader); the
+        // scan only reuses the shared cached reader.
+        let reader = self.open_reader(&index_dir)?;
 
         // Parse and run the query against the Tantivy searcher (P105.1).
         let searcher = reader.searcher();
@@ -237,14 +238,15 @@ impl PhysicalFtsScan {
             .map(|p| p.join("fts").join(&self.index_name))
     }
 
-    /// Open the on-disk Tantivy index read-only and return a fresh reader
-    /// (P107.1). Propagation to the index happens at commit time via
-    /// [`crate::physical::write_ops::fts_sync::sync_indexes_on_commit`] — the
-    /// scan must not write, and there is no scan-side catch-up anymore.
-    fn open_index(
-        &self,
-        index_dir: &std::path::Path,
-    ) -> Result<(akar_fts::index::TantivyIndex, akar_fts::index::IndexReader), String> {
+    /// Resolve the shared read handle for this index (opening + registering it
+    /// in the catalog on first use) and return its cached reader.
+    ///
+    /// P107.2: **no reload here.** The reader is refreshed by only one place —
+    /// the commit-time sync hook, via
+    /// [`crate::physical::write_ops::fts_sync::sync_indexes_on_commit`]. The
+    /// scan must not write and must not reload; this guarantees every scan
+    /// observes exactly what the last akar commit wrote.
+    fn open_reader(&self, index_dir: &std::path::Path) -> Result<akar_fts::index::IndexReader, String> {
         if !index_dir.join("meta.json").exists() {
             return Err(format!(
                 "FTS index '{}' not found on disk at '{}' (run CREATE FTS INDEX first)",
@@ -253,11 +255,7 @@ impl PhysicalFtsScan {
             ));
         }
 
-        let index = akar_fts::index::TantivyIndex::open_on_disk(index_dir)
-            .map_err(|e| format!("FTS: open index '{}': {e}", self.index_name))?;
-        let reader = index.reader().map_err(|e| format!("FTS: reader: {e}"))?;
-        reader.reload().map_err(|e| format!("FTS: reload: {e}"))?;
-
-        Ok((index, reader))
+        let handle = akar_fts::index::runtime_handle(&self.table_catalog, &self.index_name, index_dir)?;
+        handle.reader().map_err(|e| format!("FTS: reader: {e}"))
     }
 }

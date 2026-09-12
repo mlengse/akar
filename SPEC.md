@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,987 total, 0 ignored, 1,987 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P107.1: P107.1 FTS commit-hook sync dari DML INSERT/UPDATE/DELETE +2 tes; sebelumnya: 1,985 s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.2/P105: clean break Tantivy-only — 3 macro tables dihapus, `PhysicalFtsScan` query Tantivy; konfirmasi gate 1,981 tanpa perubahan jumlah tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| Tests passing | **1,990 total, 0 ignored, 1,990 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P107.2: P107.2 `IndexReader::reload()` hanya di akar commit — shared cached reader via `FtsIndexHandle` + registry `TableCatalog` +3 tes; sebelumnya: 1,987 s.d. P107.1: P107.1 FTS commit-hook sync dari DML INSERT/UPDATE/DELETE +2 tes; sebelumnya: 1,985 s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.2/P105: clean break Tantivy-only — 3 macro tables dihapus, `PhysicalFtsScan` query Tantivy; konfirmasi gate 1,981 tanpa perubahan jumlah tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -462,12 +462,20 @@ end-to-end in `test_fts_advanced_query_types`):
   `*` wildcard (`*` is tokenized away; prefix query requires the quoted phrase form). Both
   are Tantivy parser/tokenizer constraints, not akar intent.
 
-**FTS index lifecycle (P107.1):** rows written **after** `CREATE FTS INDEX` are propagated
+**FTS index lifecycle (P107.1–P107.2):** rows written **after** `CREATE FTS INDEX` are propagated
 into the Tantivy index at **commit time** by `sync_indexes_on_commit`
 (`akar_processor::physical::write_ops::fts_sync`), invoked from
 `Connection::commit_write_txn` after durable commit and before publish — a single
-incremental writer, so `USING FTS INDEX` scans are **read-only** (open + reload + search,
-no scan-side catch-up). The write set is the txn's deduplicated `undo_records`
+incremental writer, so `USING FTS INDEX` scans are **read-only**. Reader lifecycle (P107.2):
+per index ada **satu shared handle** `FtsIndexHandle` (`akar-fts/src/index.rs`) yang meng-cache
+`IndexReader` (`ReloadPolicy::Manual`) dan diregistrasi di `TableCatalog`
+(`Arc<dyn Any + Send + Sync>` registry via `fts_runtime_handle`/`set_fts_runtime_handle`);
+commit hook dan scan menyelesaikan handle yang **sama** lewat `akar_fts::index::runtime_handle`
+(lazy open-once), dan `IndexReader::reload()` berjalan di **exactly satu titik produksi —
+commit** (`apply_doc_writes(handle.inner(), …)` → `handle.reload()`). Scan `open_reader` hanya
+`reader()` — tidak membuka index, tidak refresh per-query (no scan-side catch-up, no per-scan
+reload), sehingga pembacaan deterministik segar tepat setelah commit (tanpa ketergantungan pada
+timing `OnCommitWithDelay`). The write set is the txn's deduplicated `undo_records`
 `(table_id, row_id)` snapshot. Propagation per row: `delete_term(doc_id)` then re-add on
 `SET`/`INSERT` (update), `delete_term(doc_id)` on soft-delete (`DELETE`); existing rows at
 `CREATE FTS INDEX` time are indexed by the build. Failure is non-fatal by contract (durable
@@ -685,7 +693,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,987** | **1,987 total, 0 ignored, 1,987 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P107.1: P107.1 FTS commit-hook sync dari DML INSERT/UPDATE/DELETE +2 tes; sebelumnya: 1,985 s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **1,990** | **1,990 total, 0 ignored, 1,990 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P107.2: P107.2 `IndexReader::reload()` hanya di akar commit — shared cached reader via `FtsIndexHandle` + registry `TableCatalog` +3 tes; sebelumnya: 1,987 s.d. P107.1: P107.1 FTS commit-hook sync dari DML INSERT/UPDATE/DELETE +2 tes; sebelumnya: 1,985 s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 

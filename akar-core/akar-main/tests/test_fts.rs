@@ -352,3 +352,53 @@ fn test_fts_commit_hook_syncs_dml() -> Result<(), String> {
 
     Ok(())
 }
+
+/// P107.2 — read-after-write consistency with a shared, commit-reloaded reader.
+///
+/// Between the commit hook and the scan, the engine keeps ONE cached
+/// `IndexReader` per index, reloaded only at an akar commit (in
+/// `sync_indexes_on_commit`). This test pins that contract at the SQL boundary:
+/// every scan after a commit observes exactly what that commit wrote — a second
+/// commit's rows appear while the first commit's rows remain visible, which a
+/// stale (never-reloaded) or discarded (fresh-per-connection) reader would
+/// break.
+#[test]
+fn test_fts_read_after_write_across_commits() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'a fast graph database'})")?;
+
+    // Commit #1 → visible.
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('fast') RETURN d.id")?),
+        vec![1],
+        "row from commit #1 must be visible"
+    );
+
+    // Scan again (reuses the cached reader) → still stable.
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('graph') RETURN d.id")?),
+        vec![1],
+        "cached reader stays stable between commits"
+    );
+
+    // Commit #2 → its rows appear AND commit #1's rows remain (the reader was
+    // reloaded at commit #2, not recreated).
+    conn.query("CREATE (d:Document {id: 2, title: 'Katana', content: 'rust embedded katana database'})")?;
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('database') RETURN d.id")?),
+        vec![1, 2],
+        "commit #2's scan must see both rows (reload at commit, not per-scan)"
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Document) USING FTS INDEX doc_idx('rust') RETURN d.id")?),
+        vec![2],
+        "commit #2 only"
+    );
+
+    Ok(())
+}

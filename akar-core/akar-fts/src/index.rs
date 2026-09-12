@@ -8,12 +8,22 @@
 //! - [`TantivyIndex::reader`] — `IndexReader` with [`ReloadPolicy::Manual`]
 //! - [`TantivyIndex::search`] — convenience search returning `(Score, DocAddress)`
 //!
+//! [`FtsIndexHandle`] (P107.2) is the shared live handle for an on-disk index:
+//! it caches the [`IndexReader`] built with [`ReloadPolicy::Manual`] and is
+//! reloaded **only** at an akar transaction commit (never by Tantivy's
+//! `OnCommitWithDelay`, never per-scan). Both the commit-time sync hook and the
+//! physical FTS scan resolve the same handle through the table catalog's
+//! runtime registry, so one reader serves both paths. See [`runtime_handle`].
+//!
 //! Every index registers Akar's `en_stem` tokenizer (via
 //! [`crate::tokenizer::manager`]) so `TEXT` fields built by
 //! [`crate::schema::build_tantivy_schema`] resolve the same pipeline at index
 //! and query time.
 
 use std::path::Path;
+use std::sync::{Arc, RwLock};
+
+use akar_storage::table::TableCatalog;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::Schema;
@@ -140,6 +150,103 @@ impl TantivyIndex {
         }
         Ok(results)
     }
+}
+
+/// A live, shared handle to an on-disk Tantivy FTS index (P107.2).
+///
+/// Caches the [`IndexReader`] opened over the underlying [`Index`] so:
+/// - the akar commit-time sync hook is the *single* place that reloads it, and
+/// - the physical FTS scans reuse the same cached reader instead of reopening
+///   the index and reloading on every query.
+///
+/// The reader is built with [`ReloadPolicy::Manual`] and refreshed only via
+/// [`FtsIndexHandle::reload`] — never implicitly by Tantivy, never per-scan.
+/// A freshly created reader reflects the latest committed segments (Tantivy
+/// loads them at construction), so lazy creation is always current and a
+/// reload is only ever needed to refresh a reader that already exists, i.e.
+/// after the commit hook wrote new segments.
+pub struct FtsIndexHandle {
+    index: TantivyIndex,
+    reader: RwLock<Option<IndexReader>>,
+}
+
+impl FtsIndexHandle {
+    /// Open an existing on-disk index. The directory must already contain a
+    /// Tantivy index (see [`TantivyIndex::open_on_disk`]).
+    pub fn open_on_disk(index_dir: impl AsRef<Path>) -> tantivy::Result<Self> {
+        Ok(Self {
+            index: TantivyIndex::open_on_disk(index_dir)?,
+            reader: RwLock::new(None),
+        })
+    }
+
+    /// The wrapped index, for the incremental writer path
+    /// ([`crate::build::apply_doc_writes`]).
+    pub fn inner(&self) -> &TantivyIndex {
+        &self.index
+    }
+
+    /// The cached [`IndexReader`], creating it lazily on first use.
+    ///
+    /// Returns a cheap clone (an `IndexReader` shares its segments internally),
+    /// so scans can hold the reader for their whole execution. The returned
+    /// handle observes the segments current at the last [`FtsIndexHandle::reload`]
+    /// (or, on first use, the state at open time).
+    pub fn reader(&self) -> tantivy::Result<IndexReader> {
+        {
+            let guard = self
+                .reader
+                .read()
+                .map_err(|e| tantivy::TantivyError::SystemError(format!("FTS reader lock poisoned: {e}")))?;
+            if let Some(reader) = guard.as_ref() {
+                return Ok(reader.clone());
+            }
+        }
+        let reader = self.index.reader()?;
+        let mut guard = self
+            .reader
+            .write()
+            .map_err(|e| tantivy::TantivyError::SystemError(format!("FTS reader lock poisoned: {e}")))?;
+        if guard.is_none() {
+            *guard = Some(reader.clone());
+        }
+        Ok(reader)
+    }
+
+    /// Refresh the cached reader to the latest committed segments.
+    ///
+    /// **P107.2**: this is the *only* place an [`IndexReader`] is reloaded in
+    /// production paths — the akar commit-time sync hook calls it after applying
+    /// row writes. It is never called from a scan.
+    pub fn reload(&self) -> tantivy::Result<()> {
+        let reader = self.reader()?;
+        reader.reload().map(|_| ())
+    }
+}
+
+/// Resolve the shared [`FtsIndexHandle`] for an on-disk FTS index, lazily
+/// opening it and registering it in the table catalog on first use (P107.2).
+///
+/// Both the commit-time sync hook (`fts_sync::sync_indexes_on_commit`) and the
+/// read scan (`PhysicalFtsScan`) resolve index names through this channel, so
+/// they share ONE handle and ONE cached [`IndexReader`] — the reader reloaded
+/// only at an akar transaction commit. The retrieved handle is type-erased in
+/// [`TableCatalog`] (`Arc<dyn Any + Send + Sync>`) so `akar-storage` stays
+/// decoupled from this crate.
+pub fn runtime_handle(
+    table_catalog: &Arc<TableCatalog>,
+    index_name: &str,
+    index_dir: impl AsRef<Path>,
+) -> Result<Arc<FtsIndexHandle>, String> {
+    if let Some(any) = table_catalog.fts_runtime_handle(index_name)
+        && let Ok(handle) = any.downcast::<FtsIndexHandle>()
+    {
+        return Ok(handle);
+    }
+    let handle =
+        Arc::new(FtsIndexHandle::open_on_disk(index_dir).map_err(|e| format!("FTS: open index '{index_name}': {e}"))?);
+    table_catalog.set_fts_runtime_handle(index_name, handle.clone());
+    Ok(handle)
 }
 
 #[cfg(test)]
@@ -435,6 +542,89 @@ mod tests {
             "more phrase occurrences must score higher ({} !> {})",
             score_of(0),
             score_of(1)
+        );
+    }
+
+    /// P107.2 — `IndexReader::reload()` is the *single* refresh point.
+    ///
+    /// Verifies the [`FtsIndexHandle`] contract behind read-after-write
+    /// consistency: after an incremental write the cached reader does NOT see
+    /// the new doc (manual policy — nothing auto-reloads), and only the
+    /// explicit [`FtsIndexHandle::reload`] — which the akar commit hook is the
+    /// sole production caller of — makes it visible.
+    #[test]
+    fn test_fts_handle_reload_only_at_commit() {
+        use crate::schema::{DOC_ID_FIELD, build_index_schema};
+        use akar_common::enums::CompressionType;
+        use akar_common::types::LogicalTypeID;
+        use akar_storage::table::ColumnDefinition;
+
+        let col = ColumnDefinition {
+            name: "content".to_string(),
+            logical_type: LogicalTypeID::String,
+            is_primary_key: false,
+            compression: CompressionType::Uncompressed,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let schema = build_index_schema(&[col.clone()]);
+        let content = schema.get_field("content").unwrap();
+        let doc_id = schema.get_field(DOC_ID_FIELD).unwrap();
+
+        // Prime the directory with an empty on-disk index, then open the handle.
+        {
+            let _idx = TantivyIndex::create_on_disk(dir.path(), schema).unwrap();
+        }
+        let handle = FtsIndexHandle::open_on_disk(dir.path()).unwrap();
+        assert_eq!(handle.reader().unwrap().searcher().num_docs(), 0, "empty index");
+
+        // Incremental write (the commit hook's writer path) ...
+        let writes = vec![(0i64, Some("rust embedded database".to_string()))];
+        crate::build::apply_doc_writes(handle.inner(), "content", &writes).unwrap();
+
+        // ... does NOT refresh the already-open reader by itself: manual
+        // reload policy, nothing triggers on commit other than reload().
+        assert_eq!(
+            handle.reader().unwrap().searcher().num_docs(),
+            0,
+            "no auto-reload before the commit-time reload"
+        );
+
+        // The commit hook's reload() is the single refresh point.
+        handle.reload().unwrap();
+        assert_eq!(
+            handle.reader().unwrap().searcher().num_docs(),
+            1,
+            "reload refreshes the cached reader"
+        );
+        let hits = TantivyIndex::search_doc_ids(&handle.reader().unwrap(), "rust", vec![content], doc_id, 10).unwrap();
+        assert_eq!(hits.len(), 1, "reloaded reader must find the written doc");
+    }
+
+    /// P107.2 — the table-catalog runtime registry is single-flight: the commit
+    /// hook and the scan resolve the SAME handle, so a commit-time reload
+    /// reaches the exact reader every scan reuses.
+    #[test]
+    fn test_runtime_handle_registry_returns_same_arc() {
+        use akar_common::enums::CompressionType;
+        use akar_common::types::LogicalTypeID;
+        use akar_storage::table::ColumnDefinition;
+
+        let col = ColumnDefinition {
+            name: "content".to_string(),
+            logical_type: LogicalTypeID::String,
+            is_primary_key: false,
+            compression: CompressionType::Uncompressed,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let _idx = TantivyIndex::create_on_disk(dir.path(), crate::schema::build_index_schema(&[col])).unwrap();
+        }
+        let catalog = Arc::new(TableCatalog::new());
+        let a = runtime_handle(&catalog, "doc_idx", dir.path()).unwrap();
+        let b = runtime_handle(&catalog, "doc_idx", dir.path()).unwrap();
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "registry must return the same handle so reload-at-commit reaches every scan"
         );
     }
 }
