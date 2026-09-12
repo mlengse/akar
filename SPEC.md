@@ -640,7 +640,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
 | `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
-| `akar-fts` | 31 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1) + clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) |
+| `akar-fts` | 33 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) |
 | `akar-algo` | 81 | Graph algorithm extensions |
 | `akar-search` | 23 | Search utilities |
 | `akar-dream` | 5 | Dream engine |
@@ -657,7 +657,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,981** | **1,981 total, 0 ignored, 1,981 passed, 0 failed** (gate `test [akar-core]` 2026-09-11, s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **1,983** | **1,983 total, 0 ignored, 1,983 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 

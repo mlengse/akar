@@ -114,6 +114,12 @@ pub fn tf_idf(term_freq: f64, doc_count: usize, total_docs: usize) -> f64 {
 }
 
 /// Calculate BM25 score for a term.
+///
+/// Reference closed-form implementation. The live FTS scan delegates scoring
+/// to Tantivy's own BM25 (k1=1.2, b=0.75); scoring parity is asserted in
+/// `index::tests` (`test_bm25_scoring_parity_plan_case`, `test_bm25_length_normalization`).
+/// Note that Tantivy scores with a *quantized* per-doc length (fieldnorm) and
+/// the raw mean token count as avgdl — see those tests for the exact mapping.
 pub fn bm25(
     term_freq: f64,
     doc_length: f64,
