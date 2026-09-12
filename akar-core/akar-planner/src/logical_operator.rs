@@ -1003,10 +1003,6 @@ pub struct LogicalCreateFtsIndex {
     pub table_name: String,
     pub column_name: String,
     pub if_not_exists: bool,
-    /// Derived macro table names.
-    pub docs_table: String,
-    pub terms_table: String,
-    pub posting_table: String,
     pub cardinality: u64,
 }
 
@@ -1015,9 +1011,6 @@ pub struct LogicalCreateFtsIndex {
 pub struct LogicalFtsScan {
     pub index_name: String,
     pub query_string: String,
-    pub docs_table: String,
-    pub terms_table: String,
-    pub posting_table: String,
     /// Source node table/column the index was created on (P52.39).
     pub table_name: String,
     pub column_name: String,

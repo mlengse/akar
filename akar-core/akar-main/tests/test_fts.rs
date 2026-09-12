@@ -20,23 +20,20 @@ fn test_create_and_query_fts_index() -> Result<(), String> {
     // Create native FTS index
     conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
 
-    // The macro tables: fts_doc_idx_docs, fts_doc_idx_terms, fts_doc_idx_appears_in should be created implicitly
-    let docs_res = conn.query("MATCH (d:fts_doc_idx_docs) RETURN d.text")?;
+    // P104.2 clean break: the macro tables (fts_doc_idx_docs, fts_doc_idx_terms,
+    // fts_doc_idx_appears_in) no longer exist — SELECT FROM them must error.
     assert!(
-        docs_res.chunks.first().unwrap().size > 0,
-        "FTS docs table should be populated"
+        conn.query("MATCH (d:fts_doc_idx_docs) RETURN d.text").is_err(),
+        "FTS docs macro table must not exist after clean break (P104.2)"
     );
-
-    let terms_res = conn.query("MATCH (t:fts_doc_idx_terms) RETURN t.term")?;
     assert!(
-        terms_res.chunks.first().unwrap().size > 0,
-        "FTS terms table should be populated"
+        conn.query("MATCH (t:fts_doc_idx_terms) RETURN t.term").is_err(),
+        "FTS terms macro table must not exist after clean break (P104.2)"
     );
-
-    let appears_in_res = conn.query("MATCH ()-[r:fts_doc_idx_appears_in]->() RETURN r.term_freq")?;
     assert!(
-        appears_in_res.chunks.first().unwrap().size > 0,
-        "FTS appears_in table should be populated"
+        conn.query("MATCH ()-[r:fts_doc_idx_appears_in]->() RETURN r.term_freq")
+            .is_err(),
+        "FTS appears_in macro table must not exist after clean break (P104.2)"
     );
 
     // Query using native MATCH ... USING FTS INDEX

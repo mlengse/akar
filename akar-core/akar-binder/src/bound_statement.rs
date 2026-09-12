@@ -213,12 +213,9 @@ pub struct BoundMatchClause {
 pub struct BoundFtsQuery {
     pub index_name: String,
     pub query_string: String,
-    /// The macro table names derived from the FTS index.
-    pub docs_table: String,
-    pub terms_table: String,
-    pub posting_table: String,
     /// The source node table/column the index was created on (P52.39), used
-    /// to keep the derived macro tables in sync with live DML.
+    /// to keep the Tantivy index in sync with live DML (catch-up + soft-delete
+    /// filtering, P104.2/P105.3).
     pub table_name: String,
     pub column_name: String,
 }
@@ -453,10 +450,6 @@ pub struct BoundCreateFtsIndex {
     pub table_name: String,
     pub column_name: String,
     pub if_not_exists: bool,
-    /// The macro table names that will be created.
-    pub docs_table: String,
-    pub terms_table: String,
-    pub posting_table: String,
 }
 
 /// Bound CREATE TYPE — user-defined type alias.

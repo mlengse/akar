@@ -127,9 +127,6 @@ impl QueryPlanner {
                     table_name: c.table_name,
                     column_name: c.column_name,
                     if_not_exists: c.if_not_exists,
-                    docs_table: c.docs_table,
-                    terms_table: c.terms_table,
-                    posting_table: c.posting_table,
                     cardinality: 1,
                 })])
             }
@@ -485,9 +482,6 @@ impl QueryPlanner {
                     let mut fts_to_assign = m.fts_query.as_ref().map(|fq| LogicalFtsScan {
                         index_name: fq.index_name.clone(),
                         query_string: fq.query_string.clone(),
-                        docs_table: fq.docs_table.clone(),
-                        terms_table: fq.terms_table.clone(),
-                        posting_table: fq.posting_table.clone(),
                         table_name: fq.table_name.clone(),
                         column_name: fq.column_name.clone(),
                         cardinality: 0,

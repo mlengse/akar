@@ -374,9 +374,7 @@ pub fn map_and_execute_ddl(
                     index_name: c.index_name.clone(),
                     table_name: c.table_name.clone(),
                     column_name: c.column_name.clone(),
-                    docs_table: c.docs_table.clone(),
-                    terms_table: c.terms_table.clone(),
-                    posting_table: c.posting_table.clone(),
+                    if_not_exists: c.if_not_exists,
                     table_catalog: tc.clone(),
                 };
                 let result = fts_index.execute(current_input)?;
@@ -390,9 +388,6 @@ pub fn map_and_execute_ddl(
                 let fts_scan = PhysicalFtsScan {
                     index_name: s.index_name.clone(),
                     query_string: s.query_string.clone(),
-                    docs_table: s.docs_table.clone(),
-                    terms_table: s.terms_table.clone(),
-                    posting_table: s.posting_table.clone(),
                     table_name: s.table_name.clone(),
                     column_name: s.column_name.clone(),
                     table_catalog: tc.clone(),

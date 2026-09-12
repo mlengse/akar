@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,981 total, 0 ignored, 1,981 passed, 0 failed** (gate `test [akar-core]` 2026-09-11, s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| Tests passing | **1,981 total, 0 ignored, 1,981 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P104.2/P105: clean break Tantivy-only — 3 macro tables dihapus, `PhysicalFtsScan` query Tantivy; konfirmasi gate 1,981 tanpa perubahan jumlah tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -640,7 +640,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
 | `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
-| `akar-fts` | 31 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1) |
+| `akar-fts` | 31 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1) + clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) |
 | `akar-algo` | 81 | Graph algorithm extensions |
 | `akar-search` | 23 | Search utilities |
 | `akar-dream` | 5 | Dream engine |

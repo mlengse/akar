@@ -381,9 +381,6 @@ impl Binder {
             Ok(BoundFtsQuery {
                 index_name: fq.index_name.clone(),
                 query_string: fq.query_string.clone(),
-                docs_table: format!("fts_{}_docs", fq.index_name),
-                terms_table: format!("fts_{}_terms", fq.index_name),
-                posting_table: format!("fts_{}_appears_in", fq.index_name),
                 table_name,
                 column_name,
             })
@@ -1898,12 +1895,10 @@ impl Binder {
             }
         }
         let index_name = f.index_name.clone();
-        let docs_table = format!("fts_{index_name}_docs");
-        let terms_table = format!("fts_{index_name}_terms");
-        let posting_table = format!("fts_{index_name}_appears_in");
 
         // Register the FTS index → source mapping so `USING FTS INDEX` scans
-        // can keep the derived macro tables in sync with live DML (P52.39).
+        // can catch up newly inserted rows and filter soft-deleted ones
+        // (P52.39, kept under the P104.2 clean break).
         {
             let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
             catalog
@@ -1911,89 +1906,11 @@ impl Binder {
                 .map_err(|e| format!("Failed to register FTS index: {e}"))?;
         }
 
-        // Register macro tables in the logical catalog
-        {
-            let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-
-            let docs_cols = vec![
-                akar_catalog::CatalogColumn {
-                    name: "doc_id".into(),
-                    logical_type: akar_common::types::LogicalTypeID::Int64,
-                    is_primary_key: true,
-                    compression: akar_common::enums::CompressionType::Uncompressed,
-                    default_value: None,
-                },
-                akar_catalog::CatalogColumn {
-                    name: "text".into(),
-                    logical_type: akar_common::types::LogicalTypeID::String,
-                    is_primary_key: false,
-                    compression: akar_common::enums::CompressionType::Uncompressed,
-                    default_value: None,
-                },
-            ];
-            let docs_id = match catalog.create_node_table(docs_table.clone(), docs_cols) {
-                akar_catalog::CatalogResult::Created { table_id } => table_id,
-                akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", docs_table).into());
-                }
-                _ => return Err("Failed to create docs table".into()),
-            };
-
-            let terms_cols = vec![
-                akar_catalog::CatalogColumn {
-                    name: "term_id".into(),
-                    logical_type: akar_common::types::LogicalTypeID::Int64,
-                    is_primary_key: true,
-                    compression: akar_common::enums::CompressionType::Uncompressed,
-                    default_value: None,
-                },
-                akar_catalog::CatalogColumn {
-                    name: "term".into(),
-                    logical_type: akar_common::types::LogicalTypeID::String,
-                    is_primary_key: false,
-                    compression: akar_common::enums::CompressionType::Uncompressed,
-                    default_value: None,
-                },
-                akar_catalog::CatalogColumn {
-                    name: "doc_freq".into(),
-                    logical_type: akar_common::types::LogicalTypeID::Int64,
-                    is_primary_key: false,
-                    compression: akar_common::enums::CompressionType::Uncompressed,
-                    default_value: None,
-                },
-            ];
-            let terms_id = match catalog.create_node_table(terms_table.clone(), terms_cols) {
-                akar_catalog::CatalogResult::Created { table_id } => table_id,
-                akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", terms_table).into());
-                }
-                _ => return Err("Failed to create terms table".into()),
-            };
-
-            let posting_cols = vec![akar_catalog::CatalogColumn {
-                name: "term_freq".into(),
-                logical_type: akar_common::types::LogicalTypeID::Int64,
-                is_primary_key: false,
-                compression: akar_common::enums::CompressionType::Uncompressed,
-                default_value: None,
-            }];
-            match catalog.create_rel_table(posting_table.clone(), terms_id, docs_id, posting_cols) {
-                akar_catalog::CatalogResult::Created { .. } => {}
-                akar_catalog::CatalogResult::AlreadyExists => {
-                    return Err(format!("Table '{}' already exists", posting_table).into());
-                }
-                _ => return Err("Failed to create posting table".into()),
-            }
-        }
-
         Ok(BoundStatement::BoundCreateFtsIndex(BoundCreateFtsIndex {
             index_name: f.index_name,
             table_name: f.table_name,
             column_name: f.column_name,
             if_not_exists: f.if_not_exists,
-            docs_table,
-            terms_table,
-            posting_table,
         }))
     }
 

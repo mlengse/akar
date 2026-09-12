@@ -70,9 +70,6 @@ pub fn map_and_execute_scan_node(
         scan = scan.with_fts_query(PhysicalFtsScan {
             index_name: fq.index_name.clone(),
             query_string: fq.query_string.clone(),
-            docs_table: fq.docs_table.clone(),
-            terms_table: fq.terms_table.clone(),
-            posting_table: fq.posting_table.clone(),
             table_name: fq.table_name.clone(),
             column_name: fq.column_name.clone(),
             table_catalog: ctx

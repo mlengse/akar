@@ -2,6 +2,7 @@
 //!
 //! Wraps `tantivy::Index` with Akar-specific convenience:
 //! - [`TantivyIndex::create_on_disk`] — persistent index at a directory path
+//! - [`TantivyIndex::open_on_disk`] — reopen an existing index (no schema needed)
 //! - [`TantivyIndex::create_in_memory`] — ephemeral index for tests
 //! - [`TantivyIndex::writer`] — `IndexWriter` with configurable threads / memory
 //! - [`TantivyIndex::reader`] — `IndexReader` with [`ReloadPolicy::Manual`]
@@ -16,7 +17,12 @@ use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::Schema;
-use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Score, TantivyDocument};
+use tantivy::{DocAddress, Index, IndexWriter, ReloadPolicy, Score, TantivyDocument};
+
+/// Re-exported so consumers of [`TantivyIndex::reader`] can name the reader
+/// type without depending on `tantivy` directly (e.g. the physical FTS scan in
+/// `akar-processor`).
+pub use tantivy::IndexReader;
 
 /// Minimum memory budget per thread accepted by Tantivy (15 MB).
 #[cfg(test)]
@@ -45,6 +51,19 @@ impl TantivyIndex {
         let mut index = Index::create_in_ram(schema);
         index.set_tokenizers(crate::tokenizer::manager());
         Self { index }
+    }
+
+    /// Open an existing on-disk index at `index_dir` without providing the
+    /// schema (the schema is read back from the index's `meta.json`).
+    ///
+    /// Fails if the directory does not contain a Tantivy index. The caller is
+    /// responsible for the index having been created first (e.g. via
+    /// [`TantivyIndex::create_on_disk`]).
+    pub fn open_on_disk(index_dir: impl AsRef<Path>) -> tantivy::Result<Self> {
+        let mmap_dir = tantivy::directory::MmapDirectory::open(index_dir.as_ref())?;
+        let mut index = Index::open(mmap_dir)?;
+        index.set_tokenizers(crate::tokenizer::manager());
+        Ok(Self { index })
     }
 
     /// Return the underlying [`Index`] for advanced use-cases.
@@ -89,6 +108,35 @@ impl TantivyIndex {
         let query = query_parser.parse_query(query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
         Ok(top_docs)
+    }
+
+    /// Search `query_str` and resolve each hit to its stored `doc_id` (the
+    /// `doc_id_field` stored on every document at index time), returning
+    /// `(doc_id, score)` pairs sorted by descending relevance.
+    ///
+    /// This is what the physical FTS scan consumes (P105.2): hits come back as
+    /// the source-table row index plus the Tantivy BM25 score.
+    pub fn search_doc_ids(
+        reader: &IndexReader,
+        query_str: &str,
+        search_fields: Vec<tantivy::schema::Field>,
+        doc_id_field: tantivy::schema::Field,
+        limit: usize,
+    ) -> tantivy::Result<Vec<(i64, Score)>> {
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(searcher.index(), search_fields);
+        let query = query_parser.parse_query(query_str)?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+        let mut results = Vec::with_capacity(top_docs.len());
+        for (score, doc_address) in top_docs {
+            let doc: TantivyDocument = searcher.doc(doc_address)?;
+            if let Some(value) = doc.get_first(doc_id_field) {
+                if let tantivy::schema::OwnedValue::I64(doc_id) = tantivy::schema::OwnedValue::from(value) {
+                    results.push((doc_id, score));
+                }
+            }
+        }
+        Ok(results)
     }
 }
 
