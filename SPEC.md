@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **1,981 total, 0 ignored, 1,981 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P104.2/P105: clean break Tantivy-only — 3 macro tables dihapus, `PhysicalFtsScan` query Tantivy; konfirmasi gate 1,981 tanpa perubahan jumlah tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| Tests passing | **1,985 total, 0 ignored, 1,985 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.2/P105: clean break Tantivy-only — 3 macro tables dihapus, `PhysicalFtsScan` query Tantivy; konfirmasi gate 1,981 tanpa perubahan jumlah tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping `LogicalTypeID → Tantivy field types` +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts on 7 slow test groups — tanpa `#[ignore]`, assert dipertahankan; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 | Optimizer passes | **24** (18 flat + 6 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -449,6 +449,19 @@ Extensions are compiled statically via Cargo feature flags:
 akar-main = { git = "...", features = ["json-extension", "fts-extension", "vector-extension"] }
 ```
 
+**FTS query grammar (P106.2, audited 2026-09-12):** `parse_using_fts_clause` passes the
+query string verbatim to Tantivy 0.26.2 `QueryParser`. Exposed syntax (verified
+end-to-end in `test_fts_advanced_query_types`):
+- **Bare term** (`rust`) → `TermQuery`; **phrase** (`"machine learning"`) → `PhraseQuery`
+- **Boolean** `+`/`-`/`AND`/`OR` → `BooleanQuery` Must/MustNot/Should (`NOT` is NOT an operator)
+- **Phrase-prefix** (`"machine learn"*`, needs ≥2 tokens) → `PhrasePrefixQuery`
+- **Phrase-slop** (`"machine learning rust"~1`) → phrase with `max_errors=1` (adjacent-swap allowance)
+- **Regex** (`content:/rus.*/`, field-qualified; enabled via `QueryParser::allow_regexes()`
+  in both `search` and `search_doc_ids`) → `RegexQuery`
+- **NOT exposed:** bare-term `~N` fuzzy (only `set_field_fuzzy`, not wired) and bare-term
+  `*` wildcard (`*` is tokenized away; prefix query requires the quoted phrase form). Both
+  are Tantivy parser/tokenizer constraints, not akar intent.
+
 ### 7.2 Python Bindings (`akar-python`)
 
 | Component | Description |
@@ -634,13 +647,13 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 184 | 259 registered functions |
 | `akar-storage` | 346 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
 | `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 412 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88) |
+| `akar-main` (integration) | 413 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
 | `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
-| `akar-fts` | 33 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) |
+| `akar-fts` | 34 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) |
 | `akar-algo` | 81 | Graph algorithm extensions |
 | `akar-search` | 23 | Search utilities |
 | `akar-dream` | 5 | Dream engine |
@@ -657,7 +670,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,983** | **1,983 total, 0 ignored, 1,983 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **1,985** | **1,985 total, 0 ignored, 1,985 passed, 0 failed** (gate `test [akar-core]` 2026-09-12, s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
 
 ### 11.2 Test Datasets
 

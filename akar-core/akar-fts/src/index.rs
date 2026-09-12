@@ -104,7 +104,8 @@ impl TantivyIndex {
         limit: usize,
     ) -> tantivy::Result<Vec<(Score, DocAddress)>> {
         let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(searcher.index(), search_fields);
+        let mut query_parser = QueryParser::for_index(searcher.index(), search_fields);
+        query_parser.allow_regexes();
         let query = query_parser.parse_query(query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
         Ok(top_docs)
@@ -124,7 +125,8 @@ impl TantivyIndex {
         limit: usize,
     ) -> tantivy::Result<Vec<(i64, Score)>> {
         let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(searcher.index(), search_fields);
+        let mut query_parser = QueryParser::for_index(searcher.index(), search_fields);
+        query_parser.allow_regexes();
         let query = query_parser.parse_query(query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
         let mut results = Vec::with_capacity(top_docs.len());
@@ -356,6 +358,83 @@ mod tests {
         assert!(
             score_of(0) > score_of(1),
             "shorter doc must score higher (length normalization)"
+        );
+    }
+
+    /// P106.3 — phrase query BM25 scoring parity.
+    ///
+    /// Tantivy 0.26.2 scores a phrase as a single BM25 term whose "term
+    /// frequency" is the number of **phrase occurrences** in the doc
+    /// (`phrase_scorer.rs`: `similarity_weight.score(fieldnorm_id,
+    /// phrase_count)`):
+    ///
+    /// `score = idf_sum · (1 + k1) · p / (p + k1·(1 − b + b·dl/avgdl))`
+    ///
+    /// with `idf_sum = Σ_t ln(1 + (N − df_t + 0.5)/(df_t + 0.5))` over the
+    /// phrase terms, `p` = phrase occurrence count, `dl` the fieldnorm-quantized
+    /// length (identity below 41, so lengths 3/4 are exact), and `avgdl` the raw
+    /// mean token count. Corpus: 3 docs — phrase "machine learning" twice
+    /// (doc 0), once (doc 1), and non-adjacent (doc 2, must not match).
+    #[test]
+    fn test_phrase_query_bm25_parity() {
+        let schema = bm25_parity_schema();
+        let idx = TantivyIndex::create_in_memory(schema.clone());
+        let title = schema.get_field("title").unwrap();
+        let doc_id = schema.get_field("doc_id").unwrap();
+
+        let mut writer = idx.writer(1, MIN_MEMORY_PER_THREAD).unwrap();
+        let texts = [
+            "machine learning machine learning",
+            "machine learning taxonomy",
+            "machine taxonomy learning theory",
+        ];
+        for (d, text) in texts.iter().enumerate() {
+            writer
+                .add_document(tantivy::doc!(title => *text, doc_id => d as i64))
+                .unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = idx.reader().unwrap();
+        reader.reload().unwrap();
+        let hits = TantivyIndex::search_doc_ids(&reader, "\"machine learning\"", vec![title], doc_id, 10).unwrap();
+        let mut matched: Vec<i64> = hits.iter().map(|(id, _)| *id).collect();
+        matched.sort_unstable();
+        assert_eq!(
+            matched,
+            vec![0, 1],
+            "phrase must match the adjacent docs (0, 1), not the non-adjacent doc 2"
+        );
+
+        // Engine-consistent closed form for tantivy's PhraseWeight (bm25.rs:
+        // idf = ln(1+(N−df+0.5)/(df+0.5)), norm = k1·(1−b+b·dl/avgdl)).
+        let n = 3.0;
+        let avgdl = (4.0 + 3.0 + 4.0) / n; // total tokens 11 over 3 docs
+        let idf = |df: f64| (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
+        let idf_sum = idf(3.0) + idf(3.0); // "machine" and "learning" appear in all 3 docs
+        let expected = |dl: f64, p: f64| {
+            let norm = 1.2 * (1.0 - 0.75 + 0.75 * dl / avgdl);
+            idf_sum * (1.0 + 1.2) * p / (p + norm)
+        };
+        let score_of = |id: i64| hits.iter().find(|(i, _)| *i == id).map(|(_, s)| *s).unwrap();
+
+        assert!(
+            (score_of(0) as f64 - expected(4.0, 2.0)).abs() < 1e-3,
+            "doc 0 (2 phrase occurrences) != closed form ({} != {})",
+            score_of(0),
+            expected(4.0, 2.0)
+        );
+        assert!(
+            (score_of(1) as f64 - expected(3.0, 1.0)).abs() < 1e-3,
+            "doc 1 (1 phrase occurrence) != closed form ({} != {})",
+            score_of(1),
+            expected(3.0, 1.0)
+        );
+        assert!(
+            score_of(0) > score_of(1),
+            "more phrase occurrences must score higher ({} !> {})",
+            score_of(0),
+            score_of(1)
         );
     }
 }
