@@ -1008,6 +1008,8 @@ pub struct LogicalCreateFtsIndex {
     pub index_name: String,
     pub table_name: String,
     pub column_name: String,
+    /// Tokenizer name from `WITH TOKENIZER('...')` (P109.1); `None` = `en_stem`.
+    pub tokenizer: Option<String>,
     pub if_not_exists: bool,
     pub cardinality: u64,
 }

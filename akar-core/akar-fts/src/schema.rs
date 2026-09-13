@@ -2,19 +2,22 @@
 //!
 //! | Akar LogicalTypeID | Tantivy type | Flags                         |
 //! |--------------------|--------------|-------------------------------|
-//! | `String`           | `TEXT`       | INDEXED+STORED, tokenizer `en_stem` |
+//! | `String`           | `TEXT`       | INDEXED+STORED, tokenizer from `CREATE FTS INDEX ... WITH TOKENIZER(...)` (default `en_stem`) |
 //! | `Int64`            | `I64`        | FAST                          |
 //! | `Float64`          | `F64`        | FAST                          |
 //! | `Bool`             | `BOOL`       | INDEXED+STORED                |
 //!
 //! Complex / relational types (`Node`, `Rel`, `List`, `Map`, `Struct`, …) are
 //! **skipped** — they cannot be meaningfully indexed for full-text search.
+//!
+//! The tokenizer name is baked into each `TEXT` field's `TextFieldIndexing`
+//! (P109.1), so the choice made at `CREATE FTS INDEX` time is persisted in the
+//! Tantivy `meta.json` and resolved from the index's `TokenizerManager` (see
+//! [`crate::tokenizer::manager`]) at both index- and query-time.
 
 use akar_common::types::LogicalTypeID;
 use akar_storage::table::ColumnDefinition;
 use tantivy::schema::{FAST, INDEXED, IndexRecordOption, STORED, Schema, SchemaBuilder, TEXT, TextFieldIndexing};
-
-use crate::tokenizer::EN_STEM;
 
 /// Name of the internal numeric field that stores the source row id in an FTS
 /// index.
@@ -29,15 +32,16 @@ pub const DOC_ID_FIELD: &str = "doc_id";
 /// (`I64`, `FAST | STORED`) followed by the source table's indexable columns.
 ///
 /// A source column named `doc_id` is skipped to avoid clashing with the
-/// internal field.
-pub fn build_index_schema(columns: &[ColumnDefinition]) -> Schema {
+/// internal field. Every `String` column is full-text indexed with the
+/// `tokenizer` selected by `CREATE FTS INDEX ... WITH TOKENIZER(...)` (P109.1).
+pub fn build_index_schema(columns: &[ColumnDefinition], tokenizer: &str) -> Schema {
     let mut builder = SchemaBuilder::new();
     let _ = builder.add_i64_field(DOC_ID_FIELD, INDEXED | STORED);
     for col in columns {
         if col.name == DOC_ID_FIELD {
             continue;
         }
-        let _ = add_field(&mut builder, col);
+        let _ = add_field(&mut builder, col, tokenizer);
     }
     builder.build()
 }
@@ -46,10 +50,10 @@ pub fn build_index_schema(columns: &[ColumnDefinition]) -> Schema {
 ///
 /// Each column is mapped according to the table above. Columns whose
 /// `LogicalTypeID` has no Tantivy equivalent are silently skipped.
-pub fn build_tantivy_schema(columns: &[ColumnDefinition]) -> Schema {
+pub fn build_tantivy_schema(columns: &[ColumnDefinition], tokenizer: &str) -> Schema {
     let mut builder = SchemaBuilder::new();
     for col in columns {
-        let _ = add_field(&mut builder, col); // field added; caller tracks name→field separately
+        let _ = add_field(&mut builder, col, tokenizer); // field added; caller tracks name→field separately
     }
     builder.build()
 }
@@ -57,18 +61,19 @@ pub fn build_tantivy_schema(columns: &[ColumnDefinition]) -> Schema {
 /// Map a single [`ColumnDefinition`] into a Tantivy field on `builder`.
 ///
 /// Returns `Some(Field)` when the type is indexable, `None` otherwise.
-fn add_field(builder: &mut SchemaBuilder, col: &ColumnDefinition) -> Option<tantivy::schema::Field> {
+fn add_field(builder: &mut SchemaBuilder, col: &ColumnDefinition, tokenizer: &str) -> Option<tantivy::schema::Field> {
     let name = &col.name;
     match col.logical_type {
-        // ── Text: full-text indexed with `en_stem` + stored for retrieval ──
+        // ── Text: full-text indexed with the selected tokenizer + stored ──
         // The tokenizer name is resolved from the index's TokenizerManager at
-        // index/query time (registered by `TantivyIndex` constructors).
+        // index/query time (registered by `TantivyIndex` constructors via
+        // [`crate::tokenizer::manager`]).
         LogicalTypeID::String => Some(
             builder.add_text_field(
                 name,
                 TEXT.set_indexing_options(
                     TextFieldIndexing::default()
-                        .set_tokenizer(EN_STEM)
+                        .set_tokenizer(tokenizer)
                         .set_index_option(IndexRecordOption::WithFreqsAndPositions),
                 )
                 .set_stored(),
@@ -123,6 +128,8 @@ fn add_field(builder: &mut SchemaBuilder, col: &ColumnDefinition) -> Option<tant
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tokenizer::{EN_STEM, SUPPORTED_TOKENIZERS};
+    use tantivy::schema::FieldType;
 
     fn col(name: &str, logical_type: LogicalTypeID) -> ColumnDefinition {
         ColumnDefinition {
@@ -141,7 +148,7 @@ mod tests {
             col("content", LogicalTypeID::String),
             col("score", LogicalTypeID::Float),
         ];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         assert_eq!(fields.len(), 4);
     }
@@ -149,7 +156,7 @@ mod tests {
     #[test]
     fn test_string_maps_to_text_indexed_stored() {
         let columns = vec![col("body", LogicalTypeID::String)];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         assert_eq!(fields.len(), 1);
         let (_field, entry) = &fields[0];
@@ -159,9 +166,27 @@ mod tests {
     }
 
     #[test]
+    fn test_text_field_uses_selected_tokenizer() {
+        let columns = vec![col("body", LogicalTypeID::String)];
+        for tokenizer in SUPPORTED_TOKENIZERS {
+            let schema = build_tantivy_schema(&columns, tokenizer);
+            let (_, entry) = schema.fields().collect::<Vec<_>>()[0];
+            let indexing = match entry.field_type() {
+                FieldType::Str(o) => o.get_indexing_options().expect("TEXT field is indexed"),
+                other => panic!("expected Str field, got {other:?}"),
+            };
+            assert_eq!(
+                indexing.tokenizer(),
+                *tokenizer,
+                "field must carry the selected tokenizer"
+            );
+        }
+    }
+
+    #[test]
     fn test_int64_maps_to_i64_fast() {
         let columns = vec![col("count", LogicalTypeID::Int64)];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         let (_field, entry) = &fields[0];
         assert!(entry.is_fast(), "Int64 must be FAST");
@@ -171,7 +196,7 @@ mod tests {
     #[test]
     fn test_float_maps_to_f64_fast() {
         let columns = vec![col("price", LogicalTypeID::Float)];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         let (_field, entry) = &fields[0];
         assert!(entry.is_fast());
@@ -180,7 +205,7 @@ mod tests {
     #[test]
     fn test_bool_maps_to_bool_indexed_stored() {
         let columns = vec![col("active", LogicalTypeID::Bool)];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         let (_field, entry) = &fields[0];
         assert!(entry.is_indexed(), "Bool must be indexed");
@@ -194,7 +219,7 @@ mod tests {
             col("rel_col", LogicalTypeID::Rel),
             col("list_col", LogicalTypeID::List),
         ];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         assert_eq!(fields.len(), 0);
     }
@@ -208,7 +233,7 @@ mod tests {
             col("node_ref", LogicalTypeID::Node), // skipped
             col("score", LogicalTypeID::Double),
         ];
-        let schema = build_tantivy_schema(&columns);
+        let schema = build_tantivy_schema(&columns, EN_STEM);
         let fields: Vec<_> = schema.fields().collect();
         assert_eq!(fields.len(), 4); // node_ref skipped
     }

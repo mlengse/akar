@@ -1910,6 +1910,7 @@ impl Binder {
             index_name: f.index_name,
             table_name: f.table_name,
             column_name: f.column_name,
+            tokenizer: f.tokenizer,
             if_not_exists: f.if_not_exists,
         }))
     }

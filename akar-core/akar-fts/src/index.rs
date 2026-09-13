@@ -283,6 +283,7 @@ pub fn runtime_handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tokenizer::EN_STEM;
     use tantivy::schema::{STORED, TEXT};
 
     fn test_schema() -> Schema {
@@ -597,7 +598,7 @@ mod tests {
             compression: CompressionType::Uncompressed,
         };
         let dir = tempfile::tempdir().unwrap();
-        let schema = build_index_schema(&[col.clone()]);
+        let schema = build_index_schema(&[col.clone()], EN_STEM);
         let content = schema.get_field("content").unwrap();
         let doc_id = schema.get_field(DOC_ID_FIELD).unwrap();
 
@@ -648,7 +649,7 @@ mod tests {
             compression: CompressionType::Uncompressed,
         };
         let dir = tempfile::tempdir().unwrap();
-        let schema = build_index_schema(&[col.clone()]);
+        let schema = build_index_schema(&[col.clone()], EN_STEM);
         {
             let _idx = TantivyIndex::create_on_disk(dir.path(), schema).unwrap();
         }
@@ -691,7 +692,8 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         {
-            let _idx = TantivyIndex::create_on_disk(dir.path(), crate::schema::build_index_schema(&[col])).unwrap();
+            let _idx =
+                TantivyIndex::create_on_disk(dir.path(), crate::schema::build_index_schema(&[col], EN_STEM)).unwrap();
         }
         let catalog = Arc::new(TableCatalog::new());
         let a = runtime_handle(&catalog, "doc_idx", dir.path()).unwrap();

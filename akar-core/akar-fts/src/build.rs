@@ -22,6 +22,7 @@ use tantivy::schema::Term;
 
 use crate::index::TantivyIndex;
 use crate::schema::{DOC_ID_FIELD, build_index_schema};
+use crate::tokenizer::EN_STEM;
 
 /// Tantivy requires at least 15 MB of heap per indexing thread.
 const INDEXER_MEMORY_BUDGET: usize = 15_000_000;
@@ -29,7 +30,8 @@ const INDEXER_MEMORY_BUDGET: usize = 15_000_000;
 /// Build (or rebuild) the Tantivy FTS index over `text_column` for `rows`.
 ///
 /// The index is persisted under `index_dir` when `Some`, otherwise kept in
-/// memory only. All rows are added in a single commit.
+/// memory only. All rows are added in a single commit. `tokenizer` names the
+/// analyzer baked into the schema (P109.1 — `WITH TOKENIZER(...)`).
 ///
 /// # Errors
 /// Returns a message when `text_column` is not indexable, the index directory
@@ -37,10 +39,11 @@ const INDEXER_MEMORY_BUDGET: usize = 15_000_000;
 pub fn build_index(
     columns: &[ColumnDefinition],
     text_column: &str,
+    tokenizer: &str,
     index_dir: Option<&Path>,
     rows: &[(i64, String)],
 ) -> Result<(), String> {
-    let schema = build_index_schema(columns);
+    let schema = build_index_schema(columns, tokenizer);
     let index = match index_dir {
         Some(dir) => {
             std::fs::create_dir_all(dir)
@@ -64,7 +67,7 @@ pub fn append_docs(
     text_column: &str,
     rows: &[(i64, String)],
 ) -> Result<(), String> {
-    let schema = build_index_schema(columns);
+    let schema = build_index_schema(columns, EN_STEM);
     let text_field = schema
         .get_field(text_column)
         .map_err(|_| format!("FTS: column '{text_column}' is not indexable"))?;
@@ -168,7 +171,7 @@ mod tests {
             (1, "A systems programming language using Rust".to_string()),
             (2, "A slow scripting language".to_string()),
         ];
-        let schema = build_index_schema(&[text_col()]);
+        let schema = build_index_schema(&[text_col()], EN_STEM);
         let idx = TantivyIndex::create_in_memory(schema);
         append_docs(&idx, &[text_col()], "content", &rows).unwrap();
 
@@ -187,12 +190,47 @@ mod tests {
         assert_eq!(hits.len(), 2, "expected 2 hits for 'language'");
     }
 
+    /// P109.1 — the tokenizer chosen via `WITH TOKENIZER(...)` changes which
+    /// terms are indexed: `default` keeps "running" verbatim (inflected query
+    /// "run" does not match), while `en_stem` stems both sides so "run"
+    /// matches "running".
+    #[test]
+    fn test_build_index_respects_tokenizer_choice() {
+        let rows = vec![(0, "running quickly".to_string())];
+        let default = TantivyIndex::create_in_memory(build_index_schema(&[text_col()], "default"));
+        append_docs(&default, &[text_col()], "content", &rows).unwrap();
+        let stem = TantivyIndex::create_in_memory(build_index_schema(&[text_col()], EN_STEM));
+        append_docs(&stem, &[text_col()], "content", &rows).unwrap();
+
+        let search = |idx: &TantivyIndex, q: &str| {
+            let reader = idx.reader().unwrap();
+            reader.reload().unwrap();
+            let searcher = reader.searcher();
+            let schema = searcher.schema();
+            let content = schema.get_field("content").unwrap();
+            let doc_id = schema.get_field(DOC_ID_FIELD).unwrap();
+            TantivyIndex::search_doc_ids(&reader, q, vec![content], doc_id, 10).unwrap()
+        };
+
+        assert!(
+            search(&default, "run").is_empty(),
+            "default tokenizer must not stem 'running' to 'run'"
+        );
+        assert_eq!(
+            search(&stem, "run").len(),
+            1,
+            "en_stem must match 'running' from query 'run'"
+        );
+        assert_eq!(search(&default, "running").len(), 1, "default keeps the exact term");
+        assert_eq!(search(&stem, "running").len(), 1, "en_stem also matches the exact term");
+    }
+
     #[test]
     fn test_build_index_on_disk_creates_directory() {
         let dir = tempfile::tempdir().unwrap();
         let index_dir = dir.path().join("fts").join("doc_idx");
         let rows = vec![(0, "hello tantivy".to_string())];
-        build_index(&[text_col()], "content", Some(&index_dir), &rows).unwrap();
+        build_index(&[text_col()], "content", EN_STEM, Some(&index_dir), &rows).unwrap();
         assert!(index_dir.join("meta.json").exists(), "Tantivy index must persist");
     }
 
@@ -207,7 +245,7 @@ mod tests {
             (0, "A fast graph database in Rust".to_string()),
             (1, "A systems programming language using Rust".to_string()),
         ];
-        let schema = build_index_schema(&[text_col()]);
+        let schema = build_index_schema(&[text_col()], EN_STEM);
         let idx = TantivyIndex::create_in_memory(schema);
         append_docs(&idx, &[text_col()], "content", &rows).unwrap();
 

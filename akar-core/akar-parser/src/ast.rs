@@ -213,6 +213,9 @@ pub struct CreateFtsIndex {
     pub index_name: String,
     pub table_name: String,
     pub column_name: String,
+    /// Tokenizer name from `WITH TOKENIZER('...')` (P109.1). `None` when the
+    /// clause is omitted — the binder resolves the `en_stem` default.
+    pub tokenizer: Option<String>,
     pub if_not_exists: bool,
 }
 

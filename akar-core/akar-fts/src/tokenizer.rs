@@ -18,6 +18,36 @@ use tantivy::tokenizer::{
 /// `CREATE FTS INDEX ... WITH TOKENIZER('en_stem')` (P109).
 pub const EN_STEM: &str = "en_stem";
 
+/// Tokenizers selectable via `CREATE FTS INDEX ... WITH TOKENIZER('<name>')`
+/// (P109.1). `en_stem` (Akar's English-stemming pipeline, the default) plus the
+/// Tantivy built-ins that [`manager`] also exposes: `default` (simple +
+/// lowercase), `raw` (verbatim tokens — exact-match searching) and `whitespace`
+/// (split on whitespace only). Everything [`manager`] registers is resolved from
+/// the same registry at index- and query-time, so the persisted schema always
+/// finds its tokenizer after a reopen.
+pub const SUPPORTED_TOKENIZERS: &[&str] = &[EN_STEM, "default", "raw", "whitespace"];
+
+/// Whether `name` resolves to a registered tokenizer.
+pub fn is_supported(name: &str) -> bool {
+    SUPPORTED_TOKENIZERS.contains(&name)
+}
+
+/// Resolve an optional `WITH TOKENIZER(...)` value to a concrete tokenizer name,
+/// defaulting to [`EN_STEM`] when the clause was omitted (P109.1).
+///
+/// Returns an error naming the supported set when `name` is not registered.
+pub fn resolve(name: Option<&str>) -> Result<String, String> {
+    let name = name.unwrap_or(EN_STEM).to_string();
+    if is_supported(&name) {
+        Ok(name)
+    } else {
+        Err(format!(
+            "Unknown FTS tokenizer '{name}' — supported: {}",
+            SUPPORTED_TOKENIZERS.join(", ")
+        ))
+    }
+}
+
 /// Build the `en_stem` [`TextAnalyzer`] pipeline.
 ///
 /// Equivalent to Tantivy's pre-configured `en_stem` tokenizer. Stop-word
@@ -96,5 +126,12 @@ mod tests {
         let mut stream = analyzer.token_stream("Running quickly");
         let tokens: Vec<String> = std::iter::from_fn(|| stream.next().map(|t| t.text.clone())).collect();
         assert_eq!(tokens, vec!["run", "quick"]);
+    }
+
+    #[test]
+    fn test_resolve_defaults_to_en_stem() {
+        assert_eq!(resolve(None).unwrap(), EN_STEM);
+        assert_eq!(resolve(Some("raw")).unwrap(), "raw");
+        assert!(resolve(Some("klingon")).is_err(), "unknown tokenizer must be rejected");
     }
 }

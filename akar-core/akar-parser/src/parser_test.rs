@@ -1014,7 +1014,40 @@ mod tests {
                 assert_eq!(c.index_name, "idx_name");
                 assert_eq!(c.table_name, "Person");
                 assert_eq!(c.column_name, "bio");
+                assert!(c.tokenizer.is_none(), "omitted WITH TOKENIZER must default to None");
                 assert!(!c.if_not_exists);
+            }
+            _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_create_fts_index_with_tokenizer_parse() {
+        let sql = "CREATE FTS INDEX idx_name ON (Person.bio) WITH TOKENIZER('raw')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateFtsIndex(c) => {
+                assert_eq!(c.index_name, "idx_name");
+                assert_eq!(c.table_name, "Person");
+                assert_eq!(c.column_name, "bio");
+                assert_eq!(c.tokenizer.as_deref(), Some("raw"));
+                assert!(!c.if_not_exists);
+            }
+            _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_create_fts_index_with_if_not_exists_and_tokenizer() {
+        let sql = "CREATE FTS INDEX IF NOT EXISTS idx_name ON (Person.bio) WITH TOKENIZER('en_stem')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::CreateFtsIndex(c) => {
+                assert_eq!(c.index_name, "idx_name");
+                assert_eq!(c.table_name, "Person");
+                assert_eq!(c.column_name, "bio");
+                assert_eq!(c.tokenizer.as_deref(), Some("en_stem"));
+                assert!(c.if_not_exists);
             }
             _ => panic!("Expected CreateFtsIndex, got {:?}", stmt),
         }

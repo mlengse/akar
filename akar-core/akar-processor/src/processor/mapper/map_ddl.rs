@@ -374,6 +374,7 @@ pub fn map_and_execute_ddl(
                     index_name: c.index_name.clone(),
                     table_name: c.table_name.clone(),
                     column_name: c.column_name.clone(),
+                    tokenizer: c.tokenizer.clone(),
                     if_not_exists: c.if_not_exists,
                     table_catalog: tc.clone(),
                 };

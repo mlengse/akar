@@ -758,6 +758,73 @@ fn test_fts_on_extend_destination_multi_hop() -> Result<(), String> {
     Ok(())
 }
 
+/// P109.1 — `WITH TOKENIZER(...)` selects the Tantivy analyzer baked into
+/// the index schema at creation time. Each tokenizer produces different term
+/// representations so the same query returns different results per index.
+///
+/// - `en_stem` (the default): stems at both index- and query-time, so
+///   inflected forms like "running" match the bare stem "run".
+/// - `default`: lowercases but does NOT stem, so "running" is stored as-is
+///   and only matches the verbatim query "running".
+#[test]
+fn test_fts_with_tokenizer_en_stem_vs_default() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Doc (id INT64, body STRING, PRIMARY KEY(id))")?;
+    // en_stem (default): stems "running" → "run"
+    conn.query("CREATE FTS INDEX idx_stem ON (Doc.body) WITH TOKENIZER('en_stem')")?;
+    // default: lowercases, no stemming — "running" stored verbatim
+    conn.query("CREATE FTS INDEX idx_default ON (Doc.body) WITH TOKENIZER('default')")?;
+
+    // Three rows: only id 1 and 3 contain "running".
+    conn.query("CREATE (d:Doc {id: 1, body: 'a cat is running'})")?;
+    conn.query("CREATE (d:Doc {id: 2, body: 'a dog is sleeping'})")?;
+    conn.query("CREATE (d:Doc {id: 3, body: 'a cat is running fast'})")?;
+
+    // en_stem: "running" → "run", query "run" → matches both "running" rows.
+    let stem_hits = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_stem('run') RETURN d.id")?);
+    assert_eq!(stem_hits, vec![1, 3], "en_stem must match the stemmed 'running' rows");
+
+    // default: no stemming; "run" does NOT match "running".
+    let default_miss = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_default('run') RETURN d.id")?);
+    assert!(default_miss.is_empty(), "default tokenizer must not stem 'running' to match 'run'");
+
+    // default: "running" (exact) matches both rows that contain the word.
+    let default_exact = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_default('running') RETURN d.id")?);
+    assert_eq!(default_exact, vec![1, 3], "default tokenizer must match the exact word 'running'");
+
+    // Default (omitted WITH TOKENIZER) behaves like en_stem.
+    conn.query("CREATE FTS INDEX idx_implicit ON (Doc.body)")?;
+    let implicit_hits = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_implicit('run') RETURN d.id")?);
+    assert_eq!(implicit_hits, vec![1, 3], "omitted WITH TOKENIZER must default to en_stem");
+
+    Ok(())
+}
+
+/// P109.1 — an unsupported tokenizer name must be rejected at index creation
+/// time, not silently ignored.
+#[test]
+fn test_fts_invalid_tokenizer_rejected() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Doc (id INT64, body STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE (d:Doc {id: 1, body: 'hello world'})")?;
+
+    let err = conn.query("CREATE FTS INDEX idx ON (Doc.body) WITH TOKENIZER('klingon')");
+    assert!(err.is_err(), "an unsupported tokenizer must fail at CREATE FTS INDEX");
+    let msg = err.unwrap_err().to_lowercase();
+    assert!(
+        msg.contains("unknown") && msg.contains("klingon"),
+        "error must name the unsupported tokenizer, got: {msg}"
+    );
+
+    Ok(())
+}
+
 /// Extract the textual logical plan produced by `EXPLAIN <query>`.
 fn explain_plan(conn: &Connection, sql: &str) -> String {
     let result = conn

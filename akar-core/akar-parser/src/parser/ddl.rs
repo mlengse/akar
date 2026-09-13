@@ -762,11 +762,19 @@ fn parse_copy_to(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String>
 pub(crate) fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Result<Statement, String> {
     let mut if_not_exists = false;
     let mut identifiers: Vec<String> = Vec::new();
+    let mut tokenizer: Option<String> = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::if_not_exists => if_not_exists = true,
             Rule::identifier => identifiers.push(inner.as_str().to_string()),
+            Rule::fts_tokenizer_clause => {
+                for clause_inner in inner.into_inner() {
+                    if clause_inner.as_rule() == Rule::string {
+                        tokenizer = Some(unescape_string(clause_inner.as_str()));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -782,6 +790,7 @@ pub(crate) fn parse_create_fts_index(pair: pest::iterators::Pair<Rule>) -> Resul
         index_name: identifiers[0].clone(),
         table_name: identifiers[1].clone(),
         column_name: identifiers[2].clone(),
+        tokenizer,
         if_not_exists,
     }))
 }

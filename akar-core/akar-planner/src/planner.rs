@@ -160,6 +160,7 @@ impl QueryPlanner {
                     index_name: c.index_name,
                     table_name: c.table_name,
                     column_name: c.column_name,
+                    tokenizer: c.tokenizer,
                     if_not_exists: c.if_not_exists,
                     cardinality: 1,
                 })])

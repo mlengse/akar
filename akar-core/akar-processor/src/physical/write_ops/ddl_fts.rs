@@ -51,6 +51,9 @@ pub struct PhysicalCreateFtsIndex {
     pub index_name: String,
     pub table_name: String,
     pub column_name: String,
+    /// Tokenizer name from `WITH TOKENIZER('...')` (P109.1); `None` resolves to
+    /// the `en_stem` default via [`akar_fts::tokenizer::resolve`].
+    pub tokenizer: Option<String>,
     pub if_not_exists: bool,
     pub table_catalog: Arc<TableCatalog>,
 }
@@ -97,6 +100,10 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
             rows.push((row_idx as i64, text));
         }
 
+        // Resolve the tokenizer (P109.1): `WITH TOKENIZER('...')` or the
+        // `en_stem` default; an unsupported name fails the statement.
+        let tokenizer = akar_fts::tokenizer::resolve(self.tokenizer.as_deref())?;
+
         // Build the Tantivy index (P104.1) — the only FTS representation
         // (P104.2 clean break). Disk-backed catalogs persist under
         // `<db_path>/fts/<index_name>`; in-memory ones build an ephemeral index
@@ -106,7 +113,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
             .db_path()
             .filter(|p| p.to_string_lossy() != ":memory:")
             .map(|p| p.join("fts").join(&self.index_name));
-        akar_fts::build::build_index(&columns, &self.column_name, index_dir.as_deref(), &rows)?;
+        akar_fts::build::build_index(&columns, &self.column_name, &tokenizer, index_dir.as_deref(), &rows)?;
 
         let mut result_vec = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);
         result_vec.resize(1);

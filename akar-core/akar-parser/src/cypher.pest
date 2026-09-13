@@ -111,8 +111,10 @@ create_macro = {
 // ==================== CREATE FTS INDEX ====================
 
 create_fts_index = {
-    "CREATE" ~ "FTS" ~ "INDEX" ~ if_not_exists? ~ identifier ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")"
+    "CREATE" ~ "FTS" ~ "INDEX" ~ if_not_exists? ~ identifier ~ "ON" ~ "(" ~ identifier ~ "." ~ identifier ~ ")" ~ fts_tokenizer_clause?
 }
+
+fts_tokenizer_clause = { "WITH" ~ "TOKENIZER" ~ "(" ~ string ~ ")" }
 
 // ==================== USING FTS (query modifier) ====================
 
