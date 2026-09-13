@@ -70,10 +70,16 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::CreateDml(cd) => format!("CreateDml({})", cd.table_name),
         LogicalOperator::CreateNode(cn) => format!("CreateNode({})", cn.table_name),
         LogicalOperator::CreateRel(cr) => format!("CreateRel({})", cr.table_name),
-        LogicalOperator::Extend(ex) => format!(
-            "Extend({}->{} via {})",
-            ex.bound_node_var, ex.dst_node_var, ex.rel_table_name
-        ),
+        LogicalOperator::Extend(ex) => match &ex.fts_query {
+            Some(fq) => format!(
+                "Extend({}->{} via {}) FTS[{}({})]",
+                ex.bound_node_var, ex.dst_node_var, ex.rel_table_name, fq.index_name, fq.query_string
+            ),
+            None => format!(
+                "Extend({}->{} via {})",
+                ex.bound_node_var, ex.dst_node_var, ex.rel_table_name
+            ),
+        },
         LogicalOperator::ExportDatabase(ed) => format!("ExportDatabase({})", ed.file_path),
         LogicalOperator::ImportDatabase(id) => format!("ImportDatabase({})", id.file_path),
         LogicalOperator::CreateFtsIndex(c) => format!("CreateFtsIndex({})", c.index_name),

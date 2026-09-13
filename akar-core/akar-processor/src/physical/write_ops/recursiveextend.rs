@@ -1,11 +1,12 @@
 use crate::physical::common::store_value_in_vector;
 use crate::physical::scan_filter::PhysicalScan;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::evaluate_expression_for_row;
+use crate::physical::write_ops::{PhysicalFtsScan, evaluate_expression_for_row};
 use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 // ==================== RecursiveExtend ====================
@@ -613,6 +614,10 @@ pub struct PhysicalExtend {
     pub dst_table_name: String,
     /// Table ID of the destination node.
     pub dst_table_id: u64,
+    /// Optional FTS query applied to the *destination* rows of this hop, when
+    /// the indexed table is only reachable as the destination (P108.4) — the
+    /// document-id set from the Tantivy index filters the produced dst rows.
+    pub fts_query: Option<PhysicalFtsScan>,
     /// Table catalog for data access.
     pub table_catalog: Arc<TableCatalog>,
 }
@@ -622,6 +627,24 @@ impl PhysicalExtend {
         if input.is_empty() || input.iter().all(|c| c.size == 0) {
             return Ok(input);
         }
+
+        // FTS on the destination (P108.4): the index's base table is only
+        // reachable as this hop's destination — materialise the matching
+        // document-id set once and drop every dst row outside it.
+        let fts_doc_ids: Option<HashSet<u64>> = if let Some(ref fts) = self.fts_query {
+            let fts_chunks = fts.execute(vec![])?;
+            let mut ids = HashSet::new();
+            if let Some(chunk) = fts_chunks.first() {
+                for row in 0..chunk.size {
+                    if let Some(doc_id) = chunk.get_i64(0, row) {
+                        ids.insert(doc_id as u64);
+                    }
+                }
+            }
+            Some(ids)
+        } else {
+            None
+        };
 
         // Collect rel table data upfront (owned)
         let (fwd_adj, rev_adj, rel_props, rel_cols) = {
@@ -699,6 +722,12 @@ impl PhysicalExtend {
                 for &(dst_offset, edge_idx) in &edges {
                     if dst_offset as usize >= dest_num_rows {
                         continue;
+                    }
+                    // P108.4: skip destination rows not matching the FTS index.
+                    if let Some(ref ids) = fts_doc_ids {
+                        if !ids.contains(&dst_offset) {
+                            continue;
+                        }
                     }
                     total_rows += 1;
                     row_mappings.push((i, dst_offset, edge_idx));

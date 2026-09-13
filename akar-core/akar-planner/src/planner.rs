@@ -52,6 +52,14 @@ fn attach_fts_to_matching_scans(op: &mut LogicalOperator, fts: &LogicalFtsScan) 
         }
         return;
     }
+    // The indexed table may only be reachable as this hop's destination
+    // (P108.4) — the WCOJ build-side extend produces the rows to filter.
+    if let LogicalOperator::Extend(e) = op {
+        if e.dst_table_name == fts.table_name && e.fts_query.is_none() {
+            e.fts_query = Some(fts.clone());
+        }
+        return;
+    }
     for child in op.children_mut() {
         attach_fts_to_matching_scans(child, fts);
     }
@@ -636,6 +644,13 @@ impl QueryPlanner {
                                     let dst_table_name =
                                         dest_pattern.and_then(|p| p.node_label.clone()).unwrap_or_default();
                                     let dst_table_id = dest_pattern.and_then(|p| p.node_table_id).unwrap_or(0);
+                                    // FTS routing to an Extend destination (P108.4): the indexed
+                                    // table may only be reachable as the destination of this hop —
+                                    // `(a:Author)-[:AUTHORED_BY]->(d:Document) USING FTS INDEX ...`
+                                    // has no scan of `Document`. Attach the clause so the
+                                    // document-id filter runs on the rows this hop produces; a
+                                    // pre-existing attached set is never consumed twice.
+                                    let fts_for_extend = take_fts_if_table(&mut fts_to_assign, &dst_table_name);
 
                                     extend_ops.push(LogicalOperator::Extend(LogicalExtend {
                                         rel_table_name: rel_label.clone(),
@@ -646,6 +661,7 @@ impl QueryPlanner {
                                         dst_node_var: dst_var.clone(),
                                         dst_table_name,
                                         dst_table_id,
+                                        fts_query: fts_for_extend,
                                         cardinality: 0,
                                     }));
                                     // The destination node is produced by this Extend — it becomes

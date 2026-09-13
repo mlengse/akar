@@ -106,6 +106,13 @@ pub fn map_and_execute_update(
                 .clone()
                 .ok_or_else(|| "No table catalog available for Extend".to_string())?;
 
+            let fts_query = ex.fts_query.as_ref().map(|fq| PhysicalFtsScan {
+                index_name: fq.index_name.clone(),
+                query_string: fq.query_string.clone(),
+                table_name: fq.table_name.clone(),
+                column_name: fq.column_name.clone(),
+                table_catalog: table_catalog.clone(),
+            });
             let extend_op = PhysicalExtend {
                 rel_table_name: ex.rel_table_name.clone(),
                 rel_table_id: ex.rel_table_id,
@@ -115,6 +122,7 @@ pub fn map_and_execute_update(
                 dst_node_var: ex.dst_node_var.clone(),
                 dst_table_name: ex.dst_table_name.clone(),
                 dst_table_id: ex.dst_table_id,
+                fts_query,
                 table_catalog,
             };
             let result = extend_op.execute(current_input)?;

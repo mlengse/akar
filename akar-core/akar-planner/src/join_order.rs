@@ -315,6 +315,7 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
                 dst_node_var: dst_var,
                 dst_table_name: dst_label,
                 dst_table_id,
+                fts_query: None,
                 cardinality: 0,
             }),
         ];
@@ -353,6 +354,7 @@ pub fn build_wcoj_intersect(patterns: &[BoundPattern]) -> Option<(LogicalOperato
             dst_node_var: closure_var.clone(),
             dst_table_name: dst_label.clone(),
             dst_table_id,
+            fts_query: None,
             cardinality: 0,
         }));
         trailing.push(LogicalOperator::Filter(LogicalFilter {

@@ -626,6 +626,138 @@ fn test_fts_predicate_runs_before_join_via_explain() -> Result<(), String> {
     Ok(())
 }
 
+/// P108.4 — an FTS predicate whose indexed table is ONLY reachable as an
+/// `Extend` destination must filter the rows that hop produces, not be dropped.
+///
+/// `MATCH (a:Author)-[:WROTE]->(d:Document) USING FTS INDEX doc_idx('rust')`
+/// plans `ScanNode(Author)` + `Extend(a->d via WROTE)` — there is no scan of
+/// `Document`, so the document-id filter is attached to the Extend
+/// (serializer: `Extend(...) FTS[doc_idx(rust)]`). The result set can then only
+/// contain matching documents, even when a non-matching document shares an
+/// author with a matching one (the reverse of P108.3).
+#[test]
+fn test_fts_on_extend_destination_via_explain() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE NODE TABLE Author (id INT64, name STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE REL TABLE WROTE (FROM Author TO Document)")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    conn.query("CREATE (a:Author {id: 1, name: 'Alice'})")?;
+    conn.query("CREATE (a:Author {id: 2, name: 'Bob'})")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'a fast graph database in Rust'})")?;
+    conn.query("CREATE (d:Document {id: 2, title: 'Python Book', content: 'a slow scripting language'})")?;
+    conn.query("CREATE (d:Document {id: 3, title: 'Katana Manual', content: 'katana rust embedded database'})")?;
+    conn.query("MATCH (a:Author {id: 1}), (d:Document {id: 1}) CREATE (a)-[:WROTE]->(d)")?;
+    conn.query("MATCH (a:Author {id: 2}), (d:Document {id: 2}) CREATE (a)-[:WROTE]->(d)")?;
+    conn.query("MATCH (a:Author {id: 2}), (d:Document {id: 3}) CREATE (a)-[:WROTE]->(d)")?;
+
+    // EXPLAIN: the FTS marker must sit on the Extend hop (the only place
+    // `Document` rows appear), and no scan of `Document` exists to route to.
+    let fts_sql = "MATCH (a:Author)-[:WROTE]->(d:Document) USING FTS INDEX doc_idx('rust') RETURN d.title";
+    let plan = explain_plan(&conn, fts_sql);
+    let extend_marker = "Extend(a->d via WROTE) FTS[doc_idx(rust)]";
+    assert!(
+        plan.contains(extend_marker),
+        "EXPLAIN must attach FTS to the Extend destination:\n{plan}"
+    );
+    assert!(
+        plan.contains("ScanNode(Author)"),
+        "plan must scan the Author source:\n{plan}"
+    );
+    assert!(
+        !plan.contains("ScanNode(Document)"),
+        "no Document scan exists — the FTS must not be routed to a phantom scan:\n{plan}"
+    );
+
+    // Negative control: without the FTS clause, no operator carries an FTS marker.
+    let plain_sql = "MATCH (a:Author)-[:WROTE]->(d:Document) RETURN d.title";
+    let plain_plan = explain_plan(&conn, plain_sql);
+    assert!(
+        !plain_plan.contains("FTS["),
+        "no FTS clause -> no FTS marker:\n{plain_plan}"
+    );
+
+    // Result set: doc 2 (Python Book, Bob) must NOT leak through the hop even
+    // though Bob also wrote doc 3, which matches 'rust'.
+    let res = conn.query(fts_sql)?;
+    let chunk = res.chunks.first().unwrap();
+    assert_eq!(chunk.size, 2, "only the two 'rust' docs reach the reader");
+    let mut titles: Vec<String> = (0..chunk.size)
+        .map(|i| match chunk.get_value(0, i).unwrap() {
+            Value::String(s) => s,
+            other => panic!("expected String title, got {other:?}"),
+        })
+        .collect();
+    titles.sort();
+    assert_eq!(titles, vec!["Akar DB".to_string(), "Katana Manual".to_string()]);
+
+    Ok(())
+}
+
+/// P108.4 multi-hop: the FTS table sits at the destination of the LAST extend
+/// (`(p:Person)-[:FOLLOWS]->(a:Author)-[:WROTE]->(d:Document)`), with no scan
+/// of `Document` anywhere — the document-id filter must land on that final hop,
+/// not the earlier one.
+#[test]
+fn test_fts_on_extend_destination_multi_hop() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE NODE TABLE Author (id INT64, name STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE NODE TABLE Person (id INT64, name STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE REL TABLE WROTE (FROM Author TO Document)")?;
+    conn.query("CREATE REL TABLE FOLLOWS (FROM Person TO Author)")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    conn.query("CREATE (p:Person {id: 1, name: 'Carol'})")?;
+    conn.query("CREATE (a:Author {id: 1, name: 'Alice'})")?;
+    conn.query("CREATE (a:Author {id: 2, name: 'Bob'})")?;
+    conn.query("CREATE (d:Document {id: 1, title: 'Akar DB', content: 'fast graph database in Rust'})")?;
+    conn.query("CREATE (d:Document {id: 2, title: 'Python Book', content: 'slow scripting language'})")?;
+    conn.query("CREATE (d:Document {id: 3, title: 'Katana Manual', content: 'katana rust embedded db'})")?;
+    conn.query("MATCH (p:Person {id: 1}), (a:Author {id: 1}) CREATE (p)-[:FOLLOWS]->(a)")?;
+    conn.query("MATCH (p:Person {id: 1}), (a:Author {id: 2}) CREATE (p)-[:FOLLOWS]->(a)")?;
+    conn.query("MATCH (a:Author {id: 1}), (d:Document {id: 1}) CREATE (a)-[:WROTE]->(d)")?;
+    conn.query("MATCH (a:Author {id: 2}), (d:Document {id: 2}) CREATE (a)-[:WROTE]->(d)")?;
+    conn.query("MATCH (a:Author {id: 2}), (d:Document {id: 3}) CREATE (a)-[:WROTE]->(d)")?;
+
+    let sql =
+        "MATCH (p:Person)-[:FOLLOWS]->(a:Author)-[:WROTE]->(d:Document) USING FTS INDEX doc_idx('rust') RETURN d.title";
+
+    // EXPLAIN: the marker lands on the hop whose destination is `Document`.
+    let plan = explain_plan(&conn, sql);
+    assert!(
+        plan.contains("Extend(a->d via WROTE) FTS[doc_idx(rust)]"),
+        "FTS must attach to the final Author->Document hop:\n{plan}"
+    );
+    assert!(
+        !plan.contains("Extend(p->a via FOLLOWS) FTS["),
+        "the first hop must not carry the Document FTS:\n{plan}"
+    );
+
+    // Carol follows both authors, so without dst filtering 'Python Book' (Bob,
+    // doc 2) would leak through the second hop. It must not.
+    let res = conn.query(sql)?;
+    let chunk = res.chunks.first().unwrap();
+    assert_eq!(chunk.size, 2, "only the two 'rust' docs reach the reader");
+    let mut titles: Vec<String> = (0..chunk.size)
+        .map(|i| match chunk.get_value(0, i).unwrap() {
+            Value::String(s) => s,
+            other => panic!("expected String title, got {other:?}"),
+        })
+        .collect();
+    titles.sort();
+    assert_eq!(titles, vec!["Akar DB".to_string(), "Katana Manual".to_string()]);
+
+    Ok(())
+}
+
 /// Extract the textual logical plan produced by `EXPLAIN <query>`.
 fn explain_plan(conn: &Connection, sql: &str) -> String {
     let result = conn

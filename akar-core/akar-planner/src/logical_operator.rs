@@ -962,6 +962,12 @@ pub struct LogicalExtend {
     pub dst_table_name: String,
     /// Table ID of the destination node.
     pub dst_table_id: u64,
+    /// Optional FTS query applied to the *destination* rows of this extend,
+    /// when the indexed table is only reachable as the extend destination —
+    /// `MATCH (a:Author)-[:AUTHORED_BY]->(d:Document) USING FTS INDEX ...`
+    /// has no scan of `Document`, so the document-id filter must run on the
+    /// rows this hop produces (P108.4).
+    pub fts_query: Option<LogicalFtsScan>,
     /// Estimated cardinality.
     pub cardinality: u64,
 }
