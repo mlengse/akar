@@ -540,3 +540,102 @@ fn test_fts_crash_recovery_across_db_reopen() -> Result<(), String> {
 
     Ok(())
 }
+
+/// P108.3 — an FTS predicate on the scan side of a join runs at the scan leaf,
+/// before the join/traversal, not as a filter above it.
+///
+/// `MATCH (d:Document)-[:AUTHORED_BY]->(a:Author) USING FTS INDEX doc_idx('rust')`
+/// must keep the document-id filter attached to the `Document` scan — the step
+/// that PRECEDES the `Extend` hop in the logical plan. EXPLAIN renders the FTS
+/// marker on that scan (`ScanNode(Document) FTS[doc_idx(rust)]`), at a position
+/// before the `Extend` operator. The result set then can only contain matching
+/// documents, even when a non-matching document shares an author with a
+/// matching one (P108.1 reversed-pattern routing; here the indexed table is the
+/// forward source).
+#[test]
+fn test_fts_predicate_runs_before_join_via_explain() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Document (id INT64, title STRING, content STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE NODE TABLE Author (id INT64, name STRING, PRIMARY KEY(id))")?;
+    conn.query("CREATE REL TABLE AUTHORED_BY (FROM Document TO Author)")?;
+    conn.query("CREATE FTS INDEX doc_idx ON (Document.content)")?;
+
+    let insert_doc = |id: i64, title: &str, content: &str| {
+        conn.query(&format!(
+            "CREATE (d:Document {{id: {id}, title: '{title}', content: '{content}'}})"
+        ))
+    };
+    let insert_author = |id: i64, name: &str| conn.query(&format!("CREATE (a:Author {{id: {id}, name: '{name}'}})"));
+    let authored = |doc: i64, author: i64| {
+        conn.query(&format!(
+            "MATCH (d:Document {{id: {doc}}}), (a:Author {{id: {author}}}) CREATE (d)-[:AUTHORED_BY]->(a)"
+        ))
+    };
+
+    insert_doc(1, "Akar DB", "a fast graph database in Rust")?;
+    insert_doc(2, "Python Book", "a slow scripting language")?;
+    insert_doc(3, "Katana Manual", "katana rust embedded database")?;
+    insert_author(1, "Alice")?;
+    insert_author(2, "Bob")?;
+    authored(1, 1)?; // Akar DB <- Alice
+    authored(2, 2)?; // Python Book <- Bob (does NOT match rust)
+    authored(3, 2)?; // Katana Manual <- Bob (matches rust; shares Bob w/ docs 2)
+
+    // EXPLAIN must show the FTS marker on the Document scan and that scan must
+    // precede the Extend (join/traversal) hop in the serialized plan — the
+    // document-id filtering runs at the leaf, before any hop above it.
+    let fts_sql = "MATCH (d:Document)-[:AUTHORED_BY]->(a:Author) USING FTS INDEX doc_idx('rust') RETURN d.title";
+    let plan = explain_plan(&conn, fts_sql);
+    let scan_marker = "ScanNode(Document) FTS[doc_idx(rust)]";
+    assert!(
+        plan.contains(scan_marker),
+        "EXPLAIN must attach FTS to the Document scan:\n{plan}"
+    );
+    let fts_pos = plan.find(scan_marker).expect("FTS marker present in plan");
+    let extend_pos = plan.find("Extend(").expect("Extend hop present in plan");
+    assert!(
+        fts_pos < extend_pos,
+        "FTS scan must execute before the join in the plan:\n{plan}"
+    );
+
+    // Negative control: without the FTS clause, no scan carries an FTS marker.
+    let plain_sql = "MATCH (d:Document)-[:AUTHORED_BY]->(a:Author) RETURN d.title";
+    let plain_plan = explain_plan(&conn, plain_sql);
+    assert!(
+        !plain_plan.contains("FTS["),
+        "no FTS clause -> no FTS marker:\n{plain_plan}"
+    );
+
+    // Result set: doc 2 shares author Bob with doc 3, so if the filter ran above
+    // the join, 'Python Book' would leak into the author-joined rows. It must not.
+    let res = conn.query(fts_sql)?;
+    let chunk = res.chunks.first().unwrap();
+    assert_eq!(chunk.size, 2, "only the two 'rust' docs reach the author join");
+    let mut titles: Vec<String> = (0..chunk.size)
+        .map(|i| match chunk.get_value(0, i).unwrap() {
+            Value::String(s) => s,
+            other => panic!("expected String title, got {other:?}"),
+        })
+        .collect();
+    titles.sort();
+    assert_eq!(titles, vec!["Akar DB".to_string(), "Katana Manual".to_string()]);
+
+    Ok(())
+}
+
+/// Extract the textual logical plan produced by `EXPLAIN <query>`.
+fn explain_plan(conn: &Connection, sql: &str) -> String {
+    let result = conn
+        .query(&format!("EXPLAIN {sql}"))
+        .unwrap_or_else(|e| panic!("EXPLAIN failed: {e}"));
+    assert!(result.is_success(), "EXPLAIN failed: {:?}", result.error_message);
+    let chunk = result.chunks.first().unwrap();
+    assert_eq!(chunk.size, 1, "EXPLAIN must return a single plan row");
+    match chunk.get_value(0, 0).unwrap() {
+        Value::String(s) => s,
+        other => panic!("EXPLAIN must return a String plan, got {other:?}"),
+    }
+}
