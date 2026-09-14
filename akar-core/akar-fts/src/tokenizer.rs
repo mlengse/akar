@@ -296,6 +296,35 @@ mod tests {
         assert_eq!(highlight("数据库系统", "统", CJK).unwrap(), "数据库系<b>统</b>");
     }
 
+    /// P109.4 — overlapping CJK spans (bigram + its two character grams) are
+    /// collapsed into one contiguous highlighted range by Tantivy's
+    /// `collapse_overlapped_ranges`.
+    #[test]
+    fn test_highlight_cjk_bigram_overlap_collapses() {
+        assert_eq!(highlight("数据库系统", "数据", CJK).unwrap(), "<b>数据</b>库系统");
+    }
+
+    /// P109.4 — non-stemming tokenizers still highlight: the `default`
+    /// pipeline lowercases both sides, so `running` matches `Running` without
+    /// stemming (`run`) having to apply.
+    #[test]
+    fn test_highlight_default_tokenizer() {
+        assert_eq!(
+            highlight("Running quickly", "running", "default").unwrap(),
+            "<b>Running</b> quickly"
+        );
+    }
+
+    /// P109.4 — text longer than the 150-char snippet fragment is truncated to
+    /// the best fragment around the match (no full-text echo, no ellipsis).
+    #[test]
+    fn test_highlight_long_text_truncates() {
+        let long = format!("{}rust", "word ".repeat(100));
+        let html = highlight(&long, "rust", EN_STEM).unwrap();
+        assert!(html.contains("<b>rust</b>"), "match must be highlighted: {html}");
+        assert!(html.len() < long.len(), "output must be a fragment, not the whole text");
+    }
+
     /// P109.3 — unknown tokenizer names are rejected with the supported set.
     #[test]
     fn test_highlight_unknown_tokenizer() {
