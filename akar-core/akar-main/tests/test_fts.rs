@@ -789,16 +789,27 @@ fn test_fts_with_tokenizer_en_stem_vs_default() -> Result<(), String> {
 
     // default: no stemming; "run" does NOT match "running".
     let default_miss = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_default('run') RETURN d.id")?);
-    assert!(default_miss.is_empty(), "default tokenizer must not stem 'running' to match 'run'");
+    assert!(
+        default_miss.is_empty(),
+        "default tokenizer must not stem 'running' to match 'run'"
+    );
 
     // default: "running" (exact) matches both rows that contain the word.
     let default_exact = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_default('running') RETURN d.id")?);
-    assert_eq!(default_exact, vec![1, 3], "default tokenizer must match the exact word 'running'");
+    assert_eq!(
+        default_exact,
+        vec![1, 3],
+        "default tokenizer must match the exact word 'running'"
+    );
 
     // Default (omitted WITH TOKENIZER) behaves like en_stem.
     conn.query("CREATE FTS INDEX idx_implicit ON (Doc.body)")?;
     let implicit_hits = ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_implicit('run') RETURN d.id")?);
-    assert_eq!(implicit_hits, vec![1, 3], "omitted WITH TOKENIZER must default to en_stem");
+    assert_eq!(
+        implicit_hits,
+        vec![1, 3],
+        "omitted WITH TOKENIZER must default to en_stem"
+    );
 
     Ok(())
 }
@@ -820,6 +831,62 @@ fn test_fts_invalid_tokenizer_rejected() -> Result<(), String> {
     assert!(
         msg.contains("unknown") && msg.contains("klingon"),
         "error must name the unsupported tokenizer, got: {msg}"
+    );
+
+    Ok(())
+}
+
+/// P109.2 — `WITH TOKENIZER('cjk')` selects Tantivy's character n-gram
+/// tokenizer for the index (every char plus each adjacent pair), making
+/// space-less Chinese / Japanese / Korean text searchable by single character
+/// and by character pair. The corpus uses disjoint character sets per row so
+/// OR-combined query n-grams cannot cross-match; row 1 is indexed at
+/// `CREATE FTS INDEX` time (rows present up front) and rows 2–5 are propagated
+/// by the commit-time sync (P107.1).
+#[test]
+fn test_fts_cjk_tokenizer() -> Result<(), String> {
+    let dir = tempdir().map_err(|e| e.to_string())?;
+    let db = Arc::new(Database::new(dir.path().to_str().unwrap(), SystemConfig::default()).map_err(|e| e.to_string())?);
+    let conn = Connection::new(&db);
+
+    conn.query("CREATE NODE TABLE Doc (id INT64, body STRING, PRIMARY KEY(id))")?;
+    // Row present BEFORE the index → indexed by `build_index` at creation.
+    conn.query("CREATE (d:Doc {id: 1, body: '这是一个测试文档'})")?;
+    conn.query("CREATE FTS INDEX idx_cjk ON (Doc.body) WITH TOKENIZER('cjk')")?;
+    // Rows inserted AFTER → propagated by the commit-time sync (P107.1).
+    conn.query("CREATE (d:Doc {id: 2, body: '机器学习很有趣'})")?;
+    conn.query("CREATE (d:Doc {id: 3, body: '我爱吃苹果'})")?;
+    conn.query("CREATE (d:Doc {id: 4, body: 'カタナは冷たい刃です'})")?;
+    conn.query("CREATE (d:Doc {id: 5, body: '안녕하세요 좋은 하루'})")?;
+
+    // Chinese 2-gram queries match only their row (character sets are disjoint).
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('测试') RETURN d.id")?),
+        vec![1]
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('机器') RETURN d.id")?),
+        vec![2]
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('苹果') RETURN d.id")?),
+        vec![3]
+    );
+
+    // A single character (1-gram) query matches the row containing that char.
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('我') RETURN d.id")?),
+        vec![3]
+    );
+
+    // Japanese katakana and Korean Hangul bigrams match their rows.
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('カタ') RETURN d.id")?),
+        vec![4]
+    );
+    assert_eq!(
+        ids(&conn.query("MATCH (d:Doc) USING FTS INDEX idx_cjk('안녕') RETURN d.id")?),
+        vec![5]
     );
 
     Ok(())

@@ -87,6 +87,7 @@ dependencies = [
  "akar-common",
  "akar-extension",
  "akar-function",
+ "akar-storage",
  "regex",
  "tantivy",
  "tracing",
