@@ -1,9 +1,9 @@
 //! Full-Text Search (FTS) extension for Akar.
 //!
 //! Enables full-text indexing and querying:
-//! - `STEM` — stem words with Tantivy's `en_stem` (Snowball Porter2) tokenizer
-//! - `TOKENIZE` — tokenize text into lowercased, stemmed word tokens
-//! - `FTS_HIGHLIGHT` — wrap query-matching terms in `<b>...</b>` (Tantivy Snippets)
+//! - `stem` — stem words with Tantivy's `en_stem` (Snowball Porter2) tokenizer
+//! - `tokenize` — tokenize text into lowercased, stemmed word tokens
+//! - `fts_highlight` — wrap query-matching terms in `<b>...</b>` (Tantivy Snippets)
 //!
 //! FTS index creation and querying are handled **natively** via the DDL and
 //! MATCH clause (`CREATE FTS INDEX`, `MATCH ... USING FTS INDEX`), which

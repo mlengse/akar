@@ -59,8 +59,12 @@ pub fn build_index(
 /// Append `rows` to an already-created Tantivy index over `text_column` and
 /// commit once (P105.3 incremental catch-up — no macro tables to rebuild).
 ///
-/// The schema is derived from `columns`; it must match the schema the index was
-/// created with (fields are matched by name).
+/// The schema is derived from `columns` **only to resolve field ids** — the
+/// derived `EN_STEM` tokenizer is never used for indexing, which lives in the
+/// TantivyIndex's own stored schema. For the ids to stay valid the derived
+/// fields must align 1:1 (same names and column order) with the created-schema:
+/// Tantivy assigns field ids by insertion order, so `get_field(name)` resolves
+/// against the matching position in the index's real schema.
 pub fn append_docs(
     index: &TantivyIndex,
     columns: &[ColumnDefinition],
