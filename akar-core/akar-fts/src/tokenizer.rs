@@ -14,8 +14,13 @@
 //! always agree, and so per-language variants (P109) can be added without
 //! touching the callers.
 
+use std::collections::BTreeMap;
+
+use tantivy::schema::Field;
+use tantivy::snippet::SnippetGenerator;
 use tantivy::tokenizer::{
-    Language, LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer, Stemmer, TextAnalyzer, TokenizerManager,
+    Language, LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer, Stemmer, TextAnalyzer, TokenStream,
+    TokenizerManager,
 };
 
 /// Name of the default English-stemming tokenizer registered on every
@@ -132,6 +137,42 @@ pub fn tokenize(text: &str) -> Vec<String> {
     tokens
 }
 
+/// Snippet fragment length used by [`highlight`] — matches Tantivy's
+/// `SnippetGenerator` default (`DEFAULT_MAX_NUM_CHARS = 150`).
+const MAX_SNIPPET_CHARS: usize = 150;
+
+/// Highlight occurrences of `query` in `text`, returning HTML with the matched
+/// terms wrapped in `<b>...</b>` (Tantivy `Snippets` API).
+///
+/// The query is tokenized with the same `tokenizer` pipeline that indexed the
+/// text, so the highlighted spans agree with what full-text search would match
+/// (e.g. `en_stem` matches `running` for the query `run`). Returns `text`
+/// unchanged when the query produces no tokens or no term matches.
+pub fn highlight(text: &str, query: &str, tokenizer: &str) -> Result<String, String> {
+    let name = resolve(Some(tokenizer))?;
+    let mut analyzer = manager()
+        .get(&name)
+        .ok_or_else(|| format!("tokenizer '{name}' not registered"))?;
+    let mut stream = analyzer.token_stream(query);
+    let mut terms: BTreeMap<String, f32> = BTreeMap::new();
+    while let Some(token) = stream.next() {
+        terms.insert(token.text.clone(), 1.0);
+    }
+    if terms.is_empty() {
+        return Ok(text.to_string());
+    }
+    drop(stream);
+    // The `field` is irrelevant on the text-only `SnippetGenerator::snippet`
+    // path; a dummy field id keeps us on the searcher-free `new` constructor.
+    let generator = SnippetGenerator::new(terms, analyzer, Field::from_field_id(0), MAX_SNIPPET_CHARS);
+    let snippet = generator.snippet(text);
+    if snippet.is_empty() {
+        Ok(text.to_string())
+    } else {
+        Ok(snippet.to_html())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +252,53 @@ mod tests {
         // CJK has no case, but embedded Latin is lowercased like the other
         // pipelines.
         assert_eq!(expect("本an"), vec!["本", "本a", "a", "an", "n"]);
+    }
+
+    /// P109.3 — `highlight` wraps matched terms in `<b>...</b>` via Tantivy's
+    /// `Snippets` API, using the same pipeline that indexed the text.
+    #[test]
+    fn test_highlight_en_stem() {
+        assert_eq!(
+            highlight("Rust is a systems programming language", "rust", EN_STEM).unwrap(),
+            "<b>Rust</b> is a systems programming language"
+        );
+        // Query stemming aligns with index stemming: `run` matches `Running`.
+        assert_eq!(
+            highlight("Running quickly", "run", EN_STEM).unwrap(),
+            "<b>Running</b> quickly"
+        );
+    }
+
+    /// P109.3 — a query with no matches leaves the text untouched (the snippet
+    /// would be empty, so we fall back to the original content).
+    #[test]
+    fn test_highlight_no_match_returns_text() {
+        assert_eq!(
+            highlight("The quick brown fox", "zzz", EN_STEM).unwrap(),
+            "The quick brown fox"
+        );
+    }
+
+    /// P109.3 — a query that produces no tokens (empty / stop-word-only) also
+    /// leaves the text untouched.
+    #[test]
+    fn test_highlight_empty_query_returns_text() {
+        assert_eq!(
+            highlight("The quick brown fox", "", EN_STEM).unwrap(),
+            "The quick brown fox"
+        );
+    }
+
+    /// P109.4 — `highlight` respects the CJK n-gram vocabulary, so Han script
+    /// matches highlight too (query + content share the `cjk` pipeline).
+    #[test]
+    fn test_highlight_cjk() {
+        assert_eq!(highlight("数据库系统", "统", CJK).unwrap(), "数据库系<b>统</b>");
+    }
+
+    /// P109.3 — unknown tokenizer names are rejected with the supported set.
+    #[test]
+    fn test_highlight_unknown_tokenizer() {
+        assert!(highlight("text", "q", "klingon").is_err());
     }
 }

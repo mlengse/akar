@@ -3,6 +3,7 @@
 //! Enables full-text indexing and querying:
 //! - `STEM` — stem words with Tantivy's `en_stem` (Snowball Porter2) tokenizer
 //! - `TOKENIZE` — tokenize text into lowercased, stemmed word tokens
+//! - `FTS_HIGHLIGHT` — wrap query-matching terms in `<b>...</b>` (Tantivy Snippets)
 //!
 //! FTS index creation and querying are handled **natively** via the DDL and
 //! MATCH clause (`CREATE FTS INDEX`, `MATCH ... USING FTS INDEX`), which
@@ -73,13 +74,40 @@ impl Extension for FtsExtension {
             },
         );
 
+        // Register `fts_highlight(content, query [, tokenizer])` — returns
+        // `content` with query-matching terms wrapped in `<b>...</b>` (Tantivy
+        // Snippets API). The optional 3rd argument selects the tokenizer
+        // pipeline (default `en_stem`); use `'cjk'` for Han/Kana/Hangul text.
+        context.register_scalar_function(
+            "fts_highlight",
+            ScalarFunction::CustomScalar {
+                name: "fts_highlight".into(),
+                execute: Arc::new(|args: &[Value]| -> Result<Value, String> {
+                    let content = match args.first() {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err("fts_highlight: expected 1st string argument (content)".into()),
+                    };
+                    let query = match args.get(1) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err("fts_highlight: expected 2nd string argument (query)".into()),
+                    };
+                    let tokenizer = match args.get(2) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => crate::tokenizer::EN_STEM.to_string(),
+                    };
+                    let html = crate::tokenizer::highlight(&content, &query, &tokenizer)?;
+                    Ok(Value::String(html))
+                }),
+            },
+        );
+
         // FTS index creation and querying are handled natively via:
         //   CREATE FTS INDEX ...  (DDL → PhysicalCreateFtsIndex)
         //   MATCH ... USING FTS INDEX ... (PhysicalFtsScan + BM25)
         // These extension table functions are informational stubs for
         // CALL-based discovery (e.g., `CALL show_functions()`).
 
-        tracing::info!("FTS extension loaded: stem, tokenize (scalar) + native DDL/MATCH FTS pipeline");
+        tracing::info!("FTS extension loaded: stem, tokenize, fts_highlight (scalar) + native DDL/MATCH FTS pipeline");
 
         Ok(())
     }
