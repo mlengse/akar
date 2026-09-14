@@ -1,6 +1,6 @@
 [package]
 name = "akar-function"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,7 +11,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.0" }
+akar-common = { path = "../akar-common", version = "0.2.1" }
 arrow.workspace = true
 hashbrown.workspace = true
 regex.workspace = true

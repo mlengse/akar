@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-14
+
 ## [0.2.0] - 2026-09-14
 
 ### Changed
@@ -587,6 +589,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.2.1]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.1
 [0.2.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.0
 [0.1.21]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.21
 [0.1.20]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.20
