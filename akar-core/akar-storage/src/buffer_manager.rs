@@ -4,6 +4,7 @@
 
 use crate::page::{DEFAULT_PAGE_SIZE, Frame, PageNum};
 use akar_common::memory::MemoryManager;
+use akar_common::memory_account::BUFFER_POOL;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -260,7 +261,7 @@ impl BufferManager {
         let k = Self::key(file_name, page_num);
         self.clock_order.push(k.clone());
         self.frames.insert(k.clone(), frame.clone());
-        self.memory_manager.allocate(self.page_size as u64);
+        self.memory_manager.allocate_with(BUFFER_POOL, self.page_size as u64);
 
         self.update_stats();
 
@@ -394,7 +395,7 @@ impl BufferManager {
                         }
                         self.clock_order.push(pk.clone());
                         self.frames.insert(pk, frame);
-                        self.memory_manager.allocate(self.page_size as u64);
+                        self.memory_manager.allocate_with(BUFFER_POOL, self.page_size as u64);
                     }
                 }
             }
@@ -433,7 +434,7 @@ impl BufferManager {
                 }
                 self.frames.remove(&k);
                 self.clock_order.remove(self.clock_hand);
-                self.memory_manager.deallocate(self.page_size as u64);
+                self.memory_manager.deallocate_with(BUFFER_POOL, self.page_size as u64);
                 return Ok(());
             }
         }

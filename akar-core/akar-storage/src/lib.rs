@@ -13,6 +13,7 @@ pub mod compression;
 pub mod csr;
 pub mod csv_reader;
 pub mod free_space_manager;
+pub mod group_commit;
 pub mod hyperloglog;
 pub mod ice_format;
 pub mod index;
@@ -55,6 +56,7 @@ use wal::WAL;
 pub use art_index::ArtPrimaryKeyIndex;
 pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
+pub use group_commit::{GroupCommitResult, GroupCommitStats, WalLike};
 pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
 pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
@@ -120,6 +122,10 @@ pub struct StorageManager {
     /// Optional spiller attached to newly created node tables so bulk ingest
     /// spills to disk once a NodeGroup exceeds the memory threshold (P51.44).
     spiller: std::sync::RwLock<Option<Arc<Spiller>>>,
+    /// Optional group-commit coordinator at the WAL durability boundary (G6).
+    /// When installed, `commit_transaction` step 1 batches concurrent flushes
+    /// into a single fsync (leader/follower). `None` → legacy inline fsync.
+    group_commit: Option<Arc<group_commit::GroupCommit<Mutex<WAL>>>>,
 }
 
 /// Storage info returned by CALL storage_info().
@@ -191,6 +197,7 @@ impl StorageManager {
             table_catalog,
             table_persistence: TablePersistence::new(),
             spiller: std::sync::RwLock::new(None),
+            group_commit: None,
         }
     }
 
@@ -214,6 +221,22 @@ impl StorageManager {
     /// The currently attached spiller (if any).
     pub fn spiller(&self) -> Option<Arc<Spiller>> {
         self.spiller.read().unwrap().clone()
+    }
+
+    /// Enable (or disable) group commit at the WAL durability boundary (G6).
+    ///
+    /// Installs a leader/follower coordinator over this manager's WAL so
+    /// concurrent `commit_transaction` step-1 flushes coalesce into a single
+    /// fsync. `None` restores the legacy one-fsync-per-commit behavior.
+    /// The override must be installed before concurrent commits begin (call it
+    /// once at connection setup). Recovery format is unaffected.
+    pub fn set_group_commit(&mut self, config: Option<group_commit::GroupCommitConfig>) {
+        self.group_commit = config.map(|cfg| Arc::new(group_commit::GroupCommit::new(self.wal.clone(), cfg)));
+    }
+
+    /// The currently attached group-commit coordinator, if any.
+    pub fn group_commit(&self) -> Option<Arc<group_commit::GroupCommit<Mutex<WAL>>>> {
+        self.group_commit.clone()
     }
 
     /// Open (or create) a database at `db_path`, initializing all storage
@@ -605,15 +628,27 @@ impl StorageManager {
         txn_id: u64,
         drain_fn: Option<&dyn Fn(std::time::Duration) -> bool>,
     ) -> Result<(), StorageError> {
-        // Step 1: Write-ahead log the commit
+        // Step 1: Write-ahead log the commit.
+        // The `Commit` record is appended under the WAL lock. Without group
+        // commit, the append + fsync happen inline (legacy one-fsync-per-txn).
+        // With group commit the lock is released first so concurrent commit
+        // records from other transactions can join the same fsync group; the
+        // elected leader performs a single `flush_to_disk` covering all of
+        // them (`GroupCommit`, G6). Durability semantics are unchanged.
         {
             let mut wal = self
                 .wal
                 .lock()
                 .map_err(|e| StorageError::Wal(format!("Lock poisoned: {e}")))?;
             wal.append(crate::wal::WALRecord::Commit { transaction_id: txn_id });
-            wal.flush_to_disk()
-                .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
+            if self.group_commit.is_none() {
+                wal.flush_to_disk()
+                    .map_err(|e| StorageError::Wal(format!("WAL flush failed during commit: {e}")))?;
+            }
+        }
+        if let Some(gc) = &self.group_commit {
+            gc.flush()
+                .map_err(|e| StorageError::Wal(format!("Group-commit WAL flush failed during commit: {e}")))?;
         }
 
         // Step 2: Flush local storage buffers to the actual tables.

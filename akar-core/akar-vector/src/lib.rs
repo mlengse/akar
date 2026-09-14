@@ -15,7 +15,12 @@
 //! `HnswIndex` — multi-layer navigable small world graph for fast ANN search.
 //! Supports configurable distance metrics (Cosine, Euclidean, L1, L2, Dot).
 
+pub mod distance;
 pub mod hnsw;
+
+pub use distance::{
+    MIN_DIM_AVX, MIN_DIM_SIMD, batch_cosine_similarities, batch_dot_and_sq_norms, precompute_sq_norm, top_k_by_score,
+};
 
 use akar_common::types::extract_f64_list;
 use akar_extension::{Extension, ExtensionContext};

@@ -73,33 +73,16 @@ impl DistanceMetric {
     /// Returns a non-negative value where *smaller* means more similar.
     pub fn compute(&self, a: &[f64], b: &[f64]) -> f64 {
         match self {
-            DistanceMetric::Cosine => {
-                // Single-pass optimization for dot product and squared vector norms (~3x speedup)
-                let mut dot = 0.0;
-                let mut norm_a_sq = 0.0;
-                let mut norm_b_sq = 0.0;
-                for (x, y) in a.iter().zip(b.iter()) {
-                    dot += x * y;
-                    norm_a_sq += x * x;
-                    norm_b_sq += y * y;
-                }
-                if norm_a_sq == 0.0 || norm_b_sq == 0.0 {
-                    1.0
-                } else {
-                    1.0 - dot / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
-                }
-            }
-            DistanceMetric::Euclidean => a
-                .iter()
-                .zip(b.iter())
-                .map(|(x, y)| (x - y) * (x - y))
-                .sum::<f64>()
-                .sqrt(),
-            DistanceMetric::L1 => a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum(),
-            DistanceMetric::L2Squared => a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum(),
+            // All kernels are runtime-dispatched SIMD with scalar fallback,
+            // preserving the exact scalar maths of the previous inlined
+            // implementations (see akar-vector/src/distance.rs).
+            DistanceMetric::Cosine => crate::distance::cosine_distance(a, b),
+            DistanceMetric::Euclidean => crate::distance::euclidean_distance(a, b),
+            DistanceMetric::L1 => crate::distance::l1_distance(a, b),
+            DistanceMetric::L2Squared => crate::distance::l2_squared(a, b),
             DistanceMetric::DotProduct => {
                 // Dot product: higher = more similar → negate for smaller-distance convention
-                -a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
+                -crate::distance::dot_product(a, b)
             }
         }
     }

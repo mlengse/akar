@@ -16,6 +16,7 @@ pub mod extension_utils;
 pub mod file_system;
 pub mod gzip_file_system;
 pub mod memory;
+pub mod memory_account;
 pub mod progress_bar;
 pub mod selection;
 pub mod serialization;
