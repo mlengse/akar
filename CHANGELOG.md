@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-14
+
 ### Changed
 
 - **docs(fts) — Audit Fase 6 NIT #1/#2: align nama scalar di doc-module & klarifikasi komentar derivasi schema (2026-09-14)** `2105963` — dokumentasi/komentar saja, tanpa perubahan perilaku: doc-module `akar-fts/src/lib.rs` kini menyebut nama terdaftar `stem`/`tokenize`/`fts_highlight` (sebelumnya `STEM`/`TOKENIZE`/`FTS_HIGHLIGHT` — di `register_scalar_function` semua lowercase); komentar `append_docs` (`build.rs`) diperjelas bahwa schema derivasi hanya untuk resolve field-id — tokenizer `EN_STEM` pada schema derivasi tidak pernah dipakai untuk indexing (hidup di stored schema TantivyIndex), field-id Tantivy ditetapkan by insertion order sehingga `get_field(name)` valid bila kolom & urutan selaras dengan created-schema. Verifikasi: `get_file_problems` 0 error kedua file; gate `test [akar-core]` tetap **2,021 passed / 0 failed / 0 ignored** (perubahan doc-only → jumlah tes tidak berubah).
@@ -585,6 +587,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.2.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.0
 [0.1.21]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.21
 [0.1.20]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.20
 [0.1.19]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.19
