@@ -47,45 +47,48 @@ SPEC = AKAR_ROOT / "SPEC.md"
 
 # ── crates.io publish order (bottom-up per dep graph) ──────────────
 # Core crates: must be published in this exact order.
-# Extension crates: can be published in any order AFTER their core deps.
+# Core crates: topologically sorted by intra-workspace dependencies.
+# fts lives here because it depends on storage and is required by processor.
 PUBLISH_ORDER_CORE = [
-    "akar-common",
-    "akar-storage",
-    "akar-transaction",
-    "akar-function",
-    "akar-parser",
-    "akar-catalog",
-    "akar-binder",
-    "akar-planner",
-    "akar-optimizer",
-    "akar-processor",
-    "akar-graph",
-    "akar-extension",
-    "akar-ml",
-    "akar-main",
-    "akar-cli",
+    "akar-common",      # no deps
+    "akar-parser",      # no deps
+    "akar-function",    # common
+    "akar-catalog",     # common
+    "akar-transaction", # common
+    "akar-extension",   # common, function, catalog
+    "akar-binder",      # common, parser, catalog
+    "akar-vector",      # common, function, extension
+    "akar-storage",     # common, catalog, transaction, vector
+    "akar-fts",         # common, function, extension, storage
+    "akar-planner",     # common, binder, parser, catalog
+    "akar-graph",       # common, storage
+    "akar-optimizer",   # common, planner, storage, binder, parser
+    "akar-processor",   # common, catalog, planner, function, storage, transaction, parser, fts, vector, binder
+    "akar-ml",          # common, function, extension, catalog
 ]
 
+# Extension crates + main/cli/server: published after core.
+# Order respects intra-extension deps and the massive dep list of akar-main.
 PUBLISH_ORDER_EXTENSIONS = [
-    "akar-json",
-    "akar-fts",
-    "akar-vector",
-    "akar-httpfs",
-    "akar-duckdb",
-    "akar-algo",
-    "akar-neo4j",
-    "akar-llm",
-    "akar-sqlite",
-    "akar-delta",
-    "akar-iceberg",
-    "akar-azure",
-    "akar-postgres",
-    "akar-unity-catalog",
-    "akar-dream",
-    "akar-search",
-    "akar-migrate",
-    "akar-wasm",
-    "akar-server",
+    "akar-json",         # common, function, extension
+    "akar-httpfs",       # common, function, extension
+    "akar-duckdb",       # common, function, extension  (must precede delta/iceberg/azure/unity-catalog)
+    "akar-algo",         # common, function, extension, graph, catalog  (must precede dream)
+    "akar-neo4j",        # function, extension
+    "akar-llm",          # common, function, extension
+    "akar-sqlite",       # common, function, extension
+    "akar-postgres",     # common, function, extension, catalog
+    "akar-delta",        # common, function, extension, duckdb
+    "akar-iceberg",      # common, function, extension, duckdb
+    "akar-azure",        # common, function, extension, duckdb
+    "akar-unity-catalog",# common, function, extension, duckdb
+    "akar-dream",        # algo, ml (algo in extensions, ml in core)
+    "akar-search",       # no deps
+    "akar-main",         # depends on ALL core + json/httpfs/duckdb/algo/llm/sqlite/delta/iceberg/azure/postgres
+    "akar-migrate",      # main, storage, common
+    "akar-wasm",         # main, common
+    "akar-server",       # main, common, dream, ml
+    "akar-cli",          # main, common, binder, catalog
 ]
 
 # Skip these crates entirely (not on crates.io)

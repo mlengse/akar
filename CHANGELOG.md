@@ -7,7 +7,9 @@
 
 ## [0.2.1] - 2026-09-14
 
-## [0.2.0] - 2026-09-14
+### Fixed
+
+- **release(crates.io) — re-publish 0.2.0 yang defektif: seluruh 34 crates + PyPI `akar` bawa dep akar-* yang benar `^0.2.1` (2026-09-14)** `afbeeb3` + `a02e0bd` — **rincian:** rilis 0.2.0 di-publish dengan manifest bermasalah: `align_dep_versions`/`check_dep_alignment` di `tools/release.py` memakai regex yang tidak mencocokkan dep style-path (`{ path = "../akar-x", version = "0.1.y" }`), sehingga semua requirement dep internal ter-publish menunjuk ke 0.1.x lama (cth `akar-algo@0.2.0` depend `akar-common ^0.1.3` → konsumen Rust memuat kode 0.2.0 dengan API 0.1.x = broken). Perbaikan (a) regex align-dep menangani semua bentuk inline table (`{...version = "..."...}`) — seluruh Cargo.toml workspace dijalankan `align_dep_versions("0.2.1")` → semua dep akar-* konsisten `0.2.1`; (b) `PUBLISH_ORDER` di-topological-sort ulang terhadap graf dependensi aktual — `akar-fts` dipindah ke core (depend `akar-storage`, dipakai `akar-processor`), `akar-main`/`akar-cli`/`akar-server` dipindah ke akhir (dep akar-main mencakup hampir semua extension), urutan extension di-urutkan mengikuti dep (duckdb sebelum delta/iceberg/azure/unity-catalog; algo sebelum dream); (c) manifest yang sudah terlanjur @0.2.0 tidak dapat diperbaiki (crates.io immutable) → 0.2.1 di-publish ulang bottom-up 34/34 (verifikasi `max_version = 0.2.1`, dep `akar-algo@0.2.1` → `common/extension/function/graph ^0.2.1`); `akar-python` di-bump ke `0.2.1` (pyproject Cargo.toml + dep path), wheel dibangun ulang, di-upload ke PyPI (`akar 0.2.1`), namun crates 0.2.0 tetap tersedia (tidak di-yank — token tanpa scope yank; `cargo install`/`add` default memilih 0.2.1).
 
 ### Changed
 
