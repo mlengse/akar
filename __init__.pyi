@@ -42,11 +42,8 @@ class dream:
     PyPhaseStats: Any
     PyDreamStats: Any
 
-class knn:
-    pass
+class knn: ...
 
-class louvain:
-    pass
+class louvain: ...
 
-class lstm:
-    pass
+class lstm: ...
