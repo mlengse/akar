@@ -18,7 +18,7 @@ akar-catalog = { path = "../akar-catalog", version = "0.2.1" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rustyline = "18.0.1"
-dirs = "6.0.0"
+dirs = "7.0.0"
 
 [lints]
 workspace = true
