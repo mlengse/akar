@@ -1,7 +1,7 @@
 //! Local ML inference and training for Akar.
 //!
-//! Provides a 1-layer LSTM implementation for sequence prediction,
-//! fully self-contained (pure Rust, no FFI).
+//! Provides a multi-layer LSTM implementation (f64 or f32 via generic
+//! precision) for sequence prediction, fully self-contained (pure Rust, no FFI).
 //!
 //! # Components
 //!
@@ -71,4 +71,4 @@ mod sparse;
 #[cfg(feature = "extension")]
 pub mod extension;
 
-pub use lstm::{LstmCell, LstmConfig, LstmModel, TrainingResult, train};
+pub use lstm::{LstmCell, LstmConfig, LstmModel, LstmModelF32, LstmModelF64, TrainingResult, train};

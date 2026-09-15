@@ -2,15 +2,15 @@
 
 Local ML inference and training for the Akar database engine.
 
-Self-contained LSTM implementation for sequence prediction (pure Rust, no FFI), configurable depth via `num_layers` (default 1, no behavior change).
+Self-contained LSTM implementation for sequence prediction (pure Rust, no FFI), configurable depth via `num_layers` (default 1, no behavior change) and precision via a generic float parameter (default `f64`; `LstmModelF32` for f32 — C++ LSTM parity).
 
 **Components:**
 - `LstmCell` — single LSTM gate computation (forget/input/candidate/output)
-- `LstmModel` — multi-layer LSTM with input→hidden→output projection
+- `LstmModel` — multi-layer LSTM generic over f64/f32 precision (`LstmModelF64`/`LstmModelF32`), input→hidden→output projection
 - `train` — BPTT training loop with configurable epochs/learning rate
 - `save_model` / `load_model` — serde JSON serialization
 
-**Tests:** 14
+**Tests:** 16
 
 ## Embeddings (ONNX, feature `onnx-embedding`)
 

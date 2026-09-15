@@ -1,4 +1,4 @@
-//! Multi-layer LSTM implementation.
+//! Multi-layer LSTM implementation, generic over the floating-point precision.
 //!
 //! Architecture (per layer, stacked):
 //! ```text
@@ -22,7 +22,14 @@
 //!     c_t = f ⊙ c_{t-1} + i ⊙ g
 //!     h_t = o ⊙ tanh(c_t)
 //! ```
+//!
+//! Precision is controlled via a generic parameter (`f64` default, `f32` via
+//! [`LstmModelF32`]) so that pure-Rust models can be built with either
+//! precision for parity with the C++ LSTM (f32) while defaulting to f64 for
+//! the Python bindings.
 
+use num_traits::Float;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 fn default_num_layers() -> usize {
@@ -56,93 +63,100 @@ impl Default for LstmConfig {
 
 /// Recurrent weights for a single stacked LSTM layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LstmLayer {
+pub struct LstmLayer<F: Float = f64> {
     /// Input-to-hidden weights: (4*hidden, input_len). Layer 0: input_size; above: hidden_size.
-    pub w_ih: Vec<Vec<f64>>,
+    pub w_ih: Vec<Vec<F>>,
     /// Hidden-to-hidden weights: (4*hidden, hidden).
-    pub w_hh: Vec<Vec<f64>>,
+    pub w_hh: Vec<Vec<F>>,
     /// Input-to-hidden bias: (4*hidden,).
-    pub b_ih: Vec<f64>,
+    pub b_ih: Vec<F>,
     /// Hidden-to-hidden bias: (4*hidden,).
-    pub b_hh: Vec<f64>,
+    pub b_hh: Vec<F>,
 }
 
 /// Stacked LSTM model with trained weights.
 ///
-/// Layer 0 weights are kept as flat fields (`w_ih`/`w_hh`/`b_ih`/`b_hh`) for
-/// JSON/format backward-compat; layers 1..`num_layers` live in `extra_layers`.
+/// Generic over the floating-point precision `F` (default `f64`; use
+/// [`LstmModelF32`] for f32). Layer 0 weights are kept as flat fields
+/// (`w_ih`/`w_hh`/`b_ih`/`b_hh`) for JSON/format backward-compat; layers
+/// 1..`num_layers` live in `extra_layers`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LstmModel {
+pub struct LstmModel<F: Float = f64> {
     pub config: LstmConfig,
     /// Layer 0 input-to-hidden weights: (4*hidden, input_size).
-    pub w_ih: Vec<Vec<f64>>,
+    pub w_ih: Vec<Vec<F>>,
     /// Layer 0 hidden-to-hidden weights: (4*hidden, hidden).
-    pub w_hh: Vec<Vec<f64>>,
+    pub w_hh: Vec<Vec<F>>,
     /// Layer 0 input-to-hidden bias: (4*hidden,).
-    pub b_ih: Vec<f64>,
+    pub b_ih: Vec<F>,
     /// Layer 0 hidden-to-hidden bias: (4*hidden,).
-    pub b_hh: Vec<f64>,
+    pub b_hh: Vec<F>,
     /// Layers 1..num_layers (each hidden→hidden). Empty for num_layers == 1.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub extra_layers: Vec<LstmLayer>,
+    #[serde(default = "Vec::new", skip_serializing_if = "Vec::is_empty")]
+    pub extra_layers: Vec<LstmLayer<F>>,
     /// Output projection weights: (output, hidden).
-    pub w_ho: Vec<Vec<f64>>,
+    pub w_ho: Vec<Vec<F>>,
     /// Output projection bias: (output,).
-    pub b_ho: Vec<f64>,
+    pub b_ho: Vec<F>,
 }
+
+/// `LstmModel<f64>` — default (full) precision.
+pub type LstmModelF64 = LstmModel<f64>;
+/// `LstmModel<f32>` — half-precision for C++-LSTM parity.
+pub type LstmModelF32 = LstmModel<f32>;
 
 /// Intermediate state from a single forward pass (for backprop).
 #[derive(Debug, Clone)]
-pub struct LstmCell {
+pub struct LstmCell<F: Float = f64> {
     // Gate activations
-    pub input_gate: Vec<f64>,
-    pub forget_gate: Vec<f64>,
-    pub candidate: Vec<f64>,
-    pub output_gate: Vec<f64>,
+    pub input_gate: Vec<F>,
+    pub forget_gate: Vec<F>,
+    pub candidate: Vec<F>,
+    pub output_gate: Vec<F>,
     // States
-    pub cell_state: Vec<f64>,
-    pub hidden_state: Vec<f64>,
+    pub cell_state: Vec<F>,
+    pub hidden_state: Vec<F>,
     // Inputs (for backprop)
-    pub x: Vec<f64>,
-    pub h_prev: Vec<f64>,
-    pub c_prev: Vec<f64>,
+    pub x: Vec<F>,
+    pub h_prev: Vec<F>,
+    pub c_prev: Vec<F>,
 }
 
 /// Result of training.
 #[derive(Debug, Clone)]
-pub struct TrainingResult {
-    pub final_loss: f64,
+pub struct TrainingResult<F: Float = f64> {
+    pub final_loss: F,
     pub epochs: usize,
-    pub loss_history: Vec<f64>,
+    pub loss_history: Vec<F>,
 }
 
 // ─────────────────────── Helper math ───────────────────────
 
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
+fn sigmoid<F: Float>(x: F) -> F {
+    F::one() / (F::one() + (-x).exp())
 }
 
-fn sigmoid_derivative(s: f64) -> f64 {
-    s * (1.0 - s)
+fn sigmoid_derivative<F: Float>(s: F) -> F {
+    s * (F::one() - s)
 }
 
-fn tanh_derivative(t: f64) -> f64 {
-    1.0 - t * t
+fn tanh_derivative<F: Float>(t: F) -> F {
+    F::one() - t * t
 }
 
 /// Element-wise multiply.
-fn hadamard(a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).collect()
+fn hadamard<F: Float>(a: &[F], b: &[F]) -> Vec<F> {
+    a.iter().zip(b.iter()).map(|(x, y)| *x * *y).collect()
 }
 
 /// Vector addition.
-fn vec_add(a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.iter().zip(b.iter()).map(|(x, y)| x + y).collect()
+fn vec_add<F: Float>(a: &[F], b: &[F]) -> Vec<F> {
+    a.iter().zip(b.iter()).map(|(x, y)| *x + *y).collect()
 }
 
 // ─────────────────────── LSTM Cell ───────────────────────
 
-impl LstmModel {
+impl<F: Float> LstmModel<F> {
     /// Create a new model with Xavier-initialized weights.
     ///
     /// `num_layers >= 1`; layer 0 maps `input_size -> hidden_size`, each
@@ -156,10 +170,14 @@ impl LstmModel {
         let o = config.output_size;
         let n = config.num_layers.max(1);
 
-        let mut xavier = |rows: usize, cols: usize| -> Vec<Vec<f64>> {
+        let mut xavier = |rows: usize, cols: usize| -> Vec<Vec<F>> {
             let limit = (6.0 / (rows + cols) as f64).sqrt();
             (0..rows)
-                .map(|_| (0..cols).map(|_| rng.random_range(-limit..limit)).collect())
+                .map(|_| {
+                    (0..cols)
+                        .map(|_| F::from(rng.random_range(-limit..limit)).expect("f64->F cast"))
+                        .collect()
+                })
                 .collect()
         };
 
@@ -168,8 +186,8 @@ impl LstmModel {
             extra_layers.push(LstmLayer {
                 w_ih: xavier(4 * h, h),
                 w_hh: xavier(4 * h, h),
-                b_ih: vec![0.0; 4 * h],
-                b_hh: vec![0.0; 4 * h],
+                b_ih: vec![F::zero(); 4 * h],
+                b_hh: vec![F::zero(); 4 * h],
             });
         }
 
@@ -180,44 +198,44 @@ impl LstmModel {
             },
             w_ih: xavier(4 * h, i),
             w_hh: xavier(4 * h, h),
-            b_ih: vec![0.0; 4 * h],
-            b_hh: vec![0.0; 4 * h],
+            b_ih: vec![F::zero(); 4 * h],
+            b_hh: vec![F::zero(); 4 * h],
             extra_layers,
             w_ho: xavier(o, h),
-            b_ho: vec![0.0; o],
+            b_ho: vec![F::zero(); o],
         }
     }
 
     /// Single LSTM cell step for one layer's weights.
     fn cell_step(
-        w_ih: &[Vec<f64>],
-        w_hh: &[Vec<f64>],
-        b_ih: &[f64],
-        b_hh: &[f64],
+        w_ih: &[Vec<F>],
+        w_hh: &[Vec<F>],
+        b_ih: &[F],
+        b_hh: &[F],
         hidden: usize,
-        x: &[f64],
-        h_prev: &[f64],
-        c_prev: &[f64],
-    ) -> LstmCell {
+        x: &[F],
+        h_prev: &[F],
+        c_prev: &[F],
+    ) -> LstmCell<F> {
         let combined = 4 * hidden;
 
         // Compute gate pre-activations
-        let mut gates = vec![0.0; combined];
+        let mut gates = vec![F::zero(); combined];
         for j in 0..combined {
             gates[j] = b_ih[j] + b_hh[j];
             for k in 0..x.len() {
-                gates[j] += w_ih[j][k] * x[k];
+                gates[j] = gates[j] + w_ih[j][k] * x[k];
             }
             for k in 0..h_prev.len() {
-                gates[j] += w_hh[j][k] * h_prev[k];
+                gates[j] = gates[j] + w_hh[j][k] * h_prev[k];
             }
         }
 
         // Split into gates
-        let input_gate: Vec<f64> = gates[0..hidden].iter().map(|&v| sigmoid(v)).collect();
-        let forget_gate: Vec<f64> = gates[hidden..2 * hidden].iter().map(|&v| sigmoid(v)).collect();
-        let candidate: Vec<f64> = gates[2 * hidden..3 * hidden].iter().map(|&v| v.tanh()).collect();
-        let output_gate: Vec<f64> = gates[3 * hidden..4 * hidden].iter().map(|&v| sigmoid(v)).collect();
+        let input_gate: Vec<F> = gates[0..hidden].iter().map(|&v| sigmoid(v)).collect();
+        let forget_gate: Vec<F> = gates[hidden..2 * hidden].iter().map(|&v| sigmoid(v)).collect();
+        let candidate: Vec<F> = gates[2 * hidden..3 * hidden].iter().map(|&v| v.tanh()).collect();
+        let output_gate: Vec<F> = gates[3 * hidden..4 * hidden].iter().map(|&v| sigmoid(v)).collect();
 
         // Cell state update: c_t = f ⊙ c_prev + i ⊙ g
         let cell_state = {
@@ -227,7 +245,7 @@ impl LstmModel {
         };
 
         // Hidden state: h_t = o ⊙ tanh(c_t)
-        let tanh_c: Vec<f64> = cell_state.iter().map(|&v| v.tanh()).collect();
+        let tanh_c: Vec<F> = cell_state.iter().map(|&v| v.tanh()).collect();
         let hidden_state = hadamard(&output_gate, &tanh_c);
 
         LstmCell {
@@ -252,15 +270,15 @@ impl LstmModel {
     /// For `num_layers > 1`, layer 0's hidden-state output becomes layer 1's
     /// input, and so on; upper layers start from the zero state at each call
     /// (per-timestep state carry across layers is handled by `forward_sequence`).
-    pub fn forward_cell(&self, x: &[f64], h_prev: &[f64], c_prev: &[f64]) -> LstmCell {
+    pub fn forward_cell(&self, x: &[F], h_prev: &[F], c_prev: &[F]) -> LstmCell<F> {
         let h = self.config.hidden_size;
         let num_layers = 1 + self.extra_layers.len();
-        let h_zeros = vec![0.0; h];
-        let h_layers: Vec<&[f64]> = std::iter::once(h_prev)
-            .chain(std::iter::repeat_n(&h_zeros as &[f64], num_layers.saturating_sub(1)))
+        let h_zeros = vec![F::zero(); h];
+        let h_layers: Vec<&[F]> = std::iter::once(h_prev)
+            .chain(std::iter::repeat_n(&h_zeros as &[F], num_layers.saturating_sub(1)))
             .collect();
-        let c_layers: Vec<&[f64]> = std::iter::once(c_prev)
-            .chain(std::iter::repeat_n(&h_zeros as &[f64], num_layers.saturating_sub(1)))
+        let c_layers: Vec<&[F]> = std::iter::once(c_prev)
+            .chain(std::iter::repeat_n(&h_zeros as &[F], num_layers.saturating_sub(1)))
             .collect();
         self.forward_cell_multi(x, &h_layers, &c_layers).0
     }
@@ -271,10 +289,10 @@ impl LstmModel {
     /// `h_layers` / `c_layers` must have length `num_layers` (layer 0 first, last layer last).
     fn forward_cell_multi(
         &self,
-        x: &[f64],
-        h_layers: &[&[f64]],
-        c_layers: &[&[f64]],
-    ) -> (LstmCell, Vec<Vec<f64>>, Vec<Vec<f64>>) {
+        x: &[F],
+        h_layers: &[&[F]],
+        c_layers: &[&[F]],
+    ) -> (LstmCell<F>, Vec<Vec<F>>, Vec<Vec<F>>) {
         let h = self.config.hidden_size;
         let num_layers = 1 + self.extra_layers.len();
         assert_eq!(h_layers.len(), num_layers);
@@ -318,19 +336,19 @@ impl LstmModel {
     /// `sequence` — list of input vectors, one per timestep.
     /// Returns: (all cells, output projection at final step using last layer's hidden).
     /// Per-layer hidden/cell states are carried across timesteps.
-    pub fn forward_sequence(&self, sequence: &[Vec<f64>]) -> (Vec<LstmCell>, Vec<f64>) {
+    pub fn forward_sequence(&self, sequence: &[Vec<F>]) -> (Vec<LstmCell<F>>, Vec<F>) {
         let h = self.config.hidden_size;
         let o = self.config.output_size;
         let num_layers = 1 + self.extra_layers.len();
 
         // Per-layer h/c carried across timesteps.
-        let mut h_layers: Vec<Vec<f64>> = vec![vec![0.0; h]; num_layers];
-        let mut c_layers: Vec<Vec<f64>> = vec![vec![0.0; h]; num_layers];
+        let mut h_layers: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+        let mut c_layers: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
         let mut cells = Vec::with_capacity(sequence.len());
 
         for x in sequence {
-            let h_refs: Vec<&[f64]> = h_layers.iter().map(|v| v.as_slice()).collect();
-            let c_refs: Vec<&[f64]> = c_layers.iter().map(|v| v.as_slice()).collect();
+            let h_refs: Vec<&[F]> = h_layers.iter().map(|v| v.as_slice()).collect();
+            let c_refs: Vec<&[F]> = c_layers.iter().map(|v| v.as_slice()).collect();
             let (cell, new_h, new_c) = self.forward_cell_multi(x, &h_refs, &c_refs);
             h_layers = new_h;
             c_layers = new_c;
@@ -339,11 +357,11 @@ impl LstmModel {
 
         // Output projection uses the LAST layer's hidden state.
         let final_h = &h_layers[num_layers - 1];
-        let output: Vec<f64> = (0..o)
+        let output: Vec<F> = (0..o)
             .map(|j| {
                 let mut val = self.b_ho[j];
                 for k in 0..final_h.len() {
-                    val += self.w_ho[j][k] * final_h[k];
+                    val = val + self.w_ho[j][k] * final_h[k];
                 }
                 val
             })
@@ -362,13 +380,13 @@ impl LstmModel {
 /// - `targets` — list of target vectors (one per sequence)
 /// - `epochs` — number of training epochs
 /// - `lr` — learning rate
-pub fn train(
-    model: &mut LstmModel,
-    inputs: &[Vec<Vec<f64>>],
-    targets: &[Vec<f64>],
+pub fn train<F: Float + std::iter::Sum<F>>(
+    model: &mut LstmModel<F>,
+    inputs: &[Vec<Vec<F>>],
+    targets: &[Vec<F>],
     epochs: usize,
-    lr: f64,
-) -> TrainingResult {
+    lr: F,
+) -> TrainingResult<F> {
     assert_eq!(inputs.len(), targets.len(), "inputs and targets must have same length");
     let n = inputs.len();
     let h = model.config.hidden_size;
@@ -377,7 +395,7 @@ pub fn train(
     let mut loss_history = Vec::with_capacity(epochs);
 
     for epoch in 0..epochs {
-        let mut epoch_loss = 0.0;
+        let mut epoch_loss = F::zero();
 
         for (seq, target) in inputs.iter().zip(targets.iter()) {
             let t_len = seq.len();
@@ -386,85 +404,86 @@ pub fn train(
             let (cells, output) = model.forward_sequence(seq);
 
             // ── MSE loss ──
-            let loss: f64 = output
+            let loss: F = output
                 .iter()
                 .zip(target.iter())
-                .map(|(o, t)| (o - t).powi(2))
-                .sum::<f64>()
-                / output.len() as f64;
-            epoch_loss += loss;
+                .map(|(o, t)| (*o - *t).powi(2))
+                .sum::<F>()
+                / F::from(output.len()).unwrap();
+            epoch_loss = epoch_loss + loss;
 
             // ── Output layer gradient ──
             let o_len = output.len();
-            let d_output: Vec<f64> = output
+            let two = F::one() + F::one();
+            let d_output: Vec<F> = output
                 .iter()
                 .zip(target.iter())
-                .map(|(o, t)| 2.0 * (o - t) / o_len as f64)
+                .map(|(o, t)| two * (*o - *t) / F::from(o_len).unwrap())
                 .collect();
 
             // Accumulate parameter gradients across all timesteps
-            let mut dw_ih = vec![vec![0.0; i_sz]; 4 * h];
-            let mut dw_hh = vec![vec![0.0; h]; 4 * h];
-            let mut db_ih = vec![0.0; 4 * h];
-            let mut db_hh = vec![0.0; 4 * h];
-            let mut dw_ho = vec![vec![0.0; h]; o_sz];
-            let mut db_ho = vec![0.0; o_sz];
+            let mut dw_ih = vec![vec![F::zero(); i_sz]; 4 * h];
+            let mut dw_hh = vec![vec![F::zero(); h]; 4 * h];
+            let mut db_ih = vec![F::zero(); 4 * h];
+            let mut db_hh = vec![F::zero(); 4 * h];
+            let mut dw_ho = vec![vec![F::zero(); h]; o_sz];
+            let mut db_ho = vec![F::zero(); o_sz];
 
             // Output projection gradients (from final hidden state)
             let final_h = &cells[t_len - 1].hidden_state;
             for j in 0..o_sz {
                 for k in 0..h {
-                    dw_ho[j][k] += d_output[j] * final_h[k];
+                    dw_ho[j][k] = dw_ho[j][k] + d_output[j] * final_h[k];
                 }
-                db_ho[j] += d_output[j];
+                db_ho[j] = db_ho[j] + d_output[j];
             }
 
             // Gradient flowing into final hidden state from output layer
-            let mut d_h: Vec<f64> = vec![0.0; h];
+            let mut d_h: Vec<F> = vec![F::zero(); h];
             for k in 0..h {
                 for j in 0..o_sz {
-                    d_h[k] += model.w_ho[j][k] * d_output[j];
+                    d_h[k] = d_h[k] + model.w_ho[j][k] * d_output[j];
                 }
             }
-            let mut d_c: Vec<f64> = vec![0.0; h];
+            let mut d_c: Vec<F> = vec![F::zero(); h];
 
             // ── BPTT: walk backward through all cells ──
             for t in (0..t_len).rev() {
                 let cell = &cells[t];
 
                 // tanh(c_t) — cached from forward
-                let tanh_c: Vec<f64> = cell.cell_state.iter().map(|&v| v.tanh()).collect();
+                let tanh_c: Vec<F> = cell.cell_state.iter().map(|&v| v.tanh()).collect();
 
                 // d_o = d_h ⊙ tanh(c_t)
-                let d_o: Vec<f64> = d_h.iter().zip(tanh_c.iter()).map(|(dh, tc)| dh * tc).collect();
+                let d_o: Vec<F> = d_h.iter().zip(tanh_c.iter()).map(|(dh, tc)| *dh * *tc).collect();
 
                 // d_c += d_h ⊙ o ⊙ (1 - tanh²(c_t))  (accumulate with carry from future)
-                let d_c_local: Vec<f64> = d_h
+                let d_c_local: Vec<F> = d_h
                     .iter()
                     .zip(cell.output_gate.iter())
                     .zip(tanh_c.iter())
-                    .map(|((dh, o), tc)| dh * o * (1.0 - tc * tc))
+                    .map(|((dh, o), tc)| *dh * *o * (F::one() - *tc * *tc))
                     .collect();
                 for k in 0..h {
-                    d_c[k] += d_c_local[k];
+                    d_c[k] = d_c[k] + d_c_local[k];
                 }
 
                 // d_f = d_c ⊙ c_prev
-                let d_f: Vec<f64> = d_c.iter().zip(cell.c_prev.iter()).map(|(dc, cp)| dc * cp).collect();
+                let d_f: Vec<F> = d_c.iter().zip(cell.c_prev.iter()).map(|(dc, cp)| *dc * *cp).collect();
 
                 // d_i = d_c ⊙ g
-                let d_i: Vec<f64> = d_c.iter().zip(cell.candidate.iter()).map(|(dc, g)| dc * g).collect();
+                let d_i: Vec<F> = d_c.iter().zip(cell.candidate.iter()).map(|(dc, g)| *dc * *g).collect();
 
                 // d_g = d_c ⊙ i ⊙ (1 - g²)
-                let d_g: Vec<f64> = d_c
+                let d_g: Vec<F> = d_c
                     .iter()
                     .zip(cell.input_gate.iter())
                     .zip(cell.candidate.iter())
-                    .map(|((dc, ig), g)| dc * ig * (1.0 - g * g))
+                    .map(|((dc, ig), g)| *dc * *ig * (F::one() - *g * *g))
                     .collect();
 
                 // Gate pre-activation gradients
-                let mut d_gates = vec![0.0; 4 * h];
+                let mut d_gates = vec![F::zero(); 4 * h];
                 for j in 0..h {
                     d_gates[j] = d_i[j] * sigmoid_derivative(cell.input_gate[j]);
                     d_gates[h + j] = d_f[j] * sigmoid_derivative(cell.forget_gate[j]);
@@ -475,25 +494,29 @@ pub fn train(
                 // Accumulate W_ih, W_hh, b_ih, b_hh
                 for j in 0..4 * h {
                     for k in 0..cell.x.len() {
-                        dw_ih[j][k] += d_gates[j] * cell.x[k];
+                        dw_ih[j][k] = dw_ih[j][k] + d_gates[j] * cell.x[k];
                     }
                     for k in 0..cell.h_prev.len() {
-                        dw_hh[j][k] += d_gates[j] * cell.h_prev[k];
+                        dw_hh[j][k] = dw_hh[j][k] + d_gates[j] * cell.h_prev[k];
                     }
-                    db_ih[j] += d_gates[j];
-                    db_hh[j] += d_gates[j];
+                    db_ih[j] = db_ih[j] + d_gates[j];
+                    db_hh[j] = db_hh[j] + d_gates[j];
                 }
 
                 // Propagate d_c and d_h to previous cell
                 if t > 0 {
                     // d_c_prev = d_c ⊙ f  (gradient through cell state carry)
-                    let d_c_prev: Vec<f64> = d_c.iter().zip(cell.forget_gate.iter()).map(|(dc, f)| dc * f).collect();
+                    let d_c_prev: Vec<F> = d_c
+                        .iter()
+                        .zip(cell.forget_gate.iter())
+                        .map(|(dc, f)| *dc * *f)
+                        .collect();
 
                     // d_h_prev = W_hh^T * d_gates
-                    let mut d_h_prev = vec![0.0; h];
+                    let mut d_h_prev = vec![F::zero(); h];
                     for k in 0..h {
                         for j in 0..4 * h {
-                            d_h_prev[k] += model.w_hh[j][k] * d_gates[j];
+                            d_h_prev[k] = d_h_prev[k] + model.w_hh[j][k] * d_gates[j];
                         }
                     }
 
@@ -505,32 +528,32 @@ pub fn train(
             // ── Apply accumulated gradients ──
             for j in 0..o_sz {
                 for k in 0..h {
-                    model.w_ho[j][k] -= lr * dw_ho[j][k];
+                    model.w_ho[j][k] = model.w_ho[j][k] - lr * dw_ho[j][k];
                 }
-                model.b_ho[j] -= lr * db_ho[j];
+                model.b_ho[j] = model.b_ho[j] - lr * db_ho[j];
             }
             for j in 0..4 * h {
                 for k in 0..i_sz {
-                    model.w_ih[j][k] -= lr * dw_ih[j][k];
+                    model.w_ih[j][k] = model.w_ih[j][k] - lr * dw_ih[j][k];
                 }
                 for k in 0..h {
-                    model.w_hh[j][k] -= lr * dw_hh[j][k];
+                    model.w_hh[j][k] = model.w_hh[j][k] - lr * dw_hh[j][k];
                 }
-                model.b_ih[j] -= lr * db_ih[j];
-                model.b_hh[j] -= lr * db_hh[j];
+                model.b_ih[j] = model.b_ih[j] - lr * db_ih[j];
+                model.b_hh[j] = model.b_hh[j] - lr * db_hh[j];
             }
         }
 
-        let avg_loss = epoch_loss / n as f64;
+        let avg_loss = epoch_loss / F::from(n).unwrap();
         loss_history.push(avg_loss);
 
         if epoch % 100 == 0 || epoch == epochs - 1 {
-            tracing::info!("epoch {epoch}: loss = {avg_loss:.6}");
+            tracing::info!("epoch {epoch}: loss = {:.6}", avg_loss.to_f64().unwrap_or(0.0));
         }
     }
 
     TrainingResult {
-        final_loss: *loss_history.last().unwrap_or(&0.0),
+        final_loss: *loss_history.last().unwrap_or(&F::zero()),
         epochs,
         loss_history,
     }
@@ -544,7 +567,7 @@ pub fn train(
 ///
 /// Returns an error string if serialization fails or the file cannot be
 /// written.
-pub fn save_model(model: &LstmModel, path: &str) -> Result<(), String> {
+pub fn save_model<F: Float + Serialize>(model: &LstmModel<F>, path: &str) -> Result<(), String> {
     let json = serde_json::to_string_pretty(model).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(path, json).map_err(|e| format!("write: {e}"))
 }
@@ -555,7 +578,7 @@ pub fn save_model(model: &LstmModel, path: &str) -> Result<(), String> {
 ///
 /// Returns an error string if the file cannot be read or its contents do not
 /// deserialize into an [`LstmModel`].
-pub fn load_model(path: &str) -> Result<LstmModel, String> {
+pub fn load_model<F: Float + DeserializeOwned>(path: &str) -> Result<LstmModel<F>, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     serde_json::from_str(&json).map_err(|e| format!("deserialize: {e}"))
 }
@@ -650,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_save_load_roundtrip() {
-        let model = LstmModel::new(LstmConfig {
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
             input_size: 2,
             hidden_size: 4,
             output_size: 1,
@@ -679,7 +702,7 @@ mod tests {
 
     #[test]
     fn test_model_new_shapes() {
-        let model = LstmModel::new(LstmConfig {
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
             input_size: 5,
             hidden_size: 10,
             output_size: 3,
@@ -698,7 +721,7 @@ mod tests {
     #[test]
     fn test_multi_layer_shapes() {
         // 2-layer: layer 0 maps input(3)->hidden(4); layer 1 maps hidden(4)->hidden(4).
-        let model = LstmModel::new(LstmConfig {
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
             input_size: 3,
             hidden_size: 4,
             output_size: 2,
@@ -774,7 +797,7 @@ mod tests {
 
     #[test]
     fn test_multi_layer_save_load_roundtrip() {
-        let model = LstmModel::new(LstmConfig {
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
             input_size: 2,
             hidden_size: 4,
             output_size: 1,
@@ -886,5 +909,94 @@ mod tests {
         assert_eq!(cells.len(), 1);
         assert_eq!(output.len(), 5, "output must equal output_size");
         assert_eq!(model.extra_layers.len(), 2);
+    }
+
+    #[test]
+    fn test_f32_save_load_roundtrip() {
+        let model: LstmModelF32 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 1,
+            num_layers: 2,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model_f32.json");
+        save_model(&model, path.to_str().unwrap()).unwrap();
+        let loaded: LstmModelF32 = load_model(path.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.config.num_layers, 2);
+        assert_eq!(loaded.extra_layers.len(), 1);
+        assert_eq!(loaded.w_ih.len(), model.w_ih.len());
+        assert_eq!(loaded.w_ho.len(), model.w_ho.len());
+        for (a_row, b_row) in model.w_ih.iter().zip(loaded.w_ih.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert_eq!(a, b, "f32 weight mismatch: {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_f32_vs_f64_forward_parity() {
+        // Identical weights, both f32 and f64 must produce close outputs.
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let (i, h, o) = (2_usize, 4, 2);
+        let limit = (6.0 / (i + h + h + o) as f64).sqrt();
+
+        let mut rand_vec = |n: usize| -> Vec<f64> { (0..n).map(|_| rng.random_range(-limit..limit)).collect() };
+        let mut rand_mat = |r: usize, c: usize| -> Vec<Vec<f64>> { (0..r).map(|_| rand_vec(c)).collect() };
+
+        let w_ih = rand_mat(4 * h, i);
+        let w_hh = rand_mat(4 * h, h);
+        let w_ho = rand_mat(o, h);
+        let b_ih = rand_vec(4 * h);
+        let b_hh = rand_vec(4 * h);
+        let b_ho = rand_vec(o);
+
+        let config = LstmConfig {
+            input_size: i,
+            hidden_size: h,
+            output_size: o,
+            num_layers: 1,
+        };
+        let model64 = LstmModelF64 {
+            config: config.clone(),
+            w_ih: w_ih.clone(),
+            w_hh: w_hh.clone(),
+            b_ih: b_ih.clone(),
+            b_hh: b_hh.clone(),
+            extra_layers: Vec::new(),
+            w_ho: w_ho.clone(),
+            b_ho: b_ho.clone(),
+        };
+
+        let to32 =
+            |m: &[Vec<f64>]| -> Vec<Vec<f32>> { m.iter().map(|r| r.iter().map(|v| *v as f32).collect()).collect() };
+        let to32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|v| *v as f32).collect() };
+        let model32 = LstmModelF32 {
+            config,
+            w_ih: to32(&w_ih),
+            w_hh: to32(&w_hh),
+            b_ih: to32v(&b_ih),
+            b_hh: to32v(&b_hh),
+            extra_layers: Vec::new(),
+            w_ho: to32(&w_ho),
+            b_ho: to32v(&b_ho),
+        };
+
+        let seq64 = vec![vec![0.5, -0.3], vec![0.1, 0.7]];
+        let seq32: Vec<Vec<f32>> = seq64.iter().map(|v| v.iter().map(|x| *x as f32).collect()).collect();
+
+        let (_, out64) = model64.forward_sequence(&seq64);
+        let (_, out32) = model32.forward_sequence(&seq32);
+
+        assert_eq!(out64.len(), out32.len(), "output length must match");
+        for (i, (a, b)) in out64.iter().zip(out32.iter()).enumerate() {
+            let a32 = *a as f32;
+            let diff = (a32 - b).abs();
+            assert!(
+                diff < 1e-4,
+                "f32 vs f64 parity mismatch at index {i}: f64={a} cast_f32={a32} native_f32={b} diff={diff}"
+            );
+        }
     }
 }

@@ -169,6 +169,7 @@ dependencies = [
 name = "akar-ml"
 version = "0.2.1"
 dependencies = [
+ "num-traits",
  "rand",
  "serde",
  "serde_json",

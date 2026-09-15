@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 rand = "0.10"
+num-traits = "0.2"
 fastembed = { version = "6", optional = true }
 parking_lot = { version = "0.12", optional = true }
 rayon = { workspace = true, optional = true }

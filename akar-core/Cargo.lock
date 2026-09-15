@@ -308,6 +308,7 @@ dependencies = [
  "akar-function",
  "fastembed",
  "ndarray",
+ "num-traits",
  "ort",
  "parking_lot",
  "rand 0.10.2",
