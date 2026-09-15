@@ -22,7 +22,7 @@
 
 use std::cmp::Ordering;
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
@@ -141,7 +141,7 @@ struct HnswNode {
 #[derive(Debug, Clone)]
 pub struct HnswIndex {
     /// All nodes in the index, keyed by node id.
-    nodes: BTreeMap<usize, HnswNode>,
+    nodes: HashMap<usize, HnswNode>,
     /// Number of layers in the graph.
     max_level: usize,
     /// Entry point — the node ID at the highest layer.
@@ -156,7 +156,7 @@ impl HnswIndex {
     /// Create a new HNSW index with the given distance metric.
     pub fn new(metric: DistanceMetric) -> Self {
         Self {
-            nodes: BTreeMap::new(),
+            nodes: HashMap::new(),
             max_level: 0,
             entry_point: None,
             metric,
@@ -199,7 +199,9 @@ impl HnswIndex {
 
     /// Get a reference to the vectors stored in the index, ordered by node id.
     pub fn vectors(&self) -> Vec<&[f64]> {
-        self.nodes.values().map(|n| n.vector.as_slice()).collect()
+        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
+        sorted_nodes.sort_by_key(|&(id, _)| id);
+        sorted_nodes.into_iter().map(|(_, n)| n.vector.as_slice()).collect()
     }
 
     /// All nodes as `(node_id, vector)` pairs, ordered by node id.
@@ -207,7 +209,12 @@ impl HnswIndex {
     /// The node id is the caller-supplied id (row offset in the calling
     /// table), so it is preserved across persist/load (P51.17).
     pub fn nodes(&self) -> Vec<(usize, &[f64])> {
-        self.nodes.iter().map(|(&id, n)| (id, n.vector.as_slice())).collect()
+        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
+        sorted_nodes.sort_by_key(|&(id, _)| id);
+        sorted_nodes
+            .into_iter()
+            .map(|(&id, n)| (id, n.vector.as_slice()))
+            .collect()
     }
 
     // ---- Internal helpers ----
@@ -227,25 +234,35 @@ impl HnswIndex {
 
     /// Compute distance between the vector at `node_id` and a query vector.
     fn node_distance(&self, node_id: usize, query: &[f64]) -> f64 {
-        self.metric.compute(&self.nodes[&node_id].vector, query)
+        if let Some(node) = self.nodes.get(&node_id) {
+            self.metric.compute(&node.vector, query)
+        } else {
+            f64::INFINITY
+        }
     }
 
     /// Greedy search from a given entry point to find the closest node
     /// to the query at the specified layer. Returns the closest node ID.
     fn greedy_search_at_layer(&self, entry: usize, query: &[f64], layer: usize) -> usize {
         let mut current = entry;
-        let mut current_dist = self.node_distance(current, query);
+        let mut current_node = match self.nodes.get(&current) {
+            Some(n) => n,
+            None => return current,
+        };
+        let mut current_dist = self.metric.compute(&current_node.vector, query);
 
         loop {
             let mut improved = false;
-            let neighbors = &self.nodes[&current].connections;
-            if layer < neighbors.len() {
-                for &neighbor in &neighbors[layer] {
-                    let d = self.node_distance(neighbor, query);
-                    if d < current_dist {
-                        current_dist = d;
-                        current = neighbor;
-                        improved = true;
+            if layer < current_node.connections.len() {
+                for &neighbor in &current_node.connections[layer] {
+                    if let Some(neighbor_node) = self.nodes.get(&neighbor) {
+                        let d = self.metric.compute(&neighbor_node.vector, query);
+                        if d < current_dist {
+                            current_dist = d;
+                            current = neighbor;
+                            current_node = neighbor_node;
+                            improved = true;
+                        }
                     }
                 }
             }
@@ -291,15 +308,22 @@ impl HnswIndex {
             if results.len() >= ef && c.0 > results.peek().unwrap().0 {
                 break;
             }
-            let neighbors = &self.nodes[&c.1].connections;
-            if layer >= neighbors.len() {
+            let node = match self.nodes.get(&c.1) {
+                Some(n) => n,
+                None => continue,
+            };
+            if layer >= node.connections.len() {
                 continue;
             }
-            for &neighbor in &neighbors[layer] {
+            for &neighbor in &node.connections[layer] {
                 if !visited.insert(neighbor) {
                     continue;
                 }
-                let nd = self.node_distance(neighbor, query);
+                let neighbor_node = match self.nodes.get(&neighbor) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                let nd = self.metric.compute(&neighbor_node.vector, query);
                 let worst = results.peek().map(|r| r.0).unwrap_or(f64::INFINITY);
                 // Only admit a neighbor that could enter the `ef`-closest set.
                 if nd < worst || results.len() < ef {
@@ -379,32 +403,31 @@ impl HnswIndex {
                 // First, pre-compute distances for ALL existing connections of
                 // this neighbor at this level, plus the new connection to `id`.
                 // We do this BEFORE taking any mutable borrow.
-                let existing_connections: Vec<usize> = if let Some(n) = self.nodes.get(&neighbor_id) {
-                    if level < n.connections.len() {
-                        n.connections[level].clone()
-                    } else {
-                        Vec::new()
-                    }
+                let neighbor_node = match self.nodes.get(&neighbor_id) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                let existing_connections: Vec<usize> = if level < neighbor_node.connections.len() {
+                    neighbor_node.connections[level].clone()
                 } else {
                     Vec::new()
                 };
+                let neighbor_vec = &neighbor_node.vector;
 
                 // Compute distances: existing connections + new node.
-                // Use the self.nodes entries for existing connections, and the
-                // local `vector` variable for the not-yet-inserted new node.
                 let mut dists: Vec<(f64, usize)> = existing_connections
                     .iter()
-                    .map(|&nid| {
-                        let d = self.node_distance(nid, &self.nodes[&neighbor_id].vector);
-                        (d, nid)
+                    .filter_map(|&nid| {
+                        self.nodes.get(&nid).map(|n| {
+                            let d = self.metric.compute(&n.vector, neighbor_vec);
+                            (d, nid)
+                        })
                     })
                     .collect();
                 // Add the new connection — compute distance using the local
                 // `vector` (the new node hasn't been added to self.nodes yet).
-                {
-                    let d = self.metric.compute(&vector, &self.nodes[&neighbor_id].vector);
-                    dists.push((d, id));
-                }
+                let d = self.metric.compute(&vector, neighbor_vec);
+                dists.push((d, id));
 
                 let max_conn = if level == 0 { M_MAX } else { M };
                 dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
