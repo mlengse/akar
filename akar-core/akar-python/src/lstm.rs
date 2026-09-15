@@ -69,12 +69,14 @@ pub struct LstmModel {
 impl LstmModel {
     /// Create a new LSTM model with Xavier-initialized weights.
     #[new]
-    fn new(input_size: usize, hidden_size: usize, output_size: usize) -> Self {
+    #[pyo3(signature = (input_size, hidden_size, output_size, num_layers = 1))]
+    fn new(input_size: usize, hidden_size: usize, output_size: usize, num_layers: usize) -> Self {
         Self {
             inner: akar_ml::lstm::LstmModel::new(akar_ml::lstm::LstmConfig {
                 input_size,
                 hidden_size,
                 output_size,
+                num_layers,
             }),
         }
     }
@@ -105,6 +107,7 @@ impl LstmModel {
 
     /// Train the model on a batch of sequences and targets.
     #[staticmethod]
+    #[pyo3(signature = (input_size, hidden_size, output_size, inputs, targets, epochs, lr, num_layers = 1))]
     fn train(
         input_size: usize,
         hidden_size: usize,
@@ -113,11 +116,13 @@ impl LstmModel {
         targets: Vec<Vec<f64>>,
         epochs: usize,
         lr: f64,
+        num_layers: usize,
     ) -> PyResult<TrainingResult> {
         let mut model = akar_ml::lstm::LstmModel::new(akar_ml::lstm::LstmConfig {
             input_size,
             hidden_size,
             output_size,
+            num_layers,
         });
 
         let result = akar_ml::lstm::train(&mut model, &inputs, &targets, epochs, lr);
@@ -145,10 +150,11 @@ impl LstmModel {
 
     fn __repr__(&self) -> String {
         format!(
-            "<akar.LstmModel input={} hidden={} output={}>",
+            "<akar.LstmModel input={} hidden={} output={} num_layers={}>",
             self.inner.config.input_size,
             self.inner.config.hidden_size,
             self.inner.config.output_size,
+            self.inner.config.num_layers,
         )
     }
 }
@@ -169,16 +175,29 @@ mod tests {
 
     #[test]
     fn test_lstm_new_and_repr() {
-        let m = LstmModel::new(3, 4, 2);
+        let m = LstmModel::new(3, 4, 2, 1);
         let r = m.__repr__();
         assert!(r.contains("input=3"));
         assert!(r.contains("hidden=4"));
         assert!(r.contains("output=2"));
+        assert!(r.contains("num_layers=1"));
+    }
+
+    #[test]
+    fn test_lstm_two_layer_forward_cell() {
+        let m = LstmModel::new(2, 3, 1, 2);
+        let x = vec![0.5, -0.3];
+        let h = vec![0.0; 3];
+        let c = vec![0.0; 3];
+        let cell = m.forward_cell(x, h, c).unwrap();
+        assert_eq!(cell.input_gate().len(), 3);
+        assert_eq!(cell.hidden_state().len(), 3);
+        assert_eq!(m.inner.extra_layers.len(), 1);
     }
 
     #[test]
     fn test_lstm_forward_cell() {
-        let m = LstmModel::new(2, 3, 1);
+        let m = LstmModel::new(2, 3, 1, 1);
         let x = vec![0.5, -0.3];
         let h = vec![0.0; 3];
         let c = vec![0.0; 3];
@@ -189,17 +208,26 @@ mod tests {
 
     #[test]
     fn test_lstm_forward_sequence() {
-        let m = LstmModel::new(2, 3, 1);
+        let m = LstmModel::new(2, 3, 1, 1);
         let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2]];
         let output = m.forward_sequence(seq).unwrap();
         assert_eq!(output.len(), 1);
     }
 
     #[test]
+    fn test_lstm_two_layer_forward_sequence() {
+        let m = LstmModel::new(2, 3, 2, 2);
+        let seq = vec![vec![0.5, -0.3], vec![0.1, 0.7]];
+        let output = m.forward_sequence(seq).unwrap();
+        assert_eq!(output.len(), 2, "2-layer sequence output must equal output_size");
+        assert_eq!(m.inner.extra_layers.len(), 1);
+    }
+
+    #[test]
     fn test_lstm_train() {
         let inputs = vec![vec![vec![0.0, 0.0]], vec![vec![1.0, 1.0]]];
         let targets = vec![vec![0.0], vec![1.0]];
-        let result = LstmModel::train(2, 4, 1, inputs, targets, 10, 0.01).unwrap();
+        let result = LstmModel::train(2, 4, 1, inputs, targets, 10, 0.01, 1).unwrap();
         assert_eq!(result.epochs(), 10);
         assert!(result.final_loss() > 0.0);
     }

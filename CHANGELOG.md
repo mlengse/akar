@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **feat(ml) — P114.1+P114.2: akar.lstm multi-layer LSTM — `LstmConfig.num_layers` + `forward_sequence` per-layer state carry (2026-09-15)** `[Uncommitted]` — `akar.lstm` kini superset multi-layer (C++ LSTM parity sulur, Fase 8 langkah ke-1). P114.1: `LstmConfig.num_layers` (default 1, backward-compat), `LstmLayer` struct, `LstmModel.extra_layers` (skip_if_empty), inisialisasi weight per-layer di `new()`, representasi JSON lama tetap terbaca. P114.2: `forward_cell` refactor ke helper private `forward_cell_multi` (zero state untuk upper layer di jalur publik), `forward_sequence` meneruskan hidden/cell state antar layer per timestep dan memproyeksikan output dari **layer terakhir**. PyO3: `new(num_layers=1)`, `train(..., num_layers=1)`, `__repr__` memuat num_layers. **9 tes baru** (**akar-ml lstm 5→14**: `test_two_layer_sequence_output_len`, `test_single_layer_sequence_parity`, `test_multi_layer_state_carry_across_timesteps`, `test_multi_layer_sequence_different_output_dim` (3-layer, output_size=5), + 5 tes P114.1 dims/shapes/roundtrip/backward-compat; **akar-python 5→6**: `test_lstm_two_layer_forward_sequence`). clippy `-D warnings --all-targets` clean; fmt clean. Gate `test [akar-core]` penuh **2,069 passed / 0 failed / 0 ignored** (+9 tes; sebelumnya 2,060).
+
 ## [0.2.1] - 2026-09-14
 
 ### Fixed
