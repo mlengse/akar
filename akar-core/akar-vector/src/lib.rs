@@ -132,52 +132,30 @@ impl Extension for VectorExtension {
 
 /// Compute cosine similarity between two vectors.
 ///
-/// Optimized to compute dot product and squared vector magnitudes in a single loop pass
-/// (~3x speedup on high-dimensional vector distance calculations).
+/// Dispatched to SIMD-accelerated single-pass kernel in [`distance`].
 pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0.0;
-    let mut norm_a_sq = 0.0;
-    let mut norm_b_sq = 0.0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        norm_a_sq += x * x;
-        norm_b_sq += y * y;
-    }
-    if norm_a_sq == 0.0 || norm_b_sq == 0.0 {
-        return 0.0;
-    }
-    dot / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
+    distance::cosine_similarity(a, b)
 }
 
 /// Compute Euclidean distance between two vectors.
+///
+/// Dispatched to SIMD-accelerated kernel in [`distance`].
 pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y) * (x - y))
-        .sum::<f64>()
-        .sqrt()
+    distance::euclidean_distance(a, b)
 }
 
 /// Compute dot product of two vectors.
+///
+/// Dispatched to SIMD-accelerated kernel in [`distance`].
 pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() {
-        return 0.0;
-    }
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    distance::dot_product(a, b)
 }
 
 /// Compute L2 squared distance (squared Euclidean).
+///
+/// Dispatched to SIMD-accelerated kernel in [`distance`].
 pub fn l2_distance(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
+    distance::l2_squared(a, b)
 }
 
 /// Normalize a vector to unit length.

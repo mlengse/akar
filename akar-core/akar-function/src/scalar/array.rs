@@ -38,13 +38,19 @@ pub(crate) fn evaluate_array(op: ArrayOp, args: &[Value]) -> Result<Value, Strin
 
     match op {
         ArrayOp::CosineSimilarity => {
-            let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-            let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
-            let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if norm_a == 0.0 || norm_b == 0.0 {
+            // Single-pass optimization for dot product and squared norms
+            let mut dot = 0.0;
+            let mut sq_a = 0.0;
+            let mut sq_b = 0.0;
+            for (x, y) in a.iter().zip(b.iter()) {
+                dot += x * y;
+                sq_a += x * x;
+                sq_b += y * y;
+            }
+            if sq_a == 0.0 || sq_b == 0.0 {
                 return Ok(Value::Double(1.0));
             }
-            Ok(Value::Double(dot / (norm_a * norm_b)))
+            Ok(Value::Double(dot / (sq_a.sqrt() * sq_b.sqrt())))
         }
         ArrayOp::Distance => {
             let sum_sq: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum();
