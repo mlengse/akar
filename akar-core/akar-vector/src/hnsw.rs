@@ -412,18 +412,32 @@ impl HnswIndex {
 
             // Add connections from neighbours back to new node
             for &neighbor_id in &neighbors {
-                // First, pre-compute distances for ALL existing connections of
-                // this neighbor at this level, plus the new connection to `id`.
-                // We do this BEFORE taking any mutable borrow.
                 let neighbor_node = match self.nodes.get(&neighbor_id) {
                     Some(n) => n,
                     None => continue,
                 };
-                let existing_connections: &[usize] = if level < neighbor_node.connections.len() {
-                    &neighbor_node.connections[level]
+                let max_conn = if level == 0 { M_MAX } else { M };
+                let current_conn_len = if level < neighbor_node.connections.len() {
+                    neighbor_node.connections[level].len()
                 } else {
-                    &[]
+                    0
                 };
+
+                // Fast path: if the neighbor hasn't reached max_conn yet, we don't need
+                // to recompute distances for all existing connections — simply append `id`.
+                if current_conn_len < max_conn {
+                    if let Some(n) = self.nodes.get_mut(&neighbor_id) {
+                        while n.connections.len() <= level {
+                            n.connections.push(Vec::new());
+                        }
+                        n.connections[level].push(id);
+                    }
+                    continue;
+                }
+
+                // Slow path: neighbor has reached max_conn connections, so pre-compute
+                // distances for existing connections + new node to prune the worst neighbor.
+                let existing_connections: &[usize] = &neighbor_node.connections[level];
                 let neighbor_vec = &neighbor_node.vector;
 
                 // Compute distances: existing connections + new node (avoiding connection vector clones).
@@ -441,15 +455,11 @@ impl HnswIndex {
                 let d = self.metric.compute(&vector, neighbor_vec);
                 dists.push((d, id));
 
-                let max_conn = if level == 0 { M_MAX } else { M };
                 dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
                 dists.truncate(max_conn);
 
                 // Now take the mutable borrow and write back
                 if let Some(n) = self.nodes.get_mut(&neighbor_id) {
-                    while n.connections.len() <= level {
-                        n.connections.push(Vec::new());
-                    }
                     n.connections[level] = dists.into_iter().map(|(_, nid)| nid).collect();
                 }
             }

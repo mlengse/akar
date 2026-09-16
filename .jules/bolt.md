@@ -9,3 +9,7 @@
 ## 2026-09-15 - HNSW beam search pre-allocation and slice iteration optimization
 **Learning:** In HNSW graph search and batch vector similarity metrics, default collection allocations (`HashSet::new()`, `BinaryHeap::new()`, `.clone()`) trigger multiple dynamic heap re-allocations during beam expansion. Pre-allocating visited sets and candidate heaps with `with_capacity(ef * 2)` and iterating over connection slices instead of cloning `Vec<usize>` eliminates reallocations and vector copies on hot search paths. Additionally, popping max-heap results and reversing the slice extracts sorted nearest neighbours in $O(N)$ without general sorting overhead.
 **Action:** Pre-allocate candidate heaps and visited sets based on `ef` beam size, pass connection slices by reference during neighbor updates, and extract max-heap search candidates via pop-and-reverse.
+
+## 2026-09-16 - Fast-path HNSW neighbor connection updates
+**Learning:** During HNSW graph construction, updating neighbor reverse connections before maximum connection degree (`max_conn`) is reached does not require recomputing distances across all existing neighbors. Adding a fast-path append avoids up to 32 vector distance calculations per neighbor update. Graph-traversal visited sets should use a fast integer hasher (AHashSet from `ahash`) rather than the SipHash-backed default.
+**Action:** Fast-path connection updates on nodes below degree capacity during graph construction, and use `AHashSet` for visited node sets in graph search algorithms.
