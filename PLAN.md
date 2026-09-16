@@ -124,7 +124,12 @@ pasangan baru).
 4. **Tes/benchmark**: tes integrasi baru yang men-seed 25k edge lalu menegakkan budget
    waktu 1-hop anchored (longgar, mis. < 500 ms agar tidak flaky di CI) — sebagai penjaga
    regresi. Sertakan `EXPLAIN` yang menunjukkan index dipakai.
-5. **Verifikasi dampak di Sulur:** `sulur_dream_dae` selesai tanpa RPC timeout
+5. **Batas RAM (wajib — lihat F6):** perbaikan harus membuktikan RSS **terbatas**, bukan
+   hanya cepat. Target: query anchored 1-hop dan `get_all_connections`-style scan pada
+   25k edge tidak boleh menaikkan RSS daemon lebih dari puluhan MB (bandingkan
+   `WorkingSet64` sebelum/sesudah), dan tidak ada `memory allocation of … bytes failed`.
+   Alokasi per-call 576 MiB–1,1 GiB (F6) adalah angka yang harus hilang.
+6. **Verifikasi dampak di Sulur:** `sulur_dream_dae` selesai tanpa RPC timeout
    (lihat rencana Sulur P1-DAE-1).
 
 **Catatan:** `AKAR` bisa diuji tanpa Sulur — semua data bisa di-seed lewat daemon scratch.

@@ -9,6 +9,33 @@
 
 ---
 
+## F6 — Blow-up memori: daemon 4,3 GB RSS untuk DB 19 MB, scan rel mengalokasikan 576 MiB–1,1 GiB sekaligus → abort OOM
+
+**Severity:** critical (proses daemon mati, memori host habis, klien kehilangan daemon)
+**Tanggal:** 2026-09-17 · **Ranah:** akar (planner/processor/storage) — satu keluarga dengan F3
+
+**Pengukuran live (2026-09-17, setelah insiden penulisan massal Sulur):**
+
+| Metrik | Nilai |
+|---|---|
+| RSS `akar_server` | **4.315 MB** untuk DB **19 MB** (≈227× ukuran data) |
+| Host (Windows, total 7.807 MB) | sisa bebas ~**1.131 MB** saat diukur (dilaporkan ~173 MB saat insiden) |
+| `memory allocation of … bytes failed` di log daemon | **26** kejadian, antara lain `603979776` (**576 MiB**), `1207959552` (**1,125 GiB**), `4718592`, `24576` |
+
+Pemicu: klien menarik **seluruh** rel dalam satu query
+(`MATCH (a:Memory)-[r:Connected]->(b:Memory) RETURN … ORDER BY r.weight DESC` dengan
+24.974 edge) — jalur yang sama dengan F3, tapi dampaknya RAM, bukan hanya waktu.
+Setiap kegagalan alokasi = proses abort → klien kehilangan daemon dan harus spawn ulang.
+
+**Dampak nyata (terverifikasi di Sulur):** inisialisasi engine Sulur memuat graf penuh saat
+boot (`_load_from_store()` → `get_all_connections()`); pada graf sebesar ini proses gagal /
+mematikan daemon → tool `sulur_*` UNAVAILABLE untuk sesi berjalan (Sulur `docs/FINDINGS.md`
+#36G).
+
+**Status:** OPEN — P1-PERF-1 **diperluas**: perbaikannya harus membatasi **RAM** dan waktu
+(streaming/limit pushdown; jangan materialisasi seluruh rel + kolom embedding), dengan
+kriteria lulus eksplisit pada RSS.
+
 ## F2 — `MERGE ... SET` (jalur cepat `Connection`) tidak pernah match baris yang ada
 
 **Severity:** high (root fix BELUM; mematikan fase AFE Sulur + memicu ledakan edge)
