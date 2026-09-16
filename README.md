@@ -28,6 +28,21 @@ architecture (KuzuDB): **3-way parity** on the hot path
 > Verified comparisons are limited to the Kuzu C++ (Vela) and LadybugDB C++ implementations
 > on identical 10k-row datasets.
 
+## Install
+
+```bash
+# Rust — embedded library (no server, no FFI)
+cargo add akar-main
+```
+
+```bash
+# Python bindings (PyPI)
+pip install akar
+```
+
+Akar is an **embedded library** — it ships no server. The broker/daemon lifecycle used by
+AI-agent memory engines is owned by a separate consumer (see [Origins](#origins)).
+
 ## Quick Start
 
 ```rust

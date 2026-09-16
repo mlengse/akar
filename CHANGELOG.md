@@ -5,9 +5,41 @@
 >
 > **Cara membaca (konvensi entri baru):** satu baris judul — `P### — ringkasan` · hash commit · angka gate — lalu maksimal 3–4 sub-bullet berisi hanya keputusan/perubahan yang tidak terlihat dari kode. Detail panjang (repro, formula, jejak file:line) **tidak** ditulis di sini: ada di `git show <hash>` dan `SPEC.md`. Entri versi lama (sebelum konvensi ini) masih berupa paragraf padat — dibiarkan sebagai arsip.
 
+**Indeks rilis** (terbaru di atas; klik versi untuk lompat ke bagiannya):
+
+| Versi | Tanggal | Tema |
+|-------|---------|------|
+| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
+| [0.2.1](#021---2026-09-14) | 2026-09-14 | Re-publish 0.2.0 defektif: 34 crates + PyPI `akar` dengan dep `^0.2.1` |
+| [0.1.21](#0121---2026-09-07) | 2026-09-07 | akar-ml embedding: parity `embed_multi`/rerank + API non-exhaustive (P96) |
+| [0.1.20](#0120---2026-09-04) | 2026-09-04 | fastembed end-to-end: offline weights, batch/parallel, error (P89–P99) |
+| [0.1.19](#0119---2026-08-31) | 2026-08-31 | Aggregate `DISTINCT` (P88) + tipe alias/comment (P84) + Dream GraphBackend (P77b) |
+| [0.1.18](#0118---2026-08-30) | 2026-08-30 | Tipe array berdimensi `FLOAT[384]` → `List` (P80) |
+| [0.1.17](#0117---2026-08-30) | 2026-08-30 | `LIMIT $limit` / `SKIP $skip` parameterized (P74) |
+| [0.1.16](#0116---2026-08-29) | 2026-08-29 | ADBC: real Arrow translation + parameter binding (P70) |
+| [0.1.15](#0115---2026-08-27) | 2026-08-27 | akar-server: array-of-object parameter support (P69) |
+| [0.1.14](#0114---2026-08-26) | 2026-08-26 | akar-server: op wire `dream_control` (P66) |
+| [0.1.13](#0113---2026-08-26) | 2026-08-26 | akar-server: parameter binding di wire protocol (P64) |
+| [0.1.12](#0112---2026-08-25) | 2026-08-25 | Align seluruh spec versi dep `akar-*` ke versi crate aktual |
+| [0.1.11](#0111---2026-08-25) | 2026-08-25 | akar-server daemon binary (P62) |
+| [0.1.10](#0110---2026-08-24) | 2026-08-24 | node2vec: +7 tes & pemecahan fungsi ter-tes |
+| [0.1.9](#019---2026-08-23) | 2026-08-23 | Sprint 23: perf & flaky fix (P51.48/P51.48b) |
+| [0.1.8](#018---2026-08-18) | 2026-08-18 | Sprint 21: kairos-native migration (P55–P57) |
+| [0.1.7](#017---2026-08-18) | 2026-08-18 | PyO3 expose submodule kNN/LSTM/spread/louvain (P54.5) |
+| [0.1.6](#016---2026-08-17) | 2026-08-17 | Packaging & docs: README akar-python + pyo3 0.29.2 (P53.11) |
+| [0.1.5](#015---2026-08-11) | 2026-08-11 | Rilis v0.1.5 + CI test platform-independent |
+| [0.1.4](#014---2026-08-10) | 2026-08-10 | Rilis v0.1.4: sync backlog crates.io bottom-up (Batch C/D) |
+| [0.1.3](#013---2026-08-10) | 2026-08-10 | Batch correctness inti: MERGE, FFI panic, connectors, optimizer |
+| [0.1.2](#012---2026-08-09) | 2026-08-09 | Rilis v0.1.2: correctness SQL inti (Batch 1) |
+
 ## [Unreleased]
 
 ### Added
+
+- **P116.2 — binding PyO3 `akar.lstm.LstmModel.train_pair`** · `1e34afc` · akar-python **41→45** (di luar gate)
+  - `train_pair(input: list[list[float]], target: list[float], lr: float) -> (float, list[float])` — meneruskan ke `akar_ml::lstm::LstmModel::train_pair` (P116.1): weight ter-update in-place pada semua layer, loss = MSE scalar, hidden = state akhir (panjang `hidden_size`).
+  - Pra-validasi → `ValueError`: input kosong dan `len(target) != output_size` — menghindari assert Rust muncul sebagai `PanicException` di Python.
+  - `akar-python` workspace mandiri (`publish = false`) → tesnya **di luar** gate `test [akar-core]` (tetap 2,073). Tes: return shape + panjang hidden, loss turun antar panggilan, weight extra-layer ter-update, target/input salah ditolak.
 
 - **P116.1 — akar.lstm `train_pair`: online single-pair BPTT untuk semua layer** · `2367e3a` · gate **2,073** (+2)
   - `LstmModel::train_pair(input, target, lr) -> (mse_loss, Vec<f64>)` — satu forward + satu backward BPTT per panggilan, update weight **in-place** (beda dari `train()` batch yang mengembalikan model baru); hidden state layer terakhir dikembalikan sebagai `Vec<f64>` (presisi-independen).
