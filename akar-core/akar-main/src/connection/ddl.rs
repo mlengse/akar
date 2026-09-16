@@ -306,6 +306,28 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateNodeTable(t) => {
+                // IF NOT EXISTS on an existing table must be a NO-OP: mirror the
+                // pipeline path (akar-processor/mapper/map_ddl.rs). Without this
+                // guard the storage table is re-created — a NEW table_id is
+                // allocated and `node_name_to_id` is re-pointed at it, so every
+                // row of the previous table becomes unreachable (silent data
+                // loss) while the statement still reports success. The binder
+                // already validated the clause; this is the storage-side skip.
+                if t.if_not_exists {
+                    let already_exists = self
+                        .database
+                        .table_catalog()
+                        .get_node_table_by_name(&t.name)
+                        .map(|existing| existing.table_id)
+                        .is_some();
+                    if already_exists {
+                        tracing::info!("CREATE NODE TABLE IF NOT EXISTS: '{}' already exists, skipping", t.name);
+                        return Ok(Some(QueryResult::success_message(format!(
+                            "Node table '{}' already exists",
+                            t.name
+                        ))));
+                    }
+                }
                 let columns: Vec<akar_catalog::CatalogColumn> = t
                     .columns
                     .iter()
@@ -324,6 +346,24 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundCreateRelTable(t) => {
+                // Same idempotence contract as node tables above: a duplicate
+                // `CREATE REL TABLE IF NOT EXISTS` must not re-create storage
+                // (it would orphan every existing edge under the old table_id).
+                if t.if_not_exists {
+                    let already_exists = self
+                        .database
+                        .table_catalog()
+                        .get_rel_table_by_name(&t.name)
+                        .map(|existing| existing.table_id)
+                        .is_some();
+                    if already_exists {
+                        tracing::info!("CREATE REL TABLE IF NOT EXISTS: '{}' already exists, skipping", t.name);
+                        return Ok(Some(QueryResult::success_message(format!(
+                            "Rel table '{}' already exists",
+                            t.name
+                        ))));
+                    }
+                }
                 let columns: Vec<akar_catalog::CatalogColumn> = t
                     .columns
                     .iter()

@@ -17,15 +17,21 @@ fn test_create_node_table_if_not_exists_idempotent() {
         &conn,
         "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY (id))",
     );
+    // Row written BEFORE the duplicate DDL: the pre-fix executor re-created the
+    // storage table (fresh table_id, `node_name_to_id` re-pointed) so this row
+    // became unreachable while the statement still reported success.
+    exec(&conn, "CREATE (:Person {id: 1, name: 'alice'})");
     // IF NOT EXISTS on an existing table is a no-op, not an error.
     exec(
         &conn,
         "CREATE NODE TABLE IF NOT EXISTS Person(id INT64, name STRING, PRIMARY KEY (id))",
     );
     // The existing table (and its data) is untouched and still usable.
-    exec(&conn, "CREATE (:Person {id: 1, name: 'alice'})");
     let rows = query_column(&conn, "MATCH (p:Person) RETURN p.name");
     assert_eq!(rows, vec![Value::String("alice".to_string())]);
+    // Still writable after the no-op.
+    exec(&conn, "CREATE (:Person {id: 2, name: 'bob'})");
+    assert_eq!(query_column(&conn, "MATCH (p:Person) RETURN p.id").len(), 2);
 }
 
 #[test]
@@ -34,8 +40,17 @@ fn test_create_rel_table_if_not_exists_idempotent() {
     exec(&conn, "CREATE NODE TABLE A(id INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE NODE TABLE B(id INT64, PRIMARY KEY (id))");
     exec(&conn, "CREATE REL TABLE IF NOT EXISTS Knows(FROM A TO B, since INT64)");
+    // Edge written BEFORE the duplicate DDL — must survive the no-op.
+    exec(&conn, "CREATE (:A {id: 1})");
+    exec(&conn, "CREATE (:B {id: 1})");
+    exec(&conn, "MATCH (a:A), (b:B) CREATE (a)-[:Knows {since: 2020}]->(b)");
     // Second IF NOT EXISTS create is a no-op, not an error.
     exec(&conn, "CREATE REL TABLE IF NOT EXISTS Knows(FROM A TO B, since INT64)");
+    assert_eq!(
+        query_column(&conn, "MATCH (a:A)-[r:Knows]->(b:B) RETURN r.since").len(),
+        1,
+        "existing edge must survive a duplicate IF NOT EXISTS rel-table DDL"
+    );
     // Same rel name without the clause still errors (existing behavior).
     let err = exec_err(&conn, "CREATE REL TABLE Knows(FROM A TO B, since INT64)");
     assert!(err.contains("already exists") || err.contains("Error"));
