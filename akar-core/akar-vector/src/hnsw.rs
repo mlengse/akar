@@ -20,10 +20,10 @@
 //!
 //! `HnswIndex` is `Send` but not `Sync`. Wrap in `Mutex` for concurrent use.
 
+use ahash::{AHashMap, AHashSet};
 use std::cmp::Ordering;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use ahash::{AHashMap, AHashSet};
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
