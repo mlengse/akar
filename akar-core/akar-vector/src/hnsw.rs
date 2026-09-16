@@ -22,7 +22,8 @@
 
 use std::cmp::Ordering;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
+use ahash::{AHashMap, AHashSet};
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
@@ -141,7 +142,7 @@ struct HnswNode {
 #[derive(Debug, Clone)]
 pub struct HnswIndex {
     /// All nodes in the index, keyed by node id.
-    nodes: HashMap<usize, HnswNode>,
+    nodes: AHashMap<usize, HnswNode>,
     /// Number of layers in the graph.
     max_level: usize,
     /// Entry point — the node ID at the highest layer.
@@ -156,7 +157,7 @@ impl HnswIndex {
     /// Create a new HNSW index with the given distance metric.
     pub fn new(metric: DistanceMetric) -> Self {
         Self {
-            nodes: HashMap::new(),
+            nodes: AHashMap::new(),
             max_level: 0,
             entry_point: None,
             metric,
@@ -289,7 +290,8 @@ impl HnswIndex {
             return Vec::new();
         }
         let ef = EF_SEARCH.max(k);
-        let mut visited = HashSet::new();
+        // Fast AHashSet for integer node ID lookups during HNSW beam search inner loops
+        let mut visited = AHashSet::new();
 
         let entry_dist = self.node_distance(entry, query);
         // candidates: min-heap (closest popped first).
@@ -695,11 +697,11 @@ mod tests {
                 .map(|(i, v)| (DistanceMetric::Euclidean.compute(&query, v), i))
                 .collect();
             bf.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            let bf_top10: HashSet<usize> = bf.iter().take(10).map(|(_, id)| *id).collect();
+            let bf_top10: AHashSet<usize> = bf.iter().take(10).map(|(_, id)| *id).collect();
 
             // HNSW top-10
             let hnsw = idx.search(&query, 10);
-            let hnsw_top10: HashSet<usize> = hnsw.iter().map(|(_, id)| *id).collect();
+            let hnsw_top10: AHashSet<usize> = hnsw.iter().map(|(_, id)| *id).collect();
 
             // Compute recall
             let intersection = bf_top10.intersection(&hnsw_top10).count();
@@ -766,10 +768,10 @@ mod tests {
                 .map(|(i, v)| (DistanceMetric::Euclidean.compute(&query, v), i))
                 .collect();
             bf.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            let bf_top10: HashSet<usize> = bf.iter().take(10).map(|(_, id)| *id).collect();
+            let bf_top10: AHashSet<usize> = bf.iter().take(10).map(|(_, id)| *id).collect();
 
             let hnsw = idx.search(&query, 10);
-            let hnsw_top10: HashSet<usize> = hnsw.iter().map(|(_, id)| *id).collect();
+            let hnsw_top10: AHashSet<usize> = hnsw.iter().map(|(_, id)| *id).collect();
 
             let intersection = bf_top10.intersection(&hnsw_top10).count();
             total_recall += intersection as f64 / 10.0;
