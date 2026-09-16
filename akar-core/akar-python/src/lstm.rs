@@ -105,6 +105,26 @@ impl LstmModel {
         Ok(output)
     }
 
+    /// Online single-pair training step: one forward + one backward BPTT pass
+    /// that updates the model weights **in place** (all `num_layers`).
+    ///
+    /// Returns `(mse_loss, final_hidden_state)`, where `mse_loss` is a scalar
+    /// (like the C++ `LSTMPredictor::train_step`) and `final_hidden_state` has
+    /// length `hidden_size`.
+    fn train_pair(&mut self, input: Vec<Vec<f64>>, target: Vec<f64>, lr: f64) -> PyResult<(f64, Vec<f64>)> {
+        if input.is_empty() {
+            return Err(PyValueError::new_err("train_pair: input sequence must not be empty"));
+        }
+        if target.len() != self.inner.config.output_size {
+            return Err(PyValueError::new_err(format!(
+                "train_pair: target length {} must equal output_size {}",
+                target.len(),
+                self.inner.config.output_size,
+            )));
+        }
+        Ok(self.inner.train_pair(&input, &target, lr))
+    }
+
     /// Train the model on a batch of sequences and targets.
     #[staticmethod]
     #[pyo3(signature = (input_size, hidden_size, output_size, inputs, targets, epochs, lr, num_layers = 1))]
@@ -230,5 +250,46 @@ mod tests {
         let result = LstmModel::train(2, 4, 1, inputs, targets, 10, 0.01, 1).unwrap();
         assert_eq!(result.epochs(), 10);
         assert!(result.final_loss() > 0.0);
+    }
+
+    #[test]
+    fn test_lstm_train_pair_shape() {
+        let mut m = LstmModel::new(2, 4, 1, 1);
+        let input = vec![vec![0.0, 1.0], vec![0.5, -0.5]];
+        let (loss, hidden) = m.train_pair(input, vec![1.0], 0.05).unwrap();
+        assert!(loss.is_finite() && loss >= 0.0);
+        assert_eq!(hidden.len(), 4, "hidden length must equal hidden_size");
+    }
+
+    #[test]
+    fn test_lstm_train_pair_reduces_loss_over_calls() {
+        let mut m = LstmModel::new(2, 4, 1, 1);
+        let input = vec![vec![0.0, 0.0], vec![1.0, 1.0]];
+        let (first, _) = m.train_pair(input.clone(), vec![1.0], 0.05).unwrap();
+        let mut last = first;
+        for _ in 0..60 {
+            let (loss, _) = m.train_pair(input.clone(), vec![1.0], 0.05).unwrap();
+            last = loss;
+        }
+        assert!(last < first, "online loss should decrease: {first} -> {last}");
+    }
+
+    #[test]
+    fn test_lstm_train_pair_two_layer_updates_extra_layers() {
+        let mut m = LstmModel::new(2, 3, 1, 2);
+        let before = m.inner.extra_layers[0].w_ih[0][0];
+        let _ = m
+            .train_pair(vec![vec![0.5, -0.3], vec![0.1, 0.7]], vec![1.0], 0.05)
+            .unwrap();
+        let after = m.inner.extra_layers[0].w_ih[0][0];
+        assert_ne!(before, after, "extra layer weights must be updated in place");
+    }
+
+    #[test]
+    fn test_lstm_train_pair_rejects_bad_target() {
+        let mut m = LstmModel::new(2, 3, 1, 1);
+        assert!(m.train_pair(vec![vec![0.0, 0.0]], vec![1.0, 2.0], 0.05).is_err());
+        let mut m = LstmModel::new(2, 3, 1, 1);
+        assert!(m.train_pair(vec![], vec![1.0], 0.05).is_err());
     }
 }
