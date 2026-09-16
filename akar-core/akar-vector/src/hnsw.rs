@@ -291,23 +291,26 @@ impl HnswIndex {
         }
         let ef = EF_SEARCH.max(k);
         // Fast AHashSet (integer node IDs) with pre-allocated target capacity to eliminate reallocations.
-        let mut visited = AHashSet::with_capacity(ef * 2);
+        let mut visited = AHashSet::with_capacity(ef * 4);
 
         let entry_dist = self.node_distance(entry, query);
         // candidates: min-heap (closest popped first).
-        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(ef * 2);
+        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(ef + 1);
         // results: max-heap (farthest/worst on top), bounded to `ef`.
         let mut results: BinaryHeap<Candidate> = BinaryHeap::with_capacity(ef + 1);
         candidates.push(Reverse(Candidate(entry_dist, entry)));
         results.push(Candidate(entry_dist, entry));
         visited.insert(entry);
 
+        // Track current worst distance in result set to eliminate redundant heap peeks in the inner loop.
+        let mut worst_dist = entry_dist;
+
         while let Some(Reverse(c)) = candidates.pop() {
             // If the closest remaining candidate is already worse than the
             // `ef`-th best result, no further candidate can improve it (the
             // beam is exhausted). This is the pruning step that keeps the
             // search bounded.
-            if results.len() >= ef && c.0 > results.peek().unwrap().0 {
+            if results.len() >= ef && c.0 > worst_dist {
                 break;
             }
             let node = match self.nodes.get(&c.1) {
@@ -326,13 +329,15 @@ impl HnswIndex {
                     None => continue,
                 };
                 let nd = self.metric.compute(&neighbor_node.vector, query);
-                let worst = results.peek().map(|r| r.0).unwrap_or(f64::INFINITY);
                 // Only admit a neighbor that could enter the `ef`-closest set.
-                if nd < worst || results.len() < ef {
+                if nd < worst_dist || results.len() < ef {
                     results.push(Candidate(nd, neighbor));
                     candidates.push(Reverse(Candidate(nd, neighbor)));
                     if results.len() > ef {
                         results.pop();
+                    }
+                    if let Some(worst) = results.peek() {
+                        worst_dist = worst.0;
                     }
                 }
             }
