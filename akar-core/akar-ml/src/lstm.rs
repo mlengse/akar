@@ -293,6 +293,19 @@ impl<F: Float> LstmModel<F> {
         h_layers: &[&[F]],
         c_layers: &[&[F]],
     ) -> (LstmCell<F>, Vec<Vec<F>>, Vec<Vec<F>>) {
+        let (cells, out_h, out_c) = self.forward_cell_multi_all(x, h_layers, c_layers);
+        (cells.into_iter().next_back().expect("num_layers >= 1"), out_h, out_c)
+    }
+
+    /// Forward pass through all layers for one timestep, returning **every**
+    /// layer's cell (layer 0 first) in addition to the updated per-layer h/c
+    /// states. The last element is the final layer's cell.
+    fn forward_cell_multi_all(
+        &self,
+        x: &[F],
+        h_layers: &[&[F]],
+        c_layers: &[&[F]],
+    ) -> (Vec<LstmCell<F>>, Vec<Vec<F>>, Vec<Vec<F>>) {
         let h = self.config.hidden_size;
         let num_layers = 1 + self.extra_layers.len();
         assert_eq!(h_layers.len(), num_layers);
@@ -309,6 +322,8 @@ impl<F: Float> LstmModel<F> {
             h_layers[0],
             c_layers[0],
         );
+        let mut cells = Vec::with_capacity(num_layers);
+        cells.push(cell.clone());
         let mut out_h = vec![cell.hidden_state.clone()];
         let mut out_c = vec![cell.cell_state.clone()];
 
@@ -324,11 +339,12 @@ impl<F: Float> LstmModel<F> {
                 h_layers[i + 1],
                 c_layers[i + 1],
             );
+            cells.push(cell.clone());
             out_h.push(cell.hidden_state.clone());
             out_c.push(cell.cell_state.clone());
         }
 
-        (cell, out_h, out_c)
+        (cells, out_h, out_c)
     }
 
     /// Run forward pass over a sequence, return all cell states and final output.
@@ -368,6 +384,252 @@ impl<F: Float> LstmModel<F> {
             .collect();
 
         (cells, output)
+    }
+
+    /// Like [`Self::forward_sequence`] but also returns **every layer's** cell
+    /// at each timestep (`result[t][l]`, layer 0 first). Used by
+    /// [`Self::train_pair`] to back-propagate through the stacked layers.
+    fn forward_sequence_collect(&self, sequence: &[Vec<F>]) -> (Vec<Vec<LstmCell<F>>>, Vec<F>) {
+        let h = self.config.hidden_size;
+        let o = self.config.output_size;
+        let num_layers = 1 + self.extra_layers.len();
+
+        let mut h_layers: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+        let mut c_layers: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+        let mut per_timestep = Vec::with_capacity(sequence.len());
+
+        for x in sequence {
+            let h_refs: Vec<&[F]> = h_layers.iter().map(|v| v.as_slice()).collect();
+            let c_refs: Vec<&[F]> = c_layers.iter().map(|v| v.as_slice()).collect();
+            let (cells, new_h, new_c) = self.forward_cell_multi_all(x, &h_refs, &c_refs);
+            h_layers = new_h;
+            c_layers = new_c;
+            per_timestep.push(cells);
+        }
+
+        // Output projection uses the LAST layer's hidden state.
+        let final_h = &h_layers[num_layers - 1];
+        let output: Vec<F> = (0..o)
+            .map(|j| {
+                let mut val = self.b_ho[j];
+                for k in 0..final_h.len() {
+                    val = val + self.w_ho[j][k] * final_h[k];
+                }
+                val
+            })
+            .collect();
+
+        (per_timestep, output)
+    }
+
+    /// One online training step on a single sequence: one forward pass plus a
+    /// back-propagation-through-time pass that updates **every** stacked
+    /// layer's weights (and the output projection) in place.
+    ///
+    /// Unlike the batch [`train`] helper — whose backward pass only walks the
+    /// layer-0 weights — this propagates gradients through all `num_layers`.
+    ///
+    /// - `input` — one sequence of input vectors (`T` timesteps × `input_size`)
+    /// - `target` — target output vector (`output_size`)
+    /// - `lr` — learning rate
+    ///
+    /// Returns `(mse_loss, final_hidden_state)`, where the hidden state is the
+    /// last layer's `h_T` converted to `f64` so the return surface is
+    /// precision-independent.
+    pub fn train_pair(&mut self, input: &[Vec<F>], target: &[F], lr: F) -> (F, Vec<f64>) {
+        assert!(!input.is_empty(), "train_pair: input sequence must not be empty");
+        assert_eq!(
+            target.len(),
+            self.config.output_size,
+            "train_pair: target length must equal output_size"
+        );
+
+        let h = self.config.hidden_size;
+        let o_sz = self.config.output_size;
+        let i_sz = self.config.input_size;
+        let num_layers = 1 + self.extra_layers.len();
+        let t_len = input.len();
+
+        let (per_timestep, output) = self.forward_sequence_collect(input);
+
+        // ── MSE loss ──
+        let mut loss = F::zero();
+        for (o, t) in output.iter().zip(target.iter()) {
+            loss = loss + (*o - *t).powi(2);
+        }
+        loss = loss / F::from(o_sz).unwrap();
+
+        // ── Output layer gradient ──
+        let two = F::one() + F::one();
+        let d_output: Vec<F> = output
+            .iter()
+            .zip(target.iter())
+            .map(|(o, t)| two * (*o - *t) / F::from(o_sz).unwrap())
+            .collect();
+
+        // Gradient accumulators for every layer.
+        let mut dw_ih: Vec<Vec<Vec<F>>> = Vec::with_capacity(num_layers);
+        let mut dw_hh: Vec<Vec<Vec<F>>> = Vec::with_capacity(num_layers);
+        let mut db_ih: Vec<Vec<F>> = Vec::with_capacity(num_layers);
+        let mut db_hh: Vec<Vec<F>> = Vec::with_capacity(num_layers);
+        for l in 0..num_layers {
+            let in_dim = if l == 0 { i_sz } else { h };
+            dw_ih.push(vec![vec![F::zero(); in_dim]; 4 * h]);
+            dw_hh.push(vec![vec![F::zero(); h]; 4 * h]);
+            db_ih.push(vec![F::zero(); 4 * h]);
+            db_hh.push(vec![F::zero(); 4 * h]);
+        }
+        let mut dw_ho = vec![vec![F::zero(); h]; o_sz];
+        let mut db_ho = vec![F::zero(); o_sz];
+
+        // Output projection gradients (from the final hidden state).
+        let final_h = &per_timestep[t_len - 1][num_layers - 1].hidden_state;
+        for j in 0..o_sz {
+            for k in 0..h {
+                dw_ho[j][k] = dw_ho[j][k] + d_output[j] * final_h[k];
+            }
+            db_ho[j] = db_ho[j] + d_output[j];
+        }
+
+        // Per-layer gradient flowing in from t+1 (carry) and the projection seed.
+        let mut dh_carry: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+        let mut dc_carry: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+        for k in 0..h {
+            for j in 0..o_sz {
+                dh_carry[num_layers - 1][k] = dh_carry[num_layers - 1][k] + self.w_ho[j][k] * d_output[j];
+            }
+        }
+
+        // ── BPTT: walk timesteps backwards, layers top-down ──
+        for t in (0..t_len).rev() {
+            let mut dh_cur: Vec<Vec<F>> = dh_carry.clone();
+            let dc_cur: Vec<Vec<F>> = dc_carry.clone();
+            let mut dh_next: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+            let mut dc_next: Vec<Vec<F>> = vec![vec![F::zero(); h]; num_layers];
+
+            for l in (0..num_layers).rev() {
+                let cell = &per_timestep[t][l];
+                let tanh_c: Vec<F> = cell.cell_state.iter().map(|&v| v.tanh()).collect();
+
+                // d_o = d_h ⊙ tanh(c_t)
+                let d_o: Vec<F> = dh_cur[l].iter().zip(tanh_c.iter()).map(|(dh, tc)| *dh * *tc).collect();
+
+                // d_c = carry + d_h ⊙ o ⊙ (1 - tanh²(c_t))
+                let d_c_local: Vec<F> = dh_cur[l]
+                    .iter()
+                    .zip(cell.output_gate.iter())
+                    .zip(tanh_c.iter())
+                    .map(|((dh, og), tc)| *dh * *og * (F::one() - *tc * *tc))
+                    .collect();
+                let mut d_c = dc_cur[l].clone();
+                for k in 0..h {
+                    d_c[k] = d_c[k] + d_c_local[k];
+                }
+
+                let d_f: Vec<F> = d_c.iter().zip(cell.c_prev.iter()).map(|(dc, cp)| *dc * *cp).collect();
+                let d_i: Vec<F> = d_c.iter().zip(cell.candidate.iter()).map(|(dc, g)| *dc * *g).collect();
+                let d_g: Vec<F> = d_c
+                    .iter()
+                    .zip(cell.input_gate.iter())
+                    .zip(cell.candidate.iter())
+                    .map(|((dc, ig), g)| *dc * *ig * (F::one() - *g * *g))
+                    .collect();
+
+                let mut d_gates = vec![F::zero(); 4 * h];
+                for j in 0..h {
+                    d_gates[j] = d_i[j] * sigmoid_derivative(cell.input_gate[j]);
+                    d_gates[h + j] = d_f[j] * sigmoid_derivative(cell.forget_gate[j]);
+                    d_gates[2 * h + j] = d_g[j] * tanh_derivative(cell.candidate[j]);
+                    d_gates[3 * h + j] = d_o[j] * sigmoid_derivative(cell.output_gate[j]);
+                }
+
+                // Accumulate this layer's weights.
+                for j in 0..4 * h {
+                    for k in 0..cell.x.len() {
+                        dw_ih[l][j][k] = dw_ih[l][j][k] + d_gates[j] * cell.x[k];
+                    }
+                    for k in 0..h {
+                        dw_hh[l][j][k] = dw_hh[l][j][k] + d_gates[j] * cell.h_prev[k];
+                    }
+                    db_ih[l][j] = db_ih[l][j] + d_gates[j];
+                    db_hh[l][j] = db_hh[l][j] + d_gates[j];
+                }
+
+                // d_c_prev = d_c ⊙ f  (cell-state carry to t-1)
+                dc_next[l] = d_c
+                    .iter()
+                    .zip(cell.forget_gate.iter())
+                    .map(|(dc, f)| *dc * *f)
+                    .collect();
+
+                // d_h_prev = W_hh^T d_gates  (recurrent carry to t-1)
+                let w_hh: &[Vec<F>] = if l == 0 {
+                    &self.w_hh
+                } else {
+                    &self.extra_layers[l - 1].w_hh
+                };
+                let mut d_h_prev = vec![F::zero(); h];
+                for k in 0..h {
+                    for j in 0..4 * h {
+                        d_h_prev[k] = d_h_prev[k] + w_hh[j][k] * d_gates[j];
+                    }
+                }
+                dh_next[l] = d_h_prev;
+
+                // Gradient into this layer's input = h_t^{l-1} of the layer below.
+                if l > 0 {
+                    let w_ih = &self.extra_layers[l - 1].w_ih;
+                    for k in 0..h {
+                        let mut g = F::zero();
+                        for j in 0..4 * h {
+                            g = g + w_ih[j][k] * d_gates[j];
+                        }
+                        dh_cur[l - 1][k] = dh_cur[l - 1][k] + g;
+                    }
+                }
+            }
+
+            dh_carry = dh_next;
+            dc_carry = dc_next;
+        }
+
+        // ── Apply gradients (SGD) ──
+        for j in 0..4 * h {
+            for k in 0..i_sz {
+                self.w_ih[j][k] = self.w_ih[j][k] - lr * dw_ih[0][j][k];
+            }
+            for k in 0..h {
+                self.w_hh[j][k] = self.w_hh[j][k] - lr * dw_hh[0][j][k];
+            }
+            self.b_ih[j] = self.b_ih[j] - lr * db_ih[0][j];
+            self.b_hh[j] = self.b_hh[j] - lr * db_hh[0][j];
+        }
+        for l in 1..num_layers {
+            let layer = &mut self.extra_layers[l - 1];
+            for j in 0..4 * h {
+                for k in 0..h {
+                    layer.w_ih[j][k] = layer.w_ih[j][k] - lr * dw_ih[l][j][k];
+                }
+                for k in 0..h {
+                    layer.w_hh[j][k] = layer.w_hh[j][k] - lr * dw_hh[l][j][k];
+                }
+                layer.b_ih[j] = layer.b_ih[j] - lr * db_ih[l][j];
+                layer.b_hh[j] = layer.b_hh[j] - lr * db_hh[l][j];
+            }
+        }
+        for j in 0..o_sz {
+            for k in 0..h {
+                self.w_ho[j][k] = self.w_ho[j][k] - lr * dw_ho[j][k];
+            }
+            self.b_ho[j] = self.b_ho[j] - lr * db_ho[j];
+        }
+
+        let hidden: Vec<f64> = per_timestep[t_len - 1][num_layers - 1]
+            .hidden_state
+            .iter()
+            .map(|v| v.to_f64().unwrap_or(0.0))
+            .collect();
+        (loss, hidden)
     }
 }
 
@@ -998,5 +1260,76 @@ mod tests {
                 "f32 vs f64 parity mismatch at index {i}: f64={a} cast_f32={a32} native_f32={b} diff={diff}"
             );
         }
+    }
+
+    #[test]
+    fn test_train_pair_online_learning_loss_decreases() {
+        // P116.1: repeated single-pair updates on one sample must drive the
+        // MSE monotonically down (full-batch gradient step on a fixed sample).
+        let mut model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 8,
+            output_size: 1,
+            ..Default::default()
+        });
+        let seq = vec![vec![0.3, 0.7]];
+        let target = vec![1.0];
+
+        let mut losses = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let (loss, hidden) = model.train_pair(&seq, &target, 0.02);
+            assert_eq!(hidden.len(), 8, "hidden state must be hidden_size");
+            losses.push(loss);
+        }
+
+        assert!(
+            losses.iter().all(|l| l.is_finite()),
+            "loss must stay finite: {losses:?}"
+        );
+        assert!(
+            losses[99] < losses[0],
+            "online loss did not decrease: first={} last={}",
+            losses[0],
+            losses[99]
+        );
+        assert!(
+            losses[99] < 0.05,
+            "online learning did not converge: final={}",
+            losses[99]
+        );
+        for w in losses.windows(2) {
+            assert!(
+                w[1] <= w[0] + 1e-9,
+                "loss increased across a step: {} -> {}",
+                w[0],
+                w[1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_train_pair_multi_layer_updates_all_layers() {
+        // P116.1: unlike the batch `train` helper, `train_pair` must back-propagate
+        // through stacked layers (upper-layer weights change).
+        let mut model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 1,
+            num_layers: 2,
+        });
+        let before = model.extra_layers[0].w_ih.clone();
+        let seq = vec![vec![0.2, -0.4], vec![0.5, 0.1]];
+        let target = vec![0.8];
+
+        let (loss, hidden) = model.train_pair(&seq, &target, 0.05);
+
+        assert!(loss.is_finite(), "loss must be finite");
+        assert_eq!(hidden.len(), 4, "hidden state must be hidden_size");
+        let changed = model.extra_layers[0]
+            .w_ih
+            .iter()
+            .zip(before.iter())
+            .any(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (x - y).abs() > 1e-12));
+        assert!(changed, "layer-1 weights were not updated by train_pair");
     }
 }
