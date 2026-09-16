@@ -5,3 +5,7 @@
 ## 2025-09-13 - O(1) HNSW node lookup optimization via HashMap
 **Learning:** Using `BTreeMap` to index graph nodes in `HnswIndex` introduced $O(\log N)$ tree traversal overhead on every node lookup during greedy graph descent and beam search inner loops. Switching to `HashMap` and caching `&HnswNode` references during greedy descent reduces node lookup overhead from $O(\log N)$ to $O(1)$.
 **Action:** Use `HashMap` instead of `BTreeMap` for graph node storage in vector indexes and HNSW graphs, and cache node references across loop iterations in hot graph traversal algorithms.
+
+## 2026-09-15 - HNSW beam search pre-allocation and slice iteration optimization
+**Learning:** In HNSW graph search and batch vector similarity metrics, default collection allocations (`HashSet::new()`, `BinaryHeap::new()`, `.clone()`) trigger multiple dynamic heap re-allocations during beam expansion. Pre-allocating visited sets and candidate heaps with `with_capacity(ef * 2)` and iterating over connection slices instead of cloning `Vec<usize>` eliminates reallocations and vector copies on hot search paths. Additionally, popping max-heap results and reversing the slice extracts sorted nearest neighbours in $O(N)$ without general sorting overhead.
+**Action:** Pre-allocate candidate heaps and visited sets based on `ef` beam size, pass connection slices by reference during neighbor updates, and extract max-heap search candidates via pop-and-reverse.

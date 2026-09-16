@@ -459,13 +459,15 @@ pub fn batch_cosine_similarities(query: &[f64], keys: &[&[f64]]) -> Vec<f64> {
     if norm_q == 0.0 {
         return vec![0.0; keys.len()];
     }
+    // Pre-compute query magnitude once outside the loop to avoid redundant sqrt calls.
+    let sqrt_norm_q = norm_q.sqrt();
     keys.iter()
         .map(|k| {
             let (dot, _, sq_k) = dot_and_sq_norms(query, k);
             if sq_k == 0.0 {
                 0.0
             } else {
-                dot / (norm_q.sqrt() * sq_k.sqrt())
+                dot / (sqrt_norm_q * sq_k.sqrt())
             }
         })
         .collect()

@@ -289,13 +289,14 @@ impl HnswIndex {
             return Vec::new();
         }
         let ef = EF_SEARCH.max(k);
-        let mut visited = HashSet::new();
+        // Pre-allocate visited set and heaps with target capacity to eliminate dynamic reallocations.
+        let mut visited = HashSet::with_capacity(ef * 2);
 
         let entry_dist = self.node_distance(entry, query);
         // candidates: min-heap (closest popped first).
-        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::new();
+        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(ef * 2);
         // results: max-heap (farthest/worst on top), bounded to `ef`.
-        let mut results: BinaryHeap<Candidate> = BinaryHeap::new();
+        let mut results: BinaryHeap<Candidate> = BinaryHeap::with_capacity(ef + 1);
         candidates.push(Reverse(Candidate(entry_dist, entry)));
         results.push(Candidate(entry_dist, entry));
         visited.insert(entry);
@@ -336,8 +337,13 @@ impl HnswIndex {
             }
         }
 
-        let mut out: Vec<(f64, usize)> = results.into_vec().into_iter().map(|c| (c.0, c.1)).collect();
-        out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        // Extract candidates from max-heap in descending distance order into a pre-allocated vector,
+        // then reverse to get ascending distance order without general sorting overhead.
+        let mut out = Vec::with_capacity(results.len());
+        while let Some(c) = results.pop() {
+            out.push((c.0, c.1));
+        }
+        out.reverse();
         out.truncate(k);
         out
     }
@@ -407,14 +413,14 @@ impl HnswIndex {
                     Some(n) => n,
                     None => continue,
                 };
-                let existing_connections: Vec<usize> = if level < neighbor_node.connections.len() {
-                    neighbor_node.connections[level].clone()
+                let existing_connections: &[usize] = if level < neighbor_node.connections.len() {
+                    &neighbor_node.connections[level]
                 } else {
-                    Vec::new()
+                    &[]
                 };
                 let neighbor_vec = &neighbor_node.vector;
 
-                // Compute distances: existing connections + new node.
+                // Compute distances: existing connections + new node (avoiding connection vector clones).
                 let mut dists: Vec<(f64, usize)> = existing_connections
                     .iter()
                     .filter_map(|&nid| {
