@@ -15,6 +15,7 @@ akar-common = { path = "../akar-common", version = "0.2.1" }
 akar-function = { path = "../akar-function", version = "0.2.1" }
 akar-extension = { path = "../akar-extension", version = "0.2.1" }
 tracing.workspace = true
+ahash.workspace = true
 
 [lints]
 workspace = true

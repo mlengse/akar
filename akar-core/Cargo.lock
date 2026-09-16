@@ -481,6 +481,7 @@ dependencies = [
 name = "akar-vector"
 version = "0.2.1"
 dependencies = [
+ "ahash",
  "akar-common",
  "akar-extension",
  "akar-function",
