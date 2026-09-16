@@ -41,6 +41,10 @@
   - Pra-validasi → `ValueError`: input kosong dan `len(target) != output_size` — menghindari assert Rust muncul sebagai `PanicException` di Python.
   - `akar-python` workspace mandiri (`publish = false`) → tesnya **di luar** gate `test [akar-core]` (tetap 2,073). Tes: return shape + panjang hidden, loss turun antar panggilan, weight extra-layer ter-update, target/input salah ditolak.
 
+- **docs — audit Sulur ↔ Akar: `FINDINGS.md` + `PLAN.md`** · `[Uncommitted]` · tanpa perubahan kode
+  - `FINDINGS.md` (baru): F1 DDL `IF NOT EXISTS` membuat ulang storage → rows tak terjangkau — FIXED `508328a`; F2 jalur cepat `MERGE … SET` tidak pernah match baris yang ada (literal → duplicate PK, param → NULL PK, sedangkan `MERGE … RETURN`/`CREATE`/`MATCH … SET` benar) + dua hipotesis akar (hash_index pada NodeTable hasil clone vs param tidak tersubstitusi) + dampak nyata di Sulur; F3 traversal rel table besar patologis (1-hop anchored > 25 s pada 24.974 edge vs 0,05 s pada rel kecil); F4 identifier case-sensitive & tidak terdokumentasi; F5 WAL replay menolak start saat insert duplicate-PK.
+  - `PLAN.md` (baru): P1-MERGE-1, P1-PERF-1, P2-CASE-1, P2-WAL-1 — prasyarat toolchain, recipe build `akar-server`, skrip repro lewat daemon scratch, langkah + tes + kriteria lulus per item, dan urutan ketergantungan ke rencana Sulur.
+
 - **P116.1 — akar.lstm `train_pair`: online single-pair BPTT untuk semua layer** · `2367e3a` · gate **2,073** (+2)
   - `LstmModel::train_pair(input, target, lr) -> (mse_loss, Vec<f64>)` — satu forward + satu backward BPTT per panggilan, update weight **in-place** (beda dari `train()` batch yang mengembalikan model baru); hidden state layer terakhir dikembalikan sebagai `Vec<f64>` (presisi-independen).
   - BPTT menembus **semua** `num_layers` + proyeksi output — menutup keterbatasan `train()` yang hanya menerapkan gradien ke layer-0; `forward_cell_multi_all` + `forward_sequence_collect` baru mengumpulkan cell per-layer per-timestep.
