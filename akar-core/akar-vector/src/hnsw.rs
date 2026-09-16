@@ -23,6 +23,32 @@
 use std::cmp::Ordering;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// Fast non-cryptographic hasher optimized for `usize` node IDs in graph traversal.
+#[derive(Default)]
+struct FastNodeHasher(u64);
+
+impl Hasher for FastNodeHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.0 = (i as u64).wrapping_mul(0x9e3779b97f4a7c15);
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self.0.rotate_left(8) ^ (b as u64);
+        }
+    }
+}
+
+type FastHashSet<T> = HashSet<T, BuildHasherDefault<FastNodeHasher>>;
 
 // ---------------------------------------------------------------------------
 // Constants (HNSW defaults matching the reference implementation)
@@ -289,7 +315,7 @@ impl HnswIndex {
             return Vec::new();
         }
         let ef = EF_SEARCH.max(k);
-        let mut visited = HashSet::new();
+        let mut visited = FastHashSet::default();
 
         let entry_dist = self.node_distance(entry, query);
         // candidates: min-heap (closest popped first).
@@ -400,18 +426,32 @@ impl HnswIndex {
 
             // Add connections from neighbours back to new node
             for &neighbor_id in &neighbors {
-                // First, pre-compute distances for ALL existing connections of
-                // this neighbor at this level, plus the new connection to `id`.
-                // We do this BEFORE taking any mutable borrow.
                 let neighbor_node = match self.nodes.get(&neighbor_id) {
                     Some(n) => n,
                     None => continue,
                 };
-                let existing_connections: Vec<usize> = if level < neighbor_node.connections.len() {
-                    neighbor_node.connections[level].clone()
+                let max_conn = if level == 0 { M_MAX } else { M };
+                let current_conn_len = if level < neighbor_node.connections.len() {
+                    neighbor_node.connections[level].len()
                 } else {
-                    Vec::new()
+                    0
                 };
+
+                // Fast path: if the neighbor hasn't reached max_conn yet, we don't need
+                // to recompute distances for all existing connections — simply append `id`.
+                if current_conn_len < max_conn {
+                    if let Some(n) = self.nodes.get_mut(&neighbor_id) {
+                        while n.connections.len() <= level {
+                            n.connections.push(Vec::new());
+                        }
+                        n.connections[level].push(id);
+                    }
+                    continue;
+                }
+
+                // Slow path: neighbor has reached max_conn connections, so pre-compute
+                // distances for existing connections + new node to prune the worst neighbor.
+                let existing_connections: Vec<usize> = neighbor_node.connections[level].clone();
                 let neighbor_vec = &neighbor_node.vector;
 
                 // Compute distances: existing connections + new node.
@@ -429,15 +469,11 @@ impl HnswIndex {
                 let d = self.metric.compute(&vector, neighbor_vec);
                 dists.push((d, id));
 
-                let max_conn = if level == 0 { M_MAX } else { M };
                 dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
                 dists.truncate(max_conn);
 
                 // Now take the mutable borrow and write back
                 if let Some(n) = self.nodes.get_mut(&neighbor_id) {
-                    while n.connections.len() <= level {
-                        n.connections.push(Vec::new());
-                    }
                     n.connections[level] = dists.into_iter().map(|(_, nid)| nid).collect();
                 }
             }

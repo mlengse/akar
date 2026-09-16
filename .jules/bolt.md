@@ -5,3 +5,7 @@
 ## 2025-09-13 - O(1) HNSW node lookup optimization via HashMap
 **Learning:** Using `BTreeMap` to index graph nodes in `HnswIndex` introduced $O(\log N)$ tree traversal overhead on every node lookup during greedy graph descent and beam search inner loops. Switching to `HashMap` and caching `&HnswNode` references during greedy descent reduces node lookup overhead from $O(\log N)$ to $O(1)$.
 **Action:** Use `HashMap` instead of `BTreeMap` for graph node storage in vector indexes and HNSW graphs, and cache node references across loop iterations in hot graph traversal algorithms.
+
+## 2025-09-13 - Fast-path HNSW neighbor connection updates and FastHashSet visited tracking
+**Learning:** During HNSW graph construction, updating neighbor reverse connections before maximum connection degree (`max_conn`) is reached does not require recomputing distances across all existing neighbors. Adding a fast-path append avoids up to 32 vector distance calculations per neighbor update. Additionally, using a non-cryptographic `FastNodeHasher` for integer node IDs in `visited` sets reduces hashing overhead during beam search graph traversal.
+**Action:** Fast-path connection updates on nodes below degree capacity during graph construction, and use fast integer hashing (`BuildHasherDefault<FastNodeHasher>`) for visited node sets in graph search algorithms.
