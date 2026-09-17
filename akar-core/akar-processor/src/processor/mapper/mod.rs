@@ -41,11 +41,19 @@ pub struct ExecutionContext<'p> {
     /// Active transaction id threaded into write operators so inserts/deletes
     /// use MVCC-aware storage variants (P52.18).
     pub txn_id: Option<u64>,
+    /// Column-pruning set for the currently executing Extend, collected by
+    /// `execute_internal` from the operator's downstream tail. `None` means
+    /// the Extend must materialise every column (all consumers unanalysable,
+    /// or executing inside a child sub-plan).
+    pub extend_prune: Option<crate::processor::extend_prune::ExtendPrune>,
 }
 
 impl<'p> ExecutionContext<'p> {
     pub fn execute_children(&mut self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
-        self.processor.execute_internal(operators)
+        // Child sub-plan execution must not prune Extends: the child's tail
+        // `operators[i+1..]` lacks the outer projection/join references, so
+        // pruning here would drop columns required above (extend_prune.rs).
+        self.processor.execute_internal(operators, false)
     }
 
     /// Resolve table data and column definitions for a scan node.
@@ -178,6 +186,7 @@ impl PlanMapper {
         op: &LogicalOperator,
         next_op: Option<&LogicalOperator>,
         current_input: Vec<DataChunk>,
+        limit_budget: Option<u64>,
         ctx: &mut ExecutionContext,
     ) -> Result<Vec<DataChunk>, ProcessorError> {
         match op {
@@ -197,7 +206,7 @@ impl PlanMapper {
             | LogicalOperator::Intersect(_)
             | LogicalOperator::CrossProduct(_)
             | LogicalOperator::OptionalMatch(_)
-            | LogicalOperator::RecursiveExtend(_) => map_join::map_and_execute_join(op, current_input, ctx),
+            | LogicalOperator::RecursiveExtend(_) => map_join::map_and_execute_join(op, current_input, limit_budget, ctx),
 
             // Aggregates
             LogicalOperator::Aggregate(_) | LogicalOperator::CountRelTable(_) => {

@@ -941,6 +941,50 @@ mod tests {
         assert_eq!(result[0].size, 6); // 3 +� 2 = 6
     }
 
+    #[test]
+    fn test_cross_product_budget_truncates() {
+        let cross = PhysicalCrossProduct;
+        // Full product is 3 x 5 = 15 rows; budget 7 must emit only 7.
+        let left = vec![make_i64_chunk(&[1, 2, 3])];
+        let right = vec![make_i64_chunk(&[4, 5, 6, 7, 8])];
+        let result = cross
+            .execute_binary_budgeted(&left, &right, Some(7))
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].size, 7);
+        // Row order preserved: left 1 -> all five right cols, then left 2 -> 4,5
+        assert_eq!(result[0].get_i64(0, 0), Some(1));
+        assert_eq!(result[0].get_i64(0, 4), Some(1));
+        assert_eq!(result[0].get_i64(0, 5), Some(2));
+        assert_eq!(result[0].get_i64(0, 6), Some(2));
+    }
+
+    #[test]
+    fn test_cross_product_budget_larger_than_full() {
+        let cross = PhysicalCrossProduct;
+        // Budget above the natural size emits everything.
+        let left = vec![make_i64_chunk(&[1, 2])];
+        let right = vec![make_i64_chunk(&[3, 4, 5])];
+        let result = cross
+            .execute_binary_budgeted(&left, &right, Some(10_000))
+            .unwrap();
+        assert_eq!(result[0].size, 6);
+    }
+
+    #[test]
+    fn test_cross_product_unbounded_over_safety_cap_errors() {
+        let cross = PhysicalCrossProduct;
+        // Without a budget, a product above the safety cap must error instead
+        // of materializing a multi-GB chunk (previously an OOM / daemon killer).
+        let left = vec![make_i64_chunk(&(0..11_000).collect::<Vec<_>>())];
+        let right = vec![make_i64_chunk(&(0..11_000).collect::<Vec<_>>())];
+        let err = cross.execute_binary(&left, &right).unwrap_err();
+        assert!(
+            err.to_string().contains("safety limit"),
+            "unexpected error: {err}"
+        );
+    }
+
     // ==================== SemiJoin / AntiJoin Tests ====================
 
     #[test]

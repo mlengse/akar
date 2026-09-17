@@ -1,6 +1,7 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::common::{hash_value_into, value_hash};
 use crate::physical::types::{HashJoinTable, OperatorResult};
+use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use arrow::array::ArrayRef;
@@ -96,10 +97,44 @@ fn chunk_cells_equal(
 /// Combines every row from the left side with every row from the right side.
 /// The left side is the first half of input chunks, the right side is the
 /// second half.
+///
+/// Output is row-bounded: a caller-supplied budget (e.g. a pushed-down LIMIT)
+/// truncates the emitted rows so `left_rows * right_rows` is never fully
+/// materialized in memory. Without an explicit budget a safety cap
+/// (``AKAR_MAX_CROSS_ROWS``, default 100_000) applies and produces a clear
+/// error instead of exhausting the address space (previous behaviour: a
+/// cross join of 1.4k x 1.4k nodes ballooned the daemon to multi-GB and
+/// triggered `memory allocation of N bytes failed`).
 pub struct PhysicalCrossProduct;
+
+/// Default safety cap for unbounded cross products (overridable via env).
+fn cross_max_rows() -> usize {
+    static MAX: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("AKAR_MAX_CROSS_ROWS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(100_000)
+    })
+}
 
 impl PhysicalCrossProduct {
     pub fn execute_binary(&self, left_chunks: &[DataChunk], right_chunks: &[DataChunk]) -> OperatorResult {
+        self.execute_binary_budgeted(left_chunks, right_chunks, None)
+    }
+
+    /// Execute with an optional row budget.
+    ///
+    /// `budget` is the maximum number of output rows the caller is willing to
+    /// receive (typically `LIMIT + SKIP` pushed down from the query). When
+    /// `None`, the unbounded-cap safety guard from [`cross_max_rows`] applies
+    /// and returns `Err` if the full product would exceed it.
+    pub fn execute_binary_budgeted(
+        &self,
+        left_chunks: &[DataChunk],
+        right_chunks: &[DataChunk],
+        budget: Option<u64>,
+    ) -> OperatorResult {
         if left_chunks.is_empty() || right_chunks.is_empty() {
             return Ok(vec![]);
         }
@@ -112,11 +147,29 @@ impl PhysicalCrossProduct {
             return Ok(vec![]);
         }
 
+        // Bound the number of emitted rows. With an explicit budget the caller
+        // (LIMIT pushdown) accepts a truncated prefix; without one we refuse to
+        // materialize a product larger than the safety cap so an unbounded
+        // cross join cannot OOM the process.
+        let full_rows = left_rows.saturating_mul(right_rows);
+        let emit_rows = match budget {
+            Some(b) => full_rows.min(b as usize),
+            None => {
+                if full_rows > cross_max_rows() {
+                    return Err(ProcessorError::Execution(format!(
+                        "cross product of {left_rows} x {right_rows} = {full_rows} rows exceeds safety limit {}; add a LIMIT or a join condition",
+                        cross_max_rows()
+                    )));
+                }
+                full_rows
+            }
+        };
+
         // Collect left and right values into column-major Vec<Vec<Value>>
         let num_left_cols = left_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
         let num_right_cols = right_chunks.first().map(|c| c.num_fields()).unwrap_or(0);
         let total_cols = num_left_cols + num_right_cols;
-        let total_rows = left_rows * right_rows;
+        let total_rows = emit_rows;
 
         let mut left_values: Vec<Vec<Value>> = (0..num_left_cols).map(|_| Vec::with_capacity(left_rows)).collect();
         for chunk in left_chunks {
@@ -168,7 +221,7 @@ impl PhysicalCrossProduct {
             .collect();
 
         let mut out_row = 0usize;
-        for lr in 0..left_rows {
+        'outer: for lr in 0..left_rows {
             for rr in 0..right_rows {
                 for (col, field) in output_fields.iter_mut().enumerate().take(num_left_cols) {
                     let val = &left_values[col][lr];
@@ -179,6 +232,11 @@ impl PhysicalCrossProduct {
                     let _ = output_fields[num_left_cols + col].set_value(out_row, val);
                 }
                 out_row += 1;
+                // When the caller supplied a budget we stop early instead of
+                // materializing the full Cartesian product.
+                if out_row >= total_rows {
+                    break 'outer;
+                }
             }
         }
 

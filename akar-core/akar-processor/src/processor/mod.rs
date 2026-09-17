@@ -7,6 +7,7 @@
 //! 4. Limit/OrderBy/Aggregate are applied last
 
 pub mod chunk_helpers;
+pub mod extend_prune;
 pub mod graph_source;
 pub mod join_helpers;
 pub mod mapper;
@@ -19,6 +20,7 @@ mod tests_only;
 pub mod union_helpers;
 
 pub use chunk_helpers::*;
+pub use extend_prune::*;
 pub use graph_source::*;
 pub use join_helpers::*;
 pub use mapper::*;
@@ -32,6 +34,22 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::{FunctionRegistry, TableFunction};
 use akar_planner::logical_operator::LogicalOperator;
+
+/// Walk a suffix of the logical plan looking for the next `Limit`, passing only
+/// through operators that preserve the row-count semantics (Projection).
+/// `Filter`/`Aggregate`/`OrderBy`/joins are treated as barriers so the pushed
+/// budget cannot change the query result. Returns `limit + offset` as the
+/// number of rows an upstream operator may safely emit.
+fn forward_limit_budget(tail: &[LogicalOperator]) -> Option<u64> {
+    for op in tail {
+        match op {
+            LogicalOperator::Projection(_) => {}
+            LogicalOperator::Limit(l) => return Some(l.limit.saturating_add(l.offset)),
+            _ => return None,
+        }
+    }
+    None
+}
 use akar_storage::table::TableCatalog;
 use akar_storage::wal::{WALRecord, WalSink};
 use akar_transaction::UndoRecord;
@@ -298,10 +316,18 @@ impl QueryProcessor {
 
     /// Execute a sequence of logical operators by mapping them to physical operators.
     pub fn execute(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
-        self.execute_internal(operators)
+        // Top level: allow Extend column pruning. Child sub-plan execution
+        // (`execute_children`) disables it — its tail `operators[i+1..]` does
+        // not contain the outer projection/join references, so pruning there
+        // would over-drop columns and break joins/unions (extend_prune.rs).
+        self.execute_internal(operators, true)
     }
 
-    pub fn execute_internal(&self, operators: &[LogicalOperator]) -> Result<Vec<DataChunk>, ProcessorError> {
+    pub fn execute_internal(
+        &self,
+        operators: &[LogicalOperator],
+        allow_prune: bool,
+    ) -> Result<Vec<DataChunk>, ProcessorError> {
         if operators.is_empty() {
             return Ok(vec![DataChunk {
                 fields: vec![],
@@ -322,6 +348,51 @@ impl QueryProcessor {
             });
             let next_op = operators.get(i + 1);
 
+            // PUSHED-DOWN LIMIT BUDGET: scan the remaining plan for the next
+            // LIMIT, passing only through Projection (row-count preserving)
+            // operators. When found, carry `limit + skip` down so expensive
+            // operators like CrossProduct can truncate instead of fully
+            // materializing `left * right` rows (see PhysicalCrossProduct).
+            let limit_budget = forward_limit_budget(&operators[i + 1..]);
+
+            // EXTEND COLUMN PRUNING: when executing an Extend at the top level,
+            // collect the columns the downstream tail actually references so the
+            // extend only materializes those (the rest are duplicates of the
+            // input/dest/rel columns at full-scan width — the memory blow-up
+            // for big relationship scans). Only safe for the top-level flat
+            // plan, hence gated on `allow_prune`.
+            let extend_prune = if allow_prune {
+                match op {
+                    // Note: only plain Extend is pruned today. OptionalExtend /
+                    // RecursiveExtend / join sides run through `execute_children`
+                    // (allow_prune = false) or are conservatively skipped.
+                    LogicalOperator::Extend(_) => {
+                        let pr = extend_prune::collect_extend_prune(&operators[i + 1..]);
+                        if std::env::var("AKAR_DEBUG_EXTEND").is_ok() {
+                            match &pr {
+                                Some(p) => eprintln!(
+                                    "[extend_prune] op#{} allow_prune tail len={} fields={} vars={}",
+                                    i,
+                                    operators[i + 1..].len(),
+                                    p.fields.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
+                                    p.whole_vars.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(",")
+                                ),
+                                None => {
+                                    eprintln!("[extend_prune] op#{} DISABLED (tail not analyzable)", i);
+                                    for (ti, t) in operators[i + 1..].iter().enumerate() {
+                                        eprintln!("[extend_prune]   tail[{}] {:#?}", ti, t);
+                                    }
+                                }
+                            }
+                        }
+                        pr
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
             let mut ctx = mapper::ExecutionContext {
                 processor: self,
                 function_registry: self.function_registry.clone(),
@@ -335,9 +406,10 @@ impl QueryProcessor {
                 commit_history: self.commit_history.clone(),
                 written_rows: Vec::new(),
                 txn_id: self.txn_id,
+                extend_prune,
             };
 
-            let result = mapper::PlanMapper::map_and_execute(op, next_op, current, &mut ctx)?;
+            let result = mapper::PlanMapper::map_and_execute(op, next_op, current, limit_budget, &mut ctx)?;
 
             // Accumulate written rows from this operator into the processor's write set
             if !ctx.written_rows.is_empty() {

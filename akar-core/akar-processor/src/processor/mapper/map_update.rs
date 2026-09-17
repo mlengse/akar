@@ -124,6 +124,7 @@ pub fn map_and_execute_update(
                 dst_table_id: ex.dst_table_id,
                 fts_query,
                 table_catalog,
+                prune: std::mem::take(&mut ctx.extend_prune),
             };
             let result = extend_op.execute(current_input)?;
             // Record written rows for OCC conflict detection

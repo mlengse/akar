@@ -12,6 +12,7 @@ use crate::processor::union_helpers::{flatten_union_child, merge_optional_chunks
 pub fn map_and_execute_join(
     op: &LogicalOperator,
     current_input: Vec<DataChunk>,
+    limit_budget: Option<u64>,
     ctx: &mut ExecutionContext,
 ) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
@@ -120,7 +121,7 @@ pub fn map_and_execute_join(
             let right_chunks = ctx.execute_children(&right_ops)?;
 
             let cross = PhysicalCrossProduct;
-            let result = cross.execute_binary(&left_chunks, &right_chunks)?;
+            let result = cross.execute_binary_budgeted(&left_chunks, &right_chunks, limit_budget)?;
 
             Ok(result)
         }

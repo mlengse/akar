@@ -620,6 +620,29 @@ pub struct PhysicalExtend {
     pub fts_query: Option<PhysicalFtsScan>,
     /// Table catalog for data access.
     pub table_catalog: Arc<TableCatalog>,
+    /// Column-pruning set collected from the downstream plan tail. When
+    /// `Some`, only referenced columns are materialised for input fields, rel
+    /// properties and dest node fields (identity `_id`/`id` columns are always
+    /// kept). This is what makes full relationship-table scans cheap: an
+    /// unpruned `Memory`/`Connected` scan duplicates ~46 columns (incl. large
+    /// embedding Lists) per edge — gigabytes for 50k edges.
+    pub prune: Option<crate::processor::extend_prune::ExtendPrune>,
+}
+
+/// Default safety cap for unbounded extends that must materialise every
+/// column (pruning disabled, e.g. an unanalysable tail like a pure `count(*)`
+/// or a query feeding a join). Prevents the previous OOM (`memory allocation
+/// of N bytes failed`) on full relationship-table scans. Overridable via
+/// `AKAR_MAX_EXTEND_ROWS`. When pruning is active the cap is not consulted —
+/// the output carries only referenced columns and stays small.
+fn extend_max_rows() -> u64 {
+    static MAX: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("AKAR_MAX_EXTEND_ROWS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5_000_000)
+    })
 }
 
 impl PhysicalExtend {
@@ -739,42 +762,100 @@ impl PhysicalExtend {
                 continue;
             }
 
+            // Unbound full-width extends (pruning disabled) must remain within
+            // a cap so a huge relationship table yields a clean error instead
+            // of an OOM (mirrors the cross-product guard).
+            if self.prune.is_none() && total_rows as u64 > extend_max_rows() {
+                return Err(format!(
+                    "Extend `{}` would produce {} rows ({} edges from {} bound rows) above the {} safety cap; \
+                     add a projection/filter/limit or raise AKAR_MAX_EXTEND_ROWS",
+                    self.rel_table_name, total_rows, total_rows, chunk.size, extend_max_rows()
+                )
+                .into());
+            }
+
             // Build output:
             // Column layout: [input_fields | rel_properties | dest_node_fields | dest_node_id]
             let num_input_fields = chunk.fields.len();
             let num_rel_cols = rel_cols.len();
             let num_dest_cols = dest_cols.len();
-            let num_out_cols = num_input_fields + num_rel_cols + num_dest_cols + 1;
+
+            // COLUMN PRUNING: select which input/rel/dest columns to
+            // materialise, based on the downstream tail's references. Identity
+            // columns (`_id`, `id`) are always kept via `keep_column`.
+            let rel_prefix = if self.rel_var.is_empty() {
+                &self.rel_table_name
+            } else {
+                &self.rel_var
+            };
+            let (kept_input, kept_rel, kept_dest) = match &self.prune {
+                Some(pr) => {
+                    let ki: Vec<usize> = (0..num_input_fields)
+                        .filter(|&c| {
+                            let name = chunk.field_names.get(c).map(String::as_str).unwrap_or("");
+                            crate::processor::extend_prune::keep_column(pr, name)
+                        })
+                        .collect();
+                    let kr: Vec<usize> = (0..num_rel_cols)
+                        .filter(|&c| {
+                            let col_name = rel_cols.get(c).map(|c| c.name.as_str()).unwrap_or("");
+                            let name = format!("{}.{}", rel_prefix, col_name);
+                            crate::processor::extend_prune::keep_column(pr, &name)
+                        })
+                        .collect();
+                    let kd: Vec<usize> = (0..num_dest_cols)
+                        .filter(|&c| {
+                            let col_name = dest_cols.get(c).map(|c| c.name.as_str()).unwrap_or("");
+                            let name = format!("{}.{}", self.dst_node_var, col_name);
+                            crate::processor::extend_prune::keep_column(pr, &name)
+                        })
+                        .collect();
+                    (ki, kr, kd)
+                }
+                None => (
+                    (0..num_input_fields).collect(),
+                    (0..num_rel_cols).collect(),
+                    (0..num_dest_cols).collect(),
+                ),
+            };
+            let num_kept_input = kept_input.len();
+            let num_kept_rel = kept_rel.len();
+            let num_kept_dest = kept_dest.len();
+            let num_out_cols = num_kept_input + num_kept_rel + num_kept_dest + 1;
 
             // Build column-major data
             let mut out_data: Vec<Vec<Value>> = vec![Vec::with_capacity(total_rows); num_out_cols];
             let mut out_dst_ids: Vec<Value> = Vec::with_capacity(total_rows);
 
             for &(input_row, dst_offset, edge_idx) in &row_mappings {
-                // Copy input fields
-                for col in 0..num_input_fields {
+                // Copy kept input fields
+                let mut out_idx = 0;
+                for &col in &kept_input {
                     let val = chunk.get_value(col, input_row).unwrap_or(Value::Null);
-                    out_data[col].push(val);
+                    out_data[out_idx].push(val);
+                    out_idx += 1;
                 }
-                // Copy rel properties
-                for col in 0..num_rel_cols {
+                // Copy kept rel properties
+                for &col in &kept_rel {
                     let val = rel_props
                         .get(col)
                         .and_then(|c| c.get(edge_idx))
                         .cloned()
                         .unwrap_or(Value::Null);
-                    out_data[num_input_fields + col].push(val);
+                    out_data[out_idx].push(val);
+                    out_idx += 1;
                 }
-                // Copy dest node properties (row = dst_offset, a row offset into
-                // the destination node table; P53.12).
+                // Copy kept dest node properties (row = dst_offset, a row offset
+                // into the destination node table; P53.12).
                 let dest_row = dst_offset as usize;
-                for col in 0..num_dest_cols {
+                for &col in &kept_dest {
                     let val = dest_data
                         .get(col)
                         .and_then(|c| c.get(dest_row))
                         .cloned()
                         .unwrap_or(Value::Null);
-                    out_data[num_input_fields + num_rel_cols + col].push(val);
+                    out_data[out_idx].push(val);
+                    out_idx += 1;
                 }
                 // Internal dest node id (`<dst>._id` = row offset)
                 out_dst_ids.push(Value::Int64(dst_offset as i64));
@@ -788,8 +869,8 @@ impl PhysicalExtend {
             let mut field_type_ids: Vec<PhysicalTypeID> = Vec::with_capacity(num_out_cols);
             let mut field_names = Vec::with_capacity(num_out_cols);
 
-            // Input field names (already prefixed)
-            for col in 0..num_input_fields {
+// Input field names (already prefixed)
+            for (out_pos, &col) in kept_input.iter().enumerate() {
                 let phys_type = chunk.field_types[col];
                 // Strings must go through the Arrow builder path too: the legacy
                 // ValueVector inline storage caps at 255 bytes, so a node column
@@ -801,7 +882,7 @@ impl PhysicalExtend {
                 );
                 if needs_arrow_builder {
                     fields.push(
-                        crate::expression_evaluator::build_arrow_from_values(&out_data[col], phys_type, total_rows)
+                        crate::expression_evaluator::build_arrow_from_values(&out_data[out_pos], phys_type, total_rows)
                             .map_err(|e| e.to_string())?
                             .array,
                     );
@@ -810,12 +891,12 @@ impl PhysicalExtend {
                     let mut v = ValueVector::new(phys_type, total_rows);
                     v.resize(total_rows);
                     for row in 0..total_rows {
-                        store_value_in_vector(&mut v, row, &out_data[col][row])?;
+                        store_value_in_vector(&mut v, row, &out_data[out_pos][row])?;
                     }
                     fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                     field_type_ids.push(v.physical_type());
                 }
-                if col < chunk.field_names.len() {
+if col < chunk.field_names.len() {
                     field_names.push(chunk.field_names[col].clone());
                 } else {
                     field_names.push(format!("field_{}", col));
@@ -823,7 +904,8 @@ impl PhysicalExtend {
             }
 
             // Rel field names (prefixed with rel table name)
-            for col in 0..num_rel_cols {
+            for (out_pos, &col) in kept_rel.iter().enumerate() {
+                let out_idx = num_kept_input + out_pos;
                 let phys_type = if col < rel_cols.len() {
                     PhysicalScan::logical_to_physical(&rel_cols[col].logical_type)
                 } else {
@@ -836,7 +918,7 @@ impl PhysicalExtend {
                 ) {
                     fields.push(
                         crate::expression_evaluator::build_arrow_from_values(
-                            &out_data[num_input_fields + col],
+                            &out_data[out_idx],
                             phys_type,
                             total_rows,
                         )
@@ -848,22 +930,18 @@ impl PhysicalExtend {
                     let mut v = ValueVector::new(phys_type, total_rows);
                     v.resize(total_rows);
                     for row in 0..total_rows {
-                        store_value_in_vector(&mut v, row, &out_data[num_input_fields + col][row])?;
+                        store_value_in_vector(&mut v, row, &out_data[out_idx][row])?;
                     }
                     fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                     field_type_ids.push(v.physical_type());
                 }
-                let rel_prefix = if self.rel_var.is_empty() {
-                    &self.rel_table_name
-                } else {
-                    &self.rel_var
-                };
                 let col_name = rel_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
                 field_names.push(format!("{}.{}", rel_prefix, col_name));
             }
 
             // Dest field names (prefixed with dest variable)
-            for col in 0..num_dest_cols {
+            for (out_pos, &col) in kept_dest.iter().enumerate() {
+                let out_idx = num_kept_input + num_kept_rel + out_pos;
                 let phys_type = if col < dest_cols.len() {
                     PhysicalScan::logical_to_physical(&dest_cols[col].logical_type)
                 } else {
@@ -877,7 +955,7 @@ impl PhysicalExtend {
                 if needs_arrow_builder {
                     fields.push(
                         crate::expression_evaluator::build_arrow_from_values(
-                            &out_data[num_input_fields + num_rel_cols + col],
+                            &out_data[out_idx],
                             phys_type,
                             total_rows,
                         )
@@ -889,14 +967,13 @@ impl PhysicalExtend {
                     let mut v = ValueVector::new(phys_type, total_rows);
                     v.resize(total_rows);
                     for row in 0..total_rows {
-                        store_value_in_vector(&mut v, row, &out_data[num_input_fields + num_rel_cols + col][row])?;
+                        store_value_in_vector(&mut v, row, &out_data[out_idx][row])?;
                     }
                     fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                     field_type_ids.push(v.physical_type());
                 }
-                let prefix = &self.dst_node_var;
                 let col_name = dest_cols.get(col).map(|c| c.name.as_str()).unwrap_or("");
-                field_names.push(format!("{}.{}", prefix, col_name));
+                field_names.push(format!("{}.{}", self.dst_node_var, col_name));
             }
 
             // Internal dest node id (`<dst>._id` = row offset) so subsequent
