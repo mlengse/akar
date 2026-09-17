@@ -41,6 +41,13 @@
   - `FINDINGS.md` (baru): F1 DDL `IF NOT EXISTS` membuat ulang storage → rows tak terjangkau — FIXED `508328a`; F2 jalur cepat `MERGE … SET` tidak pernah match baris yang ada (literal → duplicate PK, param → NULL PK, sedangkan `MERGE … RETURN`/`CREATE`/`MATCH … SET` benar) + dua hipotesis akar (hash_index pada NodeTable hasil clone vs param tidak tersubstitusi) + dampak nyata di Sulur; F3 traversal rel table besar patologis (1-hop anchored > 25 s pada 24.974 edge vs 0,05 s pada rel kecil); F4 identifier case-sensitive & tidak terdokumentasi; F5 WAL replay menolak start saat insert duplicate-PK.
   - `implementation plan.md` (kini **satu-satunya** dokumen perencanaan; konten `PLAN.md` digabung ke sini lalu `PLAN.md` dihapus): P1-MERGE-1, P1-PERF-1, P2-CASE-1, P2-WAL-1 — prasyarat toolchain, recipe build `akar-server`, skrip repro lewat daemon scratch, langkah + tes + kriteria lulus per item, dan urutan ketergantungan ke rencana Sulur.
 
+### Fixed
+
+- **P1-MERGE-1 — statement-level `MERGE … SET` (tanpa `RETURN`) kini match baris yang ada, param PK tidak lagi `NULL`** · `ff1a995` · gate **2,091** (+5)
+  - Akar sebenarnya: `MERGE … SET` tanpa `RETURN` bind sebagai `BoundQuery` dengan klausa `BoundClause::BoundMerge`; loop `substitute_params_in_statement` (`akar-main/src/connection/substitute.rs`) tidak punya arm klausa itu → jatuh ke `other => other.clone()` → `$param` tetap `Expression::Parameter` → saat dijalankan planner, `PhysicalMerge::eval_const` mengevaluasi PK jadi `Value::Null` → error "NULL value not allowed for primary key" (F2). Hipotesis (a) clone-divergence `hash_index` **tertutup**: `hash_index` milik bersama pada entri dashmap, dipakai INSERT & fast-path MERGE (match literal selalu benar dalam proses).
+  - Fix: arm `BoundClause::BoundMerge` baru yang membangun ulang `BoundMerge` dengan `properties`, `patterns[].node.properties`, `patterns[].edge.properties`, `on_create`, `on_match` ter-substitusi — cermin arm statement-level (`BoundStatement::BoundMerge`), dan `other` catch-all dihapus (match exhaustive).
+  - Tes regresi baru `akar-main/tests/test_merge.rs` (5): literal match existing row, literal idempotent upsert, param roundtrip create-then-match, param match literal-created row, param PK not-null. Gate `test [akar-core]`: 2,091 passed / 0 failed / 0 ignored (127 binaries).
+
 ## [0.2.2] - 2026-09-17
 
 ### Added

@@ -36,10 +36,10 @@ mematikan daemon → tool `sulur_*` UNAVAILABLE untuk sesi berjalan (Sulur `docs
 (streaming/limit pushdown; jangan materialisasi seluruh rel + kolom embedding), dengan
 kriteria lulus eksplisit pada RSS.
 
-## F2 — `MERGE ... SET` (jalur cepat `Connection`) tidak pernah match baris yang ada
+## F2 — `MERGE ... SET` (jalur cepat `Connection`) tidak pernah match baris yang ada — FIXED
 
 **Severity:** high (root fix BELUM; mematikan fase AFE Sulur + memicu ledakan edge)
-**Tanggal:** 2026-09-16 · **Ranah:** akar (semantik MERGE)
+**Tanggal:** 2026-09-16 · **Ranah:** akar (semantik MERGE) · **Status:** SELESAI → CHANGELOG `ff1a995` (P1-MERGE-1)
 
 **Repro (daemon live, tabel `Meta` PK `key`, baris sudah ada):**
 
@@ -79,7 +79,21 @@ Dua gejala, satu lokasi:
   berisiko membuat edge **duplikat** setiap kali dipanggil, bukan memperbarui weight →
   selaras dengan kenaikan `Connected` 972 → 24.974 dalam satu hari.
 
-**Status:** OPEN — rencana perbaikan di `implementation plan.md` P1-MERGE-1.
+**Resolusi (P1-MERGE-1, `ff1a995`):** akar dari hipotesis (a)/(b) — `hash_index`
+adalah `HashIndex<String>` milik bersama pada entri dashmap (`get_node_table_by_name_mut`),
+di-share jalur INSERT dan fast-path MERGE, jadi tidak ada divergensi clone dalam proses.
+Akar yang terkonfirmasi adalah **substitusi param**: `MERGE … SET` tanpa `RETURN` bind
+sebagai `BoundStatement::BoundQuery` dengan klausa `BoundClause::BoundMerge`, dan loop
+`substitute_params_in_statement` (`akar-main/src/connection/substitute.rs`) tidak punya arm
+untuk klausa itu → `other => other.clone()` → `Expression::Parameter` masih hidup → sewaktu
+dijalankan planner, `PhysicalMerge::eval_const` mengevaluasi PK jadi `Value::Null` →
+"NULL value not allowed for primary key". (Gejala literal duplicate-PK juga benigna:
+laporan daemon berasal dari jalur yang sama, dalam proses ini literal selalu MATCH.)
+Fix: arm `BoundClause::BoundMerge` baru yang membuat ulang `BoundMerge` dengan
+`properties` / `patterns[].node.properties` / `patterns[].edge.properties` /
+`on_create` / `on_match` ter-substitusi (cermin arm statement-level). Regresi:
+`akar-core/akar-main/tests/test_merge.rs` (5 tes, literal + param). Gate
+`test [akar-core]`: **2,091 passed / 0 failed / 0 ignored**.
 
 ---
 
