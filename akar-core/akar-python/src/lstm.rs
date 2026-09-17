@@ -193,12 +193,24 @@ impl LstmModel {
 }
 
 /// Register this submodule on the parent `akar` module.
+///
+/// `m.add_submodule` (PyO3 0.29) hanya menempel `lstm` sebagai atribut parent —
+/// TIDAK mendaftarkannya di `sys.modules`. Karena `akar` adalah extension module
+/// (tanpa `__path__`), `import akar.lstm` / `from akar.lstm import LstmModel`
+/// gagal ("'akar' is not a package"). Daftarkan nama dotted penuh di
+/// `sys.modules` agar import machinery menemukan submodule-nya (P118.2).
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sub = PyModule::new(m.py(), "lstm")?;
     sub.add_class::<LstmModel>()?;
     sub.add_class::<LstmCell>()?;
     sub.add_class::<TrainingResult>()?;
     m.add_submodule(&sub)?;
+
+    let name = m.name()?;
+    let parent = name.to_cow()?;
+    let full = format!("{parent}.lstm");
+    let sys_modules = m.py().import("sys")?.getattr("modules")?;
+    sys_modules.set_item(full, &sub)?;
     Ok(())
 }
 
@@ -417,5 +429,29 @@ mod tests {
         let path = dir.path().join("bad.bin");
         std::fs::write(&path, b"not-an-lstm").unwrap();
         assert!(LstmModel::load_bin(path.to_str().unwrap()).is_err());
+    }
+
+    /// P118.2: `import akar.lstm; from akar.lstm import LstmModel` harus
+    /// berfungsi — `register` wajib mendaftarkan submodule di `sys.modules`
+    /// (PyO3 0.29 `add_submodule` hanya menempel atribut parent, tidak cukup
+    /// karena parent `akar` adalah extension module tanpa `__path__`).
+    #[test]
+    fn test_import_akar_lstm() {
+        Python::attach(|py| {
+            let sys_modules = py.import("sys").unwrap().getattr("modules").unwrap();
+            let parent = PyModule::new(py, "akar").unwrap();
+            sys_modules.set_item("akar", &parent).unwrap();
+
+            super::register(&parent).unwrap();
+
+            // `import akar.lstm` → jalur `sys.modules`
+            let lstm = PyModule::import(py, "akar.lstm").expect("import akar.lstm");
+            // `from akar.lstm import LstmModel` → atribut di submodule
+            let cls = lstm.getattr("LstmModel").expect("from akar.lstm import LstmModel");
+            let model = cls.call1((2usize, 3usize, 1usize, 1usize)).expect("LstmModel(2,3,1,1)");
+            let repr = model.call_method0("__repr__").unwrap();
+            let s = repr.to_string();
+            assert!(s.contains("input=2"), "repr: {s}");
+        });
     }
 }
