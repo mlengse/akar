@@ -402,9 +402,9 @@ impl StorageManager {
         metric: DistanceMetric,
         dimensions: u32,
     ) -> VectorIndexTable {
-        let table = self
-            .table_catalog
-            .create_vector_index_with_id(index_id, name, table_name, column_name, metric, dimensions);
+        let table =
+            self.table_catalog
+                .create_vector_index_with_id(index_id, name, table_name, column_name, metric, dimensions);
 
         // Register the index file with the BufferManager
         let mut bm = self.buffer_manager.lock().unwrap();

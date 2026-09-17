@@ -769,7 +769,11 @@ impl PhysicalExtend {
                 return Err(format!(
                     "Extend `{}` would produce {} rows ({} edges from {} bound rows) above the {} safety cap; \
                      add a projection/filter/limit or raise AKAR_MAX_EXTEND_ROWS",
-                    self.rel_table_name, total_rows, total_rows, chunk.size, extend_max_rows()
+                    self.rel_table_name,
+                    total_rows,
+                    total_rows,
+                    chunk.size,
+                    extend_max_rows()
                 )
                 .into());
             }
@@ -869,7 +873,7 @@ impl PhysicalExtend {
             let mut field_type_ids: Vec<PhysicalTypeID> = Vec::with_capacity(num_out_cols);
             let mut field_names = Vec::with_capacity(num_out_cols);
 
-// Input field names (already prefixed)
+            // Input field names (already prefixed)
             for (out_pos, &col) in kept_input.iter().enumerate() {
                 let phys_type = chunk.field_types[col];
                 // Strings must go through the Arrow builder path too: the legacy
@@ -896,7 +900,7 @@ impl PhysicalExtend {
                     fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&v).array);
                     field_type_ids.push(v.physical_type());
                 }
-if col < chunk.field_names.len() {
+                if col < chunk.field_names.len() {
                     field_names.push(chunk.field_names[col].clone());
                 } else {
                     field_names.push(format!("field_{}", col));
@@ -917,13 +921,9 @@ if col < chunk.field_names.len() {
                     PhysicalTypeID::String | PhysicalTypeID::List | PhysicalTypeID::Array | PhysicalTypeID::Struct
                 ) {
                     fields.push(
-                        crate::expression_evaluator::build_arrow_from_values(
-                            &out_data[out_idx],
-                            phys_type,
-                            total_rows,
-                        )
-                        .map_err(|e| e.to_string())?
-                        .array,
+                        crate::expression_evaluator::build_arrow_from_values(&out_data[out_idx], phys_type, total_rows)
+                            .map_err(|e| e.to_string())?
+                            .array,
                     );
                     field_type_ids.push(phys_type);
                 } else {
@@ -954,13 +954,9 @@ if col < chunk.field_names.len() {
                 );
                 if needs_arrow_builder {
                     fields.push(
-                        crate::expression_evaluator::build_arrow_from_values(
-                            &out_data[out_idx],
-                            phys_type,
-                            total_rows,
-                        )
-                        .map_err(|e| e.to_string())?
-                        .array,
+                        crate::expression_evaluator::build_arrow_from_values(&out_data[out_idx], phys_type, total_rows)
+                            .map_err(|e| e.to_string())?
+                            .array,
                     );
                     field_type_ids.push(phys_type);
                 } else {

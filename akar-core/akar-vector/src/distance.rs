@@ -485,9 +485,7 @@ pub fn top_k_by_score(scores: &[f64], k: usize) -> Vec<usize> {
     }
     let mut idx: Vec<usize> = (0..scores.len()).collect();
     if k < idx.len() {
-        idx.select_nth_unstable_by(k - 1, |&i, &j| {
-            scores[j].total_cmp(&scores[i]).then_with(|| i.cmp(&j))
-        });
+        idx.select_nth_unstable_by(k - 1, |&i, &j| scores[j].total_cmp(&scores[i]).then_with(|| i.cmp(&j)));
         idx.truncate(k);
     }
 

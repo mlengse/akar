@@ -206,7 +206,9 @@ impl PlanMapper {
             | LogicalOperator::Intersect(_)
             | LogicalOperator::CrossProduct(_)
             | LogicalOperator::OptionalMatch(_)
-            | LogicalOperator::RecursiveExtend(_) => map_join::map_and_execute_join(op, current_input, limit_budget, ctx),
+            | LogicalOperator::RecursiveExtend(_) => {
+                map_join::map_and_execute_join(op, current_input, limit_budget, ctx)
+            }
 
             // Aggregates
             LogicalOperator::Aggregate(_) | LogicalOperator::CountRelTable(_) => {
