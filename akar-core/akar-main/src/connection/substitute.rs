@@ -128,7 +128,66 @@ pub(crate) fn substitute_params_in_statement(
                             sub_statements,
                         })
                     }
-                    other => other.clone(),
+                    BoundClause::BoundMerge(m) => {
+                        let properties = m
+                            .properties
+                            .iter()
+                            .map(|(k, v)| Ok((k.clone(), substitute_params(v, params)?)))
+                            .collect::<Result<Vec<_>, String>>()?;
+                        let patterns = m
+                            .patterns
+                            .iter()
+                            .map(|p| {
+                                let node = p
+                                    .node
+                                    .as_ref()
+                                    .map(|n| -> Result<akar_binder::bound_statement::BoundNodeCreate, String> {
+                                        let properties = n
+                                            .properties
+                                            .iter()
+                                            .map(|(k, v)| Ok((k.clone(), substitute_params(v, params)?)))
+                                            .collect::<Result<Vec<_>, String>>()?;
+                                        Ok(akar_binder::bound_statement::BoundNodeCreate {
+                                            variable: n.variable.clone(),
+                                            table_name: n.table_name.clone(),
+                                            table_id: n.table_id,
+                                            properties,
+                                        })
+                                    })
+                                    .transpose()?;
+                                let edge = p
+                                    .edge
+                                    .as_ref()
+                                    .map(|e| -> Result<akar_binder::bound_statement::BoundEdgeCreate, String> {
+                                        let properties = e
+                                            .properties
+                                            .iter()
+                                            .map(|(k, v)| Ok((k.clone(), substitute_params(v, params)?)))
+                                            .collect::<Result<Vec<_>, String>>()?;
+                                        Ok(akar_binder::bound_statement::BoundEdgeCreate {
+                                            variable: e.variable.clone(),
+                                            table_name: e.table_name.clone(),
+                                            table_id: e.table_id,
+                                            src_var: e.src_var.clone(),
+                                            dst_var: e.dst_var.clone(),
+                                            properties,
+                                        })
+                                    })
+                                    .transpose()?;
+                                Ok(akar_binder::bound_statement::BoundCreatePattern { node, edge })
+                            })
+                            .collect::<Result<Vec<_>, String>>()?;
+                        let on_create = substitute_in_set_items(&m.on_create, params)?;
+                        let on_match = substitute_in_set_items(&m.on_match, params)?;
+                        BoundClause::BoundMerge(akar_binder::bound_statement::BoundMerge {
+                            table_name: m.table_name.clone(),
+                            table_id: m.table_id,
+                            properties,
+                            patterns,
+                            on_create,
+                            on_match,
+                        })
+                    }
                 };
                 new_clauses.push(new_clause);
             }
