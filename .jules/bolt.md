@@ -13,3 +13,7 @@
 ## 2026-09-16 - Fast-path HNSW neighbor connection updates
 **Learning:** During HNSW graph construction, updating neighbor reverse connections before maximum connection degree (`max_conn`) is reached does not require recomputing distances across all existing neighbors. Adding a fast-path append avoids up to 32 vector distance calculations per neighbor update. Graph-traversal visited sets should use a fast integer hasher (AHashSet from `ahash`) rather than the SipHash-backed default.
 **Action:** Fast-path connection updates on nodes below degree capacity during graph construction, and use `AHashSet` for visited node sets in graph search algorithms.
+
+## 2026-09-17 - Zero-allocation HNSW neighbor selection and in-place pruning
+**Learning:** HNSW beam search (`search_layer_0`) already returns nearest candidates pre-sorted in ascending distance order. Performing additional sorting in `select_neighbors_simple` causes redundant allocations and $O(N \log N)$ sorting per insertion layer. Furthermore, when a neighbor node reaches connection degree capacity (`max_conn`), updating its connections by allocating a new vector and sorting all $M+1$ candidates is wasteful; finding the max-distance connection in a single linear pass and replacing it in-place eliminates heap allocations during graph construction.
+**Action:** Rely on pre-sorted beam search results for neighbor selection and perform in-place max-distance replacements when connection degree capacity is reached.

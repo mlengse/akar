@@ -354,12 +354,9 @@ impl HnswIndex {
         out
     }
 
-    /// Select the `M` closest neighbours from a candidate list.
-    fn select_neighbors_simple(&self, candidates: &[(f64, usize)], m: usize) -> Vec<usize> {
-        let mut sorted: Vec<_> = candidates.to_vec();
-        sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        sorted.truncate(m);
-        sorted.into_iter().map(|(_, id)| id).collect()
+    /// Select the `M` closest neighbours from a pre-sorted candidate list.
+    fn select_neighbors_simple(candidates: &[(f64, usize)], m: usize) -> Vec<usize> {
+        candidates.iter().take(m).map(|&(_, id)| id).collect()
     }
 
     // ---- Public API ----
@@ -405,7 +402,7 @@ impl HnswIndex {
             let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION);
 
             let m = if level == 0 { M_MAX } else { M };
-            let neighbors = self.select_neighbors_simple(&candidates, m);
+            let neighbors = Self::select_neighbors_simple(&candidates, m);
 
             // Add connections from new node to neighbours
             connections[level] = neighbors.clone();
@@ -435,32 +432,33 @@ impl HnswIndex {
                     continue;
                 }
 
-                // Slow path: neighbor has reached max_conn connections, so pre-compute
-                // distances for existing connections + new node to prune the worst neighbor.
+                // Slow path: neighbor has reached max_conn connections.
+                // Find the existing connection with the maximum distance and replace it in-place
+                // if the new node is closer, avoiding heap allocations and vector sorting.
                 let existing_connections: &[usize] = &neighbor_node.connections[level];
                 let neighbor_vec = &neighbor_node.vector;
 
-                // Compute distances: existing connections + new node (avoiding connection vector clones).
-                let mut dists: Vec<(f64, usize)> = existing_connections
-                    .iter()
-                    .filter_map(|&nid| {
-                        self.nodes.get(&nid).map(|n| {
-                            let d = self.metric.compute(&n.vector, neighbor_vec);
-                            (d, nid)
-                        })
-                    })
-                    .collect();
-                // Add the new connection — compute distance using the local
-                // `vector` (the new node hasn't been added to self.nodes yet).
                 let d = self.metric.compute(&vector, neighbor_vec);
-                dists.push((d, id));
 
-                dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                dists.truncate(max_conn);
+                let mut worst_d = f64::NEG_INFINITY;
+                let mut worst_idx = 0;
+                let mut has_worst = false;
 
-                // Now take the mutable borrow and write back
-                if let Some(n) = self.nodes.get_mut(&neighbor_id) {
-                    n.connections[level] = dists.into_iter().map(|(_, nid)| nid).collect();
+                for (idx, &nid) in existing_connections.iter().enumerate() {
+                    if let Some(n) = self.nodes.get(&nid) {
+                        let dist = self.metric.compute(&n.vector, neighbor_vec);
+                        if dist > worst_d {
+                            worst_d = dist;
+                            worst_idx = idx;
+                            has_worst = true;
+                        }
+                    }
+                }
+
+                if has_worst && d < worst_d {
+                    if let Some(n) = self.nodes.get_mut(&neighbor_id) {
+                        n.connections[level][worst_idx] = id;
+                    }
                 }
             }
 
@@ -802,6 +800,26 @@ mod tests {
             avg_recall > 0.95,
             "Average recall too low: {avg_recall} (expected > 0.95)"
         );
+    }
+
+    #[test]
+    fn test_search_layer_0_is_sorted() {
+        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        let mut rng: u64 = 5555;
+        for i in 0..100 {
+            idx.insert(random_vector(&mut rng, 16), i);
+        }
+        let query = random_vector(&mut rng, 16);
+        let res = idx.search_layer_0(idx.entry_point().unwrap(), &query, 0, 50);
+        assert!(!res.is_empty());
+        for w in res.windows(2) {
+            assert!(
+                w[0].0 <= w[1].0,
+                "search_layer_0 results must be sorted ascending by distance: {} > {}",
+                w[0].0,
+                w[1].0
+            );
+        }
     }
 
     #[test]
