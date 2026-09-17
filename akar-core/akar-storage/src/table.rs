@@ -1496,6 +1496,26 @@ impl TableCatalog {
         table
     }
 
+    /// Recreate a vector index at a specific index ID (used when restoring a
+    /// persisted catalog during recovery so the on-disk `vi_{id}.idx` file
+    /// matches the catalog entry). Advances `next_table_id` so subsequent
+    /// auto-assigned IDs never collide with restored ones.
+    pub fn create_vector_index_with_id(
+        &self,
+        index_id: u64,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: DistanceMetric,
+        dimensions: u32,
+    ) -> VectorIndexTable {
+        self.bump_next_table_id(index_id);
+        let table = VectorIndexTable::new(index_id, name.clone(), table_name, column_name, metric, dimensions);
+        self.vector_index_name_to_id.insert(name, index_id);
+        self.vector_indexes.insert(index_id, table.clone());
+        table
+    }
+
     /// Get a vector index by its ID.
     pub fn get_vector_index(&self, index_id: u64) -> Option<dashmap::mapref::one::Ref<'_, u64, VectorIndexTable>> {
         self.vector_indexes.get(&index_id)

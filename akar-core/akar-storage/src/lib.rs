@@ -389,6 +389,30 @@ impl StorageManager {
         table
     }
 
+    /// Restore a vector index at a specific index ID during recovery from a
+    /// persisted catalog. Reuses the existing `vi_{id}.idx` file when present,
+    /// otherwise the HNSW graph stays empty and is rebuilt on the next
+    /// `refresh_vector_index` (or backfill during recovery).
+    pub fn restore_vector_index(
+        &self,
+        index_id: u64,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: DistanceMetric,
+        dimensions: u32,
+    ) -> VectorIndexTable {
+        let table = self
+            .table_catalog
+            .create_vector_index_with_id(index_id, name, table_name, column_name, metric, dimensions);
+
+        // Register the index file with the BufferManager
+        let mut bm = self.buffer_manager.lock().unwrap();
+        table.register_file(&mut bm, &self.db_path);
+
+        table
+    }
+
     /// Get a vector index by name.
     pub fn get_vector_index_by_name(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, u64, VectorIndexTable>> {
         self.table_catalog.get_vector_index_by_name(name)

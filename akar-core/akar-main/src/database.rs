@@ -515,6 +515,23 @@ impl Database {
                         columns,
                     );
                 }
+                #[cfg(feature = "vector-extension")]
+                akar_catalog::CatalogEntry::VectorIndex(vi) => {
+                    let metric = match vi.metric.to_lowercase().as_str() {
+                        "euclidean" => akar_vector::hnsw::DistanceMetric::Euclidean,
+                        "l2" => akar_vector::hnsw::DistanceMetric::L2Squared,
+                        "dot" => akar_vector::hnsw::DistanceMetric::DotProduct,
+                        _ => akar_vector::hnsw::DistanceMetric::Cosine,
+                    };
+                    self.storage_manager.restore_vector_index(
+                        vi.index_id,
+                        vi.name.clone(),
+                        vi.table_name.clone(),
+                        vi.column_name.clone(),
+                        metric,
+                        vi.dimensions as u32,
+                    );
+                }
                 _ => {}
             }
         }
@@ -658,6 +675,18 @@ impl Database {
                 "WAL recovery failed (database may need manual repair): {e}. \
                      Refusing to start with an empty database — check the WAL."
             ));
+        }
+
+        // Rebuild HNSW graphs for restored vector indexes so they reflect the
+        // fully recovered table state (WAL replay may have inserted rows after
+        // `restore_storage_from_catalog` recreated the index shells).
+        #[cfg(feature = "vector-extension")]
+        {
+            let tc = db.storage_manager.table_catalog();
+            let index_ids: Vec<u64> = tc.all_vector_indexes().iter().map(|vi| *vi.key()).collect();
+            for index_id in index_ids {
+                tc.refresh_vector_index(index_id);
+            }
         }
 
         Ok(db)

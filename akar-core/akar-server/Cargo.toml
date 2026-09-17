@@ -27,6 +27,11 @@ ctrlc = "3"
 default = []
 embed = ["akar-dream/embed"]
 ml-extension = ["embed", "akar-main/ml-extension"]
+json-extension = ["akar-main/json-extension"]
+fts-extension = ["akar-main/fts-extension"]
+vector-extension = ["akar-main/vector-extension"]
+parquet-export = ["akar-main/parquet-export"]
+full = ["embed", "ml-extension", "json-extension", "fts-extension", "vector-extension", "parquet-export"]
 
 [dev-dependencies]
 tempfile = "3"
