@@ -46,12 +46,7 @@ fn normalize(v: Vec<f64>) -> PyResult<Vec<f64>> {
 /// `metric`: "cosine" (default), "euclidean", "l2", "dot".
 #[pyfunction]
 #[pyo3(signature = (vectors, query, k, metric="cosine"))]
-fn knn_search(
-    vectors: Vec<Vec<f64>>,
-    query: Vec<f64>,
-    k: usize,
-    metric: &str,
-) -> PyResult<Vec<(usize, f64)>> {
+fn knn_search(vectors: Vec<Vec<f64>>, query: Vec<f64>, k: usize, metric: &str) -> PyResult<Vec<(usize, f64)>> {
     if vectors.is_empty() {
         return Ok(Vec::new());
     }
@@ -66,9 +61,7 @@ fn knn_search(
 
     let score_fn: Box<dyn Fn(&[f64], &[f64]) -> f64> = match metric {
         "cosine" => Box::new(|a, b| akar_vector::cosine_similarity(a, b)),
-        "euclidean" | "l2" => {
-            Box::new(|a, b| -akar_vector::euclidean_distance(a, b))
-        }
+        "euclidean" | "l2" => Box::new(|a, b| -akar_vector::euclidean_distance(a, b)),
         "dot" => Box::new(|a, b| akar_vector::dot_product(a, b)),
         _ => {
             return Err(PyValueError::new_err(format!(
@@ -119,11 +112,7 @@ mod tests {
 
     #[test]
     fn test_knn_search_basic() {
-        let vectors = vec![
-            vec![1.0, 0.0],
-            vec![0.0, 1.0],
-            vec![1.0, 1.0],
-        ];
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 1.0]];
         let query = vec![1.0, 0.0];
         let result = knn_search(vectors, query, 2, "cosine").unwrap();
         assert_eq!(result.len(), 2);
@@ -132,11 +121,7 @@ mod tests {
 
     #[test]
     fn test_knn_search_euclidean() {
-        let vectors = vec![
-            vec![0.0, 0.0],
-            vec![1.0, 0.0],
-            vec![10.0, 10.0],
-        ];
+        let vectors = vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![10.0, 10.0]];
         let query = vec![0.0, 0.0];
         let result = knn_search(vectors, query, 1, "euclidean").unwrap();
         assert_eq!(result.len(), 1);

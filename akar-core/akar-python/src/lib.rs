@@ -18,8 +18,8 @@
 
 mod dream;
 mod knn;
-mod lstm;
 mod louvain;
+mod lstm;
 mod param_interp;
 mod search;
 mod spread;

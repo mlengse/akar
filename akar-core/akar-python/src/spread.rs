@@ -3,7 +3,7 @@
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-use akar_algo::{compute_spread_activation, batch_spread_activation};
+use akar_algo::{batch_spread_activation, compute_spread_activation};
 use akar_graph::graph::{CSRAdjacency, Edge};
 
 /// Build a CSR adjacency list from a Python edge list.

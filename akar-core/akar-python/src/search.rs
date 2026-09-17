@@ -3,9 +3,9 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use akar_search::rrf::{rrf_fuse_owned, weighted_rrf_fuse, FusedItem, DEFAULT_K};
 use akar_search::hybrid::{hybrid_search, SearchResult};
 use akar_search::multi::multi_perspective_recall_with_id;
+use akar_search::rrf::{rrf_fuse_owned, weighted_rrf_fuse, FusedItem, DEFAULT_K};
 
 /// Reciprocal Rank Fusion: merge N ranked result lists.
 ///
@@ -16,12 +16,7 @@ use akar_search::multi::multi_perspective_recall_with_id;
 /// Returns list of `{id: int, score: float}` dicts sorted by descending RRF score.
 #[pyfunction]
 #[pyo3(signature = (sets, k=DEFAULT_K as usize, limit=20))]
-fn rrf_fuse(
-    py: Python<'_>,
-    sets: Vec<Vec<(u64, f64)>>,
-    k: usize,
-    limit: usize,
-) -> PyResult<Vec<Py<PyAny>>> {
+fn rrf_fuse(py: Python<'_>, sets: Vec<Vec<(u64, f64)>>, k: usize, limit: usize) -> PyResult<Vec<Py<PyAny>>> {
     let fused: Vec<FusedItem<(u64, f64)>> = rrf_fuse_owned(sets, |&(id, _)| id, k, limit);
 
     let mut result = Vec::with_capacity(fused.len());
@@ -51,11 +46,19 @@ fn hybrid_search_py(
 ) -> PyResult<Vec<Py<PyAny>>> {
     let v_res: Vec<SearchResult> = vector_results
         .into_iter()
-        .map(|(id, score)| SearchResult { id, score, channel: "vector" })
+        .map(|(id, score)| SearchResult {
+            id,
+            score,
+            channel: "vector",
+        })
         .collect();
     let f_res: Vec<SearchResult> = fts_results
         .into_iter()
-        .map(|(id, score)| SearchResult { id, score, channel: "fts" })
+        .map(|(id, score)| SearchResult {
+            id,
+            score,
+            channel: "fts",
+        })
         .collect();
 
     let fused = hybrid_search(v_res, f_res, limit);
@@ -129,7 +132,10 @@ fn multi_perspective_recall(
     let fused: Vec<FusedItem<(u64, f64)>> = multi_perspective_recall_with_id(
         &borrowed,
         |q: &str| -> Vec<(u64, f64)> {
-            search_fn_ref.call1(py, (q,)).and_then(|r| r.extract(py)).unwrap_or_default()
+            search_fn_ref
+                .call1(py, (q,))
+                .and_then(|r| r.extract(py))
+                .unwrap_or_default()
         },
         |&(id, _)| id,
         k,

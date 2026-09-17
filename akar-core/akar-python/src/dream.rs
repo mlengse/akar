@@ -83,20 +83,35 @@ impl PyDreamConfig {
     }
 
     #[getter]
-    fn max_memories(&self) -> usize { self.inner.max_memories }
+    fn max_memories(&self) -> usize {
+        self.inner.max_memories
+    }
     #[getter]
-    fn decay(&self) -> f64 { self.inner.decay }
+    fn decay(&self) -> f64 {
+        self.inner.decay
+    }
     #[getter]
-    fn threshold(&self) -> f64 { self.inner.threshold }
+    fn threshold(&self) -> f64 {
+        self.inner.threshold
+    }
     #[getter]
-    fn max_hops(&self) -> usize { self.inner.max_hops }
+    fn max_hops(&self) -> usize {
+        self.inner.max_hops
+    }
     #[getter]
-    fn k_per_seed(&self) -> usize { self.inner.k_per_seed }
+    fn k_per_seed(&self) -> usize {
+        self.inner.k_per_seed
+    }
     #[getter]
-    fn prune_threshold(&self) -> f64 { self.inner.prune_threshold }
+    fn prune_threshold(&self) -> f64 {
+        self.inner.prune_threshold
+    }
 
     fn __repr__(&self) -> String {
-        format!("PyDreamConfig(max_memories={}, decay={})", self.inner.max_memories, self.inner.decay)
+        format!(
+            "PyDreamConfig(max_memories={}, decay={})",
+            self.inner.max_memories, self.inner.decay
+        )
     }
 }
 
@@ -110,21 +125,37 @@ pub struct PyPhaseStats {
 #[pymethods]
 impl PyPhaseStats {
     #[getter]
-    fn strengthened(&self) -> usize { self.inner.strengthened }
+    fn strengthened(&self) -> usize {
+        self.inner.strengthened
+    }
     #[getter]
-    fn weakened(&self) -> usize { self.inner.weakened }
+    fn weakened(&self) -> usize {
+        self.inner.weakened
+    }
     #[getter]
-    fn pruned(&self) -> usize { self.inner.pruned }
+    fn pruned(&self) -> usize {
+        self.inner.pruned
+    }
     #[getter]
-    fn bridges(&self) -> usize { self.inner.bridges }
+    fn bridges(&self) -> usize {
+        self.inner.bridges
+    }
     #[getter]
-    fn insights(&self) -> usize { self.inner.insights }
+    fn insights(&self) -> usize {
+        self.inner.insights
+    }
     #[getter]
-    fn facts(&self) -> usize { self.inner.facts }
+    fn facts(&self) -> usize {
+        self.inner.facts
+    }
     #[getter]
-    fn synthesized(&self) -> usize { self.inner.synthesized }
+    fn synthesized(&self) -> usize {
+        self.inner.synthesized
+    }
     #[getter]
-    fn recomputed(&self) -> usize { self.inner.recomputed }
+    fn recomputed(&self) -> usize {
+        self.inner.recomputed
+    }
 }
 
 /// Python-visible dream cycle statistics.
@@ -138,36 +169,54 @@ pub struct PyDreamStats {
 impl PyDreamStats {
     #[getter]
     fn nrem(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.nrem.clone() }
+        PyPhaseStats {
+            inner: self.inner.nrem.clone(),
+        }
     }
     #[getter]
     fn supersedes(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.supersedes.clone() }
+        PyPhaseStats {
+            inner: self.inner.supersedes.clone(),
+        }
     }
     #[getter]
     fn rem(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.rem.clone() }
+        PyPhaseStats {
+            inner: self.inner.rem.clone(),
+        }
     }
     #[getter]
     fn insights(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.insights.clone() }
+        PyPhaseStats {
+            inner: self.inner.insights.clone(),
+        }
     }
     #[getter]
     fn afe(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.afe.clone() }
+        PyPhaseStats {
+            inner: self.inner.afe.clone(),
+        }
     }
     #[getter]
     fn synthesis(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.synthesis.clone() }
+        PyPhaseStats {
+            inner: self.inner.synthesis.clone(),
+        }
     }
     #[getter]
     fn dae(&self) -> PyPhaseStats {
-        PyPhaseStats { inner: self.inner.dae.clone() }
+        PyPhaseStats {
+            inner: self.inner.dae.clone(),
+        }
     }
     #[getter]
-    fn duration_ms(&self) -> f64 { self.inner.duration_ms }
+    fn duration_ms(&self) -> f64 {
+        self.inner.duration_ms
+    }
     #[getter]
-    fn dream_id(&self) -> u64 { self.inner.dream_id }
+    fn dream_id(&self) -> u64 {
+        self.inner.dream_id
+    }
 
     fn __repr__(&self) -> String {
         format!("PyDreamStats(dream_id={})", self.inner.dream_id)
