@@ -9,7 +9,7 @@
 
 | Versi | Tanggal | Tema |
 |-------|---------|------|
-| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P118.1 `forward_sequence_hidden` + P117.1 `save_bin`/`load_bin` + P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
+| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P118.2 `import akar.lstm` + P118.1 `forward_sequence_hidden` + P117.1 `save_bin`/`load_bin` + P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
 | [0.2.1](#021---2026-09-14) | 2026-09-14 | Re-publish 0.2.0 defektif: 34 crates + PyPI `akar` dengan dep `^0.2.1` |
 | [0.1.21](#0121---2026-09-07) | 2026-09-07 | akar-ml embedding: parity `embed_multi`/rerank + API non-exhaustive (P96) |
 | [0.1.20](#0120---2026-09-04) | 2026-09-04 | fastembed end-to-end: offline weights, batch/parallel, error (P89–P99) |
@@ -35,6 +35,11 @@
 ## [Unreleased]
 
 ### Added
+
+- **P118.2 — `import akar.lstm` / `from akar.lstm import LstmModel` berfungsi** · `70109d6` · gate **2,086** (akar-python di luar gate)
+  - `lstm::register` kini mendaftarkan submodule di `sys.modules` (`akar.lstm`) selain menempel sebagai atribut parent — PyO3 0.29 `PyModule::add_submodule` hanya `self.add(name, module)` tanpa menyentuh `sys.modules`, sehingga `import akar.lstm` gagal "'akar' is not a package" (parent `akar` adalah extension module tanpa `__path__`).
+  - Nama dotted diturunkan dari `m.name()?.to_cow()?`; `sys.modules[...].set_item` via `py.import("sys")`.
+  - Tes `test_import_akar_lstm`: `Python::attach` → parent `akar` didaftarkan di `sys.modules` → `PyModule::import(py, "akar.lstm")` sukses → `getattr("LstmModel")` + instansiasi `LstmModel(2,3,1,1)` (akar-python lstm 16→17, 51→52 di luar gate); `__init__.pyi` stub `lstm` mengekspos `LstmModel`/`LstmCell`/`TrainingResult`.
 
 - **P118.1 — akar.lstm `forward_sequence_hidden`: output + hidden state per timestep** · `5b84a13` · gate **2,086** (+3)
   - `forward_sequence_hidden(sequence) -> (output, hidden_states)` — output proyeksi akhir (output_size) **dan** raw hidden state layer terakhir tiap timestep (masing-masing hidden_size-dim, bukan output_size-dim); melengkapi sulur C++ LSTM hidden-state output.
