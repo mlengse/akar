@@ -475,13 +475,24 @@ pub fn batch_cosine_similarities(query: &[f64], keys: &[&[f64]]) -> Vec<f64> {
 
 /// Return the indices of the top-`k` scores, descending, ties broken by
 /// lower index for determinism. `k == 0` or an empty slice yields `[]`.
+///
+/// Uses quickselect (`select_nth_unstable_by`) to partition top `k` candidates
+/// in O(N) time when `k < N`, reducing overall complexity from O(N log N) to
+/// O(N + k log k).
 pub fn top_k_by_score(scores: &[f64], k: usize) -> Vec<usize> {
-    if k == 0 {
+    if k == 0 || scores.is_empty() {
         return Vec::new();
     }
     let mut idx: Vec<usize> = (0..scores.len()).collect();
+    if k < idx.len() {
+        // Quickselect partition: moves top-k candidates into idx[0..k] in O(N) time
+        idx.select_nth_unstable_by(k - 1, |&i, &j| {
+            scores[j].total_cmp(&scores[i]).then_with(|| i.cmp(&j))
+        });
+        idx.truncate(k);
+    }
+    // Sort only the top-k items descending in O(k log k) time
     idx.sort_by(|&i, &j| scores[j].total_cmp(&scores[i]).then_with(|| i.cmp(&j)));
-    idx.truncate(k);
     idx
 }
 
