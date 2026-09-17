@@ -2,7 +2,7 @@
 
 > **Fungsi dokumen:** jurnal temuan ber-tanggal (findings, incidents, audits,
 > status verifikasi). Temuan yang sudah selesai dipindah ke `CHANGELOG.md`.
-> Rencana kerja aktif ada di `PLAN.md`. Bukan instruksi kerja.
+> Rencana kerja aktif ada di `implementation plan.md`. Bukan instruksi kerja.
 >
 > Asal temuan: audit Sulur ↔ Akar 2026-09-16 (daemon live `~/.sulur/engine/sulur.db`,
 > biner `v0.2.1+11 (b0fbee1)`, DB 737 memori / 24.974 edge `Connected`).
@@ -79,7 +79,7 @@ Dua gejala, satu lokasi:
   berisiko membuat edge **duplikat** setiap kali dipanggil, bukan memperbarui weight →
   selaras dengan kenaikan `Connected` 972 → 24.974 dalam satu hari.
 
-**Status:** OPEN — rencana perbaikan di `PLAN.md` P1-MERGE-1.
+**Status:** OPEN — rencana perbaikan di `implementation plan.md` P1-MERGE-1.
 
 ---
 
@@ -108,7 +108,7 @@ baris node (termasuk `embedding` 384-d) per hop, atau full-scan rel per baris in
 `sulur_dream_dae` gagal (`RuntimeError: akar-server RPC failed: timed out`), siklus
 dream tidak pernah tuntas.
 
-**Status:** OPEN — rencana di `PLAN.md` P1-PERF-1.
+**Status:** OPEN — rencana di `implementation plan.md` P1-PERF-1.
 
 ---
 
@@ -121,7 +121,7 @@ dream tidak pernah tuntas.
   (tabel terdaftar sebagai `Connected`). Nama node table sama: `Memory`, `Meta`, `DreamSession` case-sensitive.
 - Sulur `dae.py:94` (dan `:239`) memakai `[r:CONNECTED]` → query bind-error (bug sisi Sulur).
 - **Status:** OPEN — keputusan: dokumentasikan aturan case di SPEC + tambahkan tes
-  negatif yang mem-pin pesan errornya (`PLAN.md` P2-CASE-1); perbaikan typo Sulur ada di
+  negatif yang mem-pin pesan errornya (`implementation plan.md` P2-CASE-1); perbaikan typo Sulur ada di
   rencana Sulur.
 
 ---
@@ -144,7 +144,7 @@ insert `id=1`). Setelah F1 diperbaiki, urutan ini tidak bisa lagi tercipta lewat
 **tetapi** mekanisme yang ada sekarang = server **menolak start** (fail-loud, bagus untuk
 integritas) tanpa jalur pemulihan yang jelas di luar intervensi manual.
 
-**Status:** OPEN (resiliensi) — rencana di `PLAN.md` P2-WAL-1.
+**Status:** OPEN (resiliensi) — rencana di `implementation plan.md` P2-WAL-1.
 
 ---
 

@@ -9,7 +9,8 @@
 
 | Versi | Tanggal | Tema |
 |-------|---------|------|
-| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P118.2 `import akar.lstm` + P118.1 `forward_sequence_hidden` + P117.1 `save_bin`/`load_bin` + P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
+| [Unreleased](#unreleased) | — | docs: audit Sulur ↔ Akar — `FINDINGS.md` (F1–F5) + rencana perbaikan P1/P2 digabung ke `implementation plan.md` (`PLAN.md` dihapus) |
+| [0.2.2](#022---2026-09-17) | 2026-09-17 | Fase 8 akar.lstm superset (P118.2 `import akar.lstm` + P118.1 `forward_sequence_hidden` + P117.1 `save_bin`/`load_bin` + P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
 | [0.2.1](#021---2026-09-14) | 2026-09-14 | Re-publish 0.2.0 defektif: 34 crates + PyPI `akar` dengan dep `^0.2.1` |
 | [0.1.21](#0121---2026-09-07) | 2026-09-07 | akar-ml embedding: parity `embed_multi`/rerank + API non-exhaustive (P96) |
 | [0.1.20](#0120---2026-09-04) | 2026-09-04 | fastembed end-to-end: offline weights, batch/parallel, error (P89–P99) |
@@ -33,6 +34,12 @@
 | [0.1.2](#012---2026-08-09) | 2026-08-09 | Rilis v0.1.2: correctness SQL inti (Batch 1) |
 
 ## [Unreleased]
+
+### Added
+
+- **docs — audit Sulur ↔ Akar: `FINDINGS.md` + rencana perbaikan di `implementation plan.md`** · `[Uncommitted]` · tanpa perubahan kode
+  - `FINDINGS.md` (baru): F1 DDL `IF NOT EXISTS` membuat ulang storage → rows tak terjangkau — FIXED `508328a`; F2 jalur cepat `MERGE … SET` tidak pernah match baris yang ada (literal → duplicate PK, param → NULL PK, sedangkan `MERGE … RETURN`/`CREATE`/`MATCH … SET` benar) + dua hipotesis akar (hash_index pada NodeTable hasil clone vs param tidak tersubstitusi) + dampak nyata di Sulur; F3 traversal rel table besar patologis (1-hop anchored > 25 s pada 24.974 edge vs 0,05 s pada rel kecil); F4 identifier case-sensitive & tidak terdokumentasi; F5 WAL replay menolak start saat insert duplicate-PK.
+  - `implementation plan.md` (kini **satu-satunya** dokumen perencanaan; konten `PLAN.md` digabung ke sini lalu `PLAN.md` dihapus): P1-MERGE-1, P1-PERF-1, P2-CASE-1, P2-WAL-1 — prasyarat toolchain, recipe build `akar-server`, skrip repro lewat daemon scratch, langkah + tes + kriteria lulus per item, dan urutan ketergantungan ke rencana Sulur.
 
 ## [0.2.2] - 2026-09-17
 
@@ -58,10 +65,6 @@
   - `train_pair(input: list[list[float]], target: list[float], lr: float) -> (float, list[float])` — meneruskan ke `akar_ml::lstm::LstmModel::train_pair` (P116.1): weight ter-update in-place pada semua layer, loss = MSE scalar, hidden = state akhir (panjang `hidden_size`).
   - Pra-validasi → `ValueError`: input kosong dan `len(target) != output_size` — menghindari assert Rust muncul sebagai `PanicException` di Python.
   - `akar-python` workspace mandiri (`publish = false`) → tesnya **di luar** gate `test [akar-core]` (tetap 2,073). Tes: return shape + panjang hidden, loss turun antar panggilan, weight extra-layer ter-update, target/input salah ditolak.
-
-- **docs — audit Sulur ↔ Akar: `FINDINGS.md` + `PLAN.md`** · `[Uncommitted]` · tanpa perubahan kode
-  - `FINDINGS.md` (baru): F1 DDL `IF NOT EXISTS` membuat ulang storage → rows tak terjangkau — FIXED `508328a`; F2 jalur cepat `MERGE … SET` tidak pernah match baris yang ada (literal → duplicate PK, param → NULL PK, sedangkan `MERGE … RETURN`/`CREATE`/`MATCH … SET` benar) + dua hipotesis akar (hash_index pada NodeTable hasil clone vs param tidak tersubstitusi) + dampak nyata di Sulur; F3 traversal rel table besar patologis (1-hop anchored > 25 s pada 24.974 edge vs 0,05 s pada rel kecil); F4 identifier case-sensitive & tidak terdokumentasi; F5 WAL replay menolak start saat insert duplicate-PK.
-  - `PLAN.md` (baru): P1-MERGE-1, P1-PERF-1, P2-CASE-1, P2-WAL-1 — prasyarat toolchain, recipe build `akar-server`, skrip repro lewat daemon scratch, langkah + tes + kriteria lulus per item, dan urutan ketergantungan ke rencana Sulur.
 
 - **P116.1 — akar.lstm `train_pair`: online single-pair BPTT untuk semua layer** · `2367e3a` · gate **2,073** (+2)
   - `LstmModel::train_pair(input, target, lr) -> (mse_loss, Vec<f64>)` — satu forward + satu backward BPTT per panggilan, update weight **in-place** (beda dari `train()` batch yang mengembalikan model baru); hidden state layer terakhir dikembalikan sebagai `Vec<f64>` (presisi-independen).
