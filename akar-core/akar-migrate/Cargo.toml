@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-main = { path = "../akar-main", version = "0.2.1" }
-akar-storage = { path = "../akar-storage", version = "0.2.1" }
-akar-common = { path = "../akar-common", version = "0.2.1" }
+akar-main = { path = "../akar-main", version = "0.2.2" }
+akar-storage = { path = "../akar-storage", version = "0.2.2" }
+akar-common = { path = "../akar-common", version = "0.2.2" }
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0.103"
 serde_json = "1.0"

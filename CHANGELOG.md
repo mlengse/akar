@@ -34,6 +34,8 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-17
+
 ### Added
 
 - **P118.2 — `import akar.lstm` / `from akar.lstm import LstmModel` berfungsi** · `70109d6` · gate **2,086** (akar-python di luar gate)
@@ -672,6 +674,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.2.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.2
 [0.2.1]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.1
 [0.2.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.0
 [0.1.21]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.21

@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "arrow",
  "flate2",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-common",
  "arrow",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "pest",
  "pest_derive",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "akar-common",
  "tracing",
@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "akar-common",
@@ -466,7 +466,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -540,7 +540,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -602,9 +602,9 @@ checksum = "4f4c707c6a209cbe82d10abd08e1ea8995e9ea937d2550646e02798948992be0"
 
 [[package]]
 name = "cfg-if"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "chrono"
@@ -779,7 +779,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -790,7 +790,7 @@ checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
  "darling_core",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -953,7 +953,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1533,7 +1533,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
 dependencies = [
  "proc-macro2",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1651,9 +1651,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
 dependencies = [
  "bitflags",
  "errno",
@@ -1719,7 +1719,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1810,9 +1810,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.5"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1996,7 +1996,7 @@ checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -2108,7 +2108,7 @@ checksum = "f153acc4e99a5f2a5aefa09fb078be54e26271b2813f6041200b224c098d8328"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -2119,9 +2119,9 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.24"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 
 [[package]]
 name = "unicode-segmentation"
@@ -2212,7 +2212,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.5",
+ "syn 3.0.6",
  "wasm-bindgen-shared",
 ]
 
@@ -2426,9 +2426,9 @@ dependencies = [
 
 [[package]]
 name = "zlib-rs"
-version = "0.6.7"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"
