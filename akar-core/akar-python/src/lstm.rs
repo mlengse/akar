@@ -100,6 +100,14 @@ impl LstmModel {
         Ok(output)
     }
 
+    /// Forward pass through a sequence of inputs, returning the projected
+    /// output **and** the last layer's raw hidden state at every timestep
+    /// (each of length `hidden_size`, not `output_size`).
+    fn forward_sequence_hidden(&self, sequence: Vec<Vec<f64>>) -> PyResult<(Vec<f64>, Vec<Vec<f64>>)> {
+        let (output, hidden_states) = self.inner.forward_sequence_hidden(&sequence);
+        Ok((output, hidden_states))
+    }
+
     /// Online single-pair training step: one forward + one backward BPTT pass
     /// that updates the model weights **in place** (all `num_layers`).
     ///
@@ -240,6 +248,47 @@ mod tests {
     }
 
     #[test]
+    fn test_lstm_forward_sequence_hidden() {
+        let m = LstmModel::new(2, 3, 1, 1);
+        let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2], vec![0.1, 0.9]];
+        let (output, hidden) = m.forward_sequence_hidden(seq).unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(hidden.len(), 3, "hidden states len = seq_len");
+        for h in &hidden {
+            assert_eq!(h.len(), 3, "hidden dim = hidden_size");
+        }
+    }
+
+    #[test]
+    fn test_lstm_forward_sequence_hidden_consistent_with_forward_cell() {
+        let m = LstmModel::new(2, 3, 1, 1);
+        let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2]];
+        let (output, hidden) = m.forward_sequence_hidden(seq.clone()).unwrap();
+
+        let mut h_prev = vec![0.0; 3];
+        let mut c_prev = vec![0.0; 3];
+        for (i, x) in seq.iter().enumerate() {
+            let cell = m.forward_cell(x.clone(), h_prev.clone(), c_prev.clone()).unwrap();
+            for (a, b) in hidden[i].iter().zip(cell.hidden_state().iter()) {
+                assert!((a - b).abs() < 1e-9, "hidden mismatch at step {i}: {a} vs {b}");
+            }
+            h_prev = cell.hidden_state();
+            c_prev = cell.cell_state();
+        }
+
+        let projected: Vec<f64> = (0..1)
+            .map(|j| {
+                let mut val = m.inner.b_ho[j];
+                for (k, h) in h_prev.iter().enumerate() {
+                    val += m.inner.w_ho[j][k] * h;
+                }
+                val
+            })
+            .collect();
+        assert!((projected[0] - output[0]).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_lstm_two_layer_forward_sequence() {
         let m = LstmModel::new(2, 3, 2, 2);
         let seq = vec![vec![0.5, -0.3], vec![0.1, 0.7]];
@@ -354,7 +403,11 @@ mod tests {
                 assert!((a - b).abs() < 1e-10, "bin→json w_ih mismatch: {a} vs {b}");
             }
         }
-        assert_eq!(loaded_json.inner.w_ho, loaded_bin.inner.w_ho);
+        for (a_row, b_row) in loaded_json.inner.w_ho.iter().zip(loaded_bin.inner.w_ho.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert!((a - b).abs() < 1e-10, "bin→json w_ho mismatch: {a} vs {b}");
+            }
+        }
     }
 
     #[test]

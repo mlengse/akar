@@ -387,6 +387,21 @@ impl<F: Float> LstmModel<F> {
         (cells, output)
     }
 
+    /// Run the forward pass over a sequence and return the projected output
+    /// **and** the last layer's raw hidden state at every timestep.
+    ///
+    /// `sequence` — list of input vectors, one per timestep.
+    /// Returns: `(output, hidden_states)` where `output` is the single final
+    /// output projection (`output_size`) and `hidden_states[t]` is the last
+    /// layer's hidden state after timestep `t` — length `hidden_size`, **not**
+    /// `output_size`. Useful when the hidden state itself is the consumer's
+    /// target (mirrors sulur C++ LSTM's hidden-state output, Finding #34-LSTM).
+    pub fn forward_sequence_hidden(&self, sequence: &[Vec<F>]) -> (Vec<F>, Vec<Vec<F>>) {
+        let (cells, output) = self.forward_sequence(sequence);
+        let hidden_states = cells.into_iter().map(|c| c.hidden_state).collect();
+        (output, hidden_states)
+    }
+
     /// Like [`Self::forward_sequence`] but also returns **every layer's** cell
     /// at each timestep (`result[t][l]`, layer 0 first). Used by
     /// [`Self::train_pair`] to back-propagate through the stacked layers.
@@ -1079,6 +1094,81 @@ mod tests {
 
         assert_eq!(cells.len(), 2);
         assert_eq!(output.len(), 1);
+    }
+
+    #[test]
+    fn test_forward_sequence_hidden_shapes() {
+        let model = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 3,
+            output_size: 1,
+            ..Default::default()
+        });
+
+        let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2]];
+        let (output, hidden_states) = model.forward_sequence_hidden(&seq);
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(hidden_states.len(), seq.len());
+        for h in &hidden_states {
+            assert_eq!(h.len(), model.config.hidden_size);
+        }
+    }
+
+    #[test]
+    fn test_forward_sequence_hidden_two_layer_shapes() {
+        let model = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 2,
+            num_layers: 2,
+        });
+
+        let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2], vec![0.1, 0.9]];
+        let (output, hidden_states) = model.forward_sequence_hidden(&seq);
+
+        assert_eq!(output.len(), 2);
+        assert_eq!(hidden_states.len(), seq.len());
+        for h in &hidden_states {
+            assert_eq!(h.len(), 4);
+        }
+    }
+
+    #[test]
+    fn test_forward_sequence_hidden_consistent_with_forward_cell() {
+        let model = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 3,
+            output_size: 1,
+            ..Default::default()
+        });
+
+        let seq = vec![vec![1.0, 0.5], vec![0.3, -0.2], vec![0.1, 0.9]];
+        let (output, hidden_states) = model.forward_sequence_hidden(&seq);
+
+        let mut h_prev = vec![0.0; 3];
+        let mut c_prev = vec![0.0; 3];
+        let mut last_hidden = vec![0.0; 3];
+        for (i, x) in seq.iter().enumerate() {
+            let cell = model.forward_cell(x, &h_prev, &c_prev);
+            for (a, b) in hidden_states[i].iter().zip(cell.hidden_state.iter()) {
+                assert!((a - b).abs() < 1e-9, "hidden mismatch at step {i}: {a} vs {b}");
+            }
+            h_prev = cell.hidden_state;
+            c_prev = cell.cell_state;
+            last_hidden = h_prev.clone();
+        }
+
+        let projected: Vec<f64> = (0..1)
+            .map(|j| {
+                let mut val = model.b_ho[j];
+                for (k, h) in last_hidden.iter().enumerate() {
+                    val += model.w_ho[j][k] * h;
+                }
+                val
+            })
+            .collect();
+        assert!((projected[0] - output[0]).abs() < 1e-9);
     }
 
     #[test]
