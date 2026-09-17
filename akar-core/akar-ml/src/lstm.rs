@@ -31,6 +31,7 @@
 use num_traits::Float;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::io::{Cursor, Read, Write};
 
 fn default_num_layers() -> usize {
     1
@@ -845,6 +846,181 @@ pub fn load_model<F: Float + DeserializeOwned>(path: &str) -> Result<LstmModel<F
     serde_json::from_str(&json).map_err(|e| format!("deserialize: {e}"))
 }
 
+// ─────────────────────── Binary Save / Load (P117.1) ───────────────────────
+
+/// Binary magic for [`save_bin`] / [`load_bin`]: `"LSTM"` (4 bytes).
+const BIN_MAGIC: [u8; 4] = *b"LSTM";
+
+/// Current binary format version (little-endian u16).
+const BIN_VERSION: u16 = 1;
+
+/// Write a single float in the model's native precision (f32 → 4 bytes,
+/// f64 → 8 bytes), little-endian.
+fn write_f32_or_f64<F: Float>(w: &mut impl Write, x: F) -> Result<(), String> {
+    match std::mem::size_of::<F>() {
+        4 => w
+            .write_all(&x.to_f32().unwrap_or(0.0).to_le_bytes())
+            .map_err(|e| format!("write: {e}")),
+        _ => w
+            .write_all(&x.to_f64().unwrap_or(0.0).to_le_bytes())
+            .map_err(|e| format!("write: {e}")),
+    }
+}
+
+fn write_flat<F: Float, T: AsRef<[F]>>(w: &mut impl Write, rows: &[T]) -> Result<(), String> {
+    for row in rows {
+        for x in row.as_ref() {
+            write_f32_or_f64(w, *x)?;
+        }
+    }
+    Ok(())
+}
+
+/// Read a single float in the model's native precision.
+fn read_f32_or_f64<F: Float>(r: &mut Cursor<&[u8]>) -> Result<F, String> {
+    match std::mem::size_of::<F>() {
+        4 => {
+            let mut b = [0u8; 4];
+            r.read_exact(&mut b).map_err(|e| format!("read: {e}"))?;
+            F::from(f32::from_le_bytes(b)).ok_or_else(|| "binary: invalid f32".to_string())
+        }
+        _ => {
+            let mut b = [0u8; 8];
+            r.read_exact(&mut b).map_err(|e| format!("read: {e}"))?;
+            F::from(f64::from_le_bytes(b)).ok_or_else(|| "binary: invalid f64".to_string())
+        }
+    }
+}
+
+/// Save model weights to a compact binary file (P117.1).
+///
+/// Format (little-endian):
+/// ```text
+/// magic    "LSTM" (4 bytes)
+/// version  u16 == 1
+/// config   input_size u16 · hidden_size u16 · output_size u16 · num_layers u16
+/// weights  layer-0 (w_ih, w_hh, b_ih, b_hh)
+///          extra layers 1..num_layers (w_ih, w_hh, b_ih, b_hh) each — row-major
+///          output projection (w_ho, b_ho)
+/// ```
+///
+/// Floats are written in the model's native precision (`f32` → 4 bytes, `f64`
+/// → 8 bytes). More compact than JSON for large models.
+///
+/// # Errors
+///
+/// Returns an error string on I/O failure.
+pub fn save_bin<F: Float>(model: &LstmModel<F>, path: &str) -> Result<(), String> {
+    let cfg = &model.config;
+    let mut buf: Vec<u8> = Vec::new();
+    buf.write_all(&BIN_MAGIC).map_err(|e| format!("write: {e}"))?;
+    buf.write_all(&BIN_VERSION.to_le_bytes())
+        .map_err(|e| format!("write: {e}"))?;
+    for v in [cfg.input_size, cfg.hidden_size, cfg.output_size, cfg.num_layers.max(1)] {
+        let v16 = u16::try_from(v).map_err(|_| format!("binary: dimension {v} exceeds u16"))?;
+        buf.write_all(&v16.to_le_bytes()).map_err(|e| format!("write: {e}"))?;
+    }
+
+    write_flat(&mut buf, &model.w_ih)?;
+    write_flat(&mut buf, &model.w_hh)?;
+    write_flat(&mut buf, std::slice::from_ref(&model.b_ih))?;
+    write_flat(&mut buf, std::slice::from_ref(&model.b_hh))?;
+    for layer in &model.extra_layers {
+        write_flat(&mut buf, &layer.w_ih)?;
+        write_flat(&mut buf, &layer.w_hh)?;
+        write_flat(&mut buf, std::slice::from_ref(&layer.b_ih))?;
+        write_flat(&mut buf, std::slice::from_ref(&layer.b_hh))?;
+    }
+    write_flat(&mut buf, &model.w_ho)?;
+    write_flat(&mut buf, std::slice::from_ref(&model.b_ho))?;
+
+    std::fs::write(path, buf).map_err(|e| format!("write: {e}"))
+}
+
+/// Load model weights from a binary file written by [`save_bin`].
+///
+/// The file's float precision must match `F` (an f32 model cannot be loaded as
+/// an [`LstmModelF64`], and vice-versa).
+///
+/// # Errors
+///
+/// Returns an error string if the file is missing, not an akar LSTM binary, or
+/// malformed/truncated.
+pub fn load_bin<F: Float>(path: &str) -> Result<LstmModel<F>, String> {
+    let data = std::fs::read(path).map_err(|e| format!("read: {e}"))?;
+    let mut r = Cursor::new(data.as_slice());
+
+    let mut magic = [0u8; 4];
+    r.read_exact(&mut magic).map_err(|e| format!("read magic: {e}"))?;
+    if magic != BIN_MAGIC {
+        return Err(format!("not an akar LSTM binary file (magic: {magic:?})"));
+    }
+    let mut version_buf = [0u8; 2];
+    r.read_exact(&mut version_buf)
+        .map_err(|e| format!("read version: {e}"))?;
+    let version = u16::from_le_bytes(version_buf);
+    if version != BIN_VERSION {
+        return Err(format!(
+            "unsupported LSTM binary version {version} (expected {BIN_VERSION})"
+        ));
+    }
+
+    let mut dims = [0u8; 8];
+    r.read_exact(&mut dims).map_err(|e| format!("read config: {e}"))?;
+    let mut u16s = dims.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]));
+    let config = LstmConfig {
+        input_size: u16s.next().unwrap_or(0) as usize,
+        hidden_size: u16s.next().unwrap_or(0) as usize,
+        output_size: u16s.next().unwrap_or(0) as usize,
+        num_layers: (u16s.next().unwrap_or(1) as usize).max(1),
+    };
+
+    let h = config.hidden_size;
+    let read_mat = |r: &mut Cursor<&[u8]>, rows: usize, cols: usize| -> Result<Vec<Vec<F>>, String> {
+        (0..rows)
+            .map(|_| (0..cols).map(|_| read_f32_or_f64(r)).collect())
+            .collect()
+    };
+    let read_vec =
+        |r: &mut Cursor<&[u8]>, n: usize| -> Result<Vec<F>, String> { (0..n).map(|_| read_f32_or_f64(r)).collect() };
+
+    let w_ih = read_mat(&mut r, 4 * h, config.input_size)?;
+    let w_hh = read_mat(&mut r, 4 * h, h)?;
+    let b_ih = read_vec(&mut r, 4 * h)?;
+    let b_hh = read_vec(&mut r, 4 * h)?;
+
+    let mut extra_layers = Vec::with_capacity(config.num_layers.saturating_sub(1));
+    for _ in 1..config.num_layers {
+        extra_layers.push(LstmLayer {
+            w_ih: read_mat(&mut r, 4 * h, h)?,
+            w_hh: read_mat(&mut r, 4 * h, h)?,
+            b_ih: read_vec(&mut r, 4 * h)?,
+            b_hh: read_vec(&mut r, 4 * h)?,
+        });
+    }
+
+    let w_ho = read_mat(&mut r, config.output_size, h)?;
+    let b_ho = read_vec(&mut r, config.output_size)?;
+
+    if r.position() as usize != data.len() {
+        return Err(format!(
+            "binary: {} trailing bytes after model data",
+            data.len() - r.position() as usize
+        ));
+    }
+
+    Ok(LstmModel {
+        config,
+        w_ih,
+        w_hh,
+        b_ih,
+        b_hh,
+        extra_layers,
+        w_ho,
+        b_ho,
+    })
+}
+
 // ─────────────────────── Tests ───────────────────────
 
 #[cfg(test)]
@@ -1192,6 +1368,190 @@ mod tests {
         for (a_row, b_row) in model.w_ih.iter().zip(loaded.w_ih.iter()) {
             for (a, b) in a_row.iter().zip(b_row.iter()) {
                 assert_eq!(a, b, "f32 weight mismatch: {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bin_save_load_roundtrip_f64() {
+        // P117.1: 2-layer f64 binary roundtrip — config, all weights exact.
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 3,
+            num_layers: 2,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.bin");
+
+        save_bin(&model, path.to_str().unwrap()).unwrap();
+        let loaded: LstmModelF64 = load_bin(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(loaded.config.input_size, 2);
+        assert_eq!(loaded.config.hidden_size, 4);
+        assert_eq!(loaded.config.output_size, 3);
+        assert_eq!(loaded.config.num_layers, 2);
+        assert_eq!(loaded.extra_layers.len(), 1);
+        assert_eq!(loaded.w_ih.len(), model.w_ih.len());
+        assert_eq!(loaded.w_ih[0].len(), model.w_ih[0].len());
+        assert_eq!(loaded.w_ho.len(), model.w_ho.len());
+
+        for (a_row, b_row) in model.w_ih.iter().zip(loaded.w_ih.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert_eq!(a, b, "w_ih mismatch: {a} vs {b}");
+            }
+        }
+        for (a_row, b_row) in model.extra_layers[0]
+            .w_ih
+            .iter()
+            .zip(loaded.extra_layers[0].w_ih.iter())
+        {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert_eq!(a, b, "extra w_ih mismatch: {a} vs {b}");
+            }
+        }
+        assert_eq!(loaded.b_ho, model.b_ho);
+    }
+
+    #[test]
+    fn test_bin_save_load_roundtrip_f32() {
+        // P117.1: f32 precision roundtrip — stored as 4-byte floats.
+        let model: LstmModelF32 = LstmModel::new(LstmConfig {
+            input_size: 3,
+            hidden_size: 5,
+            output_size: 1,
+            ..Default::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model_f32.bin");
+
+        save_bin(&model, path.to_str().unwrap()).unwrap();
+        let loaded: LstmModelF32 = load_bin(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(loaded.config.input_size, 3);
+        assert_eq!(loaded.config.hidden_size, 5);
+        assert_eq!(loaded.config.output_size, 1);
+        assert_eq!(loaded.config.num_layers, 1);
+        assert!(loaded.extra_layers.is_empty());
+        for (a_row, b_row) in model.w_ih.iter().zip(loaded.w_ih.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert_eq!(a, b, "f32 w_ih mismatch: {a} vs {b}");
+            }
+        }
+        assert_eq!(loaded.w_ho, model.w_ho);
+    }
+
+    #[test]
+    fn test_bin_single_layer_roundtrip_parity_with_json() {
+        // P117.1: binary roundtrip must agree exactly with JSON roundtrip
+        // (weights identical), and the loaded model forward-identically.
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 3,
+            output_size: 1,
+            ..Default::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("model.bin");
+        let json_path = dir.path().join("model.json");
+
+        save_bin(&model, bin_path.to_str().unwrap()).unwrap();
+        save_model(&model, json_path.to_str().unwrap()).unwrap();
+        let loaded_bin: LstmModelF64 = load_bin(bin_path.to_str().unwrap()).unwrap();
+        let loaded_json: LstmModelF64 = load_model(json_path.to_str().unwrap()).unwrap();
+
+        // Binary roundtrip is bit-exact; JSON serialization may be off by ~1
+        // ulp, so cross-format weights are compared with the JSON test tolerance.
+        for (a_row, b_row) in loaded_json.w_ih.iter().zip(loaded_bin.w_ih.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert!((a - b).abs() < 1e-10, "bin/json w_ih mismatch: {a} vs {b}");
+            }
+        }
+        let seq = vec![vec![0.5, -0.3]];
+        let (out_bin, out_json) = (
+            loaded_bin.forward_sequence(&seq).1,
+            loaded_json.forward_sequence(&seq).1,
+        );
+        for (a, b) in out_bin.iter().zip(out_json.iter()) {
+            assert!((a - b).abs() < 1e-10, "binary and JSON load forward diff: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn test_bin_rejects_invalid_magic() {
+        // P117.1: garbage file → load_bin must error, not panic.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not_lstm.bin");
+        std::fs::write(&path, b"not-a-lstm-file-forever").unwrap();
+        let err = load_bin::<f64>(path.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("magic"), "expected magic error, got: {err}");
+    }
+
+    #[test]
+    fn test_bin_rejects_unsupported_version() {
+        // P117.1: unknown version → error.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("future.bin");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&BIN_MAGIC);
+        bytes.extend_from_slice(&(BIN_VERSION + 1).to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 8]);
+        bytes.extend_from_slice(&[0u8; 8]);
+        std::fs::write(&path, bytes).unwrap();
+        let err = load_bin::<f64>(path.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("version"), "expected version error, got: {err}");
+    }
+
+    #[test]
+    fn test_bin_rejects_truncated_file() {
+        // P117.1: truncation → error, not panic.
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 1,
+            ..Default::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let full = dir.path().join("full.bin");
+        save_bin(&model, full.to_str().unwrap()).unwrap();
+        let bytes = std::fs::read(&full).unwrap();
+        let truncated = &bytes[..bytes.len() / 2];
+        let tpath = dir.path().join("truncated.bin");
+        std::fs::write(&tpath, truncated).unwrap();
+        assert!(load_bin::<f64>(tpath.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_bin_save_json_roundtrip_backward_compat() {
+        // P117.1 backward-compat: after adding binary persistence the JSON
+        // save/load path must still work unimpaired (serialize a binary-loaded
+        // model via JSON and reload it).
+        let model: LstmModelF64 = LstmModel::new(LstmConfig {
+            input_size: 2,
+            hidden_size: 4,
+            output_size: 1,
+            num_layers: 2,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("m.bin");
+        let json_path = dir.path().join("m.json");
+
+        save_bin(&model, bin_path.to_str().unwrap()).unwrap();
+        let loaded_bin: LstmModelF64 = load_bin(bin_path.to_str().unwrap()).unwrap();
+        // JSON save must still work on the loaded model…
+        save_model(&loaded_bin, json_path.to_str().unwrap()).unwrap();
+        let loaded_json: LstmModelF64 = load_model(json_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(loaded_json.config.num_layers, 2);
+        assert_eq!(loaded_json.extra_layers.len(), 1);
+        for (a_row, b_row) in loaded_json.w_ih.iter().zip(loaded_bin.w_ih.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert!((a - b).abs() < 1e-10, "bin→json w_ih mismatch: {a} vs {b}");
+            }
+        }
+        for (a_row, b_row) in loaded_json.w_ho.iter().zip(loaded_bin.w_ho.iter()) {
+            for (a, b) in a_row.iter().zip(b_row.iter()) {
+                assert!((a - b).abs() < 1e-10, "bin→json w_ho mismatch: {a} vs {b}");
             }
         }
     }
