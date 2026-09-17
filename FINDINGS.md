@@ -36,65 +36,6 @@ mematikan daemon → tool `sulur_*` UNAVAILABLE untuk sesi berjalan (Sulur `docs
 (streaming/limit pushdown; jangan materialisasi seluruh rel + kolom embedding), dengan
 kriteria lulus eksplisit pada RSS.
 
-## F2 — `MERGE ... SET` (jalur cepat `Connection`) tidak pernah match baris yang ada — FIXED
-
-**Severity:** high (root fix BELUM; mematikan fase AFE Sulur + memicu ledakan edge)
-**Tanggal:** 2026-09-16 · **Ranah:** akar (semantik MERGE) · **Status:** SELESAI → CHANGELOG `ff1a995` (P1-MERGE-1)
-
-**Repro (daemon live, tabel `Meta` PK `key`, baris sudah ada):**
-
-| Statement | Hasil |
-|---|---|
-| `MERGE (m:Meta {key:'t'}) SET m.value='v'` | **gagal** `MERGE CREATE failed: index: Duplicate primary key value: 't'` → match meleset, lalu CREATE |
-| `MERGE (m:Meta {key:$k}) SET m.value=$v` (param) | **gagal** `MERGE CREATE failed: page: NULL value not allowed for primary key column 'key'` |
-| `MERGE (m:Meta {key:$k}) RETURN m.value` (tanpa SET) | **sukses** (match & create benar, jalur planner → `PhysicalMerge`) |
-| `MATCH (m:Meta {key:$k}) SET m.value=$v` (param) | **sukses** |
-| `CREATE (:Meta {key:$k, value:$v})` (param) | **sukses** |
-
-**Kesimpulan:** hanya jalur cepat `Connection` — `akar-main/src/connection/ddl.rs`,
-arm `BoundStatement::BoundMerge` (bentuk `MERGE … SET` tanpa `RETURN`) — yang salah.
-Dua gejala, satu lokasi:
-
-1. **Literal:** match lewat `table.hash_index.lookup(&pk_value_to_string(pv))` selalu
-   `None` untuk baris yang ada → jatuh ke CREATE → duplicate PK.
-2. **Param:** nilai PK dievaluasi dari ekspresi yang tidak ter-substitusi/ter-evaluasi
-   (`evaluate_constant_expr` pada `Expression::Parameter`) → `Null` → "NULL value not
-   allowed for primary key". (Jalur pipeline `map_ddl.rs`/`PhysicalMerge` sudah benar.)
-
-**Hipotesis akar (perlu dikonfirmasi saat memperbaiki):**
-- (a) *Index tidak hidup di instance yang dibaca.* `TableCatalog::create_node_table`
-  (`akar-storage/src/table.rs:1306`) menyimpan **clone** `NodeTable` ke `node_tables`
-  (`node_tables.insert(table_id, table.clone())`); kalau `hash_index` dimiliki per-instance
-  (bukan `Arc`), mutasi insert bisa masuk ke instance lain dari yang di-`lookup` oleh
-  jalur MERGE.
-- (b) `hash_index` hanya dipelihara jalur INSERT (binder/ART), tidak oleh jalur
-  MERGE/CREATE-pipeline, sehingga tabel yang diisi lewat MERGE tidak pernah terindeks.
-
-**Dampak nyata (terverifikasi di Sulur):**
-- Fase AFE Sulur (`afe._write_done_set`) memakai `MERGE (m:Meta {key:$k}) SET m.value=$v`
-  → `Dream cycle failed: Execute error: MERGE CREATE failed … in table 'Meta'`
-  (2026-09-16 12:45), membatalkan **seluruh siklus dream**. Mitigasi sementara di sisi
-  Sulur: MATCH → SET/CREATE (commit `eb24fbf`).
-- Upsert edge Sulur (`akar_store.upsert_connection`, `plugin.py` MERGE `Connected`)
-  berisiko membuat edge **duplikat** setiap kali dipanggil, bukan memperbarui weight →
-  selaras dengan kenaikan `Connected` 972 → 24.974 dalam satu hari.
-
-**Resolusi (P1-MERGE-1, `ff1a995`):** akar dari hipotesis (a)/(b) — `hash_index`
-adalah `HashIndex<String>` milik bersama pada entri dashmap (`get_node_table_by_name_mut`),
-di-share jalur INSERT dan fast-path MERGE, jadi tidak ada divergensi clone dalam proses.
-Akar yang terkonfirmasi adalah **substitusi param**: `MERGE … SET` tanpa `RETURN` bind
-sebagai `BoundStatement::BoundQuery` dengan klausa `BoundClause::BoundMerge`, dan loop
-`substitute_params_in_statement` (`akar-main/src/connection/substitute.rs`) tidak punya arm
-untuk klausa itu → `other => other.clone()` → `Expression::Parameter` masih hidup → sewaktu
-dijalankan planner, `PhysicalMerge::eval_const` mengevaluasi PK jadi `Value::Null` →
-"NULL value not allowed for primary key". (Gejala literal duplicate-PK juga benigna:
-laporan daemon berasal dari jalur yang sama, dalam proses ini literal selalu MATCH.)
-Fix: arm `BoundClause::BoundMerge` baru yang membuat ulang `BoundMerge` dengan
-`properties` / `patterns[].node.properties` / `patterns[].edge.properties` /
-`on_create` / `on_match` ter-substitusi (cermin arm statement-level). Regresi:
-`akar-core/akar-main/tests/test_merge.rs` (5 tes, literal + param). Gate
-`test [akar-core]`: **2,091 passed / 0 failed / 0 ignored**.
-
 ---
 
 ## F3 — Traversal rel table besar patologis (anchored >30 s)
@@ -153,28 +94,10 @@ repair): WAL recovery insert failed: index: Duplicate primary key value: '1' in 
 'DreamSession'. Refusing to start with an empty database — check the WAL.
 ```
 
-Penyebab langsung: bug F1 (tabel `DreamSession` di-wipe, id dipakai ulang, WAL memuat dua
-insert `id=1`). Setelah F1 diperbaiki, urutan ini tidak bisa lagi tercipta lewat jalur itu —
+Penyebab langsung: bug F1 (`CREATE NODE TABLE IF NOT EXISTS` mengulang storage — sudah
+FIXED, lihat `CHANGELOG.md` `508328a`; tabel `DreamSession` di-wipe, id dipakai ulang, WAL
+memuat dua insert `id=1`). Setelah F1 diperbaiki, urutan ini tidak bisa lagi tercipta lewat jalur itu —
 **tetapi** mekanisme yang ada sekarang = server **menolak start** (fail-loud, bagus untuk
 integritas) tanpa jalur pemulihan yang jelas di luar intervensi manual.
 
 **Status:** OPEN (resiliensi) — rencana di `implementation plan.md` P2-WAL-1.
-
----
-
-## F1 — `CREATE NODE TABLE IF NOT EXISTS` membuat ulang storage (silent data loss) — FIXED
-
-**Severity:** high (data loss senyap) · **Tanggal:** 2026-09-16 · **Status:** SELESAI → CHANGELOG `508328a`
-
-Ringkas (detail lengkap di `CHANGELOG.md`):
-
-- Arm `BoundCreateNodeTable`/`BoundCreateRelTable` di `akar-main/src/connection/ddl.rs`
-  memanggil `database.create_node_table(...)` tanpa memeriksa `if_not_exists`;
-  `TableCatalog::create_node_table` mengalokasikan `table_id` baru + me-remap
-  `node_name_to_id` → seluruh baris tabel lama tak terjangkau, statement tetap "sukses".
-- Repro (sebelum): create `IF NOT EXISTS` → insert → count 1 → ulangi DDL → **count 0**.
-  Sesudah fix: count tetap 1, tabel tetap writable, plain duplicate tetap error.
-- Tes `akar-main/tests/test_ddl_errors.rs` diperkuat (data ditulis **sebelum** DDL duplikat) →
-  `cargo test --release -p akar-main --test test_ddl_errors`: 26 passed / 0 failed.
-- Dampak nyata: setiap `sulur_dream_stats` menghapus `DreamSession`/`ConnectionHistory`/
-  `DreamInsight` (telemetri selalu `sessions: 0`) dan memicu WAL replay failure (F5).
