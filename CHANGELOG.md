@@ -9,7 +9,7 @@
 
 | Versi | Tanggal | Tema |
 |-------|---------|------|
-| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
+| [Unreleased](#unreleased) | — | Fase 8 akar.lstm superset (P117.1 `save_bin`/`load_bin` + P116.1 `train_pair` + P116.2 binding PyO3) + fix DDL `IF NOT EXISTS` |
 | [0.2.1](#021---2026-09-14) | 2026-09-14 | Re-publish 0.2.0 defektif: 34 crates + PyPI `akar` dengan dep `^0.2.1` |
 | [0.1.21](#0121---2026-09-07) | 2026-09-07 | akar-ml embedding: parity `embed_multi`/rerank + API non-exhaustive (P96) |
 | [0.1.20](#0120---2026-09-04) | 2026-09-04 | fastembed end-to-end: offline weights, batch/parallel, error (P89–P99) |
@@ -35,6 +35,12 @@
 ## [Unreleased]
 
 ### Added
+
+- **P117.1 — akar.lstm binary persistence `save_bin`/`load_bin`** · `57a6cc9` · gate **2,083** (+10)
+  - Format binary: magic `b"LSTM"` + version u16 (=1) + config (input/hidden/output/num_layers, 4×u16) + weights berurutan dalam precision native model (f32→4B / f64→8B, little-endian) — lebih ringkas & parser tanpa serde untuk model besar.
+  - **Bit-exact** roundtrip (JSON ~1 ulp lossy, jadi `save_bin`/`load_bin` menjadi jalur presisi penuh); `load_bin` menolak magic salah, version ≠1, file terpotong, dan byte sisa di akhir.
+  - Backward-compat: `save_model`/`load_model` (JSON) tidak berubah — roundtrip silang binary↔JSON diverifikasi dengan toleransi 1e-10.
+  - Tes: akar-ml lstm 18→25 (+7 roundtrip/reject/parity, in-gate), akar-python 45→49 (di luar gate: `save_bin` method + `load_bin` staticmethod, forward identik, reject garbage).
 
 - **P116.2 — binding PyO3 `akar.lstm.LstmModel.train_pair`** · `1e34afc` · akar-python **41→45** (di luar gate)
   - `train_pair(input: list[list[float]], target: list[float], lr: float) -> (float, list[float])` — meneruskan ke `akar_ml::lstm::LstmModel::train_pair` (P116.1): weight ter-update in-place pada semua layer, loss = MSE scalar, hidden = state akhir (panjang `hidden_size`).
