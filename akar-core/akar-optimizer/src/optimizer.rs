@@ -22,6 +22,10 @@ impl Optimizer {
         let passes: Vec<Box<dyn OptimizationPass>> = vec![
             // Pass 1: Remove obviously unnecessary operators early
             Box::new(RemoveUnnecessaryOperators),
+            // Pass 1b: Hoist source-only predicates above `Extend` so an
+            // anchored hop filters the scan *before* the relationship
+            // traversal (F3) — `FilterPushDown` then folds them into the scan.
+            Box::new(ExtendFilterPushDown),
             // Pass 2: Push filters toward scan nodes (reduces intermediate rows)
             Box::new(FilterPushDown),
             // Pass 3: Push predicate into ScanNode (reduces I/O)
@@ -92,6 +96,7 @@ impl Optimizer {
     ) -> Self {
         let passes: Vec<Box<dyn OptimizationPass>> = vec![
             Box::new(RemoveUnnecessaryOperators),
+            Box::new(ExtendFilterPushDown),
             Box::new(FilterPushDown),
             Box::new(PredicatePushDown),
             Box::new(ProjectionPushDown),
@@ -194,7 +199,8 @@ mod tests {
         assert!(names.contains(&"sort_elision"));
         assert!(names.contains(&"expression_inline"));
         assert!(names.contains(&"fts_predicate_pushdown"));
-        assert_eq!(names.len(), 25);
+        assert!(names.contains(&"extend_filter_push_down"));
+        assert_eq!(names.len(), 26);
     }
 
     #[test]

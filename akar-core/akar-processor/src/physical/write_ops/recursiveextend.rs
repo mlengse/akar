@@ -8,6 +8,31 @@ use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Process-wide diagnostics for `PhysicalExtend`: number of executions and the
+/// total number of input rows they were handed. An *anchored* 1-hop must filter
+/// its scan so the hop only expands the matching source row(s); if predicate
+/// push-down regresses (F3 — "anchor doesn't help, cost ∝ rel size") the count
+/// jumps to the whole node table. Regression tests snapshot this with
+/// [`extend_counters`] / [`reset_extend_counters`].
+pub static EXTEND_EXECUTIONS: AtomicU64 = AtomicU64::new(0);
+/// Total input rows fed to `PhysicalExtend::execute` (see [`EXTEND_EXECUTIONS`]).
+pub static EXTEND_INPUT_ROWS: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot `(executions, input_rows)` of the extend diagnostics counters.
+pub fn extend_counters() -> (u64, u64) {
+    (
+        EXTEND_EXECUTIONS.load(Ordering::Relaxed),
+        EXTEND_INPUT_ROWS.load(Ordering::Relaxed),
+    )
+}
+
+/// Reset the extend diagnostics counters to zero.
+pub fn reset_extend_counters() {
+    EXTEND_EXECUTIONS.store(0, Ordering::Relaxed);
+    EXTEND_INPUT_ROWS.store(0, Ordering::Relaxed);
+}
 
 // ==================== RecursiveExtend ====================
 
@@ -627,6 +652,14 @@ pub struct PhysicalExtend {
     /// unpruned `Memory`/`Connected` scan duplicates ~46 columns (incl. large
     /// embedding Lists) per edge — gigabytes for 50k edges.
     pub prune: Option<crate::processor::extend_prune::ExtendPrune>,
+    /// Pushed-down row budget (from a trailing `LIMIT n OFFSET m`, passed
+    /// through only Projection). When `Some`, execution stops as soon as that
+    /// many output rows have been produced instead of materialising the whole
+    /// relationship table first (P1-PERF-1 LIMIT pushdown for anchored
+    /// patterns). Only set by `execute_internal` through
+    /// `forward_limit_budget`, which guarantees no reordering/aggregation sits
+    /// between the extend and the LIMIT.
+    pub limit_budget: Option<u64>,
 }
 
 /// Default safety cap for unbounded extends that must materialise every
@@ -651,6 +684,9 @@ impl PhysicalExtend {
             return Ok(input);
         }
 
+        EXTEND_EXECUTIONS.fetch_add(1, Ordering::Relaxed);
+        EXTEND_INPUT_ROWS.fetch_add(input.iter().map(|c| c.size as u64).sum::<u64>(), Ordering::Relaxed);
+
         // FTS on the destination (P108.4): the index's base table is only
         // reachable as this hop's destination — materialise the matching
         // document-id set once and drop every dst row outside it.
@@ -669,35 +705,32 @@ impl PhysicalExtend {
             None
         };
 
-        // Collect rel table data upfront (owned)
-        let (fwd_adj, rev_adj, rel_props, rel_cols) = {
-            let rel_table = self
-                .table_catalog
-                .get_rel_table_by_name(&self.rel_table_name)
-                .ok_or_else(|| format!("Rel table {} not found", self.rel_table_name))?;
-            let fwd = rel_table.fwd_adj.clone();
-            let rev = rel_table.rev_adj.clone();
-            let props = rel_table.properties.clone();
-            let cols = rel_table.columns.clone();
-            (fwd, rev, props, cols)
-        };
-
-        // Collect dest node table data upfront (owned)
-        let (dest_data, dest_cols) = {
-            let dest_table = self
-                .table_catalog
-                .get_node_table_by_name(&self.dst_table_name)
-                .ok_or_else(|| format!("Node table {} not found", self.dst_table_name))?;
-            let data = dest_table.to_column_major_data();
-            let cols = dest_table.columns.clone();
-            (data, cols)
-        };
+        // Borrow (not clone) the rel and dest node tables from the catalog.
+        // The adjacency HashMaps and node columns stay in the catalog:
+        // lookups (`.scan_adj_list`/`.scan_rev_adj_list`) and per-row value
+        // reads happen on demand instead of snapshotting the whole tables per
+        // execution. The previous code `.clone()`d the rel fwd/rev adjacency,
+        // every rel property column AND the entire dest node table
+        // (`to_column_major_data`, incl. large embedding Lists) on every
+        // extend — making even a single anchored 1-hop O(rel + node size),
+        // the F3 "anchor doesn't help" symptom and the F6 GB-scale allocation.
+        let rel_table = self
+            .table_catalog
+            .get_rel_table_by_name(&self.rel_table_name)
+            .ok_or_else(|| format!("Rel table {} not found", self.rel_table_name))?;
+        let dest_table = self
+            .table_catalog
+            .get_node_table_by_name(&self.dst_table_name)
+            .ok_or_else(|| format!("Node table {} not found", self.dst_table_name))?;
+        let rel_cols = &rel_table.columns;
+        let dest_cols = &dest_table.columns;
         // `dst_offset` from the adjacency is a row offset into the destination
         // node table (`RelTable.fwd_adj`/`rev_adj` store row offsets, not
         // primary keys). Resolve destination rows by offset directly (P53.12).
-        let dest_num_rows = dest_data.first().map(|c| c.len()).unwrap_or(0);
+        let dest_num_rows = dest_table.num_rows as usize;
 
         let mut output = Vec::with_capacity(input.len());
+        let mut produced = 0u64;
 
         for chunk in input {
             // Find the bound node column in the chunk
@@ -716,11 +749,19 @@ impl PhysicalExtend {
                     )
                 })?;
 
+            // If the pushed-down row budget is already met by earlier chunks,
+            // this chunk contributes no output rows.
+            if let Some(budget) = self.limit_budget {
+                if produced >= budget {
+                    break;
+                }
+            }
+
             // Calculate total output rows and build row mapping
             let mut total_rows = 0;
             let mut row_mappings: Vec<(usize, u64, usize)> = Vec::new(); // (input_row, dst_offset, edge_idx)
 
-            for i in 0..chunk.size {
+            'rows: for i in 0..chunk.size {
                 if chunk.fields[bound_idx].is_null(i) {
                     continue;
                 }
@@ -730,14 +771,20 @@ impl PhysicalExtend {
                     continue;
                 };
 
+                // Adjacency-index lookup per bound source node (no full-table
+                // clone): the rel table keeps `fwd_adj`/`rev_adj` HashMaps in
+                // the catalog, so an anchored row pays O(degree), not O(edges).
+                // `Both` merges the two borrowed slices into an owned Vec only
+                // for that single node's neighbourhood.
                 let edges: Vec<(u64, usize)> = match self.direction {
-                    akar_parser::ast::EdgeDirection::LeftToRight => fwd_adj.get(&src_id).cloned().unwrap_or_default(),
-                    akar_parser::ast::EdgeDirection::RightToLeft => rev_adj.get(&src_id).cloned().unwrap_or_default(),
+                    akar_parser::ast::EdgeDirection::LeftToRight => rel_table.scan_adj_list(src_id).to_vec(),
+                    akar_parser::ast::EdgeDirection::RightToLeft => rel_table.scan_rev_adj_list(src_id).to_vec(),
                     akar_parser::ast::EdgeDirection::Both => {
-                        let mut all = fwd_adj.get(&src_id).cloned().unwrap_or_default();
-                        if let Some(rev) = rev_adj.get(&src_id) {
-                            all.extend(rev.iter().cloned());
-                        }
+                        let fwd = rel_table.scan_adj_list(src_id);
+                        let rev = rel_table.scan_rev_adj_list(src_id);
+                        let mut all = Vec::with_capacity(fwd.len() + rev.len());
+                        all.extend_from_slice(fwd);
+                        all.extend_from_slice(rev);
                         all
                     }
                 };
@@ -754,6 +801,17 @@ impl PhysicalExtend {
                     }
                     total_rows += 1;
                     row_mappings.push((i, dst_offset, edge_idx));
+                    // P1-PERF-1 LIMIT pushdown: stop materialising as soon as
+                    // the trailing `LIMIT n OFFSET m` row budget is met instead
+                    // of scanning the whole relationship table. The row that
+                    // reaches `budget` was just pushed, so the mapping stays
+                    // exact; the chunk-top guard stops further chunks.
+                    if let Some(budget) = self.limit_budget {
+                        produced += 1;
+                        if produced >= budget {
+                            break 'rows;
+                        }
+                    }
                 }
             }
 
@@ -839,9 +897,12 @@ impl PhysicalExtend {
                     out_data[out_idx].push(val);
                     out_idx += 1;
                 }
-                // Copy kept rel properties
+                // Copy kept rel properties (lazy per-edge read straight from
+                // the catalog's rel table — no per-execution clone of the
+                // whole property column).
                 for &col in &kept_rel {
-                    let val = rel_props
+                    let val = rel_table
+                        .properties
                         .get(col)
                         .and_then(|c| c.get(edge_idx))
                         .cloned()
@@ -850,14 +911,12 @@ impl PhysicalExtend {
                     out_idx += 1;
                 }
                 // Copy kept dest node properties (row = dst_offset, a row offset
-                // into the destination node table; P53.12).
+                // into the destination node table; P53.12). Lazy per-row read
+                // via the indexed column-major storage — avoids cloning the
+                // dest table (incl. 384-d embedding Lists) for every extend.
                 let dest_row = dst_offset as usize;
                 for &col in &kept_dest {
-                    let val = dest_data
-                        .get(col)
-                        .and_then(|c| c.get(dest_row))
-                        .cloned()
-                        .unwrap_or(Value::Null);
+                    let val = dest_table.get_value(dest_row, col).cloned().unwrap_or(Value::Null);
                     out_data[out_idx].push(val);
                     out_idx += 1;
                 }

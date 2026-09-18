@@ -887,4 +887,121 @@ mod tests {
         pass.apply_tree(&mut scan);
         assert_eq!(scan.cardinality(), 5, "FTS estimate cannot exceed table rows");
     }
+
+    fn make_scan_aliased(alias: &str) -> LogicalOperator {
+        LogicalOperator::ScanNode(LogicalScanNode {
+            predicate: None,
+            table_name: "Memory".into(),
+            table_id: 1,
+            alias: Some(alias.into()),
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+        })
+    }
+
+    fn make_extend() -> LogicalOperator {
+        LogicalOperator::Extend(LogicalExtend {
+            rel_table_name: "Connected".into(),
+            rel_table_id: 1,
+            rel_var: "r".into(),
+            bound_node_var: "a".into(),
+            direction: akar_parser::ast::EdgeDirection::LeftToRight,
+            dst_node_var: "b".into(),
+            dst_table_name: "Memory".into(),
+            dst_table_id: 1,
+            fts_query: None,
+            cardinality: 0,
+        })
+    }
+
+    fn make_filter_on(var: &str) -> LogicalOperator {
+        LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                BinaryOp::Equal,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(var.into())),
+                    "id".into(),
+                )),
+                Box::new(Expression::Constant(Constant::Integer(100))),
+            ),
+            children: Vec::new(),
+            cardinality: 0,
+        })
+    }
+
+    fn op_names(ops: &[LogicalOperator]) -> Vec<&'static str> {
+        ops.iter()
+            .map(|op| match op {
+                LogicalOperator::ScanNode(_) => "scan",
+                LogicalOperator::Extend(_) => "extend",
+                LogicalOperator::Filter(_) => "filter",
+                LogicalOperator::Projection(_) => "projection",
+                _ => "other",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_extend_filter_pushdown_hoists_source_predicate() {
+        // F3: `Scan(a) -> Extend -> Filter(a.id=100)` must become
+        // `Scan(a) -> Filter(a.id=100) -> Extend` so the anchor filters the
+        // scan before the relationship traversal.
+        let input = vec![
+            make_scan_aliased("a"),
+            make_extend(),
+            make_filter_on("a"),
+            make_projection(),
+        ];
+        let out = ExtendFilterPushDown.apply(&input);
+        assert_eq!(op_names(&out), vec!["scan", "filter", "extend", "projection"]);
+    }
+
+    #[test]
+    fn test_extend_filter_pushdown_keeps_destination_predicate() {
+        // A predicate on the hop's destination cannot be hoisted.
+        let input = vec![
+            make_scan_aliased("a"),
+            make_extend(),
+            make_filter_on("b"),
+            make_projection(),
+        ];
+        let out = ExtendFilterPushDown.apply(&input);
+        assert_eq!(op_names(&out), vec!["scan", "extend", "filter", "projection"]);
+    }
+
+    #[test]
+    fn test_extend_filter_pushdown_enables_scan_fold() {
+        // After hoisting, `FilterPushDown` folds the predicate into the scan.
+        let input = vec![
+            make_scan_aliased("a"),
+            make_extend(),
+            make_filter_on("a"),
+            make_projection(),
+        ];
+        let hoisted = ExtendFilterPushDown.apply(&input);
+        let folded = FilterPushDown.apply(&hoisted);
+        match &folded[0] {
+            LogicalOperator::ScanNode(scan) => {
+                assert!(scan.predicate.is_some(), "anchor predicate must fold into the scan");
+            }
+            other => panic!("expected a leading ScanNode, got {other:?}"),
+        }
+        assert_eq!(op_names(&folded), vec!["scan", "extend", "projection"]);
+    }
+
+    #[test]
+    fn test_extend_filter_pushdown_registered_before_filter_pushdown() {
+        let optimizer = crate::optimizer::Optimizer::new();
+        let names = optimizer.pass_names();
+        let hoist = names
+            .iter()
+            .position(|n| *n == "extend_filter_push_down")
+            .expect("ExtendFilterPushDown must be registered");
+        let fold = names
+            .iter()
+            .position(|n| *n == "filter_push_down")
+            .expect("FilterPushDown must be registered");
+        assert!(hoist < fold, "hoisting must run before the scan fold");
+    }
 }

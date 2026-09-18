@@ -125,6 +125,7 @@ pub fn map_and_execute_update(
                 fts_query,
                 table_catalog,
                 prune: std::mem::take(&mut ctx.extend_prune),
+                limit_budget: ctx.limit_budget,
             };
             let result = extend_op.execute(current_input)?;
             // Record written rows for OCC conflict detection

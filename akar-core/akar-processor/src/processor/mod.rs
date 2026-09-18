@@ -407,6 +407,7 @@ impl QueryProcessor {
                 written_rows: Vec::new(),
                 txn_id: self.txn_id,
                 extend_prune,
+                limit_budget,
             };
 
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, limit_budget, &mut ctx)?;

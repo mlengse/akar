@@ -11,7 +11,9 @@ use akar_planner::logical_operator::*;
 pub struct FilterPushDown;
 
 impl FilterPushDown {
-    fn get_variables(expr: &Expression) -> Vec<String> {
+    /// Collect the base variable names referenced by `expr` (the variable in a
+    /// `PropertyAccess`, function args, and both sides of binary/unary ops).
+    pub(crate) fn get_variables(expr: &Expression) -> Vec<String> {
         let mut vars = Vec::new();
         match expr {
             Expression::Variable(v) => vars.push(v.clone()),

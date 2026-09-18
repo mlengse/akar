@@ -46,6 +46,12 @@ pub struct ExecutionContext<'p> {
     /// the Extend must materialise every column (all consumers unanalysable,
     /// or executing inside a child sub-plan).
     pub extend_prune: Option<crate::processor::extend_prune::ExtendPrune>,
+    /// Pushed-down row budget from a trailing `LIMIT n OFFSET m` (via
+    /// `forward_limit_budget`, only passing through Projection). Consumed by
+    /// row-producing operators like Extend to stop materialising once the
+    /// budget is met (P1-PERF-1). `None` when the tail has no applicable
+    /// LIMIT (aggregation etc. needs the full row set).
+    pub limit_budget: Option<u64>,
 }
 
 impl<'p> ExecutionContext<'p> {
