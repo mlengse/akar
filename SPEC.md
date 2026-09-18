@@ -375,6 +375,24 @@ P60.2).
 | **Patterns** | Variable-length paths `[*1..5]`, edge patterns, multi-hop traversals |
 | **Expressions** | Arithmetic, boolean, string, CASE, list/map/struct literals, subqueries, parameters |
 
+### 4.1 Identifier Case Sensitivity
+
+All object identifiers — node table names, rel table names, column names,
+function names, and macro names — are **case-sensitive** and must be written
+exactly as registered in the catalog. There is no case folding or
+normalization at bind time; a label or name written with different casing is
+treated as a different, untracked identifier and fails binding with a
+`Bind error`:
+
+| Wrong case | Error |
+|------------|-------|
+| Table registered `Memory`, query `MATCH (m:MEMORY) RETURN m` | `Bind error: Table 'MEMORY' not found` |
+| Rel table registered `Connected`, query `MATCH (a:A)-[r:CONNECTED]-(b:B)` | `Bind error: Rel table 'CONNECTED' not found` |
+
+The correctly-cased form always resolves (positive control). The same lookup
+runs independently for node and rel labels within one pattern, so a correct
+node label does not mask a wrong-cased rel label (or vice versa).
+
 ---
 
 ## 5. Type System
