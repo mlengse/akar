@@ -908,10 +908,40 @@ pub(crate) fn replay_data_record(
         WALRecord::Insert { table_id, data } => {
             if let Some(mut table) = catalog.get_node_table_mut(*table_id) {
                 let values = deserialize_values_from_bytes(data, table.columns.len());
-                if let Err(e) = table.insert_row(values) {
-                    return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
+                match table.insert_row(values.clone()) {
+                    Ok(_) => *data_records += 1,
+                    Err(ref e @ StorageError::Index(ref msg)) if msg.starts_with("Duplicate primary key value:") => {
+                        // (P2-WAL-1/F5) A replay that re-applies an insert whose
+                        // primary key already exists must not poison startup with
+                        // "WAL recovery failed". Last-write-wins: overwrite the
+                        // surviving row in place — the row offset (and therefore
+                        // any rel references) stays stable and the PK indexes keep
+                        // pointing at the same row.
+                        let pk_col = table.primary_key_column;
+                        let pk = &values[pk_col];
+                        match table.lookup_by_pk(pk) {
+                            Some(row_offset) => {
+                                tracing::warn!(
+                                    "WAL recovery: duplicate PK insert on node table '{}' PK {:?} — last-write-wins overwrite applied (row {row_offset})",
+                                    table.name,
+                                    pk
+                                );
+                                for col in (0..table.columns.len()).filter(|&c| c != pk_col) {
+                                    table.update_cell(row_offset, col, values[col].clone()).map_err(|e| {
+                                        std::io::Error::other(format!("WAL recovery insert failed: {e}"))
+                                    })?;
+                                }
+                                *data_records += 1;
+                            }
+                            None => {
+                                return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(std::io::Error::other(format!("WAL recovery insert failed: {e}")));
+                    }
                 }
-                *data_records += 1;
             } else if let Some(mut rel) = catalog.get_rel_table_mut(*table_id) {
                 let values = deserialize_values_from_bytes(data, rel.columns.len() + 2);
                 if values.len() < 2 {
@@ -1618,6 +1648,121 @@ mod integration_tests {
                 assert!(matches!(wal.records()[0], crate::wal::WALRecord::Checkpoint));
             }
         }
+    }
+
+    // =================================================================
+    // Test 7b: WAL recovery — duplicate-PK insert applies last-write-wins
+    // instead of poisoning startup (P2-WAL-1, closes F5)
+    // =================================================================
+    #[test]
+    fn test_wal_recovery_duplicate_pk_insert_last_write_wins() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let columns = || {
+            vec![
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::UInt64,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                },
+            ]
+        };
+        let serialize =
+            |id: u64, name: &str| serialize_values_to_bytes(&[Value::UInt64(id), Value::String(name.into())]);
+
+        // Phase 1: seed the in-memory table then crash with a WAL holding TWO
+        // committed inserts for the same primary key (id=1) plus a third row.
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+            let mut table = sm.create_node_table("Session".into(), columns());
+
+            table
+                .insert_row(vec![Value::UInt64(1), Value::String("Alice".into())])
+                .unwrap();
+
+            let mut wal = sm.wal.lock().unwrap();
+            wal.append(WALRecord::Insert {
+                table_id: table.table_id,
+                data: serialize(1, "Alice"),
+            });
+            wal.append(WALRecord::Insert {
+                table_id: table.table_id,
+                data: serialize(1, "Alice-2"),
+            });
+            wal.append(WALRecord::Insert {
+                table_id: table.table_id,
+                data: serialize(2, "Bob"),
+            });
+            wal.flush_to_disk().unwrap();
+        } // "Crash" — all state dropped
+
+        // Phase 2: reopen and recover. Pre-fix this failed with
+        // "WAL recovery insert failed: index: Duplicate primary key value …";
+        // post-fix the duplicate insert is overwritten in place.
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+            sm.create_node_table("Session".into(), columns());
+
+            let recovered = sm.recover().unwrap();
+            assert_eq!(recovered, 3, "all three WAL inserts must be applied");
+
+            let table = sm.table_catalog.get_node_table_by_name("Session").unwrap();
+            assert_eq!(table.num_rows, 2, "duplicate PK must collapse to one row");
+            assert_eq!(table.get_value(0, 0), Some(&Value::UInt64(1)));
+            assert_eq!(
+                table.get_value(0, 1),
+                Some(&Value::String("Alice-2".into())),
+                "last write wins"
+            );
+            assert_eq!(table.get_value(1, 0), Some(&Value::UInt64(2)));
+            assert_eq!(table.get_value(1, 1), Some(&Value::String("Bob".into())));
+        }
+    }
+
+    // =================================================================
+    // Test 7c: duplicate-PK inserts outside replay still error
+    // (the last-write-wins policy is scoped to WAL recovery only)
+    // =================================================================
+    #[test]
+    fn test_duplicate_pk_insert_rejected_outside_replay() {
+        let (sm, _dir) = setup_integration();
+        let mut table = sm.create_node_table(
+            "Session".into(),
+            vec![
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::UInt64,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                },
+            ],
+        );
+
+        table
+            .insert_row(vec![Value::UInt64(1), Value::String("Alice".into())])
+            .unwrap();
+        let err = table
+            .insert_row(vec![Value::UInt64(1), Value::String("Alice-2".into())])
+            .unwrap_err();
+        assert!(
+            matches!(err, StorageError::Index(_)),
+            "online duplicate-PK insert must keep failing, got: {err}"
+        );
     }
 
     // =================================================================
