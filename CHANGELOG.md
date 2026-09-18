@@ -35,6 +35,8 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-18
+
 ### Added
 
 - **docs — audit Sulur ↔ Akar: `FINDINGS.md` + rencana perbaikan di `implementation plan.md`** · `[Uncommitted]` · tanpa perubahan kode
@@ -701,6 +703,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.2.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.3
 [0.2.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.2
 [0.2.1]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.1
 [0.2.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.0

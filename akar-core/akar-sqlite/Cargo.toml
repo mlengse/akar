@@ -1,6 +1,6 @@
 [package]
 name = "akar-sqlite"
-version = "0.2.2"
+version = "0.2.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,9 +12,9 @@ authors.workspace = true
 
 [dependencies]
 arrow.workspace = true
-akar-common = { path = "../akar-common", version = "0.2.2" }
-akar-function = { path = "../akar-function", version = "0.2.2" }
-akar-extension = { path = "../akar-extension", version = "0.2.2" }
+akar-common = { path = "../akar-common", version = "0.2.3" }
+akar-function = { path = "../akar-function", version = "0.2.3" }
+akar-extension = { path = "../akar-extension", version = "0.2.3" }
 rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
 tracing.workspace = true
 

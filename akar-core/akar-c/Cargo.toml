@@ -14,6 +14,6 @@ authors.workspace = true
 crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
-akar-main = { path = "../akar-main", version = "0.2.2" }
-akar-common = { path = "../akar-common", version = "0.2.2" }
+akar-main = { path = "../akar-main", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.3" }
 libc = "0.2"
