@@ -13,7 +13,7 @@ The planner turns a bound statement into a logical plan: a DAG built from 59 log
 
 ## Design Decisions
 
-- **Logical plan as the optimizer's input.** Keeping planning separate from optimization allows the 24-pass optimizer (`akar-core/akar-optimizer/src/`) to traverse and rewrite a stable form. This mirrors Kuzu's architecture and keeps parity (ADR-003).
+- **Logical plan as the optimizer's input.** Keeping planning separate from optimization allows the 26-pass optimizer (`akar-core/akar-optimizer/src/`) to traverse and rewrite a stable form. This mirrors Kuzu's architecture and keeps parity (ADR-003).
 - **Vector rewrite lives at plan time.** The alternative — a post-filter over a full ANN scan — was rejected because the HNSW graph already returns the k nearest rows; filtering after is redundant work. Encoding that decision in the planner (vs optimizer) keeps optimizer passes generic and lets the processor pick the dedicated physical op (`akar-core/akar-processor/src/processor/vector_similarity_scan.rs`).
 
 ## Why It Matters

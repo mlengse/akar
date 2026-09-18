@@ -21,7 +21,7 @@ Each stage has a clean interface to the next — the Parser does not know about 
 
 3. **Logical Planning (Planner)** — The planner converts bound statements into a logical plan tree with 59 LogicalOperator variants. It handles join ordering, optional match expansion, recursive extend planning, and DDL operator generation. The planner is where the "what to do" is decided — the optimizer later decides "how to do it efficiently." Key file: `akar-planner/src/lib.rs`.
 
-4. **Optimization (25 Passes)** — The optimizer applies 18 flat passes (applied in sequence to the plan tree) and 7 tree passes (applied to the tree structure). Key passes include FilterPushDown (push filters closer to scans), JoinOptimization (cardinality-aware reordering), TopKOptimization (convert ORDER BY + LIMIT to TopK), VectorSimilarityDetection (rewrite cosine_similarity to HNSW scan), and ArtRangeScanDetection (rewrite range filters to ART index scans). Three passes (CSE, OrderByPushDown, AggregateFusion) are deliberately NO-OP until a proven cost model exists — shipping a wrong optimization is worse than shipping no optimization. Key file: `akar-optimizer/src/lib.rs`.
+4. **Optimization (26 Passes)** — The optimizer applies 19 flat passes (applied in sequence to the plan tree) and 7 tree passes (applied to the tree structure). Key passes include FilterPushDown (push filters closer to scans), ExtendFilterPushDown (hoist source-only predicates above an `Extend` so anchored hops filter before traversal), JoinOptimization (cardinality-aware reordering), TopKOptimization (convert ORDER BY + LIMIT to TopK), VectorSimilarityDetection (rewrite cosine_similarity to HNSW scan), and ArtRangeScanDetection (rewrite range filters to ART index scans). Three passes (CSE, OrderByPushDown, AggregateFusion) are deliberately NO-OP until a proven cost model exists — shipping a wrong optimization is worse than shipping no optimization. Key file: `akar-optimizer/src/lib.rs`.
 
 5. **Physical Execution (Processor)** — The processor executes the optimized plan using 50+ physical operator executors. Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`), parallel aggregation via `AggregateHashTable`, parallel hash join via `JoinHashTable`, `BlockMergeSort` + `RadixSort` for ORDER BY, and `BinaryHeap` O(n log k) TopK. The processor is where the "how to do it" is decided — it picks the right algorithm for each operator based on data characteristics. Key file: `akar-processor/src/lib.rs`.
 
@@ -36,7 +36,7 @@ The pipeline is a chain of five specialized processors, each with a well-defined
 | `parse()` | `akar-parser/src/lib.rs` | Converts Cypher text to 33-variant Statement AST via pest PEG grammar |
 | `Binder` | `akar-binder/src/lib.rs` | Resolves symbols against Catalog, checks types, produces BoundStatement |
 | `QueryPlanner` | `akar-planner/src/lib.rs` | Builds logical plan tree with 59 LogicalOperator variants |
-| `Optimizer` | `akar-optimizer/src/lib.rs` | Applies 25 optimization passes (18 flat + 7 tree) |
+| `Optimizer` | `akar-optimizer/src/lib.rs` | Applies 26 optimization passes (19 flat + 7 tree) |
 | `QueryProcessor` | `akar-processor/src/lib.rs` | Executes physical plan with 50+ operators, returns DataChunks |
 
 ---
@@ -51,7 +51,7 @@ flowchart TD
     D --> E["BoundStatement<br/>(33 bound variants)"]
     E --> F["Planner<br/>(logical plan)"]
     F --> G["LogicalOperator Tree<br/>(59 operator types)"]
-    G --> H["Optimizer<br/>(25 passes)"]
+    G --> H["Optimizer<br/>(26 passes)"]
     H --> I["Optimized Plan<br/>(reordered, pruned)"]
     I --> J["Physical Plan<br/>(50+ executors)"]
     J --> K["QueryProcessor<br/>(Arrow evaluation)"]
@@ -65,7 +65,7 @@ flowchart TD
 
 3. **Plan** (`QueryPlanner::plan()` in `akar-planner/src/lib.rs`): Converts bound statements into a logical plan tree. Handles join ordering, optional match expansion, recursive extend planning. 59 LogicalOperator types.
 
-4. **Optimize** (`Optimizer::optimize()` in `akar-optimizer/src/lib.rs`): Applies 25 passes. FilterPushDown pushes WHERE clauses closer to scans. JoinOptimization reorders joins by cardinality. TopKOptimization converts ORDER BY + LIMIT to a single TopK operator. VectorSimilarityDetection rewrites cosine_similarity to HNSW scan.
+4. **Optimize** (`Optimizer::optimize()` in `akar-optimizer/src/lib.rs`): Applies 26 passes. FilterPushDown pushes WHERE clauses closer to scans. ExtendFilterPushDown hoists source-only predicates above `Extend`. JoinOptimization reorders joins by cardinality. TopKOptimization converts ORDER BY + LIMIT to a single TopK operator. VectorSimilarityDetection rewrites cosine_similarity to HNSW scan.
 
 5. **Execute** (`QueryProcessor::execute()` in `akar-processor/src/lib.rs`): Runs the physical plan. Each operator pulls data from its child, processes it, and produces DataChunks. Arrow-native expression evaluation. Parallel aggregation and hash join via rayon.
 
@@ -106,6 +106,6 @@ flowchart TD
 - Parse: ~10 microseconds for typical queries (PEG grammar is fast)
 - Bind: ~50 microseconds (catalog lookup is the bottleneck)
 - Plan: ~100 microseconds (59 operators is manageable)
-- Optimize: ~200 microseconds (25 passes, each O(n) in plan size)
+- Optimize: ~200 microseconds (26 passes, each O(n) in plan size)
 - Execute: varies by query; hot path 397 microseconds on 10K rows
 - Plan cache hit: ~5 microseconds (skip parse/bind/plan/optimize entirely)
