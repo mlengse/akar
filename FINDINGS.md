@@ -9,20 +9,6 @@
 
 ---
 
-## F4 — Identifiers case-sensitive (dan tidak terdokumentasi)
-
-**Severity:** low (footgun; sudah menggigit Sulur)
-**Tanggal:** 2026-09-16 · **Ranah:** akar (semantik bahasa) + sulur (typo)
-
-- `MATCH (a:Memory)-[r:CONNECTED]-(b:Memory) …` → `Bind error: Rel table 'CONNECTED' not found`
-  (tabel terdaftar sebagai `Connected`). Nama node table sama: `Memory`, `Meta`, `DreamSession` case-sensitive.
-- Sulur `dae.py:94` (dan `:239`) memakai `[r:CONNECTED]` → query bind-error (bug sisi Sulur).
-- **Status:** OPEN — keputusan: dokumentasikan aturan case di SPEC + tambahkan tes
-  negatif yang mem-pin pesan errornya (`implementation plan.md` P2-CASE-1); perbaikan typo Sulur ada di
-  rencana Sulur.
-
----
-
 ## F5 — WAL replay menolak start pada insert duplicate-PK
 
 **Severity:** medium (resiliensi; pernah membuat server tidak bisa start)
