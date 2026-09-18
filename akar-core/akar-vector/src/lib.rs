@@ -207,6 +207,9 @@ pub struct RerankCandidate {
     pub graph_score: f64,
 }
 
+/// Inverse of ln(1000), pre-calculated to avoid runtime logarithm and division in re-rank inner loop.
+const INV_LN_1000: f64 = 0.14476482730108394; // 1.0 / 1000.0_f64.ln()
+
 /// Compute combined re-ranking score from multiple signals.
 ///
 /// Formula: `w_e*(cos+1)/2 + w_t*exp(-age*0.01) + w_f*ln(freq+1)/ln(1000) + w_g*graph`
@@ -218,8 +221,9 @@ pub fn compute_rerank_score(candidate: &RerankCandidate, weights: &RerankWeights
     // Temporal: exponential decay, half-life ~69 time units
     let temporal = (-candidate.age * 0.01).exp();
     // Frequency: logarithmic scaling, saturates around 1000
+    // Pre-computed INV_LN_1000 eliminates expensive division and log recalculation per candidate
     let frequency = if candidate.frequency > 0.0 {
-        (candidate.frequency + 1.0).ln() / 1000.0_f64.ln()
+        (candidate.frequency + 1.0).ln() * INV_LN_1000
     } else {
         0.0
     };
