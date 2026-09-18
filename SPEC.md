@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,100** total, 0 ignored, 2,100 passed, 0 failed (gate `test [akar-core]`, 2026-09-18, P2-CASE-1: +3 tes — case-sensitivity identifier). Riwayat delta per-task P### tercentum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,102** total, 0 ignored, 2,102 passed, 0 failed (gate `test [akar-core]`, 2026-09-18, P2-CASE-1 + P2-WAL-1: +5 tes — case-sensitivity identifier & last-write-wins WAL replay). Riwayat delta per-task P### tercentum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -352,6 +352,19 @@ checkpoints. Mirrors are written only by checkpoints (`checkpoint_with_drain`
 persists them before truncating the WAL) and by `recover()` itself — there is
 no per-commit mirror persist in any threshold mode (P60.1 skip generalized by
 P60.2).
+
+**WAL replay policy on duplicate primary keys (P2-WAL-1):** recovery replays
+*last-write-wins* — an `Insert` record whose primary key already exists (row
+present from the mirror or an earlier record) overwrites the surviving row's
+non-PK columns **in place** (row offset and PK indexes unchanged, so rel
+references stay valid) and emits a `tracing::warn!` naming the table and PK,
+instead of aborting startup with `WAL recovery failed … Duplicate primary key
+value`. This guarantees: a WAL that re-applies a commit whose insert was
+already recovered still opens, and the pre-crash data survives. It deliberately
+does **not** guarantee: weakening the online PK invariant — duplicate-PK
+inserts issued outside replay (normal queries) still fail with
+`StorageError::Index`. A duplicate that the index reports but no longer
+resolves (inconsistent catalog) still aborts recovery.
 
 #### Transaction ([akar-transaction](akar-core/akar-transaction))
 - MVCC with AUTO/MANUAL modes

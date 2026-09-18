@@ -59,6 +59,12 @@
   - Tes negatif baru `test_p2case1_identifier_case.rs` (3): salah-casing node label → `Bind error: Table 'X' not found`; rel label → `Bind error: Rel table 'X' not found`; kontrol positif (casing benar tetap match) + independensi lookup node vs rel (label node benar tidak menutupi rel salah-casing, dan sebaliknya).
   - Keputusan P2-CASE-1: **tanpa perubahan perilaku** — normalisasi ke original-case tidak diterapkan (identifier tetap case-sensitive), pesan error tidak menyebut nama terdaftar. Footgun asal F4: Sulur `dae.py:94/:239` memakai `[r:CONNECTED]` (perbaikan typo ada di rencana Sulur).
 
+- **P2-WAL-1 — WAL replay yang menemui insert duplicate-PK bersifat last-write-wins, server tidak lagi menolak start (menutup F5)** · `1270400` · gate **2,102** (+2: 2,100 → 2,102)
+  - Temuan F5: WAL yang memuat dua insert `id=1` untuk satu node table membuat `Database::new` gagal (`WAL recovery failed … Duplicate primary key value: '1' in table 'DreamSession'`) dan daemon menolak start tanpa jalur pemulihan manual.
+  - Kebijakan baru di `replay_data_record` (`akar-storage/src/lib.rs`): saat Insert node menabrak PK yang sudah ada dalam recovery, baris yang hidup **ditimpa in-place** (row offset & indeks PK tetap → referensi rel tidak berubah) lalu `tracing::warn!` mencatat tabel + PK — replay tidak lagi menggagalkan open. Invarian online tidak disentuh: insert duplicate-PK dari query **tetap** error `StorageError::Index` (tes pemin terpisah).
+  - Apa yang dijamin & tidak dijamin replay didokumentasikan di `SPEC.md` §durability.
+  - Tes: `test_wal_recovery_duplicate_pk_insert_last_write_wins` (recover sukses, 3 record, row duplikat menyatu, nilai terakhir menang, data pra-crash utuh) + `test_duplicate_pk_insert_rejected_outside_replay` (jalur online tetap menolak). fmt + clippy `--all-targets -D warnings` bersih.
+
 ## [0.2.2] - 2026-09-17
 
 ### Added
