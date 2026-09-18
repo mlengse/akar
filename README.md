@@ -93,7 +93,7 @@ contains 35 crates and ~106K lines of pure Rust code (git-tracked, incl. tests):
 |-------|---------|
 | `akar-parser` | Cypher query parser (pest-based) |
 | `akar-binder` | Semantic analysis and type resolution |
-| `akar-optimizer` | 25 query optimization passes |
+| `akar-optimizer` | 26 query optimization passes |
 | `akar-processor` | Physical operators (scan, filter, join, aggregate, sort) |
 | `akar-storage` | Columnar disk storage, WAL, buffer manager, CSR adjacency |
 | `akar-function` | 259 SQL/Cypher functions (244 scalar + 14 aggregate + 1 table) |
@@ -105,8 +105,8 @@ contains 35 crates and ~106K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **2,091 tests, 0 failed** (gate `test [akar-core]`,
-2026-09-17). **25 optimizer passes**, **37 logical types**, **59 logical
+**Test suite:** **2,097 tests, 0 failed** (gate `test [akar-core]`,
+2026-09-18). **26 optimizer passes**, **37 logical types**, **59 logical
 operators**, **50 physical operator structs**.
 
 ## Benchmarks

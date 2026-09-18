@@ -48,6 +48,14 @@
   - Fix: arm `BoundClause::BoundMerge` baru yang membangun ulang `BoundMerge` dengan `properties`, `patterns[].node.properties`, `patterns[].edge.properties`, `on_create`, `on_match` ter-substitusi — cermin arm statement-level (`BoundStatement::BoundMerge`), dan `other` catch-all dihapus (match exhaustive).
   - Tes regresi baru `akar-main/tests/test_merge.rs` (5): literal match existing row, literal idempotent upsert, param roundtrip create-then-match, param match literal-created row, param PK not-null. Gate `test [akar-core]`: 2,091 passed / 0 failed / 0 ignored (127 binaries).
 
+### Fixed
+
+- **P1-PERF-1 — traversal rel table besar sub-detik & RAM terbatas (menutup F3 & F6)** · `2ba16d8` · gate **2,097** (+6: 2,091 → 2,097; +5 tes batch ini)
+  - Anchor predicate kini di-push ke bawah `Extend` (`ExtendFilterPushDown`, pass flat #19, dijalankan sebelum `FilterPushDown`): 1-hop anchored hanya memperluas baris source yang match. Ukur pada 20k edge: `EXTEND_INPUT_ROWS=1`, ~7 ms per hop (sebelumnya timeout > 25 s pada 24.974 edge, cost ∝ ukuran rel).
+  - `PhysicalExtend::execute` tidak lagi clone wholesale adjacency + seluruh kolom rel + kolom destinasi (termasuk embedding 384-d) per eksekusi: meminjam catalog, resolve neighbour via adjacency index, baca kolom destinasi lazily per baris, hormati `LIMIT` pushdown → alokasi 576 MiB–1,1 GiB per-call (F6) hilang.
+  - Regresi dijaga **deterministik** (bukan wall-clock): counter process-wide `EXTEND_EXECUTIONS`/`EXTEND_INPUT_ROWS` di akar-processor, di-export `extend_counters()`/`reset_extend_counters()`; tes integrasi `test_p1perf1_extend_scaling.rs` (20k edge: `count(r)` 46 ms, anchored +LIMIT/reverse < 10 ms, `input_rows ≤ 4`).
+  - Tes: +4 unit pass `passes_test.rs` (hoist source, keep dst, fold-into-scan, registrasi urutan) + 1 integrasi; ekspektasi EXPLAIN tetap menampilkan plan sebelum flat pass (inner plan dibungkus `Projection`, hanya tree pass yang melihatnya).
+
 ## [0.2.2] - 2026-09-17
 
 ### Added

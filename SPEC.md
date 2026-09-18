@@ -26,8 +26,8 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,091** total, 0 ignored, 2,091 passed, 0 failed (gate `test [akar-core]`, 2026-09-17, P1-MERGE-1: +5 tes statement-level MERGE). Riwayat delta per-task P### tercentum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
-| Optimizer passes | **25** (18 flat + 7 tree) — exceeds C++ (17) |
+| Tests passing | **2,097** total, 0 ignored, 2,097 passed, 0 failed (gate `test [akar-core]`, 2026-09-18, P1-PERF-1: +6 tes — extend pushdown & regression integrasi). Riwayat delta per-task P### tercentum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
 | Physical operators | **50** structs (incl. `PhysicalMergeRel` P53.20, `PhysicalOptionalExtend` P53.25) |
@@ -203,7 +203,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
   `collect(DISTINCT x)`) supported since **P88** (name-mangled `count_distinct`/`collect_distinct`).
 
 #### Optimizer ([akar-optimizer](akar-core/akar-optimizer))
-**18 Flat Passes:**
+**19 Flat Passes:**
 
 | # | Pass | Description |
 |---|------|-------------|
@@ -225,8 +225,9 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 16 | AggregateFusion | **off-by-design (NO-OP, audit P52.7)** — fuses aggregate operations; fusion resolves the outer agg's args to NULL (they reference the inner agg's output) and changes COUNT(*) from per-group to raw rows. Correct fusion needs a rewrite against a merged output schema that a flat pass cannot express — see plan P75. |
 | 17 | SortElision | Eliminates redundant sorts |
 | 18 | ExpressionInline | Inlines trivial expressions |
+| 19 | ExtendFilterPushDown | **ACTIVE (P1-PERF-1)** - hoists source-property filters above `Extend` so anchored hops filter the scan (F3): `Scan -> Extend -> Filter(a.prop)` becomes `Scan -> Filter -> Extend`; runs before `FilterPushDown` folds it into `ScanNode.predicate` |
 
-**6 Tree Passes:**
+**7 Tree Passes:**
 
 | # | Pass | Description |
 |---|------|-------------|
@@ -236,6 +237,7 @@ Extension crates (`akar-json`, `akar-fts`, `akar-algo`, etc.) depend on `akar-co
 | 4 | CorrelatedSubqueryUnnesting | Unnests correlated subqueries |
 | 5 | AggKeyDependency | Removes redundant grouping keys |
 | 6 | CardinalityEstimation | Annotates with estimated row counts |
+| 7 | FtsPredicatePushdown | **ACTIVE (P108.1)** - rewrites `Extend(dest FTS query)` into `FtsScan` + doc-id set filter before the join |
 
 **Parity:** ~95% (exceeds C++ with 17 passes)
 
