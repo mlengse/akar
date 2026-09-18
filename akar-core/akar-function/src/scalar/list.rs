@@ -3,6 +3,102 @@ use super::get_string;
 use crate::registry::*;
 use akar_common::types::Value;
 
+// ==================== ValueRef Helper for Hashing ====================
+
+#[derive(Clone, Copy)]
+pub(crate) struct ValueRef<'a>(pub(crate) &'a Value);
+
+impl<'a> PartialEq for ValueRef<'a> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<'a> Eq for ValueRef<'a> {}
+
+impl<'a> std::hash::Hash for ValueRef<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self.0).hash(state);
+        match self.0 {
+            Value::Null => {}
+            Value::Bool(b) => b.hash(state),
+            Value::Int64(i) => i.hash(state),
+            Value::Int32(i) => i.hash(state),
+            Value::Int16(i) => i.hash(state),
+            Value::Int8(i) => i.hash(state),
+            Value::UInt64(u) => u.hash(state),
+            Value::UInt32(u) => u.hash(state),
+            Value::UInt16(u) => u.hash(state),
+            Value::UInt8(u) => u.hash(state),
+            Value::Int128(i) => i.hash(state),
+            Value::UInt128(u) => u.hash(state),
+            Value::Double(f) => {
+                let bits = if f.is_nan() {
+                    0x7ff8000000000000u64
+                } else if *f == 0.0 {
+                    0u64
+                } else {
+                    f.to_bits()
+                };
+                bits.hash(state);
+            }
+            Value::Float(f) => {
+                let bits = if f.is_nan() {
+                    0x7fc00000u32
+                } else if *f == 0.0 {
+                    0u32
+                } else {
+                    f.to_bits()
+                };
+                bits.hash(state);
+            }
+            Value::String(s) => s.hash(state),
+            Value::Blob(b) => b.hash(state),
+            Value::Date(d) => d.0.hash(state),
+            Value::Timestamp(t) => t.0.hash(state),
+            Value::TimestampTz(t) => t.0.hash(state),
+            Value::TimestampNs(t) => t.0.hash(state),
+            Value::TimestampMs(t) => t.0.hash(state),
+            Value::TimestampSec(t) => t.0.hash(state),
+            Value::Interval(inv) => {
+                inv.months.hash(state);
+                inv.days.hash(state);
+                inv.micros.hash(state);
+            }
+            Value::InternalID(id) => {
+                id.table_id.hash(state);
+                id.offset.hash(state);
+            }
+            Value::DTime(t) => t.hash(state),
+            Value::Union(tag, val) => {
+                tag.hash(state);
+                ValueRef(val).hash(state);
+            }
+            Value::List(items) => {
+                for item in items {
+                    ValueRef(item).hash(state);
+                }
+            }
+            Value::Map(entries) => {
+                for (k, v) in entries {
+                    ValueRef(k).hash(state);
+                    ValueRef(v).hash(state);
+                }
+            }
+            Value::Struct(fields) => {
+                for (k, v) in fields {
+                    k.hash(state);
+                    ValueRef(v).hash(state);
+                }
+            }
+            Value::Json(j) => {
+                j.to_string().hash(state);
+            }
+        }
+    }
+}
+
 // ==================== List ====================
 
 pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String> {
@@ -163,10 +259,10 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
                 Value::List(items) => items,
                 _ => return Err("Expected list".into()),
             };
-            let mut seen = hashbrown::HashSet::new();
+            let mut seen = hashbrown::HashSet::with_capacity(list.len());
             let mut result = Vec::new();
             for item in list {
-                if !matches!(item, Value::Null) && seen.insert(format!("{:?}", item)) {
+                if !matches!(item, Value::Null) && seen.insert(ValueRef(item)) {
                     result.push(item.clone());
                 }
             }
@@ -177,10 +273,10 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
                 Value::List(items) => items,
                 _ => return Err("Expected list".into()),
             };
-            let mut seen = hashbrown::HashSet::new();
+            let mut seen = hashbrown::HashSet::with_capacity(list.len());
             for item in list {
                 if !matches!(item, Value::Null) {
-                    seen.insert(format!("{:?}", item));
+                    seen.insert(ValueRef(item));
                 }
             }
             Ok(Value::Int64(seen.len() as i64))
@@ -240,9 +336,33 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
                 Value::List(items) => items,
                 _ => return Err("Expected list for second argument".into()),
             };
-            for search_item in search_items {
-                if list.contains(search_item) {
-                    return Ok(Value::Bool(true));
+            if list.len() <= 8 && search_items.len() <= 8 {
+                for search_item in search_items {
+                    if list.contains(search_item) {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                return Ok(Value::Bool(false));
+            }
+            if list.len() <= search_items.len() {
+                let mut set = hashbrown::HashSet::with_capacity(list.len());
+                for item in list {
+                    set.insert(ValueRef(item));
+                }
+                for search_item in search_items {
+                    if set.contains(&ValueRef(search_item)) {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+            } else {
+                let mut set = hashbrown::HashSet::with_capacity(search_items.len());
+                for search_item in search_items {
+                    set.insert(ValueRef(search_item));
+                }
+                for item in list {
+                    if set.contains(&ValueRef(item)) {
+                        return Ok(Value::Bool(true));
+                    }
                 }
             }
             Ok(Value::Bool(false))
@@ -356,11 +476,26 @@ pub(crate) fn evaluate_list(op: ListOp, args: &[Value]) -> Result<Value, String>
                 Value::List(items) => items,
                 _ => return Err("Expected list".into()),
             };
+            if left.len() <= 8 {
+                for target in right {
+                    if matches!(target, Value::Null) {
+                        continue;
+                    }
+                    if !left.contains(target) {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                return Ok(Value::Bool(true));
+            }
+            let mut set = hashbrown::HashSet::with_capacity(left.len());
+            for item in left {
+                set.insert(ValueRef(item));
+            }
             for target in right {
                 if matches!(target, Value::Null) {
                     continue;
                 }
-                if !left.contains(target) {
+                if !set.contains(&ValueRef(target)) {
                     return Ok(Value::Bool(false));
                 }
             }
