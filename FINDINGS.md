@@ -12,9 +12,9 @@ F3 & F6 `2ba16d8`, F4 `ef792bb`, F5 `1270400` (riwayat di `CHANGELOG.md`).
 
 ---
 
-## F13 — 2026-09-20: argumen agregat yang bukan kolom polos menghasilkan NULL (`SUM(expr)`) — TERBUKA
+## F13 — 2026-09-20: argumen agregat yang bukan kolom polos menghasilkan NULL (`SUM(expr)`) — RESOLVED (`P126`, gate 2,116)
 
-**Ranah:** akar (agregasi — resolusi argumen agregat). **Status:** TERBUKA — belum ada fix; ditemukan bersamaan F12 saat menulis tes regresi-nya.
+**Ranah:** akar (agregasi — resolusi argumen agregat). **Status:** RESOLVED (`P126`, 2026-09-20) — ditemukan bersamaan F12 saat menulis tes regresi-nya.
 
 ### Gejala (tanpa error, hasil NULL)
 
@@ -40,9 +40,9 @@ F12 mengembalikan **nilai salah yang non-null** (proyeksi ter-bind ke kolom lain
 
 - Dampak: agregat bersyarat (`SUM(CASE …)`) dan agregat atas ekspresi (`SUM(a*b)`, `SUM(abs(x))`) senyap menghasilkan NULL — metrik/laporan salah tanpa error.
 - Mitigasi sementara: hitung ekspresi lebih dulu lalu agregasi atas kolom hasilnya (mis. lewat `WITH`) — **belum diverifikasi** apakah jalur `WITH` menghasilkannya dengan benar, jadi uji dulu sebelum dijadikan resep resmi; atau agregasi per-kondisi dengan `WHERE`.
-- Perilaku saat ini **dipin** oleh `computed_aggregate_arguments_are_not_yet_supported` (`akar-main/tests/test_case_expression.rs`) agar batasannya terlihat dan setiap perubahan bersifat sengaja.
+- Perilaku saat ini **dipin** oleh `computed_aggregate_arguments_are_not_yet_supported` (`akar-main/tests/test_case_expression.rs`) agar batasannya terlihat dan setiap perubahan bersifat sengaja. **(P126: tes pin ini sudah ditulis ulang menjadi asersi nilai benar.)**
 
-### Pendekatan perbaikan yang sudah dipetakan (belum dikerjakan)
+### Pendekatan perbaikan yang dipetakan (dipakai P126)
 
 Titik perbaikannya **bukan** di `aggregatehashtable.rs` (hot path, tidak memegang `FunctionRegistry`), melainkan di **mapper** `map_aggregate.rs::map_and_execute_aggregate`, yang justru memegang `ctx.function_registry`:
 
@@ -63,6 +63,23 @@ Yang **wajib** diverifikasi sebelum mengklaim selesai (inilah alasan perbaikan i
 1. Terapkan pendekatan mapper di atas.
 2. Tes regresi untuk ketiga bentuk argumen terhitung; rewrite tes pin F13 (`computed_aggregate_arguments_are_not_yet_supported`).
 3. Audit `AVG`/`MIN`/`MAX`/`STDDEV`/`VARIANCE`/`COLLECT` — semuanya memakai jalur resolusi yang sama.
+
+### Penutupan (2026-09-20, P126 — gate 2,116)
+
+Pendekatan yang dipetakan di atas diterapkan apa adanya, dengan satu penyempurnaan: perbaikan **tidak menyentuh** `aggregatehashtable.rs` sama sekali. `map_aggregate.rs::map_and_execute_aggregate` mengevaluasi argumen terhitung lewat `ExpressionEvaluator` (pola yang sama dengan `resolve_sort_keys` di `map_projection.rs`), menambah hasilnya sebagai kolom trailing sintetis bernama `__akar_agg_arg_N` beserta `field_names`-nya, lalu menulis ulang `Expression` argumennya menjadi `Variable("__akar_agg_arg_N")`. Nama sintetis itu sengaja dipilih agar dapat ditemukan `resolve_name_to_col` lewat cabang **exact match** — bukan lewat cabang numerik atau sufiks `.name`, yang bisa bertabrakan dengan nama kolom nyata.
+
+Dampaknya: agregat fisik hanya melihat kolom polos seperti sebelumnya, sehingga **seluruh fast path yang ada tetap dipakai tanpa perubahan** — COUNT/COUNT_STAR, jalur skalar Sum/Min/Max/Avg (`arrow_scalar_agg_scan`), akumulator DISTINCT P88 (`update_states_row_distinct`), maupun jalur GROUP BY terpartisi (`batch_group_by_agg`). Tidak ada satu pun operator di `splitaggregation.rs`/`aggregatehashtable.rs` yang perlu diubah.
+
+**No-op mutlak** dijaga lewat urutan pemeriksaan di mapper: bila tak ada argumen agregat yang berbentuk ekspresi, `append_computed_aggregate_columns` tidak pernah dipanggil — tidak ada salinan chunk, tidak ada evaluator, tidak ada perubahan nama/kolom. Kolom sintetis hanya ditambahkan sebagai kolom **trailing**, yaitu **setelah** indeks GROUP BY di-resolve, sehingga indeks lama tetap menunjuk kolom semula. Keluaran agregat juga tidak bocor: `PhysicalAggregateFinalize` membangun chunk hasil dari `group_by_cols` + `funcs` saja, dan nama kolom keluaran tetap diambil dari `a.aggregates` (ekspresi asli) lewat `aggregate_field_names` — bukan dari `agg_expressions` yang sudah ditulis ulang.
+
+Batasan yang **sengaja** dipertahankan (bukan bug, agar blast radius tetap nol):
+
+- Penyelesaian hanya menyasar argumen yang **bukan** `Variable`/`PropertyAccess`/`Star`. `Variable`/`PropertyAccess` yang gagal di-resolve ke kolom tetap memakai perilaku lamanya (mis. `COUNT(x)` menghitung seluruh baris aktif) — di luar cakupan F13, dan mengubahnya berisiko memunculkan silent wrong result baru.
+- Semua fungsi agregat di `parse_aggregate_function` berargumen tunggal, jadi kasus argumen-banyak tidak ada; bila kelak ada, `computed_aggregate_argument` hanya menangani bentuk satu-argumen dan sisanya kembali ke perilaku lama (NULL), bukan menebak.
+
+Verifikasi: `SUM(s.bridges)` = 18 (tak berubah), `SUM(s.bridges * 2)` = 36, `SUM(abs(s.bridges))` = 18, `SUM(CASE WHEN s.bridges > 6 THEN s.bridges ELSE 0 END)` = 18, `MIN`/`MAX` = 14/22, `AVG` = 18.0, `COUNT(DISTINCT …)` menghitung nilai unik, dan `GROUP BY s.phase` memberi 14 untuk `rem` serta 22 untuk `supersedes`. Tes `akar-main/tests/test_case_expression.rs` menjadi 9 (dari 7), gate `test [akar-core]` **2,114 → 2,116** (+2), 0 failed / 0 ignored.
+
+Item `STDDEV`/`VARIANCE` dari "Langkah lanjut" butir 3 **belum** diberi tes khusus: keduanya tidak ada di fast path mana pun sehingga lewat `update_states_row` dan memakai resolusi kolom yang sama — jalur yang sudah tercakup `COLLECT`/`AVG`. Bila kelak salah satunya butuh jaminan eksplisit, tambahkan tes di berkas yang sama.
 
 ---
 
@@ -114,7 +131,7 @@ Perbaikan: predikat dibalik menjadi **fail-safe** — sebut varian yang **dapat 
 
 Tes `akar-main/tests/test_case_expression.rs` (7): searched CASE, simple form, CASE di posisi proyeksi kedua (repro orisinal), CASE di `WHERE`, CASE bercabang string + alias, penjaga "ekspresi lain tidak berubah", dan pin batasan F13.
 
-**Catatan penting:** `SUM(CASE …)` pada repro awal **tidak** ikut tertutup — itu jalur agregasi yang berbeda dan dicatat sebagai **F13** di atas (mengembalikan NULL, bukan nilai salah).
+**Catatan penting:** `SUM(CASE …)` pada repro awal **tidak** ikut tertutup — itu jalur agregasi yang berbeda dan dicatat sebagai **F13** di atas (mengembalikan NULL, bukan nilai salah). **F13 sudah ditutup oleh P126 (2026-09-20)** — lihat bagian Penutupan di atas, termasuk dasar mengapa `SUM(CASE …)` kini aman dipakai lagi oleh Sulur.
 
 ---
 
