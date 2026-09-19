@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,102** total, 0 ignored, 2,102 passed, 0 failed (gate `test [akar-core]`, 2026-09-18, P2-CASE-1 + P2-WAL-1: +5 tes — case-sensitivity identifier & last-write-wins WAL replay). Riwayat delta per-task P### tercentum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,107** total, 0 ignored, 2,107 passed, 0 failed (gate `test [akar-core]`, 2026-09-19, P114: +5 tes — guard tulis edge-update WAL, mode salvage `--skip-wal`, hardening log daemon panic/OOM). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |

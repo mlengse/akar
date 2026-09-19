@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **P114.2 — mode salvage resmi `--skip-wal`/`--salvage` (menggantikan prosedur manual `mv wal.log`)** · `cd31526` · gate **2,107** (+5: 2,102 → 2,107)
+  - `SystemConfig::skip_wal` (default `false` — strict tetap default, P61.3 tidak berubah) → `StorageManager::set_skip_wal`; saat aktif `recover()` mencoba tiap record, mencatat + melewati yang gagal alih-alih membatalkan open; mirror kolom checkpoint tetap sumber kebenaran.
+  - Diekspos di `akar-server --skip-wal` dan `akar-cli [db] --skip-wal|--salvage`; keduanya mencetak peringatan eksplisit saat startup (F7: prosedur operator `mv wal.log` kini jadi fitur produk).
+  - Tes `test_wal_recovery_salvage_mode_skips_unplayable_record` (akar-storage): strict → abort `out of range`; salvage → open, 2 record replayable diterapkan, record buruk dilewati.
+
+- **P114.3 — hardening log daemon: panic hook + jejak OOM (F7 sampingan #1)** · `cd31526` · gate **2,107**
+  - Modul `akar_server::daemon_log`: panic hook menulis baris bertimestamp + pid (lokasi + thread) ke stderr dan flush stdout/stderr sebelum hook default; global-allocator wrapper mencatat kegagalan `alloc`/`alloc_zeroed`/`realloc` tanpa alokasi (format langsung ke writer + guard re-entrancy) sebelum handler OOM default abort.
+  - `akar-server` mencatat `START`/`EXIT` (pid + db) sehingga spawn yang tidak pernah menulis `EXIT` terlihat abnormal — menjawab keluhan F7 "proses berhenti tanpa jejak".
+  - Tes `now_ms_is_positive`, `logging_allocator_delegates_to_system` (akar-server).
+
+### Fixed
+
+- **P114.1 — guard tulis edge-update WAL: record hanya untuk edge hidup (menutup jalur lahir F7)** · `cd31526` · gate **2,107**
+  - F7: `SET … Connected` pada pemindaian tabel rel (rel scan tidak membawa kolom `_id`) jatuh ke `unwrap_or(0)` dan membaca nilai properti sebagai indeks edge → WAL memuat `Update { row_id: N }` yang tidak dapat di-replay penulisnya sendiri (`Edge index N out of range`), memblokir `Database::new` dan menolak start daemon.
+  - Guard di `PhysicalSet` (`akar-processor/src/physical/write_ops/set.rs`): sebelum menulis record update edge, tolak indeks di luar rentang dan edge yang sudah di-tombstone (`u64::MAX` pada src/dst) dengan `tracing::warn!` — WAL tidak bisa lahir tak-replayable oleh penulisnya sendiri.
+  - Tes `set_edge_guard_rejects_non_live_edge_indices` + `set_edge_guard_skips_tombstoned_edge_keeps_neighbors` (akar-processor).
+
 ## [0.2.3] - 2026-09-18
 
 ### Added

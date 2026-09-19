@@ -53,7 +53,7 @@ Namun, terdapat 5 primitif komputasi & retrieval dari `ai-memory` yang bernilai 
 
 ## F9 — 2026-09-19: agenda lanjut terpilih (investigasi F7 + hardening kematian senyap daemon) — RENCANA
 
-**Ranah:** akar (storage/WAL + daemon lifecycle). **Status:** RENCANA — belum dikerjakan;
+**Ranah:** akar (storage/WAL + daemon lifecycle). **Status:** SELESAI — kedua item dikerjakan di P114 (`cd31526`);
 tercatat sebagai urutan kerja berikutnya setelah verifikasi live DAE (F8) selesai.
 **Sumber keputusan:** sesi 2026-09-19 — pilihan #2 dan #3 dari daftar kelanjutan pasca-verifikasi DAE.
 
@@ -123,9 +123,9 @@ yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
 
 ---
 
-## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — TERBUKA
+## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — TERATASI (`cd31526`)
 
-**Ranah:** akar (storage / WAL replay). **Status:** TERBUKA — jalur replay edge `SET` belum tertangani.
+**Ranah:** akar (storage / WAL replay). **Status:** TERATASI di tingkat kode — guard tulis (P114.1) mencegah WAL lahir tak-replayable dan mode salvage resmi (P114.2) menyediakan jalur pemulihan; verifikasi live ulang pada daemon produksi belum dijalankan.
 **Biner:** `~/.cargo/bin/akar_server.exe`, dibangun ulang **2026-09-18 23:34** (tree = `v0.2.3`, HEAD `40415b9`).
 **DB:** `~/.sulur/engine/sulur.db` (daemon Sulur/Hermes, live).
 **Konteks:** batch harian cron `belajar-puskesmas-notebooklm` (06:00) — daemon sudah mati sebelum job jalan.
@@ -196,3 +196,22 @@ keberhasilan harus dikonfirmasi dari baris `Akar server listening` + `status`.
   lahir dalam keadaan tak-replayable oleh penulisnya sendiri.
 - Tambah mode `--salvage`/`--skip-wal` resmi di akar-server (pindah-manual `wal.log` = prosedur operator,
   bukan produk) + log eksplisit "WAL diabaikan, N transaksi belum di-checkpoint hilang".
+
+### Penutupan (2026-09-19, `cd31526` — P114)
+
+Ketiga langkah di atas dikerjakan:
+
+1. **P114.1 — guard tulis.** `PhysicalSet` tidak lagi menulis record update edge untuk indeks di luar
+   rentang maupun edge yang sudah di-tombstone; akar F7 (rel scan tanpa kolom `_id` → nilai properti
+   dibaca sebagai indeks edge) tertutup di titik lahirnya record. Tes `set_edge_guard_*` (akar-processor).
+2. **P114.2 — salvage mode.** `SystemConfig::skip_wal` (default `false`) → `StorageManager::set_skip_wal`;
+   `recover()` mencatat + melewati record yang gagal alih-alih membatalkan open. Opsi operator manual
+   `mv wal.log` kini fitur produk: `akar-server --skip-wal` · `akar-cli [db] --skip-wal|--salvage`.
+   Strict tetap default (P61.3). Tes `test_wal_recovery_salvage_mode_skips_unplayable_record`.
+3. **P114.3 — log hardening** (F9 item 2). `akar_server::daemon_log`: panic hook + jejak kegagalan
+   alokasi (OOM) + marker `START`/`EXIT` bertimestamp+pid, semuanya di-flush ke stderr sebelum handler
+   default berjalan. Tes `now_ms_is_positive`, `logging_allocator_delegates_to_system`.
+
+Gate `test [akar-core]`: **2,107 passed / 0 failed / 0 ignored** (2,102 → 2,107). Verifikasi live
+(memakai `dataset/wal-corrupt-edge-index-20260918/wal.log` pada salinan direktori DB produksi) masih
+perlu dijalankan agar F7 dapat ditutup penuh; `--skip-wal` kini jalur resmi untuk keperluan itu.
