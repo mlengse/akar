@@ -12,6 +12,78 @@ F3 & F6 `2ba16d8`, F4 `ef792bb`, F5 `1270400` (riwayat di `CHANGELOG.md`).
 
 ---
 
+## F9 — 2026-09-19: agenda lanjut terpilih (investigasi F7 + hardening kematian senyap daemon) — RENCANA
+
+**Ranah:** akar (storage/WAL + daemon lifecycle). **Status:** RENCANA — belum dikerjakan;
+tercatat sebagai urutan kerja berikutnya setelah verifikasi live DAE (F8) selesai.
+**Sumber keputusan:** sesi 2026-09-19 — pilihan #2 dan #3 dari daftar kelanjutan pasca-verifikasi DAE.
+
+### Item 1 — Investigasi F7 (`set.rs`, jalur replay edge)
+
+- Repro mandiri: build lokal pada copy direktori DB live + `dataset/wal-corrupt-edge-index-20260918/wal.log`
+  (fixture sendirian bukan repro mandiri — perlu salinan DB-nya).
+- Inspeksi `akar_processor/physical/write_ops/set.rs` — invariant page edge. Tujuan: tambah guard
+  saat **menulis** record update edge (bukan hanya saat replay) supaya WAL tidak bisa lahir dalam
+  keadaan tak-replayable oleh penulisnya sendiri.
+- Pertimbangkan mode `--salvage`/`--skip-wal` resmi (saat ini `mv wal.log` = prosedur operator,
+  bukan produk) + log eksplisit "WAL diabaikan, N transaksi belum di-checkpoint hilang".
+- Status rujukan: **F7 (TERBUKA)** — satu-satunya temuan akar yang masih terbuka.
+
+### Item 2 — Hardening kematian senyap daemon (F7 sampingan #1)
+
+Keputusan belum diambil. Opsi: panic-hook ke daemon log / tangkap abort karena OOM / log
+`memory allocation … failed` (saat ini `sulur.db.err.log` 0 byte padahal 4 spawn mati tanpa
+jejak 23:56–00:00). Target: proses berhenti tanpa jejak harus bisa dilacak alasan berhentinya.
+Klaim F3/F6 "daemon mati tiap ±6 menit sudah tertutup" **belum terverifikasi live** — verifikasi
+ulang setelah hardening terpasang.
+
+---
+
+## F8 — 2026-09-19: verifikasi live DAE (fix #38 Sulur) terhadap daemon produksi — TERVERIFIKASI
+
+**Ranah:** akar (daemon/DB produksi) ↔ sulur. **Status:** TERVERIFIKASI — DAE pass penuh + resume
+berjalan tanpa kerusakan, schema DDL tanpa `DEFAULT` diterima.
+**Biner:** `~/.cargo/bin/akar_server.exe` v0.2.3 (dibangun 2026-09-18 23:34, HEAD `40415b9`) — sama dengan
+yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
+**DB:** `~/.sulur/engine/sulur.db` (daemon live, pid 3268 / port 9876, sidecar token OK).
+**Sumber:** verifikasi sisi kliem (repo Sulur, fix #38 commit `2464f40`) — replay DDL drive lewat
+`DaemonClientStore` dari repo, bukan biner akar.
+
+### Hasil verifikasi (live, 912 memori / max id 929)
+
+1. **Schema DDL diterima tanpa `DEFAULT`:** keenam kolom `protected`, `dae_self_weight`,
+   `dae_neighbour_k`, `dae_schema_version`, `dae_computed_at` (+ `dae_embedding`) ter-declare dan
+   terbaca oleh daemon (`MATCH … RETURN m.<kolom>` → `None` sebelum pass). F2 (`ef792bb`, "ALTER ADD
+   tanpa `IF NOT EXISTS`") memang sudah tertunda; di sini **`ADD kolom` polos (tanpa `DEFAULT`) terbukti
+   tidak ditolak daemon** — `DEFAULT` yang digugurkan fix #38 bukan syarat agar DDL masuk.
+2. **Pass penuh:** `SULUR_DAE_RESUME=0` → `computed=894, total=894, resumed_from=None`,
+   `elapsed≈6,5 s`, `dim=384`, `batch_size=100`. 18 memori dieksklusi karena `embedding IS NULL`
+   → `computed` ekspektasi 894, **bukan** 912. Konsistensi ini tidak boleh dianggap kerusakan PK.
+3. **Pass resume:** pass berikut tanpa env → `computed=0, resumed_from=929`, `elapsed≈0,3 s` —
+   watermark `Meta.dae_checkpoint_id=929` dihormati, tidak ada double compute.
+4. **PK utuh:** `m.id` tetap ber-tipe `int` (spot: id 1, 400, 929), `count(Memory)=912` sebelum &
+   sesudah semua pass. Tidak ada korupsi index/halaman (tidak ada `Edge index` panic di daemon log).
+
+### Temuan sampingan (perlu dicatat)
+
+1. **Penulis konkuren di DB yang sama:** saat sesi verifikasi, `dae_checkpoint_id` sudah berisi `929`
+   padahal skan Meta awal hanya memuat `afe_processed_ids` → **satu engine Sulur lain di host yang sama
+   menyelesaikan full DAE pass secara bersamaan** selama jeda verifikasi. Daemon sendiri bukan penulis
+   Meta; yang menulis adalah klien. Untuk verifikasi lanjutan di DB live, jangan asumsikan state diam.
+2. **Tulis batch besar tidak rentan di jalur DAE:** satu pass menulis 894 baris (setiap baris
+   `SET … dae_*`) tanpa satu pun `daemon not answering` — kontras dengan temuan F7 no.2 (batch `sulur_recount write`
+   28 entri gagal); kemungkinan perbedaan di jalur tulis/retry engine, layak ditelusuri terpisah.
+3. **`protected` tetap `NULL`:** DAE tidak menyentuh kolom `protected` (semua 0/NULL setelah pass) —
+   konsisten; `set_protected` adalah satu-satunya penulis.
+
+### Catatan verifikasi
+
+- Konfirmasi sisi akar yang dibutuhkan F7 (jalur replay edge `SET`) **tidak** dijalankan di sini —
+  sesi ini hanya memvalidasi daemon tidak rusak saat klien menulis DAE volume penuh + resume.
+- DAE pass penuh tidak pernah memicu replay WAL: pass berjalan normal, daemon tetap hidup.
+
+---
+
 ## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — TERBUKA
 
 **Ranah:** akar (storage / WAL replay). **Status:** TERBUKA — jalur replay edge `SET` belum tertangani.
