@@ -42,10 +42,26 @@ F12 mengembalikan **nilai salah yang non-null** (proyeksi ter-bind ke kolom lain
 - Mitigasi sementara: hitung ekspresi lebih dulu lalu agregasi atas kolom hasilnya (mis. lewat `WITH`) — **belum diverifikasi** apakah jalur `WITH` menghasilkannya dengan benar, jadi uji dulu sebelum dijadikan resep resmi; atau agregasi per-kondisi dengan `WHERE`.
 - Perilaku saat ini **dipin** oleh `computed_aggregate_arguments_are_not_yet_supported` (`akar-main/tests/test_case_expression.rs`) agar batasannya terlihat dan setiap perubahan bersifat sengaja.
 
+### Pendekatan perbaikan yang sudah dipetakan (belum dikerjakan)
+
+Titik perbaikannya **bukan** di `aggregatehashtable.rs` (hot path, tidak memegang `FunctionRegistry`), melainkan di **mapper** `map_aggregate.rs::map_and_execute_aggregate`, yang justru memegang `ctx.function_registry`:
+
+1. Sebelum membangun `agg_expressions`/`SharedAggregateState`, deteksi argumen agregat yang **bukan** `Variable`/`PropertyAccess`/`Star` (cermin `resolve_agg_col_indices`).
+2. Untuk tiap argumen tersebut, evaluasi ekspresinya per-chunk dengan `ExpressionEvaluator` (pola yang sudah dipakai `map_projection.rs`), lalu **tambahkan hasilnya sebagai kolom trailing** pada chunk (`fields`/`field_types`/`field_names`).
+3. Tulis ulang argumen itu menjadi referensi nama kolom sintetis, sehingga agregat fisik hanya melihat kolom polos dan **seluruh fast path tetap berlaku** (COUNT; Sum/Min/Max/Avg via `arrow_scalar_agg`).
+4. Bila tidak ada argumen terhitung, lewati seluruh langkah → **no-op** untuk semua kueri yang ada (blast radius terbatas pada agregat ber-argumen ekspresi).
+
+Yang **wajib** diverifikasi sebelum mengklaim selesai (inilah alasan perbaikan ini belum diambil sesi ini — berisiko memunculkan silent wrong result baru di jalur agregasi):
+
+- `field_names` terisi pada input agregat (resolusi nama bergantung padanya; `SUM(s.bridges)` bekerja hari ini, jadi kemungkinan besar terisi — tetapi harus dibuktikan, bukan diasumsikan).
+- Panjang array hasil `evaluate_arrow` vs `chunk.size` saat menambahkan kolom.
+- Perilaku `sel_vector` (fast path skalar sudah bail-out saat `sel_vector.is_some()`, jadi agregat ber-`sel_vector` masuk jalur lain).
+- Regresi: kueri agregat yang sudah benar (`SUM(kolom)`, `COUNT`, `GROUP BY`) harus menghasilkan nilai identik sebelum/sesudah.
+
 ### Langkah lanjut (usul)
 
-1. Evaluasi argumen agregat per-baris: bila `resolve_agg_col_indices` mengembalikan `None` untuk argumen yang **bukan** `Star`/`COUNT(*)`, materialisasi vektor hasil evaluasi ekspresi (butuh akses `FunctionRegistry` di jalur agregasi — periksa `SharedAggregateState`/mapper) lalu umpan sebagai kolom.
-2. Tes regresi untuk ketiga bentuk di atas; perbarui/rewrite tes pin F13.
+1. Terapkan pendekatan mapper di atas.
+2. Tes regresi untuk ketiga bentuk argumen terhitung; rewrite tes pin F13 (`computed_aggregate_arguments_are_not_yet_supported`).
 3. Audit `AVG`/`MIN`/`MAX`/`STDDEV`/`VARIANCE`/`COLLECT` — semuanya memakai jalur resolusi yang sama.
 
 ---
