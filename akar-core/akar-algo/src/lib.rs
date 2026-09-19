@@ -1647,9 +1647,19 @@ where
         }
     }
 
+    // Bolt ⚡ Performance Optimization:
+    // Hoist scratch buffers out of the per-hop loop to eliminate dynamic memory allocations.
+    // Replace BTreeMap with a generation-stamped scratch array (`stamp[w] == hop`) to achieve
+    // O(1) indexed accumulation instead of O(log K) tree search/rebalances.
+    let mut next_act_scratch: Vec<f64> = vec![0.0; n];
+    let mut stamp: Vec<usize> = vec![0; n];
+    let mut touched: Vec<usize> = Vec::with_capacity(16);
+    let mut next_frontier: Vec<(usize, f64)> = Vec::with_capacity(current_frontier.len() * 2);
+
     // Propagate hop by hop
     for hop in 1..=max_hops {
-        let mut next_activation: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
+        touched.clear();
+        next_frontier.clear();
 
         for &(node, _node_act) in &current_frontier {
             let total_act = activation[node];
@@ -1667,12 +1677,21 @@ where
                 if propagated < threshold {
                     continue;
                 }
-                *next_activation.entry(w).or_insert(0.0) += propagated;
+                if stamp[w] != hop {
+                    stamp[w] = hop;
+                    next_act_scratch[w] = 0.0;
+                    touched.push(w);
+                }
+                next_act_scratch[w] += propagated;
             }
         }
 
-        let mut next_frontier: Vec<(usize, f64)> = Vec::new();
-        for (&w, &prop) in &next_activation {
+        // Sorting `touched` guarantees visiting neighbor candidates in ascending node ID order,
+        // matching BTreeMap iteration order and maintaining deterministic execution.
+        touched.sort_unstable();
+
+        for &w in &touched {
+            let prop = next_act_scratch[w];
             activation[w] += prop;
             if hop_reached[w] == usize::MAX {
                 hop_reached[w] = hop;
@@ -1684,7 +1703,7 @@ where
             }
         }
 
-        current_frontier = next_frontier;
+        std::mem::swap(&mut current_frontier, &mut next_frontier);
         if current_frontier.is_empty() {
             break;
         }
