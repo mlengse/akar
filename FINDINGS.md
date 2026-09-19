@@ -12,6 +12,54 @@ F3 & F6 `2ba16d8`, F4 `ef792bb`, F5 `1270400` (riwayat di `CHANGELOG.md`).
 
 ---
 
+## F12 — 2026-09-20: `CASE` di daftar proyeksi mengembalikan nilai kolom yang salah (silent wrong result) — TERBUKA
+
+**Ranah:** akar (binder/planner — evaluasi ekspresi pada daftar proyeksi). **Status:** TERBUKA — belum ada fix; ditemukan dari sisi Sulur (P1-OBS-1), tercatat juga di `sulur/docs/FINDINGS.md` #42.
+
+### Gejala (akar 0.2.3, tanpa error)
+
+`CASE` pada daftar `RETURN` mengembalikan nilai **kolom input lain**, bukan cabang `THEN`/`ELSE` —
+tampak di-bind **berdasarkan posisi** ekspresi dalam daftar proyeksi alih-alih dievaluasi.
+
+```cypher
+CREATE NODE TABLE DT(id INT64, phase STRING, bridges INT64, PRIMARY KEY(id));
+CREATE (:DT {id: 10, phase: 'rem', bridges: 7});
+CREATE (:DT {id: 20, phase: 'supersedes', bridges: 11});
+
+MATCH (s:DT) RETURN CASE WHEN s.phase = 'rem' THEN s.bridges ELSE 0 END AS a ORDER BY s.id;
+-- aktual    : [[10], [20]]                       (s.id — bukan 7/0)
+-- diharapkan: [[7], [0]]
+
+MATCH (s:DT) RETURN s.id AS id, CASE WHEN s.bridges > 6 THEN 1 ELSE -1 END AS a ORDER BY s.id;
+-- aktual    : [[10, 'rem'], [20, 'supersedes']]  (posisi ke-2 mengembalikan s.phase)
+-- diharapkan: [[10, 1], [20, 1]]
+
+MATCH (s:DT) RETURN SUM(CASE WHEN s.phase = 'rem' THEN s.bridges ELSE 0 END) AS t;
+-- aktual    : [[None]]
+-- diharapkan: [[7]]
+```
+
+### Bukan masalah `CASE`-umum — ekspresi lain benar
+
+Diverifikasi pada build yang sama; semuanya mengembalikan nilai yang benar:
+`RETURN s.bridges * 2`, `s.phase + '!'`, `COALESCE(s.bridges, 0)`, `abs(s.bridges)`.
+Masalahnya spesifik pada ekspresi `CASE` — bentuk **searched** (`CASE WHEN … THEN …`) **dan** **simple**
+(`CASE s.phase WHEN 'rem' THEN …`) sama-sama salah.
+
+### Dampak & mitigasi sementara
+
+- **Dampak:** agregat bersyarat gaya SQL yang lazim ditulis `SUM(CASE WHEN … THEN … ELSE … END)` mengembalikan hasil salah **tanpa error** — menyesatkan metrik/laporan. Sulur harus mengubah agregat metrik dream per-fase menjadi bentuk terfilter karena ini.
+- **Mitigasi di sisi pemakai:** tulis agregat per-kondisi sebagai `MATCH … WHERE <kondisi> RETURN SUM(x)` (terverifikasi benar) alih-alih `SUM(CASE …)`.
+- Belum ada tes pin di akar untuk repro di atas.
+
+### Langkah lanjut (usul)
+
+1. Lacak di `akar-binder`/`akar-planner`: bagaimana `Expression::Case` pada daftar proyeksi di-resolve (kandidat: proyeksi memakai indeks kolom alih-alih mengevaluasi ekspresi).
+2. Perbaiki + tes regresi dari repro di atas (searched form, simple form, `SUM(CASE …)`).
+3. Audit pemakaian `CASE` lain di planner/optimizer yang mungkin terkena.
+
+---
+
 ## F11 — 2026-09-19: Evolusi Arsitektur Sulur ke Rust & Pensiun Bertahap akar-server — RENCANA
 
 **Ranah:** akar (arsitektur akar-main, akar-server, batas domain §13).
