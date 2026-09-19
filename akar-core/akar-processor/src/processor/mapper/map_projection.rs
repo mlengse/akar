@@ -9,17 +9,22 @@ use akar_planner::logical_operator::LogicalOperator;
 use std::sync::{Arc, Mutex};
 
 fn projection_needs_expression_eval(expr: &Expression) -> bool {
-    matches!(
+    // Fail-safe shape: list the variants that resolve to a *plain column*
+    // (`resolve_projection_column_expand` handles exactly these) and let every
+    // other expression go through the per-row evaluator. The previous version
+    // enumerated the *computed* variants instead, so any variant missing from
+    // that list (F12: `Expression::Case`) fell through to the positional
+    // fallback in the caller — `column_indices = (0..expressions.len())` — and
+    // silently projected an unrelated input column. `RETURN CASE WHEN
+    // s.phase = 'rem' THEN s.bridges ELSE 0 END` returned `s.id` (or
+    // `s.phase` when it was the second item) instead of the branch value.
+    //
+    // `Star` stays in the resolvable set: it is normally expanded by the
+    // binder, and when it does leak the positional fallback is the correct
+    // "copy every column" behavior.
+    !matches!(
         expr,
-        Expression::FunctionCall(_, _)
-            | Expression::Constant(_)
-            | Expression::BinaryOp(_, _, _)
-            | Expression::UnaryOp(_, _)
-            | Expression::List(_)
-            | Expression::Map(_)
-            | Expression::Parameter(_)
-            | Expression::ExistsSubquery(_)
-            | Expression::ListPredicate { .. }
+        Expression::Variable(_) | Expression::PropertyAccess(_, _) | Expression::Star
     )
 }
 
