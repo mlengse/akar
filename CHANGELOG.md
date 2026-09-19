@@ -21,6 +21,12 @@
 
 ### Fixed
 
+- **P125 — `CASE` pada daftar proyeksi tidak lagi mengembalikan kolom yang salah (menutup F12)** · gate **2,114** (+7: 2,107 → 2,114)
+  - Akar F12: `projection_needs_expression_eval` (`akar-processor/src/processor/mapper/map_projection.rs`) menyebut varian ekspresi yang **komputasional** (`FunctionCall`/`Constant`/`BinaryOp`/…) dan **melewatkan `Expression::Case`** — sehingga proyeksi CASE mengambil jalur "kolom biasa" (fast path). Karena `resolve_projection_column_expand` hanya me-resolve `Variable`/`PropertyAccess`, CASE menghasilkan `None` dan pemanggil jatuh ke fallback posisional `column_indices = (0..expressions.len())`.
+  - Akibatnya `RETURN CASE WHEN s.phase = 'rem' THEN s.bridges ELSE 0 END` mengembalikan `s.id` (dan `s.phase` bila CASE berada di posisi proyeksi kedua) — nilai salah **tanpa error**.
+  - Perbaikan dibuat **fail-safe**, bukan menambah satu varian ke daftar: predikat kini menyebut varian yang **dapat di-resolve sebagai kolom** (`Variable`/`PropertyAccess`/`Star`) dan mengirim semua ekspresi lain ke evaluator per-baris. Ini menutup seluruh kelas bug — varian ekspresi baru otomatis dievaluasi, tidak lagi bisa diam-diam jatuh ke fallback posisional. `Star` sengaja tetap di set "kolom": bila ia bocor, fallback posisional berarti "salin semua kolom", yang perilakunya benar.
+  - Tes regresi `akar-main/tests/test_case_expression.rs` (7): searched CASE, simple form, CASE pada posisi proyeksi kedua, CASE di `WHERE`, CASE bercabang string + alias, penjaga "ekspresi lain tidak berubah" (aritmetika/`COALESCE`/kolom polos), dan satu tes yang mem-pin batasan **F13** (lihat `FINDINGS.md`).
+
 - **P114.1 — guard tulis edge-update WAL: record hanya untuk edge hidup (menutup jalur lahir F7)** · `cd31526` · gate **2,107**
   - F7: `SET … Connected` pada pemindaian tabel rel (rel scan tidak membawa kolom `_id`) jatuh ke `unwrap_or(0)` dan membaca nilai properti sebagai indeks edge → WAL memuat `Update { row_id: N }` yang tidak dapat di-replay penulisnya sendiri (`Edge index N out of range`), memblokir `Database::new` dan menolak start daemon.
   - Guard di `PhysicalSet` (`akar-processor/src/physical/write_ops/set.rs`): sebelum menulis record update edge, tolak indeks di luar rentang dan edge yang sudah di-tombstone (`u64::MAX` pada src/dst) dengan `tracing::warn!` — WAL tidak bisa lahir tak-replayable oleh penulisnya sendiri.

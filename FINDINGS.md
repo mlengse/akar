@@ -12,9 +12,47 @@ F3 & F6 `2ba16d8`, F4 `ef792bb`, F5 `1270400` (riwayat di `CHANGELOG.md`).
 
 ---
 
-## F12 — 2026-09-20: `CASE` di daftar proyeksi mengembalikan nilai kolom yang salah (silent wrong result) — TERBUKA
+## F13 — 2026-09-20: argumen agregat yang bukan kolom polos menghasilkan NULL (`SUM(expr)`) — TERBUKA
 
-**Ranah:** akar (binder/planner — evaluasi ekspresi pada daftar proyeksi). **Status:** TERBUKA — belum ada fix; ditemukan dari sisi Sulur (P1-OBS-1), tercatat juga di `sulur/docs/FINDINGS.md` #42.
+**Ranah:** akar (agregasi — resolusi argumen agregat). **Status:** TERBUKA — belum ada fix; ditemukan bersamaan F12 saat menulis tes regresi-nya.
+
+### Gejala (tanpa error, hasil NULL)
+
+`SUM(x)` hanya benar bila `x` adalah **kolom polos**; argumen terhitung menghasilkan `NULL`:
+
+```cypher
+MATCH (s:DT) RETURN SUM(s.bridges)                                          -- 18    (benar)
+MATCH (s:DT) RETURN SUM(s.bridges * 2)                                      -- NULL
+MATCH (s:DT) RETURN SUM(abs(s.bridges))                                     -- NULL
+MATCH (s:DT) RETURN SUM(CASE WHEN s.phase='rem' THEN s.bridges ELSE 0 END)  -- NULL
+MATCH (s:DT) RETURN COUNT(s.phase)                                          -- 2     (benar: COUNT hanya butuh kolom)
+```
+
+### Akar masalah
+
+`resolve_agg_col_indices` (`akar-processor/src/physical/order_aggregate/aggregatehashtable.rs:613`) memetakan tiap argumen agregat ke **indeks kolom**: hanya `Variable`/`PropertyAccess` yang di-resolve, `Star` → `None` (sengaja, untuk `COUNT(*)`), dan **seluruh ekspresi lain jatuh ke `None`** lewat `_ => {}`. `None` dimaknai "tidak butuh kolom", sehingga agregat tidak menerima nilai apa pun dan hasilnya NULL.
+
+### Bedanya dari F12
+
+F12 mengembalikan **nilai salah yang non-null** (proyeksi ter-bind ke kolom lain). F13 mengembalikan **NULL** — "tidak didukung" yang tak terdokumentasi. Keduanya berasal dari pola yang sama (pemetaan ekspresi → indeks kolom dengan fallback diam-diam) tetapi di jalur kode berbeda (proyeksi vs agregasi).
+
+### Dampak & mitigasi
+
+- Dampak: agregat bersyarat (`SUM(CASE …)`) dan agregat atas ekspresi (`SUM(a*b)`, `SUM(abs(x))`) senyap menghasilkan NULL — metrik/laporan salah tanpa error.
+- Mitigasi sementara: hitung ekspresi lebih dulu lalu agregasi atas kolom hasilnya (mis. lewat `WITH`) — **belum diverifikasi** apakah jalur `WITH` menghasilkannya dengan benar, jadi uji dulu sebelum dijadikan resep resmi; atau agregasi per-kondisi dengan `WHERE`.
+- Perilaku saat ini **dipin** oleh `computed_aggregate_arguments_are_not_yet_supported` (`akar-main/tests/test_case_expression.rs`) agar batasannya terlihat dan setiap perubahan bersifat sengaja.
+
+### Langkah lanjut (usul)
+
+1. Evaluasi argumen agregat per-baris: bila `resolve_agg_col_indices` mengembalikan `None` untuk argumen yang **bukan** `Star`/`COUNT(*)`, materialisasi vektor hasil evaluasi ekspresi (butuh akses `FunctionRegistry` di jalur agregasi — periksa `SharedAggregateState`/mapper) lalu umpan sebagai kolom.
+2. Tes regresi untuk ketiga bentuk di atas; perbarui/rewrite tes pin F13.
+3. Audit `AVG`/`MIN`/`MAX`/`STDDEV`/`VARIANCE`/`COLLECT` — semuanya memakai jalur resolusi yang sama.
+
+---
+
+## F12 — 2026-09-20: `CASE` di daftar proyeksi mengembalikan nilai kolom yang salah (silent wrong result) — RESOLVED (`P125`, gate 2,114)
+
+**Ranah:** akar (proyeksi — pemetaan ekspresi ke kolom di `PhysicalProjection`). **Status:** SELESAI — akar masalah ditemukan, diperbaiki fail-safe, dan dipin oleh 7 tes regresi; ditemukan dari sisi Sulur (P1-OBS-1), tercatat juga di `sulur/docs/FINDINGS.md` #42.
 
 ### Gejala (akar 0.2.3, tanpa error)
 
@@ -52,11 +90,15 @@ Masalahnya spesifik pada ekspresi `CASE` — bentuk **searched** (`CASE WHEN …
 - **Mitigasi di sisi pemakai:** tulis agregat per-kondisi sebagai `MATCH … WHERE <kondisi> RETURN SUM(x)` (terverifikasi benar) alih-alih `SUM(CASE …)`.
 - Belum ada tes pin di akar untuk repro di atas.
 
-### Langkah lanjut (usul)
+### Penutupan (2026-09-20, P125 — gate 2,114)
 
-1. Lacak di `akar-binder`/`akar-planner`: bagaimana `Expression::Case` pada daftar proyeksi di-resolve (kandidat: proyeksi memakai indeks kolom alih-alih mengevaluasi ekspresi).
-2. Perbaiki + tes regresi dari repro di atas (searched form, simple form, `SUM(CASE …)`).
-3. Audit pemakaian `CASE` lain di planner/optimizer yang mungkin terkena.
+Akar masalah bukan di binder/planner (binder `Expression::Case` dan `ExpressionEvaluator::evaluate_case` sudah benar) melainkan di **pemilihan jalur proyeksi**: `projection_needs_expression_eval` (`akar-processor/src/processor/mapper/map_projection.rs`) menyebut varian yang *komputasional* dan **melewatkan `Expression::Case`**, sehingga proyeksi CASE mengambil jalur "kolom biasa"; karena `resolve_projection_column_expand` hanya me-resolve `Variable`/`PropertyAccess`, hasilnya `None` → pemanggil jatuh ke fallback posisional `column_indices = (0..expressions.len())`.
+
+Perbaikan: predikat dibalik menjadi **fail-safe** — sebut varian yang **dapat di-resolve sebagai kolom** (`Variable`/`PropertyAccess`/`Star`), kirim semua ekspresi lain ke evaluator per-baris. Ini menutup seluruh kelas bug (varian ekspresi baru otomatis dievaluasi), bukan hanya `Case`. `Star` tetap di set "kolom" karena fallback posisional = "salin semua kolom" adalah perilaku yang benar bila Star bocor dari binder.
+
+Tes `akar-main/tests/test_case_expression.rs` (7): searched CASE, simple form, CASE di posisi proyeksi kedua (repro orisinal), CASE di `WHERE`, CASE bercabang string + alias, penjaga "ekspresi lain tidak berubah", dan pin batasan F13.
+
+**Catatan penting:** `SUM(CASE …)` pada repro awal **tidak** ikut tertutup — itu jalur agregasi yang berbeda dan dicatat sebagai **F13** di atas (mengembalikan NULL, bukan nilai salah).
 
 ---
 
