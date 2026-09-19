@@ -1,10 +1,15 @@
 use super::ExecutionContext;
+use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::order_aggregate::resolve_group_by_indices;
 use crate::physical_operator::*;
 use akar_common::error::ProcessorError;
 use akar_common::vector::DataChunk;
 use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
+
+/// Prefix of the synthetic trailing columns that carry pre-evaluated computed
+/// aggregate arguments (P126 / F13).
+const COMPUTED_AGG_COL_PREFIX: &str = "__akar_agg_arg_";
 
 pub fn map_and_execute_aggregate(
     op: &LogicalOperator,
@@ -33,12 +38,44 @@ pub fn map_and_execute_aggregate(
             }
             let agg_expressions: Vec<Vec<Expression>> = a.aggregates.iter().map(|(_, args)| args.clone()).collect();
 
+            // P126 (F13): an aggregate argument that is not a plain column
+            // (`SUM(s.bridges * 2)`, `SUM(abs(x))`, `SUM(CASE ...)`) resolves to
+            // no column index at all, so the physical aggregate receives no
+            // values and silently returns NULL. Evaluate every such argument
+            // per chunk, append the result as a trailing column, and rewrite the
+            // argument into a reference to that column. The physical aggregate
+            // then sees a plain column, so every existing fast path (COUNT,
+            // Sum/Min/Max/Avg/Collect and their DISTINCT / GROUP BY variants)
+            // stays on its normal route. Nothing happens at all — no chunk copy,
+            // no evaluator — when no aggregate argument is computed.
+            let mut computed_agg_args: Vec<Expression> = Vec::new();
+            let agg_expressions: Vec<Vec<Expression>> = agg_expressions
+                .into_iter()
+                .map(|args| match computed_aggregate_argument(&args) {
+                    Some(expr) => {
+                        let name = computed_agg_col_name(computed_agg_args.len());
+                        computed_agg_args.push(expr.clone());
+                        vec![Expression::Variable(name)]
+                    }
+                    None => args,
+                })
+                .collect();
+
             // Resolve GROUP BY expressions to actual column indices using input field_names
             let field_names = current_input.first().map(|c| c.field_names.as_slice()).unwrap_or(&[]);
             let group_by_cols = if a.group_by.is_empty() {
                 Vec::new()
             } else {
                 resolve_group_by_indices(&a.group_by, field_names)
+            };
+
+            // The synthetic argument columns are appended *after* the group-by
+            // indices were resolved, so those indices keep pointing at the
+            // original columns.
+            let current_input = if computed_agg_args.is_empty() {
+                current_input
+            } else {
+                append_computed_aggregate_columns(current_input, &computed_agg_args, ctx)?
             };
 
             let shared_state = std::sync::Arc::new(crate::physical::order_aggregate::SharedAggregateState::new(
@@ -84,6 +121,83 @@ pub fn map_and_execute_aggregate(
         }
         _ => Err(format!("Not an aggregate operator: {:?}", op).into()),
     }
+}
+
+/// Name of the synthetic trailing column holding the pre-evaluated value of the
+/// `idx`-th computed aggregate argument (P126 / F13).
+fn computed_agg_col_name(idx: usize) -> String {
+    format!("{COMPUTED_AGG_COL_PREFIX}{idx}")
+}
+
+/// Return the aggregate argument that must be evaluated before aggregation.
+///
+/// `resolve_agg_col_indices` maps an aggregate argument to an input column
+/// index and understands exactly three shapes: `Variable` and `PropertyAccess`
+/// (resolved by name) and `Star` (`COUNT(*)`, which deliberately needs no
+/// column). Every other shape — `SUM(s.bridges * 2)`, `SUM(abs(x))`,
+/// `SUM(CASE ...)` — previously fell through to "no column needed" and produced
+/// NULL (F13). Aggregate functions take a single argument
+/// (`parse_aggregate_function`), so the match below is unambiguous.
+///
+/// `Variable` / `PropertyAccess` are left alone even when they fail to resolve
+/// to a column, because their "no column" outcome predates F13 and is handled by
+/// its own fallback (`COUNT` counts all active rows).
+fn computed_aggregate_argument(args: &[Expression]) -> Option<&Expression> {
+    match args {
+        [arg]
+            if !matches!(
+                arg,
+                Expression::Variable(_) | Expression::PropertyAccess(_, _) | Expression::Star
+            ) =>
+        {
+            Some(arg)
+        }
+        _ => None,
+    }
+}
+
+/// Append the pre-evaluated values of computed aggregate arguments as trailing
+/// columns (P126 / F13), named so that `resolve_agg_col_indices` maps the
+/// rewritten argument back to them.
+fn append_computed_aggregate_columns(
+    input: Vec<DataChunk>,
+    computed: &[Expression],
+    ctx: &mut ExecutionContext,
+) -> Result<Vec<DataChunk>, ProcessorError> {
+    let registry = ctx
+        .function_registry
+        .clone()
+        .ok_or_else(|| "No function registry available for a computed aggregate argument".to_string())?;
+    let mut eval = ExpressionEvaluator::new(registry);
+    if let Some(ref seq_fn) = ctx.sequence_fn {
+        eval = eval.with_sequence_fn(seq_fn.clone());
+    }
+    if let Some(ref subquery_fn) = ctx.subquery_fn {
+        eval = eval.with_subquery_fn(subquery_fn.clone());
+    }
+
+    let mut augmented = Vec::with_capacity(input.len());
+    for chunk in input {
+        let mut fields = chunk.fields.clone();
+        let mut field_types = chunk.field_types.clone();
+        let mut field_names = chunk.field_names.clone();
+        for (i, expr) in computed.iter().enumerate() {
+            // `evaluate_arrow` yields one slot per physical row of the chunk, so
+            // the appended column stays aligned with the existing ones.
+            let vv = eval.evaluate_arrow(expr, &chunk)?;
+            fields.push(vv.array);
+            field_types.push(vv.physical_type);
+            field_names.push(computed_agg_col_name(i));
+        }
+        augmented.push(DataChunk {
+            fields,
+            field_types,
+            size: chunk.size,
+            field_names,
+            sel_vector: chunk.sel_vector.clone(),
+        });
+    }
+    Ok(augmented)
 }
 
 /// Split an aggregate name that may carry the parser's DISTINCT encoding
