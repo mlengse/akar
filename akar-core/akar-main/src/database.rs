@@ -51,6 +51,13 @@ pub struct SystemConfig {
     ///
     /// Default: 80% of `buffer_pool_size`. Set to 0 to disable spilling.
     pub spill_threshold: u64,
+    /// When true, WAL recovery runs in salvage mode (P114.2): a record (or
+    /// whole transaction blob) that fails to apply is logged explicitly and
+    /// skipped instead of aborting database open. Mirrors of the last
+    /// checkpoint remain the source of truth; the failing writes since that
+    /// checkpoint are ignored. Default `false` keeps recovery strict (P61.3:
+    /// never silently start from an empty database).
+    pub skip_wal: bool,
 }
 
 impl Default for SystemConfig {
@@ -66,6 +73,7 @@ impl Default for SystemConfig {
             concurrent_writes: true,
             // Default: 80% of buffer_pool_size, or 0 if not set
             spill_threshold: 0,
+            skip_wal: false,
         }
     }
 }
@@ -610,6 +618,11 @@ impl Database {
         let stats_store = Arc::new(Mutex::new(StatsStore::new()));
         let vfs = Arc::new(VirtualFileSystemRegistry::new());
 
+        // P114.2 salvage mode: skip WAL records that cannot be applied instead
+        // of aborting open (see `set_skip_wal`). Snapshot before `config`
+        // moves into `Self`.
+        let skip_wal = config.skip_wal;
+
         let mut db = Self {
             storage_manager,
             catalog,
@@ -629,6 +642,10 @@ impl Database {
         // Recreate storage-level tables from the restored catalog (if any) so
         // WAL DML replay below operates on the same table IDs.
         db.restore_storage_from_catalog();
+
+        // P114.2 salvage mode: skip WAL records that cannot be applied instead
+        // of aborting open (see `set_skip_wal`).
+        db.storage_manager.set_skip_wal(skip_wal);
 
         // Propagate the configured spiller (if any) so bulk ingest on the
         // restored tables spills to disk once a NodeGroup exceeds the memory

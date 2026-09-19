@@ -1,9 +1,11 @@
 //! Akar CLI — interactive and script-mode Cypher query shell.
 //!
 //! Usage:
-//!   akar-cli [database_path]
+//!   akar-cli [database_path] [--skip-wal]
 //!
-//! If no path is given, runs in `:memory:` mode.
+//! If no path is given, runs in `:memory:` mode. `--skip-wal` opens in salvage
+//! mode (P114.2): WAL records that fail to apply during recovery are logged
+//! and skipped instead of aborting database open.
 //!
 //! Interactive features:
 //!   - Multi-line input with `;` termination
@@ -66,8 +68,12 @@ struct CliState {
 }
 
 impl CliState {
-    fn new(db_path: &str) -> Result<Self, String> {
-        let db = Arc::new(Database::new(db_path, SystemConfig::default())?);
+    fn new(db_path: &str, skip_wal: bool) -> Result<Self, String> {
+        let config = SystemConfig {
+            skip_wal,
+            ..SystemConfig::default()
+        };
+        let db = Arc::new(Database::new(db_path, config)?);
         let catalog = db.catalog();
         let conn = Connection::new(&db);
         Ok(Self {
@@ -273,19 +279,29 @@ fn main() {
     tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
 
     let args: Vec<String> = std::env::args().collect();
-    let db_path = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        ":memory:".to_string()
-    };
+    let mut db_path = ":memory:".to_string();
+    let mut skip_wal = false;
+    for arg in args.iter().skip(1) {
+        match arg.as_str() {
+            "--skip-wal" | "--salvage" => skip_wal = true,
+            _ if db_path == ":memory:" && !arg.starts_with('-') => db_path = arg.clone(),
+            other => {
+                eprintln!("Unknown argument: {other}");
+                std::process::exit(2);
+            }
+        }
+    }
 
-    let state = match CliState::new(&db_path) {
+    let state = match CliState::new(&db_path, skip_wal) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {e}");
             std::process::exit(1);
         }
     };
+    if skip_wal {
+        eprintln!("WAL recovery in salvage mode (P114.2): unplayable records will be skipped and logged.");
+    }
 
     // Store global state reference
     *GLOBAL_STATE.lock().unwrap() = Some(state);

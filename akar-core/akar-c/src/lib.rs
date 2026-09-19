@@ -114,6 +114,7 @@ pub unsafe extern "C" fn akar_database_init(
             checkpoint_threshold: system_config.checkpoint_threshold as i64,
             concurrent_writes: true, // Default
             spill_threshold: 0,      // Default
+            skip_wal: false,         // Default
         };
 
         match Database::new(&path, config) {

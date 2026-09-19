@@ -28,6 +28,7 @@
 //! # Ok::<(), String>(())
 //! ```
 
+pub mod daemon_log;
 pub mod dream;
 pub mod session;
 

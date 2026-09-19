@@ -142,6 +142,25 @@ impl PhysicalOperatorExec for PhysicalSet {
                         .position(|c| c.name == item.column_name)
                         .unwrap_or(item.column_idx);
                     for (i, edge_idx) in rows_to_update.iter().enumerate() {
+                        // F7 guard: only write edge-update WAL records for a
+                        // real, live edge index. Rel-table scans carry no `_id`
+                        // column (see `resolve_scan_data`), so the fallback reads
+                        // a property value as the edge index; writing that to the
+                        // WAL produces a record the writer itself cannot replay
+                        // (recovery abort: "Edge index N out of range"). Reject
+                        // out-of-range and tombstoned indices here instead.
+                        let edge_is_live = match table.edges.get(*edge_idx as usize) {
+                            Some(&(src, dst)) => src != u64::MAX && dst != u64::MAX,
+                            None => false,
+                        };
+                        if !edge_is_live {
+                            tracing::warn!(
+                                "SET: skipping edge update on '{}': index {} is not a live edge",
+                                self.table_name,
+                                edge_idx
+                            );
+                            continue;
+                        }
                         if let Some(sink) = self.undo_sink.as_ref()
                             && let Ok(mut u) = sink.lock()
                         {
@@ -159,6 +178,13 @@ impl PhysicalOperatorExec for PhysicalSet {
                                 *edge_idx,
                                 col_idx as u32,
                                 &all_values[item_idx][i],
+                            );
+                        } else {
+                            tracing::warn!(
+                                "SET: edge update rejected on '{}': index {} column {}",
+                                self.table_name,
+                                edge_idx,
+                                col_idx
                             );
                         }
                     }
@@ -590,5 +616,210 @@ pub fn evaluate_constant_expr(expr: &Expression, registry: &FunctionRegistry) ->
             evaluate_scalar(&func, &arg_values).unwrap_or(Value::Null)
         }
         _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_common::enums::CompressionType;
+    use akar_common::types::LogicalTypeID;
+    use akar_parser::ast::Constant;
+    use akar_planner::logical_operator::SetItem;
+    use akar_storage::table::TableCatalog;
+    use akar_storage::wal::WALRecord;
+
+    /// Regression for F7: edge-update WAL records must never be born with an
+    /// edge index that is not a live edge. Rel-table scans carry no `_id`
+    /// column (`resolve_scan_data`), so SET falls back to a property value as
+    /// the edge index; the write-side guard rejects out-of-range and
+    /// tombstoned indices so the writer can always replay its own records.
+    #[test]
+    fn set_edge_guard_rejects_non_live_edge_indices() {
+        let catalog = Arc::new(TableCatalog::new());
+        let src = catalog.create_node_table(
+            "Memory".to_string(),
+            vec![ColumnDefinition {
+                name: "id".to_string(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: true,
+                compression: CompressionType::Uncompressed,
+            }],
+        );
+        catalog.create_rel_table(
+            "Connected".to_string(),
+            src.table_id,
+            src.table_id,
+            vec![ColumnDefinition {
+                name: "weight".to_string(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                compression: CompressionType::Uncompressed,
+            }],
+        );
+        let rel_id = {
+            let mut rel = catalog.get_rel_table_by_name_mut("Connected").unwrap();
+            rel.insert_rel(0, 1, vec![Value::Int64(10)]).unwrap();
+            rel.insert_rel(1, 2, vec![Value::Int64(20)]).unwrap();
+            rel.insert_rel(2, 3, vec![Value::Int64(30)]).unwrap();
+            // Tombstone edge 1 (deleted edge); edges 0 and 2 remain live.
+            rel.delete_edge(1).unwrap();
+            rel.table_id
+        };
+
+        // Simulate a chunk that carries NO `_id` column — exactly what a rel
+        // scan produces. The fallback `unwrap_or(0)` then reads column 0
+        // (property values) as candidate edge indices. Feed indices that are
+        // out-of-range (99, 7) and a tombstoned edge (1); only live edge 0
+        // may be written.
+        let wal: Arc<Mutex<Vec<WALRecord>>> = Arc::new(Mutex::new(Vec::new()));
+        let op = PhysicalSet {
+            table_name: "Connected".to_string(),
+            table_id: rel_id,
+            is_node: false,
+            items: vec![SetItem {
+                column_name: "weight".to_string(),
+                column_idx: 0,
+                value: Expression::Constant(Constant::Integer(99)),
+            }],
+            table_catalog: catalog.clone(),
+            txn_id: None,
+            undo_sink: None,
+            function_registry: None,
+            emit_count: true,
+            wal_sink: Some(wal.clone()),
+        };
+
+        // Build an input chunk whose single column holds candidate edge
+        // indices: [0 (live), 1 (tombstoned), 7 (out of range)].
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 3);
+        v.resize(3);
+        v.set_i64(0, 0);
+        v.set_i64(1, 1);
+        v.set_i64(2, 7);
+        let mut chunk = DataChunk::from_legacy(vec![v]);
+        chunk.field_names = vec!["Connected.weight".to_string()];
+        chunk.field_types = vec![PhysicalTypeID::Int64];
+
+        let out = op.execute(vec![chunk]).unwrap();
+        // emit_count -> a 1-row count chunk with updated==1 (only edge 0).
+        assert_eq!(out.len(), 1, "termin- al SET emits a count chunk");
+        assert_eq!(
+            out[0].get_i64(0, 0),
+            Some(1),
+            "only the single live edge may be updated"
+        );
+
+        // The write must have produced exactly one edge-update WAL record,
+        // targeting the live edge (row_id 0) — never the tombstoned or
+        // out-of-range candidates.
+        let records = wal.lock().unwrap();
+        let updates: Vec<&WALRecord> = records
+            .iter()
+            .filter(|r| matches!(r, WALRecord::Update { .. }))
+            .collect();
+        assert_eq!(updates.len(), 1, "exactly one edge-update WAL record, got {records:?}");
+        match updates[0] {
+            WALRecord::Update {
+                table_id,
+                row_id,
+                column,
+                ..
+            } => {
+                assert_eq!(*table_id, rel_id);
+                assert_eq!(*row_id, 0, "only live edge 0 may be in the WAL");
+                assert_eq!(*column, 0);
+            }
+            other => panic!("unexpected record type: {other:?}"),
+        }
+
+        // The live edge's cell must be updated; tombstoned and OOB untouched.
+        let rel = catalog.get_rel_table_by_name("Connected").unwrap();
+        assert_eq!(rel.get_edge_properties(0)[0], Value::Int64(99));
+        assert_eq!(rel.get_edge_properties(1)[0], Value::Null);
+        assert_eq!(rel.get_edge_properties(2)[0], Value::Int64(30));
+    }
+
+    /// Guard must also reject an edge index that is in-range but points at a
+    /// tombstoned edge without corrupting neighbor writes (F7 companion: rel
+    /// DELETE keeps indices stable via tombstones, so a stale SET must never
+    /// revive or rewrite a deleted edge).
+    #[test]
+    fn set_edge_guard_skips_tombstoned_edge_keeps_neighbors() {
+        let catalog = Arc::new(TableCatalog::new());
+        let src = catalog.create_node_table(
+            "Memory".to_string(),
+            vec![ColumnDefinition {
+                name: "id".to_string(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: true,
+                compression: CompressionType::Uncompressed,
+            }],
+        );
+        let rel = catalog.create_rel_table(
+            "Connected".to_string(),
+            src.table_id,
+            src.table_id,
+            vec![ColumnDefinition {
+                name: "weight".to_string(),
+                logical_type: LogicalTypeID::Int64,
+                is_primary_key: false,
+                compression: CompressionType::Uncompressed,
+            }],
+        );
+        let rel_id = rel.table_id;
+        {
+            let mut rel = catalog.get_rel_table_by_name_mut("Connected").unwrap();
+            rel.insert_rel(0, 1, vec![Value::Int64(10)]).unwrap();
+            rel.insert_rel(1, 2, vec![Value::Int64(20)]).unwrap();
+            rel.delete_edge(0).unwrap(); // tombstone edge 0
+        }
+
+        let wal: Arc<Mutex<Vec<WALRecord>>> = Arc::new(Mutex::new(Vec::new()));
+        let op = PhysicalSet {
+            table_name: "Connected".to_string(),
+            table_id: rel_id,
+            is_node: false,
+            items: vec![SetItem {
+                column_name: "weight".to_string(),
+                column_idx: 0,
+                value: Expression::Constant(Constant::Integer(55)),
+            }],
+            table_catalog: catalog.clone(),
+            txn_id: None,
+            undo_sink: None,
+            function_registry: None,
+            emit_count: true,
+            wal_sink: Some(wal.clone()),
+        };
+
+        // Candidates: edge 0 (tombstoned) and edge 1 (live).
+        let mut v = ValueVector::new(PhysicalTypeID::Int64, 2);
+        v.resize(2);
+        v.set_i64(0, 0);
+        v.set_i64(1, 1);
+        let mut chunk = DataChunk::from_legacy(vec![v]);
+        chunk.field_names = vec!["Connected.weight".to_string()];
+        chunk.field_types = vec![PhysicalTypeID::Int64];
+
+        let out = op.execute(vec![chunk]).unwrap();
+        assert_eq!(out[0].get_i64(0, 0), Some(1), "only edge 1 is live");
+
+        let records = wal.lock().unwrap();
+        let updates: Vec<&WALRecord> = records
+            .iter()
+            .filter(|r| matches!(r, WALRecord::Update { .. }))
+            .collect();
+        assert_eq!(updates.len(), 1, "one WAL update, got {records:?}");
+        match updates[0] {
+            WALRecord::Update { row_id, .. } => {
+                assert_eq!(*row_id, 1, "only live edge 1 may be written");
+            }
+            other => panic!("unexpected record type: {other:?}"),
+        }
+
+        let rel = catalog.get_rel_table_by_name("Connected").unwrap();
+        assert_eq!(rel.get_edge_properties(0)[0], Value::Null, "tombstoned edge stays null");
+        assert_eq!(rel.get_edge_properties(1)[0], Value::Int64(55));
     }
 }

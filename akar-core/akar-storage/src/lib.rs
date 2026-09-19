@@ -126,6 +126,9 @@ pub struct StorageManager {
     /// When installed, `commit_transaction` step 1 batches concurrent flushes
     /// into a single fsync (leader/follower). `None` → legacy inline fsync.
     group_commit: Option<Arc<group_commit::GroupCommit<Mutex<WAL>>>>,
+    /// P114.2 salvage mode: true skips WAL records that fail to apply during
+    /// recovery (logging each explicitly) instead of aborting database open.
+    skip_wal: std::sync::atomic::AtomicBool,
 }
 
 /// Storage info returned by CALL storage_info().
@@ -198,7 +201,15 @@ impl StorageManager {
             table_persistence: TablePersistence::new(),
             spiller: std::sync::RwLock::new(None),
             group_commit: None,
+            skip_wal: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Enable or disable WAL recovery salvage mode (P114.2). When enabled,
+    /// recovery skips individual records/transactions that fail to apply,
+    /// logging each explicitly, instead of aborting database open.
+    pub fn set_skip_wal(&self, skip: bool) {
+        self.skip_wal.store(skip, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Attach a spiller so node tables spill during bulk ingest once a
@@ -853,8 +864,26 @@ impl StorageManager {
         let mut data_records = 0usize;
         let catalog = self.table_catalog.clone();
 
-        // Replay each record on top of the mirror state.
-        wal.replay(|record| replay_data_record(record, &catalog, &mut data_records))?;
+        if self.skip_wal.load(std::sync::atomic::Ordering::Relaxed) {
+            // P114.2 salvage mode: try each record; failures are logged
+            // explicitly and skipped rather than aborting open. The durable
+            // column mirrors (last checkpoint) remain the source of truth.
+            let mut skipped = 0usize;
+            wal.replay(|record| match replay_data_record(record, &catalog, &mut data_records) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    tracing::warn!("WAL recovery (salvage): skipping record {record:?}: {e}");
+                    skipped += 1;
+                    Ok(())
+                }
+            })?;
+            if skipped > 0 {
+                tracing::warn!("WAL recovery (salvage): skipped {skipped} record(s) that failed to apply");
+            }
+        } else {
+            // Replay each record on top of the mirror state.
+            wal.replay(|record| replay_data_record(record, &catalog, &mut data_records))?;
+        }
 
         // After successful replay, mirror the recovered rows into the durable
         // column mirrors as well, so a subsequent startup with an empty WAL
@@ -1763,6 +1792,112 @@ mod integration_tests {
             matches!(err, StorageError::Index(_)),
             "online duplicate-PK insert must keep failing, got: {err}"
         );
+    }
+
+    // =================================================================
+    // Test 7d: salvage-mode recovery (P114.2) — a WAL record that
+    // applies only to a non-existent row (the F7 edge-update signature)
+    // aborts strict recovery but is skipped with an explicit warning when
+    // `set_skip_wal(true)` is set, letting the database open from mirrors
+    // + the remaining replayable records.
+    // =================================================================
+    #[test]
+    fn test_wal_recovery_salvage_mode_skips_unplayable_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let columns = || {
+            vec![
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "id".into(),
+                    logical_type: LogicalTypeID::UInt64,
+                    is_primary_key: true,
+                },
+                ColumnDefinition {
+                    compression: CompressionType::Uncompressed,
+                    name: "name".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                },
+            ]
+        };
+        let serialize =
+            |id: u64, name: &str| serialize_values_to_bytes(&[Value::UInt64(id), Value::String(name.into())]);
+        let serialize_one = |name: &str| serialize_values_to_bytes(&[Value::String(name.into())]);
+
+        // Phase 1: seed table writes + a WAL whose LAST update targets an
+        // out-of-range row id (row 999) — the durable analogue of the F7
+        // legacy edge-update record produced by the pre-guard write path.
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+            let mut table = sm.create_node_table("Session".into(), columns());
+            table
+                .insert_row(vec![Value::UInt64(1), Value::String("Alice".into())])
+                .unwrap();
+
+            let mut wal = sm.wal.lock().unwrap();
+            wal.append(WALRecord::Insert {
+                table_id: table.table_id,
+                data: serialize(1, "Alice"),
+            });
+            wal.append(WALRecord::Commit { transaction_id: 1 });
+            // Replayable update (row 0 exists).
+            wal.append(WALRecord::Update {
+                table_id: table.table_id,
+                row_id: 0,
+                column: 1,
+                data: serialize_one("Alice-2"),
+            });
+            wal.append(WALRecord::Commit { transaction_id: 2 });
+            // Unreplayable update: row 999 does not exist.
+            wal.append(WALRecord::Update {
+                table_id: table.table_id,
+                row_id: 999,
+                column: 1,
+                data: serialize_one("Bob"),
+            });
+            wal.append(WALRecord::Commit { transaction_id: 3 });
+            wal.flush_to_disk().unwrap();
+        } // "Crash" — all state dropped
+
+        // Phase 2a (strict): recovery must refuse to open (P61.3).
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+            sm.create_node_table("Session".into(), columns());
+            let err = sm
+                .recover()
+                .expect_err("strict recovery must abort on unplayable record");
+            assert!(
+                err.to_string().contains("out of range"),
+                "expected row-index range error, got: {err}"
+            );
+        }
+
+        // Phase 2b (salvage): dropping the in-memory table leaves table 0 in
+        // the catalog; recovery with skip_wal must skip the bad record, apply
+        // the good ones, and open.
+        {
+            let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
+            let sm = StorageManager::new(dir.path().to_path_buf(), mm);
+            sm.create_node_table("Session".into(), columns());
+            sm.set_skip_wal(true);
+
+            let recovered = sm.recover().expect("salvage recovery must succeed");
+            assert_eq!(
+                recovered, 2,
+                "2 replayable data records (insert + update) applied, bad one skipped"
+            );
+
+            let table = sm.table_catalog.get_node_table_by_name("Session").unwrap();
+            assert_eq!(table.num_rows, 1, "insert must be applied");
+            assert_eq!(table.get_value(0, 0), Some(&Value::UInt64(1)));
+            assert_eq!(
+                table.get_value(0, 1),
+                Some(&Value::String("Alice-2".into())),
+                "the replayable update must still be applied in salvage mode"
+            );
+        }
     }
 
     // =================================================================

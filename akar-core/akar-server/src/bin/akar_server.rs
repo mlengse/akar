@@ -9,7 +9,11 @@
 //! ```text
 //! akar-server --db <path> [--port 9876] [--addr 127.0.0.1]
 //!             [--auth-token <hex>] [--idle 86400] [--json-sidecar <path>]
+//!             [--read-only] [--skip-wal]
 //! ```
+//!
+//! `--skip-wal` (P114.2) opens in salvage mode: unplayable WAL records are
+//! logged and skipped instead of aborting database open.
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,6 +26,12 @@ use serde::{Deserialize, Serialize};
 
 use akar_main::{Database, SystemConfig};
 use akar_server::Server;
+use akar_server::daemon_log;
+
+/// P114.3: wrap the system allocator so an allocation failure leaves a trace in
+/// the daemon log before the default OOM handler aborts the process.
+#[global_allocator]
+static ALLOCATOR: daemon_log::LoggingAllocator = daemon_log::LoggingAllocator;
 
 /// Akar embedded database server daemon.
 #[derive(Parser)]
@@ -61,6 +71,11 @@ struct Args {
     #[arg(long)]
     read_only: bool,
 
+    /// Open in salvage mode (P114.2): WAL records that fail to apply during
+    /// recovery are logged and skipped instead of aborting database open.
+    #[arg(long)]
+    skip_wal: bool,
+
     /// WAL size in bytes that triggers an auto-checkpoint. Defaults to a
     /// positive threshold so the daemon checkpoints only when the WAL grows
     /// past this size, NOT after every write (the historical -1 default
@@ -90,9 +105,14 @@ struct Sidecar {
 }
 
 fn main() {
+    // P114.3: install the panic hook before anything else so a panic during
+    // startup — database open, WAL recovery or bind — is recorded with its
+    // location in the daemon log.
+    daemon_log::install_panic_hook();
     tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
 
     let args = Args::parse();
+    daemon_log::log_line("START", &format!("db={}", args.db.display()));
 
     // Filter out empty auth token.
     let auth_token = args.auth_token.filter(|t| !t.is_empty());
@@ -103,12 +123,14 @@ fn main() {
         checkpoint_threshold: args.checkpoint_threshold,
         concurrent_writes: true,
         read_only: args.read_only,
+        skip_wal: args.skip_wal,
         ..Default::default()
     };
     let db = match Database::new(&args.db, config) {
         Ok(db) => Arc::new(db),
         Err(e) => {
             eprintln!("Failed to open database at '{}': {e}", args.db.display());
+            daemon_log::log_line("EXIT", "error: database open failed");
             process::exit(1);
         }
     };
@@ -119,6 +141,7 @@ fn main() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to bind server to '{bind_addr}': {e}");
+            daemon_log::log_line("EXIT", "error: bind failed");
             process::exit(1);
         }
     };
@@ -149,6 +172,7 @@ fn main() {
         let json = serde_json::to_string_pretty(&sidecar).expect("sidecar serialization");
         if let Err(e) = fs::write(path, &json) {
             eprintln!("Failed to write sidecar to '{}': {e}", path.display());
+            daemon_log::log_line("EXIT", "error: sidecar write failed");
             process::exit(1);
         }
         tracing::info!("Sidecar written to {}", path.display());
@@ -158,6 +182,7 @@ fn main() {
     if let Err(e) = server.start() {
         eprintln!("Failed to start server: {e}");
         remove_sidecar(&sidecar_path);
+        daemon_log::log_line("EXIT", "error: server start failed");
         process::exit(1);
     }
 
@@ -172,6 +197,9 @@ fn main() {
     if args.idle > 0 {
         println!("Idle timeout: {}s", args.idle);
     }
+    if args.skip_wal {
+        println!("WAL recovery: salvage mode (unplayable records skipped)");
+    }
 
     // Wait for shutdown signal (Ctrl+C).
     wait_for_signal();
@@ -180,6 +208,7 @@ fn main() {
     server.shutdown();
     remove_sidecar(&sidecar_path);
     println!("Server stopped.");
+    daemon_log::log_line("EXIT", "graceful shutdown");
 }
 
 /// Block until Ctrl+C (SIGINT) is received.
