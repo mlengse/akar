@@ -16,6 +16,50 @@ authority multiplier, P122 `akar-markdown`) — semuanya sudah ditutup dan dipin
 
 ---
 
+## F14 — 2026-09-20: penulisan tepi tidak bisa di-batch dari parameter `UNWIND` (`Variable 'r' not found`) — TERBUKA
+
+**Ranah:** akar (binder/planner — resolusi variabel `UNWIND` dari dalam pola `MATCH`).
+**Status:** TERBUKA — terungkap saat P123.2; dihindari (bukan diperbaiki) dengan jatuh ke satu pernyataan per tepi.
+**Konteks:** `akar-main/src/bulk.rs` ingin menulis batch tepi lewat satu
+`UNWIND $rows AS r MATCH … CREATE/MERGE …` seperti jalur node.
+
+### Gejala
+
+Setiap bentuk yang seharusnya bisa, gagal atau diam-diam tidak match:
+
+```
+UNWIND $rows AS r MATCH (a:M {id: r.source}), (b:M {id: r.target}) MERGE …
+  -> Execute error: Variable 'r' not found in chunk field_names ["weight", "type"]
+UNWIND $rows AS r MATCH (a:M) WHERE a.id = r.source
+                  MATCH (b:M) WHERE b.id = r.target CREATE …
+  -> Execute error: Variable 'r' not found in chunk field_names ["weight", "type", "b.id", …]
+MATCH (a:M), (b:M) UNWIND $rows AS r WITH a, b, r WHERE a.id = r.source …
+  -> jalan, 0 baris (filter tidak pernah mengikat)
+```
+
+Yang **jalan**: `UNWIND` untuk node (`CREATE (n:T {col: r.col})`) dan untuk rel pola read
+(`UNWIND $ids AS iid MATCH (a:T {key: iid})-[e:R]->(b:T) RETURN …`). Jadi masalahnya spesifik:
+variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada jalur tulis.
+
+### Dampak & mitigasi
+
+- `insert_edges` (P123.2) menulis satu pernyataan per tepi. Biaya: plan+execute per tepi, bukan
+  per batch; *parse* tetap sekali karena teks pernyataannya konstan. Untuk formasi agen yang
+  menulis ratusan tepi per giliran, ini jalur panas yang seharusnya bisa di-batch.
+- Jalan pintas "resolve endpoint di Rust lalu tulis per tepi" tetap melewati transaksi/WAL —
+  tidak ditempuh, lihat catatan P60.7.
+
+### Langkah lanjut (usul, belum dikerjakan)
+
+- Reproduce minimal di `akar-main` (2 node, 1 batch 2 tepi) dan telusuri `akar-binder` pada
+  resolusi variabel `UNWIND` di dalam `MatchClause` → kemungkinan besar di jalur join/extend.
+- Setelah jalan, `insert_edges` kembali ke bentuk batch dan `tests/test_embedding_api.rs`
+  mengukurnya (jumlah pernyataan per batch).
+- Catatan terkait: `ORDER BY` di path ini me-resolve ke **alias proyeksi**, bukan ke ekspresi
+  (`ORDER BY a.id` gagal `Variable 'a' not found in chunk field_names`); `neighbors` memakai alias.
+
+---
+
 ## F11 — 2026-09-19: Evolusi Arsitektur Sulur ke Rust & Pensiun Bertahap akar-server — RENCANA
 
 **Ranah:** akar (arsitektur akar-main, akar-server, batas domain §13).
