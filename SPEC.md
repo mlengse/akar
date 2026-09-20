@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **35** |
 | Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,129** total, 0 ignored, 2,129 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P110.1: +13 tes — `QueryMemoryPool` & grant per-query). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,158** total, 0 ignored, 2,158 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P111: +13 tes — external spill hash join). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -720,29 +720,29 @@ Triggered by pushing a version tag (`v*`):
 
 | Crate | Tests | Coverage Focus |
 |-------|------:|----------------|
-| `akar-common` | 36 | Types (37 LogicalTypes, Value), Vectors, Memory |
-| `akar-parser` | 94 | PEG grammar, 33 Statement variants, operator precedence, AST-based DETACH/ORDER BY/star (P51.45), CREATE [NODE\|REL] TABLE IF NOT EXISTS (P72), aggregate `DISTINCT` parse (P88) |
-| `akar-binder` | 101 | Semantic analysis, type inference, symbol resolution |
+| `akar-common` | 68 | Types (37 LogicalTypes, Value), Vectors, Memory |
+| `akar-parser` | 97 | PEG grammar, 33 Statement variants, operator precedence, AST-based DETACH/ORDER BY/star (P51.45), CREATE [NODE\|REL] TABLE IF NOT EXISTS (P72), aggregate `DISTINCT` parse (P88) |
+| `akar-binder` | 102 | Semantic analysis, type inference, symbol resolution |
 | `akar-planner` | 22 | Logical plan construction |
-| `akar-optimizer` | 80 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
-| `akar-processor` | 157 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
+| `akar-optimizer` | 93 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
+| `akar-processor` | 178 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
 | `akar-function` | 184 | 259 registered functions |
-| `akar-storage` | 346 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
-| `akar-main` (unit) | 81 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 418 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3) |
+| `akar-storage` | 364 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
+| `akar-main` (unit) | 83 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
+| `akar-main` (integration) | 470 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
-| `akar-vector` | 27 | Vector similarity search (cosine scale-invariance, P51.46) |
+| `akar-vector` | 37 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
-| `akar-fts` | 38 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) + commit-time propagation `apply_doc_writes` (P107.1) + reader handle `FtsIndexHandle` reload-at-commit (P107.2) + crash recovery: last committed survives (P107.3) |
+| `akar-fts` | 53 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) + commit-time propagation `apply_doc_writes` (P107.1) + reader handle `FtsIndexHandle` reload-at-commit (P107.2) + crash recovery: last committed survives (P107.3) |
 | `akar-algo` | 81 | Graph algorithm extensions |
-| `akar-search` | 23 | Search utilities |
+| `akar-search` | 40 | Search utilities |
 | `akar-dream` | 5 | Dream engine |
-| `akar-ml` | 5 | ML functions (node2vec walk/SGD invariants) |
+| `akar-ml` | 28 | ML functions (node2vec walk/SGD invariants) |
 | `akar-extension` | 15 | Extension framework registry |
 | `akar-c` (FFI) | 18 | `extern "C"` binding tests |
-| `akar-server` | 49 | TCP framing, session, concurrency, auth/idle/stats (P62), parameter binding (P64), dream_control lifecycle `status`/`pause`/`resume`/`run` + `GraceBackend` (P77) + real `GraphBackend`/`DreamControl::with_db` (P77b) |
+| `akar-server` | 50 | TCP framing, session, concurrency, auth/idle/stats (P62), parameter binding (P64), dream_control lifecycle `status`/`pause`/`resume`/`run` + `GraceBackend` (P77) + real `GraphBackend`/`DreamControl::with_db` (P77b) |
 | `akar-postgres` | 7 | PostgreSQL integration |
 | `akar-duckdb` | 9 | DuckDB integration |
 | `akar-httpfs` | 10 | HTTP/S3 file reads |
@@ -750,9 +750,9 @@ Triggered by pushing a version tag (`v*`):
 | `akar-llm` | 9 | LLM functions |
 | `akar-sqlite` / `akar-azure` / `akar-delta` / `akar-iceberg` / `akar-unity-catalog` | 5 | Integration extensions (1 each) |
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
-| `akar-migrate` | 1 | Migration tool (idempotent, fixed P48.5) |
+| `akar-migrate` | 0* | Migration tool (idempotent, fixed P48.5; *not exercised by the default gate) |
 | Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **1,991** | **2,002 total, 0 ignored, 2,002 passed, 0 failed** (gate `test [akar-core]` 2026-09-13, s.d. P108.4: P108.4 FTS pada destination Extend - filter dst via doc-id set +2 tes; sebelumnya: 2,000 s.d. P108.3: P108.3 FTS executes before the join — EXPLAIN pin `test_fts_predicate_runs_before_join_via_explain` +1 tes; sebelumnya: 1,999 s.d. P108.2: P108.2 FTS-aware cardinality estimation +3 tes; sebelumnya: 1,996 s.d. P108.1: P108.1 FTS predicate pushdown — `FtsPredicatePushdown` optimizer pass + planner table-match routing +3 tes; sebelumnya: 1,993 s.d. P107.4: P107.4 same-transaction insert+search — FTS visibility commit-gated: committed writes searchable, aborted never leak +1 tes; sebelumnya: 1,992 s.d. P107.3: P107.3 crash recovery — Tantivy segment-commit ACID: last committed state survives crash +2 tes; sebelumnya: 1,990 s.d. P107.2: P107.2 `IndexReader::reload()` hanya di akar commit — shared cached reader via `FtsIndexHandle` + registry `TableCatalog` +3 tes; sebelumnya: 1,987 s.d. P107.1: P107.1 FTS commit-hook sync dari DML INSERT/UPDATE/DELETE +2 tes; sebelumnya: 1,985 s.d. P106.2/P106.3: P106.2 FTS advanced query types end-to-end +1 tes; P106.3 phrase query BM25 parity +1 tes; sebelumnya: 1,983 s.d. P106.1: P106.1 BM25 scoring parity +2 tes; sebelumnya: 1,981 s.d. P104.1: P104.1 operator `PhysicalCreateFtsIndex` via Tantivy +3 tes; sebelumnya: 1,978 s.d. P103: P103 Tantivy `en_stem` Porter2 tokenizer +4 tes; sebelumnya: 1,974 s.d. P102: P102 TantivyIndex wrapper +3 tes; sebelum: 1,971 s.d. P101: P101 schema mapping +7 tes; sebelum: 1,964 s.d. P88: P88 aggregate `DISTINCT` +2 tes; sebelum P88: P83 gate runtime ~7m57s → ~5m via workload cuts; sebelumnya: P82 `commit_history` MVCC `Vec`/slice → `HashMap<u64,u64>` O(1); P79 batch 8: string-dictionary `Rc<str>` single-copy + TopK/OrderBy materialisasi sort-key saja; P79 batch 7: `spill_and_clear`/`clear`/`restore_spilled` reset `version_info`; P71 vector tests are feature-gated) |
+| **Total** | **2,158** | **2,158 total, 0 ignored, 2,158 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, P111: +13 tes — external spill hash join). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
 
 ### 11.2 Test Datasets
 
