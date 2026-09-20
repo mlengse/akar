@@ -1,25 +1,72 @@
-# Deep Exploration — akar-ml
+# ML (akar-ml)
 
-`akar-ml` provides the local model layer: embedding creation (dense/sparse/ColBERT reranking via fastembed/ort ONNX), embedding caching, and local LSTM training/inference for temporal pattern learning. This is what lets consolidation and reranking run without a cloud dependency.
+**Module path:** `akar-core/akar-ml/`
+**Role:** Core domain — local LSTM training and ONNX embeddings.
 
-## Key Components
+---
 
-| Component | Responsibility | Located at |
-|-----------|----------------|-----------|
-| embedding pipeline | Dense (cl-tohoku, BERT, NER, ColBERT reranker), sparse, image, audio embeddings | `akar-core/akar-ml/src/lib.rs` |
-| embedding cache | Cache embeddings by text to avoid recomputation | `akar-core/akar-ml/src/` |
-| LSTM trainer | `LstmModel<F: Float>` (default f64; `LstmModelF32` for f32), multi-layer via `num_layers`, batch `train` BPTT + online `train_pair` single-pair BPTT, `forward_sequence_hidden` for raw hidden-state output (P118.1), JSON `save`/`load` + binary `save_bin`/`load_bin` persistence (P117.1) | `akar-core/akar-ml/src/lstm.rs` |
-| feature generation | Temporal/interaction features for LSTM | `akar-core/akar-ml/src/` |
-| Python API | `akar.lstm.LstmModel` (forward_cell/forward_sequence/forward_sequence_hidden, static `train`, online `train_pair`, JSON `save`/`load` + binary `save_bin`/`load_bin`) | `akar-core/akar-python/src/lstm.rs` |
+## Overview
 
-## Design Decisions
+`akar-ml` brings machine learning inside the process: a pure-Rust LSTM training/inference stack (backprop through time) and an optional ONNX-Runtime embedding layer (fastembed/bge/rerank models) surfaced through an `MlExtension`. Its raison d'être is the "memory-grade AI" ambition of the project: embeddings and simple sequence learning must be *local* so the dream engine and retrieval can run without any external API. Nothing leaves the process except an optional one-time model download.
 
-- **Local-first execution.** All model inference/training uses local ONNX/fastembed artifacts — no network round-trip for embeddings or reranking. The alternative (cloud-only) was rejected because akar's memory agent must work offline and with privacy guarantees.
-- **ColBERT-style reranking.** The embedding family includes a ColBERT reranker — retrieve-wide (hybrid recall in `akar-search`) then refine with a cross-encoder-style model locally.
-- **Model serialization to a directory (JSON + binary).** LSTM checkpoints write to `output_dir` in two formats: JSON `save`/`load` and, since P117.1, a compact binary `save_bin`/`load_bin` (magic header `"LSTM"` + version + dimensions, weights in native f32/f64 precision). Binary is bit-exact and more compact than JSON for large models, so trained temporal models survive restarts and can be versioned either way.
-- **Depth and precision are configurable.** Since P114/P115, `LstmModel` is generic over the float type (`LstmModelF64` default, `LstmModelF32` for C++-LSTM parity) and stacks `num_layers` hidden layers (layer N's hidden state feeds layer N+1). `train_pair` adds online single-pair BPTT that updates all layers in place, so temporal models can be trained incrementally as new memories arrive instead of only in offline epochs.
-- **Hidden-state output mode (P118.1).** `forward_sequence_hidden` returns the final projected output **and** the last layer's raw hidden state at every timestep. This mirrors the sulur C++ LSTM's hidden-state output (Finding #34-LSTM) — consumers that need the hidden state itself (e.g. feature extraction for downstream ML) no longer have to extract it from `LstmCell` objects manually.
+This is the crate behind two Sprint-19 pillars: P120 (Candle/ONNX local embeddings, superseded by fastembed-backed `FastEmbedProvider` here) and P119 (Ebbinghaus decay memory, adjacent in ai-memory work).
 
-## Why It Matters
+## Core functions
 
-`akar-ml` is what makes consolidation *intelligent*: embeddings for vector recall, LSTM for temporal pattern detection (e.g. "this memory is repeated every day → consolidate"), and reranking for the final ranking stage. Without it, `akar-search` would have no embedding source and `akar-dream` no temporal prior — it closes the loop on the AI-memory story.
+1. **LSTM training** — `train` (`lstm.rs:661`, BPTT over `LstmConfig` × data); `train_pair` (`lstm.rs:455`) single-pair BPTT with metrics.
+2. **LSTM persistence** — `save_model`/`load_model` (`lstm.rs:848/859`, serde JSON); `save_bin`/`load_bin` (`lstm.rs:928/964`, compact binary).
+3. **LSTM forward** — `forward_cell` (`lstm.rs:274`) single-step cell; `forward_sequence` (`lstm.rs:356`) full sequence.
+4. **Embeddings** — `FastEmbedProvider::embed_texts` (`embed.rs:710`); `embed_text` (`embed.rs:820`); `par_embed_texts` (`embed.rs:778`) parallel batch; `dimensions` (`embed.rs:825`).
+5. **Process-wide provider** — `shared_embedding_provider` (`extension.rs:75`) OnceLock singleton; `embed_text` scalar UDF (`extension.rs:3-10`).
+
+## Key components
+
+| Component/type | File path | One-line responsibility |
+|---|---|---|
+| `MlExtension` | `akar-ml/src/extension.rs:23` | ALGO-like extension exposing `embed_text` as SQL |
+| `LstmModel` / `LstmCell` | `akar-ml/src/lstm.rs:85,/111` | Parameterized recurrent model |
+| `LstmConfig` | `akar-ml/src/lstm.rs:42` | dims/layers/learning settings |
+| `TrainingResult` | `akar-ml/src/lstm.rs:128` | Per-epoch loss output |
+| `EmbeddingProvider` trait | `akar-ml/src/embed.rs:92` | Model-agnostic interface: `embed_text(s)` |
+| `FastEmbedProvider` | `akar-ml/src/embed.rs:324` | fastembed dense (ONNX) |
+| `RerankProvider` | `akar-ml/src/embed.rs:1502` | Cross-encoder rerank |
+| `embedding_provider` | `akar-ml/src/extension.rs:38` | Module-level `OnceLock` |
+
+## Internal data flow
+
+```mermaid
+flowchart LR
+    A["CALL embed_text('...')<br/>SQL scalar"] --> B["MlExtension::load<br/>registered UDF"]
+    B --> C["FastEmbedProvider::try_new<br/>first call"]
+    C --> D["download model<br/>BGE-small-en-v1.5 (384d)"]
+    D --> E["OnceLock cached provider"]
+    E --> F["embed_text -> Vec<Vec<f32>>"]
+    G["train()<br/>BPTT"] --> H["weights<br/>JSON / binary serde"]
+```
+
+The first SQL call triggers `FastEmbedProvider::try_new` (default model `BGE-small-en-v1.5`, 384 dims) via fastembed, cached in a `OnceLock`; subsequent calls reuse it. The LSTM path trains via BPTT and serializes weights to JSON or compact binary.
+
+## Key interfaces & extension points
+
+- **`EmbeddingProvider` trait** (`embed.rs:92`) — swap the model without touching SQL.
+- **`MlExtension::shared_embedding_provider`** (`extension.rs:75`) — reused by dream and other consumers.
+- Language-independent: ONNX local inference, no network except the one-time model download.
+
+## Interactions with other modules
+
+| Module | Direction | Interface used |
+|---|---|---|
+| akar-extension | → | `MlExtension` implements `Extension` |
+| akar-function | → | Registers the `embed_text` scalar |
+| akar-dream | ← (reused) | Dreams reuse the shared embedding provider (P119/P120) |
+| cache/store | local | Model artifacts cached for reuse |
+
+## Performance & concurrency notes
+
+`par_embed_texts` parallelizes across texts (onnxruntime is thread-pool aware). The provider is a process-wide `OnceLock`, so one model load is shared by all callers. The LSTM is pure Rust and deterministic — suitable for embedded offline training. A DirectML execution provider is available (`embed.rs:66`) for GPU acceleration on Windows.
+
+## Implementation highlights
+
+- **Model-agnostic embedding trait**: fastembed + bge + sparse + rerank all behind one surface.
+- **Embedded-by-default**: local embeddings with zero external API.
+- **Binary serialization** supports compact persistence (`save_bin`/`load_bin`).

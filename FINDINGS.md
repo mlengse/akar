@@ -16,6 +16,60 @@ authority multiplier, P122 `akar-markdown`) — semuanya sudah ditutup dan dipin
 
 ---
 
+## F15 — 2026-09-21: `SystemConfig::default()` memakai `checkpoint_threshold = -1` (checkpoint tiap tulisan) — TERBUKA
+
+**Ranah:** akar (`SystemConfig` default) ↔ sulur (jalur embedded Python + `sulur-server`).
+**Status:** TERBUKA — terungkap saat Iterasi 4 (P4-RETIRE-1); dihindari (bukan diperbaiki) dengan mengirim threshold eksplisit.
+
+### Gejala
+
+`SystemConfig::default().checkpoint_threshold == -1`, artinya **setiap penulisan langsung memicu
+checkpoint**. Bentuk pembukaan database yang paling natural bagi pemakai baru —
+`Database::new(path, SystemConfig::default())` — karena itu menghasilkan perilaku tulis kelas
+"satu checkpoint per tulis" tanpa satu pun error atau peringatan.
+
+### Bukti
+
+1. **Sulur Rust (ditemukan di Iterasi 4).** `sulur/crates/sulur-server` awalnya membuka database dengan
+   `SystemConfig::default()`. `Server::bind` kini mengirim `ServerConfig::checkpoint_threshold`
+   (default 16 MiB, override `SULUR_CHECKPOINT_THRESHOLD`, forward dari `sulur_daemon_ctl`) secara
+   eksplisit — tanpa itu daemon Rust **benar tetapi jauh lebih lambat** daripada binary yang
+   digantikannya. Ini perbedaan performa terbesar yang ditemukan di iterasi tersebut, dan sebabnya
+   satu baris default, bukan algoritma.
+2. **Sulur Python (jalur embedded).** Gate `perf: store 100 memories < 2s`
+   (`sulur/tests/test_suite.py:513`) mendarat **~20–25 s** untuk 100 store; komentar tesnya sendiri
+   (baris 524–528) menyebut sebabnya: *"embedded default checkpoint_threshold=-1"*, dan mencatat bahwa
+   jalur produksi (daemon, threshold 16 MiB) tidak terdampak. Ambang tes dinaikkan 2 s → 30 s karena itu.
+   Gate yang sama sudah dua kali jatuh: **42,71 s** (2026-09-17) dan **39,15 s** (2026-09-21) —
+   `sulur/docs/FINDINGS.md` #37 dan #44.
+3. **Nilai threshold-nya sendiri sudah diputuskan sebelumnya.** P68 memisahkan checkpoint dari jalur
+   tulis dan menetapkan 16 MiB di jalur daemon, jadi angka yang benar sudah diketahui di repo ini.
+   Yang belum selesai adalah **default** di `SystemConfig`.
+
+### Dampak
+
+Trap senyap. Sebuah API default seharusnya menjadi pilihan yang wajar; di sini ia menghasilkan
+performa yang jauh lebih buruk tanpa sinyal apa pun kepada pemanggil. Semua konsumen embedded
+(Sulur Python, tooling, tes, dan siapa pun yang menulis `SystemConfig::default()` di masa depan)
+mewarisi biaya itu, dan biayanya terlihat seperti "Sulur/Akar lambat", bukan seperti "default-nya salah".
+
+### Langkah lanjut (usul, belum dikerjakan)
+
+- **Putuskan salah satu:** ubah default `SystemConfig` menjadi threshold nyata (mis. 16 MiB, selaras
+  jalur daemon P68), **atau** pertahankan `-1` sebagai pilihan sadar dan dokumentasikan terang-terangan
+  di doc-comment `SystemConfig` beserta alasan durabilitasnya.
+- **Sebelum mengubah default, periksa kontrak durabilitasnya.** Checkpoint-per-tulis berhubungan
+  langsung dengan jaminan WAL (P61.3, P114.1–P114.2) dan P68; `-1` mungkin disengaja sebagai
+  "flush setiap commit". Jangan mengubah default sebelum itu dipastikan — ia menyentuh jaminan data,
+  bukan hanya angka performa. Bila memang disengaja, jalur yang benar adalah dokumentasi, bukan perubahan default.
+- Setelah arahnya jelas, pertimbangkan `checkpoint_threshold` eksplisit di jalur **embedded Python**
+  Sulur juga (saat ini hanya jalur daemon yang mengirimnya), sehingga flake #37/#44 dihapus pada sebabnya
+  alih-alih dengan menaikkan ambang tes.
+- Verifikasi harus memakai pengukuran yang sadar beban: satu run terisolasi per hipotesis, bukan suite
+  berulang di bawah beban paralel (lihat catatan prosedur di `sulur/docs/FINDINGS.md` #44).
+
+---
+
 ## F14 — 2026-09-20: penulisan tepi tidak bisa di-batch dari parameter `UNWIND` (`Variable 'r' not found`) — TERBUKA
 
 **Ranah:** akar (binder/planner — resolusi variabel `UNWIND` dari dalam pola `MATCH`).

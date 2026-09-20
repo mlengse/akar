@@ -1,111 +1,77 @@
-# Query Pipeline Domain
+# Query Pipeline: Parser → Binder → Planner
 
-**Module Path:** `akar-parser/`, `akar-binder/`, `akar-planner/`, `akar-optimizer/`, `akar-processor/`
-**Generated:** 2026-09-15
-
----
-
-## What This Module Does
-
-The query pipeline is the central nervous system of Akar. It takes a raw Cypher query string and transforms it, step by step, into executable physical operations that produce Arrow-native result chunks. Think of it as a translation chain: first you translate from human-readable Cypher into a structured AST, then you resolve names and types against the catalog, then you build a logical execution plan, then you optimize that plan through 25 rewrite passes, and finally you execute it with 50+ physical operators.
-
-Each stage has a clean interface to the next — the Parser does not know about the Catalog, the Optimizer does not know about the physical operators. This separability is what makes the system testable: you can verify that the parser produces the right AST without needing a storage engine, or that the optimizer produces the right plan without needing to execute it.
+**Module path:** `akar-core/akar-parser/`, `akar-core/akar-binder/`, `akar-core/akar-planner/`
+**Role:** Core domain — turning Cypher text into a logical plan.
 
 ---
 
-## Core Capabilities
+## Overview
 
-1. **Cypher Parsing (pest PEG grammar)** — The parser converts Cypher text into an AST using a pest PEG grammar (`cypher.pest`). It produces 33 Statement variants, which is a superset of Kuzu's 22 C++ grammar rules. The grammar is composable and maintainable — adding a new clause is a matter of adding a pest rule, not rewriting a hand-coded recursive descent parser. Key file: `akar-parser/src/lib.rs`, grammar: `akar-parser/src/cypher.pest`.
+The query pipeline is the front door of the database: it takes a Cypher string and produces the plan that the optimizer will reshape and the processor will execute. It works like a translation agency with three desks. The **parser** (`akar-parser`) reads the raw text and produces a syntax tree — the *what was said*. The **binder** (`akar-binder`) then reads that tree with the catalog open beside it, resolving every symbol — table names, column types, index references — and type-checking the result, producing a bound statement: the *what was meant*. Finally the **planner** (`akar-planner`) arranges that bound statement into an ordered list of logical operators — the *how it could be done* — including choosing a join order.
 
-2. **Semantic Analysis (Binder)** — The binder resolves symbols against the system catalog, checks types, and produces BoundStatement variants (33 types, 1:1 with parser). Property resolution goes through the catalog (not hardcoded types), which means the binder works correctly even when users add custom columns via ALTER TABLE. A `ConfidentialStatementAnalyzer` detects sensitive CALL statements (S3/Azure secrets) to exclude them from CLI history. Key file: `akar-binder/src/lib.rs`.
+These three crates are strictly layered: output of one is input to the next, and each keeps a near-1:1 mapping to the official C++ Kuzu statement types (33 parser `Statement` variants, 33 `BoundStatement` variants) plus Akar-specific additions (vector/FTS/graph/index statements) that the C++ grammar lacked.
 
-3. **Logical Planning (Planner)** — The planner converts bound statements into a logical plan tree with 59 LogicalOperator variants. It handles join ordering, optional match expansion, recursive extend planning, and DDL operator generation. The planner is where the "what to do" is decided — the optimizer later decides "how to do it efficiently." Key file: `akar-planner/src/lib.rs`.
+## Core functions
 
-4. **Optimization (26 Passes)** — The optimizer applies 19 flat passes (applied in sequence to the plan tree) and 7 tree passes (applied to the tree structure). Key passes include FilterPushDown (push filters closer to scans), ExtendFilterPushDown (hoist source-only predicates above an `Extend` so anchored hops filter before traversal), JoinOptimization (cardinality-aware reordering), TopKOptimization (convert ORDER BY + LIMIT to TopK), VectorSimilarityDetection (rewrite cosine_similarity to HNSW scan), and ArtRangeScanDetection (rewrite range filters to ART index scans). Three passes (CSE, OrderByPushDown, AggregateFusion) are deliberately NO-OP until a proven cost model exists — shipping a wrong optimization is worse than shipping no optimization. Key file: `akar-optimizer/src/lib.rs`.
+1. **Parse** — `parse(input)` (`akar-parser/src/parser/mod.rs:15`) handles an optional `EXPLAIN` prefix (PhysicalPlan/LogicalPlan/Profile) at `:19-29` then delegates to statement parsing; expressions are parsed by `parse_expression` (`akar-parser/src/parser/expression.rs:8`), query clauses by helpers in `dml.rs` (e.g. `parse_call`, `parse_merge_clause` at `:452/:490`).
+2. **Bind** — the `Binder` (`pub use binder::Binder`, `akar-binder/src/lib.rs:10`) resolves symbols against `Arc<Mutex<TableCatalog>>` (locked at `binder/mod.rs:170`), with key methods `bind_query` (`:198`), `bind_return` (`:537`), `resolve_expression` (`:652`), `bind_create_vector_index` (`:1005`), `bind_standalone_call` (`:1592`), and user-type resolution `parse_type_resolved` (`:166`).
+3. **Confidential-call detection** — `is_confidential_call(query)` (`akar-binder/src/confidential_statement_analyzer.rs:29`) flags `CALL`s that reference S3/GCS/Azure secrets so the engine can route them to the credential-aware path.
+4. **Plan** — `QueryPlanner::plan(statement)` (`akar-planner/src/planner.rs:139`) dispatches on the `BoundStatement` (e.g. `plan_query` at `:491`, `plan_union`, `plan_merge`) and emits `Vec<LogicalOperator>`.
+5. **Join ordering** — `build_join_tree(scans, filter_expr)` (greedy, smallest-first) and `build_wcoj_intersect(patterns)` (worst-case-optimal `Intersect`) at `akar-planner/src/join_order.rs:36` and `:216`, flattened back to a list by `flatten_join_plan` (`join_order.rs:492`).
 
-5. **Physical Execution (Processor)** — The processor executes the optimized plan using 50+ physical operator executors. Arrow-native expression evaluation (`evaluate_to_arrow` + `boolean_array_to_selection`), parallel aggregation via `AggregateHashTable`, parallel hash join via `JoinHashTable`, `BlockMergeSort` + `RadixSort` for ORDER BY, and `BinaryHeap` O(n log k) TopK. The processor is where the "how to do it" is decided — it picks the right algorithm for each operator based on data characteristics. Key file: `akar-processor/src/lib.rs`.
+## Key components
 
----
+| Component/type | File path | One-line responsibility |
+|---|---|---|
+| `Statement` (33 variants) | `akar-parser/src/ast.rs:107-141` | Root AST for all statements (Query, DDL, DML, Transaction) |
+| `Clause` (11 variants) | `akar-parser/src/ast.rs:151-163` | Query sub-clauses (Match, Return, Where, Create, Delete, Set, OptionalMatch, With, Unwind, Foreach, Merge) |
+| `Expression` | `akar-parser/src/ast.rs:313` | Expression AST incl. `Parameter($x)`, `ExistsSubquery`, `Case`, `ListPredicate`, `Star` |
+| `MatchClause` (+ `FtsQuery`) | `akar-parser/src/ast.rs:197-208` | MATCH with optional `USING FTS INDEX ...` |
+| `CypherParser` (pest) | `akar-parser/src/parser/mod.rs:13` | The pest `#[grammar = "cypher.pest"]` struct |
+| `BoundStatement` (33 variants) | `akar-binder/src/bound_statement.rs:10-44` | Type-resolved output of the binder |
+| `BoundExpression` | `akar-binder/src/bound_statement.rs:244-251` | Typed expression carrying `resolved_type`, `alias`, `is_constant` |
+| `ConfidentialStatementAnalyzer` | `akar-binder/src/confidential_statement_analyzer.rs` | Flags confidential S3/GCS/Azure `CALL`s |
+| `LogicalOperator` (59 variants) | `akar-planner/src/logical_operator.rs:66-126` | Operator AST (`ScanNode`, `Filter`, `HashJoin`, `TopK`, `FtsScan`, `CountRelTable`, …) |
+| `JoinPlan` | `akar-planner/src/join_order.rs:13-24` | Join tree shape: Leaf / HashJoin / CrossProduct |
+| `QueryPlanner` | `akar-planner/src/lib.rs:7` | Public planner API |
 
-## Key Components
-
-The pipeline is a chain of five specialized processors, each with a well-defined input/output contract.
-
-| Component | File | One-Line Role |
-|-----------|------|---------------|
-| `parse()` | `akar-parser/src/lib.rs` | Converts Cypher text to 33-variant Statement AST via pest PEG grammar |
-| `Binder` | `akar-binder/src/lib.rs` | Resolves symbols against Catalog, checks types, produces BoundStatement |
-| `QueryPlanner` | `akar-planner/src/lib.rs` | Builds logical plan tree with 59 LogicalOperator variants |
-| `Optimizer` | `akar-optimizer/src/lib.rs` | Applies 26 optimization passes (19 flat + 7 tree) |
-| `QueryProcessor` | `akar-processor/src/lib.rs` | Executes physical plan with 50+ operators, returns DataChunks |
-
----
-
-## Internal Data Flow
+## Internal data flow
 
 ```mermaid
-flowchart TD
-    A["Cypher Text<br/>(user input)"] --> B["Parser<br/>(pest PEG)"]
-    B --> C["Statement AST<br/>(33 variants)"]
-    C --> D["Binder<br/>(catalog lookup)"]
-    D --> E["BoundStatement<br/>(33 bound variants)"]
-    E --> F["Planner<br/>(logical plan)"]
-    F --> G["LogicalOperator Tree<br/>(59 operator types)"]
-    G --> H["Optimizer<br/>(26 passes)"]
-    H --> I["Optimized Plan<br/>(reordered, pruned)"]
-    I --> J["Physical Plan<br/>(50+ executors)"]
-    J --> K["QueryProcessor<br/>(Arrow evaluation)"]
-    K --> L["DataChunks<br/>(result rows)"]
+flowchart LR
+    A["Cypher text"] --> B["parse()<br/>pest grammar"]
+    B --> C["Statement AST<br/>33 variants"]
+    C --> D["Binder<br/>catalog + type resolution"]
+    D --> E["BoundStatement<br/>33 variants"]
+    E --> F["QueryPlanner::plan<br/>dispatch on BoundStatement"]
+    F --> G["Vec<LogicalOperator><br/>59 variants"]
+    G --> H["build_join_tree /<br/>build_wcoj_intersect"]
+    H --> I["optimizer input"]
 ```
 
-**Key steps:**
-1. **Parse** (`parse()` in `akar-parser/src/lib.rs`): pest PEG grammar parses Cypher text into an AST. The grammar is in `cypher.pest` with composable rules. 33 Statement variants cover DDL, DML, transactions, and extensions.
+MATCH patterns are the heart of the planner: `build_join_tree` uses a greedy smallest-first heuristic, while `build_wcoj_intersect` produces worst-case-optimal `Intersect` shapes for multi-pattern MATCHes with shared variables — an advanced feature inherited from the research-community heritage of Kuzu. FTS queries detected in MATCH (`take_fts_if_table`, `planner.rs:37`) become `FtsScan` operators before join planning.
 
-2. **Bind** (`Binder::bind()` in `akar-binder/src/lib.rs`): Resolves table names, column names, and function names against the Catalog. Type-checks expressions. Produces BoundStatement with fully resolved references.
+## Key interfaces & extension points
 
-3. **Plan** (`QueryPlanner::plan()` in `akar-planner/src/lib.rs`): Converts bound statements into a logical plan tree. Handles join ordering, optional match expansion, recursive extend planning. 59 LogicalOperator types.
+The parser exports `expression::*`, `ddl`, and `dml` production surfaces (`parser/mod.rs:97-99`). The `Binder` is extensible through `bind_*` methods — a new DDL needs a new `BoundStatement` variant plus matching `binder::ddl` code. The planner's dispatch is a big `match` over `BoundStatement` (`planner.rs:139-491`) where new statement types add `plan_*` methods. `CALL vector_similarity_scan(...)` is the flagship *extension seam*: bound via `bind_standalone_call`, planned via `plan_vector_similarity_scan_call` (`planner.rs:225`), reaching the processor as `VectorSimilarityScan` — non-standard scans get into the plan without touching the grammar.
 
-4. **Optimize** (`Optimizer::optimize()` in `akar-optimizer/src/lib.rs`): Applies 26 passes. FilterPushDown pushes WHERE clauses closer to scans. ExtendFilterPushDown hoists source-only predicates above `Extend`. JoinOptimization reorders joins by cardinality. TopKOptimization converts ORDER BY + LIMIT to a single TopK operator. VectorSimilarityDetection rewrites cosine_similarity to HNSW scan.
+## Interactions with other modules
 
-5. **Execute** (`QueryProcessor::execute()` in `akar-processor/src/lib.rs`): Runs the physical plan. Each operator pulls data from its child, processes it, and produces DataChunks. Arrow-native expression evaluation. Parallel aggregation and hash join via rayon.
+| Module | Direction | Interface used | Note |
+|---|---|---|---|
+| akar-common | depends on | `Value`, `DataChunk`, type IDs | Shared vocabulary |
+| akar-storage | depends on (binder) | `TableCatalog` | Schema lookup at bind time |
+| akar-optimizer | feeds | `Vec<LogicalOperator>` | Planner output is the optimizer's input |
+| akar-processor | feeds | Bound + planned shape | Downstream consumption |
+| akar-function | cross | `evaluate_scalar` | Type-check support |
 
----
+## Performance & concurrency notes
 
-## Key Interfaces and Extension Points
+The binder holds `Arc<Mutex<Catalog>>`, so binding is serialized per statement — a deliberate trade for schema-snapshot correctness over parallel binding. Join ordering is a greedy heuristic (not exhaustive DP) to keep planning cheap; WCOJ `Intersect` shapes try to keep intermediate sizes low (`join_order.rs:216-430`). Prepared-statement support (`Parameter($x)`, `limit_param`/`skip_param`, `ast.rs:236-242`) means the pipeline is fully reusable across executions. `visit_bottom_up` (`logical_operator.rs:263`) is the tree traversal the optimizer's tree passes use to walk the plan in place.
 
-- **`TableFunction`** trait (`akar-function`): Custom table-valued functions (e.g., `JSON_SCAN`, `QUERY_FTS_INDEX`). Two variants: `CustomTable` and `CustomTableWithGraph` (P52.46 — receives `Option<&dyn GraphDataSource>` for GDS algorithms).
-- **`ExpressionEvaluator`** (`akar-processor`): Arrow-native expression evaluation; `evaluate_to_arrow` -> `boolean_array_to_selection`. Can be extended with new scalar functions via the `FunctionRegistry`.
-- **Plan cache**: LRU(100) at connection level; keyed by normalized query string, validated against catalog version. New plan types automatically benefit from caching.
+## Implementation highlights
 
----
-
-## Interactions with Other Modules
-
-| Module | Direction | Interface | Description |
-|--------|-----------|-----------|-------------|
-| akar-storage | Depends | `StorageManager` | Physical operators read/write columnar data |
-| akar-catalog | Depends | `Catalog` | Binder resolves symbols; planner checks table schemas |
-| akar-function | Depends | `FunctionRegistry` | Processor dispatches to registered functions |
-| akar-fts | Depends | `FtsExtension` | FTS scan bypasses extension registry; physical operators call FTS directly |
-| akar-transaction | Depends | `TransactionManager` | Write statements wrapped in OCC transactions |
-
----
-
-## Cross-Module Collaboration
-
-**In the Query Execution Pipeline:** The parser produces an AST, the binder resolves it against the catalog, the planner builds a logical plan, the optimizer rewrites it for efficiency, and the processor executes it. Each stage is independently testable.
-
-**In the Write Path:** The processor's PhysicalInsert/PhysicalDelete/PhysicalSet operators write to LocalStorage, emit WAL records, and register writes for OCC tracking. The TransactionManager validates conflicts at commit time.
-
-**In the FTS Lifecycle:** The PhysicalCreateFtsIndex operator builds a Tantivy index. The PhysicalFtsScan operator reads from it. The FTS commit-hook sync propagates DML changes to the index at commit time.
-
----
-
-## Performance Characteristics
-
-- Parse: ~10 microseconds for typical queries (PEG grammar is fast)
-- Bind: ~50 microseconds (catalog lookup is the bottleneck)
-- Plan: ~100 microseconds (59 operators is manageable)
-- Optimize: ~200 microseconds (26 passes, each O(n) in plan size)
-- Execute: varies by query; hot path 397 microseconds on 10K rows
-- Plan cache hit: ~5 microseconds (skip parse/bind/plan/optimize entirely)
+- The pest PEG grammar is modular (`dml.rs`, `ddl.rs`, `expression.rs`) with `parse()` as a thin dispatcher (`parser/mod.rs:3`) — easier to extend than one monolithic grammar file.
+- `RETURN` is sugar for a `ReturnClause`, and `WITH` is reused as `Clause::With(ReturnClause)` (`ast.rs:159`), unifying two clause kinds under one structure.
+- The binder supports late-bound parameters, so identical `MATCH` shapes are planned once and cached.
+- The pipeline is a **superset** of the C++ Kuzu grammar: it keeps 1:1 counterparts for every C++ statement/operator while adding 13 statements C++ lacks (vector index, FTS index, graph DDL, index drop, sequences, etc.).

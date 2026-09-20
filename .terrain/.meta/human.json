@@ -1,9 +1,9 @@
 {
   "project": "akar",
   "repo_path": ".",
-  "generated_at": "2026-09-19T14:32:59.216709300+00:00",
-  "doc_count": 48,
-  "baseline_git_head": "3ba32c3a97ba18b2fa918e3ee27f5b1c4e2d98cc",
-  "last_run_mode": "incremental",
+  "generated_at": "2026-09-20T14:18:54.096611600+00:00",
+  "doc_count": 27,
+  "baseline_git_head": "fe9c4f8ec104615f207d70ab1f3d4fe2038d72b1",
+  "last_run_mode": "full",
   "language": "en"
 }
