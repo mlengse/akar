@@ -9,6 +9,11 @@
 
 ### Added
 
+- **P110.1 — `QueryMemoryPool` & grant per-query (fondasi Memory Governor)** · `c66825f` · gate **2,129** (+13: 2,116 → 2,129)
+  - Modul baru `akar-common/src/query_pool.rs`: `QueryMemoryPool` (pool memori per-kueri, atomik thread-safe) — `try_reserve`/`release`/`remaining`/`peak`/`pressure`/`is_under_pressure`, `note_spill` (EXPLAIN `Spill=N`), `query_id` (penamaan spill file `join_<qid>_*.bin`, P111). `Grant::Exhausted` menandai "operator harus spill" alih-alih tumbuh tanpa batas (OOM); release/peak saturasi menjamin tidak pernah negatif dan `try_reserve` tidak pernah commit parsial.
+  - `MemoryGovernor`: grant per-kueri = fair share dari `effective_spill_threshold` dibagi jumlah query aktif (termasuk kueri baru) — query pertama boleh ambil seluruh headroom, kedua setengah, ketiga sepertiga, dst; slot aktif dilepas via `Drop` pool; headroom habis (buffer pool ≥ budget) → grant 0 → kueri berjalan penuh external. `set_grant` mendukung shrink → `remaining` kolaps ke 0 → sinyal spill segera (mekanisme yang dipakai reclaim P110.3).
+  - 13 tes unit akar-common: roundtrip reserve/release, tolak melebihi grant tanpa partial commit, saturasi release, peak, pressure, grant 0 selalu exhausted, counter spill, shrink grant memaksa spill lalu pulih, fair-share bertingkat (1000/500/333), drop melepas slot aktif, tekanan global tercermin (pool 700/1000 → 300 lalu 150), headroom habis → grant 0.
+
 - **P114.2 — mode salvage resmi `--skip-wal`/`--salvage` (menggantikan prosedur manual `mv wal.log`)** · `cd31526` · gate **2,107** (+5: 2,102 → 2,107)
   - `SystemConfig::skip_wal` (default `false` — strict tetap default, P61.3 tidak berubah) → `StorageManager::set_skip_wal`; saat aktif `recover()` mencoba tiap record, mencatat + melewati yang gagal alih-alih membatalkan open; mirror kolom checkpoint tetap sumber kebenaran.
   - Diekspos di `akar-server --skip-wal` dan `akar-cli [db] --skip-wal|--salvage`; keduanya mencetak peringatan eksplisit saat startup (F7: prosedur operator `mv wal.log` kini jadi fitur produk).
