@@ -16,6 +16,7 @@ members = [
     "akar-graph",
     "akar-extension",
     "akar-json",
+    "akar-markdown",
     "akar-fts",
     "akar-vector",
     "akar-httpfs",

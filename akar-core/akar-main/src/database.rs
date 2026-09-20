@@ -791,6 +791,13 @@ impl Database {
                 reg.register(ext);
             }
         }
+        #[cfg(all(feature = "markdown-extension", not(akar_wasm)))]
+        {
+            let ext = Box::new(akar_markdown::MarkdownExtension::new());
+            if let Ok(mut reg) = self.extension_registry.lock() {
+                reg.register(ext);
+            }
+        }
         #[cfg(feature = "algo-extension")]
         {
             let ext = Box::new(akar_algo::AlgoExtension::new());

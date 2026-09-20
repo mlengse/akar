@@ -72,6 +72,7 @@ PUBLISH_ORDER_CORE = [
 PUBLISH_ORDER_EXTENSIONS = [
     "akar-json",         # common, function, extension
     "akar-httpfs",       # common, function, extension
+    "akar-markdown",     # common, function, extension
     "akar-duckdb",       # common, function, extension  (must precede delta/iceberg/azure/unity-catalog)
     "akar-algo",         # common, function, extension, graph, catalog  (must precede dream)
     "akar-neo4j",        # function, extension

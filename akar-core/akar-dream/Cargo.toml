@@ -12,6 +12,7 @@ authors.workspace = true
 
 [dependencies]
 akar-algo = { path = "../akar-algo", version = "0.2.3" }
+akar-function = { path = "../akar-function", version = "0.2.3" }
 akar-ml = { path = "../akar-ml", version = "0.2.3", optional = true }
 
 [features]

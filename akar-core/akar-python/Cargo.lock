@@ -79,6 +79,7 @@ name = "akar-dream"
 version = "0.2.3"
 dependencies = [
  "akar-algo",
+ "akar-function",
 ]
 
 [[package]]

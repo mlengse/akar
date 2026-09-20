@@ -20,6 +20,7 @@ vector-extension = ["dep:akar-vector"]
 httpfs-extension = ["dep:akar-httpfs"]
 duckdb-extension = ["dep:akar-duckdb"]
 algo-extension = ["dep:akar-algo"]
+markdown-extension = ["dep:akar-markdown"]
 neo4j-extension = ["dep:akar-neo4j"]
 llm-extension = ["dep:akar-llm"]
 ml-extension = ["dep:akar-ml", "akar-ml/extension"]
@@ -47,6 +48,7 @@ akar-processor = { path = "../akar-processor", version = "0.2.3" }
 akar-function = { path = "../akar-function", version = "0.2.3" }
 akar-extension = { path = "../akar-extension", version = "0.2.3" }
 akar-json = { path = "../akar-json", version = "0.2.3", optional = true }
+akar-markdown = { path = "../akar-markdown", version = "0.2.3", optional = true }
 akar-fts = { path = "../akar-fts", version = "0.2.3", optional = true }
 akar-vector = { path = "../akar-vector", version = "0.2.3", optional = true }
 akar-httpfs = { path = "../akar-httpfs", version = "0.2.3", optional = true }

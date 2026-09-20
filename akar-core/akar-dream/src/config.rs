@@ -21,6 +21,12 @@ pub struct DreamConfig {
     pub k_per_seed: usize,
     /// Edge weight below which to prune.
     pub prune_threshold: f64,
+    /// Base weakening applied to a non-activated edge per NREM cycle.
+    ///
+    /// This is the **maximum** decay: retention scoring only ever reduces it
+    /// (P119.2) — an edge whose endpoints are still well retained decays by less
+    /// than this. Before P119 the phase applied this value unconditionally.
+    pub nrem_weaken_rate: f64,
     /// Minimum community size for insight phase.
     pub insight_min_community_size: usize,
     /// Louvain resolution parameter.
@@ -49,6 +55,7 @@ impl Default for DreamConfig {
             max_hops: 1,
             k_per_seed: 20,
             prune_threshold: 0.005,
+            nrem_weaken_rate: 0.05,
             insight_min_community_size: 3,
             louvain_resolution: 1.0,
             max_bridge_nodes: 50,
@@ -75,6 +82,8 @@ mod tests {
         assert!((cfg.threshold - 0.01).abs() < 1e-10);
         assert_eq!(cfg.max_hops, 1);
         assert_eq!(cfg.k_per_seed, 20);
+        // Preserves the constant the NREM phase used before P119.2.
+        assert!((cfg.nrem_weaken_rate - 0.05).abs() < 1e-10);
         assert!(cfg.enable_nrem);
         assert!(cfg.enable_rem);
     }

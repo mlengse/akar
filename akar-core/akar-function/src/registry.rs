@@ -85,6 +85,10 @@ pub enum ScalarFunction {
     Union {
         op: UnionOp,
     },
+    /// Memory-retention scoring — the cognitive decay primitive (P119).
+    Retention {
+        op: RetentionOp,
+    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -110,6 +114,7 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Interval { op } => f.debug_struct("Interval").field("op", op).finish(),
             Self::Blob { op } => f.debug_struct("Blob").field("op", op).finish(),
             Self::Union { op } => f.debug_struct("Union").field("op", op).finish(),
+            Self::Retention { op } => f.debug_struct("Retention").field("op", op).finish(),
         }
     }
 }
@@ -459,6 +464,14 @@ pub enum UnionOp {
     UnionValue,
     UnionTag,
     UnionExtract,
+}
+
+/// Memory-retention scoring (P119).
+#[derive(Debug, Clone, Copy)]
+pub enum RetentionOp {
+    /// `retention_score(age_days, access_count, days_since_access, salience, distinct_actors[, breadth_weight])`
+    /// → `(0, 1]`, the Ebbinghaus retention of the memory.
+    Score,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -1181,6 +1194,9 @@ impl FunctionRegistry {
             },
         );
         self.register_scalar("least", ScalarFunction::Utility { op: UtilityOp::Least });
+
+        // --- Memory retention (P119) ---
+        self.register_scalar("retention_score", ScalarFunction::Retention { op: RetentionOp::Score });
         self.register_scalar(
             "constant_or_null",
             ScalarFunction::Utility {
@@ -1391,6 +1407,46 @@ impl FunctionRegistry {
     /// Total number of registered functions.
     pub fn total_count(&self) -> usize {
         self.scalar_count() + self.aggregate_count() + self.table_count()
+    }
+
+    /// Execute a callback-backed table function, preserving the declared column
+    /// names of the produced chunk.
+    ///
+    /// [`Self::execute_table_function`] flattens the chunk into `Vec<Vec<Value>>`
+    /// and therefore drops `field_names`; callers that surface the result to a
+    /// user (the `CALL` path in the connection layer) need those names, so they
+    /// use this instead.
+    ///
+    /// Returns `None` — leaving the caller to its existing error path — when
+    /// `name` is unknown or is not backed by an extension callback (built-in
+    /// scans and catalog-context functions are handled elsewhere).
+    pub fn execute_custom_table_function(
+        &self,
+        name: &str,
+        args: &[Value],
+        graph: Option<&dyn crate::graph::GraphDataSource>,
+    ) -> Option<Result<akar_common::vector::DataChunk, String>> {
+        use akar_common::vector::DataChunk;
+
+        let empty = || DataChunk {
+            fields: Vec::new(),
+            field_types: Vec::new(),
+            size: 0,
+            field_names: vec![],
+            sel_vector: None,
+        };
+
+        match self.get_table(name)? {
+            TableFunction::CustomTable { execute, .. } => {
+                let mut chunk = empty();
+                Some(execute(args, &mut chunk).map(|()| chunk))
+            }
+            TableFunction::CustomTableWithGraph { execute, .. } => {
+                let mut chunk = empty();
+                Some(execute(args, graph, &mut chunk).map(|()| chunk))
+            }
+            _ => None,
+        }
     }
 
     /// Execute a table function by name with the given pre-evaluated arguments.

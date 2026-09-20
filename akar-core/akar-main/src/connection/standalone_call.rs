@@ -148,50 +148,63 @@ impl StandaloneCallHandler for DbStandaloneCallHandler {
             .function_registry
             .lock()
             .map_err(|e| format!("Lock poisoned: {e}"))?;
+
+        // Table functions backed by an extension callback declare their own
+        // column names. The row-based path below would replace those with
+        // `col_0`, `col_1`, … so prefer the chunk-preserving path when it
+        // applies — `CALL read_markdown_wiki(...)` must come back with `node`
+        // and `rel`, not positional names.
+        if let Some(result) = registry.execute_custom_table_function(name, &args_vals, Some(&graph)) {
+            return result.map(|chunk| vec![chunk]).map_err(|e| Self::call_error(name, &e));
+        }
+
         match registry.execute_table_function(name, &args_vals, Some(&graph)) {
             Ok(rows) => Self::format_result(rows),
-            Err(original_err) => {
-                let known_calls = [
-                    "show_tables",
-                    "table_info",
-                    "show_functions",
-                    "show_indexes",
-                    "show_sequences",
-                    "show_macros",
-                    "show_connection",
-                    "db_version",
-                    "catalog_version",
-                    "current_setting",
-                    "stats_info",
-                    "storage_info",
-                    "show_attached_databases",
-                    "bm_info",
-                    "file_info",
-                    "free_space_info",
-                    "disk_size_info",
-                    "storage_version",
-                    "show_loaded_extensions",
-                    "show_official_extensions",
-                    "clear_warnings",
-                    "show_warnings",
-                    "show_projected_graphs",
-                    "projected_graph_info",
-                    "drop_projected_graph",
-                    "export_csv",
-                    "export_parquet",
-                ];
-                let lower = name.to_lowercase();
-                let suggestion = known_calls
-                    .iter()
-                    .find(|k| k.contains(&lower) || lower.contains(**k))
-                    .map(|k| format!(" Did you mean CALL {}()?", k))
-                    .unwrap_or_default();
-                Err(ProcessorError::Execution(format!(
-                    "CALL '{}' failed: {}.{}",
-                    name, original_err, suggestion
-                )))
-            }
+            Err(original_err) => Err(Self::call_error(name, &original_err)),
         }
+    }
+}
+
+impl DbStandaloneCallHandler {
+    /// Wrap a table-function failure with the `CALL '<name>' failed:` prefix and
+    /// a suggestion when the name is close to a built-in standalone call.
+    fn call_error(name: &str, error: &str) -> ProcessorError {
+        let known_calls = [
+            "show_tables",
+            "table_info",
+            "show_functions",
+            "show_indexes",
+            "show_sequences",
+            "show_macros",
+            "show_connection",
+            "db_version",
+            "catalog_version",
+            "current_setting",
+            "stats_info",
+            "storage_info",
+            "show_attached_databases",
+            "bm_info",
+            "file_info",
+            "free_space_info",
+            "disk_size_info",
+            "storage_version",
+            "show_loaded_extensions",
+            "show_official_extensions",
+            "clear_warnings",
+            "show_warnings",
+            "show_projected_graphs",
+            "projected_graph_info",
+            "drop_projected_graph",
+            "export_csv",
+            "export_parquet",
+        ];
+        let lower = name.to_lowercase();
+        let suggestion = known_calls
+            .iter()
+            .find(|k| k.contains(&lower) || lower.contains(**k))
+            .map(|k| format!(" Did you mean CALL {}()?", k))
+            .unwrap_or_default();
+        ProcessorError::Execution(format!("CALL '{}' failed: {}.{}", name, error, suggestion))
     }
 }
 

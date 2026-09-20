@@ -35,6 +35,7 @@ impl PyDreamConfig {
         enable_afe=true,
         enable_synthesis=true,
         enable_dae=true,
+        nrem_weaken_rate=0.05,
     ))]
     fn new(
         max_memories: usize,
@@ -56,6 +57,7 @@ impl PyDreamConfig {
         enable_afe: bool,
         enable_synthesis: bool,
         enable_dae: bool,
+        nrem_weaken_rate: f64,
     ) -> Self {
         Self {
             inner: DreamConfig {
@@ -78,6 +80,7 @@ impl PyDreamConfig {
                 enable_afe,
                 enable_synthesis,
                 enable_dae,
+                nrem_weaken_rate,
             },
         }
     }
@@ -105,6 +108,11 @@ impl PyDreamConfig {
     #[getter]
     fn prune_threshold(&self) -> f64 {
         self.inner.prune_threshold
+    }
+    /// Base NREM decay per cycle; retention scoring only ever reduces it (P119.2).
+    #[getter]
+    fn nrem_weaken_rate(&self) -> f64 {
+        self.inner.nrem_weaken_rate
     }
 
     fn __repr__(&self) -> String {

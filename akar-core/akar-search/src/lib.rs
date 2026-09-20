@@ -5,6 +5,7 @@
 //! recall with automatic RRF deduplication.
 
 pub mod fused;
+pub mod hierarchical;
 pub mod hybrid;
 pub mod hybrid_scan;
 pub mod multi;
@@ -12,6 +13,10 @@ pub mod native_bm25;
 pub mod rrf;
 
 pub use fused::{FusedSearchConfig, fuse_vector_and_bm25, to_bm25_results, to_vector_results};
+pub use hierarchical::{
+    AuthorityConfig, HierarchicalRrfConfig, apply_authority, authority_multiplier, fuse_hierarchical,
+    fuse_hierarchical_with_authority, tag_channel,
+};
 pub use hybrid::hybrid_search;
 pub use hybrid_scan::{HybridScan, HybridScanConfig};
 pub use multi::multi_perspective_recall_with_id;

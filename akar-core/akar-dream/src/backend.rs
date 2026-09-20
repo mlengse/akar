@@ -91,6 +91,9 @@ pub struct MockBackend {
     pub strengthen_count: std::cell::RefCell<usize>,
     pub weaken_count: std::cell::RefCell<usize>,
     pub prune_count: std::cell::RefCell<usize>,
+    /// Amount of every `weaken_edge` call, so tests can assert the decay
+    /// *policy* (P119.2) and not just that a weaken happened.
+    pub weaken_amounts: std::cell::RefCell<Vec<f64>>,
 }
 
 #[cfg(test)]
@@ -109,6 +112,7 @@ impl MockBackend {
             strengthen_count: std::cell::RefCell::new(0),
             weaken_count: std::cell::RefCell::new(0),
             prune_count: std::cell::RefCell::new(0),
+            weaken_amounts: std::cell::RefCell::new(Vec::new()),
         }
     }
 }
@@ -133,8 +137,9 @@ impl DreamBackend for MockBackend {
         *self.strengthen_count.borrow_mut() += 1;
     }
 
-    fn weaken_edge(&self, _source_id: usize, _target_id: usize, _amount: f64) {
+    fn weaken_edge(&self, _source_id: usize, _target_id: usize, amount: f64) {
         *self.weaken_count.borrow_mut() += 1;
+        self.weaken_amounts.borrow_mut().push(amount);
     }
 
     fn prune_edge(&self, _source_id: usize, _target_id: usize) {

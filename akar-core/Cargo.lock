@@ -132,6 +132,7 @@ name = "akar-dream"
 version = "0.2.3"
 dependencies = [
  "akar-algo",
+ "akar-function",
  "akar-ml",
 ]
 
@@ -262,6 +263,7 @@ dependencies = [
  "akar-iceberg",
  "akar-json",
  "akar-llm",
+ "akar-markdown",
  "akar-ml",
  "akar-neo4j",
  "akar-optimizer",
@@ -282,6 +284,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "akar-markdown"
+version = "0.2.3"
+dependencies = [
+ "akar-catalog",
+ "akar-common",
+ "akar-extension",
+ "akar-function",
+ "arrow 59.3.0",
+ "tempfile",
+ "thiserror",
  "tracing",
 ]
 
