@@ -65,12 +65,8 @@ pub fn page_rank(csr: &CSRAdjacency, damping: f64, max_iter: usize, tol: f64) ->
 
     // Bolt Optimization: Precompute node degrees and dangling node indices to avoid
     // repeated O(N) degree checks and CSR slice lookups across power iterations.
-    let degrees: Vec<usize> = (0..n)
-        .map(|i| csr.offsets[i + 1] - csr.offsets[i])
-        .collect();
-    let dangling_nodes: Vec<usize> = (0..n)
-        .filter(|&i| degrees[i] == 0)
-        .collect();
+    let degrees: Vec<usize> = (0..n).map(|i| csr.offsets[i + 1] - csr.offsets[i]).collect();
+    let dangling_nodes: Vec<usize> = (0..n).filter(|&i| degrees[i] == 0).collect();
 
     // Reusable scratch buffer to avoid heap reallocations on every iteration.
     let mut new_pr = vec![0.0; n];
