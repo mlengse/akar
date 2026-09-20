@@ -392,6 +392,7 @@ dependencies = [
  "criterion",
  "hashbrown 0.17.1",
  "rayon",
+ "tempfile",
  "tracing",
 ]
 

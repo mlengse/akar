@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 /// Returns `None` for null values so callers can skip them like the old code
 /// skipped `Value::Null`.
 #[inline]
-fn hash_chunk_cell(chunk: &DataChunk, col: usize, row: usize) -> Option<u64> {
+pub(crate) fn hash_chunk_cell(chunk: &DataChunk, col: usize, row: usize) -> Option<u64> {
     if col >= chunk.fields.len() || chunk.is_null(col, row) {
         return None;
     }

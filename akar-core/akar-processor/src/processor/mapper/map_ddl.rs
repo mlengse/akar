@@ -13,8 +13,15 @@ pub fn map_and_execute_ddl(
 ) -> Result<Vec<DataChunk>, ProcessorError> {
     match op {
         LogicalOperator::Explain(ex) => {
-            // Serialize the inner plan tree to a string
-            let plan_str = serialize_plan_tree(&ex.inner, 0);
+            // Serialize the inner plan tree to a string. The external-join
+            // partition count is threaded in so a `HashJoin` can declare the
+            // spill path available to it (P111) without EXPLAIN having to run
+            // the query.
+            let spill_partitions = match super::map_join::spill_config(ctx) {
+                Some(cfg) => cfg.explain_partitions(),
+                None => 0,
+            };
+            let plan_str = serialize_plan_tree(&ex.inner, 0, spill_partitions);
             let explain = PhysicalExplain { inner_plan: plan_str };
             let result = explain.execute(vec![])?;
             Ok(result)

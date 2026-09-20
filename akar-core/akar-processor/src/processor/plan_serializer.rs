@@ -1,7 +1,16 @@
 use akar_planner::logical_operator::LogicalOperator;
 
+/// Render the logical plan as text.
+///
+/// `spill_partitions` is the radix partition count of the external join path
+/// available to this execution (P111), or 0 when no spill path exists. A
+/// `HashJoin` node annotates itself with `Spill=N` only when the join *could*
+/// spill, so a plan unchanged in this respect renders exactly as before. Note
+/// that EXPLAIN serializes the plan without executing it: `N` is the configured
+/// partition count, not a runtime event count (that lives on
+/// `QueryMemoryPool::spill_events`).
 #[allow(unreachable_patterns)]
-pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
+pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize, spill_partitions: usize) -> String {
     let indent = "  ".repeat(depth);
     let prefix = if depth > 0 { "├─ " } else { "" };
 
@@ -13,7 +22,14 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
         LogicalOperator::ScanRel(s) => format!("ScanRel({})", s.table_name),
         LogicalOperator::Filter(_) => "Filter".to_string(),
         LogicalOperator::Projection(p) => format!("Projection({} cols)", p.expressions.len()),
-        LogicalOperator::HashJoin(hj) => format!("HashJoin({} keys)", hj.join_keys.len()),
+        LogicalOperator::HashJoin(hj) => {
+            let base = format!("HashJoin({} keys)", hj.join_keys.len());
+            if spill_partitions > 0 {
+                format!("{base} [Spill={spill_partitions}]")
+            } else {
+                base
+            }
+        }
         LogicalOperator::CrossProduct(_) => "CrossProduct".to_string(),
         LogicalOperator::OrderBy(ob) => format!("OrderBy({} keys)", ob.sort_keys.len()),
         LogicalOperator::TopK(tk) => format!(
@@ -92,7 +108,7 @@ pub fn serialize_plan_tree(op: &LogicalOperator, depth: usize) -> String {
 
     let children = op.children();
     for (i, child) in children.iter().enumerate() {
-        let child_str = serialize_plan_tree(child, depth + 1);
+        let child_str = serialize_plan_tree(child, depth + 1, spill_partitions);
         if i == children.len() - 1 {
             let adjusted = child_str.replacen("├─ ", "└─ ", 1);
             result.push_str(&adjusted);

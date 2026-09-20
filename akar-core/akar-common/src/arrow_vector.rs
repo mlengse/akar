@@ -349,6 +349,35 @@ pub fn convert_arrow_scalar(array: &ArrayRef, row: usize) -> Option<Value> {
     }
 }
 
+/// Recover the [`PhysicalTypeID`] an Arrow array of `data_type` corresponds to.
+///
+/// This is the inverse of the mapping [`ArrowVector::from_legacy`] applies in
+/// the other direction, and exists so Arrow data that never went through a
+/// legacy `ValueVector` — notably record batches read back from an Arrow IPC
+/// spill file (P111) — can be rebuilt into a `DataChunk` with correct physical
+/// types. Types with no engine representation fall back to `Int64` rather than
+/// failing, matching [`infer_arrow_type`]'s null fallback.
+pub fn physical_type_from_arrow(data_type: &DataType) -> PhysicalTypeID {
+    match data_type {
+        DataType::Boolean => PhysicalTypeID::Bool,
+        DataType::Int64 | DataType::Date32 | DataType::Timestamp(_, _) => PhysicalTypeID::Int64,
+        DataType::UInt64 => PhysicalTypeID::UInt64,
+        DataType::Int32 | DataType::Date64 => PhysicalTypeID::Int32,
+        DataType::Int16 => PhysicalTypeID::Int16,
+        DataType::Int8 => PhysicalTypeID::Int8,
+        DataType::UInt32 => PhysicalTypeID::UInt32,
+        DataType::UInt16 => PhysicalTypeID::UInt16,
+        DataType::UInt8 => PhysicalTypeID::UInt8,
+        DataType::Float64 => PhysicalTypeID::Double,
+        DataType::Float32 => PhysicalTypeID::Float,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => PhysicalTypeID::String,
+        DataType::Binary | DataType::LargeBinary => PhysicalTypeID::Blob,
+        DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _) => PhysicalTypeID::List,
+        DataType::Struct(_) => PhysicalTypeID::Struct,
+        _ => PhysicalTypeID::Int64,
+    }
+}
+
 /// Infer the Arrow `DataType` for a list of `Value`s.
 ///
 /// The first non-null value is used as the type sample. All-null inputs (or

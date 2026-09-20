@@ -1,4 +1,5 @@
 use super::ExecutionContext;
+use crate::physical::join_spill::JoinSpillConfig;
 use crate::physical_operator::*;
 use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
@@ -8,6 +9,17 @@ use akar_planner::logical_operator::LogicalOperator;
 
 use crate::processor::join_helpers::{JoinKeyBinding, derive_join_bindings};
 use crate::processor::union_helpers::{flatten_union_child, merge_optional_chunks};
+
+/// Build the external-join config from the execution context (P111).
+///
+/// `None` when the processor has no memory pool (nothing bounds the build side)
+/// or no spill directory (nowhere to write) — the join then stays fully in
+/// memory, exactly as before this feature existed.
+pub(crate) fn spill_config(ctx: &ExecutionContext<'_>) -> Option<JoinSpillConfig> {
+    let pool = ctx.memory_pool.clone()?;
+    let dir = ctx.spill_dir.clone()?;
+    Some(JoinSpillConfig::new(dir, pool))
+}
 
 pub fn map_and_execute_join(
     op: &LogicalOperator,
@@ -28,7 +40,15 @@ pub fn map_and_execute_join(
                 prepare_join_sides(&h.join_keys, build_chunks, probe_chunks)?;
 
             let join = PhysicalHashJoin::new(build_cols, probe_cols);
-            let result = join.execute_binary(&build_chunks, &probe_chunks)?;
+            // P111: use the external (disk-spilling) path only when the processor
+            // has both a memory pool and a spill directory. `execute_with_spill`
+            // itself is a pass-through to the in-memory join whenever the build
+            // side fits the grant, so joins that were never at risk of OOM keep
+            // their existing path and cost.
+            let result = match spill_config(ctx) {
+                Some(cfg) => join.execute_with_spill(&build_chunks, &probe_chunks, &cfg)?,
+                None => join.execute_binary(&build_chunks, &probe_chunks)?,
+            };
 
             Ok(strip_join_synthetic_columns(
                 result,
