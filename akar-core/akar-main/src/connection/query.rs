@@ -243,7 +243,7 @@ impl Connection {
 
         // Execute
         let processor = self
-            .create_processor()
+            .create_processor()?
             .with_snapshot(snapshot_ts, commit_history)
             .with_txn_id(txn_opt.as_ref().map(|t| t.transaction_id));
         let chunks = processor
@@ -434,7 +434,7 @@ impl Connection {
 
         // Execute
         let processor = self
-            .create_processor()
+            .create_processor()?
             .with_snapshot(snapshot_ts, history)
             .with_txn_id(txn_opt.as_ref().map(|t| t.transaction_id));
         let chunks = match processor.execute(&optimized_plan) {
@@ -543,20 +543,32 @@ impl Connection {
     /// registry) only depend on the `Database`, so they are built once and
     /// reused across every query — this avoids re-allocating ~30 handler Arc
     /// closures plus the standalone-call registry per execution (P51.47).
-    pub(crate) fn create_processor(&self) -> QueryProcessor {
+    ///
+    /// Each call is one query: it asks the database's memory governor for a
+    /// per-query pool (P110.2 admission gate) and binds it, together with the
+    /// spill directory, to the processor. The pool is released when the
+    /// processor is dropped at the end of the statement. A rejected admission is
+    /// reported as a query error rather than silently running the query without
+    /// a memory bound.
+    pub(crate) fn create_processor(&self) -> Result<QueryProcessor, String> {
         let handlers = self
             .processor_handlers
             .get_or_init(|| Arc::new(build_processor_handlers(&self.database)));
 
-        QueryProcessor::with_catalog(
+        // Admission runs before any other work so a refused query costs nothing.
+        let pool = self.database.admit_query()?;
+
+        Ok(QueryProcessor::with_catalog(
             self.database.function_registry.clone(),
             self.database.table_catalog(),
             self.database.vfs.clone(),
         )
+        .with_memory_pool(pool)
+        .with_spill_dir(self.database.spill_dir())
         .with_sequence_fn(handlers.sequence_fn.clone())
         .with_subquery_fn(handlers.subquery_fn.clone())
         .with_schema_ddl_fn(handlers.schema_ddl_fn.clone())
-        .with_standalone_call_handler(handlers.standalone_call_handler.clone())
+        .with_standalone_call_handler(handlers.standalone_call_handler.clone()))
     }
 }
 

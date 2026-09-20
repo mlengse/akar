@@ -52,6 +52,14 @@ pub struct ExecutionContext<'p> {
     /// budget is met (P1-PERF-1). `None` when the tail has no applicable
     /// LIMIT (aggregation etc. needs the full row set).
     pub limit_budget: Option<u64>,
+    /// Memory pool of the query being executed (P110). Operators reserve against
+    /// it before growing in-memory structures and spill when it reports
+    /// `Grant::Exhausted` (P111). `None` when the processor has no governor,
+    /// which leaves operators on their unbounded in-memory path.
+    pub memory_pool: Option<Arc<akar_common::query_pool::QueryMemoryPool>>,
+    /// Directory operators write spill files to (P111), or `None` when the
+    /// embedder did not provide one (spilling then stays disabled).
+    pub spill_dir: Option<std::path::PathBuf>,
 }
 
 impl<'p> ExecutionContext<'p> {

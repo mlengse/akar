@@ -160,6 +160,14 @@ pub struct QueryProcessor {
     /// bulk-copied into the global WAL at commit, making WAL replay
     /// self-sufficient without per-commit mirror persistence (P60.2).
     wal_records: WalSink,
+    /// Memory pool of the query being executed (P110). Carries the query's
+    /// grant, id and spill counter; operators reserve against it before growing
+    /// in-memory structures and spill when it is exhausted (P111). `None` for
+    /// processors built without a governor (tests, benchmarks), which keeps the
+    /// operators on their unbounded in-memory path.
+    memory_pool: Option<Arc<akar_common::query_pool::QueryMemoryPool>>,
+    /// Directory spill files are written to (P111). `None` disables spilling.
+    spill_dir: Option<std::path::PathBuf>,
 }
 
 impl QueryProcessor {
@@ -178,6 +186,8 @@ impl QueryProcessor {
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
             wal_records: Arc::new(Mutex::new(Vec::new())),
+            memory_pool: None,
+            spill_dir: None,
         }
     }
 
@@ -197,6 +207,8 @@ impl QueryProcessor {
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
             wal_records: Arc::new(Mutex::new(Vec::new())),
+            memory_pool: None,
+            spill_dir: None,
         }
     }
 
@@ -220,7 +232,31 @@ impl QueryProcessor {
             txn_id: None,
             undo_records: Arc::new(Mutex::new(Vec::new())),
             wal_records: Arc::new(Mutex::new(Vec::new())),
+            memory_pool: None,
+            spill_dir: None,
         }
+    }
+
+    /// Set the memory pool this processor's operators draw from (P110/P111).
+    pub fn with_memory_pool(mut self, pool: Arc<akar_common::query_pool::QueryMemoryPool>) -> Self {
+        self.memory_pool = Some(pool);
+        self
+    }
+
+    /// The memory pool bound to this processor, if any.
+    pub fn memory_pool(&self) -> Option<&Arc<akar_common::query_pool::QueryMemoryPool>> {
+        self.memory_pool.as_ref()
+    }
+
+    /// Set the directory operators may write spill files to (P111).
+    pub fn with_spill_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.spill_dir = Some(dir.into());
+        self
+    }
+
+    /// The spill directory bound to this processor, if any.
+    pub fn spill_dir(&self) -> Option<&std::path::Path> {
+        self.spill_dir.as_deref()
     }
 
     /// Set the sequence operation callback (for nextval/currval).
@@ -408,6 +444,8 @@ impl QueryProcessor {
                 txn_id: self.txn_id,
                 extend_prune,
                 limit_budget,
+                memory_pool: self.memory_pool.clone(),
+                spill_dir: self.spill_dir.clone(),
             };
 
             let result = mapper::PlanMapper::map_and_execute(op, next_op, current, limit_budget, &mut ctx)?;

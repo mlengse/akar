@@ -444,7 +444,7 @@ impl Connection {
                     .map_err(|e| format!("Plan left UNION: {e}"))?;
                 let left_optimized = optimizer.optimize(left_plan);
                 let processor = self
-                    .create_processor()
+                    .create_processor()?
                     .with_snapshot(snapshot_ts, commit_history.clone());
                 let left_chunks = processor
                     .execute(&left_optimized)
@@ -455,7 +455,7 @@ impl Connection {
                     .plan(BoundStatement::BoundQuery(*u.right.clone()))
                     .map_err(|e| format!("Plan right UNION: {e}"))?;
                 let right_optimized = optimizer.optimize(right_plan);
-                let processor = self.create_processor().with_snapshot(snapshot_ts, commit_history);
+                let processor = self.create_processor()?.with_snapshot(snapshot_ts, commit_history);
                 let right_chunks = processor
                     .execute(&right_optimized)
                     .map_err(|e| format!("Execute right UNION: {e}"))?;

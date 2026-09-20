@@ -3,6 +3,7 @@
 use akar_catalog::Catalog;
 use akar_common::file_system::VirtualFileSystemRegistry;
 use akar_common::memory::MemoryManager;
+use akar_common::query_pool::{Admission, GovernorPolicy, MemoryGovernor, QueryMemoryPool};
 use akar_common::task_system::TaskSystem;
 use akar_extension::{ExtensionContext, ExtensionRegistry};
 use akar_function::FunctionRegistry;
@@ -145,6 +146,10 @@ pub struct Database {
     pub(crate) function_registry: Arc<Mutex<FunctionRegistry>>,
     pub(crate) task_system: Arc<TaskSystem>,
     pub(crate) memory_manager: Arc<MemoryManager>,
+    /// Per-query memory governor: grants each query a bounded slice of the
+    /// instance budget, gates admission under pressure, and can reclaim
+    /// (P110.2/P110.3).
+    pub(crate) memory_governor: Arc<MemoryGovernor>,
     pub(crate) extension_registry: Mutex<ExtensionRegistry>,
     pub(crate) stats_store: Arc<Mutex<StatsStore>>,
     pub(crate) vfs: Arc<VirtualFileSystemRegistry>,
@@ -189,6 +194,44 @@ impl Database {
             return (self.config.buffer_pool_size as f64 * 0.8) as u64;
         }
         0
+    }
+
+    /// The memory governor that hands out per-query grants and enforces the
+    /// admission policy (P110.2/P110.3).
+    pub fn memory_governor(&self) -> &Arc<MemoryGovernor> {
+        &self.memory_governor
+    }
+
+    /// The admission/reclaim policy currently applied to new queries.
+    pub fn admission_policy(&self) -> GovernorPolicy {
+        self.memory_governor.policy()
+    }
+
+    /// Replace the admission/reclaim policy — the opt-in lever for refusing
+    /// queries before they can exhaust the budget (P110.2).
+    pub fn set_admission_policy(&self, policy: GovernorPolicy) {
+        self.memory_governor.set_policy(policy);
+    }
+
+    /// Admit a new query and hand back its memory pool (P110.2).
+    ///
+    /// The returned pool lives as long as the caller holds it and carries the
+    /// query's grant, spill counter and id. Under the default (inert) policy this
+    /// always succeeds; an embedder that arms a threshold in
+    /// [`GovernorPolicy`] gets a refusal here instead, reported as a query error.
+    pub fn admit_query(&self) -> Result<Arc<QueryMemoryPool>, String> {
+        match self.memory_governor.admit() {
+            Admission::Admitted(pool) => Ok(pool),
+            Admission::Rejected(reason) => Err(format!("Query rejected: {reason}")),
+        }
+    }
+
+    /// Directory where operators write spill files (`<db_path>/spill`).
+    ///
+    /// Created on demand by the writers; shared by the ingest spiller and the
+    /// external spill hash join (P111).
+    pub fn spill_dir(&self) -> PathBuf {
+        self.storage_manager.db_path().join("spill")
     }
 
     /// Create a `Spiller` instance using the current database configuration.
@@ -615,6 +658,7 @@ impl Database {
         };
         let function_registry = Arc::new(Mutex::new(FunctionRegistry::new()));
         let storage_manager = Arc::new(StorageManager::new(db_path.clone(), memory_manager.clone()));
+        let memory_governor = Arc::new(MemoryGovernor::new(memory_manager.clone()));
         let stats_store = Arc::new(Mutex::new(StatsStore::new()));
         let vfs = Arc::new(VirtualFileSystemRegistry::new());
 
@@ -630,6 +674,7 @@ impl Database {
             function_registry,
             task_system,
             memory_manager,
+            memory_governor,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
             vfs,
