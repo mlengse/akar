@@ -63,20 +63,33 @@ pub fn page_rank(csr: &CSRAdjacency, damping: f64, max_iter: usize, tol: f64) ->
     let mut pr = vec![1.0 / n as f64; n];
     let base = (1.0 - damping) / n as f64;
 
-    for _iter in 0..max_iter {
-        let mut new_pr = vec![base; n];
+    // Bolt Optimization: Precompute node degrees and dangling node indices to avoid
+    // repeated O(N) degree checks and CSR slice lookups across power iterations.
+    let degrees: Vec<usize> = (0..n)
+        .map(|i| csr.offsets[i + 1] - csr.offsets[i])
+        .collect();
+    let dangling_nodes: Vec<usize> = (0..n)
+        .filter(|&i| degrees[i] == 0)
+        .collect();
 
-        // Dangling mass: total PR of nodes with no outgoing edges, distributed
-        // once per iteration instead of O(n) per dangling node (P52.48).
-        let dangling_mass: f64 = (0..n).filter(|&i| csr.neighbors(i).is_empty()).map(|i| pr[i]).sum();
+    // Reusable scratch buffer to avoid heap reallocations on every iteration.
+    let mut new_pr = vec![0.0; n];
+
+    for _iter in 0..max_iter {
+        new_pr.fill(base);
+
+        // Dangling mass: accumulate PageRank of nodes without outgoing edges using precomputed indices.
+        let dangling_mass: f64 = dangling_nodes.iter().map(|&i| pr[i]).sum();
 
         for i in 0..n {
-            let neighbors = csr.neighbors(i);
-            if neighbors.is_empty() {
+            let deg = degrees[i];
+            if deg == 0 {
                 continue;
             }
-            let share = pr[i] / neighbors.len() as f64;
-            for (_, dst) in neighbors {
+            let share = pr[i] / deg as f64;
+            let start = csr.offsets[i];
+            let end = csr.offsets[i + 1];
+            for (_, dst) in &csr.adjacency[start..end] {
                 let j = dst.offset as usize;
                 if j < n {
                     new_pr[j] += damping * share;
@@ -91,9 +104,9 @@ pub fn page_rank(csr: &CSRAdjacency, damping: f64, max_iter: usize, tol: f64) ->
             }
         }
 
-        // Check convergence
+        // Check convergence and swap buffers in O(1) time
         let diff: f64 = pr.iter().zip(new_pr.iter()).map(|(a, b)| (a - b).abs()).sum();
-        pr = new_pr;
+        std::mem::swap(&mut pr, &mut new_pr);
         if diff < tol {
             break;
         }
