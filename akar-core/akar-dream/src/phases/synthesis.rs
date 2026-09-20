@@ -1,7 +1,7 @@
 //! SYNTHESIS phase: merge AFE clusters into synthesis memories.
 
 use crate::backend::DreamBackend;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 
 pub fn run_synthesis<B: DreamBackend>(backend: &B) -> PhaseStats {
     PhaseStats {

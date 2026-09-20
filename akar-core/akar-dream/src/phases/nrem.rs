@@ -2,7 +2,7 @@
 
 use crate::backend::{DreamBackend, Memory};
 use crate::config::DreamConfig;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 use std::collections::HashMap;
 
 /// Seconds in a day, for converting unix timestamps to Ebbinghaus age.

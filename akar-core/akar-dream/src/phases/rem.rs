@@ -4,7 +4,7 @@
 use crate::EmbeddingProvider;
 use crate::backend::DreamBackend;
 use crate::config::DreamConfig;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 
 pub fn run_rem<B: DreamBackend>(
     backend: &B,

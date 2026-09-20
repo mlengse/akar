@@ -1,6 +1,10 @@
 //! Configuration for the dream engine.
 
-/// Configuration for a dream cycle.
+/// Primitive tuning for the dream phases.
+///
+/// This carries only the knobs that change *how* a phase computes — sampling
+/// ratios, decay, thresholds. Which phases run is a cycle decision, and the
+/// cycle belongs to the host, so no phase-enable flags live here (SPEC §13).
 #[derive(Debug, Clone)]
 pub struct DreamConfig {
     /// Maximum number of memories to sample for NREM phase.
@@ -33,14 +37,6 @@ pub struct DreamConfig {
     pub louvain_resolution: f64,
     /// Maximum bridge nodes to discover in REM phase.
     pub max_bridge_nodes: usize,
-    /// Whether to enable each phase.
-    pub enable_nrem: bool,
-    pub enable_supersedes: bool,
-    pub enable_rem: bool,
-    pub enable_insights: bool,
-    pub enable_afe: bool,
-    pub enable_synthesis: bool,
-    pub enable_dae: bool,
 }
 
 impl Default for DreamConfig {
@@ -59,13 +55,6 @@ impl Default for DreamConfig {
             insight_min_community_size: 3,
             louvain_resolution: 1.0,
             max_bridge_nodes: 50,
-            enable_nrem: true,
-            enable_supersedes: true,
-            enable_rem: true,
-            enable_insights: true,
-            enable_afe: true,
-            enable_synthesis: true,
-            enable_dae: true,
         }
     }
 }
@@ -84,7 +73,5 @@ mod tests {
         assert_eq!(cfg.k_per_seed, 20);
         // Preserves the constant the NREM phase used before P119.2.
         assert!((cfg.nrem_weaken_rate - 0.05).abs() < 1e-10);
-        assert!(cfg.enable_nrem);
-        assert!(cfg.enable_rem);
     }
 }

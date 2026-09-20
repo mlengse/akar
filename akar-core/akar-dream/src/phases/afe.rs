@@ -1,7 +1,7 @@
 //! AFE phase: atomic fact extraction from memories.
 
 use crate::backend::DreamBackend;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 
 pub fn run_afe<B: DreamBackend>(backend: &B) -> PhaseStats {
     let mut stats = PhaseStats::default();

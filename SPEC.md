@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **36** |
 | Lines of code | **~139K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,259** total, 0 ignored, 2,259 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P123: +17 tes — connection pool + batch typed/`neighbors` untuk embedding in-process). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,259** total, 0 ignored, 2,259 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P127: no net change — 4 tes dream pindah `akar-dream` → `akar-server` saat siklus dream menjadi milik host). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **260** (245 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -70,7 +70,7 @@ akar/
 │   ├── akar-graph/              # CSR adjacency, GDS framework
 │   ├── akar-extension/          # Extension framework trait + registry
 │   ├── akar-search/             # Hybrid search, RRF fusion
-│   ├── akar-dream/              # Dream engine orchestrator
+│   ├── akar-dream/              # Dream phase compute primitives + storage port (cycle is host-owned)
 │   ├── akar-ml/                 # LSTM ML training
 │   │
 │   ├── akar-json/               # JSON extension
@@ -743,11 +743,11 @@ Triggered by pushing a version tag (`v*`):
 | `akar-fts` | 53 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) + commit-time propagation `apply_doc_writes` (P107.1) + reader handle `FtsIndexHandle` reload-at-commit (P107.2) + crash recovery: last committed survives (P107.3) |
 | `akar-algo` | 81 | Graph algorithm extensions |
 | `akar-search` | 54 | Search utilities, hierarchical multi-vector RRF + authority re-weighting (P121) |
-| `akar-dream` | 12 | Dream engine — retention-derived NREM decay (P119.2) |
+| `akar-dream` | 8 | Dream phase **compute primitives** + storage port (`DreamBackend`) — retention-derived NREM decay (P119.2). The cycle (which phases run, in what order) is host-owned per §13: `akar-server` sequences it as the wire reference |
 | `akar-ml` | 28 | ML functions (node2vec walk/SGD invariants) |
 | `akar-extension` | 15 | Extension framework registry |
 | `akar-c` (FFI) | 18 | `extern "C"` binding tests |
-| `akar-server` | 50 | TCP framing, session, concurrency, auth/idle/stats (P62), parameter binding (P64), dream_control lifecycle `status`/`pause`/`resume`/`run` + `GraceBackend` (P77) + real `GraphBackend`/`DreamControl::with_db` (P77b) |
+| `akar-server` | 54 | TCP framing, session, concurrency, auth/idle/stats (P62), parameter binding (P64), dream_control lifecycle `status`/`pause`/`resume`/`run` (P77) + real `GraphBackend`/`DreamControl::with_db` (P77b) + `DreamCycle` sequencing the seven `akar-dream` primitives (P127) |
 | `akar-postgres` | 7 | PostgreSQL integration |
 | `akar-duckdb` | 9 | DuckDB integration |
 | `akar-httpfs` | 10 | HTTP/S3 file reads |
@@ -757,7 +757,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 0* | Migration tool (idempotent, fixed P48.5; *not exercised by the default gate) |
 | Doc-tests | 10 | Doc-tests across all crates |
-| **Total** | **2,259** | **2,259 total, 0 ignored, 2,259 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, P123: +17 tes). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
+| **Total** | **2,259** | **2,259 total, 0 ignored, 2,259 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, P127: no net change — 4 tes dream pindah dari `akar-dream` ke `akar-server`). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
 
 ### 11.2 Test Datasets
 

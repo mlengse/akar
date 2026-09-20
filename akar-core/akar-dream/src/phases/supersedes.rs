@@ -1,7 +1,7 @@
 //! SUPERSEDES phase: mark edges superseded by newer ones.
 
 use crate::backend::DreamBackend;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 
 pub fn run_supersedes<B: DreamBackend>(backend: &B) -> PhaseStats {
     PhaseStats {

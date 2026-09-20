@@ -2,7 +2,7 @@
 
 use crate::backend::DreamBackend;
 use crate::config::DreamConfig;
-use crate::orchestrator::PhaseStats;
+use crate::stats::PhaseStats;
 
 pub fn run_insights<B: DreamBackend>(backend: &B, _config: &DreamConfig) -> PhaseStats {
     let mut stats = PhaseStats::default();

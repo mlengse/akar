@@ -39,6 +39,11 @@
 
 ### Changed
 
+- **P127 — `akar-dream` diturunkan jadi primitif fase murni; siklus dream jadi milik host (ADR-03 / §13)** · `akar-core/akar-dream/src/{lib,stats,backend,config}.rs`, `akar-core/akar-server/src/dream.rs`, `akar-core/akar-python/src/dream.rs` · gate **2,259** (tetap; 4 tes pindah `akar-dream` → `akar-server`, bukan bertambah)
+  - **Siklus keluar dari Akar.** `orchestrator.rs` dihapus: `DreamOrchestrator` + `DreamStats` (ringkasan siklus) hilang dari `akar-dream`, yang kini hanya memuat primitif fase + port storage (`DreamBackend`). Penjadwalan siklus pindah ke host — `akar-server` menambah `DreamCycle`/`DreamStats` lokal sebagai wire reference, `sulur-server` memilikinya di produksi.
+  - **Tujuh flag `enable_*` dihapus dari `DreamConfig`.** Karena `DreamConfig::default()` dulu semuanya `true`, `DreamCycle` menjalankan ketujuh fase tanpa syarat — perilaku tidak berubah, tetapi "fase mana yang jalan" kini keputusan siklus (milik host), bukan knob penyetelan primitif. `DreamConfig` tinggal berisi tuning primitif.
+  - **`MockBackend` jadi publik (bukan `#[cfg(test)]`) dan `PhaseStats` pindah ke `stats.rs`** sebagai tipe hasil *satu fase*, bukan ringkasan siklus — supaya host bisa menggerakkan primitif tanpa basis data. Sisi Python memangkas `PyDreamStats`/`PyPhaseStats` beserta tujuh kwarg `enable_*`; tidak ada pemanggil Python yang mengimpor `akar.dream`, jadi tak ada yang rusak.
+
 - **P120 — ditutup tanpa kode baru: embedding lokal in-process sudah terkirim** · gate **2,242**
   - `embed_text` sudah ada sebagai scalar UDF (`akar-ml/src/extension.rs`, feature `ml-extension` → `onnx-embedding`) dan berjalan **in-process** via fastembed/ONNX Runtime — tanpa server embedding eksternal — dengan model default `bge-small-en-v1.5` (384d, dapat di-override `AKAR_EMBED_MODEL`), sudah dikonsumsi dream engine lewat `akar_main::ml::shared_embedding_provider()`.
   - Dua deviasi dari teks rencana dicatat supaya tidak jadi pekerjaan hantu: implementasi memakai **ONNX Runtime, bukan Candle**, dan permukaan Cypher-nya **scalar function** (`RETURN embed_text('…')`), bukan `CALL embed_text(…) YIELD vector` — grammar akar memang tidak mengenal `YIELD`. Teks P120 di `implementation plan.md` ("Candle", `CALL … YIELD`) karena itu usang.

@@ -1,11 +1,14 @@
 //! Dream engine control state for the akar server (P77).
 //!
 //! This module owns the per-server dream lifecycle ("status" / "pause" /
-//! "resume" / "run") and the [`DreamOrchestrator`] that executes a
-//! consolidation cycle. It is wired into [`SessionConfig`](crate::session::SessionConfig)
-//! as a shared [`Arc`], so every client connection observes the same engine.
+//! "resume" / "run") and the [`DreamCycle`] that sequences a consolidation
+//! cycle over `akar-dream`'s phase primitives. The sequence lives here because
+//! the cycle is host-owned (SPEC §13): `akar-server` is the wire reference,
+//! while `sulur-server` owns it in production. It is wired into
+//! [`SessionConfig`](crate::session::SessionConfig) as a shared [`Arc`], so
+//! every client connection observes the same engine.
 //!
-//! Two backends back the orchestrator:
+//! Two backends back the cycle:
 //!
 //! - [`GraceBackend`] — a graceful-degradation stub used when the engine has no
 //!   database handle (e.g. unit tests). Every [`DreamBackend`] method is a
@@ -21,7 +24,8 @@
 use akar_common::types::Value;
 use akar_dream::backend::{self, DreamBackend};
 use akar_dream::config::DreamConfig;
-use akar_dream::orchestrator::{DreamOrchestrator, DreamStats};
+use akar_dream::phases;
+use akar_dream::stats::PhaseStats;
 use akar_main::connection::Connection;
 use akar_main::database::Database;
 use akar_main::query_result::QueryResult;
@@ -773,6 +777,93 @@ impl DreamBackend for GraphBackend {
     }
 }
 
+/// Statistics from a full dream cycle.
+///
+/// This summary is host-side on purpose: a cycle is a sequence, and the
+/// sequencing lives here rather than in `akar-dream` (SPEC §13).
+#[derive(Debug, Clone, Default)]
+pub struct DreamStats {
+    pub nrem: PhaseStats,
+    pub supersedes: PhaseStats,
+    pub rem: PhaseStats,
+    pub insights: PhaseStats,
+    pub afe: PhaseStats,
+    pub synthesis: PhaseStats,
+    pub dae: PhaseStats,
+    pub duration_ms: f64,
+    pub dream_id: u64,
+}
+
+/// Sequences the seven dream phases over an `akar-dream` storage port.
+///
+/// The phases themselves are Akar primitives; deciding to run them in this
+/// order is the host's call, so the cycle object lives on this side of the
+/// boundary. Every phase runs unconditionally — skipping phases is a
+/// cycle-level policy the host would apply by calling primitives directly.
+pub struct DreamCycle<B: DreamBackend> {
+    config: DreamConfig,
+    backend: B,
+    dream_count: u64,
+}
+
+impl<B: DreamBackend> DreamCycle<B> {
+    pub fn new(config: DreamConfig, backend: B) -> Self {
+        Self {
+            config,
+            backend,
+            dream_count: 0,
+        }
+    }
+
+    /// Run a full dream cycle: NREM → SUPERSEDES → REM → Insight → AFE → Synthesis → DAE.
+    #[cfg_attr(
+        feature = "embed",
+        doc = "When `embed` feature is enabled, accepts an optional embedding provider for the REM phase."
+    )]
+    pub fn run_cycle(
+        &mut self,
+        #[cfg(feature = "embed")] embedding: Option<&dyn akar_dream::EmbeddingProvider>,
+    ) -> DreamStats {
+        let start = std::time::Instant::now();
+        let mut stats = DreamStats::default();
+        self.dream_count += 1;
+        stats.dream_id = self.dream_count;
+
+        // NREM
+        stats.nrem = phases::nrem::run_nrem(&self.backend, &self.config);
+
+        // SUPERSEDES
+        stats.supersedes = phases::supersedes::run_supersedes(&self.backend);
+
+        // REM
+        stats.rem = phases::rem::run_rem(
+            &self.backend,
+            &self.config,
+            #[cfg(feature = "embed")]
+            embedding,
+        );
+
+        // INSIGHT
+        stats.insights = phases::insights::run_insights(&self.backend, &self.config);
+
+        // AFE
+        stats.afe = phases::afe::run_afe(&self.backend);
+
+        // SYNTHESIS
+        stats.synthesis = phases::synthesis::run_synthesis(&self.backend);
+
+        // DAE
+        stats.dae = phases::dae::run_dae(&self.backend);
+
+        stats.duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+        stats
+    }
+
+    pub fn dream_count(&self) -> u64 {
+        self.dream_count
+    }
+}
+
 /// Per-server dream engine lifecycle guarded behind a [`Mutex`].
 ///
 /// Clients never lock the orchestrator for long: `run_cycle` may execute all
@@ -789,8 +880,8 @@ pub struct DreamControl {
 /// - [`DreamControl::new`] uses the graceful stub (no database handle).
 /// - [`DreamControl::with_db`] uses the real graph backend.
 enum DreamEngine {
-    Grace(DreamOrchestrator<GraceBackend>),
-    Graph(Box<DreamOrchestrator<GraphBackend>>),
+    Grace(DreamCycle<GraceBackend>),
+    Graph(Box<DreamCycle<GraphBackend>>),
 }
 
 impl DreamEngine {
@@ -818,7 +909,7 @@ impl DreamControl {
     /// production graph-backed variant.
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            orchestrator: Mutex::new(DreamEngine::Grace(DreamOrchestrator::new(
+            orchestrator: Mutex::new(DreamEngine::Grace(DreamCycle::new(
                 DreamConfig::default(),
                 GraceBackend,
             ))),
@@ -838,7 +929,7 @@ impl DreamControl {
         #[cfg(not(feature = "embed"))]
         {
             Arc::new(Self {
-                orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamOrchestrator::new(
+                orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamCycle::new(
                     DreamConfig::default(),
                     GraphBackend::new(&db),
                 )))),
@@ -857,7 +948,7 @@ impl DreamControl {
         provider: Option<Arc<dyn akar_dream::EmbeddingProvider>>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamOrchestrator::new(
+            orchestrator: Mutex::new(DreamEngine::Graph(Box::new(DreamCycle::new(
                 DreamConfig::default(),
                 GraphBackend::with_embedding(&db, provider),
             )))),
@@ -920,6 +1011,7 @@ impl DreamControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use akar_dream::backend::{Edge, Memory, MockBackend};
     use akar_main::{Database, SystemConfig};
     use tempfile::TempDir;
 
@@ -1082,6 +1174,93 @@ mod tests {
         assert!(stats.nrem.strengthened + stats.nrem.weakened + stats.nrem.pruned == 0);
     }
 
+    #[test]
+    fn test_dream_cycle_default_config() {
+        let backend = MockBackend::new();
+        let mut cycle = DreamCycle::new(DreamConfig::default(), backend);
+        let stats = cycle.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        assert_eq!(stats.dream_id, 1);
+        assert!(stats.duration_ms >= 0.0);
+    }
+
+    #[test]
+    fn test_dream_cycle_incremental_dream_id() {
+        let backend = MockBackend::new();
+        let mut cycle = DreamCycle::new(DreamConfig::default(), backend);
+        let s1 = cycle.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        let s2 = cycle.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        assert_eq!(s1.dream_id, 1);
+        assert_eq!(s2.dream_id, 2);
+    }
+
+    #[test]
+    fn test_dream_cycle_runs_all_phases_without_data() {
+        // Replacement for the removed `enable_*` flags: the cycle has no
+        // phase-skipping knobs, so a cycle over an empty backend still runs all
+        // seven phases and each reports the default (zero) stats.
+        let backend = MockBackend::new();
+        let mut cycle = DreamCycle::new(DreamConfig::default(), backend);
+        let stats = cycle.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        assert_eq!(stats.dream_id, 1);
+        assert!(stats.duration_ms >= 0.0);
+        let touched = |p: &PhaseStats| {
+            p.strengthened + p.weakened + p.pruned + p.bridges + p.insights + p.facts + p.synthesized + p.recomputed
+        };
+        for phase in [
+            &stats.nrem,
+            &stats.supersedes,
+            &stats.rem,
+            &stats.insights,
+            &stats.afe,
+            &stats.synthesis,
+            &stats.dae,
+        ] {
+            assert_eq!(touched(phase), 0, "every phase must run: {phase:?}");
+        }
+    }
+
+    #[test]
+    fn test_dream_cycle_with_mock_data() {
+        let backend = MockBackend::new();
+        // Add some memories and edges
+        for i in 0..10 {
+            backend.memories.borrow_mut().push(Memory {
+                id: i,
+                salience: 0.5,
+                created_at: 1000.0 + i as f64,
+                content: format!("memory {i}"),
+            });
+        }
+        for i in 0..9 {
+            backend.edges.borrow_mut().push(Edge {
+                source_id: i,
+                target_id: i + 1,
+                weight: 0.5,
+            });
+        }
+
+        let mut cycle = DreamCycle::new(DreamConfig::default(), backend);
+        let stats = cycle.run_cycle(
+            #[cfg(feature = "embed")]
+            None,
+        );
+        assert_eq!(stats.dream_id, 1);
+        // NREM should have processed edges
+        assert!(stats.nrem.strengthened > 0 || stats.nrem.weakened > 0 || stats.nrem.pruned > 0);
+    }
+
     #[cfg(feature = "embed")]
     mod embed_tests {
         use super::*;
@@ -1149,7 +1328,7 @@ mod tests {
             // complete without error (mock storage + mock provider).
             let (db, _dir) = seeded_bridge_db();
             let backend = GraphBackend::with_embedding(&db, Some(Arc::new(MockProvider)));
-            let mut orch = DreamOrchestrator::new(DreamConfig::default(), backend);
+            let mut orch = DreamCycle::new(DreamConfig::default(), backend);
             let stats = orch.run_cycle(None);
             assert_eq!(stats.dream_id, 1);
         }

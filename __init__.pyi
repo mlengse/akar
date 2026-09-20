@@ -39,8 +39,6 @@ class spread:
 
 class dream:
     PyDreamConfig: Any
-    PyPhaseStats: Any
-    PyDreamStats: Any
 
 class knn: ...
 

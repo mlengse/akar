@@ -83,8 +83,10 @@ pub trait DreamBackend {
     fn recompute_dae(&self) -> usize;
 }
 
-/// Mock backend for testing.
-#[cfg(test)]
+/// In-memory [`DreamBackend`] test double.
+///
+/// Published (not `#[cfg(test)]`) so hosts can exercise the phase primitives
+/// without a database — `akar-server` drives it from its own unit tests.
 pub struct MockBackend {
     pub memories: std::cell::RefCell<Vec<Memory>>,
     pub edges: std::cell::RefCell<Vec<Edge>>,
@@ -96,14 +98,12 @@ pub struct MockBackend {
     pub weaken_amounts: std::cell::RefCell<Vec<f64>>,
 }
 
-#[cfg(test)]
 impl Default for MockBackend {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(test)]
 impl MockBackend {
     pub fn new() -> Self {
         Self {
@@ -117,7 +117,6 @@ impl MockBackend {
     }
 }
 
-#[cfg(test)]
 impl DreamBackend for MockBackend {
     fn sample_for_dream(
         &self,

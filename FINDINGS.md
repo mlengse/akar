@@ -60,10 +60,10 @@ variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada
 
 ---
 
-## F11 — 2026-09-19: Evolusi Arsitektur Sulur ke Rust & Pensiun Bertahap akar-server — RENCANA
+## F11 — 2026-09-19: Evolusi Arsitektur Sulur ke Rust & Pensiun Bertahap akar-server — TERBUKA
 
-**Ranah:** akar (arsitektur akar-main, akar-server, batas domain §13).
-**Status:** RENCANA — keputusan strategis pasca audit `ai-memory` dan standarisasi `hermes-plugins`.
+**Ranah:** akar (arsitektur akar-main, akar-dream, akar-server, batas domain §13).
+**Status:** TERBUKA — demosi `akar-dream` sudah mendarat; sisa itemnya pensiun penuh `akar-server` dari produksi (belum selesai).
 **Konteks:**
 1. **Penyelesaian Paradoks ADR-02:** Selama ini `akar-server` dipertahankan di workspace Akar sebagai kompromi (ADR-02) karena Sulur ditulis dalam Python dan memerlukan TCP broker tunggal untuk menghindari bentrok lock file database. Padahal, SPEC.md §13 menyatakan prinsip dasar: *"Akar ships no server — embedded library only"*.
 2. **Dampak Migrasi Sulur ke Rust:** Begitu Sulur dimigrasikan menjadi binary Rust mandiri (`sulur-server` yang meng-embed `akar-main`), Sulur akan langsung mengontrol file lock `sulur.db` secara in-process. 
@@ -73,6 +73,8 @@ variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada
    - Akar kembali 100% menjadi *pure embedded library* tanpa kontradiksi dokumentasi. Crate `akar-server` diturunkan statusnya menjadi *test harness / optional wire reference* saja.
 4. **Kesiapan `akar-main` untuk Direct Embedding:**
    - Diperlukan audit pada `akar-main` terkait kemudahan multi-threaded access dan pembagian koneksi via `Arc<Database>` pada async runtime Tokio tingkat tinggi yang akan dipakai oleh Sulur Rust.
+5. **Kemajuan — demosi `akar-dream` SELESAI (P127):** Akar berhenti mengorchestrasi. Crate `akar-dream` kini hanya memuat **primitif komputasi fase** + *storage port* (`DreamBackend`); `DreamOrchestrator`/`DreamStats` dan seluruh flag `enable_*` dihapus, dan `PhaseStats` turun status menjadi tipe hasil *satu fase* (bukan ringkasan siklus). Siklus 7 fase kini **milik host**: `akar-server` menyusunnya lewat `DreamCycle` lokal sebagai *wire reference*, dan `sulur-server` akan memilikinya di produksi. Ini menghapus sisa ambiguitas §13 di sisi Akar — Akar tidak lagi memutuskan fase mana yang jalan.
+6. **Sisa item F11:** pensiun penuh `akar-server` dari jalur produksi — akar **P124** / sulur **P4-RETIRE-1**. Belum selesai, sehingga finding ini tetap terbuka.
 
 ---
 
