@@ -24,14 +24,14 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 
 | Metric | Value |
 |--------|-------|
-| Workspace crates | **35** |
-| Lines of code | **~106K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,158** total, 0 ignored, 2,158 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P111: +13 tes — external spill hash join). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Workspace crates | **36** |
+| Lines of code | **~139K LOC** (pure Rust, git-tracked incl. tests) |
+| Tests passing | **2,242** total, 0 ignored, 2,242 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, Iterasi 3 P119–P122: +84 tes — decay Ebbinghaus, hierarchical RRF, authority re-weighting, ekstensi `akar-markdown`). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
-| Registered functions | **259** (244 scalar + 14 aggregate + 1 table) |
+| Registered functions | **260** (245 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
 | Physical operators | **50** structs (incl. `PhysicalMergeRel` P53.20, `PhysicalOptionalExtend` P53.25) |
-| Extensions | **15** crates |
+| Extensions | **16** crates |
 | Graph algorithms | **18** |
 
 ---
@@ -51,7 +51,7 @@ akar/
 │   ├── dependabot.yml
 │   └── pull_request_template.md
 │
-├── akar-core/                   # ★ Main Rust workspace (35 crates)
+├── akar-core/                   # ★ Main Rust workspace (36 crates)
 │   ├── Cargo.toml               # Workspace root
 │   ├── Cargo.lock
 │   ├── clippy.toml
@@ -74,6 +74,7 @@ akar/
 │   ├── akar-ml/                 # LSTM ML training
 │   │
 │   ├── akar-json/               # JSON extension
+│   ├── akar-markdown/           # Markdown wiki / OKF reader
 │   ├── akar-fts/                # Full-Text Search (BM25)
 │   ├── akar-vector/             # Vector similarity search
 │   ├── akar-algo/               # 18 graph algorithms
@@ -424,11 +425,13 @@ Special (2): `ANY`, `JSON`
 
 ---
 
-## 6. Functions (259 Registered)
+## 6. Functions (260 Registered)
 
-> Registry count (verified via `FunctionRegistry::new()`): **244 scalar + 14 aggregate + 1
-> table** = 259. `CALL show_tables()/db_version()/storage_info()` are handled as
+> Registry count (verified via `FunctionRegistry::new()`): **245 scalar + 14 aggregate + 1
+> table** = 260. `CALL show_tables()/db_version()/storage_info()` are handled as
 > `BoundStandaloneCall` in the DDL layer, not registered table functions.
+> Extension-provided functions (`read_markdown_wiki`, `json_extract`, …) are registered by their
+> extension's `load()` and are therefore **not** part of this built-in count.
 
 | Category | Count | Examples |
 |----------|:-----:|---------|
@@ -455,7 +458,7 @@ functions GDS (`akar-algo`). Lihat header §6 di atas.
 
 ---
 
-## 7. Extension Ecosystem (15 Crates)
+## 7. Extension Ecosystem (16 Crates)
 
 | Extension | Type | Crate | Description |
 |-----------|------|-------|-------------|
@@ -474,6 +477,7 @@ functions GDS (`akar-algo`). Lihat header §6 di atas.
 | Azure | DuckDB delegation | [akar-azure](akar-core/akar-azure) | `azure_scan` (abfss:// URI) |
 | Unity Catalog | DuckDB delegation | [akar-unity-catalog](akar-core/akar-unity-catalog) | `uc_scan` |
 | Server | Native Rust | [akar-server](akar-core/akar-server) | TCP listener + JSON framing |
+| Markdown Wiki / OKF | Native Rust | [akar-markdown](akar-core/akar-markdown) | `read_markdown_wiki` — YAML frontmatter + `[[wikilinks]]` → `node`/`rel` columns (P122) |
 
 Extensions are compiled statically via Cargo feature flags:
 
@@ -602,7 +606,7 @@ members = [
     "akar-search", "akar-dream", "akar-common", "akar-storage",
     "akar-transaction", "akar-catalog", "akar-parser", "akar-binder",
     "akar-planner", "akar-optimizer", "akar-processor", "akar-function",
-    "akar-graph", "akar-extension", "akar-json", "akar-fts", "akar-vector",
+    "akar-graph", "akar-extension", "akar-json", "akar-markdown", "akar-fts", "akar-vector",
     "akar-httpfs", "akar-duckdb", "akar-algo", "akar-neo4j", "akar-llm",
     "akar-sqlite", "akar-delta", "akar-iceberg", "akar-azure",
     "akar-postgres", "akar-unity-catalog", "akar-ml", "akar-main",
@@ -726,19 +730,20 @@ Triggered by pushing a version tag (`v*`):
 | `akar-planner` | 22 | Logical plan construction |
 | `akar-optimizer` | 93 | 24 optimization passes (audit P52.2–P52.7: 5 passes reviewed 2026-08-10, ART range scan fixed + 4 documented NO-OPs, +12 regression tests) |
 | `akar-processor` | 178 | Physical operators (Scan, Filter, HashJoin, OrderBy, Aggregate, etc.) |
-| `akar-function` | 184 | 259 registered functions |
+| `akar-function` | 198 | 260 registered functions (P119.1: `retention_score` decay Ebbinghaus) |
 | `akar-storage` | 364 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
 | `akar-main` (unit) | 83 | Database, Connection, QueryResult, DDL/DML, COPY FROM |
-| `akar-main` (integration) | 470 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3) |
+| `akar-main` (integration) | 474 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3), `retention_score` end-to-end (P119.1), `CALL read_markdown_wiki` column contract (P122, feature-gated) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
 | `akar-vector` | 37 | Vector similarity search (cosine scale-invariance, P51.46) |
 | `akar-json` | 14 | JSON functions |
+| `akar-markdown` | 44 | Markdown wiki / Open Knowledge Format reader — YAML frontmatter subset + `[[wikilinks]]`, `read_markdown_wiki` table function (P122) |
 | `akar-fts` | 53 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) + commit-time propagation `apply_doc_writes` (P107.1) + reader handle `FtsIndexHandle` reload-at-commit (P107.2) + crash recovery: last committed survives (P107.3) |
 | `akar-algo` | 81 | Graph algorithm extensions |
-| `akar-search` | 40 | Search utilities |
-| `akar-dream` | 5 | Dream engine |
+| `akar-search` | 54 | Search utilities, hierarchical multi-vector RRF + authority re-weighting (P121) |
+| `akar-dream` | 12 | Dream engine — retention-derived NREM decay (P119.2) |
 | `akar-ml` | 28 | ML functions (node2vec walk/SGD invariants) |
 | `akar-extension` | 15 | Extension framework registry |
 | `akar-c` (FFI) | 18 | `extern "C"` binding tests |
@@ -751,8 +756,8 @@ Triggered by pushing a version tag (`v*`):
 | `akar-sqlite` / `akar-azure` / `akar-delta` / `akar-iceberg` / `akar-unity-catalog` | 5 | Integration extensions (1 each) |
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 0* | Migration tool (idempotent, fixed P48.5; *not exercised by the default gate) |
-| Doc-tests | 8 | Doc-tests across all crates |
-| **Total** | **2,158** | **2,158 total, 0 ignored, 2,158 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, P111: +13 tes — external spill hash join). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
+| Doc-tests | 9 | Doc-tests across all crates |
+| **Total** | **2,242** | **2,242 total, 0 ignored, 2,242 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, Iterasi 3 P119–P122: +84 tes). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
 
 ### 11.2 Test Datasets
 

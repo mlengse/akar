@@ -9,9 +9,10 @@
 
 Semua temuan audit sudah selesai: F1 `508328a`, F2 `ff1a995`,
 F3 & F6 `2ba16d8`, F4 `ef792bb`, F5 `1270400` (riwayat di `CHANGELOG.md`).
-F9 & F7-reguard `cd31526` (P114), F12 `P125`, F13 `P126` — semuanya sudah ditutup
-dan dipindah ke `CHANGELOG.md`; hanya temuan yang masih terbuka/masih punya celah
-yang tinggal di berkas ini.
+F9 & F7-reguard `cd31526` (P114), F12 `P125`, F13 `P126`, dan F10 (seluruh 5 primitif
+yang diadopsi: P119 decay Ebbinghaus, P120 embedding lokal, P121 hierarchical RRF +
+authority multiplier, P122 `akar-markdown`) — semuanya sudah ditutup dan dipindah ke
+`CHANGELOG.md`; hanya temuan yang masih terbuka/masih punya celah yang tinggal di berkas ini.
 
 ---
 
@@ -28,29 +29,6 @@ yang tinggal di berkas ini.
    - Akar kembali 100% menjadi *pure embedded library* tanpa kontradiksi dokumentasi. Crate `akar-server` diturunkan statusnya menjadi *test harness / optional wire reference* saja.
 4. **Kesiapan `akar-main` untuk Direct Embedding:**
    - Diperlukan audit pada `akar-main` terkait kemudahan multi-threaded access dan pembagian koneksi via `Arc<Database>` pada async runtime Tokio tingkat tinggi yang akan dipakai oleh Sulur Rust.
-
----
-
-## F10 — 2026-09-19: Komparasi Arsitektur dengan ai-memory & Adopsi Primitif Komputasi Memori — RENCANA
-
-**Ranah:** akar (akar-function, akar-dream, akar-search, akar-vector, akar-extension).
-**Status:** RENCANA — referensi arsitektur dari audit proyek `ai-memory` (Fabio Akita / MIT).
-**Konteks:** Perbandingan antara engine basis data grafik Akar dengan sistem memori agent `ai-memory`.
-Batas domain (§13) tetap ditegakkan: Akar tetap embedded database library murni (tanpa server daemon atau hooks agent).
-Namun, terdapat 5 primitif komputasi & retrieval dari `ai-memory` yang bernilai tinggi untuk diadopsi langsung ke Akar:
-
-1. **Formula Decay Ebbinghaus (Retensi Temporal Berbasis Akses):**
-   `ai-memory` menggunakan rumus retensi matematis murni:
-   $$R = \text{salience} \cdot e^{-\lambda \Delta t} + \sigma \cdot \ln(1 + \text{access\_count}) \cdot e^{-\mu \cdot \Delta t_{\text{last}}} \cdot (1 + w_{\text{breadth}} \cdot \ln(\text{actors}))$$
-   Di Akar, fase NREM `akar-dream` saat ini menggunakan pelemahan statis konstan (`weaken_edge(..., 0.05)`). Diperlukan scalar function Cypher di `akar-function` dan integrasi formula eksponensial ini ke NREM prune/strengthen cycle.
-2. **In-Process Pure-Rust Local Embeddings via Candle (`akar-vector`):**
-   `ai-memory` mengintegrasikan `candle-core` dan `tokenizers` untuk komputasi embedding teks lokal tanpa ketergantungan API eksternal. Di Akar, `akar-vector` saat ini hanya mengelola index HNSW dan `akar-llm` bergantung pada HTTP REST. Fitur opsional `candle` di `akar-vector` akan membuat Akar 100% mandiri dan offline-first.
-3. **Multi-Stream Hierarchical RRF Fusion (L0 Abstract vs L1 Body) (`akar-search`):**
-   `ai-memory` membedakan embedding ringkasan/abstrak (L0) dari embedding konten penuh (L1) dalam 5-way RRF. Akar dapat memperluas `PhysicalHybridScan` dan `akar-optimizer` untuk multi-property vector scan berbobot hierarkis bersama BM25 Tantivy.
-4. **Authority / Metadata-Aware Rank Multiplier (`akar-processor`):**
-   Penyesuaian skor pasca-fusi berbasis otoritas kategori/label (misal: node bertipe `:Decision` atau `:Rule` mendapat multiplier lebih tinggi dibanding log episodik) secara tervektorisasi pada Arrow chunk sebelum `LIMIT`.
-5. **Ekstensi `akar-markdown` / Open Knowledge Format (OKF) Reader (`akar-extension`):**
-   Ekstensi table function `CALL read_markdown_wiki('/path')` untuk memetakan direktori Markdown + YAML frontmatter + `[[wikilinks]]` menjadi Node Table (`Page`) dan Relationship Table (`LINKS_TO`) secara langsung di Cypher.
 
 ---
 
