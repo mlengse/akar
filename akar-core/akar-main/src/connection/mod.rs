@@ -27,6 +27,8 @@ pub mod utils;
 
 use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;
+use crate::query_result::QueryResult;
+use akar_common::types::Value;
 use plan_cache::{CachedPlan, PlanCache};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -105,6 +107,22 @@ impl Connection {
             explicit_txn_active: std::sync::atomic::AtomicBool::new(false),
             processor_handlers: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Run a parameterised statement, reusing the prepared statement cache.
+    ///
+    /// Shorthand for [`Self::prepare`] followed by [`Self::execute`], for
+    /// callers that run the same statement shape repeatedly (bulk writes in
+    /// [`crate::bulk`], for instance). The statement is parsed once per distinct
+    /// text thanks to the statement cache; planning still happens per call.
+    ///
+    /// # Errors
+    ///
+    /// Propagates parse/bind errors from [`Self::prepare`] and missing- or
+    /// unknown-parameter errors from [`Self::execute`].
+    pub fn execute_params(&self, query_str: &str, params: Vec<(&str, Value)>) -> Result<QueryResult, String> {
+        let prepared = self.prepare(query_str)?;
+        self.execute(&prepared, params)
     }
 
     /// Clear the prepared statement and plan caches.

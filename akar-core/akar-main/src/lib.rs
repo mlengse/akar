@@ -1,7 +1,9 @@
 //! Akar public API — Database, Connection, QueryResult, PreparedStatement.
 
+pub mod bulk;
 pub mod connection;
 pub mod database;
+pub mod pool;
 pub mod prepared_statement;
 pub mod query_result;
 pub mod remote;
@@ -20,8 +22,12 @@ mod connection_test;
 /// Always compiled (not cfg(test)-gated) so integration tests in `tests/` can use them.
 pub mod test_helpers;
 
+pub use bulk::{
+    DEFAULT_ROWS_PER_STATEMENT, EdgeRow, Neighbor, RelSpec, TypedNode, insert_edges, insert_nodes, neighbors,
+};
 pub use connection::Connection;
 pub use database::{Database, SystemConfig};
+pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use prepared_statement::PreparedStatement;
 pub use query_result::QueryResult;
 pub use remote::RemoteDatabase;
