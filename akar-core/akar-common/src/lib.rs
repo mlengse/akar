@@ -18,6 +18,7 @@ pub mod gzip_file_system;
 pub mod memory;
 pub mod memory_account;
 pub mod progress_bar;
+pub mod query_pool;
 pub mod selection;
 pub mod serialization;
 pub mod task_system;
