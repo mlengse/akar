@@ -73,7 +73,7 @@ tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"
-parquet = "59.1.0"
+parquet = "60.0.0"
 proptest = "1.6"
 arrow = { workspace = true }
 criterion.workspace = true
