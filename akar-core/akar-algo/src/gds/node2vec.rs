@@ -13,7 +13,15 @@ fn generate_walks(
     rng: &mut SimpleRng,
 ) -> Vec<Vec<usize>> {
     let n = csr.num_nodes();
+    let inv_p = 1.0 / p;
+    let inv_q = 1.0 / q;
     let mut all_walks = Vec::with_capacity(n * walks);
+
+    // Bolt Optimization: Reuse scratch buffer `weights` across step iterations to eliminate
+    // millions of dynamic heap allocations during random walk generation, and pre-fetch
+    // `csr.neighbors(prev)` outside the neighbor loop.
+    let mut weights = Vec::new();
+
     for start in 0..n {
         for _ in 0..walks {
             let mut walk = Vec::with_capacity(window);
@@ -29,17 +37,19 @@ fn generate_walks(
                 }
 
                 // Node2Vec biased sampling
-                let mut weights = Vec::with_capacity(neighbors.len());
+                weights.clear();
+                weights.reserve(neighbors.len());
                 let mut total_weight = 0.0;
+                let prev_neighbors = csr.neighbors(prev);
 
                 for (_, dst) in neighbors {
                     let next = dst.offset as usize;
                     let weight = if next == prev {
-                        1.0 / p
-                    } else if csr.neighbors(prev).iter().any(|(_, d)| d.offset as usize == next) {
+                        inv_p
+                    } else if prev_neighbors.iter().any(|(_, d)| d.offset as usize == next) {
                         1.0
                     } else {
-                        1.0 / q
+                        inv_q
                     };
                     weights.push(weight);
                     total_weight += weight;
@@ -138,9 +148,18 @@ pub fn compute_node2vec(
 }
 
 fn update_embedding(embeddings: &mut [f64], u: usize, v: usize, dim: usize, target: f64, lr: f64) {
+    if dim == 0 {
+        return;
+    }
+
+    // Bolt Optimization: Precompute row offsets `u_off` and `v_off` to avoid repeated
+    // multiplication and bounds checking inside hot dot product and SGD update loops.
+    let u_off = u * dim;
+    let v_off = v * dim;
+
     let mut dot = 0.0;
     for i in 0..dim {
-        dot += embeddings[u * dim + i] * embeddings[v * dim + i];
+        dot += embeddings[u_off + i] * embeddings[v_off + i];
     }
 
     // Sigmoid
@@ -152,10 +171,10 @@ fn update_embedding(embeddings: &mut [f64], u: usize, v: usize, dim: usize, targ
     let grad = lr * (target - prob);
 
     for i in 0..dim {
-        let update_u = grad * embeddings[v * dim + i];
-        let update_v = grad * embeddings[u * dim + i];
-        embeddings[u * dim + i] += update_u;
-        embeddings[v * dim + i] += update_v;
+        let u_val = embeddings[u_off + i];
+        let v_val = embeddings[v_off + i];
+        embeddings[u_off + i] += grad * v_val;
+        embeddings[v_off + i] += grad * u_val;
     }
 }
 
