@@ -95,6 +95,48 @@ durabilitas yang diputuskan sadar.
 byte; yang berubah hanyalah panjang jendela replay dan biaya per tulis. Karena itu pertanyaan lama
 "`-1` mungkin memang disengaja" **sudah terjawab: tidak.** Yang tersisa murni trade-off (P128.2).
 
+### Temuan lanjutan (audit konsumen + pra-ukur, 2026-09-23)
+
+Empat hal yang mengubah bentuk keputusan, ditemukan setelah P128.1:
+
+1. **`akar-python` tidak punya permukaan `SystemConfig` sama sekali.** `Database` Python dibuka dengan
+   `akar_main::Database::new(path, Default::default())` (`akar-core/akar-python/src/lib.rs:57`) — tanpa
+   argumen config apa pun. Artinya opsi "Sulur mengirim ambangnya sendiri dari jalur embedded Python"
+   **tidak mungkin hari ini**: ia menuntut API baru di akar-python lebih dulu. Jadi arah (B) bukan
+   "cukup dokumentasi", melainkan "dokumentasi **+ API config di akar-python**".
+2. **Jalur daemon sudah memilih 16 MiB, dan menyebut `-1` sebagai pemulihan perilaku lama.**
+   `akar-server --checkpoint-threshold` default `16 * 1024 * 1024` (`akar-server/src/bin/akar_server.rs:87`),
+   dengan help text *"disable auto-checkpoint, or -1 to restore checkpoint-per-write."* Repo ini karena
+   itu sudah memutuskan 16 MiB sebagai default produksi dan `-1` sebagai opt-in legacy; yang tersisa bagi
+   P128.2 adalah menyelaraskan default **pustaka** dengan keputusan itu.
+3. **`-1` sudah dua kali menimbulkan cacat, bukan hanya lambat.** P67 (`0.1.14`): dengan `-1` setiap commit
+   memicu auto-checkpoint, dan drain 30 s di jalur itu **selalu timeout** di bawah penulis konkuren
+   (Hermes gateway + klien kairos) — diperbaiki dengan melewati drain untuk auto-checkpoint. Ditambah
+   amplifikasi tulis di bawah, `-1` punya rekam jejak dua kelas masalah.
+4. **Blast radius perubahan default (bahan P128.3).** `SystemConfig::default()` dipakai oleh default FFI
+   `akar-c`, `akar-cli` (mewarisi `-1`), `akar-python` (mewarisi), `akar-main/src/bin/ladybug.rs`, banyak
+   bench, dan helper tes (`test_helpers::setup_db`/`setup_db_on_disk`) plus beberapa tes crash-recovery.
+   Dua konsekuensi yang perlu disebut terang-terangan: (a) `storage_io_bench::bench_insert_throughput`
+   memakai default, jadi **benchmark throughput akar sendiri mengukur jalur `-1`** — kalau angka
+   `SPEC.md` §12.1 berasal dari sana, ia perlu diukur ulang setelah perubahan; (b) suite crash-recovery
+   ditulis di atas semantik default lama, jadi (A) bukan perubahan satu baris.
+
+**Pra-ukur P128.4 (debug, 100 `CREATE` ke satu tabel 2 kolom, satu mesin, 2026-09-23):**
+
+| `checkpoint_threshold` | 100 creates |
+|---|---|
+| `-1` (checkpoint tiap tulis) | **2,648 s** |
+| 16 MiB | **0,474 s** |
+| `0` (tidak pernah — referensi batas bawah, bukan kandidat) | 0,470 s |
+
+`-1` **5,6×** lebih lambat, dan 16 MiB tak terbedakan dari "tidak pernah checkpoint" pada volume ini
+(WAL tak pernah mencapai 16 MiB). Angka absolut Sulur (~20–25 s per 100 store) lebih besar karena setiap
+memori menulis vektor 384-dim, sehingga mirror yang ditulis ulang tiap checkpoint jauh lebih berat —
+arah dan sebabnya sama. Probe-nya sementara dan tidak ikut di-commit.
+
+**Catatan dokumentasi:** `SPEC.md` tidak menyebut `checkpoint_threshold` maupun auto-checkpoint sama
+sekali, jadi apa pun arahnya, kebijakan checkpoint perlu satu paragraf di SPEC (§15 atau §17).
+
 ### Langkah lanjut (usul, belum dikerjakan)
 
 - **Putuskan salah satu:** ubah default `SystemConfig` menjadi threshold nyata (mis. 16 MiB, selaras
