@@ -39,6 +39,11 @@
 
 ### Changed
 
+- **P124.2 — referensi broker daemon dibersihkan dari dokumentasi Akar; Akar 100% pure embedded library (§13 / ADR-02)** · `README.md`, `SPEC.md`, `implementation plan.md` · gate **2,259** (tanpa perubahan kode)
+  - `akar-server` tidak lagi dipresentasikan sebagai permukaan produksi: entri crate di README, pohon repo SPEC §2, tabel ekstensi SPEC §7, dan bagian SPEC §13.4 kini menyebutnya **test harness / wire reference only** — konsisten dengan ADR-02 (broker lifecycle milik konsumen; `sulur-server` adalah daemon produksi).
+  - Item plan P124 ditutup: `implementation plan.md` hanya memuat pekerjaan yang belum dikerjakan, jadi blok "Iterasi 5 — Pensiun Bertahap `akar-server`" dihapus dan statusnya cukup dicatat di ringkasan iterasi. Backlog "Streaming/Chunked query results" tidak lagi diatribusikan ke `akar-server` karena Akar tetap embedded.
+  - Tanpa perubahan kode, tes, atau gate: murni penyelarasan dokumen, diverifikasi `python tools/doc-check.py --akar` PASS.
+
 - **P127 — `akar-dream` diturunkan jadi primitif fase murni; siklus dream jadi milik host (ADR-03 / §13)** · `akar-core/akar-dream/src/{lib,stats,backend,config}.rs`, `akar-core/akar-server/src/dream.rs`, `akar-core/akar-python/src/dream.rs` · gate **2,259** (tetap; 4 tes pindah `akar-dream` → `akar-server`, bukan bertambah)
   - **Siklus keluar dari Akar.** `orchestrator.rs` dihapus: `DreamOrchestrator` + `DreamStats` (ringkasan siklus) hilang dari `akar-dream`, yang kini hanya memuat primitif fase + port storage (`DreamBackend`). Penjadwalan siklus pindah ke host — `akar-server` menambah `DreamCycle`/`DreamStats` lokal sebagai wire reference, `sulur-server` memilikinya di produksi.
   - **Tujuh flag `enable_*` dihapus dari `DreamConfig`.** Karena `DreamConfig::default()` dulu semuanya `true`, `DreamCycle` menjalankan ketujuh fase tanpa syarat — perilaku tidak berubah, tetapi "fase mana yang jalan" kini keputusan siklus (milik host), bukan knob penyetelan primitif. `DreamConfig` tinggal berisi tuning primitif.

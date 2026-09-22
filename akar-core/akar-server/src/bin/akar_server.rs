@@ -1,8 +1,9 @@
-//! `akar-server` daemon binary (P62).
+//! `akar-server` reference binary (P62) — **not a production surface** (§13).
 //!
 //! A standalone process that owns the Akar `Database` and serves TCP clients.
-//! Designed to replace the Python daemon (`sulur.kuzu_daemon`) as the single
-//! DB owner, eliminating race conditions between interpreters.
+//! Since Iterasi 4 the production daemon is Sulur's own `sulur-server`, which
+//! embeds `akar-main` in-process; this binary survives as a test harness and as
+//! the wire reference for the framing `sulur-server` speaks.
 //!
 //! # Usage
 //!

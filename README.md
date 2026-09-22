@@ -41,7 +41,9 @@ pip install akar
 ```
 
 Akar is an **embedded library** — it ships no server. The broker/daemon lifecycle used by
-AI-agent memory engines is owned by a separate consumer (see [Origins](#origins)).
+AI-agent memory engines is owned by a separate consumer (see [Origins](#origins)); the
+`akar-server` crate in this workspace is a **test harness / wire reference only**, never a
+production broker.
 
 ## Quick Start
 
@@ -101,7 +103,7 @@ contains 36 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-fts` | Full-text search (BM25) |
 | `akar-vector` | Vector similarity search |
 | `akar-markdown` | Markdown wiki / OKF reader (`read_markdown_wiki`) |
-| `akar-server` | Embedded TCP server mode (multi-process access) |
+| `akar-server` | TCP wire harness (test/reference only — **not** a production surface) |
 | `akar-c` | C FFI API (`extern "C"`) |
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |

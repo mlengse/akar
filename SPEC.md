@@ -93,7 +93,7 @@ akar/
 │   ├── akar-cli/                # Interactive Cypher REPL shell
 │   ├── akar-wasm/               # WebAssembly bindings
 │   ├── akar-c/                  # C FFI API (extern "C")
-│   ├── akar-server/             # Embedded TCP server mode
+│   ├── akar-server/             # TCP wire harness (test/reference only)
 │   └── akar-migrate/            # C++ → Rust migration tool
 │
 ├── dataset/                     # 68 test datasets (CSV, Parquet, JSON)
@@ -476,7 +476,7 @@ functions GDS (`akar-algo`). Lihat header §6 di atas.
 | Iceberg | DuckDB delegation | [akar-iceberg](akar-core/akar-iceberg) | `iceberg_scan`, `iceberg_metadata` |
 | Azure | DuckDB delegation | [akar-azure](akar-core/akar-azure) | `azure_scan` (abfss:// URI) |
 | Unity Catalog | DuckDB delegation | [akar-unity-catalog](akar-core/akar-unity-catalog) | `uc_scan` |
-| Server | Native Rust | [akar-server](akar-core/akar-server) | TCP listener + JSON framing |
+| Server (reference) | Native Rust | [akar-server](akar-core/akar-server) | TCP listener + JSON framing — test harness / wire reference only, **not** a production surface (§13) |
 | Markdown Wiki / OKF | Native Rust | [akar-markdown](akar-core/akar-markdown) | `read_markdown_wiki` — YAML frontmatter + `[[wikilinks]]` → `node`/`rel` columns (P122) |
 
 Extensions are compiled statically via Cargo feature flags:
@@ -871,10 +871,11 @@ conn.query("COMMIT")?;
 ### 13.3 WebAssembly ([akar-wasm](akar-core/akar-wasm))
 - `AkarDatabase`, `AkarConnection`, `AkarPreparedStatement` wrappers for Node.js
 
-### 13.4 TCP Server ([akar-server](akar-core/akar-server))
+### 13.4 TCP Server ([akar-server](akar-core/akar-server)) — reference only
 - Length-prefixed JSON framing over TCP
 - Session bridging via `TransactionManager`
 - Supports concurrent read/write clients
+- **Not a production surface (§13):** Akar ships as an embedded library and never as a daemon. The broker lifecycle belongs to the consumer; `akar-server` survives as a test harness and wire reference, while Sulur's own `sulur-server` is the production daemon (ADR-02).
 
 ---
 
