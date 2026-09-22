@@ -20,7 +20,8 @@ authority multiplier, P122 `akar-markdown`) — semuanya sudah ditutup dan dipin
 ## F15 — 2026-09-21: `SystemConfig::default()` memakai `checkpoint_threshold = -1` (checkpoint tiap tulisan) — TERBUKA
 
 **Ranah:** akar (`SystemConfig` default) ↔ sulur (jalur embedded Python + `sulur-server`).
-**Status:** TERBUKA — terungkap saat Iterasi 4 (P4-RETIRE-1); dihindari (bukan diperbaiki) dengan mengirim threshold eksplisit.
+**Status:** TERBUKA — punya item **`implementation plan.md` Iterasi 6 / P128**; terungkap saat Iterasi 4
+(P4-RETIRE-1) dan dihindari (bukan diperbaiki) dengan mengirim threshold eksplisit.
 
 ### Gejala
 
