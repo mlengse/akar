@@ -137,11 +137,49 @@ arah dan sebabnya sama. Probe-nya sementara dan tidak ikut di-commit.
 **Catatan dokumentasi:** `SPEC.md` tidak menyebut `checkpoint_threshold` maupun auto-checkpoint sama
 sekali, jadi apa pun arahnya, kebijakan checkpoint perlu satu paragraf di SPEC (§15 atau §17).
 
-**Yang belum diketahui (jangan dibaca seolah sudah terjawab):**
-- Pra-ukur di atas berjalan di **mode debug, satu mesin**. Yang bermakna rasionya; angka absolutnya tidak.
-- **Ukuran blast radius perubahan default belum diukur.** Audit di atas memetakan *siapa* yang memakai
-  `SystemConfig::default()`, bukan *berapa* yang akan pecah dan kenapa — itu pertanyaan eksperimen (P129).
-- Angka Sulur (~20–25 s per 100 store) adalah **kutipan komentar tesnya**, bukan pengukuran independen.
+### Hasil eksperimen P129 (2026-09-23) — arah (A) di branch scratch
+
+Dijalankan sesuai prosedur yang ditetapkan lebih dulu: branch scratch dari `main`, satu-satunya perubahan
+`SystemConfig::default().checkpoint_threshold` → `16 * 1024 * 1024`, lalu `cargo test --workspace --no-fail-fast`
+**satu kali tanpa beban paralel**. Branch sudah dihapus; tidak ada yang mendarat di `main`.
+
+**Hasil: 2.259 passed / 1 failed** (total 2.260 — sama persis dengan baseline).
+
+Yang **tidak** pecah justru yang paling penting: **`test_crash_recovery.rs` 14/14 hijau**, termasuk
+`test_auto_checkpoint_threshold_various` dan seluruh `test_wal_replay_*`. Dugaan lama bahwa suite
+crash-recovery berdiri di atas semantik default lama **tidak terbukti**: tidak ada asumsi durabilitas
+tersembunyi di sana (`test_data_durability` dan `test_catalog_persistence` juga hijau).
+
+Yang pecah satu: `test_join_spill::hash_join_spills_under_a_tight_budget_and_still_returns_every_row`
+(`akar-main/tests/test_join_spill.rs:83` — *"with a 16384 byte budget the join must have spilled"*).
+
+**Sebabnya — jalur tidak langsung yang tidak diperkirakan aturan keputusan.** Tes itu membangun DB dengan
+`max_db_size: 16 * 1024` saja (`..SystemConfig::default()`). `Database::new` menyerahkan governor ke
+`MemoryGovernor::new(memory_manager)` (`akar-main/src/database.rs:661`), dan headroom-nya = budget − alokasi
+buffer pool (dipin unit test `test_governor_reflects_global_pressure` &
+`test_governor_depleted_headroom_saturates_zero` di `akar-common/src/query_pool.rs`). Rantainya:
+`checkpoint_threshold` 16 MiB → tulis tidak lagi checkpoint (`checkpoint()` memanggil `buffer_manager.flush_all()`,
+`akar-storage/src/checkpoint.rs:57`) → halaman kotor menumpuk di buffer pool → alokasi buffer pool ≥ budget
+16 KiB → headroom 0 → **grant 0** → dan pada grant 0 join spill memang mengambil jalur "tidak ada yang bisa
+dituju → join in-memory" (perilaku yang sudah didokumentasikan di entri P111) → `spill_events()` tetap 0 →
+asersi gagal. Dengan `-1` buffer pool dijaga tetap kecil, sehingga grant-nya bukan nol dan join benar-benar spill.
+
+**Klasifikasi terhadap aturan keputusan yang ditetapkan lebih dulu:** hasil ini masuk **bucket 2** ("hanya
+tes yang berdiri di atas default lama, bukan assert durabilitas"), **tetapi mekanismenya tidak diperkirakan
+bucket mana pun.** Yang berubah bukan konfigurasi tes, melainkan **okupansi buffer pool** yang menyuapi
+anggaran governor; bucket 2 hanya kebetulan menangkapnya karena remedinya sama (sebut ambangnya eksplisit,
+jangan bergantung pada efek samping default). Pelajarannya: saat default ditinjau, yang perlu diaudit bukan
+hanya `checkpoint_threshold` itu sendiri, melainkan pula **okupansi buffer pool** yang bergantung padanya.
+Dicatat sebagai pelajaran — bukan ditafsirkan ulang secara diam-diam.
+
+**Kesimpulan menurut aturan itu:** (A) **viabel** — tidak ada tes durabilitas yang pecah, dan satu-satunya
+kerusakan duduk di rezim degenerate yang sudah diperingatkan P110.2 (budget lebih kecil dari alokasi
+buffer-pool baseline-nya) serta memperbaiki dirinya dengan menyebut konfigurasinya eksplisit (P128.3).
+Keputusan arah (P128.2) tetap milik maintainer.
+
+**Baseline Sulur kini juga terukur:** **20,84 s** untuk 100 store embedded (sebelumnya kutipan komentar
+tes) — lihat `sulur/docs/FINDINGS.md` #44. Satu keterbatasan masih berlaku: pra-ukur 5,6× di atas berjalan
+di **mode debug, satu mesin**, jadi rasionya yang bermakna, bukan angka absolutnya.
 
 ### Langkah lanjut (usul, belum dikerjakan)
 
