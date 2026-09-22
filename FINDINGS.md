@@ -115,14 +115,16 @@ variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada
 
 ---
 
-## F8 — 2026-09-19: verifikasi live DAE (fix #38 Sulur) terhadap daemon produksi — TERVERIFIKASI
+## F8 — 2026-09-19: verifikasi live DAE terhadap daemon produksi (fix `2464f40` Sulur) — TERVERIFIKASI, satu utas terbuka
 
 **Ranah:** akar (daemon/DB produksi) ↔ sulur. **Status:** TERVERIFIKASI — DAE pass penuh + resume
-berjalan tanpa kerusakan, schema DDL tanpa `DEFAULT` diterima.
+berjalan tanpa kerusakan, schema DDL tanpa `DEFAULT` diterima. Utas yang masih terbuka: temuan
+sampingan no.2 di bawah (batch besar tidak rentan di jalur DAE, kontras dengan F7 no.2 — layak
+ditelusuri terpisah).
 **Biner:** `~/.cargo/bin/akar_server.exe` v0.2.3 (dibangun 2026-09-18 23:34, HEAD `40415b9`) — sama dengan
 yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
 **DB:** `~/.sulur/engine/sulur.db` (daemon live, pid 3268 / port 9876, sidecar token OK).
-**Sumber:** verifikasi sisi kliem (repo Sulur, fix #38 commit `2464f40`) — replay DDL drive lewat
+**Sumber:** verifikasi sisi kliem (repo Sulur, fix DDL `2464f40`) — replay DDL drive lewat
 `DaemonClientStore` dari repo, bukan biner akar.
 
 ### Hasil verifikasi (live, 912 memori / max id 929)
@@ -160,9 +162,9 @@ yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
 
 ---
 
-## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — TERATASI (`cd31526`)
+## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — kode TERATASI (`cd31526`), verifikasi live TERBUKA
 
-**Ranah:** akar (storage / WAL replay). **Status:** TERATASI di tingkat kode — guard tulis (P114.1) mencegah WAL lahir tak-replayable dan mode salvage resmi (P114.2) menyediakan jalur pemulihan; verifikasi live ulang pada daemon produksi belum dijalankan.
+**Ranah:** akar (storage / WAL replay). **Status:** TERATASI di tingkat kode — guard tulis (P114.1) mencegah WAL lahir tak-replayable dan mode salvage resmi (P114.2) menyediakan jalur pemulihan; verifikasi live ulang pada daemon produksi **belum dijalankan**, dan dua utas sampingan di bawah (kematian daemon senyap, batch tulis besar rentan) masih terbuka — karena itu finding ini belum boleh dihapus.
 **Biner:** `~/.cargo/bin/akar_server.exe`, dibangun ulang **2026-09-18 23:34** (tree = `v0.2.3`, HEAD `40415b9`).
 **DB:** `~/.sulur/engine/sulur.db` (daemon Sulur/Hermes, live).
 **Konteks:** batch harian cron `belajar-puskesmas-notebooklm` (06:00) — daemon sudah mati sebelum job jalan.

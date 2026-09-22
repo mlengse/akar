@@ -93,8 +93,6 @@
   - `akar-server` mencatat `START`/`EXIT` (pid + db) sehingga spawn yang tidak pernah menulis `EXIT` terlihat abnormal — menjawab keluhan F7 "proses berhenti tanpa jejak".
   - Tes `now_ms_is_positive`, `logging_allocator_delegates_to_system` (akar-server).
 
-### Fixed
-
 - **P126 — argumen agregat yang bukan kolom polos tidak lagi menghasilkan NULL (menutup F13)** · gate **2,116** (+2: 2,114 → 2,116)
   - Akar F13: `resolve_agg_col_indices` (`akar-processor/src/physical/order_aggregate/aggregatehashtable.rs`) memetakan argumen agregat ke **indeks kolom** dan hanya mengenal `Variable`/`PropertyAccess` (plus `Star` = `COUNT(*)`, yang memang tidak butuh kolom); bentuk lain jatuh ke `_ => {}` → `None`, dimaknai "tidak butuh kolom" → agregat tidak menerima nilai → `SUM(s.bridges * 2)`, `SUM(abs(x))`, `SUM(CASE …)` semua `NULL`.
   - Perbaikan diletakkan di **mapper**, bukan di physical aggregate (hot path itu tidak memegang `FunctionRegistry`): `map_aggregate.rs::map_and_execute_aggregate` mengevaluasi tiap argumen terhitung per-chunk lewat `ExpressionEvaluator`, menambahkannya sebagai kolom trailing sintetis (`__akar_agg_arg_N`, termasuk `field_names`-nya), lalu menulis ulang argumen itu menjadi referensi kolom — sehingga agregat fisik hanya melihat kolom polos dan **seluruh fast path tetap berlaku** (COUNT, Sum/Min/Max/Avg, jalur DISTINCT P88, dan GROUP BY terpartisi).
