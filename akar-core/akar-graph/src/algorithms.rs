@@ -8,7 +8,6 @@
 
 use crate::graph::CSRAdjacency;
 use hashbrown::HashMap;
-use std::collections::VecDeque;
 
 /// Result of a graph algorithm containing node-level values.
 #[derive(Debug, Clone)]
@@ -23,28 +22,48 @@ pub struct AlgorithmResult {
 
 /// BFS traversal from a source node.
 /// Returns (distance, parent) for each reachable node.
+// Bolt Optimization: Pre-allocated contiguous Vec queue with head index cursor and
+// integer sentinel distance tracking avoids VecDeque ring-buffer overhead, Option allocations,
+// and unwrap overhead in BFS traversal.
 pub fn bfs(csr: &CSRAdjacency, source: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let n = csr.num_nodes();
-    let mut distance = vec![None; n];
-    let mut parent = vec![None; n];
-    let mut queue = VecDeque::new();
+    if n == 0 || source >= n {
+        return (vec![None; n], vec![None; n]);
+    }
 
-    distance[source] = Some(0);
-    queue.push_back(source);
+    let mut distance = vec![usize::MAX; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n);
 
-    while let Some(node) = queue.pop_front() {
-        let dist = distance[node].unwrap();
+    distance[source] = 0;
+    queue.push(source);
+
+    let mut head = 0;
+    while head < queue.len() {
+        let node = queue[head];
+        head += 1;
+        let next_dist = distance[node] + 1;
+
         for (_rel, dst) in csr.neighbors(node) {
             let neighbor = dst.offset as usize;
-            if neighbor < n && distance[neighbor].is_none() {
-                distance[neighbor] = Some(dist + 1);
-                parent[neighbor] = Some(node);
-                queue.push_back(neighbor);
+            if neighbor < n && distance[neighbor] == usize::MAX {
+                distance[neighbor] = next_dist;
+                parent[neighbor] = node;
+                queue.push(neighbor);
             }
         }
     }
 
-    (distance, parent)
+    let distance_opt = distance
+        .into_iter()
+        .map(|d| if d == usize::MAX { None } else { Some(d) })
+        .collect();
+    let parent_opt = parent
+        .into_iter()
+        .map(|p| if p == usize::MAX { None } else { Some(p) })
+        .collect();
+
+    (distance_opt, parent_opt)
 }
 
 // ==================== PageRank ====================
@@ -179,20 +198,80 @@ pub fn weakly_connected_components(csr: &CSRAdjacency) -> AlgorithmResult {
 // ==================== Shortest Path ====================
 
 /// BFS-based shortest path distance between two nodes.
+// Bolt Optimization: Direct early-exit BFS terminates immediately when target is found,
+// avoiding whole-graph traversal and full distance vector allocations.
 pub fn shortest_path(csr: &CSRAdjacency, source: usize, target: usize) -> Option<usize> {
-    let (distance, _parent) = bfs(csr, source);
-    distance.get(target).copied().flatten()
+    let n = csr.num_nodes();
+    if n == 0 || source >= n || target >= n {
+        return None;
+    }
+    if source == target {
+        return Some(0);
+    }
+
+    let mut distance = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n.min(256));
+
+    distance[source] = 0;
+    queue.push(source);
+
+    let mut head = 0;
+    while head < queue.len() {
+        let node = queue[head];
+        head += 1;
+        let next_dist = distance[node] + 1;
+
+        for (_rel, dst) in csr.neighbors(node) {
+            let neighbor = dst.offset as usize;
+            if neighbor < n && distance[neighbor] == usize::MAX {
+                if neighbor == target {
+                    return Some(next_dist);
+                }
+                distance[neighbor] = next_dist;
+                queue.push(neighbor);
+            }
+        }
+    }
+
+    None
 }
 
 /// All-pairs reachable nodes within a given radius using BFS.
+// Bolt Optimization: Bounded BFS expansion terminates as soon as max_dist depth limit
+// is reached, returning visited node queue without traversing farther nodes or allocating Option wrappers.
 pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> Vec<usize> {
-    let (distance, _) = bfs(csr, source);
-    distance
-        .iter()
-        .enumerate()
-        .filter(|&(_, d)| d.is_some() && d.unwrap() <= max_dist)
-        .map(|(i, _)| i)
-        .collect()
+    let n = csr.num_nodes();
+    if n == 0 || source >= n {
+        return Vec::new();
+    }
+
+    let mut distance = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n.min(256));
+
+    distance[source] = 0;
+    queue.push(source);
+
+    let mut head = 0;
+    while head < queue.len() {
+        let node = queue[head];
+        head += 1;
+        let dist = distance[node];
+
+        if dist >= max_dist {
+            continue;
+        }
+
+        let next_dist = dist + 1;
+        for (_rel, dst) in csr.neighbors(node) {
+            let neighbor = dst.offset as usize;
+            if neighbor < n && distance[neighbor] == usize::MAX {
+                distance[neighbor] = next_dist;
+                queue.push(neighbor);
+            }
+        }
+    }
+
+    queue
 }
 
 // ==================== Degree Centrality ====================
