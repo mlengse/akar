@@ -248,6 +248,19 @@ mod avx {
 // ---------------------------------------------------------------------------
 // aarch64 kernels (NEON; baseline on armv8-A)
 // ---------------------------------------------------------------------------
+//
+// NEON is part of the aarch64 baseline — `cfg(target_feature = "neon")` holds on
+// every supported aarch64 target — so these kernels need no runtime detection and
+// stay safe to call. The `unsafe` blocks inside are required only because rustc
+// declares each `#[target_feature(enable = "neon")]` stdarch intrinsic as an
+// `unsafe fn`; the feature itself is statically enabled for the whole crate, so
+// the calls below are in fact always sound.
+//
+// Preconditions shared by all three kernels (enforced by the dispatch layer in
+// this module and pinned by the `debug_assert!`s): `a` and `b` have **equal**
+// length and at least `MIN_DIM_SIMD` elements. Equal length is the one that
+// matters for memory safety — the loop count is derived from `a` alone, so a
+// shorter `b` would be read out of bounds.
 
 #[cfg(target_arch = "aarch64")]
 mod neon {
@@ -256,18 +269,26 @@ mod neon {
 
     /// NEON single-pass dot + squared norms (2 × f64 per vector).
     pub(crate) fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
+        debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
+        debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
         let chunks = a.len() / 2;
-        let mut dot = vdupq_n_f64(0.0);
-        let mut sq_a = vdupq_n_f64(0.0);
-        let mut sq_b = vdupq_n_f64(0.0);
-        for i in 0..chunks {
-            let x = unsafe { vld1q_f64(a.as_ptr().add(i * 2)) };
-            let y = unsafe { vld1q_f64(b.as_ptr().add(i * 2)) };
-            dot = vaddq_f64(dot, vmulq_f64(x, y));
-            sq_a = vaddq_f64(sq_a, vmulq_f64(x, x));
-            sq_b = vaddq_f64(sq_b, vmulq_f64(y, y));
-        }
-        let mut acc = (vaddvq_f64(dot), vaddvq_f64(sq_a), vaddvq_f64(sq_b));
+        // SAFETY: `neon` is statically enabled for every aarch64 target, and each
+        // 2-lane load reads at `i * 2 < chunks * 2 <= a.len() == b.len()`, so both
+        // slices stay in bounds for the whole loop.
+        let mut acc = unsafe {
+            let mut dot = vdupq_n_f64(0.0);
+            let mut sq_a = vdupq_n_f64(0.0);
+            let mut sq_b = vdupq_n_f64(0.0);
+            for i in 0..chunks {
+                let x = vld1q_f64(a.as_ptr().add(i * 2));
+                let y = vld1q_f64(b.as_ptr().add(i * 2));
+                dot = vaddq_f64(dot, vmulq_f64(x, y));
+                sq_a = vaddq_f64(sq_a, vmulq_f64(x, x));
+                sq_b = vaddq_f64(sq_b, vmulq_f64(y, y));
+            }
+            (vaddvq_f64(dot), vaddvq_f64(sq_a), vaddvq_f64(sq_b))
+        };
+        // Scalar tail for an odd element count.
         for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
             acc.0 += x * y;
             acc.1 += x * x;
@@ -278,15 +299,20 @@ mod neon {
 
     /// NEON squared L2 distance.
     pub(crate) fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
+        debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
+        debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
         let chunks = a.len() / 2;
-        let mut acc = vdupq_n_f64(0.0);
-        for i in 0..chunks {
-            let x = unsafe { vld1q_f64(a.as_ptr().add(i * 2)) };
-            let y = unsafe { vld1q_f64(b.as_ptr().add(i * 2)) };
-            let d = vsubq_f64(x, y);
-            acc = vaddq_f64(acc, vmulq_f64(d, d));
-        }
-        let mut sum = vaddvq_f64(acc);
+        // SAFETY: as in `dot_and_sq_norms` — statically enabled feature, loads in bounds.
+        let mut sum = unsafe {
+            let mut acc = vdupq_n_f64(0.0);
+            for i in 0..chunks {
+                let x = vld1q_f64(a.as_ptr().add(i * 2));
+                let y = vld1q_f64(b.as_ptr().add(i * 2));
+                let d = vsubq_f64(x, y);
+                acc = vaddq_f64(acc, vmulq_f64(d, d));
+            }
+            vaddvq_f64(acc)
+        };
         for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
             let d = x - y;
             sum += d * d;
@@ -296,14 +322,19 @@ mod neon {
 
     /// NEON L1 distance (absolute differences via `vabsq_f64`).
     pub(crate) fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
+        debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
+        debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
         let chunks = a.len() / 2;
-        let mut acc = vdupq_n_f64(0.0);
-        for i in 0..chunks {
-            let x = unsafe { vld1q_f64(a.as_ptr().add(i * 2)) };
-            let y = unsafe { vld1q_f64(b.as_ptr().add(i * 2)) };
-            acc = vaddq_f64(acc, vabsq_f64(vsubq_f64(x, y)));
-        }
-        let mut sum = vaddvq_f64(acc);
+        // SAFETY: as in `dot_and_sq_norms` — statically enabled feature, loads in bounds.
+        let mut sum = unsafe {
+            let mut acc = vdupq_n_f64(0.0);
+            for i in 0..chunks {
+                let x = vld1q_f64(a.as_ptr().add(i * 2));
+                let y = vld1q_f64(b.as_ptr().add(i * 2));
+                acc = vaddq_f64(acc, vabsq_f64(vsubq_f64(x, y)));
+            }
+            vaddvq_f64(acc)
+        };
         for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
             sum += (x - y).abs();
         }
@@ -538,6 +569,30 @@ mod tests {
             assert_triple_close(sse, dot_and_sq_norms_scalar(&a, &b));
             assert_close(unsafe { sse2::l2_squared(&a, &b) }, l2_squared_scalar(&a, &b));
             assert_close(unsafe { sse2::l1_distance(&a, &b) }, l1_distance_scalar(&a, &b));
+        }
+
+        // NEON is the aarch64 baseline, so there is nothing to detect: the kernels
+        // are always both reachable and exercised here.
+        #[cfg(target_arch = "aarch64")]
+        {
+            assert_triple_close(neon::dot_and_sq_norms(&a, &b), dot_and_sq_norms_scalar(&a, &b));
+            assert_close(neon::l2_squared(&a, &b), l2_squared_scalar(&a, &b));
+            assert_close(neon::l1_distance(&a, &b), l1_distance_scalar(&a, &b));
+        }
+    }
+
+    #[test]
+    fn test_odd_lengths_match_scalar() {
+        // Every SIMD kernel processes whole 2- or 4-lane chunks and hands the
+        // remainder to a scalar tail; odd lengths are where that seam can drift.
+        // Runs the dispatched path, so it covers SSE2/AVX on x86_64 and NEON on
+        // aarch64 without naming either.
+        for len in MIN_DIM_SIMD..=MIN_DIM_SIMD + 33 {
+            let a: Vec<f64> = (0..len).map(|i| (i as f64) * 0.25 - 4.0).collect();
+            let b: Vec<f64> = (0..len).map(|i| (i as f64 * 1.5) % 11.0 - 5.0).collect();
+            assert_triple_close(dot_and_sq_norms(&a, &b), dot_and_sq_norms_scalar(&a, &b));
+            assert_close(l2_squared(&a, &b), l2_squared_scalar(&a, &b));
+            assert_close(l1_distance(&a, &b), l1_distance_scalar(&a, &b));
         }
     }
 

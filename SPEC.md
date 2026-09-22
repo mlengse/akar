@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **36** |
 | Lines of code | **~139K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,259** total, 0 ignored, 2,259 passed, 0 failed (gate `test [akar-core]`, 2026-09-20, P127: no net change — 4 tes dream pindah `akar-dream` → `akar-server` saat siklus dream menjadi milik host). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,260** total, 0 ignored, 2,260 passed, 0 failed (gate `test [akar-core]`, 2026-09-23, P113: +1 — parity NEON + jahitan chunk/tail di `akar-vector`). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **260** (245 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -693,7 +693,7 @@ strip = false
 | 2 | `audit` | ubuntu-24.04 | `cargo audit` (security vulnerability check) |
 | 3 | `clippy` | ubuntu-24.04 | `cargo clippy --workspace --all-targets -- -D warnings` |
 | 4 | `test-ubuntu` | ubuntu-24.04 | `cargo build + cargo test --workspace` |
-| 5 | `test-macos` | macos-14 | `cargo build + cargo test --workspace` |
+| 5 | `test-macos` | macos-14 (arm64) | `cargo build + cargo test --workspace` — satu-satunya permukaan **aarch64**: ia yang mengompilasi *dan* menjalankan kernel NEON `akar-vector` (P113) |
 | 6 | `test-windows` | windows-2022 | `cargo build + cargo test --workspace` |
 | 7 | `feature-gated` | ubuntu-24.04 | Build + test with ALL 14 extension features |
 | 8 | `wasm-check` | ubuntu-24.04 | `cargo check --target wasm32-unknown-unknown` |
@@ -737,7 +737,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
-| `akar-vector` | 37 | Vector similarity search (cosine scale-invariance, P51.46) |
+| `akar-vector` | 38 | Vector similarity search (cosine scale-invariance, P51.46) + parity NEON + jahitan chunk/tail (P113) |
 | `akar-json` | 14 | JSON functions |
 | `akar-markdown` | 44 | Markdown wiki / Open Knowledge Format reader — YAML frontmatter subset + `[[wikilinks]]`, `read_markdown_wiki` table function (P122) |
 | `akar-fts` | 53 | Tantivy index lifecycle (`TantivyIndex`), `en_stem` tokenizer, schema mapping, FTS index build on disk (P104.1), clean break Tantivy-only (P104.2/P105: query via Tantivy `IndexReader`, incremental `append_docs`) + BM25 scoring parity (P106.1) + phrase query BM25 parity (P106.3) + commit-time propagation `apply_doc_writes` (P107.1) + reader handle `FtsIndexHandle` reload-at-commit (P107.2) + crash recovery: last committed survives (P107.3) |
@@ -757,7 +757,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 0* | Migration tool (idempotent, fixed P48.5; *not exercised by the default gate) |
 | Doc-tests | 10 | Doc-tests across all crates |
-| **Total** | **2,259** | **2,259 total, 0 ignored, 2,259 passed, 0 failed** (gate `test [akar-core]` 2026-09-20, P127: no net change — 4 tes dream pindah dari `akar-dream` ke `akar-server`). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
+| **Total** | **2,260** | **2,260 total, 0 ignored, 2,260 passed, 0 failed** (gate `test [akar-core]` 2026-09-23, P113: +1 di `akar-vector`). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
 
 ### 11.2 Test Datasets
 

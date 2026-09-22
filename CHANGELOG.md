@@ -9,6 +9,11 @@
 
 ### Added
 
+- **P113 — kernel SIMD NEON aarch64 benar-benar dikompilasi + parity test** · `akar-vector/src/distance.rs` · gate **2,260** (+1: 2,259 → 2,260)
+  - **Modul `neon` tidak pernah lolos type-check.** Sejak `82ca669` ia hanya membungkus load `vld1q_f64` dengan `unsafe`, sedangkan seluruh intrinsik NEON f64 di stdarch adalah `unsafe fn` — `cargo check --target aarch64-apple-darwin` gagal **22× E0133**. Kernel aarch64 tak pernah benar-benar ada, hanya terlihat ada. Body vektor kini masuk satu blok `unsafe` ber-`// SAFETY:` per fungsi.
+  - **NEON baseline ⇒ fungsinya tetap `fn` aman.** `cfg(target_feature = "neon")` menyala di semua target aarch64 (`rustc --print cfg`), jadi bukan hanya deteksi runtime yang tak perlu — pemanggil di dispatch pun tidak perlu `unsafe`. `debug_assert_eq!(a.len(), b.len())` mem-pin satu-satunya prasyarat memori: panjang loop dihitung dari `a`, jadi `b` yang lebih pendek berarti bacaan di luar batas.
+  - **Parity test menyebut NEON namanya**, plus `test_odd_lengths_match_scalar` (panjang 16–49) yang menguji jahitan chunk/tail lewat jalur dispatch — SSE2/AVX di x86_64, NEON di aarch64. Dtype dikoreksi: kernel ini **f64**, bukan f32 seperti tertulis di teks rencana dan entri `82ca669`.
+
 - **P123 — primitif embedding in-process: connection pool + batch typed (Iterasi 4.1)** · `akar-main/src/pool.rs`, `akar-main/src/bulk.rs` · gate **2,259** (+17: 2,242 → 2,259)
   - **Pool.** `ConnectionPool` di atas satu `Arc<Database>` (`PoolConfig::max_idle`, default 8). `get()` mengembalikan guard `PooledConnection` yang mengembalikan koneksi saat drop, sehingga plan cache koneksi bertahan antar permintaan; `run(f)` membungkus pola itu. Pool `Send + Sync` — dan itu **seluruh** cerita integrasi async: `Arc` pool dimasukkan ke `spawn_blocking`. Akar tidak menarik dependensi runtime async apa pun; pembungkus `async fn` milik host (dokumentasi `pool.rs` memuat resep Tokio-nya).
   - **Koneksi teracuni dibuang, bukan dipoolkan.** Guard yang dikembalikan saat transaksi eksplisit masih terbuka tidak masuk kembali ke pool: `BEGIN` bersifat per-koneksi dan DDL di dalamnya tidak bisa di-rollback, jadi memakainya ulang akan merusak peminjam berikutnya. Drop-nya yang menjalankan rollback transaksi telantar itu.
@@ -39,7 +44,7 @@
 
 ### Changed
 
-- **P124.2 — referensi broker daemon dibersihkan dari dokumentasi Akar; Akar 100% pure embedded library (§13 / ADR-02)** · `README.md`, `SPEC.md`, `implementation plan.md` · gate **2,259** (tanpa perubahan kode)
+- **P124.2 — referensi broker daemon dibersihkan dari dokumentasi Akar; Akar 100% pure embedded library (§13 / ADR-02)** · `5043401` · `README.md`, `SPEC.md`, `implementation plan.md` · gate **2,259** (tanpa perubahan kode)
   - `akar-server` tidak lagi dipresentasikan sebagai permukaan produksi: entri crate di README, pohon repo SPEC §2, tabel ekstensi SPEC §7, dan bagian SPEC §13.4 kini menyebutnya **test harness / wire reference only** — konsisten dengan ADR-02 (broker lifecycle milik konsumen; `sulur-server` adalah daemon produksi).
   - Item plan P124 ditutup: `implementation plan.md` hanya memuat pekerjaan yang belum dikerjakan, jadi blok "Iterasi 5 — Pensiun Bertahap `akar-server`" dihapus dan statusnya cukup dicatat di ringkasan iterasi. Backlog "Streaming/Chunked query results" tidak lagi diatribusikan ke `akar-server` karena Akar tetap embedded.
   - Tanpa perubahan kode, tes, atau gate: murni penyelarasan dokumen, diverifikasi `python tools/doc-check.py --akar` PASS.
