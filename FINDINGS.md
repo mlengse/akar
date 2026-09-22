@@ -22,6 +22,7 @@ authority multiplier, P122 `akar-markdown`) — semuanya sudah ditutup dan dipin
 **Ranah:** akar (`SystemConfig` default) ↔ sulur (jalur embedded Python + `sulur-server`).
 **Status:** TERBUKA — punya item **`implementation plan.md` Iterasi 6 / P128**; terungkap saat Iterasi 4
 (P4-RETIRE-1) dan dihindari (bukan diperbaiki) dengan mengirim threshold eksplisit.
+Investigasi **P128.1 sudah selesai** (hasilnya di bawah); keputusan arah **P128.2 belum diambil**.
 
 ### Gejala
 
@@ -55,15 +56,54 @@ performa yang jauh lebih buruk tanpa sinyal apa pun kepada pemanggil. Semua kons
 (Sulur Python, tooling, tes, dan siapa pun yang menulis `SystemConfig::default()` di masa depan)
 mewarisi biaya itu, dan biayanya terlihat seperti "Sulur/Akar lambat", bukan seperti "default-nya salah".
 
+### Hasil investigasi P128.1 (2026-09-23) — apa yang sebenarnya dijamin `-1`
+
+Diperiksa: `SystemConfig::default()` (`akar-main/src/database.rs`), `maybe_auto_checkpoint`
+(`akar-main/src/connection/query.rs`), `maybe_checkpoint` / `commit_transaction` / `recover()`
+(`akar-storage/src/lib.rs`), `checkpoint()` (`akar-storage/src/checkpoint.rs`), `flush_to_disk`
+(`akar-storage/src/wal.rs`), plus P60.1/P60.2/P68/P114 di `CHANGELOG.md`.
+
+**Durabilitas tidak berasal dari checkpoint.** `commit_transaction` Step 1 menulis record `Commit`
+lalu **fsync** — inline (`wal.flush_to_disk()` → `file.sync_data()`) atau lewat group commit
+(`GroupCommit::flush()` menunggu fsync yang dimulai setelah enqueue). Doc-comment-nya menyatakan hal
+yang sama untuk **setiap** mode threshold: *"Since P60.2 the SQL write path emits typed
+`Insert/Delete/Update WAL records, so committed data is durable from the WAL alone"*. `recover()`
+memang persis begitu: Phase 1 muat mirror kolom, Phase 2 `wal.load_from_disk()` + replay record data
+bertipe, baru mirror ditulis ulang. Checkpoint hanya memutuskan **kapan** mirror kolom ditulis ulang
+dan **kapan** WAL dipotong.
+
+**Asal-usul `-1` sudah kedaluwarsa.** P60.1 menemukan bahwa klaim "WAL fsync sudah menjamin
+durabilitas" **keliru untuk jalur SQL** waktu itu: WAL hanya membawa marker `Commit` + blob
+`LocalWALData` kosong yang di-skip replay, sehingga **mirror kolom adalah satu-satunya sumber
+recovery** dan `-1` (selalu checkpoint) yang membuat tiap tulisan durable. P60.2 (`d0a1447`,
+2026-08-24) menutup itu dengan typed Insert/Delete/Update WAL records. Jadi `-1` adalah **default
+yang tertinggal dari pengaturan pra-P60.2** dan belum pernah ditinjau ulang — bukan pilihan
+durabilitas yang diputuskan sadar.
+
+**Yang benar-benar berubah bila ambangnya angka byte** (bukan durabilitas):
+1. **Jendela replay saat crash.** `-1` menyisakan WAL nyaris kosong; `N` byte berarti sampai N byte
+   harus di-replay. Ini satu-satunya argumen pro-`-1` yang jujur: bila ada record tak-replayable
+   (kelas F7), blast radius-nya lebih kecil. Sejak P114.1 penulis tak bisa lagi melahirkan record
+   seperti itu, tetapi verifikasi live F7 masih terbuka.
+2. **Jejak disk `wal.log`** — dibatasi N byte (dan karena itu pula waktu replay).
+3. **Biaya per tulis** — inilah yang mahal: `-1` memicu, untuk **setiap** tulis, persist ulang
+   seluruh mirror kolom + `BufferManager::flush_all()` + `wal.clear()` + marker + fsync. (P60.1
+   sudah memangkas separuh: Step 2 di-skip ketika checkpoint pasti jalan.) Angka Sulur ~20–25 s per
+   100 store embedded berasal dari sini, bukan dari WAL.
+
+**Kesimpulan investigasi:** tidak ada jaminan durabilitas yang hilang bila default berpindah ke ambang
+byte; yang berubah hanyalah panjang jendela replay dan biaya per tulis. Karena itu pertanyaan lama
+"`-1` mungkin memang disengaja" **sudah terjawab: tidak.** Yang tersisa murni trade-off (P128.2).
+
 ### Langkah lanjut (usul, belum dikerjakan)
 
 - **Putuskan salah satu:** ubah default `SystemConfig` menjadi threshold nyata (mis. 16 MiB, selaras
   jalur daemon P68), **atau** pertahankan `-1` sebagai pilihan sadar dan dokumentasikan terang-terangan
   di doc-comment `SystemConfig` beserta alasan durabilitasnya.
-- **Sebelum mengubah default, periksa kontrak durabilitasnya.** Checkpoint-per-tulis berhubungan
-  langsung dengan jaminan WAL (P61.3, P114.1–P114.2) dan P68; `-1` mungkin disengaja sebagai
-  "flush setiap commit". Jangan mengubah default sebelum itu dipastikan — ia menyentuh jaminan data,
-  bukan hanya angka performa. Bila memang disengaja, jalur yang benar adalah dokumentasi, bukan perubahan default.
+- ~~Sebelum mengubah default, periksa kontrak durabilitasnya.~~ **Sudah dijawab oleh P128.1 di atas:**
+  `-1` bukan pilihan durabilitas yang disengaja, melainkan default yang tertinggal dari pengaturan
+  pra-P60.2. Yang tersisa dari kekhawatiran ini hanyalah satu argumen jujur (jendela replay), dan itu
+  masuk keputusan P128.2 — bukan alasan untuk menahan default apa adanya.
 - Setelah arahnya jelas, pertimbangkan `checkpoint_threshold` eksplisit di jalur **embedded Python**
   Sulur juga (saat ini hanya jalur daemon yang mengirimnya), sehingga flake #37/#44 dihapus pada sebabnya
   alih-alih dengan menaikkan ambang tes.
