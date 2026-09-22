@@ -137,6 +137,12 @@ arah dan sebabnya sama. Probe-nya sementara dan tidak ikut di-commit.
 **Catatan dokumentasi:** `SPEC.md` tidak menyebut `checkpoint_threshold` maupun auto-checkpoint sama
 sekali, jadi apa pun arahnya, kebijakan checkpoint perlu satu paragraf di SPEC (§15 atau §17).
 
+**Yang belum diketahui (jangan dibaca seolah sudah terjawab):**
+- Pra-ukur di atas berjalan di **mode debug, satu mesin**. Yang bermakna rasionya; angka absolutnya tidak.
+- **Ukuran blast radius perubahan default belum diukur.** Audit di atas memetakan *siapa* yang memakai
+  `SystemConfig::default()`, bukan *berapa* yang akan pecah dan kenapa — itu pertanyaan eksperimen (P129).
+- Angka Sulur (~20–25 s per 100 store) adalah **kutipan komentar tesnya**, bukan pengukuran independen.
+
 ### Langkah lanjut (usul, belum dikerjakan)
 
 - **Putuskan salah satu:** ubah default `SystemConfig` menjadi threshold nyata (mis. 16 MiB, selaras
