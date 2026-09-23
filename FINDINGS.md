@@ -62,6 +62,43 @@ variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada
 
 ---
 
+## F16 — 2026-09-23: `ORDER BY <alias proyeksi>` gagal saat hasil kueri kosong (`Variable 'source' not found (chunk has no field_names)`) — TERBUKA
+
+**Ranah:** akar (binder — resolusi `ORDER BY` atas alias proyeksi ketika chunk hasil kosong).
+**Status:** TERBUKA — ditemukan saat Sulur P5-KNN-1; dihindari (bukan diperbaiki) dengan proyeksi tanpa `ORDER BY`.
+**Konteks:** `akar-main/src/bulk.rs::neighbors_statement` membangun
+`UNWIND $ids AS iid MATCH (a:…)-[e:…]->(b:…) RETURN a.id AS source … ORDER BY source`. Komentarnya
+sendiri menyatakan `ORDER BY a.id` gagal (`Variable 'a' not found in chunk field_names`), sehingga ia
+memakai alias — yang justru gagal di kasus lain.
+
+### Gejala
+
+`akar_main::neighbors` — dan karenanya `MemoryStore::edges` di Sulur — mengembalikan
+`Execute error: Variable 'source' not found (chunk has no field_names)` **ketika himpunan hasilnya
+kosong**, yaitu saat tak satu pun node di `$ids` punya edge keluar. Jadi bukan "tidak ada tetangga"
+yang dikembalikan, melainkan sebuah error. Kasus yang setara sudah dikenal di jalur lain
+(`scan_memories` memakai `ORDER BY m.id`, bukan `ORDER BY id`, dengan komentar yang sama di
+`sulur-core/src/store.rs`): alias proyeksi tidak bisa di-bind saat chunk berukuran nol, sedangkan
+bentuk ekspresi bisa.
+
+### Dampak & mitigasi
+
+- `neighbors` tidak bisa dipakai pada graf yang node-nya tidak punya edge keluar: store dengan 0
+  edge, atau pool kandidat tanpa edge keluar, error alih-alih mengembalikan senarai kosong.
+- Mitigasi sementara (Sulur P5-KNN-1): jalur hitung koneksi graph memakai
+  `UNWIND $ids AS iid MATCH (a:Memory {id: iid})-[:Connected]->(b:Memory) RETURN a.id AS source`
+  **tanpa** `ORDER BY`, yang mentoleransi chunk kosong.
+
+### Langkah lanjut (usul, belum dikerjakan)
+
+- Reproduce minimal: 2 node `Memory`, satu himpunan `$ids`, 0 edge → `neighbors` harus mengembalikan `[]`.
+- Perbaiki binder: `ORDER BY` atas alias proyeksi pada chunk berukuran 0 harus mengembalikan hasil
+  kosong, bukan error; setelah itu `neighbors_statement` boleh tetap memakai `ORDER BY source`.
+- Setelah diperbaiki, jalur hitung koneksi Sulur dapat kembali ke `MemoryStore::edges` bila membaca
+  bobot edge memang dibutuhkan.
+
+---
+
 ## F8 — 2026-09-19: verifikasi live DAE terhadap daemon produksi (fix `2464f40` Sulur) — TERVERIFIKASI, satu utas terbuka
 
 **Ranah:** akar (daemon/DB produksi) ↔ sulur. **Status:** TERVERIFIKASI — DAE pass penuh + resume
