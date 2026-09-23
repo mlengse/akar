@@ -15,9 +15,9 @@ default = []
 arrow = ["dep:arrow"]
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-function = { path = "../akar-function", version = "0.2.3" }
-akar-catalog = { path = "../akar-catalog", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-function = { path = "../akar-function", version = "0.2.4" }
+akar-catalog = { path = "../akar-catalog", version = "0.2.4" }
 tracing.workspace = true
 arrow = { workspace = true, optional = true }
 

@@ -1,6 +1,6 @@
 [package]
 name = "akar-optimizer"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,14 +11,14 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-planner = { path = "../akar-planner", version = "0.2.3" }
-akar-storage = { path = "../akar-storage", version = "0.2.3" }
-akar-binder = { path = "../akar-binder", version = "0.2.3" }
-akar-parser = { path = "../akar-parser", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-planner = { path = "../akar-planner", version = "0.2.4" }
+akar-storage = { path = "../akar-storage", version = "0.2.4" }
+akar-binder = { path = "../akar-binder", version = "0.2.4" }
+akar-parser = { path = "../akar-parser", version = "0.2.4" }
 tracing.workspace = true
 
 [dev-dependencies]
-akar-parser = { path = "../akar-parser", version = "0.2.3" }
+akar-parser = { path = "../akar-parser", version = "0.2.4" }
 [lints]
 workspace = true

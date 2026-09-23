@@ -11,10 +11,10 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-function = { path = "../akar-function", version = "0.2.3" }
-akar-extension = { path = "../akar-extension", version = "0.2.3" }
-akar-storage = { path = "../akar-storage", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-function = { path = "../akar-function", version = "0.2.4" }
+akar-extension = { path = "../akar-extension", version = "0.2.4" }
+akar-storage = { path = "../akar-storage", version = "0.2.4" }
 tantivy = { version = "0.26.2", default-features = false, features = ["mmap", "lz4-compression", "stemmer", "stopwords"] }
 regex.workspace = true
 tracing.workspace = true

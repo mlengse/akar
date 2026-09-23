@@ -1,6 +1,6 @@
 [package]
 name = "akar-vector"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-function = { path = "../akar-function", version = "0.2.3" }
-akar-extension = { path = "../akar-extension", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-function = { path = "../akar-function", version = "0.2.4" }
+akar-extension = { path = "../akar-extension", version = "0.2.4" }
 tracing.workspace = true
 ahash.workspace = true
 

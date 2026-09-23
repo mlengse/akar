@@ -11,10 +11,10 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-main = { path = "../akar-main", version = "0.2.3" }
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-binder = { path = "../akar-binder", version = "0.2.3" }
-akar-catalog = { path = "../akar-catalog", version = "0.2.3" }
+akar-main = { path = "../akar-main", version = "0.2.4" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-binder = { path = "../akar-binder", version = "0.2.4" }
+akar-catalog = { path = "../akar-catalog", version = "0.2.4" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rustyline = "18.0.1"

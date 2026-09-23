@@ -1,6 +1,6 @@
 [package]
 name = "akar-dream"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-algo = { path = "../akar-algo", version = "0.2.3" }
-akar-function = { path = "../akar-function", version = "0.2.3" }
-akar-ml = { path = "../akar-ml", version = "0.2.3", optional = true }
+akar-algo = { path = "../akar-algo", version = "0.2.4" }
+akar-function = { path = "../akar-function", version = "0.2.4" }
+akar-ml = { path = "../akar-ml", version = "0.2.4", optional = true }
 
 [features]
 embed = ["akar-ml", "akar-ml?/onnx-embedding"]

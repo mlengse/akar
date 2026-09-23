@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "arrow",
  "flate2",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-common",
  "arrow",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "pest",
  "pest_derive",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "akar-common",
  "tracing",
@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "ahash",
  "akar-common",
@@ -584,9 +584,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cc"
-version = "1.4.6"
+version = "1.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3eb0f42d6c360dc3f8a821f6bf2fdea7f72bfd36b3076eb0e6d1e9e0752fff4"
+checksum = "54413ede23c2daf518f35156dfde027feb2374004d63bd497f983c8db9c0e313"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -892,9 +892,9 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
+checksum = "ef25905e51abafe4dcea6c15fec58c57b601cdbd0ee53d22ea1d3016c587d39b"
 
 [[package]]
 name = "flatbuffers"
@@ -1468,9 +1468,9 @@ dependencies = [
 
 [[package]]
 name = "pest"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d45aeb61b4bf818e12d4205f2466f8c4748f85f4fce0146d1c03d69d753f0ad"
+checksum = "45d3aca230fad2e6f6317ca0a72724338c4960cb97168a85cdee66df4a9a21a8"
 dependencies = [
  "memchr",
  "ucd-trie",
@@ -1478,9 +1478,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89cc5a242e25ed4e7704d0be240f2cfbe20a8c27e7e252d94835be93d92dc39f"
+checksum = "284b60557f2c4a2e72ad3f2d34d42685a2fa4a6a61d0d2a10c0ae2a5e916c2cf"
 dependencies = [
  "pest",
  "pest_generator",
@@ -1488,9 +1488,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abf21475cc3820fe4b2ca2dc2142902f67a02189f3b5b3a229f4febc01a43e5"
+checksum = "1d9d1f08a115309ee99268cf85e5228e0e56aa9caf8841ec12866b6be07c3109"
 dependencies = [
  "pest",
  "pest_meta",
@@ -1501,9 +1501,9 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.9.1"
+version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adba4db388f687393c18c51348d44a41d870ca9df71a2c98172ea3035dc6936e"
+checksum = "ed93ba1a9ffcca32130a5188701c81c0c49cf00d4b7c5007d5148951d743adcb"
 dependencies = [
  "pest",
 ]

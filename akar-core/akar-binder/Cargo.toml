@@ -1,6 +1,6 @@
 [package]
 name = "akar-binder"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,9 +11,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.2.3" }
-akar-parser = { path = "../akar-parser", version = "0.2.3" }
-akar-catalog = { path = "../akar-catalog", version = "0.2.3" }
+akar-common = { path = "../akar-common", version = "0.2.4" }
+akar-parser = { path = "../akar-parser", version = "0.2.4" }
+akar-catalog = { path = "../akar-catalog", version = "0.2.4" }
 [dev-dependencies]
 criterion.workspace = true
 
