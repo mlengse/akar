@@ -21,7 +21,7 @@ P128.2)** — semuanya sudah ditutup dan dipindah ke
 ## F14 — 2026-09-20: penulisan tepi tidak bisa di-batch dari parameter `UNWIND` (`Variable 'r' not found`) — TERBUKA
 
 **Ranah:** akar (binder/planner — resolusi variabel `UNWIND` dari dalam pola `MATCH`).
-**Status:** TERBUKA — terungkap saat P123.2; dihindari (bukan diperbaiki) dengan jatuh ke satu pernyataan per tepi.
+**Status:** TERBUKA — punya item **PLAN Iterasi 7 / `P131`**. Terungkap saat P123.2; dihindari (bukan diperbaiki) dengan jatuh ke satu pernyataan per tepi.
 **Konteks:** `akar-main/src/bulk.rs` ingin menulis batch tepi lewat satu
 `UNWIND $rows AS r MATCH … CREATE/MERGE …` seperti jalur node.
 
@@ -65,7 +65,7 @@ variabel hasil `UNWIND` tidak dapat dipakai dari dalam/ di belakang `MATCH` pada
 ## F16 — 2026-09-23: `ORDER BY <alias proyeksi>` gagal saat hasil kueri kosong (`Variable 'source' not found (chunk has no field_names)`) — TERBUKA
 
 **Ranah:** akar (binder — resolusi `ORDER BY` atas alias proyeksi ketika chunk hasil kosong).
-**Status:** TERBUKA — ditemukan saat Sulur P5-KNN-1; dihindari (bukan diperbaiki) dengan proyeksi tanpa `ORDER BY`.
+**Status:** TERBUKA — punya item **PLAN Iterasi 7 / `P130`**. Ditemukan saat Sulur P5-KNN-1; dihindari (bukan diperbaiki) dengan proyeksi tanpa `ORDER BY`.
 **Konteks:** `akar-main/src/bulk.rs::neighbors_statement` membangun
 `UNWIND $ids AS iid MATCH (a:…)-[e:…]->(b:…) RETURN a.id AS source … ORDER BY source`. Komentarnya
 sendiri menyatakan `ORDER BY a.id` gagal (`Variable 'a' not found in chunk field_names`), sehingga ia
@@ -103,8 +103,8 @@ bentuk ekspresi bisa.
 
 **Ranah:** akar (daemon/DB produksi) ↔ sulur. **Status:** TERVERIFIKASI — DAE pass penuh + resume
 berjalan tanpa kerusakan, schema DDL tanpa `DEFAULT` diterima. Utas yang masih terbuka: temuan
-sampingan no.2 di bawah (batch besar tidak rentan di jalur DAE, kontras dengan F7 no.2 — layak
-ditelusuri terpisah).
+sampingan no.2 di bawah (batch besar tidak rentan di jalur DAE, kontras dengan F7 no.2) → **punya item
+PLAN Iterasi 7 / `P134`**.
 **Biner:** `~/.cargo/bin/akar_server.exe` v0.2.3 (dibangun 2026-09-18 23:34, HEAD `40415b9`) — sama dengan
 yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
 **DB:** `~/.sulur/engine/sulur.db` (daemon live, pid 3268 / port 9876, sidecar token OK).
@@ -148,7 +148,7 @@ yang dibuktikan sehat di F7 (copy DB +`mv wal.log` → listen).
 
 ## F7 — 2026-09-18/19: replay WAL gagal di jalur **edge update** (`Edge index 0 out of range`) — kode TERATASI (`cd31526`), verifikasi live TERBUKA
 
-**Ranah:** akar (storage / WAL replay). **Status:** TERATASI di tingkat kode — guard tulis (P114.1) mencegah WAL lahir tak-replayable dan mode salvage resmi (P114.2) menyediakan jalur pemulihan; verifikasi live ulang pada daemon produksi **belum dijalankan**, dan dua utas sampingan di bawah (kematian daemon senyap, batch tulis besar rentan) masih terbuka — karena itu finding ini belum boleh dihapus.
+**Ranah:** akar (storage / WAL replay). **Status:** TERATASI di tingkat kode — guard tulis (P114.1) mencegah WAL lahir tak-replayable dan mode salvage resmi (P114.2) menyediakan jalur pemulihan; verifikasi live ulang pada daemon produksi **belum dijalankan**, dan dua utas sampingan di bawah (kematian daemon senyap, batch tulis besar rentan) masih terbuka — karena itu finding ini belum boleh dihapus. **Punya item PLAN Iterasi 7 / `P133`** (verifikasi live) dan **`P134`** (dua utas sampingan).
 **Biner:** `~/.cargo/bin/akar_server.exe`, dibangun ulang **2026-09-18 23:34** (tree = `v0.2.3`, HEAD `40415b9`).
 **DB:** `~/.sulur/engine/sulur.db` (daemon Sulur/Hermes, live).
 **Konteks:** batch harian cron `belajar-puskesmas-notebooklm` (06:00) — daemon sudah mati sebelum job jalan.
