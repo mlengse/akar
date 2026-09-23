@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **F8 — verifikasi live DAE terhadap daemon produksi (2026-09-19; tanpa perubahan kode)** · `FINDINGS.md` tidak lagi memuatnya (temuan tanpa task pindah ke task; sisa utasnya = **`P134`**)
+  - Pass penuh `SULUR_DAE_RESUME=0` → `computed=894, total=894, resumed_from=None` (18 dari 912 memori tanpa embedding memang dieksklusi), lalu pass resume → `computed=0, resumed_from=929`: watermark `Meta.dae_checkpoint_id` dihormati, tidak ada double compute.
+  - `count(Memory)=912` dan `m.id` tetap `int` sebelum & sesudah semua pass — tak ada korupsi index/halaman. `ADD kolom` **tanpa `DEFAULT`** terbukti diterima daemon: `DEFAULT` (yang digugurkan fix Sulur `2464f40`) bukan syarat agar DDL masuk.
+  - Satu engine Sulur lain di host yang sama menyelesaikan pass penuh **bersamaan** selama jeda verifikasi — pada DB live, state tidak boleh diasumsikan diam saat verifikasi lanjutan.
+
 ## [0.2.4] - 2026-09-23
 
 ### Added
