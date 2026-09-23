@@ -1,78 +1,94 @@
-# Search (akar-search)
+# Search domain
 
-**Module path:** `akar-core/akar-search/`
-**Role:** Core domain — fusing sparse and dense signals into one ranked list.
+**Module paths**: `akar-core/akar-fts/`, `akar-core/akar-vector/`, `akar-core/akar-search/`
+**Generated**: 2026-09-23
 
 ---
 
-## Overview
+## What this module is doing
 
-`akar-search` is the memory-retrieval brain: it combines BM25-style sparse scores and vector-embedding scores into a single ranked result list using Reciprocal Rank Fusion (RRF) — or, for the richer path, a hierarchical summary/content/BM25 channel model with optional authority (link-rank) boosting. It exists because neither signal alone is enough for memory recall: keyword hits are exact and controllable, vector hits are fuzzy and semantic. RRF fuses on *rank* rather than raw score, so channels with entirely different score scales become comparable.
+Search is Akar's recall desk — the part of the memory engine that answers "what have I seen that matches this?" rather than "traverse from this node." Agent memory lives or dies on retrieval: exact keyword matches (BM25 full-text), semantic similarity (HNSW vector ANN), and especially the fusion of many signals into one ranked list (hierarchical RRF). Akar bundles all three natively — no external search cluster, no separate vector DB — while owning the hard part most libraries skip: **index lifecycle contracts** (commit-gated visibility, crash recovery, read-after-write consistency) that keep indexes truthful relative to the row store.
 
-The crate is deliberately small and pure-Rust, oriented around a few fusion functions (`weighted_rrf_fuse`, `hybrid_search`, `fuse_hierarchical*`) plus an operator-layer `HybridScan` that the vectorized query processor can drop straight into a plan.
+The mental model worth carrying: an index that can drift from its table is worse than no index at all, because results become *plausibly wrong*. This module's distinguishing feature is that its consistency guarantees are written down (P107.x) and tested as contracts, not implied by hope.
 
-## Core functions
+---
 
-1. **RRF core** — `weighted_rrf_fuse` (`akar-search/src/algorithm/rrf.rs:23`) applies per-channel weights + rank fusion; `rrf_fuse_owned` (`rrf.rs:54`) and `rrf_fuse_ref` (`rrf.rs:90`) are owned/reference convenience wrappers. `DEFAULT_K = 60` (`rrf.rs:10`).
-2. **Canonical hybrid** — `hybrid_search` (`hybrid.rs:19`) fuses vector hits with BM25 hits through `rrf_fuse_owned`, producing `SearchResult { id, score, channel }` (`hybrid.rs:7`).
-3. **Weighted fusion** — `fuse_vector_and_bm25` (`fused.rs:50`) merges a vector score list with a BM25 list using `FusedSearchConfig` (`fused.rs:23`; defaults bm25_weight 0.5 / vector_weight 0.5, `rrf_k = 60`, `limit = 10`).
-4. **Hierarchical fusion** — `fuse_hierarchical` (`hierarchical.rs:71`) fuses three channels (L0 summary embedding, L1 content embedding, BM25) with `HierarchicalRrfConfig` weights (`hierarchical.rs:25`).
-5. **Authority boost** — `apply_authority` (`hierarchical.rs:119`) multiplies fused scores by `authority_multiplier` clamped to `AuthorityConfig` floor/ceiling (`hierarchical.rs:87`); `fuse_hierarchical_with_authority` (`hierarchical.rs:144`) is the full pipeline.
-6. **Multi-perspective recall** — `multi_perspective_recall_with_id` (`multi.rs:6`) computes recall across perspectives using an ID oracle.
+## Core capabilities
+
+1. **BM25 full-text (Tantivy-backed)** — `akar-fts` modules `build`, `index`, `schema`, `tokenizer` (`akar-fts/src/lib.rs:14-17`); English stemmer (`stem_word` `:121`), tokenizer, stop words (`:169`), TF-IDF (`:136`) and BM25 scoring (`:151`) with parity tests against Tantivy's own outputs (P106.1/P106.3). `CREATE FTS INDEX` builds on disk under `<db_path>/fts/<name>`.
+2. **Commit-time index sync** — `sync_indexes_on_commit` (`akar-processor/src/physical/write_ops/fts_sync.rs:39`): after durable commit, propagates the transaction's deduplicated undo write-set into Tantivy (`apply_doc_writes`: delete-term-then-readd), then **reloads the single shared `FtsIndexHandle` reader** — the one production reload point (P107.2), giving deterministic read-after-write without per-scan refreshes. Non-fatal by contract (P107.1); crash boundary = Tantivy segment commit (P107.3); aborted writes never sync (P107.4).
+3. **FTS query language** — verbatim pass-through to Tantivy `QueryParser`: terms, phrases, `+`/`-`/`AND`/`OR`, phrase-prefix, phrase-slop `~N`, field-regex `/.../` (P106.2, SPEC §7).
+4. **HNSW vector search** — `akar-vector/src/hnsw.rs` (graph build/insert/search) + `distance.rs` (SIMD cosine/dot/L2 incl. NEON parity on macOS, P113); scalar functions `cosine_similarity`/`euclidean_distance`/`dot_product`/`l2` (`lib.rs:136-159`); rerank machinery (`RerankCandidate`, `rerank_knn` `:197-248`). Indexes refresh after DML (P52.38, `refresh_vector_indexes` in `akar-main/src/database.rs:454`).
+5. **SQL read path via optimizer** — `VectorSimilarityDetection` rewrites `MATCH ... WHERE cosine_similarity(n.col,q) >= thr ORDER BY ... LIMIT k` into `VectorSimilarityScan → Filter → OrderBy → Projection → Limit` (`akar-optimizer/src/passes/flat/vector_similarity.rs:54-101`); explicit `CALL vector_similarity_scan(...)` also exists (P71.1–P71.4). FTS side: `FtsPredicatePushdown` tree pass (P108.1) + `USING FTS INDEX` scans.
+6. **Hybrid fusion (RRF)** — `akar-search` modules `fused`, `hierarchical`, `hybrid`, `hybrid_scan`, `multi`, `native_bm25`, `rrf` (`akar-search/src/lib.rs:7-13`): hierarchical multi-vector RRF with authority re-weighting (P121) merges ranked lists — FTS + vector + structural signals — into one ordering (54 tests).
+
+---
 
 ## Key components
 
-| Component/type | File path | One-line responsibility |
-|---|---|---|
-| `FusedItem<T>` | `akar-search/src/rrf.rs:14` | Scored item carrying a channel tag |
-| `SearchResult` | `akar-search/src/hybrid.rs:7` | `{id: String, score: f64, channel: Channel}` output row |
-| `HybridScan` | `akar-search/src/hybrid_scan.rs:36` | Operator combining vector hits + native BM25; `new()` `:44`, `execute()` `:56` |
-| `HybridScanConfig` | `akar-search/src/hybrid_scan.rs:25` | Tuning for the scan operator (top-k, weights) |
-| `HierarchicalRrfConfig` | `akar-search/src/hierarchical.rs:25` | `l0_weight`/`l1_weight`/`bm25_weight`/`rrf_k`/`limit` |
-| `AuthorityConfig` | `akar-search/src/hierarchical.rs:87` | Clamp range for the authority multiplier |
-| `NativeBm25Index` | `akar-search/src/native_bm25.rs:44` | In-process BM25 over tokenized docs; `score_docs` `:126` |
-| `Bm25Params` | `akar-search/src/native_bm25.rs:12` | k1/b parameters for the BM25 scorer |
-| `FusedSearchConfig` | `akar-search/src/fused.rs:23` | Weights + `rrf_k` + result `limit` for the vector+BM25 fuse |
+The table divides the domain into its three crates by *concern*: indexing & lifecycle (fts), approximation & metrics (vector), fusion & ranking (search) — plus the commit hook in the processor that ties them to the transaction story.
+
+| Component / type | File path | Core responsibility |
+|-------------------|-----------|---------------------|
+| `FtsExtension` | `akar-core/akar-fts/src/lib.rs:23-113` | Registers FTS functions at load |
+| `TantivyIndex` / `FtsIndexHandle` | `akar-core/akar-fts/src/index.rs` | Writer + cached shared reader (reload-at-commit) |
+| `apply_doc_writes` | `akar-core/akar-fts/src/build.rs` | Incremental doc update/delete from undo set |
+| `sync_indexes_on_commit` | `akar-core/akar-processor/src/physical/write_ops/fts_sync.rs:39` | The commit hook (P107.2 reload) |
+| HNSW graph | `akar-core/akar-vector/src/hnsw.rs` | ANN index build / insert / search |
+| Distance kernels | `akar-core/akar-vector/src/distance.rs` | SIMD metric functions (SSE/AVX/NEON) |
+| `VectorExtension` | `akar-core/akar-vector/src/lib.rs:29-130` | Registers similarity scalar functions |
+| `VectorSimilarityDetection` | `akar-core/akar-optimizer/src/passes/flat/vector_similarity.rs:54` | SQL idiom → ANN scan rewrite |
+| RRF / hierarchical fusion | `akar-core/akar-search/src/{rrf,hierarchical,fused}.rs` | Hybrid multi-signal ranking (P121) |
+| `PhysicalFtsScan` / `PhysicalVectorSimilarityScan` | `akar-core/akar-processor/src/physical/` | Execution operators probing indexes |
+
+---
 
 ## Internal data flow
 
 ```mermaid
-flowchart LR
-    A["tokenized docs"] --> B["NativeBm25Index.score_docs"]
-    B --> C["channel = bm25"]
-    D["embedding hits"] --> E["channel = vector"]
-    C --> F["weighted_rrf_fuse / rrf_fuse_owned"]
-    E --> F
-    F --> G["ranked list"]
-    C --> H["fuse_hierarchical<br/>L0/L1 + BM25"]
-    E --> H
-    H --> I["optional apply_authority"]
-    I --> G
+flowchart TD
+    A["DML commit<br/>commit_write_txn"] --> B["fts_sync<br/>apply_doc_writes + handle.reload"]
+    C["Post-DML refresh"] --> D["refresh_vector_indexes<br/>akar-main/src/database.rs:454"]
+    E["MATCH with cosine ORDER LIMIT"] --> F["Optimizer rewrite<br/>VectorSimilarityScan"]
+    G["Extend with FTS query"] --> H["FtsPredicatePushdown<br/>to FtsScan pre-join"]
+    F --> I["Top-k rows (ANN)"]
+    H --> J["BM25 doc ids"]
+    I --> K["akar-search hierarchical RRF<br/>authority re-weight"]
+    J --> K
+    K --> L["Ranked QueryResult"]
 ```
 
-There are two families of flow: the classic path funnels the BM25 and vector channels into RRF and ranks; the hierarchical path routes L0 summary, L1 content and BM25 through `fuse_hierarchical`, then optionally multiplies by authority. `HybridScan::execute` exposes the same behavior as an operator producing result rows for the processor.
+**Key steps**: write-side sync runs *after* fsync (so index visibility never precedes row durability — P107.3's crash boundary); the single reader reload per commit is what makes "write then immediately search" deterministic; the read-side optimizer rewrites are what let standard Cypher reach these indexes without proprietary syntax.
+
+---
 
 ## Key interfaces & extension points
 
-- **New channels** — tag scores via `FusedItem.channel` and feed them into `weighted_rrf_fuse`; the fusion math doesn't care what a channel means.
-- **`HybridScan`** is the integration seam into the vectorized processor's operator `execute()` contract.
-- **`fuse_hierarchical_with_authority`** is the "one call" high-level API for the summary/content hybrid (the ai-memory P121 design).
+SQL/DQL surface: `CREATE FTS INDEX`, `USING FTS INDEX`, `cosine_similarity(...)`, `CALL vector_similarity_scan(...)`. Registry: functions arrive via `FtsExtension::load` / `VectorExtension::load` under feature flags (`fts-extension`, `vector-extension`) — so a build can exclude them cleanly. The FTS handle registry lives on `TableCatalog` as `Arc<dyn Any>` (via `fts_runtime_handle`), following a lazy open-once pattern — the handle opens on first use against the already-recovered directory. `GraphDataSource`-style substitution isn't needed here; instead the rerank seam (`rerank_knn`) accepts candidate lists from any retrieval stage, which is how hybrid pipelines compose.
 
-## Interactions with other modules
+## Cross-module collaboration
 
-| Module | Direction | Interface used |
-|---|---|---|
-| akar-vector | supplies → | Vector hit scores for the vector channel |
-| akar-fts / BM25 | peer | Sparse scores for the BM25 channel |
-| akar-function | → | `ClassifierFn`-style functions feed BM25 params into `Bm25Params` |
-| akar-processor | → | Consumes `HybridScan` as an operator in query plans |
+| Interacting module | Direction | Interface | Description |
+|--------------------|-----------|-----------|-------------|
+| Storage | persists | `create_vector_index`/`restore_vector_index` (`akar-storage/src/lib.rs:384,:407`), FTS dir under db path | Index files live with the database |
+| Transactions / commit path | triggers | `sync_indexes_on_commit` after fsync | Consistency keystone (P107.x) |
+| Optimizer | exposes | detection/pushdown passes → specialized scans | Standard SQL reaches indexes |
+| Processor | executes | `PhysicalFtsScan`, `PhysicalVectorSimilarityScan` | Probe operators in pipelines |
+| Intelligence (`akar-search` RRF host) | fuses | ranked lists from FTS + vector | Hybrid recall for memory queries |
+| `akar-python` (P123) | surfaces | in-process embedding + vector helpers | Python/Sulur embedding path |
 
-## Performance & concurrency notes
+**In the hybrid-recall flow**: FTS and HNSW each produce a ranked list; `akar-search`'s hierarchical RRF merges them — the concrete implementation of "find what I mean, not just what I said."
 
-Fusion is arithmetic over ranked f64 score vectors — O(n) per channel, no allocation-heavy sort beyond top-k, structurally SIMD-friendly. `NativeBm25Index` is an in-memory corpus; scoring within one call is single-threaded, with parallelism decided by the caller. `rrf_fuse_*` takes no locks; the crate is stateless except the caller-owned index.
+**In the write-commit flow**: this module owns the post-fsync index-sync stage of `3.Workflows.md` §2.2 — the reason committed rows are immediately searchable.
 
-## Implementation highlights
+---
 
-- **Rank-based weights**: per-channel weights apply to ranks (RRF), not raw scores, which makes channel scale differences irrelevant — the key design decision for robust hybrid recall.
-- `DEFAULT_K = 60` tunes fusion sensitivity to ranking noise (top-K doc convention).
-- `fuse_hierarchical` deliberately widens recall across three complementary representations (summary/content/sparse) before applying the final limit.
+## Performance considerations
+
+ANN search is roughly O(log n) versus brute-force O(n); BM25 scoring rides Tantivy's inverted index rather than scanning text; **exactly one reader reload per commit** avoids per-query refresh costs (the common naive design pays a reload per search); threshold + top-k push into the scan so HNSW never materializes a full-table ranking; SIMD distance kernels cut metric cost by vector width (NEON verified on macOS CI — the only aarch64-specific surface in the engine). `native_bm25.rs` offers a lighter-weight scoring path when full Tantivy machinery is unnecessary.
+
+---
+
+## Highlights
+
+The P107.x contract family is the module's crown jewel: a coherent, tested story for *visibility* (commit-gated), *durability* (Tantivy segment commit as crash boundary), and *recovery* (lazy reopen), with explicit caveats documented (pre-P107.1 FAST-only `doc_id` indexes need rebuild — a caveat admitted rather than buried). The optimizer-rewrite-to-ANN pattern is the architectural highlight: exposing vector search through *recognized query idioms* instead of proprietary syntax is exactly how an embedded, standard-facing database should do it — the query stays portable even when the execution path specializes. And the P53 re-entrancy fix (DashMap `Ref` scope before writer acquisition in `fts_sync`) remains the repo's best-documented example of a real concurrency bug found under full-suite load and fixed at its precise lock boundary.

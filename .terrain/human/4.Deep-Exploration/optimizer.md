@@ -1,77 +1,86 @@
-# Optimizer (akar-optimizer)
+# Optimizer domain
 
-**Module path:** `akar-core/akar-optimizer/`
-**Role:** Core domain — the query-rewrite brain between plan and execution.
+**Module paths**: `akar-core/akar-optimizer/`
+**Generated**: 2026-09-23
 
 ---
 
-## Overview
+## What this module is doing
 
-The optimizer is where a naive logical plan becomes a clever one. The planner has produced a plan that *works*; the optimizer then applies two phases of rewrites to make it *fast*: 19 flat passes over the operator list, then 7 tree passes over each operator subtree. Think of it as an editor who takes a draft manuscript and applies a sequence of well-understood copy-edits — push filters down toward the scans where they cost less, fold constant expressions, detect "top-K" requests and give them a faster operator, spot a vector-similarity predicate and swap in an HNSW scan, or rewrite FTS predicates onto the base-table scan.
+The optimizer is Akar's route planner: given the logical blueprint from the frontend, it rewrites the plan into a shape that finishes sooner *without changing what the query means*. A naive plan scans everything and sorts at the end; an optimized plan filters at the source, joins in cardinality order, and keeps only top-k. Akar runs **26 ordered passes** (19 flat + 7 tree) — more than the 17 of the C++ reference — and its discipline is unusual: three passes are audited **NO-OPs kept visible** rather than silently deleted, documenting that their correct forms need features a flat pass can't yet express. Honesty over vanity.
 
-`Optimizer` (`akar-optimizer/src/optimizer.rs:15-18`) holds the two pass vectors; `Optimizer::new()` registers the standard chain (asserted to be exactly 26 passes by a test at `optimizer.rs:203`), and `with_stats_and_fts()` adds storage-backed cardinality estimation plus an optional FTS selectivity estimator. This is the stage where Akar exceeds its C++ ancestor: 26 passes vs. C++'s 17.
+The practical consequence for anyone reading `EXPLAIN` output: what you see has already been pushed, folded, reordered, and annotated — and if a rewrite *didn't* happen, the pass list will tell you so explicitly instead of leaving you guessing.
 
-## Core functions
+---
 
-1. **Register passes** — `Optimizer::new()` (`optimizer.rs:21-81`) builds the chain of 19 flat + 7 tree passes.
-2. **Stats-aware optimizer** — `with_stats_and_fts(stats, fts_estimator)` (`optimizer.rs:93-132`) wires `CardinalityEstimation::new(Some(stats)).with_fts_estimator(...)` (P108.2).
-3. **Optimize** — `Optimizer::optimize(&self, operators)` (`optimizer.rs:134-152`) runs flat passes (Phase 1) then tree passes over each top-level operator (Phase 2).
-4. **Pass traits** — flat passes implement `OptimizationPass::apply(&[LogicalOperator]) -> Vec<LogicalOperator>` (`passes/mod.rs:20-23`); tree passes implement `TreeOptimizationPass::apply_tree(&mut LogicalOperator)` (`passes/mod.rs:30-35`).
+## Core capabilities
 
-**Flat passes** (`optimizer.rs:22-63`): RemoveUnnecessaryOperators, ExtendFilterPushDown, FilterPushDown, PredicatePushDown, ProjectionPushDown, ConstantFolding, AggregateDetection, JoinOptimization, TopKOptimization, VectorSimilarityDetection, ArtRangeScanDetection, LimitPushDown, CommonSubexpressionElimination, OrderByPushDown, UnwindDedup, CountRelTable, AggregateFusion, SortElision, ExpressionInline.
+1. **Flat restructuring passes (19)** — linear rewrites over the operator pipeline: `RemoveUnnecessaryOperators`, `FilterPushDown`, `PredicatePushDown`, `ProjectionPushDown`, `ConstantFolding`, `AggregateDetection`, `JoinOptimization` (DP bushy-tree reordering), `TopKOptimization` (OrderBy+Limit → TopK), `VectorSimilarityDetection` (SQL idiom → HNSW scan, P71.4), `ArtRangeScanDetection` (conservative, P52.4), `LimitPushDown`, `UnwindDedup`, `CountRelTable` (CSR-metadata shortcut), `AggregateFusion`/`CommonSubexpressionElimination`/`OrderByPushDown` (documented NO-OPs), `SortElision`, `ExpressionInline`, `ExtendFilterPushDown` (P1-PERF-1).
+2. **Tree passes (7)** — recursive once structure stabilizes: `FactorizationRewriting` (insert Flatten), `ForeignJoinPushDown`, `AccHashJoinOptimization`, `CorrelatedSubqueryUnnesting`, `AggKeyDependency`, `CardinalityEstimation` (annotate estimates), `FtsPredicatePushdown` (Extend → FtsScan pre-join, P108.1).
+3. **Ordered execution** — `Optimizer::new()` registers passes (`akar-optimizer/src/optimizer.rs:21-93`); `optimize()` (`optimizer.rs:134`) runs flat first, then tree — the ordering rationale is codified as ADR-003: restructure cheaply bottom-up, run expensive recursion only on stable shape, join reorder must precede factorization, and cardinality estimation is necessarily last (it needs the final join structure).
+4. **Statistics-aware decisions** — `with_stats`/`with_stats_and_fts` (`optimizer.rs:84,:93`) inject a `StatsStore` and FTS estimates so cost choices (join sides, scan strategies) aren't flying blind.
 
-**Tree passes** (`optimizer.rs:64-79`): FactorizationRewriting, ForeignJoinPushDown, AccHashJoinOptimization, CorrelatedSubqueryUnnesting, AggKeyDependency, CardinalityEstimation, FtsPredicatePushdown.
+---
 
 ## Key components
 
-| Component/type | File path | One-line responsibility |
-|---|---|---|
-| `Optimizer` | `src/optimizer.rs:15-18` | Pass-chain orchestrator (flat + tree vectors) |
-| `OptimizationPass` trait | `src/passes/mod.rs:20-23` | Flat rewrite over operator list |
-| `TreeOptimizationPass` trait | `src/passes/mod.rs:30-35` | In-place bottom-up tree rewrite |
-| `FilterPushDown` | `src/passes/flat/filter_pushdown.rs:11-42` | Move filters toward scans |
-| `PredicatePushDown` | `src/passes/flat/predicate_pushdown.rs:15` | Fold predicates onto `ScanNode` |
-| `ExtendFilterPushDown` | `src/passes/flat/extend_filter_pushdown.rs:34` | Hoist source-property filters above `Extend` before hops (F3) |
-| `VectorSimilarityDetection` | `src/passes/flat/vector_similarity.rs:47` | Detect `cos > thr ORDER BY DESC LIMIT k` → `VectorSimilarityScan` (HNSW read) |
-| `ArtRangeScanDetection` | `src/passes/flat/art_range_scan.rs:23` | Detect PK range scans on the ART index |
-| `TopKOptimization` | `src/passes/flat/top_k.rs:9` | Merge ORDER BY + LIMIT into `TopK` |
-| `AggregateFusion` | `src/passes/flat/aggregate_fusion.rs:19` | Merge consecutive aggregates with same GROUP BY |
-| `CardinalityEstimation` | `src/passes/tree/cardinality.rs:25` | Annotate operators with estimated row counts |
-| `FtsPredicatePushdown` | `src/passes/tree/fts_predicate_pushdown.rs:21` | Route `USING FTS INDEX` predicates onto the base-table scan (P108) |
-| `FtsCardinalityEstimator` trait | `src/fts_estimate.rs:15-18` | Estimate FTS match counts for cardinality |
+Read the table as "the driver, the two pass families, and the detector you'll most likely extend." Detection passes are the module's signature contribution — pattern recognizers that swap generic idioms for specialized operators.
+
+| Component / type | File path | Core responsibility |
+|-------------------|-----------|---------------------|
+| `Optimizer` | `akar-core/akar-optimizer/src/optimizer.rs:15` | Pass registry + driver |
+| `optimize()` | `akar-core/akar-optimizer/src/optimizer.rs:134` | Runs flat passes then tree passes |
+| Flat passes directory | `akar-core/akar-optimizer/src/passes/flat/` | e.g. `vector_similarity.rs:54-101`, `art_range_scan.rs`, `ladybug.rs` |
+| Tree passes directory | `akar-core/akar-optimizer/src/passes/tree/` | factorization, unnesting, cardinality, FTS pushdown |
+| `VectorSimilarityDetection` | `akar-core/akar-optimizer/src/passes/flat/vector_similarity.rs:54` | Rewrites cosine/ORDER/LIMIT idiom → VectorSimilarityScan |
+| `FtsPredicatePushdown` | `akar-core/akar-optimizer/src/passes/tree/` | Moves FTS predicates into FtsScan pre-join (P108.1) |
+| `StatsStore` | `akar-core/akar-optimizer/src/stats.rs` | Cardinality & FTS estimates |
+| ADR-003 | `akar-core/docs/adr/003-optimizer-pass-ordering.md` | Ordering rationale (why flat-before-tree) |
+
+---
 
 ## Internal data flow
 
 ```mermaid
-flowchart LR
-    A["Vec<LogicalOperator><br/>from planner"] --> B["Phase 1: flat passes<br/>each apply(&result)"]
-    B --> C["Phase 2: tree passes<br/>apply_tree per top-level op"]
-    C --> D["CardinalityEstimation<br/>StatsStore + FTS estimator"]
-    D --> E["optimized plan<br/>to akar-processor"]
+flowchart TD
+    A["Vec of LogicalOperator from planner"] --> B["Flat passes x19<br/>pushdown, fold, reorder, detect"]
+    B --> C{"Plan shape stable?"}
+    C --> D["Tree passes x7<br/>factorize, unnest, estimate"]
+    D --> E["Optimized plan<br/>to physical mapper"]
+    F["StatsStore / FTS stats"] -.-> B
+    F -.-> D
 ```
 
-`CardinalityEstimation` consults `StatsStore` (when configured) and the optional FTS selectivity estimator to stamp `cardinality` estimates on operators; without stats it falls back to static heuristics (`EQUALITY_PREDICATE_SELECTIVITY = 0.01`, `passes/tree/cardinality.rs:15`), and without an FTS estimator FTS scans are estimated at full table size (`optimizer.rs:91-92`).
+**Key steps**: detection passes (`VectorSimilarityDetection`, `ArtRangeScanDetection`, `FtsPredicatePushdown`) spot a *semantic idiom* — a recognizable arrangement of generic operators — and replace it with an operator the processor can execute far faster (ANN probe, ART lookup, pre-joined BM25). This is how Akar exposes indexes through standard Cypher without proprietary syntax.
+
+---
 
 ## Key interfaces & extension points
 
-`OptimizationPass` and `TreeOptimizationPass` are the two stable extension points: implement either trait and insert it in `Optimizer::new()`/`with_stats_and_fts()`. Plugin-in stats: `with_stats(stats)` (`optimizer.rs:84`) consumes the read-only `StatsStore` (`akar-storage/src/stats`). Two passes are documented **active** rewrites of note: `VectorSimilarityDetection` (P71.4, with in-file safety invariants at `vector_similarity.rs:1-37`) and `FtsPredicatePushdown` (P108) — both reshape expensive join-time work into index reads. Several passes are documented **NO-OP by design** (CommonSubexpressionElimination, OrderByPushDown, AggregateFusion) because the rewrites they'd perform are not provably correct under UNION concat semantics without new operators — see the SPEC.
+Input/output is a plain `Vec<LogicalOperator>` in → out, called from `akar-main`'s `build_optimized_plan` (`akar-main/src/connection/query.rs:175`) after a plan-cache miss — the optimizer itself is stateless per call (stats are injected). Adding a pass follows a fixed ritual: implement the apply function → register it in `Optimizer::new` at the correct phase (flat vs tree, respecting ADR-003 ordering) → add a regression test proving both the rewrite and its semantic invariance. `pass_names()` (`optimizer.rs:155`) exposes the registry for EXPLAIN and tests, so pass-order changes are observable, not tribal knowledge.
 
-## Interactions with other modules
+## Cross-module collaboration
 
-| Module | Direction | Interface used | Note |
-|---|---|---|---|
-| akar-planner | input | `LogicalOperator` (59 variants) | Plan source |
-| akar-storage | uses | `StatsStore`, table metadata | Cardinality, ART/vector reasoning |
-| akar-processor | consumer | Optimized plan | Processor maps to physical ops |
-| akar-function/vector | indirect | Cosine-similarity shape | Signals `VectorSimilarityDetection` |
+| Interacting module | Direction | Interface | Description |
+|--------------------|-----------|-----------|-------------|
+| Frontend (planner) | feeds optimizer | `Vec<LogicalOperator>` | Guaranteed-bound input |
+| Processor (mapper) | consumes output | optimized operator list | Builds `Physical*` operators |
+| `akar-main` (connection) | invokes | `build_optimized_plan` (`query.rs:175`) | After cache miss only |
+| Search (FTS/vector) | provides stats + scan ops | `StatsStore`, FtsScan/VectorSimilarityScan targets | Detection passes swap these in |
+| Catalog | indirect | version stamp via plan cache | Schema change → re-optimize |
 
-## Performance & concurrency notes
+**In the read-query flow**: this module is stage 4 — the only stage whose output can change latency profiles across orders of magnitude (a missed pushdown turns a selective filter into a full scan).
 
-All passes are single-threaded sequential rewrites (no threading inside the optimizer). The per-file `Pass N` doc comments reflect the pass design numbers, not the executable order in `Optimizer::new()` — rely on `pass_names()` as ground truth. `CardinalityEstimation` costs nothing when no `StatsStore` is configured (static-heuristics path), keeping default planning cheap.
+**In the vector-search flow**: `VectorSimilarityDetection` (`vector_similarity.rs:54-101`) is the bridge that lets `WHERE cosine_similarity(...) >= thr ORDER BY ... LIMIT k` reach the HNSW index at all — without it, the query degrades to brute-force evaluation.
 
-## Implementation highlights
+---
 
-- **Vector ANN detection (P71.4):** pattern-matches `ScanNode(pred=cos>thr) + OrderBy(cos DESC) + Limit(k)` and rewrites to `[VectorSimilarityScan(column, query_vector, k), Filter(>thr)]`, preserving downstream Projection/ORDER BY/LIMIT. This single pass is what makes vector search "just work" from ordinary Cypher.
-- **FTS-aware planning (P108):** the binder attaches `USING FTS INDEX` to MATCH, the planner emits `FtsScan`, and `FtsPredicatePushdown` re-routes it onto the base-table scan so index read and predicate land together (`passes/tree/fts_predicate_pushdown.rs:21`).
-- Ladybug micro-optimizations (`ladybug.rs`: OrderByPushDown `:18`, UnwindDedup `:121`, CountRelTable `:166`) are bundled here.
-- The pass-count test `test_optimizer_registers_all_passes` (`optimizer.rs:203`) pins the 26-pass invariant, so a new pass can't silently break the documented chain.
+## Performance considerations
+
+Pass ordering *is* the performance strategy: filters move to scans first (less data flows), projections drop dead columns early (narrower chunks), join order follows estimated cardinality (small side becomes build side), TopK avoids full sorts, and `CountRelTable` answers `COUNT` from CSR metadata without touching rows. Estimated-row annotations from `CardinalityEstimation` feed runtime choices (hash-join build sides, spill decisions). Because the whole front half is plan-cached, these 26 passes run once per distinct statement text, not once per execution — optimization cost is amortized to near zero on hot paths.
+
+---
+
+## Highlights
+
+The honesty-as-a-feature pattern is the module's crown: audits P52.2/P52.6/P52.7 left `CommonSubexpressionElimination`, `OrderByPushDown`, and `AggregateFusion` as documented NO-OPs with explicit reasons (arity breakage, missing MergeUnion, merged-schema rewrite) instead of shipping subtly wrong rewrites — a rare engineering posture worth imitating wherever correctness outranks feature-matrix vanity. `VectorSimilarityDetection` shows the ideal detection pass in miniature: recognize a four-operator idiom, swap the scan, preserve threshold/projection/limit exactly, and prove it with a regression test — the reusable template for any future index exposure.

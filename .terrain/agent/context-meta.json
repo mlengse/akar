@@ -2,9 +2,9 @@
   "project": "akar",
   "repo_path": ".",
   "output_file": "context.md",
-  "generated_at": "2026-09-20T13:39:49.970597800+00:00",
+  "generated_at": "2026-09-23T12:58:29.130539700+00:00",
   "section_count": 6,
-  "char_count": 11787,
-  "baseline_git_head": "29b0d468843bb31107912194d57454c21ae37b22",
+  "char_count": 9911,
+  "baseline_git_head": "0e419d65116789b59cbe6ca9c000342f0ecaea99",
   "language": "en"
 }

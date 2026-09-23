@@ -7,94 +7,90 @@ source: .
 
 ## Project Overview
 
-Akar is a **pure-Rust, embedded graph database for AI agent memory** — a from-scratch reimplementation of KuzuDB (archived C++ graph DB, U. of Waterloo) with **zero C++ and zero FFI** (ADR-002). It keeps Kuzu's architectural DNA: Cypher query language (pest grammar, ADR-001), worst-case optimal joins (WCOJ), factorized execution, column-major storage (ADR-004), and MVCC (ADR-005). Hot-path performance is validated at 3-way parity with the C++ originals (397 µs vs 400 µs vs 374 µs on a 10K-row query). Primary consumer is the `sulur` AI memory engine (ships as PyPI `akar>=X.Y.Z`); akar also ships a CLI shell, a TCP daemon server, Python/C/WASM bindings, and an ADBC source. Governance is **spec-driven**: `SPEC.md` is the live contract; every batch gates on `cargo test` (0 failed / 0 ignored), clippy `-D warnings`, and fmt.
+Akar is a **pure-Rust embedded property-graph database for AI-agent memory** (GPL-3.0-or-later, edition 2024, ~139K LOC, 2,242 tests). It is a from-scratch, no-FFI reimplementation of the KuzuDB design: worst-case-optimal joins, factorized execution, column-major storage, and MVCC, compressed into an in-process library with no C++ and no external runtime. Consumers embed it via `akar-main` (Rust), `pip install akar` (Python), or Akar Server `akarshell`/`akar-server`. It executes **openCypher** over a durable, columnar, multi-writer graph store; hot path measured at parity with Kuzu C++ (~397 µs/query). Primary downstream consumer: **Sulur**, the memory engine (formerly kairos), which embeds Akar in-process. Key constraints: embedded-only (no Docker/infra), 100% pure Rust (ADR-002), spec-driven development governed by `SPEC.md`, and cross-product release sequencing with Sulur.
 
 ## Architecture
 
-A Cargo workspace of ~35 crates under `akar-core/`, layered bottom-up; `akar-main` is the embedded library facade.
+Akar is organized as a layered pipeline within 35 Cargo crates in the `akar-core/` workspace. Data flows verbatim through query frontend → logical planning → cost-based optimizer → vectorized physical execution → columnar storage.
 
-| Layer | Role | Key paths |
+| Layer | Crates | Responsibility |
 |---|---|---|
-| Query front-end | Cypher grammar (pest), AST, DDL/DML/expression parsing | `akar-core/akar-parser/src/` |
-| Semantic binding | AST → `BoundStatement`, DDL bind, confidential-statement analysis | `akar-core/akar-binder/src/` |
-| Logical planning | Logical operators/planner, join-order enumeration | `akar-core/akar-planner/src/` |
-| Optimization | 25 rule passes (18 flat + 7 tree): WCOJ/factorization, pushdowns, aggregate fusion, subquery unnesting, FTS & vector-similarity rewrites | `akar-core/akar-optimizer/src/passes/` |
-| Physical execution | Parallel push-based vectorized execution over Arrow `DataChunk`s; scan/filter/join/aggregate/write operators + expression evaluator | `akar-core/akar-processor/src/physical/`, `src/processor/`, `src/expression_evaluator.rs` |
-| Storage | Columnar node-groups, per-column chunks, ART index, page/buffer manager, WAL + checkpoint + crash recovery, compression, stats, HNSW vector index | `akar-core/akar-storage/src/` |
-| Transactions | MVCC lifecycle, commit history, snapshot visibility | `akar-core/akar-transaction/src/` |
-| Embedding facade | `Database`, sessions, DDL/DML/COPY orchestration, plan cache, table functions, storage driver | `akar-core/akar-main/src/` (incl. `connection/`) |
-| Extensions | FTS, ANN, GDS algorithms, hybrid search, scalar/aggregate functions, ML models, Dream consolidation, JSON, object-store formats | `akar-fts`, `akar-vector`, `akar-graph`, `akar-algo`, `akar-search`, `akar-function`, `akar-ml`, `akar-dream`, `akar-json` |
-| Interop adapters | Foreign-engine compatibility | `akar-duckdb`, `akar-delta`, `akar-iceberg`, `akar-azure`, `akar-unity-catalog`, `akar-neo4j`, `akar-postgres`, `akar-sqlite` |
-| Entry points & bindings | CLI shell, TCP daemon, Rust/C/Python/WASM/ADBC/migrate | `akar-cli`, `akar-server`, `akar-c`, `akar-python`, `akar-wasm`, `akar-migrate` |
+| Frontend | `akar-parser`, `akar-binder`, `akar-catalog` | openCypher grammar (pest), AST, name/type binding, DDL analysis |
+| Planning | `akar-planner`, `akar-optimizer` | Logical operators, join-order, flat + tree rule passes (pushdown, fusion, subquery unnest, vector-similarity rewrite) |
+| Execution | `akar-processor`, `akar-function`, `akar-common` | Arrow-vectorized operators, scalar/aggregate functions, mapper, spillable join/aggregate |
+| Storage | `akar-storage`, `akar-transaction`, `akar-binder` | Column-major tables, ART index, CSR graph storage, WAL/checkpoint, group commit, MVCC undo |
+| Search & Graph | `akar-fts`, `akar-vector`, `akar-search`, `akar-algo`, `akar-graph` | Tantivy BM25, HNSW ANN, hybrid/RRF fusion, GDS algorithms (Louvain, node2vec, LPA) |
+| Cognitive/AI | `akar-dream`, `akar-ml`, `akar-llm` | Sleep-phase memory consolidation (NREM/REM/AFE/DAE), embedding + LSTM, provider-agnostic LLM calls |
+| Entry points | `akar-main`, `akar-cli`, `akar-server`, `akar-python`, `akar-c`, `akar-wasm` | Embedded DB API, shell, network broker (deprecated), FFI/wasm bindings |
+| Integration | `akar-duckdb`, `akar-sqlite`, `akar-postgres`, `akar-neo4j`, `akar-azure`, `akar-httpfs`, `akar-iceberg`, `akar-delta`, `akar-unity-catalog`, `akar-json`, `akar-markdown` | External engines, object stores, lakehouse formats |
 
-**Execution model:** `QueryProcessor` runs a mapper/scheduler over physical operator trees; parallel scans feed hash-join PMCs that materialize WCOJ plans, with factorized pass back per projection group.
+Major internal dependencies: `akar-main` is the facade (ADBC + connection layer + plan cache); `akar-common` is the shared Arrow data-chunk/enum/error substrate consumed everywhere; `akar-extension` + `akar-azure`/`akar-httpfs` form the pluggable filesystem/extension registry.
 
 ## Module Map
 
-| Module (crate dir) | Responsibility | Primary paths |
+| Module | Responsibility | Primary paths |
 |---|---|---|
-| `akar-main` | Embedded facade: `Database`, sessions, DDL/DML/COPY, plan cache, ADBC, remote client, table functions | `akar-core/akar-main/src/`, `src/connection/`, `src/database.rs`, `src/adbc.rs` |
-| `akar-parser` | Cypher grammar + AST (pest, `cypher.pest`) | `akar-core/akar-parser/src/parser/`, `src/ast.rs` |
-| `akar-binder` | AST → bound statements, DDL binding | `akar-core/akar-binder/src/binder/`, `src/bound_statement.rs` |
-| `akar-planner` | Logical plan construction, join ordering, WCOJ `Intersect` shape | `akar-core/akar-planner/src/planner.rs`, `src/join_order.rs`, `src/logical_operator.rs` |
-| `akar-optimizer` | Rule-based rewrites (18 flat + 7 tree passes) | `akar-core/akar-optimizer/src/passes/{flat,tree}/`, `src/optimizer.rs`, `src/join_order.rs` |
-| `akar-processor` | Physical operators, expression evaluator, plan serializer, write ops, graph-source projection | `akar-core/akar-processor/src/physical/`, `src/processor/`, `src/physical/write_ops/` |
-| `akar-storage` | Columnar engine: node-groups, ART, WAL/checkpoint/recovery, parquet/CSV/NPY readers, statistics, vector index | `akar-core/akar-storage/src/` |
-| `akar-transaction` | MVCC lifecycle & commit-history visibility | `akar-core/akar-transaction/src/lib.rs` |
-| `akar-common` | Arrow vectors/DataChunk, types, selection, memory accounting, VFS, task system | `akar-core/akar-common/src/` |
-| `akar-function` | Scalar + aggregate function registry (arithmetic, string, date, list/map, JSON path, hash, …) | `akar-core/akar-function/src/scalar/`, `src/aggregate/`, `src/graph.rs` |
-| `akar-vector` / `akar-fts` / `akar-search` | ANN (HNSW + SIMD), full-text (Tantivy), hybrid/RRF/multi-stage search | `akar-core/akar-vector/src/hnsw.rs`, `akar-fts/src/index.rs`, `akar-search/src/` |
-| `akar-graph` / `akar-algo` / `akar-ml` / `akar-dream` | GDS (BFS, random walk, node2vec, Louvain, LPA), ML (LSTM/SBYO/sparse), memory consolidation sleep-cycle | `akar-core/akar-graph/src/gds/`, `akar-algo/src/gds/`, `akar-ml/src/`, `akar-dream/src/phases/`, `src/orchestrator.rs` |
-| `akar-duckdb` + attach family | DuckDB-delegated read of Delta / Iceberg / Azure Blob / Unity Catalog | `akar-core/akar-duckdb/src/`, `akar-delta/src/`, `akar-iceberg/src/`, `akar-azure/src/`, `akar-unity-catalog/src/` |
+| `akar-parser` | openCypher grammar (pest) → AST | `akar-core/akar-parser/src/parser/`, `cypher.pest` |
+| `akar-binder` | Name/type binding, confidential-statement analysis | `akar-core/akar-binder/src/binder/` |
+| `akar-planner` | Logical plan + join-order enumeration | `akar-core/akar-planner/src/planner.rs`, `join_order.rs` |
+| `akar-optimizer` | Cost-based rule passes (flat/tree) | `akar-core/akar-optimizer/src/passes/` |
+| `akar-processor` | Vectorized physical ops, mapper, spills, write ops | `akar-core/akar-processor/src/processor/`, `physical/` |
+| `akar-function` | Scalar/aggregate/table-function registry | `akar-core/akar-function/src/scalar/`, `aggregate/` |
+| `akar-storage` | Tables, columns, WAL, checkpoints, ART index, CSR | `akar-core/akar-storage/src/` |
+| `akar-transaction` | MVCC transaction lifecycle | `akar-core/akar-transaction/src/` |
+| `akar-fts` / `akar-search` | BM25 full-text + hybrid/RRF scoring | `akar-core/akar-fts/src/`, `akar-search/src/` |
+| `akar-vector` | HNSW ANN + distance kernels | `akar-core/akar-vector/src/hnsw.rs` |
+| `akar-graph` / `akar-algo` | Graph algorithms & GDS (Node2Vec, Louvain, RandomWalk) | `akar-core/akar-graph/src/gds/` |
+| `akar-dream` / `akar-ml` / `akar-llm` | Memory consolidation, embedding/LSTM, provider embeddings | `akar-core/akar-dream/src/phases/`, `akar-ml/src/` |
+| `akar-main` | Embedded DB facade: connection, DDL/DML, COPY, plan cache, ADBC | `akar-core/akar-main/src/` |
+| `akar-python` / `akar-c` / `akar-wasm` / `akar-cli` | Bindings & CLI surface | `akar-core/akar-python/src/`, `akar-cli/src/main.rs` |
 
 ## Core Flows
 
-1. **Query (read path):** session statement → parse Cypher → bind to `BoundStatement` → logical plan (+ join order) → optimizer rewrites (WCOJ factorization, predicate/projection/FTS/vector pushdown) → `QueryProcessor` maps to physical operators → parallel vectorized scan/filter/join/aggregate over Arrow chunks → result through the plan-cache-aware session (`akar-main/src/connection/query.rs`).
-2. **Write + durability:** DDL/DML bound+executed inside an MVCC transaction → WAL appended before data pages → commit publishes visibility via O(1) commit-history lookup → group-commit + async checkpoint flush dirty pages → crash recovery replays WAL on startup (`akar-storage/src/wal.rs`, `wal_replayer.rs`, `checkpoint.rs`).
-3. **Vector ANN query:** `MATCH … WHERE cosine_similarity(n.emb, $q) > thr … ORDER BY cos DESC LIMIT k` is rewritten by `VectorSimilarityDetection` into `[VectorSimilarityScan(HNSW) → Filter(cos>thr) → OrderBy → Projection → Limit]`; `CALL vector_similarity_scan(…)` uses the same HNSW read path with SIMD distance kernels and scalar fallback.
-4. **FTS lifecycle:** `CREATE FTS INDEX` builds an on-disk Tantivy index per table/column → inserts/deletes sync **only on durable commit** (aborted writes never leak) → `USING FTS INDEX` predicates push down to the scan leaf; cardinality estimated from Tantivy `doc_freq` (min with table cardinality) without executing search.
-5. **Python drop-in path:** `akar-python` mirrors the Kuzu Python API so `sulur` can `cargo`-embed or `pip install akar`; Kuzu-compat harness (53/53 tests) guards behavioral parity (e.g. `MATCH..SET..RETURN` phantom-row fix, P59.1).
+1. **Query pipeline** — text → `akar-parser` (pest AST) → `akar-binder` (schema/type resolution) → `akar-planner` (logical plan) → `akar-optimizer` (flat + tree passes; subquery unnesting, filter/join pushdown, vector-similarity rewrite, FTS predicate pushdown) → `akar-processor` mappers build vectorized physical operators → Arrow chunks streamed to `QueryResult`. Plans cached in `akar-main/src/connection/plan_cache.rs`.
+2. **Write path (COPY / DML)** — `COPY FROM` CSV/JSON/Parquet/NPY via `attention`-less bulk ingest (`copyfrom.rs`), DML (insert/update/delete/set) converted to physical write ops; write rows go to in-memory node groups, group-committed to the **WAL**, then checkpointed into columnar pages which are compressed and written via shadow-file (atomic swap). MVCC uses undo buffers in `akar-transaction`.
+3. **Hybrid retrieval** — query rewrites into `[VectorSimilarityScan(HNSW), Filter(cos), OrderBy, Limit]`; explicit `CALL vector_similarity_scan(...)` path exists. Combined text+vector scoring via BM25 (`akar-fts`, Tantivy) and reciprocal-rank fusion in `akar-search` (hybrid/RRF, hierarchical). Vector indexes maintained on DML via catalog refresh.
+4. **Memory consolidation (Dream)** — ingested memories are periodically reprocessed by `akar-dream`'s sleep/rest phases (NREM/REM/AFE/DAE): decay curves (Ebbinghaus), insight extraction, supersede/synthesis into durable graph structure, with local embedding (Candle) in `akar-ml`.
 
 ## Tech Stack
 
-- **Language:** Rust; deliberately FFI-free in the core engine; SIMD via `#[target_feature]` (`is_x86_feature_detected!` SSE2/AVX, NEON).
-- **Query front-end:** Cypher; grammar in **pest** (`cypher.pest`).
-- **Columnar runtime:** Apache Arrow vectors / `DataChunk`; column-major on-disk format.
-- **Indexes:** ART (+ ART range-scan optimization), Tantivy FTS, self-contained HNSW ANN.
-- **External formats:** DuckDB (libduckdb C++ extension) delegated via `akar-duckdb` for Delta/Iceberg/Azure/Unity Catalog; native Parquet/CSV/NPY/JSON readers in `akar-storage`.
-- **Concurrency:** worker-thread scheduler, parallel scans, group-commit WAL, MVCC snapshot isolation.
-- **Embeddings:** HTTP clients for OpenAI-compatible endpoints (OpenAI, Ollama, VoyageAI, Bedrock, Vertex/Gemini).
-- **Build/test/CI:** cargo workspace (35 crates, `max_width=120`), gate `test [akar-core]` (~1,954 tests, 0 failed / 0 ignored; per-crate suites listed), clippy `-D warnings`, GitHub Actions (`rust-ci.yml`, `rust-release.yml`), fuzz targets in `akar-core/fuzz` (nightly). Releases automated via `tools/release.py` (bottom-up publish) + `tools/doc-check.py`.
+- **Language/edition:** Rust 2024, Cargo workspace of 35 crates; standard CI clippy `-Dwarnings`, `cargo fmt` (max_width 120).
+- **Parsing:** `pest` grammar (`cypher.pest`), AST in `akar-parser` (ADR-001).
+- **Execution:** Arrow-vectorized `DataChunk`/`SelectionVector` in `akar-common`; physical operator tree in `akar-processor`; spill-to-disk for hash join/aggregate (radix/block-merge sort).
+- **Storage:** column-major (ADR-004), page manager, WAL + replayer, group commit, ART index, CSR for graph, string dictionary, compression (zstd/gzip via `akar-httpfs`/gzip FS).
+- **Indexes/search:** Tantivy (BM25) in `akar-fts`; custom HNSW in `akar-vector`; hybrid RRF in `akar-search`.
+- **AI/ML:** local embedding via Candle (`akar-ml`), provider embeddings via `akar-llm`, LSTM, SBYO, sparse embeddings.
+- **Bindings:** PyO3 Python package (`pip install akar`), C library, Wasm target, CLI.
+- **Infra/tooling:** GitHub Actions (`rust-ci.yml`, `rust-release.yml`), ADR docs (`akar-core/docs/adr/`), fuzz targets (nightly toolchain), `tools/release.py` + `tools/doc-check.py`.
 
 ## System Boundaries
 
-- **Trust boundary — query & ingest input:** arbitrary Cypher, COPY, and JSON/CSV payloads are attacker-adjacent; fuzzed (`cypher_query`, `expression_eval`, `copy_from_csv`, `compression_roundtrip`, `wal_bytes`); malformed-file suites under `dataset/`.
-- **External data-plane (read-only attach):** DuckDB-driven Delta Lake, Iceberg, Azure Blob (`CREATE SECRET`), Unity Catalog — credentials flow through attach-setup SQL, never into the core engine.
-- **Embedding providers:** outbound HTTP only at query time; no keystore, keys supplied by caller config.
-- **Foreign-engine interop:** `akar-neo4j`, `akar-postgres`, `akar-sqlite`, `akar-json` convert external objects across the Arrow/Value type boundary.
-- **Server daemon:** blocking TCP server (`akar-server`) with idle-timeout auto-shutdown; session/ping wire protocol now supports parameter binding via the prepared-statement pipeline. Status: deprecated for production (sulur migrates to in-process embedding, P124).
-- **On-disk format contract:** `STORAGE_VERSION = 1` (`akar-storage/src/version_info.rs`); a bump without auto-migration ⇒ mandatory `0.2.0` SemVer release.
-- **Release/versioning:** crates publish bottom-up respecting crates.io rate limits; tag `v*` triggers 3-OS CLI binary builds + GitHub Release; akar released before `sulur` (cross-repo dependency enforced by `sulur/tools/boundary-check.py`).
+| Boundary | Interface | Direction |
+|---|---|---|
+| External LLM providers | OpenAI, Google Gemini/Vertex, AWS Bedrock, Ollama, Voyage AI (via `akar-llm`) | outbound HTTP |
+| Object storage | Azure Blob (`akar-azure`), HTTP/S3-style (`akar-httpfs`) | outbound HTTP |
+| External engines | DuckDB, SQLite, PostgreSQL, Neo4j connectors (binary/network libs) | integration |
+| Lakehouse formats | Iceberg, Delta, Unity Catalog (Apache Avro reader) | integration |
+| Consumer API | `akar-python` (PyPI) consumed by **Sulur**; sulur/akar boundary enforced by `sulur/tools/boundary-check.py` | cross-repo contract |
+| Network broker | `akar-server` (TCP JSON) — **deprecated** for production; degraded to test harness / wire reference | outbound→inbound |
+| Trust boundaries | Untrusted cypher input & host SQL/JSON path reads; local file IO confined to catalog paths; network outbound only for provider/storage access | — |
 
 ## Code Map Index
 
-| Concept | Location |
-|---|---|
-| Embedded entrypoint / `Database` | `akar-core/akar-main/src/database.rs`, `src/lib.rs` |
-| Connection sessions (DDL/DML/COPY/query/transaction) | `akar-core/akar-main/src/connection/{ddl,dml,copy,query,transaction,plan_cache,standalone_call}.rs` |
-| Query processor / exec context | `akar-core/akar-processor/src/processor/mod.rs`, `src/physical_operator.rs` |
-| Optimizer passes | `akar-core/akar-optimizer/src/passes/{flat,tree}/` |
-| WCOJ / factorization | `akar-core/akar-optimizer/src/passes/tree/factorization.rs`, `akar-planner/src/join_order.rs` |
-| Vector-similarity HNSW rewrite | `akar-core/akar-optimizer/src/passes/flat/vector_similarity.rs`, `akar-processor/src/physical/write_ops/vectorsimilarityscan.rs` |
-| HNSW + distance kernels | `akar-core/akar-vector/src/hnsw.rs`, `src/distance.rs` |
-| Storage engine (node-groups, ART, WAL, MVCC) | `akar-core/akar-storage/src/{table,node_group,art_index,wal,wal_replayer,checkpoint,version_info}.rs` |
-| MVCC transactions | `akar-core/akar-transaction/src/lib.rs` |
-| FTS index + pushdown + estimate | `akar-core/akar-fts/src/index.rs`, `akar-optimizer/src/passes/tree/fts_predicate_pushdown.rs`, `akar-main/src/connection/fts_estimate.rs` |
-| GDS / graph algorithms | `akar-core/akar-graph/src/gds/`, `akar-algo/src/gds/` |
-| ML models / Dream consolidation | `akar-core/akar-ml/src/`, `akar-dream/src/orchestrator.rs`, `akar-dream/src/phases/` |
-| Hybrid / RRF search | `akar-core/akar-search/src/{hybrid,rrf,hierarchical,fused,multi}.rs` |
-| Server daemon + wire protocol | `akar-core/akar-server/src/bin/akar_server.rs`, `src/session.rs`, `akar-main/src/remote.rs` |
-| Bindings & CLI | `akar-core/akar-cli/src/main.rs`, `akar-python/src/lib.rs`, `akar-c/src/lib.rs`, `akar-wasm/src/lib.rs`, `akar-main/src/adbc.rs` |
-| Spec / plan / release governance | root `SPEC.md`, `CHANGELOG.md`, `implementation plan.md`, `tools/release.py`, `tools/doc-check.py` |
-
-Note: full implementation detail (symbols, signatures, code) lives in `agent/repomix.md`.
+| Concept | Location | Notes |
+|---|---|---|
+| Embedded DB facade | `akar-core/akar-main/src/database.rs`, `lib.rs` | Entry, pool, prepared statements |
+| Connection layer (query/DDL/DML/COPY/plan-cache) | `akar-core/akar-main/src/connection/` | Includes transaction, substitute, standalone_call |
+| Copy ingestion (CSV/JSON/Parquet/NPY) | `akar-core/akar-main/src/bulk.rs`, `akar-storage/src/csv_reader.rs` | Dialect sniffing, multi-file |
+| Optimizer passes | `akar-core/akar-optimizer/src/passes/` | Flat + tree pass dirs |
+| Physical operators | `akar-core/akar-processor/src/physical/` | scan_filter, order_aggregate, write_ops, join |
+| Vector similarity scan path | `akar-core/akar-optimizer/src/passes/flat/vector_similarity.rs`, `akar-processor/src/physical/write_ops/vectorsimilarityscan.rs` | Docs in SPEC §8/vector notes |
+| Storage & WAL | `akar-core/akar-storage/src/wal.rs`, `wal_replayer.rs`, `checkpoint.rs`, `uart` | Group commit, crash recovery |
+| FTS build/catch-up | `akar-core/akar-fts/src/build.rs`, `index.rs`; `akar-main/src/connection/fts_estimate.rs` | Tantivy-backed |
+| Hybrid search fusion | `akar-core/akar-search/src/hybrid.rs`, `rrf.rs`, `fused.rs`, `hierarchical.rs` | BM25+vector RRF |
+| HNSW | `akar-core/akar-vector/src/hnsw.rs` | ONNX-free, owned engine |
+| Dream (memory consolidation) | `akar-core/akar-dream/src/phases/` | NREM/REM/AFE/DAE/insights/supersedes |
+| Graph algorithms | `akar-core/akar-algo/src/gds/`, `akar-graph/src/gds/` | Louvain, LPA, Node2Vec |
+| Python bindings | `akar-core/akar-python/src/` | dream, knn, louvain, lstm, search, spread |
+| CLI & server | `akar-core/akar-cli/src/main.rs`, `akar-server/src/bin/akar_server.rs` | shell + deprecated broker |
+| Release tooling | `tools/release.py`, `tools/doc-check.py`, root `CHANGELOG.md`, `SPEC.md` | Spec-driven flow gate |

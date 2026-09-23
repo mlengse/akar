@@ -1,83 +1,90 @@
-# Processor (akar-processor)
+# Processor domain
 
-**Module path:** `akar-core/akar-processor/`
-**Role:** Core domain — where plans become real work.
+**Module paths**: `akar-core/akar-processor/`, `akar-core/akar-function/`
+**Generated**: 2026-09-23
 
 ---
 
-## Overview
+## What this module is doing
 
-The processor is the engine room of the database: it takes the optimized logical plan and turns each operator into a concrete physical closure that pushes columnar `DataChunk`s forward through a pipeline. Think of it as the factory floor: the plan is the blueprint, the mapper is the foreman who assigns each blueprint step to a machine, and the physical operators are the machines themselves — scan, filter, hash join, aggregation, top-k, sorts, writes, vector-similarity scans, FTS, COPY, DDL and GDS table functions. Because data flows as whole Arrow column batches rather than row-by-row, the whole floor works in vectorized sweeps, with rayon handling the heavy parallel lifting for joins, aggregation and sorts.
+If storage is the factory floor and the frontend is customs, the processor is the logistics fleet: it takes the optimized route sheet and actually moves the goods — scanning pages, filtering rows, joining sides, aggregating groups, sorting order — as vectorized Arrow batches. It also owns the vocabulary of computation itself: `akar-function` registers the **260 built-in functions** (245 scalar, 14 aggregate, 1 table) that expressions call at runtime. Together they are where plans become results; the parity audit shows all 58 C++ physical operator types have functional akar counterparts (55 executors), with no operator genuinely missing.
 
-`QueryProcessor` (`akar-processor/src/processor/mod.rs:131`) is the orchestrator, holding the registry/catalog/VFS references plus the MVCC fields so that every operator has transaction context without threading it through call signatures.
+This is the layer users *feel*: a missing pushdown shows up as optimizer slowness, but a slow join implementation, a wrong aggregate, or a serial hotspot is born here. It's also where the engine's columnar identity is most literal — data crosses operator boundaries as `DataChunk`s, never as rows.
 
-## Core functions
+---
 
-1. **Execute** — `QueryProcessor::execute(operators)` (`processor/mod.rs:354`) turns `&[LogicalOperator]` into `Result<Vec<DataChunk>, ProcessorError>`; the core tail-walker `execute_internal` (`:362`) dispatches each operator to its mapper.
-2. **Map & run** — `map_and_execute(operators)` / `execute_children` (`mapper/mod.rs:199`, `:66`) recurse through the plan building physical ops.
-3. **Special entry points** — `execute_table_function` (`mod.rs:485`) and `execute_vector_similarity_scan` (`:545`) bypass the generic mapper for table functions and HNSW vector scans.
-4. **Expression evaluation** — `ExpressionEvaluator` / `evaluate_expression` (`mod.rs:638` and `expression_evaluator.rs`) front the scalar functions from `akar_function::scalar::evaluate_scalar`.
-5. **Limit budget** — `forward_limit_budget(tail)` (`processor/mod.rs:43-52`) safely pushes `limit+offset` budgets upstream, but only through Projections (Filter/Aggregate/OrderBy/joins are barriers: `mod.rs:38-52`).
-6. **Physical contract** — `PhysicalOperatorExec` trait: `execute(&self, input: Vec<DataChunk>) -> OperatorResult` (`physical/types.rs:14-17`); `OperatorResult` is `Result<Vec<DataChunk>, ProcessorError>` (`physical/types.rs:9`).
+## Core capabilities
+
+1. **Physical operator library (50 `Physical*` structs + 5 infrastructure ops)** — scans (`PhysicalScan`, `PhysicalScanRel`, `PhysicalPrimaryKeyScan`), filter, joins (`PhysicalHashJoin` build/probe, `PhysicalSemiJoin`/`AntiJoin`, `PhysicalIntersect` WCOJ), aggregate (with finalize/scan split), order (`PhysicalOrderBy` using `BlockMergeSort` + radix), TopK (binary heap, O(n log k)), limit/skip, projection, flatten, unwind/foreach, recursive extend, union-all scan, index lookup, path property probe, multiplicity reducer, accumulate, explain, copy-from, and the specialized FTS/vector/ART scans; infrastructure ops `ResultCollector`/`DummySink`/`Profile`/`Partitioner` live in `physical/missing_ops.rs`.
+2. **Arrow-native expression evaluation** — `expression_evaluator.rs` (`evaluate_to_arrow` + `boolean_array_to_selection`) computes predicates/expressions directly on columnar arrays instead of row-at-a-time — the single biggest constant-factor win in the execution engine.
+3. **Parallel runtime structures** — `AggregateHashTable` and `JoinHashTable` are built for concurrent population; rayon splits work across `SystemConfig::max_num_threads`.
+4. **Write operators + index sync** — Insert/Delete/Set/Merge (incl. `PhysicalMergeRel`), batch insert, and `sync_indexes_on_commit` (`physical/write_ops/fts_sync.rs:39-125`) which propagates committed rows into Tantivy and reloads the shared reader — the one production reload point (P107.2).
+5. **Logical → physical mapping** — `mapper/` (`map_join.rs`, `map_projection.rs`, `map_ddl.rs`) translates `LogicalOperator`s into operator pipelines; DDL/admin statements often execute inline at the connection layer instead (SPEC processor matrix category (b)).
+6. **Function registry** — `akar-function/src/{scalar,aggregate,graph,registry}`: arithmetic/string/date/cast/list/map/struct/path families; 14 aggregates (COUNT/SUM/AVG/… plus name-mangled `count_distinct` since P88); the `evaluate_scalar` dispatch hub (`akar-function/src/scalar/mod.rs:75-102`). `CALL`-able system/GDS functions route through connection `standalone_call.rs` instead.
+
+---
 
 ## Key components
 
-| Component/type | File path | One-line responsibility |
-|---|---|---|
-| `QueryProcessor` | `src/processor/mod.rs:131` | Orchestrates execution; holds registry/catalog/VFS/MVCC fields |
-| `ExecutionContext` | `src/processor/mapper/mod.rs:23-40` | Threads processor, registry, `snapshot_ts`, `commit_history`, `written_rows`, `txn_id`, undo/wal sinks through mappers |
-| `PhysicalOperatorExec` trait | `src/physical/types.rs:14-17` | Contract every physical operator implements |
-| `PhysicalFilter` | `src/physical/scan_filter/filter.rs:28` | Row-level predicate filtering |
-| `PhysicalHashJoin` | `src/physical/join_ops.rs:909` | Build-probe hash join (rayon-parallel build at `:755-758`) |
-| `PhysicalTopK` | `src/physical/order_aggregate/topk.rs:16` | `ORDER BY ... LIMIT k` streaming top-k |
-| `BlockMergeSorter` | `src/physical/order_aggregate/blockmergesort.rs:10` | Block-based parallel sort + k-way merge (radix for Int64) |
-| `AggregateHashTable` | `src/physical/order_aggregate/aggregatehashtable.rs:18` | Thread-local rayon aggregation, merged at `:170` |
-| `PhysicalVectorSimilarityScan` | `src/physical/write_ops/vectorsimilarityscan.rs:15` | HNSW/vector-index scan read path (the ANN backend) |
-| `CatalogGraphSource` | `src/processor/graph_source.rs:13` | `GraphDataSource` snapshot built from `TableCatalog` (`new(catalog)` `:20`) |
-| `PhysicalCopyFrom` | `src/physical/write_ops/copyfrom.rs:17` | COPY CSV/Parquet ingestion |
-| `PhysicalCreateFtsIndex` / `PhysicalCountRelTable` | `src/physical/write_ops/ddl_fts.rs:50` / `:12` | FTS index creation; CSR-metadata COUNT |
-| `PhysicalDelete` / `PhysicalSet` | `src/physical/write_ops/delete.rs:14` / `set.rs:26` | Soft-delete / SET with correct `_id` semantics (P52.62) |
+The table separates *the driver*, *the operator zoo*, and *the function vocabulary* — the three things you'd touch when adding a computation: an operator for new physical behavior, an evaluator for new expression semantics, or a registry entry for a new callable function.
+
+| Component / type | File path | Core responsibility |
+|-------------------|-----------|---------------------|
+| `QueryProcessor` | `akar-core/akar-processor/src/processor/` | Pipeline driver, built per statement |
+| `Physical*` operators | `akar-core/akar-processor/src/physical/` | 50+ executors over DataChunks |
+| Logical→physical mapper | `akar-core/akar-processor/src/processor/mapper/` | Wires `LogicalOperator`s into pipelines |
+| `expression_evaluator` | `akar-core/akar-processor/src/expression_evaluator.rs` | Vectorized expression evaluation |
+| `fts_sync` | `akar-core/akar-processor/src/physical/write_ops/fts_sync.rs:39` | Commit-time FTS propagation + reader reload |
+| `CatalogGraphSource` | `akar-core/akar-processor/src/processor/graph_source.rs` | TableCatalog → `GraphDataSource` for GDS |
+| `FunctionRegistry` | `akar-core/akar-function/src/registry/` | Lookup/execute for 260 builtins |
+| `evaluate_scalar` | `akar-core/akar-function/src/scalar/mod.rs:75` | Scalar dispatch hub |
+| `AggregateHashTable` / `JoinHashTable` | `akar-core/akar-processor/src/` | Parallel hash structures |
+
+---
 
 ## Internal data flow
 
 ```mermaid
-flowchart LR
-    A["optimized Vec<LogicalOperator>"] --> B["execute()<br/>processor/mod.rs:354"]
-    B --> C["execute_internal<br/>tail-walker :362"]
-    C --> D["mapper fns<br/>per operator type"]
-    D --> E["physical closure<br/>PhysicalOperatorExec"]
-    E --> F["DataChunk pipeline<br/>Vectorized + rayon"]
-    F --> G["Vec<DataChunk> result"]
-    H["scan path"] --> I["resolve_scan_data<br/>ExecutionContext:75"]
-    J["table functions / ANN"] --> K["execute_table_function<br/>:485 / :545"]
+flowchart TD
+    A["Optimized LogicalOperator plan"] --> B["mapper<br/>map_join / map_projection / map_ddl"]
+    B --> C["Physical pipeline<br/>Scan to Filter to Join to Agg to Order to Limit"]
+    C --> D["Arrow DataChunks<br/>evaluate_to_arrow"]
+    D --> E["ResultCollector<br/>to QueryResult"]
+    F["Write operators"] --> G["LocalStorage undo + WAL records"]
+    G --> H["commit_write_txn<br/>fts_sync then HNSW refresh"]
 ```
 
-Execution is a depth-first tail-walk: `execute_internal` visits operators in plan order, each mapper builds a physical closure and invokes it on the incoming chunks, pushing results forward. Write operators funnel MVCC/OCC/WAL state through `undo_sink`/`wal_sink` (`mod.rs:304-352`). Carting data from `TableCatalog` to GDS table functions goes through `resolve_scan_data` (`mapper/mod.rs:75`) and `CatalogGraphSource`.
+**Key steps**: (1) the mapper materializes operators with injected storage/catalog/txn handlers (built by `create_processor`/`build_processor_handlers` in `akar-main/src/connection/query.rs:553,:587`); (2) execution exchanges only Arrow batches; (3) writes stage durable-adjacent state (undo, deltas) that the connection's commit path later validates — the processor never fsyncs anything itself.
+
+---
 
 ## Key interfaces & extension points
 
-- **Standalone call handler** — `StandaloneCallHandler` trait (`mod.rs:93`) + `StandaloneCallRegistry` (`mod.rs:110`); performance-critical external calls (e.g. `CALL vector_similarity_scan`, backup/restore) inject via `with_standalone_call_handler` (`mod.rs:264`).
-- **Callback aliases** — `SequenceFn`, `SubqueryFn`, `SchemaDdlFn` (`mod.rs:59-91`) mark the schema-level catalog boundary.
-- **Builders** — `with_catalog` (`:216`), `with_memory_pool` (`:241`), `with_spill_dir` (`:252`), `with_snapshot` (`:287`), `with_txn_id` (`:298`) configure each execution.
+The processor is constructed per statement by `akar-main` (`create_processor` at `query.rs:553`), which injects handlers for storage, catalog, transactions, and result sinks — this dependency-injection seam is what keeps the crate testable in isolation. New functions extend via `FunctionRegistry` registration (extensions add more at their `load()`); new physical behavior follows the established pattern: logical operator (planner) → mapper case → `Physical*` impl → parity/SPEC update. The `TableFunction::CustomTableWithGraph` seam (P52.46) lets GDS closures receive `Option<&dyn GraphDataSource>` — graph-aware table functions without hard-wiring the catalog.
 
-## Interactions with other modules
+## Cross-module collaboration
 
-| Module | Direction | Interface used | Note |
-|---|---|---|---|
-| akar-planner/optimizer | input | Optimized logical plan | Map source |
-| akar-common | depends on | `DataChunk`, `Value`, `InternalID` | Data currency |
-| akar-function | depends on | `evaluate_scalar`, `GraphDataSource` | Scalar/aggregate/table execution |
-| akar-storage | depends on | `NodeTable`, `TableCatalog`, `LocalStorage/WAL` | Scans/writes; WAL sinks |
-| akar-storage transaction | depends on | `snapshot_ts`, `commit_history`, `written_rows` | MVCC/OCC context |
-| akar-graph/algo | peer | `CatalogGraphSource` | GDS table functions read the catalog graph |
+| Interacting module | Direction | Interface | Description |
+|--------------------|-----------|-----------|-------------|
+| Optimizer | consumes output | optimized `Vec<LogicalOperator>` | Builds physical pipeline from it |
+| Storage / transactions | reads + stages | page scans, `LocalStorage` undo | Never touches WAL directly |
+| Search (FTS/vector) | executes specialized ops | `PhysicalFtsScan`, `PhysicalVectorSimilarityScan` | Index probes inside pipelines |
+| Graph/GDS | hosts | `CatalogGraphSource` | Supplies CSR views to `akar-algo` |
+| `akar-main` (connection) | constructs | `create_processor` (`query.rs:553`) | Per-statement wiring |
+| Extensions | register into | `FunctionRegistry` | Their functions become callable here |
 
-## Performance & concurrency notes
+**In the read-query flow**: this module is stage 6 (execute) — consuming frontend+optimizer output, reading storage pages through the buffer manager, returning Arrow results.
 
-Rayon parallelism is the headline: hash-join builds (`join_ops.rs:755-758`) and thread-local aggregation (`aggregatehashtable.rs:170-189`) are parallel, and sorts use `BlockMergeSorter` with a radix path for Int64 keys. Everything is vectorized over Arrow `DataChunk`s. `forward_limit_budget` is deliberately conservative (Projection-only) so limit/offset semantics can't be corrupted by pushed-down operator reordering. Memory-pool registration and spill-dir support (`with_memory_pool` `:241`, `with_spill_dir` `:252`) back the memory-governor feature (P110/P111). Graph hops use `PhysicalPackedExtend` (`write_ops/packedextend.rs:16`) over packed CSR adjacency for fast traversal.
+**In the write-commit flow**: its write ops create the undo/local-WAL state that `commit_write_txn` validates; the FTS sync hook sits *after* durable commit by contract (P107.x).
 
-## Implementation highlights
+---
 
-- **WCOJ Intersect shape**: `PhysicalIntersect` (`join_ops.rs:485`) plus Semi/Anti joins (`:269`, `:371`) implement the planner's worst-case-optimal multi-pattern intersect shapes.
-- **Vector ANN wiring**: the optimizer's `VectorSimilarityDetection` feeds `PhysicalVectorSimilarityScan` (`vectorsimilarityscan.rs:15`) — vector search is a first-class operator, not a bolted-on function.
-- **MVCC transparency**: `snapshot_ts` + `commit_history` + `txn_id` live in `ExecutionContext`, so isolation is available to every operator without changing mapper signatures.
-- **OCC write-set**: `written_rows` is captured at row level so the connection layer can run optimistic-concurrency retries after a failed commit.
+## Performance considerations
+
+Vectorization (Arrow batches, not rows) is the foundational win; operator-local parallel hash tables keep multi-core utilization high without a global shuffle; radix/block merge sort bounds sort memory; TopK heaps avoid materializing full orderings; specialized scans (HNSW/ART/FTS/CSR-count) bypass generic paths entirely; and spill-aware memory governance (`admit_query`, `MemoryGovernor` in `akar-main`) keeps a big join from OOM-ing the host process — an embedded database that crashes its embedder has failed regardless of query speed.
+
+---
+
+## Highlights
+
+The parity matrix in `SPEC.md` (§ physical operator matrix, lines ~245-325) is the standout artifact — 58 C++ enum entries mapped to 55 akar executors with explicit 1:1 / merge / inline categories, plus akar-only operators (CopyFrom, Explain, FTS/Vector/ART scans) called out as additions rather than smuggled in. The FTS commit hook's re-entrancy scoping — the DashMap `Ref` dropped before the writer lock is opened, the root-cause fix for the P53 test flake — is a masterclass in subtle concurrency hygiene: the bug was a shard-collision under *random seed* timing, found only under full-suite load, and fixed at the exact lock boundary where it lived.

@@ -1,85 +1,92 @@
-# Storage Engine (akar-storage)
+# Storage domain
 
-**Module path:** `akar-core/akar-storage/`
-**Role:** Core domain — the columnar engine that makes Akar durable and fast.
+**Module paths**: `akar-core/akar-storage/`, `akar-core/akar-transaction/`
+**Generated**: 2026-09-23
 
 ---
 
-## Overview
+## What this module is doing
 
-`akar-storage` is the machinery room of the database: it decides how rows land on disk, how pages are cached and evicted, how crashes are survived, and how edges are laid out for fast traversal. Think of it as a warehouse with a meticulous inventory system — fixed-size node groups hold the data like pallets, a buffer manager keeps hot pallets near the loading dock, a write-ahead log is the accountant's ledger that can reconstruct everything after a fire, and a CSR index is the cross-reference that lets you walk from one package to its neighbours without searching the whole warehouse.
+Storage is the factory floor of Akar — the only place where data actually becomes durable. Everything above it (plans, operators, functions) is machinery for deciding *what* to read or write; storage decides *how bytes survive a power cut and come back identical*. It owns the column-major page files, the buffer cache that mediates RAM vs disk, the append-only WAL that makes commits cheap, and — together with `akar-transaction` — the MVCC/OCC discipline that lets many writers share that floor without collisions.
 
-The module list in `akar-core/akar-storage/src/lib.rs` gives a full census: `art_index`, `buffer_manager`, `checkpoint`, `column_chunk`, `compression`, `csr`, `csv_reader`, `free_space_manager`, `group_commit`, `hyperloglog`, `ice_format`, `index`, `lazy_scanner`, `local_storage`, `local_wal`, `node_group`, `npy_reader`, `page`, `page_manager`, `parquet_reader`/`writer` (feature `parquet`), `persistence`, `predicate`, `roaring_bitmap`, `shadow_file`, `spiller`, `stats`, `string_dictionary`, `table`, `undo_buffer`, `update_info`, `vector_index`, `version_info`, `wal`, `wal_replayer`. The top-level handle consumers interact with is `StorageManager`.
+If the query engine is the assembly line, storage is the building it stands in: the line can be redesigned any week, but the building must never collapse. That's why changes here carry the heaviest process burden in the repo (SPEC gates, WAL recovery tests, crash simulations).
 
-## Core functions
+---
 
-1. **Row ingestion under MVCC** — `NodeTable::insert_row_with_txn` / `insert_rows_batch_with_txn` (`src/table.rs:137`, `table.rs:231`) store rows with an optional txn_id so visibility can be versioned.
-2. **Lookup and update** — `NodeTable::lookup_by_pk` (`src/table.rs:360`), `lookup_by_pk_range` (`table.rs:388`), `scan_column` (`table.rs:420`), `update_cell` (`table.rs:528`), `delete_row_with_txn` (`table.rs:558`).
-3. **Node-group buffering** — `NodeGroup::append_row_with_txn` (`src/node_group.rs:129`), plus `spill_and_clear` (`node_group.rs:170`) and `restore_spilled` (`node_group.rs:199`) for memory bounds on large inserts.
-4. **Write-ahead logging** — `WAL::append` / `flush_to_disk` (`src/wal.rs:324`, `wal.rs:441`): an append-only log branded with magic `b"AKAR"` and format version 2 (`wal.rs:12/14`), typed via `WALRecord` (`wal.rs:18`).
-5. **Crash recovery** — `WALReplayer::replay` (`src/wal_replayer.rs:36`) applies only committed records and returns a `ReplayResult` with counts of replayed/skipped records and committed txns (`wal_replayer.rs:17`).
-6. **Checkpointing** — `checkpoint()` / `flush_table` (`src/checkpoint.rs:43`, `checkpoint.rs:25`) persist dirty pages to stable storage, so the WAL never grows unbounded.
+## Core capabilities
+
+1. **Columnar persistence with page management** — `StorageManager` (`akar-storage/src/lib.rs:111`) ties together `BufferManager` (clock-eviction page cache), `PageManager` (buddy free-space FSM), column chunks, node groups, and overflow `.ovf` pages. Tables restore/drop via `restore_node_table`/`restore_rel_table` (`lib.rs:343,:371`).
+2. **Write-ahead log + typed recovery** — WAL records carry CRC32; `recover` (`lib.rs:844`) loads checkpoint mirrors first, then replays typed deltas via `replay_data_record` (`lib.rs:921`) with last-write-wins on duplicate PKs (P2-WAL-1). Salvage mode (`set_skip_wal`, `lib.rs:211`) opens a database even with a corrupt WAL — an explicit, operator-chosen escape hatch.
+3. **Checkpointing** — `checkpoint`/`checkpoint_with_drain`/`maybe_checkpoint` (`lib.rs:488,:542,:506`) rewrite column mirrors then truncate the WAL; triggered at `checkpoint_threshold` (16 MiB default) so recovery stays bounded.
+4. **Commit/rollback pipeline** — `commit_transaction` (`lib.rs:658`) and `rollback_transaction` (`lib.rs:734`) implement the LocalStorage → ShadowFile → BufferManager dance; `group_commit.rs` batches fsyncs across writers.
+5. **Indexes at rest** — ART primary-key index (`art_index.rs`, Node4/16/48/256 variants), HNSW vector index (`vector_index.rs`), on-disk hash; compression families in `compression.rs`/`string_dictionary.rs` (constant, boolean, string-dictionary).
+6. **Bulk I/O & spill** — CSV/Parquet/NPY readers, lazy scanner, and `spiller.rs`/`local_storage.rs` keep large ingests inside `spill_threshold` instead of host RAM.
+7. **Transactions (OCC/MVCC)** — `TransactionManager::begin_read/begin_write` (`akar-transaction/src/lib.rs:775,:785`), row-level `RowConflictTracker::validate_write_set` (`lib.rs:511`), `ConcurrencyControl` gate (`lib.rs:545`), visibility via commit-history snapshots (`is_visible` `lib.rs:944`).
+
+---
 
 ## Key components
 
-| Component/type | File path | One-line responsibility |
-|---|---|---|
-| `BufferManager` (+ config/stats) | `src/buffer_manager.rs:120`, `:77`, `:104` | Page cache with file registration (`register_file` L219) and per-page/whole flush (`flush` L306 / `flush_all` L322) |
-| `NodeTable` / `ColumnDefinition` | `src/table.rs:39`, `table.rs:21` | Row/column store; `NO_PRIMARY_KEY=usize::MAX` (L69); `add_column` L103 |
-| `TableCatalog` | `src/table.rs:1230` | Runtime table registry; `fts_runtime_handle(name)` L1294, `refresh_vector_indexes_for_tables` L1614 |
-| `NodeGroup` | `src/node_group.rs:38` | Fixed-size row group (4096 rows; `NODE_GROUP_SIZE` in `column_chunk.rs:25`) with spilling |
-| `ColumnChunk` | `src/column_chunk.rs` | In-memory column chunk (`append` L77, `flush_to_column` L227) |
-| `CompressedChunk` / `compress`/`decompress` | `src/compression.rs:11/:18/:41` | Constant, bitpacking, string-dictionary, float compression |
-| `CsrIndex` | `src/csr.rs:21` | Compressed Sparse Row forward+reverse adjacency for graph traversal |
-| `ArtPrimaryKeyIndex` (ART) | `src/art_index.rs` (art_node.rs:32-34) | Order-preserving radix-tree PK index (NODE4/16/48 fanout) |
-| `HashIndex` / `OnDiskHashIndex` | `src/index.rs:55` | O(1) PK index — in-memory HashMap L1 over page-based L2 (`SLOTS_PER_PAGE=64`, `index.rs:39`) |
-| `LocalStorage` / `LocalWAL` / `ShadowFile` | `src/local_storage.rs:143`, `src/local_wal.rs:19`, `src/shadow_file.rs:21` | Per-transaction staging, txn WAL buffer, copy-on-write page versioning |
-| `UndoBuffer` | `src/undo_buffer.rs:14` | Old-cell recorder for rollback (`record` L24) |
-| `VectorVersionInfo` / `VersionInfo` | `src/version_info.rs:18/:129` | Per-vector (1024-row) txn→bitmap inserted/deleted maps |
-| `GroupCommit` | `src/group_commit.rs` | 200µs drain / 50ms leader timeouts (`group_commit.rs:36/:39`), `flush` L166 |
-| `VectorIndex` | `src/vector_index.rs` | Wraps `HnswIndex` with buffer-manager persistence (48-byte header, magic `"HNSW"`) |
-| `WALReplayer` | `src/wal_replayer.rs:27` | Crash-recovery entry point |
+Each row below answers "which file do I open when X breaks" — the facade, the log, the cache, the allocator, the conflict tracker, and the batch-fsync path are the six pieces that must agree for any commit to be correct.
+
+| Component / type | File path | Core responsibility |
+|-------------------|-----------|---------------------|
+| `StorageManager` | `akar-core/akar-storage/src/lib.rs:111` | Facade over WAL, buffers, tables, indexes, recovery |
+| `WAL` / `WALReplayer` | `akar-core/akar-storage/src/wal.rs`, `wal_replayer.rs` | Append-only log + crash replay (6 DDL variants) |
+| `BufferManager` | `akar-core/akar-storage/src/buffer_manager.rs` | Page cache with clock eviction |
+| `PageManager` / FSM | `akar-core/akar-storage/src/page_manager.rs`, `free_space_manager.rs` | Page allocation, buddy defragmentation |
+| `NodeTable` / `RelTable` | `akar-core/akar-storage/src/table.rs` | Column chunks + CSR forward/reverse adjacency |
+| `UndoBuffer` / `UndoRecord` | `akar-core/akar-storage/src/undo_buffer.rs`, `akar-transaction/src/lib.rs:51` | Before-images enabling rollback |
+| `TransactionManager` | `akar-core/akar-transaction/src/lib.rs:389` | Snapshots, OCC, multi-writer gate |
+| `RowConflictTracker` | `akar-core/akar-transaction/src/lib.rs:488` | Row-level write-write conflict detection |
+| `GroupCommit` | `akar-core/akar-storage/src/group_commit.rs` | Batched WAL fsync across writers |
+
+---
 
 ## Internal data flow
 
 ```mermaid
-flowchart LR
-    A["Row ingest<br/>with txn_id"] --> B["NodeGroup<br/>append_row_with_txn"]
-    B --> C{"group full?"}
-    C -->|no| B
-    C -->|yes| D["spill_and_clear<br/>into ColumnChunk"]
-    B --> E["version_info<br/>per-vector visibility"]
-    D --> F["on-disk column pages"]
-    G["LocalWAL buffer"] -->|commit| H["WAL.flush_to_disk"]
-    I["ShadowFile"] -->|commit| J["BufferManager pages"]
-    J -->|checkpoint| K["stable data"]
-    K -->|open or recover| L["WALReplayer.replay"]
+flowchart TD
+    A["Write operator (processor)"] --> B["LocalStorage + LocalWAL<br/>per-txn buffers"]
+    B --> C["OCC validate<br/>validate_write_set lib.rs:511"]
+    C --> D["Global WAL write + fsync<br/>group commit"]
+    D --> E["ShadowFile apply<br/>to BufferManager pages"]
+    E --> F["Publish (MVCC visible)"]
+    F --> G["Checkpoint at 16 MiB threshold<br/>mirrors rewritten, WAL truncated"]
+    H["Crash / power loss"] --> I["recover lib.rs:844<br/>mirrors first, then WAL replay"]
+    I --> F
 ```
 
-The commit pipeline (`WAL` durable → `LocalStorage` flush → `ShadowFile` apply → checkpoint) is orchestrated by `StorageManager::commit_transaction`, whose contract lives in `akar-transaction/src/lib.rs:9-13`.
+**Key steps**: validation strictly precedes the WAL copy (losers never pollute the log); the fsync strictly precedes publication (a commit ack implies durability); mirrors are written only by checkpoints/recovery (P60.2), never on the hot path.
+
+---
 
 ## Key interfaces & extension points
 
-`StorageManager` exposes `db_path()`, `storage_info()`, `buffer_info()`, `file_info()`, `fsm_info()`, `wal_size()`, and `table_catalog()`, consumed by the `StorageDriver` in `akar-main/src/storage_driver.rs:34-66`. `BufferManagerConfig` (`buffer_manager.rs:77`) carries db_path, max_memory, page_size and log_path. The `NodeTable` API is uniformly threaded with `txn_id: Option<u64>` so MVCC correctness is enforced at the storage layer rather than by callers. Because the per-txn `LocalWAL` and the global `WAL` share one binary format, commit is a bulk byte copy (`local_wal.rs:1-8`) — a clean seam that keeps both paths trivially consistent.
+Consumers are `akar-main`'s connection commit path (`commit_write_txn` drives this module end-to-end) and the processor's write operators (which record undo/deltas). Two test seams matter: the `WalLike` trait makes fsync testable without a real disk, and `set_group_commit`/`set_spiller` (`lib.rs:244,:219`) let tests or embedders swap policy. The visibility contract (`is_visible(txn_id, snapshot_ts)`) is what binder/processor scans consume to filter rows — it's the module's most-sensitive public promise.
 
-## Interactions with other modules
+## Cross-module collaboration
 
-| Module | Direction | Interface used | Note |
-|---|---|---|---|
-| akar-main | depended on by | `StorageManager`, `TableCatalog`, `LocalStorage/WAL/ShadowFile` | Connection, StorageDriver, DDL wiring |
-| akar-transaction | depends on | `UndoRecord` (via `UndoBuffer`) | Commit/rollback trigger storage flushes |
-| akar-common | depends on | `Value`, `DataChunk`, `CompressionType`, `StorageError`/`TransactionError` | Data + error vocabulary |
-| akar-vector | depends on | `HnswIndex` embedded in `VectorIndex` (`vector_index.rs:14`) | ANN persistence |
-| akar-common/file_system | depends on | `VirtualFileSystemRegistry` | VFS-backed IO for httpfs etc. |
+| Interacting module | Direction | Interface | Description |
+|--------------------|-----------|-----------|-------------|
+| `akar-main` (connection) | drives | `commit_transaction` / `rollback_transaction` | Commit workflow orchestration |
+| Processor write ops | produces state | `LocalStorage` + `UndoBuffer` records | Insert/Delete/Set/Merge feed deltas |
+| Search (FTS/HNSW) | consumes write set | Post-commit undo records | `fts_sync` propagates after fsync |
+| Foundation (Catalog) | persists | WAL DDL records | Schema changes survive recovery |
+| Memory governor (akar-main) | constrains | `spill_threshold`, buffer pool size | Admission before ingest |
 
-## Performance & concurrency notes
+**In the write-commit flow**: this module owns stages 2–5 (validate → log → publish → checkpoint trigger) of the commit sequence — the correctness core of `3.Workflows.md` §2.2.
 
-Group commit amortises WAL fsync with a 200µs drain window and a 50ms leader timeout (`group_commit.rs:36/39`). The per-transaction `LocalWAL` removes contention on the global WAL mutex — only the actual commit serialises. `HashIndex` keeps a hot in-memory HashMap L1 over cold page-based L2 and rebuilds L1 by scanning L2 at startup (`index.rs:4-9`). MVCC visibility is per-vector segment (1024 rows) with `Mutex<HashMap<txn_id, Vec<u32>>>` inserted/deleted maps, so version checks are chunk-local instead of row-local. Spilling (`spill_and_clear`, `node_group.rs:170`) bounds per-group memory during bulk loads, and ART fanout thresholds (NODE4/16/48, `art_node.rs:32-34`) tune radix-node growth.
+**In the open/recovery flow**: `recover` runs before extensions load, ensuring FTS handles open against fully replayed segments.
 
-## Implementation highlights
+---
 
-- FTS runtime handles and vector-index refresh live inside storage's `TableCatalog` (not `akar-catalog`) — storage owns the constructed indexes (`table.rs:1294`, `table.rs:1614`).
-- Shadow-file copy-on-write (`shadow_file.rs:40`) gives transaction isolation at the page level without copying whole tables.
-- The WAL header (`wal.rs:12-14`) guards format compatibility; `WAL_VERSION=2`.
-- `CsrIndex` dual forward/reverse arrays make both traversal directions O(deg) (`csr.rs:13-19`).
-- Hash and vector indexes share one persistence pattern — header page + serialized data pages through the BufferManager (`index.rs:12-30`, `vector_index.rs:1-24`).
+## Performance considerations
+
+WAL append is sequential — SPEC's audit claims ~52× versus page-image logging; group commit amortizes fsync across concurrent winners; clock-eviction buffers are sized by `buffer_pool_size` so an embedded host stays in control; the spill path keeps bulk ingest within `spill_threshold`; and OCC avoids per-statement lock traffic entirely — the steady-state concurrency cost is validation at commit only, not lock maintenance during execution.
+
+---
+
+## Highlights
+
+Three design choices stand out as worth studying anywhere, not just in databases. First, *deterministic recovery ordering* (mirrors → replay → re-persist) turns crash recovery from an art into a testable procedure — see the literal crash-simulation tests (`test_wal_recovery_*`, `test_commit_pipeline_local_storage_flush` at `lib.rs:2019`). Second, *salvage mode as an explicit opt-in* acknowledges that the worst day will happen and gives the operator a documented lever instead of folklore. Third, *row-granular OCC instead of table locks* keeps readers never-blocked and writes conflict-free in the common case — trading abort-retry under contention for the absence of deadlocks, a deliberate exchange made visible in `RowConflictTracker` rather than hidden in lock managers.
