@@ -910,6 +910,15 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 | WAL safety | Atomic rename (`write .tmp → sync → rename → fsync parent`) |
 | Commit durability | Typed WAL records from the SQL write path, fsynced at commit; per-commit mirror persist removed in every threshold mode — mirrors are written by checkpoints and recovery only (P60.2) |
 
+**Checkpoint policy (P128, F15):** auto-checkpoint is governed by
+`SystemConfig::checkpoint_threshold`. Durability never depends on it — WAL fsync
+at commit happens in every mode. A **positive** threshold (default **16 MiB**,
+aligned with the daemon production default) schedules a checkpoint once the WAL
+grows past it; `-1` checkpoints on **every** write (legacy, ~5.6× slower —
+measured 2,648 s vs 0,474 s for 100 creates, F15); `0` disables auto-checkpoint.
+Consumers needing legacy semantics must set the threshold explicitly rather than
+inherit the default.
+
 ---
 
 ## 16. Versioning & Release
@@ -929,6 +938,7 @@ production code paths (replaced with `ok_or_else()`, epsilon float comparisons, 
 | #11 | crates.io publishing deferred | API not yet stable for public consumption — **superseded 2026-08-08 (P50): publishing active**, 31/31 crates at 0.1.0 |
 | #66 | No premature production publish | Don't publish before truly production-ready — satisfied by P50 gate (1,594 tests, audits CLEAN) |
 | #67 | WCOJ benchmark deferred | Legacy bench never runnable; pre-existing bugs |
+| #128 | `SystemConfig::default().checkpoint_threshold` = **16 MiB** (was `-1`) | `-1` = checkpoint per write: ~5.6× slower (F15 probe), 2 defect incidents (P67; amplified write), and only a replay-window argument in its favor. P128.1 proved no durability guarantee is lost (WAL fsync at commit in all modes). P129 verified only 1 test breaks (non-durability, explicit-config fix). Aligns the library default with the already-decided daemon default (P68). |
 
 ---
 

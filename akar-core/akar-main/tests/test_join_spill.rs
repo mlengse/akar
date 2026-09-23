@@ -17,6 +17,12 @@ fn setup_tight_memory_db(max_db_size: u64) -> (std::sync::Arc<Database>, Connect
     let db_path = dir.path().join("test_db");
     let config = SystemConfig {
         max_db_size,
+        // P128.2: the tight budget must force spills through the governor's
+        // per-query grants, so the buffer pool must stay drained (checkpoint
+        // per write). With the 16 MiB default, dirty pages accumulate until
+        // headroom/grants saturate at zero and the join silently stops spilling
+        // (P129). State the dependency explicitly instead of inheriting it.
+        checkpoint_threshold: -1,
         ..SystemConfig::default()
     };
     let database = std::sync::Arc::new(Database::new(db_path, config).unwrap());

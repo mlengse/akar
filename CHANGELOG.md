@@ -44,6 +44,12 @@
 
 ### Changed
 
+- **P128.2 — `SystemConfig::default().checkpoint_threshold` = 16 MiB (sebelumnya `-1`, checkpoint per tulis) + knob `checkpoint_threshold` di akar-python (menutup F15)** · `akar-core/akar-main/src/database.rs`, `akar-core/akar-python/src/lib.rs`, `akar-core/akar-main/tests/test_join_spill.rs` · gate **2,260** (tetap; kutipan `test_join_spill` diperbaiki eksplisit)
+  - **Default pustaka diselaraskan dengan keputusan produksi yang sudah ada** (P68 di jalur daemon). P128.1 membuktikan durabilitas tidak pernah bergantung pada checkpoint — WAL fsync di commit berjalan di setiap mode (P60.2), checkpoint hanya mengatur kapan mirror kolom ditulis ulang & kapan WAL dipotong. Nilai `-1` adalah peninggalan pra-P60.2 (saat mirror kolom satu-satunya sumber recovery), bukan pilihan sadar; ia membawa dua insiden (P67) dan diukur 5,6× lebih lambat (F15: 2,648 s vs 0,474 s untuk 100 creates).
+  - **Eksperimen P129 sebelumnya (branch scratch):** hanya `test_join_spill` yang pecah — `test_crash_recovery` 14/14 hijau, jadi tidak ada asumsi durabilitas tersembunyi di suite crash-recovery. Tes itu kini **menyebut `checkpoint_threshold: -1` secara eksplisit** dengan komentar (P129 pelajaran: okupansi buffer pool ikut menyuapi anggaran governor, bukan sekadar ambangnya).
+  - **`Database` Python kini menerima `checkpoint_threshold` (bytes; `-1` = per tulis, `0` = tanpa auto-checkpoint, `None` = default 16 MiB)** — konsumen embedded (Sulur) punya cara menjadi eksplisit tanpa batal dari default.
+  - Kebijakan checkpoint didokumentasikan di SPEC §15 + entri keputusan §17 (#128).
+
 - **P124.2 — referensi broker daemon dibersihkan dari dokumentasi Akar; Akar 100% pure embedded library (§13 / ADR-02)** · `5043401` · `README.md`, `SPEC.md`, `implementation plan.md` · gate **2,259** (tanpa perubahan kode)
   - `akar-server` tidak lagi dipresentasikan sebagai permukaan produksi: entri crate di README, pohon repo SPEC §2, tabel ekstensi SPEC §7, dan bagian SPEC §13.4 kini menyebutnya **test harness / wire reference only** — konsisten dengan ADR-02 (broker lifecycle milik konsumen; `sulur-server` adalah daemon produksi).
   - Item plan P124 ditutup: `implementation plan.md` hanya memuat pekerjaan yang belum dikerjakan, jadi blok "Iterasi 5 — Pensiun Bertahap `akar-server`" dihapus dan statusnya cukup dicatat di ringkasan iterasi. Backlog "Streaming/Chunked query results" tidak lagi diatribusikan ke `akar-server` karena Akar tetap embedded.

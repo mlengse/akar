@@ -52,10 +52,18 @@ pub struct Database {
 
 #[pymethods]
 impl Database {
-    /// `Database(path: str)` — buka (atau buat) database embedded di `path`.
+    /// `Database(path: str, checkpoint_threshold: int = None)` — buka (atau
+    /// buat) database embedded di `path`. `checkpoint_threshold` (bytes)
+    /// meng-override default `SystemConfig.checkpoint_threshold` (16 MiB):
+    /// `-1` = checkpoint tiap tulis (lama), `0` = tanpa auto-checkpoint (P128.2).
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let db = akar_main::Database::new(path, Default::default())
+    #[pyo3(signature = (path, checkpoint_threshold=None))]
+    fn new(path: &str, checkpoint_threshold: Option<i64>) -> PyResult<Self> {
+        let mut config = akar_main::SystemConfig::default();
+        if let Some(t) = checkpoint_threshold {
+            config.checkpoint_threshold = t;
+        }
+        let db = akar_main::Database::new(path, config)
             .map_err(|e| PyValueError::new_err(format!("Cannot open Akar database at {path:?}: {e}")))?;
         Ok(Self {
             db: Some(Arc::new(db)),
@@ -825,7 +833,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
         let path = fresh_db_path("p53_18_reopen");
 
         Python::attach(|py| {
-            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let db = Bound::new(py, Database::new(path.to_str().unwrap(), None).expect("open temp db")).expect("wrap db");
             let _conn = Connection::new(&db).expect("create connection");
             db.borrow_mut().close(py);
             drop(db);
@@ -850,11 +858,11 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
         Python::attach(|py| {
             // fixture store
             let fixture =
-                Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+                Bound::new(py, Database::new(path.to_str().unwrap(), None).expect("open temp db")).expect("wrap db");
             // store milik test — open kedua pada path sama, harus sukses (P53.35)
             let s = Bound::new(
                 py,
-                Database::new(path.to_str().unwrap()).expect("second open shares lock"),
+                Database::new(path.to_str().unwrap(), None).expect("second open shares lock"),
             )
             .expect("wrap db");
             let _conn_s = Connection::new(&s).expect("connection on second db");
@@ -864,7 +872,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
             // fixture masih hidup, path dibuka ulang — harus sukses (share)
             let s2 = Bound::new(
                 py,
-                Database::new(path.to_str().unwrap()).expect("reopen while fixture alive"),
+                Database::new(path.to_str().unwrap(), None).expect("reopen while fixture alive"),
             )
             .expect("wrap db");
             s2.borrow_mut().close(py);
@@ -888,7 +896,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
         let path = fresh_db_path("p53_18_conn_close");
 
         Python::attach(|py| {
-            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let db = Bound::new(py, Database::new(path.to_str().unwrap(), None).expect("open temp db")).expect("wrap db");
             let conn = Connection::new(&db).expect("create connection");
             conn.borrow_mut(py).close();
             db.borrow_mut().close(py);
@@ -910,7 +918,7 @@ CREATE NODE TABLE IF NOT EXISTS Counter (
         let path = fresh_db_path("p53_18_reject");
 
         Python::attach(|py| {
-            let db = Bound::new(py, Database::new(path.to_str().unwrap()).expect("open temp db")).expect("wrap db");
+            let db = Bound::new(py, Database::new(path.to_str().unwrap(), None).expect("open temp db")).expect("wrap db");
             let conn = Connection::new(&db).expect("create connection");
             db.borrow_mut().close(py);
             assert!(

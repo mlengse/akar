@@ -38,6 +38,13 @@ pub struct SystemConfig {
     pub read_only: bool,
     pub max_db_size: u64,
     pub auto_checkpoint: bool,
+    /// Auto-checkpoint policy: once the WAL grows past this many bytes a
+    /// checkpoint is triggered. A positive value schedules checkpoints by WAL
+    /// size (default **16 MiB**, aligned with the daemon's production default);
+    /// `-1` checkpoints on **every** write (durable but pays a full column
+    /// mirror rewrite per commit — measured ~5.6× slower, F15); `0` disables
+    /// auto-checkpoint. Durability itself never depends on this: WAL fsync at
+    /// commit happens in every mode (P128.1).
     pub checkpoint_threshold: i64,
     /// When true, multiple write transactions can run concurrently.
     /// When false, only one write transaction at a time is allowed.
@@ -70,7 +77,7 @@ impl Default for SystemConfig {
             read_only: false,
             max_db_size: u64::from(u32::MAX),
             auto_checkpoint: true,
-            checkpoint_threshold: -1,
+            checkpoint_threshold: 16 * 1024 * 1024,
             concurrent_writes: true,
             // Default: 80% of buffer_pool_size, or 0 if not set
             spill_threshold: 0,
