@@ -1142,7 +1142,15 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
     let n = csr.num_nodes();
     let mut labels: Vec<usize> = (0..n).collect();
     let mut next_labels = labels.clone();
-    let mut counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+
+    // Bolt Optimization: Replace per-node dynamic HashMap allocations with a single
+    // hoisted generation-stamped scratch array (`stamp[lbl] == generation`).
+    // This achieves O(1) indexed label frequency counting and zero allocations inside
+    // the node propagation loop.
+    let mut counts_scratch = vec![0usize; n];
+    let mut stamp = vec![0usize; n];
+    let mut touched = Vec::with_capacity(16);
+    let mut generation = 0usize;
 
     for _ in 0..max_iters {
         let mut changed = false;
@@ -1152,21 +1160,29 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
                 continue;
             }
 
-            counts.clear();
+            generation += 1;
+            touched.clear();
             for (_, dst) in neighbors {
                 let w = dst.offset as usize;
                 if w < n {
-                    *counts.entry(labels[w]).or_insert(0) += 1;
+                    let lbl = labels[w];
+                    if stamp[lbl] != generation {
+                        stamp[lbl] = generation;
+                        counts_scratch[lbl] = 0;
+                        touched.push(lbl);
+                    }
+                    counts_scratch[lbl] += 1;
                 }
             }
 
-            if counts.is_empty() {
+            if touched.is_empty() {
                 continue;
             }
 
             let mut max_count = 0;
             let mut best_label = labels[v];
-            for (&lbl, &cnt) in &counts {
+            for &lbl in &touched {
+                let cnt = counts_scratch[lbl];
                 if cnt > max_count || (cnt == max_count && lbl > best_label) {
                     max_count = cnt;
                     best_label = lbl;
