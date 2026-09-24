@@ -7,7 +7,6 @@
 //! - Shortest path (BFS-based)
 
 use crate::graph::CSRAdjacency;
-use hashbrown::HashMap;
 
 /// Result of a graph algorithm containing node-level values.
 #[derive(Debug, Clone)]
@@ -140,8 +139,8 @@ pub fn weakly_connected_components(csr: &CSRAdjacency) -> AlgorithmResult {
     let n = csr.num_nodes();
     let mut parent: Vec<usize> = (0..n).collect();
 
-    // Union-Find: find with iterative path compression (P52.44 — the recursive
-    // variant overflowed the stack on deep chains).
+    // Union-Find: find with iterative path compression (P52.44 — full two-pass
+    // compression guarantees all nodes in a chain flatten to the true root).
     fn find(parent: &mut [usize], x: usize) -> usize {
         let mut root = x;
         while parent[root] != root {
@@ -166,7 +165,9 @@ pub fn weakly_connected_components(csr: &CSRAdjacency) -> AlgorithmResult {
     }
 
     for i in 0..n {
-        for (_, dst) in csr.neighbors(i) {
+        let start = csr.offsets[i];
+        let end = csr.offsets[i + 1];
+        for (_, dst) in &csr.adjacency[start..end] {
             let j = dst.offset as usize;
             if j < n {
                 union(&mut parent, i, j);
@@ -179,13 +180,19 @@ pub fn weakly_connected_components(csr: &CSRAdjacency) -> AlgorithmResult {
         find(&mut parent, i);
     }
 
-    // Assign component IDs
-    let mut comp_id: HashMap<usize, usize> = HashMap::new();
+    // Bolt Optimization: Dense array lookup for component ID assignment.
+    // Root node IDs p are in 0..n, so comp_map[p] provides O(1) indexed component
+    // mapping with zero hash table lookups or allocations.
+    let mut comp_map = vec![usize::MAX; n];
+    let mut next_id = 0usize;
     let values: Vec<f64> = parent
         .iter()
         .map(|&p| {
-            let len = comp_id.len();
-            *comp_id.entry(p).or_insert(len) as f64
+            if comp_map[p] == usize::MAX {
+                comp_map[p] = next_id;
+                next_id += 1;
+            }
+            comp_map[p] as f64
         })
         .collect();
 

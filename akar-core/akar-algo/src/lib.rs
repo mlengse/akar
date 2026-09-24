@@ -1593,13 +1593,19 @@ where
         }
     }
 
-    // Assign sequential community IDs
-    let mut comm_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    // Bolt Optimization: Replace HashMap with a dense vector lookup for sequential
+    // community ID assignment. Community IDs c are in 0..n, so comm_map[c] provides
+    // O(1) indexed lookup with zero hash computations or table allocations.
+    let mut comm_map = vec![usize::MAX; n];
+    let mut next_id = 0usize;
     let values: Vec<f64> = community
         .iter()
         .map(|&c| {
-            let len = comm_map.len();
-            *comm_map.entry(c).or_insert(len) as f64
+            if comm_map[c] == usize::MAX {
+                comm_map[c] = next_id;
+                next_id += 1;
+            }
+            comm_map[c] as f64
         })
         .collect();
 
@@ -1841,7 +1847,9 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
 
     // Process each edge; for undirected, each edge appears twice in CSR
     for v in 0..n {
-        for (_, dst) in csr.neighbors(v) {
+        let start = csr.offsets[v];
+        let end = csr.offsets[v + 1];
+        for (_, dst) in &csr.adjacency[start..end] {
             let w = dst.offset as usize;
             if w < n && v < w {
                 // Only process each edge once (v < w)
@@ -1855,13 +1863,19 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
         find(&mut parent, i);
     }
 
-    // Assign component IDs
-    let mut comp_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    // Bolt Optimization: Replace HashMap with a dense vector lookup.
+    // Component roots p are in 0..n, so comp_map[p] provides O(1) component ID assignment
+    // with zero hash table lookups or allocations.
+    let mut comp_map = vec![usize::MAX; n];
+    let mut next_id = 0usize;
     let values: Vec<f64> = parent
         .iter()
         .map(|&p| {
-            let len = comp_map.len();
-            *comp_map.entry(p).or_insert(len) as f64
+            if comp_map[p] == usize::MAX {
+                comp_map[p] = next_id;
+                next_id += 1;
+            }
+            comp_map[p] as f64
         })
         .collect();
 
