@@ -1214,19 +1214,28 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     let mut cb = vec![0.0; n];
 
-    for s in 0..n {
-        let mut stack = Vec::new();
-        let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
-        let mut sigma = vec![0.0; n];
-        sigma[s] = 1.0;
-        let mut dist = vec![-1i64; n];
-        dist[s] = 0;
+    // Bolt Optimization: Hoist Brandes' algorithm scratch buffers outside the per-source
+    // iteration loop and reset state only on visited nodes upon popping from `stack`.
+    // This eliminates O(N²) dynamic heap allocations (N x N inner predecessor vectors and
+    // N distance/sigma/delta/queue allocations), making Brandes traversal zero-allocation
+    // across all source node iterations.
+    let mut stack = Vec::with_capacity(n);
+    let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
+    let mut sigma = vec![0.0; n];
+    let mut dist = vec![-1i64; n];
+    let mut delta = vec![0.0; n];
+    let mut q = std::collections::VecDeque::with_capacity(n);
 
-        let mut q = std::collections::VecDeque::new();
+    for s in 0..n {
+        sigma[s] = 1.0;
+        dist[s] = 0;
         q.push_back(s);
 
         while let Some(v) = q.pop_front() {
             stack.push(v);
+            let dist_v = dist[v];
+            let sigma_v = sigma[v];
+
             for (_, dst) in csr.neighbors(v) {
                 let w = dst.offset as usize;
                 if w >= n {
@@ -1235,20 +1244,19 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
 
                 // Path discovery
                 if dist[w] < 0 {
-                    dist[w] = dist[v] + 1;
+                    dist[w] = dist_v + 1;
                     q.push_back(w);
                 }
 
                 // Path counting
-                if dist[w] == dist[v] + 1 {
-                    sigma[w] += sigma[v];
+                if dist[w] == dist_v + 1 {
+                    sigma[w] += sigma_v;
                     pred[w].push(v);
                 }
             }
         }
 
-        let mut delta = vec![0.0; n];
-        // Accumulation
+        // Accumulation in reverse BFS order and state reset for visited nodes
         while let Some(w) = stack.pop() {
             for &v in &pred[w] {
                 if sigma[w] > 0.0 {
@@ -1258,6 +1266,12 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
             if w != s {
                 cb[w] += delta[w];
             }
+
+            // Reset state for node w to restore clean defaults for next source iteration
+            pred[w].clear();
+            sigma[w] = 0.0;
+            dist[w] = -1;
+            delta[w] = 0.0;
         }
     }
 
