@@ -23,26 +23,16 @@
 //! goes through the normal write path; only the parse/plan overhead is
 //! amortised.
 //!
-//! # Edges cannot be batched in this engine version
+//! # Edges are batched like nodes
 //!
-//! [`insert_edges`] issues **one statement per edge**, unlike [`insert_nodes`].
-//! Akar 0.2.3 cannot resolve a variable introduced by `UNWIND` from inside a
-//! `MATCH` pattern, which is exactly what a batched edge write needs. Every
-//! shape that should work fails:
-//!
-//! ```text
-//! UNWIND $rows AS r MATCH (a:M {id: r.source}), (b:M {id: r.target}) ...
-//!   -> Execute error: Variable 'r' not found in chunk field_names ["weight", "type"]
-//! UNWIND $rows AS r MATCH (a:M) WHERE a.id = r.source MATCH (b:M) WHERE b.id = r.target ...
-//!   -> Execute error: Variable 'r' not found in chunk field_names [...]
-//! MATCH (a:M), (b:M) UNWIND $rows AS r WITH a, b, r WHERE ...
-//!   -> runs, but matches nothing (the filter never binds)
-//! ```
-//!
-//! The per-edge statement is still worth having: its text is constant, so the
-//! connection's statement cache parses it once, and callers get typed rows and
-//! a real write count instead of hand-built Cypher. Lifting the restriction is
-//! tracked as an open finding in `FINDINGS.md`.
+//! [`insert_edges`] writes a whole chunk of edges through **one**
+//! `UNWIND $rows AS r MATCH (a), (b) MERGE (a)-[e]->(b) SET ... RETURN count(e)`
+//! statement, so the parse/plan/commit cost is once per chunk instead of once
+//! per edge. Resolving the `UNWIND` variable from inside a `MATCH` pattern and
+//! carrying it through to the `MERGE` output required a processor fix (P131):
+//! `PhysicalMergeRel` used to drop pipeline columns (including `r`) from its
+//! output chunk, so a downstream `SET e.prop = r.prop` could not resolve `r`.
+//! The batched shape was restored once that was fixed.
 //!
 //! # Missing endpoints
 //!
@@ -179,7 +169,7 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
     Ok(written)
 }
 
-/// Write `edges` into `rel.table`, one statement per edge.
+/// Write `edges` into `rel.table` using one batched `UNWIND` statement per chunk.
 ///
 /// `properties` names the relationship properties positionally matched against
 /// each row's [`EdgeRow::values`]; pass an empty slice for a property-less
@@ -192,38 +182,48 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
 /// endpoint does not exist is dropped by the `MATCH` and is not counted (see
 /// the module docs).
 ///
-/// This is *not* batched — see the module docs for why Akar cannot batch edge
-/// writes today. The statement text is constant across edges, so only the plan
-/// and execution are per-edge, not the parse.
+/// Rows are split into chunks of [`DEFAULT_ROWS_PER_STATEMENT`]; call
+/// [`insert_edges_chunked`] to size the chunks explicitly.
 ///
 /// # Errors
 ///
 /// Returns an error when `properties` and a row's value count disagree, or when
-/// the engine rejects a statement.
+/// the engine rejects a chunk.
 pub fn insert_edges(conn: &Connection, rel: &RelSpec, properties: &[&str], edges: &[EdgeRow]) -> Result<usize, String> {
+    insert_edges_chunked(conn, rel, properties, edges, DEFAULT_ROWS_PER_STATEMENT)
+}
+
+/// Write `edges` into `rel.table`, `rows_per_statement` edges per statement.
+///
+/// Same semantics as [`insert_edges`] with explicit chunk sizing, mirroring
+/// [`insert_nodes`]: a large batch is split into chunks so no statement grows
+/// without bound, and each chunk is parsed, bound, planned and committed once.
+/// The reduction shows up as statements per batch — one per chunk, not one per
+/// edge — observable through [`Connection::executed_statements`].
+///
+/// # Errors
+///
+/// Returns an error when `rows_per_statement` is zero, when `properties` and a
+/// row's value count disagree, or when the engine rejects a chunk.
+pub fn insert_edges_chunked(
+    conn: &Connection,
+    rel: &RelSpec,
+    properties: &[&str],
+    edges: &[EdgeRow],
+    rows_per_statement: usize,
+) -> Result<usize, String> {
+    if rows_per_statement == 0 {
+        return Err("rows_per_statement must be greater than zero".into());
+    }
     if edges.is_empty() {
         return Ok(0);
     }
 
-    let statement = merge_edge_statement(rel, properties);
+    let statement = merge_edges_batch_statement(rel, properties);
     let mut written = 0;
-    for edge in edges {
-        if edge.values.len() != properties.len() {
-            return Err(format!(
-                "edge ({} -> {}) carries {} values for {} properties",
-                edge.source,
-                edge.target,
-                edge.values.len(),
-                properties.len()
-            ));
-        }
-        let mut params: Vec<(&str, Value)> = Vec::with_capacity(properties.len() + 2);
-        params.push(("source", Value::Int64(edge.source)));
-        params.push(("target", Value::Int64(edge.target)));
-        for (index, value) in edge.values.iter().enumerate() {
-            params.push((property_parameter(index), value.clone()));
-        }
-        let result = conn.execute_params(&statement, params)?;
+    for chunk in edges.chunks(rows_per_statement) {
+        let payload = encode_edge_chunk(chunk, properties)?;
+        let result = conn.execute_params(&statement, vec![("rows", payload)])?;
         written += written_count(&result)?;
     }
     Ok(written)
@@ -300,22 +300,22 @@ fn create_nodes_statement<T: TypedNode>() -> String {
     format!("UNWIND $rows AS r CREATE (n:{table} {{{properties}}}) RETURN count(n) AS written")
 }
 
-/// `MATCH ... MERGE (a)-[e:REL]->(b) SET ... RETURN count(e)` for one edge.
-fn merge_edge_statement(rel: &RelSpec, properties: &[&str]) -> String {
+/// `UNWIND $rows AS r MATCH ... MERGE (a)-[e:REL]->(b) SET ... RETURN count(e)`
+/// for an entire chunk of edges.
+fn merge_edges_batch_statement(rel: &RelSpec, properties: &[&str]) -> String {
     let key = rel.primary_key;
     let set_clause = if properties.is_empty() {
         String::new()
     } else {
         let assignments = properties
             .iter()
-            .enumerate()
-            .map(|(index, property)| format!("e.{property} = ${}", property_parameter(index)))
+            .map(|property| format!("e.{property} = r.{property}"))
             .collect::<Vec<_>>()
             .join(", ");
         format!(" SET {assignments}")
     };
     format!(
-        "MATCH (a:{from} {{{key}: $source}}), (b:{to} {{{key}: $target}}) \
+        "UNWIND $rows AS r MATCH (a:{from} {{{key}: r.source}}), (b:{to} {{{key}: r.target}}) \
          MERGE (a)-[e:{table}]->(b){set_clause} RETURN count(e) AS written",
         from = rel.from_table,
         to = rel.to_table,
@@ -370,10 +370,32 @@ fn encode_chunk<T: TypedNode>(rows: &[T]) -> Result<Value, String> {
     Ok(Value::List(encoded))
 }
 
-/// Parameter name for the `index`-th edge property (`v0`, `v1`, ...).
-fn property_parameter(index: usize) -> &'static str {
-    const NAMES: [&str; 8] = ["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"];
-    NAMES.get(index).copied().unwrap_or("v_unsupported")
+/// Encode a chunk of edges as the `$rows` list-of-structs parameter.
+///
+/// Each struct carries the endpoints under `source`/`target` (so the `MATCH`
+/// patterns can reference them) plus the given property names positionally,
+/// matching `e.{property} = r.{property}` in the set clause.
+fn encode_edge_chunk(edges: &[EdgeRow], properties: &[&str]) -> Result<Value, String> {
+    let mut encoded = Vec::with_capacity(edges.len());
+    for edge in edges {
+        if edge.values.len() != properties.len() {
+            return Err(format!(
+                "edge ({} -> {}) carries {} values for {} properties",
+                edge.source,
+                edge.target,
+                edge.values.len(),
+                properties.len()
+            ));
+        }
+        let mut fields = Vec::with_capacity(properties.len() + 2);
+        fields.push(("source".to_string(), Value::Int64(edge.source)));
+        fields.push(("target".to_string(), Value::Int64(edge.target)));
+        for (property, value) in properties.iter().zip(edge.values.iter()) {
+            fields.push(((*property).to_string(), value.clone()));
+        }
+        encoded.push(Value::Struct(fields));
+    }
+    Ok(Value::List(encoded))
 }
 
 /// Read the `written` column the batched statements return.

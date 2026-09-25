@@ -84,6 +84,12 @@ pub struct Connection {
     /// catalog directly, so they cannot be rolled back — they are rejected
     /// while this flag is set instead of falsely reporting success (P52.28).
     pub(crate) explicit_txn_active: std::sync::atomic::AtomicBool,
+    /// Number of parameterised statements executed via `prepare`+`execute` —
+    /// the path the bulk helpers in [`crate::bulk`] use. Reading the delta
+    /// around a batch write tells a caller how many statements a batch was
+    /// split into: one per chunk for the batched `UNWIND` helpers, versus one
+    /// per row for a per-row fallback (P131).
+    pub(crate) executed_statements: std::sync::atomic::AtomicU64,
     /// Lazily-built processor handler callbacks (sequence, schema DDL, query,
     /// subquery, standalone-call registry), shared across every query on this
     /// connection. Cached here rather than on `Database` so the handlers'
@@ -105,6 +111,7 @@ impl Connection {
             plan_cache: Mutex::new(PlanCache::new(PLAN_CACHE_CAPACITY)),
             txn_resources: Mutex::new(HashMap::new()),
             explicit_txn_active: std::sync::atomic::AtomicBool::new(false),
+            executed_statements: std::sync::atomic::AtomicU64::new(0),
             processor_handlers: std::sync::OnceLock::new(),
         }
     }
@@ -143,6 +150,17 @@ impl Connection {
     /// Number of cached query plans.
     pub fn plan_cache_size(&self) -> usize {
         self.plan_cache.lock().map(|c| c.len()).unwrap_or(0)
+    }
+
+    /// Number of parameterised statements executed through `prepare`+`execute`.
+    ///
+    /// Mirrors the statement count at the execution engine: the batched
+    /// `UNWIND` helpers in [`crate::bulk`] issue one statement per chunk, so
+    /// the delta across `insert_nodes`/`insert_edges` is the number of chunks,
+    /// not the number of rows. Read the value before and after a batch to
+    /// measure statements per batch.
+    pub fn executed_statements(&self) -> u64 {
+        self.executed_statements.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 

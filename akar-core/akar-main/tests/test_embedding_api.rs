@@ -7,8 +7,8 @@
 
 use akar_common::types::Value;
 use akar_main::{
-    Connection, ConnectionPool, Database, EdgeRow, RelSpec, SystemConfig, TypedNode, insert_edges, insert_nodes,
-    neighbors,
+    Connection, ConnectionPool, Database, EdgeRow, RelSpec, SystemConfig, TypedNode, insert_edges,
+    insert_edges_chunked, insert_nodes, neighbors,
 };
 use std::sync::Arc;
 
@@ -67,9 +67,13 @@ fn typed_batch_insert_writes_every_row_and_reports_the_count() -> Result<(), Str
     let (_db, conn, _dir) = open();
     let rows: Vec<MemoryRow> = (1..=250).map(memory).collect();
 
-    // 250 rows over chunks of 100 → 3 statements, none of them per-row.
+    // 250 rows over chunks of 100 → 3 statements, none of them per-row. The
+    // statement counter proves the batch shape: 3 chunks, not 250 statements.
+    let before = conn.executed_statements();
     let written = insert_nodes(&conn, &rows, 100)?;
     assert_eq!(written, 250, "the engine count must equal the rows submitted");
+    let issued = conn.executed_statements() - before;
+    assert_eq!(issued, 3, "250 rows over chunks of 100 → 3 statements, not 250");
 
     let count = conn.query("MATCH (m:Memory) RETURN count(m) AS n")?;
     let chunk = count.chunks.first().ok_or("no chunk")?;
@@ -147,6 +151,41 @@ fn batched_edge_insert_rejects_a_property_value_mismatch() -> Result<(), String>
         error.contains("carries 0 values for 1 properties"),
         "unexpected error: {error}"
     );
+    Ok(())
+}
+
+#[test]
+fn batched_edge_insert_uses_one_statement_per_batch() -> Result<(), String> {
+    let (_db, conn, _dir) = open();
+    insert_nodes(&conn, &(1..=250).map(memory).collect::<Vec<_>>(), 100)?;
+
+    let properties = ["weight", "type"];
+    let edges: Vec<EdgeRow> = (1..250i64)
+        .map(|i| EdgeRow::with_values(i, i + 1, vec![Value::Double(0.5), Value::String("similar".into())]))
+        .collect();
+    assert_eq!(edges.len(), 249);
+
+    // The count of statements issued drives the batch claim: 249 edges over
+    // chunks of 100 → 3 statements, none of them per-edge (P131).
+    let before = conn.executed_statements();
+    let written = insert_edges_chunked(&conn, &CONNECTED, &properties, &edges, 100)?;
+    assert_eq!(written, 249, "every edge whose endpoints exist is written");
+    let issued = conn.executed_statements() - before;
+    assert_eq!(issued, 3, "249 edges over chunks of 100 → 3 statements, not 249");
+
+    // The default-chunk wrapper lands the same way; the write count stays
+    // truthful when an endpoint is missing.
+    let missing = vec![EdgeRow::with_values(
+        250,
+        999,
+        vec![Value::Double(1.0), Value::String("similar".into())],
+    )];
+    let again = insert_edges(&conn, &CONNECTED, &properties, &missing)?;
+    assert_eq!(again, 0, "an edge with a missing endpoint is not counted");
+
+    let count = conn.query("MATCH (a:Memory)-[c:Connected]->(b:Memory) RETURN count(c) AS n")?;
+    let chunk = count.chunks.first().ok_or("no chunk")?;
+    assert_eq!(chunk.get_value(0, 0), Some(Value::Int64(249)));
     Ok(())
 }
 

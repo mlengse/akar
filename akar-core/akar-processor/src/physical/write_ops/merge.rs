@@ -95,6 +95,8 @@ impl PhysicalOperatorExec for PhysicalMerge {
         let mut source_rows: Vec<(usize, usize)> = Vec::new();
         let mut matched_ids: Vec<u64> = Vec::new();
         let mut created_ids: Vec<u64> = Vec::new();
+        let mut matched_src: Vec<(usize, usize)> = Vec::new();
+        let mut created_src: Vec<(usize, usize)> = Vec::new();
 
         for (ci, chunk) in chunks.iter().enumerate() {
             for row in 0..chunk.size {
@@ -142,6 +144,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
                 if let Some(row_id) = matched {
                     matched_ids.push(row_id);
+                    matched_src.push((ci, row));
                     merged_row_ids.push(row_id);
                     source_rows.push((ci, row));
                 } else {
@@ -174,6 +177,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
                             u.push(UndoRecord::insert(self.table_id, row_id));
                         }
                         created_ids.push(row_id);
+                        created_src.push((ci, row));
                         merged_row_ids.push(row_id);
                         source_rows.push((ci, row));
                     }
@@ -183,15 +187,19 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
         // Apply ON MATCH / ON CREATE SET once per group, targeting the affected
         // row ids via the `_id` pseudo-column (mirrors the edge MERGE path).
+        // Pipeline columns from the source chunks (e.g. an UNWIND variable) are
+        // carried into the SET so `SET n.x = r.weight` can resolve `r` (P131).
         for set_op in &self.on_match {
             if !matched_ids.is_empty() {
-                let chunk = row_id_chunk(&matched_ids);
+                let mut chunk = row_id_chunk(&matched_ids);
+                append_pipeline_columns(&mut chunk, &chunks, &matched_src)?;
                 set_op.execute(vec![chunk])?;
             }
         }
         for set_op in &self.on_create {
             if !created_ids.is_empty() {
-                let chunk = row_id_chunk(&created_ids);
+                let mut chunk = row_id_chunk(&created_ids);
+                append_pipeline_columns(&mut chunk, &chunks, &created_src)?;
                 set_op.execute(vec![chunk])?;
             }
         }

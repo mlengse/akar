@@ -1,7 +1,7 @@
 //! Physical operator for edge MERGE (P53.20): `MERGE (a)-[r:R {..}]->(b)`.
 
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::set::{PhysicalSet, evaluate_expression_for_row};
+use crate::physical::write_ops::set::{PhysicalSet, append_pipeline_columns, evaluate_expression_for_row};
 use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
@@ -86,8 +86,11 @@ impl PhysicalOperatorExec for PhysicalMergeRel {
                 })?;
 
             let mut matched_idx: Vec<Option<u64>> = Vec::with_capacity(chunk.size);
+            let mut out_src: Vec<usize> = Vec::with_capacity(chunk.size);
             let mut matched: Vec<u64> = Vec::new();
             let mut created: Vec<u64> = Vec::new();
+            let mut matched_src: Vec<usize> = Vec::new();
+            let mut created_src: Vec<usize> = Vec::new();
 
             for row in 0..chunk.size {
                 let src_id = match chunk.get_value(src_col, row) {
@@ -125,6 +128,7 @@ impl PhysicalOperatorExec for PhysicalMergeRel {
                 match found {
                     Some(edge_idx) => {
                         matched.push(edge_idx as u64);
+                        matched_src.push(row);
                         matched_idx.push(Some(edge_idx as u64));
                     }
                     None => {
@@ -136,12 +140,17 @@ impl PhysicalOperatorExec for PhysicalMergeRel {
                         }
                         let edge_idx = self.insert_rel(src_id, dst_id, values)?;
                         created.push(edge_idx);
+                        created_src.push(row);
                         matched_idx.push(Some(edge_idx));
                     }
                 }
+                out_src.push(row);
             }
 
-            // Emit `<edge_var>._id` so a following SET targets these edges.
+            // Emit `<edge_var>._id` so a following SET targets these edges. The
+            // source row's pipeline columns (e.g. an UNWIND variable) are
+            // carried into the output so a downstream `SET e.w = r.weight` can
+            // resolve `r` (P131).
             let edge_count = matched_idx.len();
             let mut v = ValueVector::new(PhysicalTypeID::Int64, edge_count);
             v.resize(edge_count);
@@ -153,15 +162,18 @@ impl PhysicalOperatorExec for PhysicalMergeRel {
                 }
             }
             let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-            let out = DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])
+            let mut out = DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])
                 .with_names(vec![format!("{}.{}", self.edge_var, "_id")]);
+            let out_source_rows: Vec<(usize, usize)> = out_src.iter().map(|&r| (0usize, r)).collect();
+            append_pipeline_columns(&mut out, std::slice::from_ref(&chunk), &out_source_rows)
+                .map_err(ProcessorError::from)?;
             output.push(out);
 
             if !matched.is_empty() {
-                self.apply_on_clause(&self.on_match, &matched)?;
+                self.apply_on_clause(&self.on_match, &matched, &matched_src, &chunk)?;
             }
             if !created.is_empty() {
-                self.apply_on_clause(&self.on_create, &created)?;
+                self.apply_on_clause(&self.on_create, &created, &created_src, &chunk)?;
             }
         }
 
@@ -229,8 +241,16 @@ impl PhysicalMergeRel {
 
     /// Apply `ON MATCH SET` / `ON CREATE SET` operations against the given
     /// edge indices. Each SET op reads the `<edge_var>._id` column, so only
-    /// the edge rows emitted by this merge are touched.
-    fn apply_on_clause(&self, set_ops: &[PhysicalSet], edge_ids: &[u64]) -> Result<(), ProcessorError> {
+    /// the edge rows emitted by this merge are touched. The source chunk's
+    /// pipeline columns (e.g. an UNWIND variable) are carried into the SET so
+    /// `SET e.w = r.weight` can resolve `r` (P131).
+    fn apply_on_clause(
+        &self,
+        set_ops: &[PhysicalSet],
+        edge_ids: &[u64],
+        src_rows: &[usize],
+        src_chunk: &DataChunk,
+    ) -> Result<(), ProcessorError> {
         if set_ops.is_empty() || edge_ids.is_empty() {
             return Ok(());
         }
@@ -241,8 +261,11 @@ impl PhysicalMergeRel {
             v.set_i64(i, *e as i64);
         }
         let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
-        let chunk = DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])
+        let mut chunk = DataChunk::new(vec![arr], vec![PhysicalTypeID::Int64])
             .with_names(vec![format!("{}.{}", self.edge_var, "_id")]);
+        let source_rows: Vec<(usize, usize)> = src_rows.iter().map(|&r| (0usize, r)).collect();
+        append_pipeline_columns(&mut chunk, std::slice::from_ref(src_chunk), &source_rows)
+            .map_err(ProcessorError::from)?;
         for set_op in set_ops {
             let _ = set_op.execute(vec![chunk.clone()])?;
         }

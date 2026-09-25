@@ -339,6 +339,11 @@ impl Connection {
             return Err("Database is in read-only mode; write statements are not allowed".into());
         }
 
+        // Count the statement before execution so batch helpers can measure how
+        // many statements a batch is split into (P131).
+        self.executed_statements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         // Substitute parameters in the bound statement. Done before `handle_ddl`
         // so prepared DML (CREATE/MERGE) with `$param` in pattern properties gets
         // concrete values too (P51.31).

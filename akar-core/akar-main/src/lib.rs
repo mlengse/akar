@@ -23,7 +23,8 @@ mod connection_test;
 pub mod test_helpers;
 
 pub use bulk::{
-    DEFAULT_ROWS_PER_STATEMENT, EdgeRow, Neighbor, RelSpec, TypedNode, insert_edges, insert_nodes, neighbors,
+    DEFAULT_ROWS_PER_STATEMENT, EdgeRow, Neighbor, RelSpec, TypedNode, insert_edges, insert_edges_chunked,
+    insert_nodes, neighbors,
 };
 pub use connection::Connection;
 pub use database::{Database, SystemConfig};
