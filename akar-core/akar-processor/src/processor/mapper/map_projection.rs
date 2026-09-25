@@ -2,10 +2,13 @@ use super::ExecutionContext;
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical_operator::*;
 use crate::processor::projection_helper::resolve_projection_column_index;
+use akar_common::arrow_vector::ArrowVector;
 use akar_common::error::ProcessorError;
-use akar_common::vector::DataChunk;
+use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
+use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::Expression;
 use akar_planner::logical_operator::LogicalOperator;
+use arrow::array::ArrayRef;
 use std::sync::{Arc, Mutex};
 
 fn projection_needs_expression_eval(expr: &Expression) -> bool {
@@ -48,6 +51,35 @@ fn expression_field_name(alias: Option<&str>, expr: &Expression) -> String {
     }
 }
 
+/// Rebuild the projected output schema for an empty (zero-row) input.
+///
+/// An exhausted UNWIND/MATCH over an empty table or relationship is
+/// represented upstream as a *schemaless* zero-row chunk
+/// (`DataChunk::new(vec![], vec![])`): `PhysicalProjection` forwards it
+/// unchanged and the alias-rename step is skipped (no fields to rename), so
+/// the result chunk never carries the projected column names. Downstream
+/// ORDER BY key resolution (`ORDER BY source`) then cannot map the key and
+/// named-column consumers (e.g. `decode_neighbors`) fail with "result is
+/// missing the 'source' column". Rebuild the projection's own schema so an
+/// empty result still exposes the correct zero-length typed columns (F16).
+fn projected_empty_chunk(field_names: Vec<String>, field_types: Vec<PhysicalTypeID>) -> DataChunk {
+    let fields: Vec<ArrayRef> = field_types
+        .iter()
+        .map(|&pt| {
+            let mut v = ValueVector::new(pt, 0);
+            v.resize(0);
+            ArrowVector::from_legacy(&v).array
+        })
+        .collect();
+    DataChunk {
+        fields,
+        field_types,
+        size: 0,
+        field_names,
+        sel_vector: None,
+    }
+}
+
 /// Resolve ORDER BY / TOP-K sort keys to column indices.
 ///
 /// Sort keys are expressions (e.g. `p.age`); they must be mapped to the actual
@@ -67,6 +99,10 @@ fn resolve_sort_keys(
     input: &[DataChunk],
     ctx: &mut ExecutionContext,
 ) -> Result<(Vec<(u32, bool)>, Vec<DataChunk>, usize), ProcessorError> {
+    if input.iter().all(|chunk| chunk.size == 0) {
+        return Ok((Vec::new(), input.to_vec(), 0));
+    }
+
     let base_cols = input.first().map(|c| c.num_fields()).unwrap_or(0);
     let mut resolved = Vec::with_capacity(sort_keys.len());
     let mut computed: Vec<Expression> = Vec::new();
@@ -210,6 +246,23 @@ pub fn map_and_execute_projection(
 
             let result = if p.expressions.is_empty() {
                 input
+            } else if input.iter().all(|chunk| chunk.size == 0) {
+                // Empty input still carries the full projected schema (F16), so
+                // downstream ORDER BY key resolution and named-column consumers
+                // work on empty results. Mirrors `PhysicalProjection`'s
+                // "empty input → one zero-row chunk" normalisation while adding
+                // the zero-length typed columns the projected aliases define.
+                let field_names: Vec<String> = p
+                    .expressions
+                    .iter()
+                    .map(|be| expression_field_name(be.alias.as_deref(), &be.expression))
+                    .collect();
+                let field_types: Vec<PhysicalTypeID> = p
+                    .expressions
+                    .iter()
+                    .map(|be| physical_type_from_logical(be.resolved_type))
+                    .collect();
+                vec![projected_empty_chunk(field_names, field_types)]
             } else {
                 // Expressions that cannot map to a plain column — computed exprs
                 // (function calls, arithmetic) OR property accesses on a map/

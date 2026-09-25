@@ -228,6 +228,15 @@ fn empty_batches_are_a_no_op_not_an_error() -> Result<(), String> {
 }
 
 #[test]
+fn neighbors_with_no_matching_edges_is_empty() -> Result<(), String> {
+    let (_db, conn, _dir) = open();
+    insert_nodes(&conn, &[memory(1)], 10)?;
+
+    assert!(neighbors(&conn, &CONNECTED, Some("weight"), &[1], 0, 100)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn a_pool_serves_concurrent_writers_on_one_database() -> Result<(), String> {
     // The shape `sulur-server` uses: one Database, one pool, N blocking tasks.
     let (db, conn, _dir) = open();

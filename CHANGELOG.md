@@ -14,6 +14,13 @@
   - `count(Memory)=912` dan `m.id` tetap `int` sebelum & sesudah semua pass — tak ada korupsi index/halaman. `ADD kolom` **tanpa `DEFAULT`** terbukti diterima daemon: `DEFAULT` (yang digugurkan fix Sulur `2464f40`) bukan syarat agar DDL masuk.
   - Satu engine Sulur lain di host yang sama menyelesaikan pass penuh **bersamaan** selama jeda verifikasi — pada DB live, state tidak boleh diasumsikan diam saat verifikasi lanjutan.
 
+### Fixed
+
+- **P130 (F16) — proyeksi di atas hasil kosong mempertahankan schema kolom (`ORDER BY` alias proyeksi pada empty result)** · `akar-processor/src/processor/mapper/map_projection.rs` · gate **2,261** (+1: 2,260 → 2,261, tes `neighbors_with_no_matching_edges_is_empty`)
+  - `MATCH`/`UNWIND` yang habis (lewat rel/table kosong) direpresentasikan upstream sebagai chunk zero-row **tanpa schema**; `PhysicalProjection` meloloskan chunk itu apa adanya dan rename-alias dilewati, sehingga kolom hasil (`AS source`, dst.) tidak pernah muncul — `ORDER BY source` gagal `Variable 'source' not found (chunk has no field_names)` dan `neighbors`/`MemoryStore::edges` Sulur mengembalikan error alih-alih `[]`.
+  - Perbaikan di mapper proyeksi, bukan hanya `neighbors`/`decode_neighbors`: ketika **seluruh** input zero-row, hasil dibangun ulang dari `BoundExpression` logis — satu chunk kosong berisi kolom bertipe zero-length dengan nama hasil alias (`expression_field_name`) dan tipe fisik dari `resolved_type`.
+  - `resolve_sort_keys` mempertahankan guard zero-row (sort key kosong = tidak ada kerja sorting pada hasil kosong); coverage ORDER BY/empty-result terkait tetap hijau (`test_p5337_order_by_unprojected`, `test_p5316_g5_alias_return`, `test_empty_tables`, `test_embedding_api`).
+
 ## [0.2.4] - 2026-09-23
 
 ### Added

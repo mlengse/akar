@@ -26,7 +26,7 @@ Akar is a **from-scratch pure Rust reimplementation** of [KuzuDB](https://github
 |--------|-------|
 | Workspace crates | **36** |
 | Lines of code | **~139K LOC** (pure Rust, git-tracked incl. tests) |
-| Tests passing | **2,260** total, 0 ignored, 2,260 passed, 0 failed (gate `test [akar-core]`, 2026-09-23, P113: +1 — parity NEON + jahitan chunk/tail di `akar-vector`). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
+| Tests passing | **2,261** total, 0 ignored, 2,261 passed, 0 failed (gate `test [akar-core]`, 2026-09-25, P130: +1 — regresi `neighbors_with_no_matching_edges_is_empty` di `akar-main`). Riwayat delta per-task P### tercantum di CHANGELOG.md — kolom ini mencatat status terkini saja. |
 | Optimizer passes | **26** (19 flat + 7 tree) — exceeds C++ (17) |
 | Registered functions | **260** (245 scalar + 14 aggregate + 1 table) |
 | Logical operators | **59** variants |
@@ -733,7 +733,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-function` | 198 | 260 registered functions (P119.1: `retention_score` decay Ebbinghaus) |
 | `akar-storage` | 364 | BufferManager, WAL, Compression, CSV/Parquet readers, ART Index, spiller restore (P51.44), MVCC `commit_history` HashMap O(1) (P82) |
 | `akar-main` (unit) | 90 | Database, Connection, QueryResult, DDL/DML, COPY FROM, connection pool + plan-cache reuse across borrows (P123.1) |
-| `akar-main` (integration) | 483 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3), `retention_score` end-to-end (P119.1), `CALL read_markdown_wiki` column contract (P122, feature-gated), typed batch insert + batched `neighbors` + pool concurrency (P123.2) |
+| `akar-main` (integration) | 484 | RETURN *, FOREACH, MERGE (+edge MERGE P53.20), subqueries, WCOJ, crash recovery, durability, rel-scan binding, list ORDER BY/LIMIT, OPTIONAL MATCH→CREATE add_bridge_batch (P53.25), SET/MERGE/DELETE drop-in (P53.29–P53.32), CREATE TABLE IF NOT EXISTS idempotency (P72), aggregate `DISTINCT` (P88), FTS advanced query types: phrase/boolean/regex/phrase-prefix/phrase-slop (P106.2), FTS commit-hook sync dari DML INSERT/UPDATE/DELETE (P107.1), FTS read-after-write across commits (P107.2), FTS crash recovery across db reopen (P107.3), FTS same-transaction insert+search commit-gated visibility (P107.4), FTS executes before the join via EXPLAIN (P108.3), `retention_score` end-to-end (P119.1), `CALL read_markdown_wiki` column contract (P122, feature-gated), typed batch insert + batched `neighbors` + pool concurrency (P123.2), `neighbors` empty-result schema regression (P130) |
 | `akar-catalog` | 39 | Catalog CRUD, schema management |
 | `akar-transaction` | 18 | MVCC, begin/commit/rollback, checkpoint, conflict detection |
 | `akar-graph` | 36 | CSR adjacency, all GDS algorithms |
@@ -757,7 +757,7 @@ Triggered by pushing a version tag (`v*`):
 | `akar-wasm` | 0* | WASM bindings (*3 via `wasm-pack test --node` on CI) |
 | `akar-migrate` | 0* | Migration tool (idempotent, fixed P48.5; *not exercised by the default gate) |
 | Doc-tests | 10 | Doc-tests across all crates |
-| **Total** | **2,260** | **2,260 total, 0 ignored, 2,260 passed, 0 failed** (gate `test [akar-core]` 2026-09-23, P113: +1 di `akar-vector`). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
+| **Total** | **2,261** | **2,261 total, 0 ignored, 2,261 passed, 0 failed** (gate `test [akar-core]` 2026-09-25, P130: +1 regresi `neighbors_with_no_matching_edges_is_empty` di `akar-main`). Riwayat delta per-task P### ada di `CHANGELOG.md`; angka per-crate di atas diukur dari run gate yang sama. |
 
 ### 11.2 Test Datasets
 
