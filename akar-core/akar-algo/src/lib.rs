@@ -1301,21 +1301,49 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     let n_minus_1 = (n - 1) as f64;
     let mut values = vec![0.0; n];
 
-    for source in 0..n {
-        let (distances, _) = shortest_path_bfs(csr, source);
-        let (sum_dist, reachable): (f64, usize) = distances
-            .iter()
-            .enumerate()
-            .filter(|(i, d)| d.is_some() && *i != source)
-            .fold((0.0, 0), |(sum, cnt), (_, d)| (sum + d.unwrap() as f64, cnt + 1));
+    // Bolt Optimization: Hoist BFS scratch vectors outside the source node loop and reset
+    // state lazily only on visited nodes in `queue`. This eliminates O(N) heap allocations
+    // (N distance vectors per run) and replaces O(N) Option array iterations with O(|R(u)|)
+    // direct integer distance summation and queue-length counting.
+    let mut distance = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n);
 
-        if reachable == 0 || sum_dist == 0.0 {
-            continue;
+    for source in 0..n {
+        queue.clear();
+        distance[source] = 0;
+        queue.push(source);
+
+        let mut head = 0usize;
+        let mut sum_dist = 0.0f64;
+
+        while head < queue.len() {
+            let u = queue[head];
+            head += 1;
+            let d_u = distance[u];
+            if u != source {
+                sum_dist += d_u as f64;
+            }
+
+            for (_, dst) in csr.neighbors(u) {
+                let neighbor = dst.offset as usize;
+                if neighbor < n && distance[neighbor] == usize::MAX {
+                    distance[neighbor] = d_u + 1;
+                    queue.push(neighbor);
+                }
+            }
         }
 
-        let r = reachable as f64;
-        // Wasserman-Faust normalized closeness
-        values[source] = (r / n_minus_1) * (r / n_minus_1) * (r / sum_dist);
+        let reachable = queue.len().saturating_sub(1);
+        if reachable > 0 && sum_dist > 0.0 {
+            let r = reachable as f64;
+            // Wasserman-Faust normalized closeness
+            values[source] = (r / n_minus_1) * (r / n_minus_1) * (r / sum_dist);
+        }
+
+        // Lazy cleanup for visited nodes to prepare `distance` for next source iteration
+        for &visited_node in &queue {
+            distance[visited_node] = usize::MAX;
+        }
     }
 
     AlgoResult {
@@ -2047,13 +2075,42 @@ pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> Algo
 /// Returns the number of reachable nodes from each source (destination count).
 pub fn compute_all_sp_destinations(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
-    let values: Vec<f64> = (0..n)
-        .map(|source| {
-            let (distance, _) = shortest_path_bfs(csr, source);
-            // Count reachable nodes (excluding source itself)
-            distance.iter().filter(|d| d.is_some()).count().saturating_sub(1) as f64
-        })
-        .collect();
+    let mut values = vec![0.0; n];
+
+    // Bolt Optimization: Hoist BFS scratch vectors outside the source node loop and reset
+    // state lazily only on visited nodes in `queue`. Replaces O(N) heap allocations per source
+    // node and O(N) array filtering with O(|R(s)|) queue-length counting and lazy cleanup.
+    let mut distance = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n);
+
+    for source in 0..n {
+        queue.clear();
+        distance[source] = 0;
+        queue.push(source);
+
+        let mut head = 0usize;
+        while head < queue.len() {
+            let u = queue[head];
+            head += 1;
+
+            for (_, dst) in csr.neighbors(u) {
+                let neighbor = dst.offset as usize;
+                if neighbor < n && distance[neighbor] == usize::MAX {
+                    distance[neighbor] = distance[u] + 1;
+                    queue.push(neighbor);
+                }
+            }
+        }
+
+        // Count reachable nodes (excluding source itself)
+        values[source] = queue.len().saturating_sub(1) as f64;
+
+        // Lazy cleanup for visited nodes to prepare `distance` for next source iteration
+        for &visited_node in &queue {
+            distance[visited_node] = usize::MAX;
+        }
+    }
+
     AlgoResult {
         name: "all_sp_destinations".into(),
         values,
