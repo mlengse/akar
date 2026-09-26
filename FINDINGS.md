@@ -58,7 +58,17 @@ dengan tesis spike = sinyal checkpoint di jalur commit, bukan jalur tulis.
 **Dampak.** Bench 10.000 row target (`P6-BENCH-1`) akan pungut biaya
 checkpoint beberapa kali. Opsi mitigasi bila terbukti: (a) `CHECKPOINT`
 eksplisit di sela batch dengan ambang dibesarkan, (b) knob ekspos di harness,
-(c) lewati ambang saat tulis beruntun dalam satu transaksi. Keputusan
-pengangkatan jadi task masih terbuka — penetapan tuntas (`P6-FORM-1` sulur,
-`882f3d3`) tidak menyentuh ranah akar ini; angka pasca-mitigasi terekam di
-`CHANGELOG.md` sulur (entri P6-FORM-1) dan `docs/BENCH_CPP_VS_RUST.md`.
+(c) lewati ambang saat tulis beruntun dalam satu transaksi.
+
+**Keputusan pengangkatan (2026-09-26):** **bukan task** — biarkan sebagai
+temuan dengan mitigasi default tercatat. Alasan: workload pemantik telah
+memenuhi target (store 10k `P6-FORM-1` selesai ~2,5 menit < 5 menit); `store_single`
+tak terdampak; produksi jauh di bawah skala yang menyakitkan (DB audit: 737
+memori). **Mitigasi default yang dipilih: (a)** — caller ingest berkelanjutan
+(harness bench, sulur dream batch, formasi) mengeluarkan `CHECKPOINT` eksplisit
+di batas batch dan, bila perlu, menaikkan `config.checkpoint_threshold`
+(> 16 MiB) agar sinyal auto tidak menyela di tengah batch. Perubahan engine
+jauh-jauh hari (c) hanya bila profil produksi menunjukkan tail terpola; sampai
+itu, ambang auto 16 MiB dipertahankan sebagai jaring pengaman. Keputusan ini
+bisa direvisi bila `P6-RECALL-1` atau bench formasi berikutnya menarik biaya
+checkpoint sebagai variabel dominan.
