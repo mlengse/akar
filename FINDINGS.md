@@ -13,7 +13,7 @@
 > `~/.sulur/engine/sulur.db`, biner `v0.2.1+11 (b0fbee1)`, DB 737 memori /
 > 24.974 edge `Connected`).
 
-## F17 — 2026-09-26: auto-checkpoint (threshold 16 MiB) menggelembungkan tulis berkelanjutan — TERBUKA
+## F17 — 2026-09-26: auto-checkpoint (threshold 16 MiB) menggelembungkan tulis berkelanjutan — TERVERIFIKASI
 
 **Gejala.** Bench `sulur/benchmarks/cpp_vs_rust/rust/src/bin/tier_b.rs` (Tier B,
 GPL) yang menulis batched 1000-row ke `Memory` (2× `FLOAT[768]` per row ≈
@@ -37,11 +37,28 @@ formasi) di mana checkpoint bukan per-op melainkan lonjakan deterministik yang
 membunuh latensi tail. Jalur tulis Sulur (`P6-FORM-1`) terindikasi sehat;
 spike bukan dari sana.
 
-**Verifikasi yang dibutuhkan.** Jalankan bench store_batch dengan
-`auto_checkpoint: false, checkpoint_threshold: 0` → spike harus hilang (chunk
-semua ~1.2–1.75 ms/row). Konfirmasi menutup/membuka hipotesis di atas.
+**Verifikasi (selesai 2026-09-26; A/B back-to-back, `RECALL=0`, `NO_CHECKPOINT=1`
+knob ditambahkan di `tier_b.rs`).** store_batch 2000..6000 (4 chunk × 1000 row):
+
+| chunk | baseline (cp ON) | NO_CHECKPOINT |
+|---|---|---|
+| 1000..2000 (ref) | 1,30 s | 1,44 s |
+| 2000..3000 | **15,71 s** | 1,39 s |
+| 3000..4000 | 1,31 s | 1,58 s |
+| 4000..5000 | 1,76 s | 1,68 s |
+| 5000..6000 | **31,30 s** | 2,20 s |
+| total 2000..6000 | **50,08 s** | **6,84 s (7,3×)** |
+
+Spike muncul di chunk yang sama dengan observasi awal (2000..3000 dan
+5000..6000 ≈ WAL melewati 16 MiB tiap ~1,3–2k row) dan **hilang** saat
+auto-checkpoint dimatikan; base chunk non-spike di kedua sisi tetap rata
+(~1,3–1,8 s). `store_single` tak terdampak (63,5 s vs 59,0 s) — konsisten
+dengan tesis spike = sinyal checkpoint di jalur commit, bukan jalur tulis.
 
 **Dampak.** Bench 10.000 row target (`P6-BENCH-1`) akan pungut biaya
 checkpoint beberapa kali. Opsi mitigasi bila terbukti: (a) `CHECKPOINT`
 eksplisit di sela batch dengan ambang dibesarkan, (b) knob ekspos di harness,
-(c) lewati ambang saat tulis beruntun dalam satu transaksi.
+(c) lewati ambang saat tulis beruntun dalam satu transaksi. Keputusan
+pengangkatan jadi task masih terbuka — penetapan tuntas (`P6-FORM-1` sulur,
+`882f3d3`) tidak menyentuh ranah akar ini; angka pasca-mitigasi terekam di
+`CHANGELOG.md` sulur (entri P6-FORM-1) dan `docs/BENCH_CPP_VS_RUST.md`.
