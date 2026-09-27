@@ -16,14 +16,11 @@ pub fn compute_random_walk(
     let mut hit_counts = vec![0.0; n];
     let mut rng = SimpleRng::new(42);
 
-    let start_nodes = match start_node {
-        Some(node) => vec![node],
-        None => (0..n).collect(),
-    };
-
-    for &start in &start_nodes {
+    // Bolt Optimization: Avoid allocating `start_nodes: Vec<usize>` when `start_node` is `None`
+    // and use direct CSR offset indexing in the step loop to eliminate slice bounds check overhead.
+    let run_walks = |start: usize, hit_counts: &mut [f64], rng: &mut SimpleRng| {
         if start >= n {
-            continue;
+            return;
         }
 
         for _ in 0..walks_per_node {
@@ -31,13 +28,15 @@ pub fn compute_random_walk(
             hit_counts[current] += 1.0;
 
             for _ in 0..steps {
-                let neighbors = csr.neighbors(current);
-                if neighbors.is_empty() {
+                let start_off = csr.offsets[current];
+                let end_off = csr.offsets[current + 1];
+                let deg = end_off - start_off;
+                if deg == 0 {
                     break;
                 }
 
-                let idx = rng.gen_range(neighbors.len());
-                current = neighbors[idx].1.offset as usize;
+                let idx = rng.gen_range(deg);
+                current = csr.adjacency[start_off + idx].1.offset as usize;
 
                 if current < n {
                     hit_counts[current] += 1.0;
@@ -45,6 +44,14 @@ pub fn compute_random_walk(
                     break;
                 }
             }
+        }
+    };
+
+    if let Some(start) = start_node {
+        run_walks(start, &mut hit_counts, &mut rng);
+    } else {
+        for start in 0..n {
+            run_walks(start, &mut hit_counts, &mut rng);
         }
     }
 
