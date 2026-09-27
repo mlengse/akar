@@ -8,6 +8,3 @@ __pycache__/
 dist/
 .pytest_cache/
 *.gap_report.json
-
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-graft/
