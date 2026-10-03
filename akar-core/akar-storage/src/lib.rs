@@ -1187,7 +1187,6 @@ mod integration_tests {
         let wal_path = dir.path().join("wal.log");
 
         // Phase 1: Write data with WAL logging
-        #[allow(unused_variables)]
         let (wal_records_count, column_count) = {
             let mm = Arc::new(MemoryManager::new(64 * 1024 * 1024));
             let config = BufferManagerConfig::default();
