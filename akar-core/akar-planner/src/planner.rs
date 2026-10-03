@@ -1469,10 +1469,7 @@ mod tests {
         assert!(projection_covers_sort_key(&[be1], &sort_key_var_alias));
 
         // Case 2: Match by alias (PropertyAccess key matching format var.prop)
-        let prop_expr = Expression::PropertyAccess(
-            Box::new(Expression::Variable("m".to_string())),
-            "id".to_string(),
-        );
+        let prop_expr = Expression::PropertyAccess(Box::new(Expression::Variable("m".to_string())), "id".to_string());
         let be_prop_alias = make_be(prop_expr.clone(), Some("m.id".to_string()));
         assert!(projection_covers_sort_key(&[be_prop_alias], &prop_expr));
 
@@ -1487,10 +1484,8 @@ mod tests {
 
         // Case 5: Non-matching cases
         // 5a: Unprojected property when projected list contains different expression/alias
-        let other_expr = Expression::PropertyAccess(
-            Box::new(Expression::Variable("m".to_string())),
-            "name".to_string(),
-        );
+        let other_expr =
+            Expression::PropertyAccess(Box::new(Expression::Variable("m".to_string())), "name".to_string());
         let be_other = make_be(other_expr, Some("m_name".to_string()));
         let unprojected_key = Expression::PropertyAccess(
             Box::new(Expression::Variable("m".to_string())),
