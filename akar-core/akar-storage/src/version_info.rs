@@ -7,19 +7,19 @@
 //!
 //! This is the Rust port of Vela C++'s `VersionInfo` / `VectorVersionInfo`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 /// Tracks insert/delete visibility for a single vector (1024 rows).
 ///
-/// Uses a `Mutex`-protected map from transaction ID to a bitmap of
+/// Uses a `Mutex`-protected map from transaction ID to a set of
 /// affected row indices within this vector.
 #[derive(Debug)]
 pub struct VectorVersionInfo {
     /// Map: transaction_id → set of inserted row indices (relative to vector).
-    inserted: Mutex<HashMap<u64, Vec<u32>>>,
+    inserted: Mutex<HashMap<u64, HashSet<u32>>>,
     /// Map: transaction_id → set of deleted row indices.
-    deleted: Mutex<HashMap<u64, Vec<u32>>>,
+    deleted: Mutex<HashMap<u64, HashSet<u32>>>,
 }
 
 impl Clone for VectorVersionInfo {
@@ -48,13 +48,13 @@ impl VectorVersionInfo {
     /// Record that `txn_id` inserted a row at `row_in_vector`.
     pub fn insert(&self, txn_id: u64, row_in_vector: u32) {
         let mut ins = self.inserted.lock().unwrap();
-        ins.entry(txn_id).or_default().push(row_in_vector);
+        ins.entry(txn_id).or_default().insert(row_in_vector);
     }
 
     /// Record that `txn_id` deleted a row at `row_in_vector`.
     pub fn delete(&self, txn_id: u64, row_in_vector: u32) {
         let mut del = self.deleted.lock().unwrap();
-        del.entry(txn_id).or_default().push(row_in_vector);
+        del.entry(txn_id).or_default().insert(row_in_vector);
     }
 
     /// Drop all recorded inserts and deletes for this vector.
