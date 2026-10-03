@@ -158,37 +158,6 @@ fn format_schema_string(schema_str: &str) -> String {
         .join("\n")
 }
 
-/// List all Parquet data files in the table directory (non-_delta_log files).
-#[allow(dead_code)]
-pub fn list_parquet_files(table_path: &str) -> Result<Vec<String>, String> {
-    let dir = Path::new(table_path);
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut files = Vec::new();
-    collect_table_parquet_files(dir, &mut files)?;
-    Ok(files)
-}
-
-#[allow(dead_code)]
-fn collect_table_parquet_files(dir: &Path, files: &mut Vec<String>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
-        let path = entry.path();
-        if path.is_dir() {
-            // Skip _delta_log directory
-            if path.file_name().map_or(false, |n| n != "_delta_log") {
-                collect_table_parquet_files(&path, files)?;
-            }
-        } else if path.extension().map_or(false, |ext| ext == "parquet") {
-            files.push(path.to_string_lossy().to_string());
-        }
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -259,19 +228,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_list_parquet_files() {
-        let dir = std::env::temp_dir().join("delta_test_data");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("file1.parquet"), "fake data").unwrap();
-        // Create _delta_log directory that should be skipped
-        fs::create_dir_all(dir.join("_delta_log")).unwrap();
-        fs::write(dir.join("_delta_log/00000000000000000000.json"), "{}").unwrap();
-
-        let files = list_parquet_files(&dir.to_string_lossy()).unwrap();
-        assert_eq!(files.len(), 1);
-    }
 
     #[test]
     fn test_format_schema_string() {
