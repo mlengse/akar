@@ -191,6 +191,7 @@ mod tests {
         assert!(info.schema.is_some());
         assert_eq!(info.table_id.unwrap(), "test-table-id");
         assert_eq!(info.min_reader_version, 1);
+        assert_eq!(info.min_writer_version, 2);
     }
 
     #[test]
