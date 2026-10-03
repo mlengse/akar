@@ -14,14 +14,16 @@ use std::io::Read;
 /// data-scan path (currently the REST client only returns metadata); only
 /// `table_name`/`table_type`/`schema`/`storage_location` are read today.
 /// Compiled only under the `native` feature (`--all-features`).
-#[allow(dead_code)]
 pub struct UcTableScan {
     pub table_name: String,
     pub table_type: String,
     pub schema: String,
     pub storage_location: Option<String>,
+    #[allow(dead_code)]
     pub columns: Vec<UcColumnInfo>,
+    #[allow(dead_code)]
     pub rows: Vec<Vec<String>>,
+    #[allow(dead_code)]
     pub row_count: usize,
 }
 
@@ -79,11 +81,7 @@ pub fn get_table_info(endpoint: &str, token: &str, table: &str) -> Result<UcTabl
         })
         .unwrap_or_default();
 
-    let schema = columns
-        .iter()
-        .map(|c| format!("  {}: {} (nullable={})", c.name, c.type_str, c.nullable))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let schema = format_columns(&columns);
 
     Ok(UcTableScan {
         table_name,
@@ -97,7 +95,6 @@ pub fn get_table_info(endpoint: &str, token: &str, table: &str) -> Result<UcTabl
 }
 
 /// Format column info into human-readable schema string.
-#[allow(dead_code)]
 pub fn format_columns(columns: &[UcColumnInfo]) -> String {
     columns
         .iter()
