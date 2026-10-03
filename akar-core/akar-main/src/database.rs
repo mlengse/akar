@@ -145,7 +145,6 @@ fn lock_key(db_path: &Path) -> PathBuf {
         .join(LOCK_FILE_NAME)
 }
 
-#[allow(dead_code)]
 pub struct Database {
     pub(crate) storage_manager: Arc<StorageManager>,
     pub(crate) catalog: Arc<Mutex<Catalog>>,
