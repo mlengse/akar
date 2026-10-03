@@ -62,3 +62,61 @@ pub(crate) fn gamma_func(x: f64) -> f64 {
 pub fn set_rng_seed(seed: u64) {
     RNG_STATE.with(|state| state.set(seed));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_rng_seed_determinism() {
+        set_rng_seed(12345);
+        let val1 = rng_next();
+        let val2 = rng_next();
+
+        set_rng_seed(12345);
+        let val1_again = rng_next();
+        let val2_again = rng_next();
+
+        assert_eq!(val1, val1_again);
+        assert_eq!(val2, val2_again);
+    }
+
+    #[test]
+    fn test_set_rng_seed_different_seeds() {
+        set_rng_seed(12345);
+        let val1 = rng_next();
+
+        set_rng_seed(54321);
+        let val2 = rng_next();
+
+        assert_ne!(val1, val2);
+    }
+
+    #[test]
+    fn test_set_rng_seed_boundary_values() {
+        set_rng_seed(0);
+        let val_zero = rng_next();
+        assert!((0.0..1.0).contains(&val_zero));
+
+        set_rng_seed(0);
+        assert_eq!(rng_next(), val_zero);
+
+        set_rng_seed(u64::MAX);
+        let val_max = rng_next();
+        assert!((0.0..1.0).contains(&val_max));
+
+        set_rng_seed(u64::MAX);
+        assert_eq!(rng_next(), val_max);
+    }
+
+    #[test]
+    fn test_get_cached_regex() {
+        let re1 = get_cached_regex(r"\d+").unwrap();
+        let re2 = get_cached_regex(r"\d+").unwrap();
+        assert!(re1.is_match("123"));
+        assert!(re2.is_match("123"));
+
+        let err = get_cached_regex(r"[").unwrap_err();
+        assert!(err.contains("Regex error"));
+    }
+}
