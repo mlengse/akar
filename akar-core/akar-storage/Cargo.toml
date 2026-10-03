@@ -41,3 +41,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "version_info_bench"
+harness = false
