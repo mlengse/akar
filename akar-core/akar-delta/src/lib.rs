@@ -5,7 +5,7 @@
 //! - **DuckDB delegation** (feature `duckdb-delegation`): Delegates to DuckDB's delta extension.
 
 #[cfg(feature = "native")]
-mod native_reader;
+pub mod native_reader;
 
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;
@@ -53,7 +53,7 @@ impl Extension for DeltaExtension {
                     }
 
                     let table_info = native_reader::load_delta_table(&path)?;
-                    let file_refs: Vec<String> = table_info.data_files.iter().cloned().collect();
+                    let file_refs: Vec<String> = table_info.data_files.clone();
 
                     akar_common::extension_utils::fill_chunk_with_strings(chunk, "file_path", &file_refs);
                     Ok(())

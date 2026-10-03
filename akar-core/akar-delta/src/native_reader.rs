@@ -7,7 +7,6 @@ use std::fs;
 use std::path::Path;
 
 /// Parsed Delta table metadata.
-#[allow(dead_code)]
 pub struct DeltaTableInfo {
     pub version: i64,
     pub data_files: Vec<String>,
@@ -148,16 +147,15 @@ fn format_schema_string(schema_str: &str) -> String {
 
     fields
         .iter()
-        .filter_map(|f| {
+        .map(|f| {
             let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let type_str = f.get("type").and_then(|v| v.as_str()).unwrap_or("?");
             let nullable = f.get("nullable").and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(format!("  {name}: {type_str} (nullable={nullable})"))
+            format!("  {name}: {type_str} (nullable={nullable})")
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -227,7 +225,6 @@ mod tests {
             );
         }
     }
-
 
     #[test]
     fn test_format_schema_string() {
