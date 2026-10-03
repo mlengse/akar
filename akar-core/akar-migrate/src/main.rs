@@ -20,6 +20,76 @@ struct Args {
     /// Skip the Python extraction step (assumes `from` contains schema.json and Parquet files)
     #[arg(long, default_value_t = false)]
     skip_extract: bool,
+
+    /// Explicit path to the Python executable
+    #[arg(long)]
+    python_path: Option<PathBuf>,
+}
+
+fn find_in_path(name: &Path) -> Option<PathBuf> {
+    if name.components().count() > 1 {
+        if name.is_file() {
+            return name.canonicalize().ok().or_else(|| Some(name.to_path_buf()));
+        }
+        return None;
+    }
+
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate.canonicalize().ok().or(Some(candidate));
+            }
+        }
+    }
+    None
+}
+
+fn resolve_python_executable(custom_path: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = custom_path {
+        if path.is_absolute() {
+            if path.is_file() {
+                return Ok(path.to_path_buf());
+            } else {
+                anyhow::bail!("Specified --python-path does not exist or is not a file: {:?}", path);
+            }
+        } else if let Some(found) = find_in_path(path) {
+            return Ok(found);
+        } else if path.exists() {
+            return path.canonicalize().context("Failed to canonicalize python-path");
+        } else {
+            anyhow::bail!("Specified --python-path not found: {:?}", path);
+        }
+    }
+
+    if let Ok(env_python) = std::env::var("PYTHON") {
+        if !env_python.trim().is_empty() {
+            let path = Path::new(&env_python);
+            if path.is_absolute() && path.is_file() {
+                return Ok(path.to_path_buf());
+            } else if let Some(found) = find_in_path(path) {
+                return Ok(found);
+            } else if path.exists() {
+                return path.canonicalize().context("Failed to canonicalize PYTHON env path");
+            }
+        }
+    }
+
+    let candidates = if cfg!(windows) {
+        vec!["python3.exe", "python.exe", "python3", "python"]
+    } else {
+        vec!["python3", "python"]
+    };
+
+    for candidate in candidates {
+        if let Some(found) = find_in_path(Path::new(candidate)) {
+            return Ok(found);
+        }
+    }
+
+    anyhow::bail!(
+        "Could not find a valid Python executable. Please specify using --python-path or set the PYTHON environment variable."
+    )
 }
 
 fn main() -> Result<()> {
@@ -36,10 +106,14 @@ fn main() -> Result<()> {
     };
 
     if !args.skip_extract {
+        let python_exec = resolve_python_executable(args.python_path.as_deref())?;
         let python_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("export_cpp.py");
 
-        println!("1. Extracting data and schema from C++ Akar (via Python)...");
-        let status = Command::new("python")
+        println!(
+            "1. Extracting data and schema from C++ Akar (via Python: {:?})...",
+            python_exec
+        );
+        let status = Command::new(&python_exec)
             .arg(&python_script)
             .arg("--db_path")
             .arg(&args.from)
@@ -209,4 +283,30 @@ fn main() -> Result<()> {
 
     println!("Migration complete!");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_python_executable() {
+        // If system has python3 or python, resolve_python_executable should succeed and return an absolute path
+        if let Ok(path) = resolve_python_executable(None) {
+            assert!(path.is_absolute());
+            assert!(path.is_file());
+        }
+
+        // Test with custom path that exists
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fake_python = temp_dir.path().join("fake_python");
+        fs::write(&fake_python, "dummy").unwrap();
+
+        let resolved = resolve_python_executable(Some(&fake_python)).unwrap();
+        assert!(resolved.is_absolute());
+
+        // Test with non-existent custom path
+        let non_existent = temp_dir.path().join("non_existent_python");
+        assert!(resolve_python_executable(Some(&non_existent)).is_err());
+    }
 }
