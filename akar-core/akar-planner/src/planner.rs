@@ -1450,4 +1450,60 @@ mod tests {
         assert!(scan_pos < filter_pos);
         assert!(filter_pos < proj_pos);
     }
+
+    #[test]
+    fn test_projection_covers_sort_key() {
+        use akar_common::types::LogicalTypeID;
+
+        let make_be = |expr: Expression, alias: Option<String>| BoundExpression {
+            expression: expr,
+            alias,
+            is_constant: false,
+            resolved_type: LogicalTypeID::Any,
+        };
+
+        // Case 1: Match by alias (Variable key)
+        let expr1 = Expression::Variable("a".to_string());
+        let be1 = make_be(expr1, Some("a_alias".to_string()));
+        let sort_key_var_alias = Expression::Variable("a_alias".to_string());
+        assert!(projection_covers_sort_key(&[be1], &sort_key_var_alias));
+
+        // Case 2: Match by alias (PropertyAccess key matching format var.prop)
+        let prop_expr = Expression::PropertyAccess(
+            Box::new(Expression::Variable("m".to_string())),
+            "id".to_string(),
+        );
+        let be_prop_alias = make_be(prop_expr.clone(), Some("m.id".to_string()));
+        assert!(projection_covers_sort_key(&[be_prop_alias], &prop_expr));
+
+        // Case 3: Match by exact expression equality without alias
+        let be_exact = make_be(prop_expr.clone(), None);
+        assert!(projection_covers_sort_key(&[be_exact], &prop_expr));
+
+        // Case 4: Match by bare node variable projection covering property access
+        let bare_node_expr = Expression::Variable("m".to_string());
+        let be_bare_node = make_be(bare_node_expr, None);
+        assert!(projection_covers_sort_key(&[be_bare_node], &prop_expr));
+
+        // Case 5: Non-matching cases
+        // 5a: Unprojected property when projected list contains different expression/alias
+        let other_expr = Expression::PropertyAccess(
+            Box::new(Expression::Variable("m".to_string())),
+            "name".to_string(),
+        );
+        let be_other = make_be(other_expr, Some("m_name".to_string()));
+        let unprojected_key = Expression::PropertyAccess(
+            Box::new(Expression::Variable("m".to_string())),
+            "access_count".to_string(),
+        );
+        assert!(!projection_covers_sort_key(&[be_other], &unprojected_key));
+
+        // 5b: Non-variable property access obj (e.g. constant)
+        let complex_obj_key = Expression::PropertyAccess(
+            Box::new(Expression::Constant(akar_parser::ast::Constant::Integer(1))),
+            "prop".to_string(),
+        );
+        let be_complex = make_be(Expression::Variable("x".to_string()), Some("1.prop".to_string()));
+        assert!(!projection_covers_sort_key(&[be_complex], &complex_obj_key));
+    }
 }
