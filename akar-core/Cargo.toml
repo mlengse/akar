@@ -58,7 +58,7 @@ hashbrown = { version = "0.17.1", features = ["serde"] }
 ahash = "0.8"
 bytes = "1"
 criterion = { version = "0.8.2", features = ["html_reports"] }
-arrow = { version = "59.1.0", default-features = false, features = ["csv", "ipc", "prettyprint"] }
+arrow = { version = "60.0.0", default-features = false, features = ["csv", "ipc", "prettyprint"] }
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "flate2", "flate2-rust_backend", "snap", "brotli", "lz4"] }
 flate2 = { version = "1.0", features = ["rust_backend"] }
 csv = "1.3"
