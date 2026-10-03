@@ -116,10 +116,7 @@ pub struct BufferManagerStats {
 
 /// The buffer manager manages a pool of frames with a Clock eviction policy.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct BufferManager {
-    /// Path to the database directory.
-    db_path: PathBuf,
     /// Page size in bytes.
     page_size: usize,
     /// Maximum number of frames allowed.
@@ -152,15 +149,13 @@ pub struct BufferManager {
     prev_last_accessed: HashMap<String, PageNum>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct FileHandleInfo {
     path: PathBuf,
-    num_pages: u64,
 }
 
 impl BufferManager {
-    pub fn new(db_path: PathBuf, memory_manager: Arc<MemoryManager>, config: BufferManagerConfig) -> Self {
+    pub fn new(_db_path: PathBuf, memory_manager: Arc<MemoryManager>, config: BufferManagerConfig) -> Self {
         let max_frames = if config.max_memory > 0 {
             (config.max_memory / config.page_size as u64) as usize
         } else {
@@ -174,7 +169,6 @@ impl BufferManager {
         };
 
         Self {
-            db_path,
             page_size: config.page_size,
             max_frames,
             frames: HashMap::new(),
@@ -217,13 +211,7 @@ impl BufferManager {
 
     /// Register a database file with the buffer manager.
     pub fn register_file(&mut self, name: &str, path: PathBuf) {
-        let num_pages = if path.exists() {
-            let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            len / self.page_size as u64
-        } else {
-            0
-        };
-        self.files.insert(name.to_string(), FileHandleInfo { path, num_pages });
+        self.files.insert(name.to_string(), FileHandleInfo { path });
     }
 
     /// Pin a page: bring it into the buffer pool if not already present.
