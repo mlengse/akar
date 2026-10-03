@@ -74,12 +74,6 @@ impl<T> PlanCache<T> {
     pub fn len(&self) -> usize {
         self.map.len()
     }
-
-    /// Maximum number of entries before least-recently-used eviction.
-    #[allow(dead_code)]
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
 }
 
 /// Normalize a query string into a stable cache key: trim surrounding
@@ -236,7 +230,9 @@ mod tests {
 
     #[test]
     fn test_capacity_min_one() {
-        let cache: PlanCache<u32> = PlanCache::new(0);
-        assert_eq!(cache.capacity(), 1);
+        let mut cache: PlanCache<u32> = PlanCache::new(0);
+        cache.insert("a".into(), 1);
+        cache.insert("b".into(), 2);
+        assert_eq!(cache.len(), 1);
     }
 }
