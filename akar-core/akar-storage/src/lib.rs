@@ -107,7 +107,6 @@ impl From<&akar_catalog::CatalogColumn> for ColumnDefinition {
 }
 
 /// The storage manager — root of the storage engine.
-#[allow(dead_code)]
 pub struct StorageManager {
     db_path: PathBuf,
     buffer_manager: Arc<Mutex<BufferManager>>,
@@ -270,6 +269,10 @@ impl StorageManager {
 
     pub fn wal(&self) -> &Arc<Mutex<WAL>> {
         &self.wal
+    }
+
+    pub fn memory_manager(&self) -> &Arc<MemoryManager> {
+        &self.memory_manager
     }
 
     pub fn db_path(&self) -> &PathBuf {
