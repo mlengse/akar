@@ -1361,38 +1361,85 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
 pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
     let mut values = vec![0.0; n];
-
-    // Collect sorted neighbor lists for efficient intersection
-    let mut neighbors: Vec<Vec<usize>> = Vec::with_capacity(n);
-    for v in 0..n {
-        let mut neigh: Vec<usize> = csr
-            .neighbors(v)
-            .iter()
-            .map(|(_, dst)| dst.offset as usize)
-            .filter(|&dst| dst < n && dst != v)
-            .collect();
-        neigh.sort_unstable();
-        neigh.dedup();
-        neighbors.push(neigh);
+    if n == 0 {
+        return AlgoResult {
+            name: "triangle_count".into(),
+            values,
+            metadata: None,
+        };
     }
 
-    // For each node, check if neighbor pairs are connected
+    // Bolt Optimization: Consolidate deduplicated and sorted neighbor adjacency lists into a single
+    // contiguous flat array (`flat_adj` and `offsets`) to eliminate N dynamic heap allocations.
+    // Restrict intersection scans to neighbors w > u > v (canonical triangle ordering v < u < w).
+    // This discovers each triangle exactly once, eliminates redundant checks in the inner loop,
+    // avoids division operations, and drastically shortens intersection scan lengths.
+    let mut total_degree = 0usize;
     for v in 0..n {
-        for &u in &neighbors[v] {
+        total_degree += csr.neighbors(v).len();
+    }
+
+    let mut offsets = Vec::with_capacity(n + 1);
+    let mut flat_adj = Vec::with_capacity(total_degree);
+
+    for v in 0..n {
+        offsets.push(flat_adj.len());
+        let start_len = flat_adj.len();
+        for (_, dst) in csr.neighbors(v) {
+            let neighbor = dst.offset as usize;
+            if neighbor < n && neighbor != v {
+                flat_adj.push(neighbor);
+            }
+        }
+        let slice = &mut flat_adj[start_len..];
+        slice.sort_unstable();
+        let mut write = start_len;
+        let mut read = start_len;
+        while read < flat_adj.len() {
+            let val = flat_adj[read];
+            flat_adj[write] = val;
+            write += 1;
+            read += 1;
+            while read < flat_adj.len() && flat_adj[read] == val {
+                read += 1;
+            }
+        }
+        flat_adj.truncate(write);
+    }
+    offsets.push(flat_adj.len());
+
+    for v in 0..n {
+        let v_start = offsets[v];
+        let v_end = offsets[v + 1];
+        let v_adj = &flat_adj[v_start..v_end];
+
+        for &u in v_adj {
             if u <= v {
                 continue;
             }
-            // Count common neighbors of v and u
-            let mut common = 0usize;
+
+            let u_start = offsets[u];
+            let u_end = offsets[u + 1];
+            let u_adj = &flat_adj[u_start..u_end];
+
+            // Sub-slice of v's neighbors > u
+            let v_sub_idx = v_adj.partition_point(|&x| x <= u);
+            let v_sub = &v_adj[v_sub_idx..];
+
+            // Sub-slice of u's neighbors > u
+            let u_sub_idx = u_adj.partition_point(|&x| x <= u);
+            let u_sub = &u_adj[u_sub_idx..];
+
+            // Intersect v_sub and u_sub
             let mut i = 0usize;
             let mut j = 0usize;
-            while i < neighbors[v].len() && j < neighbors[u].len() {
-                let a = neighbors[v][i];
-                let b = neighbors[u][j];
+            while i < v_sub.len() && j < u_sub.len() {
+                let a = v_sub[i];
+                let b = u_sub[j];
                 if a == b {
-                    if a != v && a != u {
-                        common += 1;
-                    }
+                    values[v] += 1.0;
+                    values[u] += 1.0;
+                    values[a] += 1.0;
                     i += 1;
                     j += 1;
                 } else if a < b {
@@ -1401,10 +1448,7 @@ pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
                     j += 1;
                 }
             }
-            values[v] += common as f64;
-            values[u] += common as f64;
         }
-        values[v] /= 2.0; // each triangle counted twice per node
     }
 
     AlgoResult {
