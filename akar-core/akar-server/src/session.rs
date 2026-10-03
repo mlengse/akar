@@ -105,7 +105,7 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionC
             match &config.auth_token {
                 Some(expected) => {
                     match &request.token {
-                        Some(provided) if provided == expected => {
+                        Some(provided) if constant_time_eq(provided.as_bytes(), expected.as_bytes()) => {
                             authenticated = true;
                         }
                         _ => {
@@ -501,4 +501,40 @@ fn cell_value(field: &ArrayRef, field_type: PhysicalTypeID, row: usize) -> Optio
         _ => None,
     };
     value.or_else(|| Some(Value::String(format!("{:?}", field.slice(row, 1)))))
+}
+
+/// Compare two byte slices in constant time to prevent timing side-channel attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constant_time_eq_matching() {
+        assert!(constant_time_eq(b"secret_token_123", b"secret_token_123"));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn test_constant_time_eq_mismatch_same_length() {
+        assert!(!constant_time_eq(b"secret_token_123", b"secret_token_124"));
+        assert!(!constant_time_eq(b"a", b"b"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_mismatch_different_length() {
+        assert!(!constant_time_eq(b"secret_token_123", b"secret_token_12"));
+        assert!(!constant_time_eq(b"secret_token_123", b"secret_token_1234"));
+        assert!(!constant_time_eq(b"", b"a"));
+    }
 }
