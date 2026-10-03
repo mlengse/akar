@@ -628,8 +628,6 @@ impl ConcurrencyControl {
 
 struct CheckpointCoordinator {
     mtx_for_starting_new_txns: Mutex<()>,
-    #[allow(dead_code)]
-    mtx_for_checkpoint: Mutex<()>,
     cv_active_txns_changed: Condvar,
     checkpoint_requested: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
@@ -640,7 +638,6 @@ impl CheckpointCoordinator {
     fn new() -> Self {
         Self {
             mtx_for_starting_new_txns: Mutex::new(()),
-            mtx_for_checkpoint: Mutex::new(()),
             cv_active_txns_changed: Condvar::new(),
             checkpoint_requested: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
