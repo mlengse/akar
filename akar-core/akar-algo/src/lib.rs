@@ -1487,17 +1487,25 @@ where
         };
     }
 
-    // Weighted total edge weight (each edge counted twice in undirected CSR)
-    let mut m: f64 = 0.0;
+    // Bolt ⚡ Performance Optimization:
+    // Precompute node degrees in a single pass over CSR slices and compute total graph weight m
+    // directly from the degree sum, avoiding a redundant full graph traversal pass.
+    let mut degree = vec![0.0; n];
+    let mut degree_sum = 0.0;
     for v in 0..n {
-        for (_rel, dst) in csr.neighbors(v) {
+        let start = csr.offsets[v];
+        let end = csr.offsets[v + 1];
+        let mut deg = 0.0;
+        for (_rel, dst) in &csr.adjacency[start..end] {
             let w = dst.offset as usize;
             if w < n {
-                m += weight_fn(v, w);
+                deg += weight_fn(v, w);
             }
         }
+        degree[v] = deg;
+        degree_sum += deg;
     }
-    m /= 2.0;
+    let m = degree_sum / 2.0;
 
     if m == 0.0 {
         return AlgoResult {
@@ -1506,19 +1514,6 @@ where
             metadata: None,
         };
     }
-
-    // Weighted degree per node
-    let degree: Vec<f64> = (0..n)
-        .map(|v| {
-            csr.neighbors(v)
-                .iter()
-                .map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n { weight_fn(v, w) } else { 0.0 }
-                })
-                .sum()
-        })
-        .collect();
 
     // Internal edge weight per community (initially 0 — each node in its own community)
     let mut sigma_in: Vec<f64> = vec![0.0; n];
@@ -1550,37 +1545,45 @@ where
         }
     }
 
-    // Scratch buffers for neighbor-community weight aggregation, hoisted out of
-    // the node loop and reused across passes (avoids a map allocation + tree
-    // inserts per node in the hot path). `comm_stamp` provides O(1) generation-
-    // tagged lazy reset; `touched` is kept sorted so iteration order matches the
-    // previous BTreeMap's ascending order, preserving move tie-breaking exactly.
+    // Bolt ⚡ Performance Optimization:
+    // Hoist scratch buffers (`comm_scratch`, `comm_stamp`, `order`, `moves`, `claimed_stamp`)
+    // outside the pass iteration loop to eliminate per-iteration heap re-allocations.
     let mut comm_scratch: Vec<f64> = vec![0.0; n];
     let mut comm_stamp: Vec<u64> = vec![0; n];
     let mut touched: Vec<usize> = Vec::with_capacity(16);
     let mut generation: u64 = 0;
+
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut moves: Vec<(usize, usize, f64)> = Vec::with_capacity(n);
+    let mut claimed_stamp: Vec<u64> = vec![0; n];
+    let mut claimed_gen: u64 = 0;
 
     while improved && pass < max_iterations {
         improved = false;
         pass += 1;
 
         // Deterministic or sequential visit order
-        let mut order: Vec<usize> = (0..n).collect();
         if let Some(s) = seed {
             SimpleRng::new(s.wrapping_add(pass as u64)).shuffle(&mut order);
+        } else {
+            for (i, slot) in order.iter_mut().enumerate() {
+                *slot = i;
+            }
         }
 
         // Batch mode: compute all gains, then apply best moves
-        let mut moves: Vec<(usize, usize, f64)> = Vec::new(); // (v, best_comm, gain)
+        moves.clear();
 
         for &v in &order {
             let current_comm = community[v];
             let kv = degree[v];
 
-            // Sum of weights from v to each neighboring community
+            // Sum of weights from v to each neighboring community via direct CSR slice access
+            let start = csr.offsets[v];
+            let end = csr.offsets[v + 1];
             generation += 1;
             touched.clear();
-            for (_rel, dst) in csr.neighbors(v) {
+            for (_rel, dst) in &csr.adjacency[start..end] {
                 let w = dst.offset as usize;
                 if w < n {
                     let c = community[w];
@@ -1623,58 +1626,55 @@ where
         }
 
         // Apply batch moves (first-come-first-served for same-community conflicts)
-        let mut claimed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // Bolt ⚡ Performance Optimization:
+        // Use generation-stamped `claimed_stamp` array instead of `HashSet` for O(1) zero-allocation claim checks.
+        claimed_gen += 1;
         for (v, best_comm, _gain) in &moves {
             let v = *v;
             let best_comm = *best_comm;
             let current_comm = community[v];
-            if current_comm == best_comm || claimed.contains(&best_comm) {
+            if current_comm == best_comm || claimed_stamp[best_comm] == claimed_gen {
                 continue;
             }
             let kv = degree[v];
 
-            // Recompute v's weight into new community using current community assignments
-            let sigma_v_current: f64 = csr
-                .neighbors(v)
-                .iter()
-                .filter_map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n && community[w] == current_comm {
-                        Some(weight_fn(v, w))
-                    } else {
-                        None
+            // Bolt ⚡ Performance Optimization:
+            // Consolidate dual neighbor loops for `sigma_v_current` and `sigma_v_new` into a single linear
+            // pass over the direct CSR adjacency slice.
+            let start = csr.offsets[v];
+            let end = csr.offsets[v + 1];
+            let mut sigma_v_current = 0.0;
+            let mut sigma_v_new = 0.0;
+            for (_rel, dst) in &csr.adjacency[start..end] {
+                let w = dst.offset as usize;
+                if w < n {
+                    let comm_w = community[w];
+                    if comm_w == current_comm {
+                        sigma_v_current += weight_fn(v, w);
+                    } else if comm_w == best_comm {
+                        sigma_v_new += weight_fn(v, w);
                     }
-                })
-                .sum();
-            let sigma_v_new: f64 = csr
-                .neighbors(v)
-                .iter()
-                .filter_map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n && community[w] == best_comm {
-                        Some(weight_fn(v, w))
-                    } else {
-                        None
-                    }
-                })
-                .sum();
+                }
+            }
 
             sigma_in[current_comm] -= 2.0 * sigma_v_current;
             sigma_tot[current_comm] -= kv;
             sigma_in[best_comm] += 2.0 * sigma_v_new;
             sigma_tot[best_comm] += kv;
             community[v] = best_comm;
-            claimed.insert(v);
+            claimed_stamp[v] = claimed_gen;
             improved = true;
         }
     }
 
-    // Compute final modularity Q = Σ_c [σ_in_c / m - (σ_tot_c / 2m)²]
+    // Bolt ⚡ Performance Optimization:
+    // Replace `HashSet` with a dense boolean vector `seen_comms` for O(1) community presence check.
     let mut q = 0.0;
-    let mut seen_comms = std::collections::HashSet::new();
+    let mut seen_comms = vec![false; n];
     for v in 0..n {
         let c = community[v];
-        if seen_comms.insert(c) {
+        if !seen_comms[c] {
+            seen_comms[c] = true;
             q += sigma_in[c] / m - (sigma_tot[c] / (2.0 * m)).powi(2);
         }
     }
