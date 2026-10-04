@@ -245,8 +245,7 @@ impl FreeSpaceManager {
     pub fn total_free_pages(&self) -> u64 {
         self.free_lists
             .iter()
-            .flat_map(|list_lock| list_lock.read().unwrap().clone().into_iter())
-            .map(|r| r.num_pages)
+            .map(|list_lock| list_lock.read().unwrap().iter().map(|r| r.num_pages).sum::<u64>())
             .sum()
     }
 }
