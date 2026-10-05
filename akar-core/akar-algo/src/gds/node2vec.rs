@@ -46,7 +46,7 @@ fn generate_walks(
                     let next = dst.offset as usize;
                     let weight = if next == prev {
                         inv_p
-                    } else if prev_neighbors.iter().any(|(_, d)| d.offset as usize == next) {
+                    } else if prev == current || prev_neighbors.iter().any(|(_, d)| d.offset as usize == next) {
                         1.0
                     } else {
                         inv_q
@@ -148,18 +148,27 @@ pub fn compute_node2vec(
 }
 
 fn update_embedding(embeddings: &mut [f64], u: usize, v: usize, dim: usize, target: f64, lr: f64) {
-    if dim == 0 {
+    if dim == 0 || u == v {
         return;
     }
 
-    // Bolt Optimization: Precompute row offsets `u_off` and `v_off` to avoid repeated
-    // multiplication and bounds checking inside hot dot product and SGD update loops.
+    // Bolt Optimization: Split `embeddings` into non-overlapping `u_slice` and `v_slice`
+    // using `split_at_mut` to eliminate repeated row offset calculations and bounds checking
+    // inside dot product and SGD gradient loops, enabling LLVM SIMD auto-vectorization.
     let u_off = u * dim;
     let v_off = v * dim;
 
+    let (u_slice, v_slice) = if u < v {
+        let (left, right) = embeddings.split_at_mut(v_off);
+        (&mut left[u_off..u_off + dim], &mut right[..dim])
+    } else {
+        let (left, right) = embeddings.split_at_mut(u_off);
+        (&mut right[..dim], &mut left[v_off..v_off + dim])
+    };
+
     let mut dot = 0.0;
-    for i in 0..dim {
-        dot += embeddings[u_off + i] * embeddings[v_off + i];
+    for (&x, &y) in u_slice.iter().zip(v_slice.iter()) {
+        dot += x * y;
     }
 
     // Sigmoid
@@ -170,11 +179,11 @@ fn update_embedding(embeddings: &mut [f64], u: usize, v: usize, dim: usize, targ
 
     let grad = lr * (target - prob);
 
-    for i in 0..dim {
-        let u_val = embeddings[u_off + i];
-        let v_val = embeddings[v_off + i];
-        embeddings[u_off + i] += grad * v_val;
-        embeddings[v_off + i] += grad * u_val;
+    for (u_val, v_val) in u_slice.iter_mut().zip(v_slice.iter_mut()) {
+        let u_old = *u_val;
+        let v_old = *v_val;
+        *u_val += grad * v_old;
+        *v_val += grad * u_old;
     }
 }
 

@@ -59,3 +59,7 @@
 - **Problem:** `FreeSpaceManager::total_free_pages()` cloned each `BTreeSet` free list in order to iterate over items via `.clone().into_iter()`, causing excessive heap allocation and overhead during free space calculation.
 - **Solution:** Direct iteration over references (`.iter()`) under the read lock guard avoids all cloning and heap allocations.
 - **Impact:** Reduced execution time of `total_free_pages()` from ~12.76 µs to ~4.26 µs (~66.5% speedup / 3x performance boost).
+
+## 2026-10-05 - Disjoint slice iteration and initial-step short-circuiting in Node2Vec
+**Learning:** In Node2Vec random walks and SGD embedding updates, checking `prev_neighbors` on step 1 performed redundant $O(d_{\text{start}}^2)$ linear scans because `prev_neighbors == neighbors` on step 1 (`prev == current`). Short-circuiting with `prev == current` eliminates this search. Additionally, in SGD embedding updates, indexed array iteration (`embeddings[u_off + i]`) causes repeated bounds checking and multiplication inside hot loops. Splitting `embeddings` into disjoint mutable slices via `split_at_mut` enables direct slice iteration (`.zip()`) with zero bounds checks, allowing LLVM SIMD auto-vectorization across embedding dimensions.
+**Action:** Short-circuit step-1 neighbor lookups in random walk algorithms and use `split_at_mut` for disjoint vector slice operations in SGD embedding update loops.
