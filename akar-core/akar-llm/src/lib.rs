@@ -111,22 +111,15 @@ impl std::str::FromStr for LlmProvider {
     }
 }
 
-/// Resolve OpenAI API key from explicit config, environment variable, or credentials file.
+/// Resolve OpenAI API key from explicit config or credentials file.
 ///
 /// Priority:
 /// 1. `config_key` if non-empty
-/// 2. `OPENAI_API_KEY` environment variable
-/// 3. File specified by `AKAR_CREDENTIALS_FILE` or `~/.akar/credentials`
+/// 2. File specified by `AKAR_CREDENTIALS_FILE` or `~/.akar/credentials`
 pub fn resolve_openai_api_key(config_key: Option<&str>) -> Option<String> {
     if let Some(k) = config_key {
         if !k.trim().is_empty() {
             return Some(k.to_string());
-        }
-    }
-
-    if let Ok(k) = std::env::var("OPENAI_API_KEY") {
-        if !k.trim().is_empty() {
-            return Some(k);
         }
     }
 
@@ -182,7 +175,7 @@ pub struct Embedding {
 
 /// Generate an embedding for the given text.
 ///
-/// If no config is provided, uses defaults (OpenAI with OPENAI_API_KEY env var).
+/// If no config is provided, uses defaults (OpenAI with credentials file or config).
 /// The `provider` and `model` can be overridden via query parameters.
 pub fn create_embedding(text: &str, config: Option<&EmbeddingConfig>) -> Result<Embedding, String> {
     let cfg = config.cloned().unwrap_or_default();
@@ -198,10 +191,10 @@ pub fn create_embedding(text: &str, config: Option<&EmbeddingConfig>) -> Result<
 /// Generate embeddings via the OpenAI API.
 ///
 /// Uses the `/v1/embeddings` endpoint.
-/// Requires `OPENAI_API_KEY` environment variable or config.api_key.
+/// Requires credentials file or config.api_key.
 fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, String> {
     let resolved_key = resolve_openai_api_key(config.api_key.as_deref()).ok_or_else(|| {
-        "OpenAI API key not found. Set OPENAI_API_KEY environment variable, configure credentials file at ~/.akar/credentials, or pass api_key in config.".to_string()
+        "OpenAI API key not found. Configure credentials file at ~/.akar/credentials or pass api_key in config.".to_string()
     })?;
     let api_key = resolved_key.as_str();
 
@@ -437,16 +430,15 @@ mod tests {
         drop(creds_file);
 
         unsafe {
-            // 1. Credentials file fallback when no env var or config key
-            std::env::remove_var("OPENAI_API_KEY");
+            // 1. Credentials file fallback when no config key
             std::env::set_var("AKAR_CREDENTIALS_FILE", creds_path.to_str().unwrap());
             assert_eq!(resolve_openai_api_key(None), Some("file_key_123".to_string()));
 
-            // 2. Env var overrides credentials file
+            // 2. OPENAI_API_KEY env var is ignored for security
             std::env::set_var("OPENAI_API_KEY", "env_key_456");
-            assert_eq!(resolve_openai_api_key(None), Some("env_key_456".to_string()));
+            assert_eq!(resolve_openai_api_key(None), Some("file_key_123".to_string()));
 
-            // 3. Config key overrides env var and credentials file
+            // 3. Config key overrides credentials file
             assert_eq!(resolve_openai_api_key(Some("config_key_789")), Some("config_key_789".to_string()));
 
             // Clean up
@@ -454,5 +446,20 @@ mod tests {
             std::env::remove_var("AKAR_CREDENTIALS_FILE");
         }
         let _ = std::fs::remove_file(creds_path);
+    }
+
+    #[test]
+    fn test_openai_api_key_env_var_ignored() {
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "env_key_should_be_ignored");
+            std::env::remove_var("AKAR_CREDENTIALS_FILE");
+            // Non-existent credentials file path to ensure credentials file resolution fails
+            std::env::set_var("AKAR_CREDENTIALS_FILE", "/nonexistent/path/credentials");
+
+            assert_eq!(resolve_openai_api_key(None), None);
+
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("AKAR_CREDENTIALS_FILE");
+        }
     }
 }
