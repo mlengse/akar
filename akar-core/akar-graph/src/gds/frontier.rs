@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Frontier management for graph algorithms.
 //!
 //! Ported from C++ `gds_frontier.h` / `gds_frontier.cpp`.
