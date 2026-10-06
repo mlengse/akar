@@ -1980,31 +1980,50 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
 /// - `distances[i]` = shortest distance (number of hops) from source to node i,
 ///   or `None` if node i is unreachable.
 /// - `parents[i]` = predecessor node on the shortest path, or `None` for source/unreachable.
+// Bolt Optimization: Pre-allocated contiguous Vec queue with head index cursor and
+// integer sentinel distance tracking avoids VecDeque ring-buffer overhead, Option allocations,
+// and unwrap overhead in BFS traversal. Direct CSR adjacency slice access avoids iterator/tuple creation.
 pub fn shortest_path_bfs(csr: &CSRAdjacency, source: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let n = csr.num_nodes();
-    if source >= n {
+    if n == 0 || source >= n {
         return (vec![None; n], vec![None; n]);
     }
-    let mut distance = vec![None; n];
-    let mut parent = vec![None; n];
-    let mut queue = std::collections::VecDeque::new();
 
-    distance[source] = Some(0);
-    queue.push_back(source);
+    let mut distance = vec![usize::MAX; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n);
 
-    while let Some(node) = queue.pop_front() {
-        let dist = distance[node].unwrap();
-        for (_rel, dst) in csr.neighbors(node) {
+    distance[source] = 0;
+    queue.push(source);
+
+    let mut head = 0usize;
+    while head < queue.len() {
+        let node = queue[head];
+        head += 1;
+        let next_dist = distance[node] + 1;
+
+        let start = csr.offsets[node];
+        let end = csr.offsets[node + 1];
+        for (_rel, dst) in &csr.adjacency[start..end] {
             let neighbor = dst.offset as usize;
-            if neighbor < n && distance[neighbor].is_none() {
-                distance[neighbor] = Some(dist + 1);
-                parent[neighbor] = Some(node);
-                queue.push_back(neighbor);
+            if neighbor < n && distance[neighbor] == usize::MAX {
+                distance[neighbor] = next_dist;
+                parent[neighbor] = node;
+                queue.push(neighbor);
             }
         }
     }
 
-    (distance, parent)
+    let distance_opt = distance
+        .into_iter()
+        .map(|d| if d == usize::MAX { None } else { Some(d) })
+        .collect();
+    let parent_opt = parent
+        .into_iter()
+        .map(|p| if p == usize::MAX { None } else { Some(p) })
+        .collect();
+
+    (distance_opt, parent_opt)
 }
 
 /// Compute shortest path distances and return as `AlgoResult`.
