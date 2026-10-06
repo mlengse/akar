@@ -74,6 +74,12 @@ pub struct HttpRandomAccessReader {
 
 impl HttpRandomAccessReader {
     pub fn new(url: &str) -> std::io::Result<Self> {
+        if !is_valid_http_url(url) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid HTTP/HTTPS URL: {url}"),
+            ));
+        }
         // HEAD may be unsupported by some servers; treat it as optional.
         let content_length = ureq::head(url).call().ok().and_then(|resp| {
             resp.headers()
@@ -292,6 +298,9 @@ impl Extension for HttpfsExtension {
                         return Err("http_get requires 1 argument (URL)".into());
                     }
                     if let Value::String(url) = &args[0] {
+                        if !is_valid_http_url(url) {
+                            return Err(format!("Invalid HTTP/HTTPS URL: {url}"));
+                        }
                         let body = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
                         // Cap the response body so an untrusted server cannot
                         // stream an unbounded body and OOM the embedded process
@@ -329,12 +338,21 @@ impl Extension for HttpfsExtension {
                     return Ok(()); // Only yield 1 row
                 }
                 if let Value::String(url) = &args[0] {
+                    if !is_valid_http_url(url) {
+                        return Err(format!("Invalid HTTP/HTTPS URL: {url}"));
+                    }
                     let resp = ureq::get(url).call().map_err(|e| format!("HTTP GET failed: {}", e))?;
+                    const MAX_SCAN_BODY: u64 = 512 * 1024 * 1024;
                     let mut reader = resp.into_body().into_reader();
                     let mut temp_file =
                         NamedTempFile::new().map_err(|e| format!("Failed to create temp file: {}", e))?;
-                    std::io::copy(&mut reader, &mut temp_file)
+                    let n = std::io::copy(&mut reader.by_ref().take(MAX_SCAN_BODY + 1), &mut temp_file)
                         .map_err(|e| format!("Failed to write temp file: {}", e))?;
+                    if n > MAX_SCAN_BODY {
+                        return Err(format!(
+                            "http_scan downloaded file from {url} exceeds the {MAX_SCAN_BODY}-byte limit"
+                        ));
+                    }
 
                     let (_file, path) = temp_file
                         .keep()
@@ -538,5 +556,12 @@ mod tests {
     #[test]
     fn test_read_ahead_window_size() {
         assert_eq!(READ_AHEAD, 256 * 1024);
+    }
+
+    #[test]
+    fn test_http_random_access_reader_invalid_url() {
+        assert!(HttpRandomAccessReader::new("file:///etc/passwd").is_err());
+        assert!(HttpRandomAccessReader::new("invalid_url").is_err());
+        assert!(HttpRandomAccessReader::new("ftp://example.com/file").is_err());
     }
 }
