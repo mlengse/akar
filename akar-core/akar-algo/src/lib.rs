@@ -2067,6 +2067,62 @@ impl Ord for DistNode {
     }
 }
 
+// Bolt Optimization: Flat primitive vectors (`dist: Vec<f64>` initialized with `f64::INFINITY`
+// and `parent: Vec<usize>` initialized with `usize::MAX`) cut memory usage by 50% and improve
+// cache locality during Dijkstra traversal. Pre-allocating `BinaryHeap` capacity and using direct
+// CSR slice access eliminates heap re-allocations and neighbor iterator overhead.
+pub fn weighted_shortest_path_internal<F>(
+    csr: &CSRAdjacency,
+    source: usize,
+    weight_fn: F,
+) -> (Vec<f64>, Vec<usize>)
+where
+    F: Fn(usize, usize) -> f64,
+{
+    use std::collections::BinaryHeap;
+
+    let n = csr.num_nodes();
+    if source >= n {
+        return (vec![f64::INFINITY; n], vec![usize::MAX; n]);
+    }
+
+    let mut dist = vec![f64::INFINITY; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut heap = BinaryHeap::with_capacity(n.min(1024));
+
+    dist[source] = 0.0;
+    heap.push(DistNode(0.0, source));
+
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
+    while let Some(DistNode(d, node)) = heap.pop() {
+        if d > dist[node] {
+            continue;
+        }
+
+        let start = offsets[node];
+        let end = offsets[node + 1];
+
+        for (_rel, dst) in &adjacency[start..end] {
+            let neighbor = dst.offset as usize;
+            if neighbor >= n {
+                continue;
+            }
+            let weight = weight_fn(node, neighbor);
+            let new_dist = d + weight;
+
+            if new_dist < dist[neighbor] {
+                dist[neighbor] = new_dist;
+                parent[neighbor] = node;
+                heap.push(DistNode(new_dist, neighbor));
+            }
+        }
+    }
+
+    (dist, parent)
+}
+
 pub fn weighted_shortest_path<F>(
     csr: &CSRAdjacency,
     source: usize,
@@ -2075,57 +2131,27 @@ pub fn weighted_shortest_path<F>(
 where
     F: Fn(usize, usize) -> f64,
 {
-    use std::collections::BinaryHeap;
-
-    let n = csr.num_nodes();
-    if source >= n {
-        return (vec![None; n], vec![None; n]);
-    }
-
-    let mut distance: Vec<Option<f64>> = vec![None; n];
-    let mut parent: Vec<Option<usize>> = vec![None; n];
-    let mut heap = BinaryHeap::new();
-
-    distance[source] = Some(0.0);
-    heap.push(DistNode(0.0, source));
-
-    while let Some(DistNode(dist, node)) = heap.pop() {
-        if let Some(best) = distance[node] {
-            if dist > best {
-                continue;
-            }
-        } else {
-            continue;
-        }
-
-        for (_rel, dst) in csr.neighbors(node) {
-            let neighbor = dst.offset as usize;
-            if neighbor >= n {
-                continue;
-            }
-            let weight = weight_fn(node, neighbor);
-            let new_dist = dist + weight;
-
-            match distance[neighbor] {
-                Some(best) if new_dist >= best => {}
-                _ => {
-                    distance[neighbor] = Some(new_dist);
-                    parent[neighbor] = Some(node);
-                    heap.push(DistNode(new_dist, neighbor));
-                }
-            }
-        }
-    }
-
-    (distance, parent)
+    let (dist, parent) = weighted_shortest_path_internal(csr, source, weight_fn);
+    let dist_opt = dist
+        .into_iter()
+        .map(|d| if d == f64::INFINITY { None } else { Some(d) })
+        .collect();
+    let parent_opt = parent
+        .into_iter()
+        .map(|p| if p == usize::MAX { None } else { Some(p) })
+        .collect();
+    (dist_opt, parent_opt)
 }
 
 /// Compute weighted shortest path distances and return as `AlgoResult`.
 ///
 /// Uses unit weights (equivalent to BFS shortest path).
 pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
-    let (distance, _parent) = weighted_shortest_path(csr, source, |_from, _to| 1.0);
-    let values: Vec<f64> = distance.iter().map(|d| d.unwrap_or(f64::MAX)).collect();
+    let (dist, _parent) = weighted_shortest_path_internal(csr, source, |_from, _to| 1.0);
+    let values: Vec<f64> = dist
+        .into_iter()
+        .map(|d| if d == f64::INFINITY { f64::MAX } else { d })
+        .collect();
     AlgoResult {
         name: "weighted_shortest_path".into(),
         values,
