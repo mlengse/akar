@@ -918,3 +918,126 @@ fn non_null_count(chunks: &[DataChunk], col_idx: usize) -> u64 {
     }
     count
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_common::types::{PhysicalTypeID, Value};
+    use akar_common::vector::{DataChunk, ValueVector};
+    use akar_parser::ast::Expression;
+
+    fn make_test_chunk() -> DataChunk {
+        let mut v1 = ValueVector::new(PhysicalTypeID::Int64, 3);
+        v1.resize(3);
+        store_value_in_vector(&mut v1, 0, &Value::Int64(10)).unwrap();
+        store_value_in_vector(&mut v1, 1, &Value::Int64(20)).unwrap();
+        v1.set_null(2, true);
+
+        let mut v2 = ValueVector::new(PhysicalTypeID::String, 3);
+        v2.resize(3);
+        store_value_in_vector(&mut v2, 0, &Value::String("alpha".to_string())).unwrap();
+        v2.set_null(1, true);
+        store_value_in_vector(&mut v2, 2, &Value::String("gamma".to_string())).unwrap();
+
+        DataChunk::new(
+            vec![
+                akar_common::arrow_vector::ArrowVector::from_legacy(&v1).array,
+                akar_common::arrow_vector::ArrowVector::from_legacy(&v2).array,
+            ],
+            vec![PhysicalTypeID::Int64, PhysicalTypeID::String],
+        )
+    }
+
+    #[test]
+    fn test_build_group_key_empty() {
+        let chunk = make_test_chunk();
+        let key = build_group_key(&chunk, &[], 0);
+        assert_eq!(key, Value::Null);
+    }
+
+    #[test]
+    fn test_build_group_key_single() {
+        let chunk = make_test_chunk();
+
+        // Row 0, col 0 (Int64(10))
+        let key0 = build_group_key(&chunk, &[0], 0);
+        assert_eq!(key0, Value::Int64(10));
+
+        // Row 1, col 1 (Null string)
+        let key1 = build_group_key(&chunk, &[1], 1);
+        assert_eq!(key1, Value::Null);
+
+        // Out of bounds column index
+        let key_oob = build_group_key(&chunk, &[99], 0);
+        assert_eq!(key_oob, Value::Null);
+    }
+
+    #[test]
+    fn test_build_group_key_multiple() {
+        let chunk = make_test_chunk();
+
+        // Row 0: Int64(10), String("alpha")
+        let key0 = build_group_key(&chunk, &[0, 1], 0);
+        assert_eq!(
+            key0,
+            Value::List(vec![Value::Int64(10), Value::String("alpha".to_string())])
+        );
+
+        // Row 1: Int64(20), Null
+        let key1 = build_group_key(&chunk, &[0, 1], 1);
+        assert_eq!(key1, Value::List(vec![Value::Int64(20), Value::Null]));
+
+        // With out of bounds column index
+        let key_oob = build_group_key(&chunk, &[0, 99], 0);
+        assert_eq!(key_oob, Value::List(vec![Value::Int64(10), Value::Null]));
+    }
+
+    #[test]
+    fn test_hash_group_key_and_keys_equal() {
+        let chunk = make_test_chunk();
+
+        // Scalar group cols (empty)
+        assert!(keys_equal(&Value::Null, &chunk, &[], 0));
+
+        // Single col
+        let key0 = build_group_key(&chunk, &[0], 0);
+        let hash0_a = hash_group_key(&chunk, &[0], 0);
+        let hash0_b = hash_group_key(&chunk, &[0], 0);
+        assert_eq!(hash0_a, hash0_b);
+        assert!(keys_equal(&key0, &chunk, &[0], 0));
+        assert!(!keys_equal(&key0, &chunk, &[0], 1));
+
+        // Single col null
+        let key_null = build_group_key(&chunk, &[1], 1);
+        assert_eq!(key_null, Value::Null);
+        assert!(keys_equal(&key_null, &chunk, &[1], 1));
+
+        // Multiple cols
+        let key_multi0 = build_group_key(&chunk, &[0, 1], 0);
+        let hash_multi0 = hash_group_key(&chunk, &[0, 1], 0);
+        assert_eq!(hash_multi0, hash_group_key(&chunk, &[0, 1], 0));
+        assert!(keys_equal(&key_multi0, &chunk, &[0, 1], 0));
+        assert!(!keys_equal(&key_multi0, &chunk, &[0, 1], 1));
+
+        // Out of bounds column index
+        let hash_oob = hash_group_key(&chunk, &[99], 0);
+        let _ = hash_oob; // ensure no panic
+        assert!(keys_equal(&Value::Null, &chunk, &[99], 0));
+    }
+
+    #[test]
+    fn test_resolve_group_by_indices() {
+        let fields = vec!["a.id".to_string(), "age".to_string(), "Person.name".to_string()];
+
+        let exprs = vec![
+            Expression::Variable("age".to_string()),
+            Expression::PropertyAccess(Box::new(Expression::Variable("a".to_string())), "id".to_string()),
+            Expression::PropertyAccess(Box::new(Expression::Variable("Person".to_string())), "name".to_string()),
+            Expression::Variable("unknown".to_string()),
+        ];
+
+        let resolved = resolve_group_by_indices(&exprs, &fields);
+        assert_eq!(resolved, vec![1, 0, 2, 0]);
+    }
+}
