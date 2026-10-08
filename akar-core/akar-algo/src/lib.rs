@@ -1301,10 +1301,11 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     let n_minus_1 = (n - 1) as f64;
     let mut values = vec![0.0; n];
 
-    // Bolt Optimization: Hoist BFS scratch vectors outside the source node loop and reset
-    // state lazily only on visited nodes in `queue`. This eliminates O(N) heap allocations
-    // (N distance vectors per run) and replaces O(N) Option array iterations with O(|R(u)|)
-    // direct integer distance summation and queue-length counting.
+    // Bolt Optimization: Hoist CSR offsets/adjacency slices, use branchless u64 distance sum,
+    // and pre-calculate next distance `next_d` outside the neighbor loop. Direct CSR slice
+    // access avoids iterator/tuple construction overhead per edge during full graph traversals.
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
     let mut distance = vec![usize::MAX; n];
     let mut queue = Vec::with_capacity(n);
 
@@ -1314,26 +1315,29 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
         queue.push(source);
 
         let mut head = 0usize;
-        let mut sum_dist = 0.0f64;
+        let mut sum_dist_int = 0u64;
 
         while head < queue.len() {
             let u = queue[head];
             head += 1;
             let d_u = distance[u];
-            if u != source {
-                sum_dist += d_u as f64;
-            }
+            sum_dist_int += d_u as u64;
 
-            for (_, dst) in csr.neighbors(u) {
+            let next_d = d_u + 1;
+            let start = offsets[u];
+            let end = offsets[u + 1];
+
+            for (_rel, dst) in &adjacency[start..end] {
                 let neighbor = dst.offset as usize;
                 if neighbor < n && distance[neighbor] == usize::MAX {
-                    distance[neighbor] = d_u + 1;
+                    distance[neighbor] = next_d;
                     queue.push(neighbor);
                 }
             }
         }
 
         let reachable = queue.len().saturating_sub(1);
+        let sum_dist = sum_dist_int as f64;
         if reachable > 0 && sum_dist > 0.0 {
             let r = reachable as f64;
             // Wasserman-Faust normalized closeness
