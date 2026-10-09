@@ -292,3 +292,111 @@ impl<'a> Iterator for RowIter<'a> {
 }
 
 impl<'a> ExactSizeIterator for RowIter<'a> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::{Float64Array, Int64Array, StringArray};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_resize_chunk_shrink() {
+        let col1 = Arc::new(Int64Array::from(vec![10, 20, 30, 40, 50])) as ArrayRef;
+        let col2 = Arc::new(StringArray::from(vec!["a", "b", "c", "d", "e"])) as ArrayRef;
+        let mut chunk = DataChunk::new(
+            vec![col1, col2],
+            vec![PhysicalTypeID::Int64, PhysicalTypeID::String],
+        );
+
+        assert_eq!(chunk.size, 5);
+        assert_eq!(chunk.fields[0].len(), 5);
+        assert_eq!(chunk.fields[1].len(), 5);
+
+        resize_chunk(&mut chunk, 3);
+
+        assert_eq!(chunk.size, 3);
+        assert_eq!(chunk.fields[0].len(), 3);
+        assert_eq!(chunk.fields[1].len(), 3);
+        assert_eq!(chunk.get_i64(0, 0), Some(10));
+        assert_eq!(chunk.get_i64(0, 2), Some(30));
+        assert_eq!(chunk.get_string(1, 0), Some("a"));
+        assert_eq!(chunk.get_string(1, 2), Some("c"));
+    }
+
+    #[test]
+    fn test_resize_chunk_expand() {
+        let col = Arc::new(Int64Array::from(vec![1, 2, 3])) as ArrayRef;
+        let mut chunk = DataChunk::new(vec![col], vec![PhysicalTypeID::Int64]);
+
+        assert_eq!(chunk.size, 3);
+        assert_eq!(chunk.fields[0].len(), 3);
+
+        // When new_size > field.len(), field length should remain unchanged because field.slice cannot extend array
+        resize_chunk(&mut chunk, 10);
+
+        assert_eq!(chunk.size, 10);
+        assert_eq!(chunk.fields[0].len(), 3);
+    }
+
+    #[test]
+    fn test_resize_chunk_zero() {
+        let col = Arc::new(Int64Array::from(vec![100, 200, 300])) as ArrayRef;
+        let mut chunk = DataChunk::new(vec![col], vec![PhysicalTypeID::Int64]);
+
+        resize_chunk(&mut chunk, 0);
+
+        assert_eq!(chunk.size, 0);
+        assert_eq!(chunk.fields[0].len(), 0);
+    }
+
+    #[test]
+    fn test_resize_chunk_empty_fields() {
+        let mut chunk = DataChunk::new(vec![], vec![]);
+        assert_eq!(chunk.size, 0);
+
+        resize_chunk(&mut chunk, 5);
+
+        assert_eq!(chunk.size, 5);
+        assert!(chunk.fields.is_empty());
+    }
+
+    #[test]
+    fn test_resize_chunk_multiple_types() {
+        let col_i64 = Arc::new(Int64Array::from(vec![1, 2, 3, 4])) as ArrayRef;
+        let col_f64 = Arc::new(Float64Array::from(vec![1.1, 2.2, 3.3, 4.4])) as ArrayRef;
+        let col_str = Arc::new(StringArray::from(vec!["w", "x", "y", "z"])) as ArrayRef;
+
+        let mut chunk = DataChunk::new(
+            vec![col_i64, col_f64, col_str],
+            vec![
+                PhysicalTypeID::Int64,
+                PhysicalTypeID::Double,
+                PhysicalTypeID::String,
+            ],
+        );
+
+        resize_chunk(&mut chunk, 2);
+
+        assert_eq!(chunk.size, 2);
+        assert_eq!(chunk.fields[0].len(), 2);
+        assert_eq!(chunk.fields[1].len(), 2);
+        assert_eq!(chunk.fields[2].len(), 2);
+
+        assert_eq!(chunk.get_i64(0, 1), Some(2));
+        assert_eq!(chunk.get_f64(1, 1), Some(2.2));
+        assert_eq!(chunk.get_string(2, 1), Some("x"));
+    }
+
+    #[test]
+    fn test_resize_method() {
+        let col = Arc::new(Int64Array::from(vec![10, 20, 30, 40])) as ArrayRef;
+        let mut chunk = DataChunk::new(vec![col], vec![PhysicalTypeID::Int64]);
+
+        chunk.resize(2);
+
+        assert_eq!(chunk.size, 2);
+        assert_eq!(chunk.fields[0].len(), 2);
+        assert_eq!(chunk.get_i64(0, 0), Some(10));
+        assert_eq!(chunk.get_i64(0, 1), Some(20));
+    }
+}

@@ -1,6 +1,7 @@
 //! Parser tests
 
 use crate::ast::*;
+use crate::parser::expression::unescape_string;
 use crate::parser::*;
 
 #[cfg(test)]
@@ -1288,6 +1289,55 @@ mod tests {
             }
             _ => panic!("Expected Query"),
         }
+    }
+
+    #[test]
+    fn test_unescape_string_basic_and_quotes() {
+        assert_eq!(unescape_string("hello"), "hello");
+        assert_eq!(unescape_string("\"hello\""), "hello");
+        assert_eq!(unescape_string("'hello'"), "hello");
+        assert_eq!(unescape_string("\"\""), "");
+        assert_eq!(unescape_string("''"), "");
+        assert_eq!(unescape_string(""), "");
+    }
+
+    #[test]
+    fn test_unescape_string_standard_escapes() {
+        assert_eq!(unescape_string(r#""hello\nworld""#), "hello\nworld");
+        assert_eq!(unescape_string(r#""hello\tworld""#), "hello\tworld");
+        assert_eq!(unescape_string(r#""hello\rworld""#), "hello\rworld");
+        assert_eq!(unescape_string(r#""hello\\world""#), "hello\\world");
+        assert_eq!(unescape_string(r#""hello\"world""#), "hello\"world");
+        assert_eq!(unescape_string(r#"'hello\'world'"#), "hello'world");
+    }
+
+    #[test]
+    fn test_unescape_string_unknown_escapes_and_trailing_backslash() {
+        // Unknown escape sequence should preserve backslash and character
+        assert_eq!(unescape_string(r#""hello\zworld""#), "hello\\zworld");
+        assert_eq!(unescape_string(r#""hello\aworld""#), "hello\\aworld");
+        // Trailing backslash at end of string
+        assert_eq!(unescape_string(r#""hello\"#), "hello\\");
+        assert_eq!(unescape_string(r#"\"#), "\\");
+    }
+
+    #[test]
+    fn test_unescape_string_unicode_and_whitespace() {
+        assert_eq!(unescape_string("\"  hello  \""), "  hello  ");
+        assert_eq!(unescape_string("\"こんにちは\""), "こんにちは");
+        assert_eq!(unescape_string(r#""こんにちは\n世界""#), "こんにちは\n世界");
+        assert_eq!(unescape_string("\"🎉🚀\""), "🎉🚀");
+    }
+
+    #[test]
+    fn test_unescape_string_complex_combinations() {
+        let input = r#""line1\nline2\t\"quoted\'\\end""#;
+        let expected = "line1\nline2\t\"quoted'\\end";
+        assert_eq!(unescape_string(input), expected);
+
+        let single_quoted = r#"'a\nb\tc\'d\"e\\f'"#;
+        let expected_single = "a\nb\tc'd\"e\\f";
+        assert_eq!(unescape_string(single_quoted), expected_single);
     }
 }
 #[test]

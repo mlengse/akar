@@ -1301,10 +1301,11 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
     let n_minus_1 = (n - 1) as f64;
     let mut values = vec![0.0; n];
 
-    // Bolt Optimization: Hoist BFS scratch vectors outside the source node loop and reset
-    // state lazily only on visited nodes in `queue`. This eliminates O(N) heap allocations
-    // (N distance vectors per run) and replaces O(N) Option array iterations with O(|R(u)|)
-    // direct integer distance summation and queue-length counting.
+    // Bolt Optimization: Hoist CSR offsets/adjacency slices, use branchless u64 distance sum,
+    // and pre-calculate next distance `next_d` outside the neighbor loop. Direct CSR slice
+    // access avoids iterator/tuple construction overhead per edge during full graph traversals.
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
     let mut distance = vec![usize::MAX; n];
     let mut queue = Vec::with_capacity(n);
 
@@ -1314,26 +1315,29 @@ pub fn compute_closeness_centrality(csr: &CSRAdjacency) -> AlgoResult {
         queue.push(source);
 
         let mut head = 0usize;
-        let mut sum_dist = 0.0f64;
+        let mut sum_dist_int = 0u64;
 
         while head < queue.len() {
             let u = queue[head];
             head += 1;
             let d_u = distance[u];
-            if u != source {
-                sum_dist += d_u as f64;
-            }
+            sum_dist_int += d_u as u64;
 
-            for (_, dst) in csr.neighbors(u) {
+            let next_d = d_u + 1;
+            let start = offsets[u];
+            let end = offsets[u + 1];
+
+            for (_rel, dst) in &adjacency[start..end] {
                 let neighbor = dst.offset as usize;
                 if neighbor < n && distance[neighbor] == usize::MAX {
-                    distance[neighbor] = d_u + 1;
+                    distance[neighbor] = next_d;
                     queue.push(neighbor);
                 }
             }
         }
 
         let reachable = queue.len().saturating_sub(1);
+        let sum_dist = sum_dist_int as f64;
         if reachable > 0 && sum_dist > 0.0 {
             let r = reachable as f64;
             // Wasserman-Faust normalized closeness
@@ -1487,17 +1491,25 @@ where
         };
     }
 
-    // Weighted total edge weight (each edge counted twice in undirected CSR)
-    let mut m: f64 = 0.0;
+    // Bolt ⚡ Performance Optimization:
+    // Precompute node degrees in a single pass over CSR slices and compute total graph weight m
+    // directly from the degree sum, avoiding a redundant full graph traversal pass.
+    let mut degree = vec![0.0; n];
+    let mut degree_sum = 0.0;
     for v in 0..n {
-        for (_rel, dst) in csr.neighbors(v) {
+        let start = csr.offsets[v];
+        let end = csr.offsets[v + 1];
+        let mut deg = 0.0;
+        for (_rel, dst) in &csr.adjacency[start..end] {
             let w = dst.offset as usize;
             if w < n {
-                m += weight_fn(v, w);
+                deg += weight_fn(v, w);
             }
         }
+        degree[v] = deg;
+        degree_sum += deg;
     }
-    m /= 2.0;
+    let m = degree_sum / 2.0;
 
     if m == 0.0 {
         return AlgoResult {
@@ -1506,19 +1518,6 @@ where
             metadata: None,
         };
     }
-
-    // Weighted degree per node
-    let degree: Vec<f64> = (0..n)
-        .map(|v| {
-            csr.neighbors(v)
-                .iter()
-                .map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n { weight_fn(v, w) } else { 0.0 }
-                })
-                .sum()
-        })
-        .collect();
 
     // Internal edge weight per community (initially 0 — each node in its own community)
     let mut sigma_in: Vec<f64> = vec![0.0; n];
@@ -1550,37 +1549,45 @@ where
         }
     }
 
-    // Scratch buffers for neighbor-community weight aggregation, hoisted out of
-    // the node loop and reused across passes (avoids a map allocation + tree
-    // inserts per node in the hot path). `comm_stamp` provides O(1) generation-
-    // tagged lazy reset; `touched` is kept sorted so iteration order matches the
-    // previous BTreeMap's ascending order, preserving move tie-breaking exactly.
+    // Bolt ⚡ Performance Optimization:
+    // Hoist scratch buffers (`comm_scratch`, `comm_stamp`, `order`, `moves`, `claimed_stamp`)
+    // outside the pass iteration loop to eliminate per-iteration heap re-allocations.
     let mut comm_scratch: Vec<f64> = vec![0.0; n];
     let mut comm_stamp: Vec<u64> = vec![0; n];
     let mut touched: Vec<usize> = Vec::with_capacity(16);
     let mut generation: u64 = 0;
+
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut moves: Vec<(usize, usize, f64)> = Vec::with_capacity(n);
+    let mut claimed_stamp: Vec<u64> = vec![0; n];
+    let mut claimed_gen: u64 = 0;
 
     while improved && pass < max_iterations {
         improved = false;
         pass += 1;
 
         // Deterministic or sequential visit order
-        let mut order: Vec<usize> = (0..n).collect();
         if let Some(s) = seed {
             SimpleRng::new(s.wrapping_add(pass as u64)).shuffle(&mut order);
+        } else {
+            for (i, slot) in order.iter_mut().enumerate() {
+                *slot = i;
+            }
         }
 
         // Batch mode: compute all gains, then apply best moves
-        let mut moves: Vec<(usize, usize, f64)> = Vec::new(); // (v, best_comm, gain)
+        moves.clear();
 
         for &v in &order {
             let current_comm = community[v];
             let kv = degree[v];
 
-            // Sum of weights from v to each neighboring community
+            // Sum of weights from v to each neighboring community via direct CSR slice access
+            let start = csr.offsets[v];
+            let end = csr.offsets[v + 1];
             generation += 1;
             touched.clear();
-            for (_rel, dst) in csr.neighbors(v) {
+            for (_rel, dst) in &csr.adjacency[start..end] {
                 let w = dst.offset as usize;
                 if w < n {
                     let c = community[w];
@@ -1623,58 +1630,55 @@ where
         }
 
         // Apply batch moves (first-come-first-served for same-community conflicts)
-        let mut claimed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // Bolt ⚡ Performance Optimization:
+        // Use generation-stamped `claimed_stamp` array instead of `HashSet` for O(1) zero-allocation claim checks.
+        claimed_gen += 1;
         for (v, best_comm, _gain) in &moves {
             let v = *v;
             let best_comm = *best_comm;
             let current_comm = community[v];
-            if current_comm == best_comm || claimed.contains(&best_comm) {
+            if current_comm == best_comm || claimed_stamp[best_comm] == claimed_gen {
                 continue;
             }
             let kv = degree[v];
 
-            // Recompute v's weight into new community using current community assignments
-            let sigma_v_current: f64 = csr
-                .neighbors(v)
-                .iter()
-                .filter_map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n && community[w] == current_comm {
-                        Some(weight_fn(v, w))
-                    } else {
-                        None
+            // Bolt ⚡ Performance Optimization:
+            // Consolidate dual neighbor loops for `sigma_v_current` and `sigma_v_new` into a single linear
+            // pass over the direct CSR adjacency slice.
+            let start = csr.offsets[v];
+            let end = csr.offsets[v + 1];
+            let mut sigma_v_current = 0.0;
+            let mut sigma_v_new = 0.0;
+            for (_rel, dst) in &csr.adjacency[start..end] {
+                let w = dst.offset as usize;
+                if w < n {
+                    let comm_w = community[w];
+                    if comm_w == current_comm {
+                        sigma_v_current += weight_fn(v, w);
+                    } else if comm_w == best_comm {
+                        sigma_v_new += weight_fn(v, w);
                     }
-                })
-                .sum();
-            let sigma_v_new: f64 = csr
-                .neighbors(v)
-                .iter()
-                .filter_map(|(_rel, dst)| {
-                    let w = dst.offset as usize;
-                    if w < n && community[w] == best_comm {
-                        Some(weight_fn(v, w))
-                    } else {
-                        None
-                    }
-                })
-                .sum();
+                }
+            }
 
             sigma_in[current_comm] -= 2.0 * sigma_v_current;
             sigma_tot[current_comm] -= kv;
             sigma_in[best_comm] += 2.0 * sigma_v_new;
             sigma_tot[best_comm] += kv;
             community[v] = best_comm;
-            claimed.insert(v);
+            claimed_stamp[v] = claimed_gen;
             improved = true;
         }
     }
 
-    // Compute final modularity Q = Σ_c [σ_in_c / m - (σ_tot_c / 2m)²]
+    // Bolt ⚡ Performance Optimization:
+    // Replace `HashSet` with a dense boolean vector `seen_comms` for O(1) community presence check.
     let mut q = 0.0;
-    let mut seen_comms = std::collections::HashSet::new();
+    let mut seen_comms = vec![false; n];
     for v in 0..n {
         let c = community[v];
-        if seen_comms.insert(c) {
+        if !seen_comms[c] {
+            seen_comms[c] = true;
             q += sigma_in[c] / m - (sigma_tot[c] / (2.0 * m)).powi(2);
         }
     }
@@ -1980,31 +1984,50 @@ pub fn compute_spanning_forest(csr: &CSRAdjacency) -> AlgoResult {
 /// - `distances[i]` = shortest distance (number of hops) from source to node i,
 ///   or `None` if node i is unreachable.
 /// - `parents[i]` = predecessor node on the shortest path, or `None` for source/unreachable.
+// Bolt Optimization: Pre-allocated contiguous Vec queue with head index cursor and
+// integer sentinel distance tracking avoids VecDeque ring-buffer overhead, Option allocations,
+// and unwrap overhead in BFS traversal. Direct CSR adjacency slice access avoids iterator/tuple creation.
 pub fn shortest_path_bfs(csr: &CSRAdjacency, source: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let n = csr.num_nodes();
-    if source >= n {
+    if n == 0 || source >= n {
         return (vec![None; n], vec![None; n]);
     }
-    let mut distance = vec![None; n];
-    let mut parent = vec![None; n];
-    let mut queue = std::collections::VecDeque::new();
 
-    distance[source] = Some(0);
-    queue.push_back(source);
+    let mut distance = vec![usize::MAX; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut queue = Vec::with_capacity(n);
 
-    while let Some(node) = queue.pop_front() {
-        let dist = distance[node].unwrap();
-        for (_rel, dst) in csr.neighbors(node) {
+    distance[source] = 0;
+    queue.push(source);
+
+    let mut head = 0usize;
+    while head < queue.len() {
+        let node = queue[head];
+        head += 1;
+        let next_dist = distance[node] + 1;
+
+        let start = csr.offsets[node];
+        let end = csr.offsets[node + 1];
+        for (_rel, dst) in &csr.adjacency[start..end] {
             let neighbor = dst.offset as usize;
-            if neighbor < n && distance[neighbor].is_none() {
-                distance[neighbor] = Some(dist + 1);
-                parent[neighbor] = Some(node);
-                queue.push_back(neighbor);
+            if neighbor < n && distance[neighbor] == usize::MAX {
+                distance[neighbor] = next_dist;
+                parent[neighbor] = node;
+                queue.push(neighbor);
             }
         }
     }
 
-    (distance, parent)
+    let distance_opt = distance
+        .into_iter()
+        .map(|d| if d == usize::MAX { None } else { Some(d) })
+        .collect();
+    let parent_opt = parent
+        .into_iter()
+        .map(|p| if p == usize::MAX { None } else { Some(p) })
+        .collect();
+
+    (distance_opt, parent_opt)
 }
 
 /// Compute shortest path distances and return as `AlgoResult`.
@@ -2048,6 +2071,62 @@ impl Ord for DistNode {
     }
 }
 
+// Bolt Optimization: Flat primitive vectors (`dist: Vec<f64>` initialized with `f64::INFINITY`
+// and `parent: Vec<usize>` initialized with `usize::MAX`) cut memory usage by 50% and improve
+// cache locality during Dijkstra traversal. Pre-allocating `BinaryHeap` capacity and using direct
+// CSR slice access eliminates heap re-allocations and neighbor iterator overhead.
+pub fn weighted_shortest_path_internal<F>(
+    csr: &CSRAdjacency,
+    source: usize,
+    weight_fn: F,
+) -> (Vec<f64>, Vec<usize>)
+where
+    F: Fn(usize, usize) -> f64,
+{
+    use std::collections::BinaryHeap;
+
+    let n = csr.num_nodes();
+    if source >= n {
+        return (vec![f64::INFINITY; n], vec![usize::MAX; n]);
+    }
+
+    let mut dist = vec![f64::INFINITY; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut heap = BinaryHeap::with_capacity(n.min(1024));
+
+    dist[source] = 0.0;
+    heap.push(DistNode(0.0, source));
+
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
+    while let Some(DistNode(d, node)) = heap.pop() {
+        if d > dist[node] {
+            continue;
+        }
+
+        let start = offsets[node];
+        let end = offsets[node + 1];
+
+        for (_rel, dst) in &adjacency[start..end] {
+            let neighbor = dst.offset as usize;
+            if neighbor >= n {
+                continue;
+            }
+            let weight = weight_fn(node, neighbor);
+            let new_dist = d + weight;
+
+            if new_dist < dist[neighbor] {
+                dist[neighbor] = new_dist;
+                parent[neighbor] = node;
+                heap.push(DistNode(new_dist, neighbor));
+            }
+        }
+    }
+
+    (dist, parent)
+}
+
 pub fn weighted_shortest_path<F>(
     csr: &CSRAdjacency,
     source: usize,
@@ -2056,57 +2135,27 @@ pub fn weighted_shortest_path<F>(
 where
     F: Fn(usize, usize) -> f64,
 {
-    use std::collections::BinaryHeap;
-
-    let n = csr.num_nodes();
-    if source >= n {
-        return (vec![None; n], vec![None; n]);
-    }
-
-    let mut distance: Vec<Option<f64>> = vec![None; n];
-    let mut parent: Vec<Option<usize>> = vec![None; n];
-    let mut heap = BinaryHeap::new();
-
-    distance[source] = Some(0.0);
-    heap.push(DistNode(0.0, source));
-
-    while let Some(DistNode(dist, node)) = heap.pop() {
-        if let Some(best) = distance[node] {
-            if dist > best {
-                continue;
-            }
-        } else {
-            continue;
-        }
-
-        for (_rel, dst) in csr.neighbors(node) {
-            let neighbor = dst.offset as usize;
-            if neighbor >= n {
-                continue;
-            }
-            let weight = weight_fn(node, neighbor);
-            let new_dist = dist + weight;
-
-            match distance[neighbor] {
-                Some(best) if new_dist >= best => {}
-                _ => {
-                    distance[neighbor] = Some(new_dist);
-                    parent[neighbor] = Some(node);
-                    heap.push(DistNode(new_dist, neighbor));
-                }
-            }
-        }
-    }
-
-    (distance, parent)
+    let (dist, parent) = weighted_shortest_path_internal(csr, source, weight_fn);
+    let dist_opt = dist
+        .into_iter()
+        .map(|d| if d == f64::INFINITY { None } else { Some(d) })
+        .collect();
+    let parent_opt = parent
+        .into_iter()
+        .map(|p| if p == usize::MAX { None } else { Some(p) })
+        .collect();
+    (dist_opt, parent_opt)
 }
 
 /// Compute weighted shortest path distances and return as `AlgoResult`.
 ///
 /// Uses unit weights (equivalent to BFS shortest path).
 pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> AlgoResult {
-    let (distance, _parent) = weighted_shortest_path(csr, source, |_from, _to| 1.0);
-    let values: Vec<f64> = distance.iter().map(|d| d.unwrap_or(f64::MAX)).collect();
+    let (dist, _parent) = weighted_shortest_path_internal(csr, source, |_from, _to| 1.0);
+    let values: Vec<f64> = dist
+        .into_iter()
+        .map(|d| if d == f64::INFINITY { f64::MAX } else { d })
+        .collect();
     AlgoResult {
         name: "weighted_shortest_path".into(),
         values,

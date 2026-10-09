@@ -5,7 +5,7 @@
 //! - **DuckDB delegation** (feature `duckdb-delegation`): Delegates to DuckDB's uc_catalog extension.
 
 #[cfg(feature = "native")]
-mod native_client;
+pub mod native_client;
 
 use akar_extension::{Extension, ExtensionContext};
 use std::sync::Arc;

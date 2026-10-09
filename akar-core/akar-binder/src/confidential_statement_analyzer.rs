@@ -80,4 +80,63 @@ mod tests {
         assert!(is_confidential_call("call s3_secret_access_key = 'v'"));
         assert!(is_confidential_call("Call S3_Access_Key_Id = 'v'"));
     }
+
+    #[test]
+    fn test_all_confidential_options() {
+        let options = [
+            "S3_ACCESS_KEY_ID",
+            "S3_SECRET_ACCESS_KEY",
+            "S3_SESSION_TOKEN",
+            "GCS_ACCESS_KEY_ID",
+            "GCS_SECRET_ACCESS_KEY",
+            "GCS_SESSION_TOKEN",
+            "AZURE_CONNECTION_STRING",
+            "AZURE_ACCOUNT_NAME",
+        ];
+        for option in options {
+            let query_space = format!("CALL {} = 'val'", option);
+            assert!(is_confidential_call(&query_space), "Failed for space query: {}", query_space);
+
+            let query_eq = format!("CALL {}='val'", option);
+            assert!(is_confidential_call(&query_eq), "Failed for eq query: {}", query_eq);
+
+            let query_lower = format!("call {} = 'val'", option.to_lowercase());
+            assert!(is_confidential_call(&query_lower), "Failed for lowercase query: {}", query_lower);
+        }
+    }
+
+    #[test]
+    fn test_syntax_and_whitespace_variations() {
+        assert!(is_confidential_call("   CALL   S3_SECRET_ACCESS_KEY   =   'val'   "));
+        assert!(is_confidential_call("CALL S3_SECRET_ACCESS_KEY\t=\t'val'"));
+        assert!(is_confidential_call("CALL S3_SECRET_ACCESS_KEY ( 'val' )"));
+    }
+
+    #[test]
+    fn test_boundary_and_false_positives() {
+        // Empty / short inputs
+        assert!(!is_confidential_call(""));
+        assert!(!is_confidential_call("   "));
+        assert!(!is_confidential_call("CAL"));
+        assert!(!is_confidential_call("CALL"));
+
+        // Extended or prefix option names (should not match exact set)
+        assert!(!is_confidential_call("CALL S3_SECRET_ACCESS_KEY_EXTRA = 'val'"));
+        assert!(!is_confidential_call("CALL MY_S3_SECRET_ACCESS_KEY = 'val'"));
+        assert!(!is_confidential_call("CALL S3_SECRET = 'val'"));
+
+        // Statements where CALL is a prefix of another word or embedded elsewhere
+        assert!(!is_confidential_call("CALLABLE S3_SECRET_ACCESS_KEY = 'val'"));
+        assert!(!is_confidential_call("RECALL S3_SECRET_ACCESS_KEY = 'val'"));
+        assert!(!is_confidential_call("SELECT 'CALL S3_SECRET_ACCESS_KEY'"));
+
+        // Non-space whitespace directly after CALL
+        assert!(!is_confidential_call("CALL\tS3_SECRET_ACCESS_KEY='val'"));
+        assert!(!is_confidential_call("CALL\nS3_SECRET_ACCESS_KEY = 'val'"));
+
+        // CALL( directly followed by option without space is unhandled due to split on '('
+        assert!(!is_confidential_call("CALL(S3_SECRET_ACCESS_KEY='val')"));
+        assert!(!is_confidential_call("CALL (S3_SECRET_ACCESS_KEY='val')"));
+        assert!(!is_confidential_call("CALL( S3_SECRET_ACCESS_KEY = 'val' )"));
+    }
 }

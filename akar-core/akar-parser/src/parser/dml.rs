@@ -5,9 +5,15 @@ use crate::ast::*;
 use crate::parser::ddl::parse_using_fts_clause;
 use crate::parser::expression::parse_expression;
 
-pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Query, String> {
+pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<'_, Rule>) -> Result<Query, String> {
+    parse_query_pairs_iter(pair.into_inner())
+}
+
+pub(crate) fn parse_query_pairs_iter<'a>(
+    children: impl IntoIterator<Item = pest::iterators::Pair<'a, Rule>>,
+) -> Result<Query, String> {
     let mut clauses = Vec::new();
-    for child in pair.into_inner() {
+    for child in children {
         // The chain grammar nests clauses inside `query_clause` groups; a trailing
         // `return_clause` is a direct child of `query_statement`.
         match child.as_rule() {
@@ -15,17 +21,16 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                 for inner in child.into_inner() {
                     match inner.as_rule() {
                         Rule::match_clause => {
-                            // Check for a trailing using_fts_clause child inside the match_clause subtree
-                            let inner_clone = inner.clone();
-                            let fts_query = inner_clone
-                                .into_inner()
-                                .find(|p| p.as_rule() == Rule::using_fts_clause)
-                                .map(|fts| parse_using_fts_clause(fts))
-                                .transpose()?;
-                            clauses.push(Clause::Match(MatchClause {
-                                patterns: parse_patterns(inner)?,
-                                fts_query,
-                            }));
+                            let mut patterns = Vec::new();
+                            let mut fts_query = None;
+                            for p in inner.into_inner() {
+                                match p.as_rule() {
+                                    Rule::pattern => patterns.extend(parse_pattern_path(p)?),
+                                    Rule::using_fts_clause => fts_query = Some(parse_using_fts_clause(p)?),
+                                    _ => {}
+                                }
+                            }
+                            clauses.push(Clause::Match(MatchClause { patterns, fts_query }));
                         }
                         Rule::optional_match_clause => {
                             clauses.push(Clause::OptionalMatch(OptionalMatchClause {
@@ -37,10 +42,38 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                             clauses.push(Clause::Where(WhereClause { expression: expr }));
                         }
                         Rule::with_clause => {
-                            let order_by = parse_order_by(&inner);
-                            let (limit, skip, limit_param, skip_param) = parse_limit_skip(&inner)?;
+                            let mut expressions = Vec::new();
+                            let mut order_by = None;
+                            let mut limit = None;
+                            let mut skip = None;
+                            let mut limit_param = None;
+                            let mut skip_param = None;
+
+                            for part in inner.into_inner() {
+                                match part.as_rule() {
+                                    Rule::return_item => {
+                                        let mut expr = None;
+                                        let mut alias = None;
+                                        for p in part.into_inner() {
+                                            match p.as_rule() {
+                                                Rule::expression => expr = Some(parse_expression(p)?),
+                                                Rule::identifier => alias = Some(p.as_str().to_string()),
+                                                _ => {}
+                                            }
+                                        }
+                                        if let Some(e) = expr {
+                                            expressions.push(ReturnItem { expression: e, alias });
+                                        }
+                                    }
+                                    Rule::order_by => order_by = parse_order_by_pair(part),
+                                    Rule::limit => {
+                                        (limit, skip, limit_param, skip_param) = parse_limit_skip_pair(part)?;
+                                    }
+                                    _ => {}
+                                }
+                            }
                             clauses.push(Clause::With(ReturnClause {
-                                expressions: parse_return_items(inner)?,
+                                expressions,
                                 distinct: false,
                                 order_by,
                                 limit,
@@ -52,7 +85,7 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                         Rule::delete_clause => {
                             let mut detach = false;
                             let mut expressions = Vec::new();
-                            for c in inner.clone().into_inner() {
+                            for c in inner.into_inner() {
                                 if c.as_rule() == Rule::detach_kw {
                                     detach = true;
                                 } else if c.as_rule() == Rule::expression {
@@ -111,11 +144,46 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                 }
             }
             Rule::return_clause => {
-                let distinct = has_distinct_flag(&child);
-                let order_by = parse_order_by(&child);
-                let (limit, skip, limit_param, skip_param) = parse_limit_skip(&child)?;
+                let mut distinct = false;
+                let mut expressions = Vec::new();
+                let mut order_by = None;
+                let mut limit = None;
+                let mut skip = None;
+                let mut limit_param = None;
+                let mut skip_param = None;
+
+                for inner in child.into_inner() {
+                    match inner.as_rule() {
+                        Rule::distinct_flag => distinct = true,
+                        Rule::return_item => {
+                            let mut expr = None;
+                            let mut alias = None;
+                            for part in inner.into_inner() {
+                                match part.as_rule() {
+                                    Rule::expression => expr = Some(parse_expression(part)?),
+                                    Rule::identifier => alias = Some(part.as_str().to_string()),
+                                    _ => {}
+                                }
+                            }
+                            if let Some(e) = expr {
+                                expressions.push(ReturnItem { expression: e, alias });
+                            }
+                        }
+                        Rule::order_by => order_by = parse_order_by_pair(inner),
+                        Rule::limit => {
+                            (limit, skip, limit_param, skip_param) = parse_limit_skip_pair(inner)?;
+                        }
+                        _ => {}
+                    }
+                }
+                if expressions.is_empty() {
+                    expressions.push(ReturnItem {
+                        expression: Expression::Star,
+                        alias: None,
+                    });
+                }
                 clauses.push(Clause::Return(ReturnClause {
-                    expressions: parse_return_items(child)?,
+                    expressions,
                     distinct,
                     order_by,
                     limit,
@@ -167,7 +235,7 @@ pub(crate) fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<
                         Rule::delete_clause => {
                             let mut detach = false;
                             let mut expressions = Vec::new();
-                            for c in body_inner.clone().into_inner() {
+                            for c in body_inner.into_inner() {
                                 if c.as_rule() == Rule::detach_kw {
                                     detach = true;
                                 } else if c.as_rule() == Rule::expression {
@@ -334,42 +402,8 @@ pub(crate) fn parse_property_kv(pair: pest::iterators::Pair<Rule>) -> Result<(St
     val.map(|v| (key, v)).ok_or("Missing property value".into())
 }
 
-pub(crate) fn parse_return_items(pair: pest::iterators::Pair<Rule>) -> Result<Vec<ReturnItem>, String> {
-    let mut items = Vec::new();
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::return_item {
-            let mut expr = None;
-            let mut alias = None;
-            for part in inner.into_inner() {
-                match part.as_rule() {
-                    Rule::expression => expr = Some(parse_expression(part)?),
-                    Rule::identifier => alias = Some(part.as_str().to_string()),
-                    _ => {}
-                }
-            }
-            if let Some(e) = expr {
-                items.push(ReturnItem { expression: e, alias });
-            }
-        }
-    }
-    if items.is_empty() {
-        // If there are no return_item children, it must be the `*` branch in the grammar.
-        items.push(ReturnItem {
-            expression: Expression::Star,
-            alias: None,
-        });
-    }
-    Ok(items)
-}
-
-/// Check if the return_clause pair has a DISTINCT flag.
-pub(crate) fn has_distinct_flag(pair: &pest::iterators::Pair<Rule>) -> bool {
-    pair.clone().into_inner().any(|c| c.as_rule() == Rule::distinct_flag)
-}
-
-/// Extract ORDER BY items from a return_clause or with_clause pair.
-fn parse_order_by(pair: &pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>> {
-    let order_by_pair = pair.clone().into_inner().find(|p| p.as_rule() == Rule::order_by)?;
+/// Extract ORDER BY items directly from a `Rule::order_by` Pair.
+fn parse_order_by_pair(order_by_pair: pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>> {
     let mut items = Vec::new();
     for part in order_by_pair.into_inner() {
         if part.as_rule() == Rule::sort_item {
@@ -378,33 +412,25 @@ fn parse_order_by(pair: &pest::iterators::Pair<Rule>) -> Option<Vec<OrderByItem>
             for inner in part.into_inner() {
                 match inner.as_rule() {
                     Rule::sort_dir => ascending = inner.as_str() == "ASC",
-                    Rule::expression => expr = Some(parse_expression(inner).ok()?),
+                    Rule::expression => expr = parse_expression(inner).ok(),
                     _ => {}
                 }
             }
-            items.push(OrderByItem {
-                expression: expr?,
-                ascending,
-            });
+            if let Some(e) = expr {
+                items.push(OrderByItem {
+                    expression: e,
+                    ascending,
+                });
+            }
         }
     }
     if items.is_empty() { None } else { Some(items) }
 }
 
-/// Extract LIMIT and SKIP values from a return_clause or with_clause pair.
-///
-/// Each of LIMIT / SKIP may be either a literal integer or a parameter
-/// placeholder (e.g. `LIMIT $limit`). Literals are returned as `Option<u64>`
-/// (negative or overflowing values return an error instead of being silently
-/// dropped — previously `.ok()` swallowed those); parameter references are
-/// returned as `Option<String>` names, mutually exclusive with the literal.
-fn parse_limit_skip(
-    pair: &pest::iterators::Pair<Rule>,
+/// Extract LIMIT and SKIP values directly from a `Rule::limit` Pair.
+fn parse_limit_skip_pair(
+    limit_pair: pest::iterators::Pair<Rule>,
 ) -> Result<(Option<u64>, Option<u64>, Option<String>, Option<String>), String> {
-    let limit_pair = match pair.clone().into_inner().find(|p| p.as_rule() == Rule::limit) {
-        Some(p) => p,
-        None => return Ok((None, None, None, None)),
-    };
     let mut limit_val = None;
     let mut limit_param = None;
     let mut skip_val = None;
@@ -422,7 +448,6 @@ fn parse_limit_skip(
             }
             Rule::parameter => {
                 if limit_param.is_none() {
-                    // `$name` — strip the leading `$` to get the parameter name.
                     limit_param = Some(inner.as_str().trim_start_matches('$').to_string());
                 }
             }

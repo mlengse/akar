@@ -55,11 +55,9 @@ fn bench_triangle_count(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(4));
     for &size in &[2_000usize, 10_000] {
         let csr = build_triangle_graph(size, 16);
-        group.bench_with_input(
-            BenchmarkId::new("compute_triangle_count", size),
-            &csr,
-            |b, csr| b.iter(|| compute_triangle_count(black_box(csr))),
-        );
+        group.bench_with_input(BenchmarkId::new("compute_triangle_count", size), &csr, |b, csr| {
+            b.iter(|| compute_triangle_count(black_box(csr)))
+        });
     }
     group.finish();
 }

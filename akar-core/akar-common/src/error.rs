@@ -468,3 +468,39 @@ pub fn lock_or_poisoned<T>(mutex: &std::sync::Mutex<T>) -> crate::error::Result<
         .lock()
         .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::thread;
+
+    #[test]
+    fn test_lock_or_poisoned_ok() {
+        let mutex = Mutex::new(42);
+        let guard = lock_or_poisoned(&mutex);
+        assert!(guard.is_ok());
+        assert_eq!(*guard.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_lock_or_poisoned_poisoned() {
+        let mutex = std::sync::Arc::new(Mutex::new(100));
+        let mutex_clone = std::sync::Arc::clone(&mutex);
+
+        let _ = thread::spawn(move || {
+            let _guard = mutex_clone.lock().unwrap();
+            panic!("Intentional panic to poison mutex");
+        })
+        .join();
+
+        let res = lock_or_poisoned(&mutex);
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            AkarError::Transaction(TransactionError::LockPoisoned(msg)) => {
+                assert!(!msg.is_empty());
+            }
+            other => panic!("Expected TransactionError::LockPoisoned, got {:?}", other),
+        }
+    }
+}
