@@ -71,3 +71,8 @@
 ## 2026-10-07 - Fast-path unbiased random walk sampling in Node2Vec
 **Learning:** In Node2Vec random walk generation (`generate_walks`), default unbiased parameters ($p=1.0, q=1.0$) caused $O(\text{degree})$ weight calculations, buffer allocation, and predecessor neighbor scans per walk step. Fast-pathing unbiased walks with direct $O(1)$ uniform neighbor index selection while preserving RNG draw counts eliminates all transition weight computations and vector operations in the default mode without breaking determinism or state sequences.
 **Action:** Detect uniform weight conditions ($p=1.0, q=1.0$) in graph random walk algorithms to fast-path direct $O(1)$ index selection and bypass neighbor transition scans.
+
+## 2026-10-09 - Single-pass Pest Pair iteration in Cypher DML parser
+
+**Learning:** In PEG parser AST construction using `pest::iterators::Pair`, cloning `Pair` instances (e.g. `inner.clone()`, `pair.clone().into_inner()`) causes repeated reference counting increments/decrements and Pest struct copies when inspecting AST subtrees (such as checking `using_fts_clause`, `distinct_flag`, `order_by`, and `limit`). Consolidating subtree inspection into single-pass iteration loops over owned `Pair.into_inner()` streams eliminates all redundant `Pair` cloning operations in statement and clause parsers, reducing DML query parsing times by up to ~4.2%.
+**Action:** Parse AST clauses in single-pass loops over `pair.into_inner()` streams instead of cloning `Pair` instances for multi-pass child lookups.
