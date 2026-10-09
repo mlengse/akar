@@ -52,7 +52,7 @@ pub(crate) fn parse_query_pairs(pair: pest::iterators::Pair<Rule>) -> Result<Que
                         Rule::delete_clause => {
                             let mut detach = false;
                             let mut expressions = Vec::new();
-                            for c in inner.clone().into_inner() {
+                            for c in inner.into_inner() {
                                 if c.as_rule() == Rule::detach_kw {
                                     detach = true;
                                 } else if c.as_rule() == Rule::expression {
@@ -167,7 +167,7 @@ pub(crate) fn parse_foreach_clause(pair: pest::iterators::Pair<Rule>) -> Result<
                         Rule::delete_clause => {
                             let mut detach = false;
                             let mut expressions = Vec::new();
-                            for c in body_inner.clone().into_inner() {
+                            for c in body_inner.into_inner() {
                                 if c.as_rule() == Rule::detach_kw {
                                     detach = true;
                                 } else if c.as_rule() == Rule::expression {
