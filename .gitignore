@@ -53,3 +53,4 @@ dataset/ldbc-1/csv
 
 # akar-ml bundled model staging (air-gapped assets prepared locally, never committed)
 akar-core/akar-ml/models/.staging/
+.jules/
