@@ -47,13 +47,11 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
             ddl::parse_ddl(ddl_inner)
         }
         Rule::create_dml_statement => {
-            let inner_clone = inner.clone();
-            let patterns = dml::parse_patterns(inner_clone)?;
+            let patterns = dml::parse_patterns(inner)?;
             Ok(Statement::CreateDml(CreateClause { patterns }))
         }
         Rule::query_statement => {
-            let inner_clone = inner.clone();
-            let children: Vec<_> = inner_clone.into_inner().collect();
+            let children: Vec<_> = inner.into_inner().collect();
             // A standalone MERGE (possibly with RETURN) keeps the legacy
             // `Statement::Merge` shape. A MERGE embedded in a clause chain becomes
             // `Clause::Merge` inside a Query.
@@ -61,22 +59,20 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
                 && children.first().is_some_and(|c| c.as_rule() == Rule::query_clause)
                 && (children.len() == 1 || children[1].as_rule() == Rule::return_clause)
                 && {
-                    let qc_inner: Vec<_> = children[0].clone().into_inner().collect();
-                    qc_inner.len() == 1 && qc_inner[0].as_rule() == Rule::merge_clause
+                    let mut qc_iter = children[0].clone().into_inner();
+                    let first = qc_iter.next();
+                    first.is_some_and(|m| m.as_rule() == Rule::merge_clause) && qc_iter.next().is_none()
                 };
             if standalone_merge {
-                let qc = inner.into_inner().next().ok_or("Empty MERGE query")?;
+                let qc = children.into_iter().next().ok_or("Empty MERGE query")?;
                 let merge_pair = qc.into_inner().next().ok_or("MERGE missing merge_clause")?;
                 Ok(Statement::Merge(dml::parse_merge_clause(merge_pair)?))
             } else {
-                let query = dml::parse_query_pairs(inner)?;
+                let query = dml::parse_query_pairs_iter(children)?;
                 Ok(Statement::Query(query))
             }
         }
-        Rule::union_statement => {
-            let inner_clone = inner.clone();
-            ddl::parse_ddl(inner_clone)
-        }
+        Rule::union_statement => ddl::parse_ddl(inner),
         Rule::call_statement => {
             let call = dml::parse_call(inner)?;
             Ok(Statement::StandaloneCall(call))
