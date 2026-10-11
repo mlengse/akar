@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Negative numeric literals lost their sign in the parser; the vector (ANN) surface was corrupted** · `akar-core/akar-parser/src/parser/expression.rs` · gate **2,303**
+  - `unary_expr = ("-" | "+")? ~ postfix_expr` — the sign is an unnamed pest token (absent from `into_inner()`), and `parse_expression` only handled 1- and ≥3-child forms, so the leading sign was dropped before the child `float`/`integer` could see it. `[-1.5, 2.0]` parsed as `[1.5, 2.0]`, silently corrupting **every negative vector component** — including the ANN query literal in `CALL vector_similarity_scan`.
+  - Fix: fold a leading `-`/`+` in `Rule::unary_expr` before the generic unwrap (constant-fold integers/floats; `UnaryOp::Negate` otherwise).
+  - Tests: `akar-main/tests/test_negative_literals.rs` (3, default gate) + `call_vector_similarity_scan_ranks_nearest_first` (`--features vector-extension`) pinning nearest-first ordering and scan-distance == exhaustive cosine.
+  - **Not closed:** `CALL vector_similarity_scan` over the bench corpus still reaches only the entry point's ~33-neighbour cluster (`overlap@10 ≈ 0.006`, invariant to pool), so FR-008 is unmet. Root cause is **not** an HNSW defect: on dense 768-d vectors the level-0 graph is fully connected, and swapping `select_neighbors_simple` for the canonical diversity heuristic gives no gain (dense recall@10 0.735 vs 0.750; reverted). It is **corpus-driven** — `HashingEmbedder` drops the `<3`-char number token, so `Content for memory 0`..`99` become 100 exact duplicates that dominate the nearest-neighbour structure and isolate the rest of the graph. Fix belongs in the bench corpus, separate from this parser defect.
+
 ### Removed
 
 - **P135 — crate `akar-server` dihapus dari workspace; Akar 100% pustaka embedded (§13 / ADR-02)** · `[Uncommitted]` · gate **2,300**

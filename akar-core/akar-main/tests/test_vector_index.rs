@@ -327,3 +327,82 @@ fn match_vector_scan_cosine_scale_invariant() {
         "scale-invariant: DESC cosine order must put id 1 first (cos 0.994 > 0.110)"
     );
 }
+
+/// T025 / FR-008: the ANN candidate source must actually return the *nearest*
+/// rows, nearest-first. The smoke test above used 2 rows with k=2, so it could
+/// only assert set-equality and could never catch a ranking defect — which is
+/// exactly how the candidate-source bug (P6-RECALL-1) slipped through. This
+/// inserts enough rows that ranking is observable and pins both the reported
+/// distances and the ordering against an exhaustive cosine computation.
+#[test]
+fn call_vector_similarity_scan_ranks_nearest_first() {
+    let (_dir, _db, conn) = setup();
+
+    conn.query("CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=3)")
+        .expect("create vector index");
+
+    // 24 distinct directions on a cone, so the cosine ranking is non-trivial.
+    let n = 24usize;
+    let mut vectors: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = (i as f64) * 0.23;
+        vectors.push([a.cos(), a.sin(), 0.35]);
+    }
+    for (i, v) in vectors.iter().enumerate() {
+        conn.query(&format!(
+            "CREATE (m:Memory {{id: {i}, content: 'c{i}', embedding: [{}, {}, {}]}})",
+            v[0], v[1], v[2]
+        ))
+        .expect("insert row");
+    }
+
+    let q = [0.9, 0.1, 0.35];
+    let res = conn
+        .query(&format!(
+            "CALL vector_similarity_scan('Memory', 'embedding', [{}, {}, {}], 5)",
+            q[0], q[1], q[2]
+        ))
+        .expect("vector_similarity_scan");
+
+    let chunk = res.chunks.first().expect("one chunk");
+    assert_eq!(chunk.size, 5, "expected the requested k rows");
+
+    let dist = |v: &[f64; 3]| {
+        let dot: f64 = v.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
+        let na = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let nq = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+        1.0 - dot / (na * nq)
+    };
+    let mut truth: Vec<(usize, f64)> = vectors.iter().enumerate().map(|(i, v)| (i, dist(v))).collect();
+    truth.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let expected_ids: Vec<i64> = truth.iter().take(5).map(|(i, _)| *i as i64).collect();
+
+    let mut got: Vec<(i64, f64)> = Vec::new();
+    for row in 0..chunk.size {
+        let id = match chunk.get_value(0, row).expect("id column") {
+            Value::Int64(i) => i,
+            other => panic!("id must be Int64, got {other:?}"),
+        };
+        let d = match chunk.get_value(3, row).expect("distance column") {
+            Value::Double(d) => d,
+            other => panic!("distance must be Double, got {other:?}"),
+        };
+        got.push((id, d));
+    }
+
+    // (a) each reported distance must equal the exhaustive cosine distance.
+    for (id, d) in &got {
+        let expected = dist(&vectors[*id as usize]);
+        assert!(
+            (d - expected).abs() < 1e-6,
+            "id {id}: scan distance {d} != exhaustive cosine {expected}"
+        );
+    }
+
+    // (b) the scan must be nearest-first and match the exhaustive top-k.
+    let got_ids: Vec<i64> = got.iter().map(|(i, _)| *i).collect();
+    assert_eq!(
+        got_ids, expected_ids,
+        "scan must return the true nearest rows, nearest-first"
+    );
+}

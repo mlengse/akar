@@ -44,6 +44,32 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
         return Err(format!("Unexpected comparison_expr with {} children", children.len()));
     }
 
+    // Leading unary sign: `unary_expr = ("-" | "+")? ~ postfix_expr`. The sign is
+    // an unnamed pest token (absent from `into_inner()`), so it used to be dropped
+    // before the child `float`/`integer` (which also allow an optional sign) could
+    // see it — `[-1.5]` parsed as `[1.5]`, silently corrupting every negative
+    // numeric literal (including negative vector components and the ANN query
+    // literal in `CALL vector_similarity_scan`). Fold the sign back here, ahead of
+    // the generic single-child unwrap below.
+    if rule == Rule::unary_expr {
+        let sign = pair.as_str().as_bytes().first().copied();
+        if matches!(sign, Some(b'-') | Some(b'+')) {
+            let inner = match children.len() {
+                1 => parse_expression(children[0].clone())?,
+                2 => parse_expression(children[1].clone())?,
+                n => return Err(format!("unary_expr: unexpected {n} children")),
+            };
+            if sign == Some(b'+') {
+                return Ok(inner);
+            }
+            return Ok(match inner {
+                Expression::Constant(Constant::Integer(i)) => Expression::Constant(Constant::Integer(-i)),
+                Expression::Constant(Constant::Float(f)) => Expression::Constant(Constant::Float(-f)),
+                other => Expression::UnaryOp(UnaryOp::Negate, Box::new(other)),
+            });
+        }
+    }
+
     // Unwrap single-child wrappers (priority/precedence levels)
     if matches!(
         rule,
