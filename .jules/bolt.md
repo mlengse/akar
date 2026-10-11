@@ -73,6 +73,9 @@
 **Action:** Detect uniform weight conditions ($p=1.0, q=1.0$) in graph random walk algorithms to fast-path direct $O(1)$ index selection and bypass neighbor transition scans.
 
 ## 2026-10-09 - Single-pass Pest Pair iteration in Cypher DML parser
-
 **Learning:** In PEG parser AST construction using `pest::iterators::Pair`, cloning `Pair` instances (e.g. `inner.clone()`, `pair.clone().into_inner()`) causes repeated reference counting increments/decrements and Pest struct copies when inspecting AST subtrees (such as checking `using_fts_clause`, `distinct_flag`, `order_by`, and `limit`). Consolidating subtree inspection into single-pass iteration loops over owned `Pair.into_inner()` streams eliminates all redundant `Pair` cloning operations in statement and clause parsers, reducing DML query parsing times by up to ~4.2%.
 **Action:** Parse AST clauses in single-pass loops over `pair.into_inner()` streams instead of cloning `Pair` instances for multi-pass child lookups.
+
+## 2026-10-10 - Single-map RRF score accumulation and entry lookup optimization
+**Learning:** In Reciprocal Rank Fusion (`weighted_rrf_fuse`, `rrf_fuse_owned`, and `rrf_fuse_ref`), using multiple parallel HashMaps (`scores`, `id_to_item`, `first_seen`) causes 2-3 hash table entry lookups, redundant key cloning, and $O(N)$ map deletion overhead during result extraction per item. Consolidating scores and items into a single `HashMap<I, (f64, T)>` with `map.entry(id)` reduces hash map entry lookups to 1 per item, avoids key cloning on existing items, and extracts fused results via `.into_values()` without $O(N)$ hashmap removal overhead.
+**Action:** Use a single consolidated `HashMap` with `map.entry(id).and_modify(...).or_insert(...)` or `or_insert_with_key(...)` for score accumulation and deduplication across multi-channel rank fusion algorithms.
