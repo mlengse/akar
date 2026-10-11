@@ -1042,6 +1042,23 @@ impl PhysicalExtend {
             field_type_ids.push(PhysicalTypeID::Int64);
             field_names.push(format!("{}.{}", self.dst_node_var, "_id"));
 
+            // Internal relationship id (`<rel_var>._id` = edge index) when the
+            // edge is named (`-[r:...]->`). This is what lets `DELETE r` and
+            // `SET r.…` address the matched edge itself instead of the source
+            // node's row offset (P132, #36I). Appended after the dst `_id` so
+            // the legacy "first `_id` column" fallback is unchanged for
+            // anonymous edges and node-only scans.
+            if !self.rel_var.is_empty() {
+                let mut rel_id_v = ValueVector::new(PhysicalTypeID::Int64, total_rows);
+                rel_id_v.resize(total_rows);
+                for (row, &(_, _, edge_idx)) in row_mappings.iter().enumerate() {
+                    store_value_in_vector(&mut rel_id_v, row, &Value::Int64(edge_idx as i64))?;
+                }
+                fields.push(akar_common::arrow_vector::ArrowVector::from_legacy(&rel_id_v).array);
+                field_type_ids.push(PhysicalTypeID::Int64);
+                field_names.push(format!("{}.{}", self.rel_var, "_id"));
+            }
+
             output.push(DataChunk {
                 fields,
                 field_types: field_type_ids,

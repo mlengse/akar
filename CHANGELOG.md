@@ -30,6 +30,12 @@
 
 ### Fixed
 
+- **P132 (#36I) — alamat per-edge: `DELETE r` / `SET r.…` menyasar edge yang di-match, bukan offset baris node sumber** · `akar-processor/src/physical/write_ops/{recursiveextend,delete,set}.rs`, `akar-planner/src/{logical_operator,planner}.rs`, `akar-processor/src/processor/mapper/map_update.rs` · gate **2,267** (+3: 2,264 → 2,267; `test_p132_edge_addressing.rs`)
+  - `PhysicalExtend` hanya memancarkan `<dst>._id`, tak pernah indeks edge; `PhysicalDelete`/`PhysicalSet` membaca kolom `_id` **pertama** (= offset baris node sumber). Akibatnya satu `DELETE r` menghapus paling banyak satu edge per offset (sering bukan yang di-match), `DELETE` kedua = no-op tombstone, dan `SET` ber-scope = no-op diam.
+  - `PhysicalExtend` kini juga memancarkan `<rel_var>._id` (indeks edge) untuk edge bernama (`-[r:…]->`) — diletakkan **setelah** `<dst>._id` agar fallback "kolom `_id` pertama" tak berubah untuk edge anonim/node-only scan.
+  - `LogicalDelete`/`LogicalSet` membawa `var_name`; `PhysicalDelete`/`PhysicalSet` memakainya (lewat `row_id_column_index_for`) untuk membaca `<var>._id`; `PhysicalSet` meneruskan kolom itu ke output agar SET berantai tetap menargetkan baris yang sama.
+  - Tes: +3 `test_p132_edge_addressing.rs` — DELETE satu-pasangan, DELETE ber-predikat (`WHERE r.weight < $keep`, menyisakan yang terkuat), dan SET ber-scope; ketiganya gagal sebelum perbaikan.
+
 - **P131 (F14) - variabel `UNWIND` dapat di-resolve dari pola `MATCH` pada write path; `insert_edges` kembali ke bentuk batch** · `akar-processor/src/physical/write_ops/merge_rel.rs`, `merge.rs`, `akar-main/src/bulk.rs` · gate **2,264** (+3: 2,261 → 2,264; 2 replay + 1 pengukuran statement)
   - `UNWIND $rows AS r MATCH (a:M {id: r.source}), (b:M {id: r.target}) MERGE (a)-[e:R]->(b) SET e.w = r.w RETURN count(e) AS written` gagal karena `PhysicalMergeRel` hanya menyalin `<edge_var>._id` ke chunk keluaran — kolom pipeline (termasuk `r`) dibuang, sehingga `SET` hilir (ter-bind sebagai `PhysicalSet` downstream) tidak bisa memecahkan `r`. Input merge terbukti membawa `r`, `a`, `b` (diag `field_names`); kolom hilang tepat di output merge.
   - Fix `merge_rel.rs`: `apply_on_clause` kini menerima `src_rows` + `src_chunk` dan menambahkan pipeline columns (memakai ulang `append_pipeline_columns` dari `set.rs`); `execute` melacak `matched_src`/`created_src`/`out_src`; output chunk membawa pipeline columns untuk operator hilir. Path node `merge.rs` serupa (on-clause chunk + pipeline columns). Tak ada helper baru.

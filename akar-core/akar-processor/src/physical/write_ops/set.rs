@@ -1,7 +1,7 @@
 //! Auto-extracted from physical_operator.rs
 use crate::expression_evaluator::ExpressionEvaluator;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index};
+use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index_for};
 use akar_common::arrow_vector::VectorAccess;
 use akar_common::types::Value;
 use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
@@ -27,6 +27,10 @@ pub struct PhysicalSet {
     pub table_name: String,
     pub table_id: u64,
     pub is_node: bool,
+    /// Name of the SET target variable (e.g. `r`). When `Some`, the row/edge
+    /// address is read from `<target_var>._id` so a pattern-matched relationship
+    /// updates the matched edge, not the source node's row offset (P132).
+    pub target_var: Option<String>,
     pub items: Vec<SetItem>,
     pub table_catalog: Arc<TableCatalog>,
     /// Active transaction id (P52.18).
@@ -60,7 +64,7 @@ impl PhysicalOperatorExec for PhysicalSet {
         let mut source_rows: Vec<(usize, usize)> = Vec::new();
 
         for (ci, chunk) in input.iter().enumerate() {
-            let row_id_col = row_id_column_index(chunk);
+            let row_id_col = row_id_column_index_for(chunk, self.target_var.as_deref());
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty()
                     && let Some(Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row)
@@ -677,6 +681,7 @@ mod tests {
             table_name: "Connected".to_string(),
             table_id: rel_id,
             is_node: false,
+            target_var: None,
             items: vec![SetItem {
                 column_name: "weight".to_string(),
                 column_idx: 0,
@@ -780,6 +785,7 @@ mod tests {
             table_name: "Connected".to_string(),
             table_id: rel_id,
             is_node: false,
+            target_var: None,
             items: vec![SetItem {
                 column_name: "weight".to_string(),
                 column_idx: 0,

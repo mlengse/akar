@@ -689,6 +689,11 @@ pub struct LogicalSet {
     pub table_name: String,
     pub table_id: u64,
     pub is_node: bool,
+    /// Name of the variable the SET writes to (e.g. `r` in `SET r.weight = …`).
+    /// Used to resolve the edge/row address from `<var>._id` so a pattern-matched
+    /// relationship targets the matched edge (P132); `None` falls back to the
+    /// first `_id` column.
+    pub var_name: Option<String>,
     /// All assignments of the SET clause, evaluated against the pre-update
     /// snapshot as a group (P53.17). Multiple items were previously emitted as
     /// a chain of single-item operators, so items after the first received the
@@ -718,6 +723,11 @@ pub struct LogicalDelete {
     pub primary_key_column: String,
     pub is_node: bool,
     pub detach: bool,
+    /// Name of the variable being deleted (e.g. `r` in `DELETE r`). Used to
+    /// resolve the edge/row address from `<var>._id` so a pattern-matched
+    /// relationship targets the matched edge (P132); `None` falls back to the
+    /// first `_id` column.
+    pub var_name: Option<String>,
     pub cardinality: u64,
 }
 

@@ -399,6 +399,7 @@ impl QueryPlanner {
                 table_name: item.table_name.clone(),
                 table_id: item.table_id,
                 is_node: item.is_node,
+                var_name: None,
                 items: vec![SetItem {
                     column_name: item.column_name.clone(),
                     column_idx: item.column_idx,
@@ -416,6 +417,7 @@ impl QueryPlanner {
                 table_name: item.table_name.clone(),
                 table_id: item.table_id,
                 is_node: item.is_node,
+                var_name: None,
                 items: vec![SetItem {
                     column_name: item.column_name.clone(),
                     column_idx: item.column_idx,
@@ -952,12 +954,17 @@ impl QueryPlanner {
                 }
                 BoundClause::BoundDelete(d) => {
                     for item in &d.items {
+                        let var_name = match &item.expression {
+                            akar_parser::ast::Expression::Variable(v) => Some(v.clone()),
+                            _ => None,
+                        };
                         delete_exprs.push(LogicalOperator::Delete(LogicalDelete {
                             table_name: item.table_name.clone(),
                             table_id: item.table_id,
                             primary_key_column: item.primary_key_column.clone(),
                             is_node: item.is_node,
                             detach: d.detach,
+                            var_name,
                             cardinality: 0,
                         }));
                     }
@@ -985,14 +992,21 @@ impl QueryPlanner {
                     // operator per item would feed items 2+ the previous item's
                     // count chunk, losing the scan rows (`SET a=123.0, b=b+1`
                     // left `b` at its old value).
-                    let mut groups: Vec<(String, u64, bool, Vec<SetItem>)> = Vec::new();
+                    let mut groups: Vec<(String, u64, bool, Option<String>, Vec<SetItem>)> = Vec::new();
                     for item in &s.items {
+                        let var_name = match &item.property {
+                            akar_parser::ast::Expression::PropertyAccess(obj, _) => match obj.as_ref() {
+                                akar_parser::ast::Expression::Variable(v) => Some(v.clone()),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
                         let key = (item.table_name.clone(), item.table_id, item.is_node);
                         match groups
                             .iter_mut()
-                            .find(|(n, id, n2, _)| *n == key.0 && *id == key.1 && *n2 == key.2)
+                            .find(|(n, id, n2, _, _)| *n == key.0 && *id == key.1 && *n2 == key.2)
                         {
-                            Some((_, _, _, items)) => items.push(SetItem {
+                            Some((_, _, _, _, items)) => items.push(SetItem {
                                 column_name: item.column_name.clone(),
                                 column_idx: item.column_idx,
                                 value: item.value.clone(),
@@ -1001,6 +1015,7 @@ impl QueryPlanner {
                                 key.0,
                                 key.1,
                                 key.2,
+                                var_name,
                                 vec![SetItem {
                                     column_name: item.column_name.clone(),
                                     column_idx: item.column_idx,
@@ -1009,11 +1024,12 @@ impl QueryPlanner {
                             )),
                         }
                     }
-                    for (table_name, table_id, is_node, items) in groups {
+                    for (table_name, table_id, is_node, var_name, items) in groups {
                         delete_exprs.push(LogicalOperator::Set(LogicalSet {
                             table_name,
                             table_id,
                             is_node,
+                            var_name,
                             items,
                             emit_count: !has_return,
                             cardinality: 0,

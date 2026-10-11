@@ -17,6 +17,10 @@ pub struct PhysicalDelete {
     pub primary_key_column: String,
     pub is_node: bool,
     pub detach: bool,
+    /// Name of the deleted variable (e.g. `r`). When `Some`, the row/edge
+    /// address is read from `<target_var>._id` so a pattern-matched relationship
+    /// deletes the matched edge, not the source node's row offset (P132).
+    pub target_var: Option<String>,
     /// Row indices to delete (found by the scan/filter pipeline).
     pub row_indices: Vec<u64>,
     pub table_catalog: Arc<TableCatalog>,
@@ -42,7 +46,7 @@ impl PhysicalOperatorExec for PhysicalDelete {
         // (last column); reading column 0 would treat the first *property*
         // value as a row index (wrong row or an out-of-range no-op).
         for chunk in &input {
-            let row_id_col = row_id_column_index(chunk);
+            let row_id_col = row_id_column_index_for(chunk, self.target_var.as_deref());
             for row in 0..chunk.size {
                 if !chunk.fields.is_empty() {
                     if let Some(akar_common::types::Value::Int64(val)) = chunk.get_value(row_id_col.unwrap_or(0), row) {
@@ -184,4 +188,21 @@ pub fn ast_constant_to_value(c: &Constant) -> Value {
 /// column (e.g. rel table scans), letting callers keep the legacy behaviour.
 pub fn row_id_column_index(chunk: &DataChunk) -> Option<usize> {
     chunk.field_names.iter().position(|n| n == "_id" || n.ends_with("._id"))
+}
+
+/// Resolve the column holding the physical row/edge address for a write op.
+///
+/// When the target variable is known, its explicit `<var>._id` column is
+/// preferred so a pattern-matched relationship addresses the matched edge
+/// rather than the source node's row offset (P132, #36I). Falls back to the
+/// first `_id` column (previous behaviour) when the qualified column is absent,
+/// keeping node writes and anonymous-edge writes unchanged.
+pub fn row_id_column_index_for(chunk: &DataChunk, target_var: Option<&str>) -> Option<usize> {
+    if let Some(var) = target_var {
+        let qualified = format!("{var}._id");
+        if let Some(idx) = chunk.field_names.iter().position(|n| *n == qualified) {
+            return Some(idx);
+        }
+    }
+    row_id_column_index(chunk)
 }
