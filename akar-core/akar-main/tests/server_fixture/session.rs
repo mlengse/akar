@@ -1,19 +1,19 @@
-//! Client session handling — one thread per TCP connection (P47.2).
+//! Client session handling — one thread per TCP connection (test fixture).
 //!
-//! Each client gets its own [`Connection`] to the shared [`Database`]. Requests
-//! are length-prefixed JSON frames; the session loop reads a frame, executes the
+//! Relocated from the retired `akar-server` crate (P135 / plan §8.1b). Each
+//! client gets its own [`Connection`] to the shared [`Database`]. Requests are
+//! length-prefixed JSON frames; the session loop reads a frame, executes the
 //! query through the normal `Connection::query` pipeline (which wraps writes in
 //! OCC transactions and surfaces `WriteConflict` as errors), and replies with a
 //! serialized [`WireResponse`].
 //!
-//! P62 adds:
 //! - **Auth token validation** — first frame must carry the correct token.
 //! - **Operation dispatch** — `ping`, `flush`, `stats`, `export`, `shutdown`.
-//! - **Idle tracking** — `last_activity` timestamp for the server idle monitor.
+//! - **Idle tracking** — `last_activity` timestamp for the fixture idle monitor.
 //!
-//! P66 adds:
-//! - **`dream_control` op** — status/pause/resume for the dream engine (stub
-//!   until DreamBackend is integrated; returns `not_available` for now).
+//! `dream_control` handling was **not** carried over: the dream cycle is
+//! host-owned (§13) and its `DreamControl` tests were duplicates, so the op is
+//! gone with the crate (plan §8.1d).
 
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_main::connection::Connection;
@@ -37,7 +37,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const READ_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// How long a response write may block before the session gives up. Bounds how
-/// long [`Server::shutdown`](crate::Server::shutdown) waits for a client that
+/// long [`Server::shutdown`](super::Server::shutdown) waits for a client that
 /// stops reading its responses.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -54,8 +54,6 @@ pub struct SessionConfig {
     pub db_path: String,
     /// Shared flag to trigger server shutdown (set by `shutdown` op).
     pub shutdown: Arc<AtomicBool>,
-    /// Shared dream engine lifecycle (P77). Built once per server.
-    pub dream: Arc<crate::dream::DreamControl>,
 }
 
 /// Serve one client connection until the peer disconnects or the server shuts
@@ -137,7 +135,6 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Database>, config: &SessionC
             Some("stats") => handle_stats(&config.db_path, &config.total_queries),
             Some("export") => handle_export(&conn, request.path.as_deref()),
             Some("shutdown") => handle_shutdown(&config.shutdown),
-            Some("dream_control") => handle_dream_control(request.action.as_deref(), &config.dream),
             None | Some("query") => {
                 config.total_queries.fetch_add(1, Ordering::Relaxed);
                 execute_query(&conn, &request)
@@ -208,78 +205,6 @@ fn handle_export(conn: &Connection, path: Option<&str>) -> Vec<u8> {
 fn handle_shutdown(shutdown_flag: &Arc<AtomicBool>) -> Vec<u8> {
     shutdown_flag.store(true, Ordering::SeqCst);
     let resp = WireResponse::success_message("Shutdown requested".to_string());
-    serialize_response(&resp)
-}
-
-/// Handle dream engine control requests (status/pause/resume/run).
-///
-/// The request carries an `action` string; empty/unknown actions default to
-/// `status` for backward compatibility with sulur callers. The action maps to
-/// a lifecycle op on the shared [`DreamControl`](crate::dream::DreamControl);
-/// a `run`/`resume` executes a consolidation cycle and reports its `dream_id`
-/// and duration.
-fn handle_dream_control(action: Option<&str>, dream: &Arc<crate::dream::DreamControl>) -> Vec<u8> {
-    use crate::dream::DreamState;
-    let action = action.filter(|a| !a.is_empty()).unwrap_or("status");
-    let (state, note, dream_id) = match action {
-        "run" => {
-            let stats = dream.run(
-                #[cfg(feature = "embed")]
-                None,
-            );
-            (
-                dream.state(),
-                Some(format!("dream cycle completed in {:.0} ms", stats.duration_ms)),
-                Some(stats.dream_id),
-            )
-        }
-        "resume" => {
-            let stats = dream.resume();
-            (
-                dream.state(),
-                Some(format!("dream cycle resumed in {:.0} ms", stats.duration_ms)),
-                Some(stats.dream_id),
-            )
-        }
-        "pause" => {
-            dream.pause();
-            (dream.state(), Some("dream engine paused".to_string()), None)
-        }
-        "status" => {
-            let last = dream.last_stats();
-            let note = match (&last, dream.state()) {
-                (Some(s), DreamState::Running) => {
-                    Some(format!("last dream #{} in {:.0} ms", s.dream_id, s.duration_ms))
-                }
-                _ => None,
-            };
-            (dream.state(), note, last.map(|s| s.dream_id))
-        }
-        other => (
-            dream.state(),
-            Some(format!("unknown action '{other}' (fallback to status)")),
-            dream.last_stats().map(|s| s.dream_id),
-        ),
-    };
-
-    let status = match state {
-        DreamState::Idle => "idle",
-        DreamState::Running => "running",
-        DreamState::Paused => "paused",
-    };
-    let resp = WireResponse {
-        success: true,
-        message: Some(format!("dream_control: {action}")),
-        error_message: None,
-        column_names: vec!["action".into(), "status".into(), "note".into(), "dream_id".into()],
-        rows: vec![vec![
-            Some(Value::String(action.to_string())),
-            Some(Value::String(status.to_string())),
-            note.map(Value::String),
-            dream_id.map(Value::UInt64),
-        ]],
-        stats: None,
-    };
     serialize_response(&resp)
 }
 

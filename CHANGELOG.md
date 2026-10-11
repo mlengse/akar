@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **P135 — crate `akar-server` dihapus dari workspace; Akar 100% pustaka embedded (§13 / ADR-02)** · `[Uncommitted]` · gate **2,300**
+  - Crate broker terakhir `akar-server` dihapus dari `akar-core/Cargo.toml` (members) dan `PUBLISH_ORDER` (`tools/release.py`); `akar-server` hilang total dari workspace, bukan sekadar diturunkan perannya (P124). **Yank** crates.io seluruh versi masih aksi eksternal (belum dijalankan).
+  - **Tes tidak hilang** (arah §8.1 "migrasi dulu, hapus belakangan"): 4 tes `DreamCycle` kembali ke `akar-dream` (`src/cycle_tests.rs`, sequencer *test-only* — crate tetap primitif-only, §13); 41 tes framing/session/auth/param-binding menjadi fixture `#[cfg(test)]` di `akar-main/tests/test_remote_server.rs` + `tests/server_fixture/`, satu-satunya cara `Database::connect_tcp` tetap punya uji putaran penuh. 12 tes duplikat (`dream_control`/`DreamControl::with_db`/`GraphBackend`, `daemon_log`) dihapus — `daemon_log` sudah hidup di `sulur-server` (P6-LOG-1).
+  - Rekonsiliasi: SPEC §1.2/§2/§3.2/§7/§9.1/§11.1/§13.4 + `README.md` + prosa `remote.rs`; counts **36 → 35** crate, tes **2,267 → 2,300** (2,291 unit/integrasi + 9 doctest; net −12 dari penghapusan duplikat). `sulur/tools/boundary-check.py` BC-02 diselaraskan (crate hilang → INFO "(clean)").
+
 ### Changed
 
 - **P137/P138/P139 — CLI & QueryResult presentation defects (finding-lift CLI cluster)** · `akar-cli/src/main.rs`, `akar-common/src/types.rs`, `akar-main/src/query_result.rs`

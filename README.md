@@ -41,9 +41,8 @@ pip install akar
 ```
 
 Akar is an **embedded library** — it ships no server. The broker/daemon lifecycle used by
-AI-agent memory engines is owned by a separate consumer (see [Origins](#origins)); the
-`akar-server` crate in this workspace is a **test harness / wire reference only**, never a
-production broker.
+AI-agent memory engines is owned by a separate consumer (see [Origins](#origins));
+`sulur-server` is the production daemon.
 
 ## Quick Start
 
@@ -89,7 +88,7 @@ No server. No Docker. Just `cargo add akar-main` and query.
 ## Architecture
 
 Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`)
-contains 36 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
+contains 35 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
 
 | Crate | Purpose |
 |-------|---------|
@@ -103,12 +102,11 @@ contains 36 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-fts` | Full-text search (BM25) |
 | `akar-vector` | Vector similarity search |
 | `akar-markdown` | Markdown wiki / OKF reader (`read_markdown_wiki`) |
-| `akar-server` | TCP wire harness (test/reference only — **not** a production surface) |
 | `akar-c` | C FFI API (`extern "C"`) |
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **2,267 tests, 0 failed** (gate `test [akar-core]`,
+**Test suite:** **2,300 tests, 0 failed** (gate `test [akar-core]`,
 2026-10-11). **26 optimizer passes**, **37 logical types**, **59 logical
 operators**, **50 physical operator structs**.
 

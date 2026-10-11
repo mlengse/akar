@@ -1728,7 +1728,7 @@ impl Binder {
     /// canonical form.
     ///
     /// Security (path traversal, CWE-22/CWE-59): `file_path` is raw text from
-    /// parsed SQL — including queries submitted by remote akar-server clients —
+    /// parsed SQL — including queries submitted by remote wire clients —
     /// so it may carry `..` components or symlinks that escape the directory
     /// the operator intended. We reject any lexical `..` component outright,
     /// then canonicalize so every later containment check operates on the real

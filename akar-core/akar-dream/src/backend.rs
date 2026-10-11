@@ -86,7 +86,7 @@ pub trait DreamBackend {
 /// In-memory [`DreamBackend`] test double.
 ///
 /// Published (not `#[cfg(test)]`) so hosts can exercise the phase primitives
-/// without a database — `akar-server` drives it from its own unit tests.
+/// without a database; `akar-dream`'s own cycle tests drive it too.
 pub struct MockBackend {
     pub memories: std::cell::RefCell<Vec<Memory>>,
     pub edges: std::cell::RefCell<Vec<Edge>>,

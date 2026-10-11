@@ -1,21 +1,22 @@
-//! Remote client for the Akar embedded server (P47).
+//! Remote client for a TCP host that owns an Akar [`Database`] (P47).
 //!
-//! The embedded server (crate `akar-server`) owns the [`Database`] instance
-//! and its exclusive file lock. Remote clients connect over TCP using a
-//! length-prefixed JSON protocol and never open the database directory
-//! themselves — the server holds every file lock on their behalf.
+//! The wire-protocol types and framing in this module are the **client** side:
+//! the peer owns the [`Database`] instance and its exclusive file lock, while
+//! remote clients connect over TCP with a length-prefixed JSON protocol and
+//! never open the database directory themselves — the peer holds every file
+//! lock on their behalf.
+//!
+//! The broker that used to live in this workspace (crate `akar-server`) was
+//! retired in P135; the production daemon is Sulur's `sulur-server`, and the
+//! in-tree round-trip coverage of this client now lives in
+//! `akar-main/tests/test_remote_server.rs`.
 //!
 //! # Usage
 //!
 //! ```no_run
 //! use akar_main::Database;
 //!
-//! // On the server side (separate process):
-//! // let db = Arc::new(Database::new("./my_db", SystemConfig::default())?);
-//! // let mut server = akar_server::Server::bind("127.0.0.1:9876", db)?;
-//! // server.start()?;
-//!
-//! // On the client side:
+//! // Against a peer that owns the database (e.g. sulur-server):
 //! let client = Database::connect_tcp("127.0.0.1:9876")?;
 //! let res = client.query("MATCH (n) RETURN n LIMIT 5")?;
 //! assert!(res.success);

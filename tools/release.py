@@ -88,7 +88,6 @@ PUBLISH_ORDER_EXTENSIONS = [
     "akar-main",         # depends on ALL core + json/httpfs/duckdb/algo/llm/sqlite/delta/iceberg/azure/postgres
     "akar-migrate",      # main, storage, common
     "akar-wasm",         # main, common
-    "akar-server",       # main, common, dream, ml
     "akar-cli",          # main, common, binder, catalog
 ]
 

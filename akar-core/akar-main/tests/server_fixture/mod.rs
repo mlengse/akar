@@ -1,36 +1,23 @@
-//! Akar embedded server — multi-process access over TCP (P47).
+//! TCP wire-reference test fixture — relocated from the retired `akar-server`
+//! crate (P135 / plan §8.1b).
 //!
 //! One process owns the [`Database`] (and its exclusive file lock) while N
-//! client processes connect over TCP to query the same database. This is the
-//! multi-process access layer on top of the single-writer embedded engine:
+//! client processes connect over TCP to query the same database. This fixture
+//! exists for exactly one reason: `akar-main`'s own TCP client (`RemoteDatabase`
+//! / `Database::connect_tcp`) needs a real listener for a full round-trip test,
+//! and the retired broker no longer provides one. It is **not** a production
+//! surface (§13): `sulur-server` owns the daemon role.
 //!
-//! - The server serializes all writes through the existing [`TransactionManager`]
-//!   (optimistic row-level conflicts surface as `WriteConflict` errors).
+//! It is compiled only as part of `akar-main`'s integration-test binary
+//! (`tests/test_remote_server.rs`), never as a published library.
+//!
+//! - Writes are serialized through the existing transaction manager (optimistic
+//!   row-level conflicts surface as `WriteConflict` errors).
 //! - Read-only clients use the normal MVCC snapshot path.
-//! - Clients never open the database directory — the server holds every file
-//!   lock on their behalf ([`crate::Database::connect_tcp`]).
-//!
-//! True shared-storage multi-process *writers* over the same files remain
-//! deliberately out of scope: the storage format (durable column mirrors +
-//! `BufferManager` mmap + `.ovf` sidecars) assumes a single owner, and a
-//! distributed buffer-pool protocol is beyond an embedded database.
-//!
-//! # Example
-//!
-//! ```no_run
-//! use std::sync::Arc;
-//! use akar_main::{Database, SystemConfig};
-//! use akar_server::Server;
-//!
-//! let db = Arc::new(Database::new("./my_db", SystemConfig::default())?);
-//! let mut server = Server::bind("127.0.0.1:9876", db)?;
-//! server.start()?;
-//! # Ok::<(), String>(())
-//! ```
+//! - Clients never open the database directory — the fixture holds every file
+//!   lock on their behalf.
 
-pub mod daemon_log;
-pub mod dream;
-pub mod session;
+mod session;
 
 use akar_main::database::Database;
 use session::SessionConfig;
@@ -41,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// The Akar embedded server.
+/// TCP wire-reference fixture server (test-only, §13).
 ///
 /// Owns a [`Database`] instance (and therefore the exclusive file lock) and
 /// accepts TCP client connections. Each client gets its own
@@ -120,7 +107,7 @@ impl Server {
         let shutdown = self.shutdown.clone();
         let timeout_secs = timeout.as_secs();
         let handle = thread::Builder::new()
-            .name("akar-server-idle".into())
+            .name("akar-wire-fixture-idle".into())
             .spawn(move || {
                 loop {
                     thread::sleep(Duration::from_secs(1));
@@ -148,6 +135,7 @@ impl Server {
     /// Finished client threads are pruned from the handle list, so the count
     /// reflects live sessions rather than the cumulative number ever accepted
     /// (and the backing `Vec` never grows unboundedly).
+    #[allow(dead_code)] // fixture API, kept for parity with the retired crate
     pub fn num_clients(&self) -> usize {
         let mut handles = self.client_handles.lock().unwrap_or_else(|p| p.into_inner());
         handles.retain(|h| !h.is_finished());
@@ -155,6 +143,7 @@ impl Server {
     }
 
     /// Total number of queries executed since the server started.
+    #[allow(dead_code)] // fixture API, kept for parity with the retired crate
     pub fn total_queries(&self) -> u64 {
         self.total_queries.load(Ordering::Relaxed)
     }
@@ -217,7 +206,7 @@ impl Server {
         let db_path = self.db_path.clone();
         let auth_token = self.auth_token.clone();
         let handle = thread::Builder::new()
-            .name("akar-server-accept".into())
+            .name("akar-wire-fixture-accept".into())
             .spawn(move || {
                 accept_loop(
                     listener,
@@ -253,16 +242,6 @@ fn accept_loop(
     db_path: String,
     auth_token: Option<String>,
 ) {
-    let dream = {
-        #[cfg(feature = "ml-extension")]
-        {
-            dream::DreamControl::with_db_and_provider(db.clone(), akar_main::ml::shared_embedding_provider())
-        }
-        #[cfg(not(feature = "ml-extension"))]
-        {
-            dream::DreamControl::with_db(db.clone())
-        }
-    };
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
@@ -275,20 +254,20 @@ fn accept_loop(
                 let last_activity = last_activity.clone();
                 let total_queries = total_queries.clone();
                 let db_path = db_path.clone();
-                let dream = dream.clone();
                 let config = SessionConfig {
                     auth_token: auth_token.clone(),
                     last_activity,
                     total_queries,
                     db_path,
                     shutdown: shutdown.clone(),
-                    dream,
                 };
-                match thread::Builder::new().name("akar-server-client".into()).spawn(move || {
-                    tracing::debug!("Client connected: {peer}");
-                    session::handle_client(stream, db, &config);
-                    tracing::debug!("Client disconnected: {peer}");
-                }) {
+                match thread::Builder::new()
+                    .name("akar-wire-fixture-client".into())
+                    .spawn(move || {
+                        tracing::debug!("Client connected: {peer}");
+                        session::handle_client(stream, db, &config);
+                        tracing::debug!("Client disconnected: {peer}");
+                    }) {
                     Ok(handle) => {
                         if let Ok(mut guard) = handles.lock() {
                             guard.push(handle);
