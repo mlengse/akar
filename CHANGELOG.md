@@ -9,6 +9,20 @@
 
 ### Changed
 
+- **Rekonsiliasi tata kelola (2026-10-11)** · `SPEC.md`, `README.md`, `AGENTS.md`, `CHANGELOG.md`
+  - Versi diselaraskan ke `0.2.4` (SPEC semula `0.1.13`; AGENTS semula `v0.1.10`)
+  - Test count diselaraskan ke `2,264` (README semula `2,261`; AGENTS semula `1,889`)
+  - Self-contradiction SPEC diresolusi: optimizer passes `24`→`26`, functions `259`→`260`, executors `55`→`50`
+
+- **Finding-lift CLI defects (2026-10-11)** · `implementation plan.md`, `FINDINGS.md`, `docs/audits/`
+  - P137 (C1, HIGH): CLI menampilkan `col_0` bukan nama kolom asli — `akar-cli/src/main.rs:507,619`
+  - P138 (C2, MED): `fmt_val` hanya menangani 8/27 varian `Value` — `akar-cli/src/main.rs:764-777`
+  - P139 (C3, LOW): `QueryResult::Display` mencetak metadata chunk, bukan baris — `akar-main/src/query_result.rs:174-192`
+  - Referensi orphaned P54.1–P54.5 dihapus dari `docs/audits/README.md` (abandoned, 2026-10-11)
+  - Status stale P52.46 dikoreksi: FIXED (`0290a8c`), bukan OPEN
+  - Status stale akar-json #16 dikoreksi: FIXED (P52.49)
+  - F17 dianotasi: mitigasi (a) tetap resolusi diterima, tanpa task baru
+
 - **F8 — verifikasi live DAE terhadap daemon produksi (2026-09-19; tanpa perubahan kode)** · `FINDINGS.md` tidak lagi memuatnya (temuan tanpa task pindah ke task; sisa utasnya = **`P134`**)
   - Pass penuh `SULUR_DAE_RESUME=0` → `computed=894, total=894, resumed_from=None` (18 dari 912 memori tanpa embedding memang dieksklusi), lalu pass resume → `computed=0, resumed_from=929`: watermark `Meta.dae_checkpoint_id` dihormati, tidak ada double compute.
   - `count(Memory)=912` dan `m.id` tetap `int` sebelum & sesudah semua pass — tak ada korupsi index/halaman. `ADD kolom` **tanpa `DEFAULT`** terbukti diterima daemon: `DEFAULT` (yang digugurkan fix Sulur `2464f40`) bukan syarat agar DDL masuk.
