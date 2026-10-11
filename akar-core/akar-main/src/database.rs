@@ -150,7 +150,14 @@ pub struct Database {
     pub(crate) catalog: Arc<Mutex<Catalog>>,
     pub(crate) transaction_manager: Arc<TransactionManager>,
     pub(crate) function_registry: Arc<Mutex<FunctionRegistry>>,
+    /// Worker pool for the task system. Held for the database's lifetime; the
+    /// task-dispatch path that reads it is not wired up yet.
+    #[allow(dead_code)]
     pub(crate) task_system: Arc<TaskSystem>,
+    /// Instance memory manager. Cloned into `storage_manager` and
+    /// `memory_governor` at construction; retained so the database owns a
+    /// handle to the instance budget.
+    #[allow(dead_code)]
     pub(crate) memory_manager: Arc<MemoryManager>,
     /// Per-query memory governor: grants each query a bounded slice of the
     /// instance budget, gates admission under pressure, and can reclaim

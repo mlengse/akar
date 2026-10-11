@@ -152,6 +152,9 @@ impl Frontier for SparseFrontierReference {
 /// Each node offset maps directly to an array slot.
 pub struct DenseFrontier {
     data: Vec<AtomicU16>,
+    /// Reserved for multi-label pinning. `Frontier::pin_table_id` is a no-op in
+    /// this simplified port, so the flag is set but not yet read.
+    #[allow(dead_code)]
     pinned: bool,
 }
 
@@ -312,6 +315,12 @@ pub trait FrontierPair: Send + Sync {
 ///
 /// Unlike other algorithms, shortest path guarantees each node is visited at most once,
 /// so current and next frontiers write to the same underlying storage.
+///
+/// The `*_frontier` reference fields and `num_nodes` are retained from the
+/// multi-table port; `pin_*_frontier` are no-ops in this simplified
+/// implementation, which reads `dense_frontier`/`sparse_frontier` directly, so
+/// those fields are not yet read.
+#[allow(dead_code)]
 pub struct SPFrontierPair {
     state: GDSDensityState,
     dense_frontier: Option<DenseFrontier>,
