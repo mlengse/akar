@@ -20,27 +20,30 @@ pub struct FusedItem<T> {
 ///
 /// Each set carries its own weight. Rank is 1-based (matching Python convention).
 /// When all weights are 1.0 this is equivalent to unweighted RRF.
+// Bolt Optimization: Consolidate scores and items into a single HashMap<I, (f64, T)>.
+// This reduces dual HashMap lookups to 1 single entry lookup per item, avoids O(N) map removals
+// during result extraction, and eliminates key cloning for existing items.
 pub fn weighted_rrf_fuse<T, I, F>(sets: Vec<(Vec<T>, f64)>, id_fn: F, k: usize, limit: usize) -> Vec<FusedItem<T>>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,
 {
-    let mut scores: HashMap<I, f64> = HashMap::new();
-    let mut id_to_item: HashMap<I, T> = HashMap::new();
+    let mut map: HashMap<I, (f64, T)> = HashMap::new();
 
     for (set, weight) in sets {
         for (rank, item) in set.into_iter().enumerate() {
             let id = id_fn(&item);
             let rrf = weight / (k as f64 + (rank + 1) as f64);
 
-            *scores.entry(id.clone()).or_insert(0.0) += rrf;
-            id_to_item.entry(id).or_insert(item);
+            map.entry(id)
+                .and_modify(|(score, _)| *score += rrf)
+                .or_insert((rrf, item));
         }
     }
 
-    let mut results: Vec<FusedItem<T>> = scores
-        .into_iter()
-        .filter_map(|(id, score)| id_to_item.remove(&id).map(|item| FusedItem { item, rrf_score: score }))
+    let mut results: Vec<FusedItem<T>> = map
+        .into_values()
+        .map(|(score, item)| FusedItem { item, rrf_score: score })
         .collect();
 
     results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
@@ -51,27 +54,29 @@ where
 /// Fuse N ranked result sets (owned version).
 ///
 /// Simpler API that takes ownership of the result sets.
+// Bolt Optimization: Consolidate scores and items into a single HashMap<I, (f64, T)>.
+// Replaces dual HashMap lookups with 1 entry lookup per item and avoids O(N) HashMap removal overhead.
 pub fn rrf_fuse_owned<T, I, F>(sets: Vec<Vec<T>>, id_fn: F, k: usize, limit: usize) -> Vec<FusedItem<T>>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,
 {
-    let mut scores: HashMap<I, f64> = HashMap::new();
-    let mut id_to_item: HashMap<I, T> = HashMap::new();
+    let mut map: HashMap<I, (f64, T)> = HashMap::new();
 
     for set in sets {
         for (rank, item) in set.into_iter().enumerate() {
             let id = id_fn(&item);
             let rrf = 1.0 / (k as f64 + rank as f64 + 1.0);
 
-            *scores.entry(id.clone()).or_insert(0.0) += rrf;
-            id_to_item.entry(id).or_insert(item);
+            map.entry(id)
+                .and_modify(|(score, _)| *score += rrf)
+                .or_insert((rrf, item));
         }
     }
 
-    let mut results: Vec<FusedItem<T>> = scores
-        .into_iter()
-        .filter_map(|(id, score)| id_to_item.remove(&id).map(|item| FusedItem { item, rrf_score: score }))
+    let mut results: Vec<FusedItem<T>> = map
+        .into_values()
+        .map(|(score, item)| FusedItem { item, rrf_score: score })
         .collect();
 
     results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
@@ -87,13 +92,14 @@ where
 ///
 /// # Returns
 /// A vector of `(T, f64)` pairs sorted by RRF score descending.
+// Bolt Optimization: Consolidate scores and reference pointers into a single HashMap<I, (f64, &'a T)>.
+// Maintains deterministic first-seen ordering via `order` while reducing HashMap entry lookups to 1 per item and eliminating redundant key cloning.
 pub fn rrf_fuse_ref<'a, T, I, F>(sets: &'a [Vec<T>], id_fn: F, k: usize, limit: usize) -> Vec<(&'a T, f64)>
 where
     I: Eq + std::hash::Hash + Clone,
     F: Fn(&T) -> I,
 {
-    let mut scores: HashMap<I, f64> = HashMap::new();
-    let mut first_seen: HashMap<I, (&'a T, usize)> = HashMap::new();
+    let mut map: HashMap<I, (f64, &'a T)> = HashMap::new();
     let mut order: Vec<I> = Vec::new();
 
     for set in sets {
@@ -101,20 +107,19 @@ where
             let id = id_fn(item);
             let rrf = 1.0 / (k as f64 + rank as f64 + 1.0);
 
-            *scores.entry(id.clone()).or_insert(0.0) += rrf;
-
-            if !first_seen.contains_key(&id) {
-                first_seen.insert(id.clone(), (item, order.len()));
-                order.push(id);
-            }
+            map.entry(id)
+                .and_modify(|(score, _)| *score += rrf)
+                .or_insert_with_key(|k| {
+                    order.push(k.clone());
+                    (rrf, item)
+                });
         }
     }
 
     let mut results: Vec<(&'a T, f64)> = order
         .into_iter()
         .filter_map(|id| {
-            let (item, _) = first_seen.remove(&id)?;
-            let score = scores.remove(&id)?;
+            let (score, item) = map.remove(&id)?;
             Some((item, score))
         })
         .collect();
