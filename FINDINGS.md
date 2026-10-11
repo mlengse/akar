@@ -72,3 +72,4 @@ jauh-jauh hari (c) hanya bila profil produksi menunjukkan tail terpola; sampai
 itu, ambang auto 16 MiB dipertahankan sebagai jaring pengaman. Keputusan ini
 bisa direvisi bila `P6-RECALL-1` atau bench formasi berikutnya menarik biaya
 checkpoint sebagai variabel dominan.
+> **Status 2026-10-11**: Reviewed during finding-lift (US2). Mitigation (a) remains the accepted resolution; no task created.

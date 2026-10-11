@@ -312,6 +312,22 @@ def gate_test() -> bool:
     return True
 
 
+def gate_doc_check() -> bool:
+    print("[gate] python tools/doc-check.py ...")
+    result = run(
+        [sys.executable, "tools/doc-check.py"],
+        check=False,
+        capture=True,
+    )
+    if result.returncode != 0:
+        print("FAIL: documentation drift detected.")
+        print(result.stdout[-2000:] if result.stdout else "")
+        print(result.stderr[-2000:] if result.stderr else "")
+        return False
+    print("  PASS")
+    return True
+
+
 # ── changelog ───────────────────────────────────────────────────────
 def finalize_changelog(version: str, tag: str) -> None:
     """Move [Unreleased] content to [version] section."""
@@ -634,7 +650,7 @@ def main() -> None:
     # ── gate ──
     if not args.skip_gate:
         print("=== GATE ===\n")
-        gates = [gate_fmt(), gate_clippy(), gate_test()]
+        gates = [gate_doc_check(), gate_fmt(), gate_clippy(), gate_test()]
         if not all(gates):
             print("\nFAIL: gate did not pass. Aborting release.")
             sys.exit(1)

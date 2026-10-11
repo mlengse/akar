@@ -64,9 +64,9 @@ akar/
 │   ├── akar-parser/             # PEG grammar (pest.rs) for Cypher
 │   ├── akar-binder/             # Semantic analysis, symbol resolution
 │   ├── akar-planner/            # Logical plan construction
-│   ├── akar-optimizer/          # 24 optimization passes
+│   ├── akar-optimizer/          # 26 optimization passes
 │   ├── akar-processor/          # Physical operator execution
-│   ├── akar-function/           # 259 built-in functions
+│   ├── akar-function/           # 260 built-in functions
 │   ├── akar-graph/              # CSR adjacency, GDS framework
 │   ├── akar-extension/          # Extension framework trait + registry
 │   ├── akar-search/             # Hybrid search, RRF fusion
@@ -124,7 +124,7 @@ Cypher text
     ▼
 ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
 │   Parser    │───▶│  Binder  │───▶│  Planner │───▶│  Optimizer   │───▶│  Processor   │
-│ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (24 passes)  │    │ (physical)   │
+│ (pest.rs)   │    │(Catalog) │    │(logical) │    │ (26 passes)  │    │ (physical)   │
 │ 33 stmt     │    │33 bound  │    │59 ops    │    │ 18 flat +    │    │ 50 operators │
 │ variants    │    │variants  │    │          │    │ 6 tree       │    │              │
 └─────────────┘    └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
@@ -875,7 +875,7 @@ conn.query("COMMIT")?;
 - Length-prefixed JSON framing over TCP
 - Session bridging via `TransactionManager`
 - Supports concurrent read/write clients
-- **Not a production surface (§13):** Akar ships as an embedded library and never as a daemon. The broker lifecycle belongs to the consumer; `akar-server` survives as a test harness and wire reference, while Sulur's own `sulur-server` is the production daemon (ADR-02).
+- **Not a production surface (§13):** Akar ships as an embedded library and never as a daemon. The broker lifecycle belongs to the consumer; `akar-server` survives as a test harness and wire reference, while Sulur's own `sulur-server` is the production daemon (ADR-02, ADR-006).
 
 ---
 
@@ -923,7 +923,7 @@ inherit the default.
 
 ## 16. Versioning & Release
 
-- **Current version:** `0.1.13` (workspace); latest release tag **v0.1.13** (2026-08-26)
+- **Current version:** `0.2.4` (workspace); latest release tag **v0.2.4** (2026-09-23)
 - **Versioning:** [Semantic Versioning 2.0.0](https://semver.org/)
 - **MSRV:** Rust 1.80+
 - **Release artifacts:** CLI binaries for Linux (x86_64), macOS (arm64), Windows (x86_64)
@@ -945,7 +945,7 @@ inherit the default.
 ## 18. Known Limitations
 
 1. **No direct Neo4j/vector DB benchmarks** — verified comparisons limited to Kuzu C++ and LadybugDB C++
-2. **Physical operator parity** — akar 55 executors vs **C++ 58** `PhysicalOperatorType` entries
+2. **Physical operator parity** — akar 50 executors vs **C++ 58** `PhysicalOperatorType` entries
    (P85 audit: kuzu-vela `physical_operator.h:17-76` — earlier "67" was miscounted; the enum has 58,
    and `EXTENSION_CLAUSE`/`CREATE_TYPE`-class entries fall through the string-switch default). Essential
    parity **~100%** and **no operator genuinely missing** (P85 category c = ∅) — the count gap is
