@@ -1,5 +1,6 @@
 //! QueryResult — encapsulates the result of a query execution.
 
+use akar_common::types::{Value, format_value};
 use akar_common::vector::DataChunk;
 use std::fmt;
 use std::time::Duration;
@@ -181,13 +182,71 @@ impl fmt::Display for QueryResult {
         ) {
             return write!(f, "{head}");
         }
-        for (i, chunk) in self.chunks.iter().enumerate() {
-            if i > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "Chunk {}: {} rows, {} columns", i, chunk.size, chunk.num_fields())?;
+        if self.chunks.is_empty() {
+            return write!(f, "(empty)");
         }
-        Ok(())
+        // Real column names, rows, and values — not chunk metadata (P139).
+        // Rendering shares akar_common::types::format_value with the CLI, so
+        // the two surfaces cannot disagree on how a value prints.
+        let field_names: Vec<String> = self
+            .chunks
+            .iter()
+            .find(|c| !c.field_names.is_empty())
+            .map(|c| c.field_names.clone())
+            .unwrap_or_default();
+        let ncols = self.chunks.iter().map(|c| c.num_fields()).max().unwrap_or(0);
+        let headers: Vec<String> = (0..ncols)
+            .map(|i| field_names.get(i).cloned().unwrap_or_else(|| format!("col_{}", i)))
+            .collect();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for chunk in &self.chunks {
+            for r in 0..chunk.size {
+                rows.push(
+                    (0..chunk.num_fields())
+                        .map(|c| format_value(&chunk.get_value(c, r).unwrap_or(Value::Null)))
+                        .collect(),
+                );
+            }
+        }
+        if rows.is_empty() {
+            return write!(f, "(empty)");
+        }
+        let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+        for row in &rows {
+            for (i, v) in row.iter().enumerate() {
+                if i < widths.len() {
+                    widths[i] = widths[i].max(v.len());
+                }
+            }
+        }
+        let sep = format!(
+            "+{}+",
+            widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>().join("-+-")
+        );
+        let hdr = format!(
+            "| {} |",
+            headers
+                .iter()
+                .enumerate()
+                .map(|(i, h)| format!("{:w$}", h, w = widths[i]))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
+        writeln!(f, "{sep}")?;
+        writeln!(f, "{hdr}")?;
+        writeln!(f, "{sep}")?;
+        for row in &rows {
+            let line = format!(
+                "| {} |",
+                row.iter()
+                    .enumerate()
+                    .map(|(i, v)| format!("{:w$}", v, w = widths[i]))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
+            writeln!(f, "{line}")?;
+        }
+        writeln!(f, "{sep}")
     }
 }
 
@@ -257,5 +316,25 @@ mod tests {
         local.num_rows = 2;
         local.num_columns = 3;
         assert_eq!(local.result_summary(), remote(true, None, None, 3, 2).result_summary());
+    }
+
+    /// P139 regression: `Display` must render the actual rows under real column
+    /// names, not "Chunk N: X rows, Y columns" metadata.
+    #[test]
+    fn test_display_renders_rows_with_real_column_names() {
+        use crate::test_helpers::setup_db;
+        let (_db, conn) = setup_db();
+        conn.query("CREATE NODE TABLE P(name STRING, age INT64, PRIMARY KEY(name))")
+            .unwrap();
+        conn.query("CREATE (:P {name: 'Alice', age: 30})").unwrap();
+        let result = conn.query("MATCH (p:P) RETURN p.name AS name, p.age AS age").unwrap();
+        let text = result.to_string();
+        assert!(
+            text.contains("name") && !text.contains("col_0"),
+            "expected the real column name, got:\n{text}"
+        );
+        assert!(text.contains("Alice"), "expected row values, got:\n{text}");
+        assert!(text.contains("30"), "expected row values, got:\n{text}");
+        assert!(!text.contains("Chunk"), "Display still prints chunk metadata:\n{text}");
     }
 }

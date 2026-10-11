@@ -132,6 +132,117 @@ pub enum Value {
     Struct(Vec<(String, Value)>),
 }
 
+// --- Value rendering -------------------------------------------------------
+//
+// Single home for display formatting. The CLI (`fmt_val`), `QueryResult`'s
+// `Display` impl, and the regression tests all route through `format_value`,
+// so a value variant cannot render one way in one surface and another way in
+// the other. A variant added to `Value` must be added here too — the
+// exhaustive match has no catch-all arm for exactly that reason.
+
+/// Render a [`Value`] as a human-readable string.
+///
+/// Total function: every variant renders and the function never panics.
+/// Composites (`List`/`Map`/`Struct`/`Union`) render recursively.
+pub fn format_value(v: &Value) -> String {
+    match v {
+        Value::Null => "NULL".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int64(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int16(i) => i.to_string(),
+        Value::Int8(i) => i.to_string(),
+        Value::UInt64(i) => i.to_string(),
+        Value::UInt32(i) => i.to_string(),
+        Value::UInt16(i) => i.to_string(),
+        Value::UInt8(i) => i.to_string(),
+        Value::Int128(i) => i.to_string(),
+        Value::UInt128(i) => i.to_string(),
+        Value::Double(d) => d.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::DTime(t) => time_of_day_to_iso(*t),
+        Value::String(s) => s.clone(),
+        Value::Blob(b) => {
+            let mut hex = String::with_capacity(b.len() * 2);
+            for byte in b {
+                hex.push_str(&format!("{byte:02x}"));
+            }
+            format!("x'{hex}'")
+        }
+        Value::Date(d) => days_to_iso(d.0 as i64),
+        Value::Timestamp(t) => micros_to_iso(t.0),
+        Value::TimestampTz(t) => format!("{}+00:00", micros_to_iso(t.0)),
+        Value::TimestampNs(t) => micros_to_iso(t.0),
+        Value::TimestampMs(t) => micros_to_iso(t.0),
+        Value::TimestampSec(t) => micros_to_iso(t.0),
+        Value::Interval(iv) => format!("{} months {} days {} micros", iv.months, iv.days, iv.micros),
+        Value::InternalID(id) => format!("{}:{}", id.table_id, id.offset),
+        Value::Json(j) => serde_json::to_string(j).unwrap_or_else(|_| "<json>".to_string()),
+        Value::Union(tag, inner) => format!("{}({})", tag, format_value(inner)),
+        Value::List(items) => {
+            let rendered: Vec<String> = items.iter().map(format_value).collect();
+            format!("[{}]", rendered.join(", "))
+        }
+        Value::Map(pairs) => {
+            let rendered: Vec<String> = pairs
+                .iter()
+                .map(|(k, v)| format!("{}: {}", format_value(k), format_value(v)))
+                .collect();
+            format!("{{{}}}", rendered.join(", "))
+        }
+        Value::Struct(fields) => {
+            let rendered: Vec<String> = fields
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", format_value(v)))
+                .collect();
+            format!("{{{}}}", rendered.join(", "))
+        }
+    }
+}
+
+/// Days since the Unix epoch → ISO 8601 date (`YYYY-MM-DD`).
+///
+/// Proleptic Gregorian, Howard Hinnant's `civil_from_days` algorithm.
+fn days_to_iso(days: i64) -> String {
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Microseconds since midnight → `HH:MM:SS.ffffff`.
+fn time_of_day_to_iso(micros: i64) -> String {
+    let micros = micros.rem_euclid(86_400_000_000);
+    let (seconds, us) = (micros / 1_000_000, micros % 1_000_000);
+    let (minutes, s) = (seconds / 60, seconds % 60);
+    let (hours, min) = (minutes / 60, minutes % 60);
+    if us == 0 {
+        format!("{hours:02}:{min:02}:{s:02}")
+    } else {
+        format!("{hours:02}:{min:02}:{s:02}.{us:06}")
+    }
+}
+
+/// Microseconds since the Unix epoch → ISO 8601 UTC datetime
+/// (`YYYY-MM-DDTHH:MM:SS[.ffffff]`).
+fn micros_to_iso(micros: i64) -> String {
+    let days = micros.div_euclid(86_400_000_000);
+    let tod = micros.rem_euclid(86_400_000_000);
+    format!("{}T{}", days_to_iso(days), time_of_day_to_iso(tod))
+}
+
+/// Civil (proleptic Gregorian) date from days since 1970-01-01.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 // --- From implementations for Value ---
 
 impl From<bool> for Value {
@@ -553,5 +664,116 @@ mod tests {
         assert_eq!(value_to_csv_string(&Value::Int64(42)), "42");
         assert_eq!(value_to_csv_string(&Value::String("a,b".into())), "a,b");
         assert_eq!(value_to_csv_string(&Value::UInt8(7)), "7");
+    }
+
+    // --- format_value (P138: every Value variant renders) -----------------
+
+    #[test]
+    fn test_format_value_every_variant_renders() {
+        let cases: Vec<Value> = vec![
+            Value::Null,
+            Value::Bool(true),
+            Value::Int64(-7),
+            Value::Int32(9),
+            Value::Int16(5),
+            Value::Int8(3),
+            Value::UInt64(u64::MAX),
+            Value::UInt32(11),
+            Value::UInt16(12),
+            Value::UInt8(13),
+            Value::Int128(i128::MIN),
+            Value::UInt128(u128::MAX),
+            Value::Double(1.5),
+            Value::Float(0.25),
+            Value::DTime(3_661_000_000),
+            Value::String("x".into()),
+            Value::Blob(vec![0xde, 0xad, 0xbe, 0xef]),
+            Value::Date(Date(0)),
+            Value::Timestamp(Timestamp(0)),
+            Value::TimestampTz(TimestampTZ(0)),
+            Value::TimestampNs(Timestamp(0)),
+            Value::TimestampMs(Timestamp(0)),
+            Value::TimestampSec(Timestamp(0)),
+            Value::Interval(Interval {
+                months: 2,
+                days: 3,
+                micros: 4000,
+            }),
+            Value::InternalID(InternalID { table_id: 1, offset: 2 }),
+            Value::Json(serde_json::json!({"a": 1})),
+            Value::Union("u".into(), Box::new(Value::Int64(4))),
+            Value::List(vec![Value::Int64(1), Value::String("a".into())]),
+            Value::Map(vec![(Value::String("k".into()), Value::Int64(2))]),
+            Value::Struct(vec![("f".to_string(), Value::Bool(true))]),
+        ];
+        for v in &cases {
+            let rendered = format_value(v);
+            assert!(!rendered.is_empty(), "variant {v:?} rendered an empty string");
+            assert!(rendered != "<val>", "variant {v:?} still renders the placeholder");
+        }
+    }
+
+    #[test]
+    fn test_format_value_exact_rendering() {
+        assert_eq!(format_value(&Value::Null), "NULL");
+        assert_eq!(format_value(&Value::Bool(true)), "true");
+        assert_eq!(format_value(&Value::Int64(-7)), "-7");
+        assert_eq!(format_value(&Value::UInt64(42)), "42");
+        assert_eq!(format_value(&Value::String("hi".into())), "hi");
+        // Blob renders as tagged lowercase hex.
+        assert_eq!(format_value(&Value::Blob(vec![0xde, 0xad])), "x'dead'");
+        // Date/timestamps render ISO 8601 from epoch-relative counts.
+        assert_eq!(format_value(&Value::Date(Date(0))), "1970-01-01");
+        assert_eq!(format_value(&Value::Date(Date(20_000))), "2024-10-04");
+        assert_eq!(format_value(&Value::Timestamp(Timestamp(0))), "1970-01-01T00:00:00");
+        assert_eq!(
+            format_value(&Value::Timestamp(Timestamp(1_700_000_000_000_000))),
+            "2023-11-14T22:13:20"
+        );
+        assert_eq!(
+            format_value(&Value::TimestampTz(TimestampTZ(0))),
+            "1970-01-01T00:00:00+00:00"
+        );
+        assert_eq!(format_value(&Value::DTime(3_661_000_000)), "01:01:01");
+        assert_eq!(
+            format_value(&Value::Interval(Interval {
+                months: 2,
+                days: 3,
+                micros: 4000
+            })),
+            "2 months 3 days 4000 micros"
+        );
+        assert_eq!(
+            format_value(&Value::InternalID(InternalID { table_id: 1, offset: 2 })),
+            "1:2"
+        );
+        assert_eq!(format_value(&Value::Json(serde_json::json!({"a": 1}))), "{\"a\":1}");
+        assert_eq!(
+            format_value(&Value::Union("u".into(), Box::new(Value::Int64(4)))),
+            "u(4)"
+        );
+        assert_eq!(
+            format_value(&Value::List(vec![Value::Int64(1), Value::String("a".into())])),
+            "[1, a]"
+        );
+        assert_eq!(
+            format_value(&Value::Map(vec![(Value::String("k".into()), Value::Int64(2))])),
+            "{k: 2}"
+        );
+        assert_eq!(
+            format_value(&Value::Struct(vec![("f".to_string(), Value::Bool(true))])),
+            "{f: true}"
+        );
+    }
+
+    #[test]
+    fn test_days_to_iso_known_dates() {
+        assert_eq!(days_to_iso(0), "1970-01-01");
+        assert_eq!(days_to_iso(-1), "1969-12-31");
+        assert_eq!(days_to_iso(19_000), "2022-01-08");
+        // Leap day: 2024-02-29 is day 19782, its neighbours bound it.
+        assert_eq!(days_to_iso(19_781), "2024-02-28");
+        assert_eq!(days_to_iso(19_782), "2024-02-29");
+        assert_eq!(days_to_iso(19_783), "2024-03-01");
     }
 }

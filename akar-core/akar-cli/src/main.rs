@@ -504,7 +504,18 @@ fn format_output(result: &akar_main::QueryResult, mode: OutputMode, output: &mut
     }
 
     let ncols = rows[0].len();
-    let headers: Vec<String> = (0..ncols).map(|i| format!("col_{}", i)).collect();
+    // Real column names come from the first chunk that carries them; an
+    // unnamed result falls back to positional `col_N` (constitution §6:
+    // one fact, one home — the names live on the chunk, not re-derived here).
+    let field_names: Vec<String> = result
+        .chunks
+        .iter()
+        .find(|c| !c.field_names.is_empty())
+        .map(|c| c.field_names.clone())
+        .unwrap_or_default();
+    let headers: Vec<String> = (0..ncols)
+        .map(|i| field_names.get(i).cloned().unwrap_or_else(|| format!("col_{}", i)))
+        .collect();
 
     match mode {
         OutputMode::Table => {
@@ -616,7 +627,7 @@ fn format_output(result: &akar_main::QueryResult, mode: OutputMode, output: &mut
                 let objs: Vec<String> = row
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| format!("\"col_{}\": \"{}\"", i, json_escape(v)))
+                    .map(|(i, v)| format!("\"{}\": \"{}\"", headers[i], json_escape(v)))
                     .collect();
                 let comma = if ri < rows.len() - 1 { "," } else { "" };
                 writeln!(output, "  {{{}}}{}", objs.join(", "), comma).ok();
@@ -762,16 +773,48 @@ fn json_escape(s: &str) -> String {
 }
 
 fn fmt_val(v: &akar_common::types::Value) -> String {
-    use akar_common::types::Value;
-    match v {
-        Value::Null => "NULL".into(),
-        Value::Int64(i) => i.to_string(),
-        Value::Int32(i) => i.to_string(),
-        Value::Int16(i) => i.to_string(),
-        Value::Double(d) => d.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::String(s) => s.clone(),
-        _ => "<val>".into(),
+    // Thin delegation: every variant renders in akar_common::types::format_value,
+    // so the CLI cannot drift from QueryResult's rendering (P138).
+    akar_common::types::format_value(v)
+}
+
+#[cfg(test)]
+mod cli_display_tests {
+    use super::*;
+
+    fn render(query: &str, mode: OutputMode) -> String {
+        let (_db, conn) = akar_main::test_helpers::setup_db();
+        conn.query("CREATE NODE TABLE P(name STRING, age INT64, PRIMARY KEY(name))")
+            .unwrap();
+        conn.query("CREATE (:P {name: 'Alice', age: 30})").unwrap();
+        let result = conn.query(query).unwrap();
+        let mut out: Vec<u8> = Vec::new();
+        format_output(&result, mode, &mut out);
+        String::from_utf8(out).unwrap()
+    }
+
+    /// P137 regression: table mode must print the query's real column names,
+    /// never positional `col_N` stand-ins.
+    #[test]
+    fn table_mode_prints_real_column_names_and_values() {
+        let text = render("MATCH (p:P) RETURN p.name AS name, p.age AS age", OutputMode::Table);
+        assert!(
+            text.contains("name") && !text.contains("col_0"),
+            "expected real column names, got:\n{text}"
+        );
+        assert!(text.contains("Alice"), "expected the row value, got:\n{text}");
+        assert!(text.contains("30"), "expected the row value, got:\n{text}");
+    }
+
+    /// P137 regression: JSON mode must key each row object by the real column
+    /// name too.
+    #[test]
+    fn json_mode_uses_real_column_names_as_keys() {
+        let text = render("MATCH (p:P) RETURN p.name AS name, p.age AS age", OutputMode::Json);
+        assert!(
+            text.contains("\"name\": \"Alice\""),
+            "expected a name-keyed JSON object, got:\n{text}"
+        );
+        assert!(!text.contains("col_0"), "positional key leaked, got:\n{text}");
     }
 }

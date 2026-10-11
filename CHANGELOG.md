@@ -9,6 +9,12 @@
 
 ### Changed
 
+- **P137/P138/P139 — CLI & QueryResult presentation defects (finding-lift CLI cluster)** · `akar-cli/src/main.rs`, `akar-common/src/types.rs`, `akar-main/src/query_result.rs`
+  - **P137 (C1, HIGH):** CLI table/JSON output now prints the query's **real column names**. Headers come from `DataChunk::field_names` (first chunk that carries them); positional `col_N` remains only as the fallback for unnamed results. JSON row objects are keyed by the same names.
+  - **P138 (C2, MED):** every `Value` variant renders. New `akar_common::types::format_value` is the single display home (exhaustive match, no catch-all): integers of all widths, `Blob` as tagged hex, `Date`/`Timestamp*`/`DTime` as ISO 8601, `Interval`, `InternalID`, `Json`, `Union`, and recursive `List`/`Map`/`Struct`. The CLI's `fmt_val` (was 8 of 27 variants, rest `"<val>"`) delegates to it, and `QueryResult::Display` shares it — one rendering, two surfaces.
+  - **P139 (C3, LOW):** `QueryResult::Display` renders the actual **rows** (header + aligned table) instead of `Chunk N: X rows, Y columns` chunk metadata. The message/error/empty summary head is unchanged.
+  - Regression tests: `format_value` exact-rendering + all-variants cases and epoch-date conversion in `akar-common`; end-to-end Display test in `akar-main` (`test_display_renders_rows_with_real_column_names`); CLI table + JSON name tests in `akar-cli`. `cargo test -p akar-common -p akar-cli -p akar-main` exit 0; `cargo clippy --all-targets -- -D warnings` on the three crates exit 0; the three files are `cargo fmt`-clean (pre-existing fmt diffs elsewhere in the tree are untouched by this change).
+
 - **Rekonsiliasi tata kelola (2026-10-11)** · `SPEC.md`, `README.md`, `AGENTS.md`, `CHANGELOG.md`
   - Versi diselaraskan ke `0.2.4` (SPEC semula `0.1.13`; AGENTS semula `v0.1.10`)
   - Test count diselaraskan ke `2,264` (README semula `2,261`; AGENTS semula `1,889`)
