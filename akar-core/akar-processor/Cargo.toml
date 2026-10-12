@@ -63,3 +63,7 @@ harness = false
 workspace = true
 
 # Trigger reload
+
+[[bench]]
+name = "optional_extend_bench"
+harness = false

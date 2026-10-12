@@ -52,38 +52,20 @@ mod tests {
 
     #[test]
     fn test_parse_aggregate_function_standard_uppercase() {
-        assert!(matches!(
-            parse_aggregate_function("COUNT"),
-            AggregateFunction::Count
-        ));
+        assert!(matches!(parse_aggregate_function("COUNT"), AggregateFunction::Count));
         assert!(matches!(
             parse_aggregate_function("COUNT(*)"),
             AggregateFunction::CountStar
         ));
-        assert!(matches!(
-            parse_aggregate_function("SUM"),
-            AggregateFunction::Sum
-        ));
-        assert!(matches!(
-            parse_aggregate_function("AVG"),
-            AggregateFunction::Avg
-        ));
-        assert!(matches!(
-            parse_aggregate_function("MIN"),
-            AggregateFunction::Min
-        ));
-        assert!(matches!(
-            parse_aggregate_function("MAX"),
-            AggregateFunction::Max
-        ));
+        assert!(matches!(parse_aggregate_function("SUM"), AggregateFunction::Sum));
+        assert!(matches!(parse_aggregate_function("AVG"), AggregateFunction::Avg));
+        assert!(matches!(parse_aggregate_function("MIN"), AggregateFunction::Min));
+        assert!(matches!(parse_aggregate_function("MAX"), AggregateFunction::Max));
         assert!(matches!(
             parse_aggregate_function("COLLECT"),
             AggregateFunction::Collect
         ));
-        assert!(matches!(
-            parse_aggregate_function("STDDEV"),
-            AggregateFunction::StdDev
-        ));
+        assert!(matches!(parse_aggregate_function("STDDEV"), AggregateFunction::StdDev));
         assert!(matches!(
             parse_aggregate_function("VARIANCE"),
             AggregateFunction::Variance
@@ -100,38 +82,20 @@ mod tests {
 
     #[test]
     fn test_parse_aggregate_function_case_insensitivity() {
-        assert!(matches!(
-            parse_aggregate_function("count"),
-            AggregateFunction::Count
-        ));
+        assert!(matches!(parse_aggregate_function("count"), AggregateFunction::Count));
         assert!(matches!(
             parse_aggregate_function("cOuNt(*)"),
             AggregateFunction::CountStar
         ));
-        assert!(matches!(
-            parse_aggregate_function("Sum"),
-            AggregateFunction::Sum
-        ));
-        assert!(matches!(
-            parse_aggregate_function("aVg"),
-            AggregateFunction::Avg
-        ));
-        assert!(matches!(
-            parse_aggregate_function("min"),
-            AggregateFunction::Min
-        ));
-        assert!(matches!(
-            parse_aggregate_function("mAx"),
-            AggregateFunction::Max
-        ));
+        assert!(matches!(parse_aggregate_function("Sum"), AggregateFunction::Sum));
+        assert!(matches!(parse_aggregate_function("aVg"), AggregateFunction::Avg));
+        assert!(matches!(parse_aggregate_function("min"), AggregateFunction::Min));
+        assert!(matches!(parse_aggregate_function("mAx"), AggregateFunction::Max));
         assert!(matches!(
             parse_aggregate_function("collect"),
             AggregateFunction::Collect
         ));
-        assert!(matches!(
-            parse_aggregate_function("stddev"),
-            AggregateFunction::StdDev
-        ));
+        assert!(matches!(parse_aggregate_function("stddev"), AggregateFunction::StdDev));
         assert!(matches!(
             parse_aggregate_function("Variance"),
             AggregateFunction::Variance
@@ -152,14 +116,8 @@ mod tests {
             parse_aggregate_function("UNKNOWN_FUNC"),
             AggregateFunction::Count
         ));
-        assert!(matches!(
-            parse_aggregate_function(""),
-            AggregateFunction::Count
-        ));
-        assert!(matches!(
-            parse_aggregate_function("  123  "),
-            AggregateFunction::Count
-        ));
+        assert!(matches!(parse_aggregate_function(""), AggregateFunction::Count));
+        assert!(matches!(parse_aggregate_function("  123  "), AggregateFunction::Count));
     }
 
     #[test]

@@ -5,6 +5,7 @@ use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::EdgeDirection;
 use akar_storage::table::TableCatalog;
+use hashbrown::HashSet;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -103,31 +104,51 @@ fn probe_incident_edges(
     src: u64,
     direction: &EdgeDirection,
 ) -> Vec<usize> {
-    let mut idxs: Vec<usize> = Vec::new();
     match direction {
         EdgeDirection::LeftToRight => {
             if let Some(entries) = fwd_adj.get(&src) {
-                idxs.extend(entries.iter().map(|(_, i)| *i));
+                entries.iter().map(|(_, i)| *i).collect()
+            } else {
+                Vec::new()
             }
         }
         EdgeDirection::RightToLeft => {
             if let Some(entries) = rev_adj.get(&src) {
-                idxs.extend(entries.iter().map(|(_, i)| *i));
+                entries.iter().map(|(_, i)| *i).collect()
+            } else {
+                Vec::new()
             }
         }
         EdgeDirection::Both => {
-            for list in [fwd_adj.get(&src), rev_adj.get(&src)].into_iter().flatten() {
-                for (_, i) in list {
-                    if !idxs.contains(i) {
-                        idxs.push(*i);
+            let fwd = fwd_adj.get(&src);
+            let rev = rev_adj.get(&src);
+            match (fwd, rev) {
+                (None, None) => Vec::new(),
+                (Some(fwd_list), None) => fwd_list.iter().map(|(_, i)| *i).collect(),
+                (None, Some(rev_list)) => rev_list.iter().map(|(_, i)| *i).collect(),
+                (Some(fwd_list), Some(rev_list)) => {
+                    let total = fwd_list.len() + rev_list.len();
+                    let mut idxs = Vec::with_capacity(total);
+                    if total <= 16 {
+                        for (_, i) in fwd_list.iter().chain(rev_list.iter()) {
+                            if !idxs.contains(i) {
+                                idxs.push(*i);
+                            }
+                        }
+                    } else {
+                        let mut seen = HashSet::with_capacity(total);
+                        for (_, i) in fwd_list.iter().chain(rev_list.iter()) {
+                            if seen.insert(*i) {
+                                idxs.push(*i);
+                            }
+                        }
                     }
+                    idxs
                 }
             }
         }
     }
-    idxs
 }
-
 impl PhysicalOptionalExtend {
     pub fn execute(&self, input: Vec<DataChunk>) -> Result<Vec<DataChunk>, ProcessorError> {
         if input.is_empty() {

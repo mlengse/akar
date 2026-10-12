@@ -919,7 +919,6 @@ fn non_null_count(chunks: &[DataChunk], col_idx: usize) -> u64 {
     count
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
