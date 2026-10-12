@@ -229,6 +229,7 @@ dependencies = [
  "akar-common",
  "akar-extension",
  "akar-function",
+ "criterion",
  "serde_json",
  "tracing",
 ]
