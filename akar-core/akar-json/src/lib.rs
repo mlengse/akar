@@ -9,6 +9,7 @@
 //! - `json_structure` — type structure of JSON value
 //! - `json_type` — type of JSON value
 
+use std::collections::HashSet;
 use akar_extension::{Extension, ExtensionContext};
 
 /// The JSON extension adds JSON data type and functions to Akar.
@@ -290,13 +291,13 @@ fn structure_inner(value: &serde_json::Value, indent: usize, depth: usize) -> Re
             } else {
                 // Describe every distinct element type, not just `arr[0]`, so a
                 // heterogeneous array reflects its real schema (P52.49).
-                let mut seen: Vec<String> = Vec::new();
+                let mut seen: HashSet<String> = HashSet::new();
                 let mut res = format!("{prefix}[");
                 for elem in arr {
                     let inner = structure_inner(elem, indent + 2, depth + 1)?;
                     if !seen.contains(&inner) {
-                        seen.push(inner.clone());
                         res.push_str(&format!("\n{prefix}  {inner}"));
+                        seen.insert(inner);
                     }
                 }
                 res.push_str(&format!("\n{prefix}]"));
