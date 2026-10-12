@@ -49,11 +49,14 @@ def embed(n):
     v[1] = 1.0 - n * 0.1
     return v
 
-for i, content in enumerate(["hello world", "goodbye world", "foo bar", "baz qux"]):
-    conn.execute(
-        "CREATE (:Memory {id: $id, content: $content, embedding: $vec, salience: $sal})",
-        {"id": i, "content": content, "vec": embed(i), "sal": 0.5 + i * 0.1},
-    )
+items = [
+    {"id": i, "content": content, "vec": embed(i), "sal": 0.5 + i * 0.1}
+    for i, content in enumerate(["hello world", "goodbye world", "foo bar", "baz qux"])
+]
+conn.execute(
+    "UNWIND $batch AS item CREATE (:Memory {id: item.id, content: item.content, embedding: item.vec, salience: item.sal})",
+    {"batch": items},
+)
 print("step3 inserts ok", flush=True)
 
 # 4. QUERY_VECTOR_INDEX translation -> brute-force MATCH, params interpolated
