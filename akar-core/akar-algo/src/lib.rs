@@ -993,19 +993,27 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
 /// Compute SCC using Kosaraju's algorithm.
 pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     let mut visited = vec![false; n];
     let mut order = Vec::with_capacity(n);
+    let mut dfs_stack: Vec<(usize, usize)> = Vec::new();
 
-    // Phase 1: iterative DFS to get finish order (P52.47 — the recursive
-    // dfs1 overflowed the stack on large/deep graphs).
+    // Phase 1: iterative DFS to get finish order (P52.47 — iterative DFS avoids
+    // stack overflow on deep graphs). Hoisting `dfs_stack` outside loop avoids allocation churn.
     for start in 0..n {
         if visited[start] {
             continue;
         }
         visited[start] = true;
-        let mut dfs_stack: Vec<(usize, usize)> = vec![(start, 0)];
+        dfs_stack.push((start, 0));
+
         while let Some(&(v, npos)) = dfs_stack.last() {
-            let neighbors = csr.neighbors(v);
+            let start_off = offsets[v];
+            let end_off = offsets[v + 1];
+            let neighbors = &adjacency[start_off..end_off];
+
             if npos < neighbors.len() {
                 let (_, dst) = neighbors[npos];
                 dfs_stack.last_mut().unwrap().1 += 1;
@@ -1021,15 +1029,42 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
         }
     }
 
-    // Phase 2: DFS on reversed graph (simulated via in-edge query)
-    // Since we don't have reverse adjacency, we scan all nodes' neighbors.
-    // For efficiency, build reverse CSR on the fly.
-    let mut rev_adj: Vec<Vec<usize>> = vec![vec![]; n];
+    // Phase 2: Build a flat reverse CSR instead of allocating N individual vectors (`Vec<Vec<usize>>`).
+    // Bolt Optimization: Building contiguous flat arrays (`rev_offsets` and `rev_adj`) reduces
+    // reverse graph heap allocations from N+1 down to 2, eliminating dynamic reallocation overhead
+    // and ensuring cache-friendly contiguous slice traversal during reverse DFS.
+    let total_edges = offsets.last().copied().unwrap_or(0);
+    let mut rev_offsets = vec![0usize; n + 1];
+
+    // Pass 1: count in-degrees for reverse graph
     for v in 0..n {
-        for (_, dst) in csr.neighbors(v) {
+        let start_off = offsets[v];
+        let end_off = offsets[v + 1];
+        for (_, dst) in &adjacency[start_off..end_off] {
             let w = dst.offset as usize;
-            if w < csr.num_nodes() {
-                rev_adj[w].push(v);
+            if w < n {
+                rev_offsets[w + 1] += 1;
+            }
+        }
+    }
+
+    // Prefix sum to compute offsets
+    for i in 0..n {
+        rev_offsets[i + 1] += rev_offsets[i];
+    }
+
+    // Pass 2: fill flat reverse adjacency array
+    let mut rev_adj = vec![0usize; total_edges];
+    let mut pos = rev_offsets.clone();
+    for v in 0..n {
+        let start_off = offsets[v];
+        let end_off = offsets[v + 1];
+        for (_, dst) in &adjacency[start_off..end_off] {
+            let w = dst.offset as usize;
+            if w < n {
+                let p = pos[w];
+                rev_adj[p] = v;
+                pos[w] += 1;
             }
         }
     }
@@ -1037,20 +1072,23 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
     let mut component = vec![0usize; n];
     let mut comp_id = 0usize;
     let mut visited2 = vec![false; n];
+    let mut dfs_stack2 = Vec::new();
 
     for &v in order.iter().rev() {
         if visited2[v] {
             continue;
         }
-        // Iterative DFS (replaces recursive dfs2).
-        let mut dfs_stack = vec![v];
+        // Iterative DFS on reverse graph using flat slice iteration and hoisted stack reuse.
+        dfs_stack2.push(v);
         visited2[v] = true;
-        while let Some(cur) = dfs_stack.pop() {
+        while let Some(cur) = dfs_stack2.pop() {
             component[cur] = comp_id;
-            for &w in &rev_adj[cur] {
+            let start_off = rev_offsets[cur];
+            let end_off = rev_offsets[cur + 1];
+            for &w in &rev_adj[start_off..end_off] {
                 if !visited2[w] {
                     visited2[w] = true;
-                    dfs_stack.push(w);
+                    dfs_stack2.push(w);
                 }
             }
         }
