@@ -12,14 +12,14 @@ use std::sync::Mutex;
 
 /// Tracks insert/delete visibility for a single vector (1024 rows).
 ///
-/// Uses a `Mutex`-protected map from transaction ID to a set of
-/// affected row indices within this vector.
+/// Uses a `Mutex`-protected map from row index within this vector to the
+/// transaction ID that inserted or deleted that row.
 #[derive(Debug)]
 pub struct VectorVersionInfo {
-    /// Map: transaction_id → set of inserted row indices (relative to vector).
-    inserted: Mutex<HashMap<u64, HashSet<u32>>>,
-    /// Map: transaction_id → set of deleted row indices.
-    deleted: Mutex<HashMap<u64, HashSet<u32>>>,
+    /// Map: row_in_vector → transaction_id that inserted this row.
+    inserted: Mutex<HashMap<u32, u64>>,
+    /// Map: row_in_vector → transaction_id that deleted this row.
+    deleted: Mutex<HashMap<u32, u64>>,
 }
 
 impl Clone for VectorVersionInfo {
@@ -48,13 +48,13 @@ impl VectorVersionInfo {
     /// Record that `txn_id` inserted a row at `row_in_vector`.
     pub fn insert(&self, txn_id: u64, row_in_vector: u32) {
         let mut ins = self.inserted.lock().unwrap();
-        ins.entry(txn_id).or_default().insert(row_in_vector);
+        ins.insert(row_in_vector, txn_id);
     }
 
     /// Record that `txn_id` deleted a row at `row_in_vector`.
     pub fn delete(&self, txn_id: u64, row_in_vector: u32) {
         let mut del = self.deleted.lock().unwrap();
-        del.entry(txn_id).or_default().insert(row_in_vector);
+        del.insert(row_in_vector, txn_id);
     }
 
     /// Drop all recorded inserts and deletes for this vector.
@@ -75,25 +75,23 @@ impl VectorVersionInfo {
     ///
     /// `commit_history` is used to look up commit timestamps for
     /// transaction IDs.
+    // Bolt Optimization: Replace O(N_txns) loop with O(1) row index lookup in `deleted` and `inserted`.
+    // Each row offset in a vector is inserted/deleted by at most 1 transaction, so direct lookup
+    // turns visibility checks into O(1) operations.
     pub fn is_visible(&self, row_in_vector: u32, snapshot_ts: u64, commit_history: &HashMap<u64, u64>) -> bool {
-        // Check deletions: if any committed txn with commit_ts ≤ snapshot_ts
-        // deleted this row, it's not visible.
+        // Check deletions: if deleted by a committed txn with commit_ts ≤ snapshot_ts, not visible.
         if let Ok(del) = self.deleted.lock() {
-            for (&txn_id, rows) in del.iter() {
-                if rows.contains(&row_in_vector) && is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
+            if let Some(&txn_id) = del.get(&row_in_vector) {
+                if is_txn_committed_before(txn_id, snapshot_ts, commit_history) {
                     return false;
                 }
             }
         }
 
-        // Check insertions: if any committed txn with commit_ts ≤ snapshot_ts
-        // inserted this row, it's visible. If no insert record, the row is
-        // visible by default (pre-existing data).
+        // Check insertions: if inserted by a committed txn with commit_ts ≤ snapshot_ts, visible.
         if let Ok(ins) = self.inserted.lock() {
-            for (&txn_id, rows) in ins.iter() {
-                if rows.contains(&row_in_vector) {
-                    return is_txn_committed_before(txn_id, snapshot_ts, commit_history);
-                }
+            if let Some(&txn_id) = ins.get(&row_in_vector) {
+                return is_txn_committed_before(txn_id, snapshot_ts, commit_history);
             }
         }
 
@@ -103,12 +101,22 @@ impl VectorVersionInfo {
 
     /// Number of unique transactions that inserted rows.
     pub fn num_inserters(&self) -> usize {
-        self.inserted.lock().map(|m| m.len()).unwrap_or(0)
+        if let Ok(ins) = self.inserted.lock() {
+            let unique: HashSet<u64> = ins.values().copied().collect();
+            unique.len()
+        } else {
+            0
+        }
     }
 
     /// Number of unique transactions that deleted rows.
     pub fn num_deleters(&self) -> usize {
-        self.deleted.lock().map(|m| m.len()).unwrap_or(0)
+        if let Ok(del) = self.deleted.lock() {
+            let unique: HashSet<u64> = del.values().copied().collect();
+            unique.len()
+        } else {
+            0
+        }
     }
 }
 
