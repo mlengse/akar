@@ -9,8 +9,8 @@
 //! - `json_structure` — type structure of JSON value
 //! - `json_type` — type of JSON value
 
-use std::collections::HashSet;
 use akar_extension::{Extension, ExtensionContext};
+use std::collections::HashSet;
 
 /// The JSON extension adds JSON data type and functions to Akar.
 pub struct JsonExtension;

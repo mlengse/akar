@@ -303,10 +303,7 @@ mod tests {
     fn test_resize_chunk_shrink() {
         let col1 = Arc::new(Int64Array::from(vec![10, 20, 30, 40, 50])) as ArrayRef;
         let col2 = Arc::new(StringArray::from(vec!["a", "b", "c", "d", "e"])) as ArrayRef;
-        let mut chunk = DataChunk::new(
-            vec![col1, col2],
-            vec![PhysicalTypeID::Int64, PhysicalTypeID::String],
-        );
+        let mut chunk = DataChunk::new(vec![col1, col2], vec![PhysicalTypeID::Int64, PhysicalTypeID::String]);
 
         assert_eq!(chunk.size, 5);
         assert_eq!(chunk.fields[0].len(), 5);
@@ -368,11 +365,7 @@ mod tests {
 
         let mut chunk = DataChunk::new(
             vec![col_i64, col_f64, col_str],
-            vec![
-                PhysicalTypeID::Int64,
-                PhysicalTypeID::Double,
-                PhysicalTypeID::String,
-            ],
+            vec![PhysicalTypeID::Int64, PhysicalTypeID::Double, PhysicalTypeID::String],
         );
 
         resize_chunk(&mut chunk, 2);

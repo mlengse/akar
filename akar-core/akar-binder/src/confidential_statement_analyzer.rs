@@ -95,13 +95,21 @@ mod tests {
         ];
         for option in options {
             let query_space = format!("CALL {} = 'val'", option);
-            assert!(is_confidential_call(&query_space), "Failed for space query: {}", query_space);
+            assert!(
+                is_confidential_call(&query_space),
+                "Failed for space query: {}",
+                query_space
+            );
 
             let query_eq = format!("CALL {}='val'", option);
             assert!(is_confidential_call(&query_eq), "Failed for eq query: {}", query_eq);
 
             let query_lower = format!("call {} = 'val'", option.to_lowercase());
-            assert!(is_confidential_call(&query_lower), "Failed for lowercase query: {}", query_lower);
+            assert!(
+                is_confidential_call(&query_lower),
+                "Failed for lowercase query: {}",
+                query_lower
+            );
         }
     }
 

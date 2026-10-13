@@ -2113,11 +2113,7 @@ impl Ord for DistNode {
 // and `parent: Vec<usize>` initialized with `usize::MAX`) cut memory usage by 50% and improve
 // cache locality during Dijkstra traversal. Pre-allocating `BinaryHeap` capacity and using direct
 // CSR slice access eliminates heap re-allocations and neighbor iterator overhead.
-pub fn weighted_shortest_path_internal<F>(
-    csr: &CSRAdjacency,
-    source: usize,
-    weight_fn: F,
-) -> (Vec<f64>, Vec<usize>)
+pub fn weighted_shortest_path_internal<F>(csr: &CSRAdjacency, source: usize, weight_fn: F) -> (Vec<f64>, Vec<usize>)
 where
     F: Fn(usize, usize) -> f64,
 {

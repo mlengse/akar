@@ -194,7 +194,8 @@ pub fn create_embedding(text: &str, config: Option<&EmbeddingConfig>) -> Result<
 /// Requires credentials file or config.api_key.
 fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Embedding, String> {
     let resolved_key = resolve_openai_api_key(config.api_key.as_deref()).ok_or_else(|| {
-        "OpenAI API key not found. Configure credentials file at ~/.akar/credentials or pass api_key in config.".to_string()
+        "OpenAI API key not found. Configure credentials file at ~/.akar/credentials or pass api_key in config."
+            .to_string()
     })?;
     let api_key = resolved_key.as_str();
 
@@ -439,7 +440,10 @@ mod tests {
             assert_eq!(resolve_openai_api_key(None), Some("file_key_123".to_string()));
 
             // 3. Config key overrides credentials file
-            assert_eq!(resolve_openai_api_key(Some("config_key_789")), Some("config_key_789".to_string()));
+            assert_eq!(
+                resolve_openai_api_key(Some("config_key_789")),
+                Some("config_key_789".to_string())
+            );
 
             // Clean up
             std::env::remove_var("OPENAI_API_KEY");

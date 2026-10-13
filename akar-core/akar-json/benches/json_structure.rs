@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use akar_json::json_structure_of;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn generate_array_json(num_elements: usize) -> String {
     let mut json = String::with_capacity(num_elements * 20 + 2);

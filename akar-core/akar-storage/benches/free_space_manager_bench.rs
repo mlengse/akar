@@ -9,9 +9,7 @@ fn bench_total_free_pages(c: &mut Criterion) {
     }
 
     c.bench_function("FreeSpaceManager/total_free_pages", |b| {
-        b.iter(|| {
-            fsm.total_free_pages()
-        })
+        b.iter(|| fsm.total_free_pages())
     });
 }
 

@@ -2338,7 +2338,10 @@ mod tests {
         assert_eq!(Binder::parse_type("DATE").unwrap(), LogicalTypeID::Date);
         assert_eq!(Binder::parse_type("TIMESTAMP").unwrap(), LogicalTypeID::Timestamp);
         assert_eq!(Binder::parse_type("TIMESTAMP_MS").unwrap(), LogicalTypeID::Timestamp);
-        assert_eq!(Binder::parse_type("TIMESTAMP_SEC").unwrap(), LogicalTypeID::TimestampSec);
+        assert_eq!(
+            Binder::parse_type("TIMESTAMP_SEC").unwrap(),
+            LogicalTypeID::TimestampSec
+        );
         assert_eq!(Binder::parse_type("TIMESTAMP_NS").unwrap(), LogicalTypeID::TimestampNs);
         assert_eq!(Binder::parse_type("TIMESTAMP_TZ").unwrap(), LogicalTypeID::TimestampTz);
         assert_eq!(Binder::parse_type("INTERVAL").unwrap(), LogicalTypeID::Interval);
@@ -2353,8 +2356,14 @@ mod tests {
     fn parse_type_compound_types() {
         assert_eq!(Binder::parse_type("MAP(STRING, INT64)").unwrap(), LogicalTypeID::Map);
         assert_eq!(Binder::parse_type("map(int64, string)").unwrap(), LogicalTypeID::Map);
-        assert_eq!(Binder::parse_type("STRUCT(a INT64, b STRING)").unwrap(), LogicalTypeID::Struct);
-        assert_eq!(Binder::parse_type("UNION(a INT64, b STRING)").unwrap(), LogicalTypeID::Union);
+        assert_eq!(
+            Binder::parse_type("STRUCT(a INT64, b STRING)").unwrap(),
+            LogicalTypeID::Struct
+        );
+        assert_eq!(
+            Binder::parse_type("UNION(a INT64, b STRING)").unwrap(),
+            LogicalTypeID::Union
+        );
     }
 
     #[test]
