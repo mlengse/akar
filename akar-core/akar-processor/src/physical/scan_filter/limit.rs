@@ -23,6 +23,17 @@ impl PhysicalOperatorExec for PhysicalLimit {
         let mut skipped: u64 = 0;
 
         for chunk in input {
+            // P136 / T034: a zero-row chunk carries schema but no rows to
+            // limit, so it must pass through unchanged. Without this it is
+            // swallowed by the offset branch below (`skipped + 0 <= skip` is
+            // true even for `skip = 0`), and an all-empty input produces zero
+            // chunks — the consumer then sees no schema at all and name-based
+            // reads fail with `Variable 'X' not found (chunk has no
+            // field_names)`. `PhysicalSkip` already passes such chunks through.
+            if chunk.size == 0 {
+                output.push(chunk);
+                continue;
+            }
             if remaining == 0 {
                 break;
             }

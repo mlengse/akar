@@ -82,14 +82,25 @@ impl PhysicalOperatorExec for PhysicalTopK {
     }
 
     fn execute(&self, input: Vec<DataChunk>) -> OperatorResult {
-        let capacity = (self.limit + self.offset) as usize;
-        if capacity == 0 || input.is_empty() {
+        if input.is_empty() {
             return Ok(Vec::new());
         }
-
+        let field_names = input[0].field_names.clone();
+        let capacity = (self.limit + self.offset) as usize;
         let total_rows: usize = input.iter().map(|c| c.size).sum();
-        if total_rows == 0 {
-            return Ok(Vec::new());
+
+        // P136 / T034: an empty *result* must still carry the input's schema.
+        // A bare `Ok(Vec::new())` here made `ORDER BY ... LIMIT k` over an
+        // empty table return zero chunks, so downstream name-based reads
+        // failed with `Variable 'X' not found (chunk has no field_names)` —
+        // live-reproduced by the T033 probe matrix (path P11). Zero-row input
+        // passes through unchanged; LIMIT 0 and OFFSET-past-the-end yield a
+        // zero-row chunk that keeps the schema.
+        if capacity == 0 || total_rows == 0 {
+            if total_rows == 0 {
+                return Ok(input);
+            }
+            return Ok(vec![take_global_rows(&input, &[], field_names)?]);
         }
 
         let num_fields = input[0].num_fields();
@@ -134,11 +145,9 @@ impl PhysicalOperatorExec for PhysicalTopK {
         let entries = &sorted[start..end];
 
         if entries.is_empty() {
-            return Ok(Vec::new());
+            // OFFSET past the last row: empty result, schema preserved.
+            return Ok(vec![take_global_rows(&input, &[], field_names.clone())?]);
         }
-
-        // Capture field_names from input chunks for output propagation
-        let field_names = input[0].field_names.clone();
 
         // Build output chunks (up to 100 rows each). Slice the source fields
         // via Arrow `take`, preserving complex types (List/Struct).
