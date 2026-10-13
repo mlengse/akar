@@ -67,6 +67,11 @@
   - Perbaikan di mapper proyeksi, bukan hanya `neighbors`/`decode_neighbors`: ketika **seluruh** input zero-row, hasil dibangun ulang dari `BoundExpression` logis — satu chunk kosong berisi kolom bertipe zero-length dengan nama hasil alias (`expression_field_name`) dan tipe fisik dari `resolved_type`.
   - `resolve_sort_keys` mempertahankan guard zero-row (sort key kosong = tidak ada kerja sorting pada hasil kosong); coverage ORDER BY/empty-result terkait tetap hijau (`test_p5337_order_by_unprojected`, `test_p5316_g5_alias_return`, `test_empty_tables`, `test_embedding_api`).
 
+- **P136 / T034 — `LIMIT` dan `TopK` atas hasil kosong mempertahankan schema kolom** · `akar-processor/src/physical/scan_filter/limit.rs`, `akar-processor/src/physical/order_aggregate/topk.rs`, `akar-main/tests/test_empty_result_schema_probe.rs` · gate **2,310** (+1: 2,309 → 2,310, tes probe)
+  - **Temuan (live-reproduced).** Probe matrix 11-jalur: `MATCH (n:T) RETURN n.id AS id ORDER BY id LIMIT 10` atas tabel kosong mengembalikan chunk nol-baris ber-`field_names` **kosong** — kelas defect P136 hidup di build saat ini; premis "tak terverifikasi" di T013 terbantah (file evidensi hilang ≠ defect hilang). Latar: `PhysicalLimit` men-drop chunk nol-baris lewat cabang offset (`skipped + 0 <= skip`), dan `PhysicalTopK` (operator fusi ORDER BY+LIMIT, dipanggil dari `map_projection`) me-return `Vec::new()` untuk input nol-baris / `LIMIT 0` / OFFSET-past-end.
+  - **Fix.** Keduanya meneruskan chunk nol-baris tidak berubah (skema dipertahankan; tidak ada baris untuk di-limit). Probe jadi kontrak keras: setiap jalur harus execute, dan setiap hasil nol-baris harus membawa `field_names`.
+  - **Verifikasi.** `cargo test --manifest-path akar-core/Cargo.toml` **2,310 passed / 0 failed / 0 ignored** (tanpa regresi dari perubahan TopK); `cargo fmt -p akar-processor -p akar-main` clean.
+
 ### Deprecated
 
 - **T020 — helper warisan implementasi FTS dari-nol didepresiasi (penghapusan di 0.3.0)** · `akar-fts/src/lib.rs` · `[Uncommitted]` · gate `clippy -p akar-fts --all-targets -- -D warnings` clean, `test -p akar-fts` 53 passed / 0 failed, `fmt -p akar-fts` clean
