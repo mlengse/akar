@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-13
+
 ### Fixed
 
 - **Negative numeric literals lost their sign in the parser; the vector (ANN) surface was corrupted** · `akar-core/akar-parser/src/parser/expression.rs` · gate **2,303**
@@ -864,6 +866,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.2.5]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.5
 [0.2.4]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.4
 [0.2.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.3
 [0.2.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.2
