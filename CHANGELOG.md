@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **P135 withdrawal completed on crates.io; `akar` 0.2.5 wheel published to PyPI (workspace backlog T043/T046, 2026-10-14)** · `CHANGELOG.md` · release-owner external actions, no code change
+  - **Yank done:** `cargo yank akar-server --version <v>` applied to every published version (0.1.0–0.1.3, 0.1.12–0.1.21, 0.2.0–0.2.4) — 19 OK / 0 FAIL. crates.io reports `0.2.4` `yanked: true` and no non-yanked version remains (`latest` = 0.0.0); reversible via `cargo yank --undo`. This closes the P135 distribution-shape removal that the 0.2.5 release left as an external action.
+  - **PyPI wheel:** `akar-core/akar-python/pyproject.toml` bumped `0.2.4` → `0.2.5`; `maturin build --release` produced `akar-0.2.5-cp39-abi3-win_amd64.whl`, uploaded to PyPI — `akar 0.2.5` confirmed live (unblocks the sulur `akar` pin, workspace T039).
+
 ## [0.2.5] - 2026-10-13
 
 ### Fixed
@@ -20,7 +26,7 @@
 ### Removed
 
 - **P135 — crate `akar-server` dihapus dari workspace; Akar 100% pustaka embedded (§13 / ADR-02)** · `[Uncommitted]` · gate **2,300**
-  - Crate broker terakhir `akar-server` dihapus dari `akar-core/Cargo.toml` (members) dan `PUBLISH_ORDER` (`tools/release.py`); `akar-server` hilang total dari workspace, bukan sekadar diturunkan perannya (P124). **Yank** crates.io seluruh versi masih aksi eksternal (belum dijalankan).
+  - Crate broker terakhir `akar-server` dihapus dari `akar-core/Cargo.toml` (members) dan `PUBLISH_ORDER` (`tools/release.py`); `akar-server` hilang total dari workspace, bukan sekadar diturunkan perannya (P124). **Yank** crates.io seluruh versi (19) selesai 2026-10-14 — lihat `[Unreleased]`.
   - **Tes tidak hilang** (arah §8.1 "migrasi dulu, hapus belakangan"): 4 tes `DreamCycle` kembali ke `akar-dream` (`src/cycle_tests.rs`, sequencer *test-only* — crate tetap primitif-only, §13); 41 tes framing/session/auth/param-binding menjadi fixture `#[cfg(test)]` di `akar-main/tests/test_remote_server.rs` + `tests/server_fixture/`, satu-satunya cara `Database::connect_tcp` tetap punya uji putaran penuh. 12 tes duplikat (`dream_control`/`DreamControl::with_db`/`GraphBackend`, `daemon_log`) dihapus — `daemon_log` sudah hidup di `sulur-server` (P6-LOG-1).
   - Rekonsiliasi: SPEC §1.2/§2/§3.2/§7/§9.1/§11.1/§13.4 + `README.md` + prosa `remote.rs`; counts **36 → 35** crate, tes **2,267 → 2,300** (2,291 unit/integrasi + 9 doctest; net −12 dari penghapusan duplikat). `sulur/tools/boundary-check.py` BC-02 diselaraskan (crate hilang → INFO "(clean)").
 
