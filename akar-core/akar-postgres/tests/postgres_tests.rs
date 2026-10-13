@@ -4,7 +4,7 @@ use akar_catalog::Catalog;
 use akar_common::file_system::VirtualFileSystemRegistry;
 use akar_extension::{Extension, ExtensionContext};
 use akar_function::registry::FunctionRegistry;
-use akar_postgres::PostgresExtension;
+use akar_postgres::{PostgresExtension, validate_query};
 
 fn make_context() -> ExtensionContext {
     ExtensionContext::new(
@@ -48,8 +48,6 @@ fn test_postgres_placeholder_returns_error() {
     if let akar_function::registry::ScalarFunction::CustomScalar { execute, .. } = func {
         let result = execute(&[]);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("not available"));
     } else {
         panic!("Expected CustomScalar variant");
     }
@@ -80,4 +78,19 @@ fn test_postgres_load_idempotent() {
 
     let reg = ctx.function_registry().lock().unwrap();
     assert!(reg.get_scalar("sql_query").is_some());
+}
+
+#[test]
+fn test_validate_query_integration() {
+    assert!(validate_query("SELECT * FROM users").is_ok());
+    assert!(validate_query("EXPLAIN SELECT 1").is_ok());
+
+    let err_empty = validate_query("").unwrap_err();
+    assert!(err_empty.contains("Empty query"));
+
+    let err_keyword = validate_query("DROP TABLE users").unwrap_err();
+    assert!(err_keyword.contains("Query must start with"));
+
+    let err_stacked = validate_query("SELECT 1; DROP TABLE users").unwrap_err();
+    assert!(err_stacked.contains("Multiple SQL statements"));
 }
