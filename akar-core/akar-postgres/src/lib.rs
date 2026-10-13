@@ -90,8 +90,7 @@ mod runtime {
         // when the caller explicitly requires TLS (which we cannot provide yet).
         if config.get_ssl_mode() == tokio_postgres::config::SslMode::Require {
             return Err(
-                "sslmode=require requested but TLS support is not compiled into akar-postgres \
-                 (use sslmode=disable or sslmode=prefer)"
+                "sslmode=require requested but TLS support is not compiled into akar-postgres                  (use sslmode=disable or sslmode=prefer)"
                     .into(),
             );
         }
@@ -129,6 +128,164 @@ mod runtime {
             }
         }
     }
+}
+
+/// Validate a PostgreSQL query string.
+///
+/// Ensures the query is non-empty, starts with a read-only query keyword
+/// (`SELECT`, `EXPLAIN`, `SHOW`, `WITH`, `TABLE`, `VALUES`), and does not
+/// contain stacked/multiple SQL statements separated by semicolons.
+pub fn validate_query(sql: &str) -> Result<(), String> {
+    let trimmed = sql.trim();
+    if trimmed.is_empty() {
+        return Err("Empty query".into());
+    }
+
+    let uppercase_trimmed = trimmed.to_uppercase();
+    let valid_keywords = ["SELECT", "EXPLAIN", "SHOW", "WITH", "TABLE", "VALUES"];
+    if !valid_keywords.iter().any(|kw| uppercase_trimmed.starts_with(kw)) {
+        let first_word = trimmed.split_whitespace().next().unwrap_or("");
+        return Err(format!(
+            "Query must start with SELECT, EXPLAIN, SHOW, WITH, TABLE, or VALUES. Got: {first_word}"
+        ));
+    }
+
+    if has_stacked_statements(trimmed) {
+        return Err("Multiple SQL statements are not allowed".into());
+    }
+
+    Ok(())
+}
+
+fn has_stacked_statements(sql: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut statement_count = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let mut dollar_tag: Option<String> = None;
+    let mut has_unquoted_content = false;
+
+    while i < len {
+        if in_line_comment {
+            if bytes[i] == b'\n' {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_block_comment {
+            if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                in_block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(ref tag) = dollar_tag {
+            if sql[i..].starts_with(tag) {
+                i += tag.len();
+                dollar_tag = None;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if in_single_quote {
+            if bytes[i] == b'\'' {
+                if i + 1 < len && bytes[i + 1] == b'\'' {
+                    i += 2;
+                } else {
+                    in_single_quote = false;
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            if bytes[i] == b'"' {
+                if i + 1 < len && bytes[i + 1] == b'"' {
+                    i += 2;
+                } else {
+                    in_double_quote = false;
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            in_line_comment = true;
+            i += 2;
+            continue;
+        }
+
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            in_block_comment = true;
+            i += 2;
+            continue;
+        }
+
+        if bytes[i] == b'\'' {
+            in_single_quote = true;
+            has_unquoted_content = true;
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'"' {
+            in_double_quote = true;
+            has_unquoted_content = true;
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'$' {
+            if let Some(end_dollar) = sql[i + 1..].find('$') {
+                let tag_candidate = &sql[i..=i + 1 + end_dollar];
+                let inner = &tag_candidate[1..tag_candidate.len() - 1];
+                if inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    dollar_tag = Some(tag_candidate.to_string());
+                    has_unquoted_content = true;
+                    i += tag_candidate.len();
+                    continue;
+                }
+            }
+        }
+
+        if bytes[i] == b';' {
+            if has_unquoted_content {
+                statement_count += 1;
+                has_unquoted_content = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if !bytes[i].is_ascii_whitespace() {
+            has_unquoted_content = true;
+        }
+
+        i += 1;
+    }
+
+    if has_unquoted_content {
+        statement_count += 1;
+    }
+
+    statement_count > 1
 }
 
 /// The PostgreSQL extension enables querying PostgreSQL databases from Akar.
@@ -171,6 +328,8 @@ impl Extension for PostgresExtension {
                     Value::String(s) => s.clone(),
                     _ => return Err("sql_query: second argument must be a SQL string".into()),
                 };
+
+                validate_query(&sql)?;
 
                 let rows = runtime::query(&conn_str, &sql)?;
 
@@ -223,5 +382,32 @@ mod tests {
     fn test_postgres_extension_name() {
         let ext = PostgresExtension::new();
         assert_eq!(ext.name(), "POSTGRES");
+    }
+
+    #[test]
+    fn test_validate_query_valid() {
+        assert!(validate_query("SELECT * FROM users").is_ok());
+        assert!(validate_query("  select id, name from table  ").is_ok());
+        assert!(validate_query("EXPLAIN SELECT 1").is_ok());
+        assert!(validate_query("SHOW tables").is_ok());
+        assert!(validate_query("WITH cte AS (SELECT 1) SELECT * FROM cte").is_ok());
+        assert!(validate_query("TABLE users").is_ok());
+        assert!(validate_query("VALUES (1, 'a'), (2, 'b')").is_ok());
+        assert!(validate_query("SELECT 'hello; world' FROM t").is_ok());
+        assert!(validate_query("SELECT $tag$hello; world$tag$ FROM t").is_ok());
+        assert!(validate_query("SELECT * FROM t;").is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_invalid() {
+        assert!(validate_query("").is_err());
+        assert!(validate_query("   ").is_err());
+        assert!(validate_query("INSERT INTO t VALUES (1)").is_err());
+        assert!(validate_query("DELETE FROM t").is_err());
+        assert!(validate_query("DROP TABLE t").is_err());
+        assert!(validate_query("UPDATE t SET x = 1").is_err());
+        assert!(validate_query("CREATE TABLE t (id INT)").is_err());
+        assert!(validate_query("SELECT * FROM t; DROP TABLE t").is_err());
+        assert!(validate_query("SELECT 1; SELECT 2").is_err());
     }
 }
