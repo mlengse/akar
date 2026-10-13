@@ -6,6 +6,22 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A table column definition in the catalog.
+///
+/// # Array dimensions (P81 — evaluated, deferred)
+///
+/// `FLOAT[384]` and `FLOAT[]` are indistinguishable here: `parse_type`
+/// drops the declared element count `N`, so the catalog records only
+/// `LogicalTypeID::Array` with no dimension (mirroring the Python engine).
+/// P81 evaluated threading `N` into this struct plus a fixed-size storage
+/// `PhysicalTypeID::Array` so the catalog could store the dimension and
+/// storage could enforce it. **Decision: deferred, do not implement yet.**
+/// The value (a complete type model) is real but the blast radius is large —
+/// `physical_type_size` (`akar-vector/src/vector.rs`), serialization and
+/// persistence (`STORAGE_VERSION`), and the storage layout all move — and the
+/// only proven consumer need (kairos bootstrap size enforcement) is already
+/// satisfied by P80. Re-open only when a workload proves P80 insufficient.
+/// Provenance: specs/002-workspace-pending-work/tasks.md (T019);
+/// sources/akar/implementation-plan.md — BACKLOG P81.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogColumn {
     pub name: String,

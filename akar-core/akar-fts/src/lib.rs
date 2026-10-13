@@ -133,6 +133,15 @@ pub fn tokenize(text: &str) -> Vec<String> {
 }
 
 /// Compute TF-IDF score for a term in a document.
+///
+/// Legacy residual of the from-scratch FTS implementation: production scoring
+/// goes through the Tantivy backend (`bm25` below is the retained reference
+/// form; live scans delegate to Tantivy). Retained only because it is public
+/// API — scheduled for removal in 0.3.0 (breaking).
+#[deprecated(
+    since = "0.2.5",
+    note = "legacy from-scratch FTS helper; production search uses the Tantivy backend. Removed in 0.3.0."
+)]
 pub fn tf_idf(term_freq: f64, doc_count: usize, total_docs: usize) -> f64 {
     if total_docs == 0 || doc_count == 0 {
         return 0.0;
@@ -166,6 +175,14 @@ pub fn bm25(
 }
 
 /// Common English stop words to filter out during indexing.
+///
+/// Legacy residual of the from-scratch FTS implementation — stop-word
+/// handling belongs to the Tantivy pipeline, not to this list. Retained only
+/// because it is public API — scheduled for removal in 0.3.0 (breaking).
+#[deprecated(
+    since = "0.2.5",
+    note = "legacy from-scratch FTS helper; stop-word handling belongs to the Tantivy pipeline. Removed in 0.3.0."
+)]
 pub const STOP_WORDS: &[&str] = &[
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "by", "with", "from", "as", "is", "was",
     "are", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
@@ -178,14 +195,29 @@ pub const STOP_WORDS: &[&str] = &[
 ];
 
 /// Filter stop words from a list of tokens.
+///
+/// Legacy residual of the from-scratch FTS implementation — see [`STOP_WORDS`].
+/// Retained only because it is public API — scheduled for removal in 0.3.0
+/// (breaking).
+#[deprecated(
+    since = "0.2.5",
+    note = "legacy from-scratch FTS helper; stop-word handling belongs to the Tantivy pipeline. Removed in 0.3.0."
+)]
 pub fn remove_stop_words(tokens: Vec<String>) -> Vec<String> {
-    tokens
-        .into_iter()
-        .filter(|t| !STOP_WORDS.contains(&t.as_str()))
-        .collect()
+    #[allow(deprecated)]
+    let stop = STOP_WORDS;
+    tokens.into_iter().filter(|t| !stop.contains(&t.as_str())).collect()
 }
 
 /// Build a term frequency map from tokenized text.
+///
+/// Legacy residual of the from-scratch FTS implementation: term frequencies
+/// are computed inside the Tantivy indexer in production. Retained only
+/// because it is public API — scheduled for removal in 0.3.0 (breaking).
+#[deprecated(
+    since = "0.2.5",
+    note = "legacy from-scratch FTS helper; term frequencies are computed by the Tantivy indexer. Removed in 0.3.0."
+)]
 pub fn term_frequencies(tokens: &[String]) -> Vec<(String, usize)> {
     let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for token in tokens {
@@ -258,6 +290,9 @@ mod tests {
         assert!(tokens.is_empty());
     }
 
+    // The legacy helpers are deprecated (T020) but their contract tests stay
+    // until removal in 0.3.0.
+    #[allow(deprecated)]
     #[test]
     fn test_remove_stop_words() {
         let tokens = vec![
@@ -270,6 +305,7 @@ mod tests {
         assert_eq!(filtered, vec!["quick", "brown", "fox"]);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_term_frequencies() {
         let tokens = vec!["a".into(), "b".into(), "a".into(), "c".into(), "a".into(), "b".into()];
@@ -286,6 +322,7 @@ mod tests {
         assert!(score < 10.0);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_tf_idf_score() {
         let score = tf_idf(2.0, 5, 100);
@@ -294,6 +331,7 @@ mod tests {
         assert!((score - 6.0).abs() < 1.0);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_tf_idf_all_docs() {
         let score = tf_idf(1.0, 100, 100);

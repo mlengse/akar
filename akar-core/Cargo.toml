@@ -110,3 +110,15 @@ debug = 0
 
 [profile.bench]
 debug = true
+
+# ── Backlog note: P79 (DEFERRED) — persistence full column-mirror rewrite ──
+# Every UPDATE/DELETE rewrites the entire column mirror of the touched row.
+# Kept open and DEFERRED: it overlaps P60.1 (per-column mirroring) in full, so
+# it is to be executed as part of P60.1 if that task is picked up — not as a
+# standalone fix. Mitigation in place: the P68 checkpoint-threshold default
+# (auto-checkpoint at 16 MiB WAL) bounds the rewrite's blast radius; callers
+# doing sustained ingest emit an explicit CHECKPOINT at batch boundaries and
+# may raise `config.checkpoint_threshold` so the auto signal never interrupts
+# mid-batch (finding F17, verified mitigation (a)).
+# Provenance: specs/002-workspace-pending-work/tasks.md (T018);
+# sources/akar/implementation-plan.md — "Backlog & clean-up" #1.

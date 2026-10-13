@@ -67,6 +67,18 @@
   - Perbaikan di mapper proyeksi, bukan hanya `neighbors`/`decode_neighbors`: ketika **seluruh** input zero-row, hasil dibangun ulang dari `BoundExpression` logis — satu chunk kosong berisi kolom bertipe zero-length dengan nama hasil alias (`expression_field_name`) dan tipe fisik dari `resolved_type`.
   - `resolve_sort_keys` mempertahankan guard zero-row (sort key kosong = tidak ada kerja sorting pada hasil kosong); coverage ORDER BY/empty-result terkait tetap hijau (`test_p5337_order_by_unprojected`, `test_p5316_g5_alias_return`, `test_empty_tables`, `test_embedding_api`).
 
+### Deprecated
+
+- **T020 — helper warisan implementasi FTS dari-nol didepresiasi (penghapusan di 0.3.0)** · `akar-fts/src/lib.rs` · `[Uncommitted]` · gate `clippy -p akar-fts --all-targets -- -D warnings` clean, `test -p akar-fts` 53 passed / 0 failed, `fmt -p akar-fts` clean
+  - `tf_idf`, `STOP_WORDS`, `remove_stop_words`, `term_frequencies` — residu Audit 2 NIT: hanya dipakai tes lib, bukan jalur produksi (backend kini Tantivy). `#[deprecated(since = "0.2.5")]`; penghapusan bersifat breaking → masuk 0.3.0, bukan patch.
+  - Lima tes kontrak helper memakai `#[allow(deprecated)]` agar gate CI `-D warnings` tetap hijau sampai penghapusan.
+
+### Changed
+
+- **T018/T019 — temuan engine deferred didokumentasikan di rumah kodenya** · `akar-core/Cargo.toml`, `akar-catalog/src/lib.rs` · `[Uncommitted]` · doc-only
+  - T018: P79 (persistence menulis ulang seluruh column mirror pada setiap UPDATE/DELETE) dicatat DEFERRED — overlap penuh dengan P60.1 (per-column mirroring) — dengan mitigasi P68 checkpoint-threshold + F17 mitigasi (a) (`CHECKPOINT` eksplisit di batas batch, ambang boleh dinaikkan > 16 MiB).
+  - T019: P81 (fidelity dims `FLOAT[N]` di katalog) dicatat **dievaluasi & deferred** pada `CatalogColumn` — `parse_type` membuang `N` (`FLOAT[384]` ≡ `FLOAT[]`, mirror Python); Path B menyentuh `physical_type_size` (`akar-vector`), serialisasi/`STORAGE_VERSION`, dan layout storage — blast radius besar sementara kebutuhan sudah terpenuhi P80; buka kembali hanya bila workload membuktikan P80 kurang.
+
 ## [0.2.4] - 2026-09-23
 
 ### Added
