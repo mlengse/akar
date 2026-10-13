@@ -2317,4 +2317,51 @@ mod tests {
         assert_eq!(Binder::parse_type("FLOAT").unwrap(), LogicalTypeID::Float);
         assert_eq!(Binder::parse_type("INT64").unwrap(), LogicalTypeID::Int64);
     }
+
+    #[test]
+    fn parse_type_all_primitive_types_and_aliases() {
+        assert_eq!(Binder::parse_type("BOOL").unwrap(), LogicalTypeID::Bool);
+        assert_eq!(Binder::parse_type("BOOLEAN").unwrap(), LogicalTypeID::Bool);
+        assert_eq!(Binder::parse_type("boolean").unwrap(), LogicalTypeID::Bool);
+        assert_eq!(Binder::parse_type("Int64").unwrap(), LogicalTypeID::Int64);
+        assert_eq!(Binder::parse_type("INT32").unwrap(), LogicalTypeID::Int32);
+        assert_eq!(Binder::parse_type("INT16").unwrap(), LogicalTypeID::Int16);
+        assert_eq!(Binder::parse_type("INT8").unwrap(), LogicalTypeID::Int8);
+        assert_eq!(Binder::parse_type("UINT64").unwrap(), LogicalTypeID::UInt64);
+        assert_eq!(Binder::parse_type("UINT32").unwrap(), LogicalTypeID::UInt32);
+        assert_eq!(Binder::parse_type("UINT16").unwrap(), LogicalTypeID::UInt16);
+        assert_eq!(Binder::parse_type("UINT8").unwrap(), LogicalTypeID::UInt8);
+        assert_eq!(Binder::parse_type("DOUBLE").unwrap(), LogicalTypeID::Double);
+        assert_eq!(Binder::parse_type("FLOAT").unwrap(), LogicalTypeID::Float);
+        assert_eq!(Binder::parse_type("STRING").unwrap(), LogicalTypeID::String);
+        assert_eq!(Binder::parse_type("BLOB").unwrap(), LogicalTypeID::Blob);
+        assert_eq!(Binder::parse_type("DATE").unwrap(), LogicalTypeID::Date);
+        assert_eq!(Binder::parse_type("TIMESTAMP").unwrap(), LogicalTypeID::Timestamp);
+        assert_eq!(Binder::parse_type("TIMESTAMP_MS").unwrap(), LogicalTypeID::Timestamp);
+        assert_eq!(Binder::parse_type("TIMESTAMP_SEC").unwrap(), LogicalTypeID::TimestampSec);
+        assert_eq!(Binder::parse_type("TIMESTAMP_NS").unwrap(), LogicalTypeID::TimestampNs);
+        assert_eq!(Binder::parse_type("TIMESTAMP_TZ").unwrap(), LogicalTypeID::TimestampTz);
+        assert_eq!(Binder::parse_type("INTERVAL").unwrap(), LogicalTypeID::Interval);
+        assert_eq!(Binder::parse_type("SERIAL").unwrap(), LogicalTypeID::Serial);
+        assert_eq!(Binder::parse_type("UINT128").unwrap(), LogicalTypeID::UInt128);
+        assert_eq!(Binder::parse_type("JSON").unwrap(), LogicalTypeID::Json);
+        assert_eq!(Binder::parse_type("TIME").unwrap(), LogicalTypeID::Time);
+        assert_eq!(Binder::parse_type("DTIME").unwrap(), LogicalTypeID::Time);
+    }
+
+    #[test]
+    fn parse_type_compound_types() {
+        assert_eq!(Binder::parse_type("MAP(STRING, INT64)").unwrap(), LogicalTypeID::Map);
+        assert_eq!(Binder::parse_type("map(int64, string)").unwrap(), LogicalTypeID::Map);
+        assert_eq!(Binder::parse_type("STRUCT(a INT64, b STRING)").unwrap(), LogicalTypeID::Struct);
+        assert_eq!(Binder::parse_type("UNION(a INT64, b STRING)").unwrap(), LogicalTypeID::Union);
+    }
+
+    #[test]
+    fn parse_type_invalid_returns_error() {
+        assert!(Binder::parse_type("FOOBAR").is_err());
+        assert!(Binder::parse_type("INVALID_TYPE").is_err());
+        let err = Binder::parse_type("UNKNOWN_TYPE").unwrap_err();
+        assert!(err.to_string().contains("Unknown type: UNKNOWN_TYPE"));
+    }
 }
