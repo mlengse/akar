@@ -418,6 +418,14 @@ pub struct LogicalVectorSimilarityScan {
     pub column_name: String,
     pub query_vector: Vec<f64>,
     pub top_k: u64,
+    /// Beam width — the size of the dynamic candidate pool expanded before the
+    /// result is truncated to `top_k`.
+    ///
+    /// Independent of `top_k`, and the only knob that controls how much of the
+    /// graph a query may explore: a wider pool can recover a nearer neighbour
+    /// the beam would otherwise prune, at the cost of latency. `None` keeps the
+    /// HNSW default beam; `Some(0)` is treated as unset.
+    pub pool: Option<u64>,
     /// Node alias for field-name prefixing (e.g. `n` in
     /// `MATCH (n:Memory) ...`). `None` for the bare `CALL vector_similarity_scan`
     /// path, which emits unprefixed output columns like `distance`/`_id`.

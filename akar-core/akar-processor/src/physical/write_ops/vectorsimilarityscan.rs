@@ -17,6 +17,13 @@ pub struct PhysicalVectorSimilarityScan {
     pub index_id: u64,
     pub query_vector: Vec<f64>,
     pub top_k: u64,
+    /// Beam width — the size of the dynamic candidate pool expanded at layer 0.
+    ///
+    /// Independent of `top_k`: widening the pool widens the set of nodes the
+    /// search may visit before it truncates to `top_k`, which is what lets
+    /// recall approach the exact ranking at the cost of latency.
+    /// `None` keeps the HNSW default beam; `Some(0)` is treated as unset.
+    pub pool: Option<u64>,
     pub table_name: String,
     pub table_catalog: Option<Arc<TableCatalog>>,
 }
@@ -56,8 +63,17 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
                 .ok_or_else(|| format!("Vector index '{}' not found", self.index_name))?
         };
 
-        // Search the HNSW index for top-K nearest neighbours
-        let results = vi.hnsw().search(&self.query_vector, self.top_k as usize);
+        // Search the HNSW index for top-K nearest neighbours. The pool (beam
+        // width) widens the candidate set the search is allowed to explore
+        // before it truncates to top_k; without it the beam is pinned and a
+        // wider pool request would return exactly the candidates a narrow one
+        // would.
+        let results = match self.pool.filter(|p| *p > 0) {
+            Some(pool) => vi
+                .hnsw()
+                .search_with_ef(&self.query_vector, self.top_k as usize, pool as usize),
+            None => vi.hnsw().search(&self.query_vector, self.top_k as usize),
+        };
         drop(vi); // Release the DashMap reference
 
         if results.is_empty() {

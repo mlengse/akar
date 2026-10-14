@@ -150,6 +150,7 @@ pub fn map_and_execute_scan(
                 index_id: 0,
                 query_vector: vs.query_vector.clone(),
                 top_k: vs.top_k,
+                pool: vs.pool,
                 table_name: vs.table_name.clone(),
                 table_catalog: Some(tc),
             };

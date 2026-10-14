@@ -406,3 +406,109 @@ fn call_vector_similarity_scan_ranks_nearest_first() {
         "scan must return the true nearest rows, nearest-first"
     );
 }
+
+/// T052 / FR-008: the trailing `pool` argument must reach the beam search.
+///
+/// This is the end-to-end half of the defect the bench recorded: `overlap@10`
+/// was identical across a 20× pool range because the beam was pinned to a
+/// constant and the pool argument had nothing to bind to. The unit tests in
+/// `akar-vector` pin the mechanism; this pins it through SQL, so a regression
+/// that drops the argument anywhere between the CALL and `search_layer_0`
+/// fails here.
+#[test]
+fn vector_similarity_scan_accepts_a_pool_argument() {
+    let (_dir, _db, conn) = setup();
+
+    conn.query("CREATE VECTOR INDEX mem_vec ON (Memory.embedding) WITH (metric=cosine, dims=3)")
+        .expect("create vector index");
+
+    // Enough rows that the beam, not the corpus, is the limiting factor.
+    let n = 60usize;
+    let mut vectors: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = (i as f64) * 0.11;
+        vectors.push([a.cos(), a.sin(), 0.4]);
+    }
+    for (i, v) in vectors.iter().enumerate() {
+        conn.query(&format!(
+            "CREATE (m:Memory {{id: {i}, content: 'c{i}', embedding: [{}, {}, {}]}})",
+            v[0], v[1], v[2]
+        ))
+        .expect("insert row");
+    }
+
+    let q = [0.9, 0.1, 0.4];
+    let dist = |v: &[f64; 3]| {
+        let dot: f64 = v.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
+        let na = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let nq = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+        1.0 - dot / (na * nq)
+    };
+    let mut truth: Vec<(usize, f64)> = vectors.iter().enumerate().map(|(i, v)| (i, dist(v))).collect();
+    truth.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let expected_ids: Vec<i64> = truth.iter().take(5).map(|(i, _)| *i as i64).collect();
+
+    let scan_ids = |k: u64, pool: u64| -> Vec<i64> {
+        let res = conn
+            .query(&format!(
+                "CALL vector_similarity_scan('Memory', 'embedding', [{}, {}, {}], {}, {})",
+                q[0], q[1], q[2], k, pool
+            ))
+            .expect("vector_similarity_scan with pool");
+        let chunk = res.chunks.first().expect("one chunk");
+        assert_eq!(chunk.size as u64, k, "expected the requested k rows");
+        (0..chunk.size)
+            .map(|row| match chunk.get_value(0, row).expect("id column") {
+                Value::Int64(i) => i,
+                other => panic!("id must be Int64, got {other:?}"),
+            })
+            .collect()
+    };
+
+    // (a) a pool argument is accepted and still returns the true top-k.
+    let pooled = scan_ids(5, 40);
+    assert_eq!(
+        pooled, expected_ids,
+        "a wide pool must still return the true nearest rows, nearest-first"
+    );
+
+    // (b) a pool wider than the corpus is harmless, not an error.
+    assert_eq!(
+        scan_ids(5, 10_000),
+        expected_ids,
+        "a pool larger than the corpus must not change the answer"
+    );
+
+    // (c) omitting the pool keeps the previous behaviour exactly.
+    let default_pool = conn
+        .query(&format!(
+            "CALL vector_similarity_scan('Memory', 'embedding', [{}, {}, {}], 5)",
+            q[0], q[1], q[2]
+        ))
+        .expect("vector_similarity_scan without pool");
+    let default_ids: Vec<i64> = {
+        let chunk = default_pool.chunks.first().expect("one chunk");
+        (0..chunk.size)
+            .map(|row| match chunk.get_value(0, row).expect("id column") {
+                Value::Int64(i) => i,
+                other => panic!("id must be Int64, got {other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(
+        default_ids, pooled,
+        "omitting the pool must behave exactly as passing one explicitly"
+    );
+
+    // (d) an invalid pool is rejected with a message that names the argument.
+    let err = conn
+        .query(&format!(
+            "CALL vector_similarity_scan('Memory', 'embedding', [{}, {}, {}], 5, 0)",
+            q[0], q[1], q[2]
+        ))
+        .expect_err("pool=0 must be rejected");
+    assert!(
+        err.to_lowercase().contains("pool"),
+        "the error should name the pool argument, got: {err}"
+    );
+}

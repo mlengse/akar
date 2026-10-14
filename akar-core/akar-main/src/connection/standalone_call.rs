@@ -277,6 +277,18 @@ impl DbStandaloneCallHandler {
             }
         };
 
+        // Optional trailing `pool` — the HNSW beam width, independent of `top_k`.
+        let pool = match values.get(4) {
+            None | Some(Value::Null) => None,
+            Some(Value::Int64(p)) if *p > 0 => Some(*p as u64),
+            Some(other) => {
+                return Err(format!(
+                    "Fifth argument to vector_similarity_scan (pool) must be a positive integer, got: {other:?}"
+                )
+                .into());
+            }
+        };
+
         // Resolve the vector index by column (first index on the table whose
         // indexed column matches), falling back to the first index on the table.
         let tc = self.database.table_catalog();
@@ -306,6 +318,7 @@ impl DbStandaloneCallHandler {
             index_id: 0,
             query_vector,
             top_k,
+            pool,
             table_name,
             table_catalog: Some(tc),
         };

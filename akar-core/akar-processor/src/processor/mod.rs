@@ -604,6 +604,16 @@ impl QueryProcessor {
             _ => return Err("Fourth argument to vector_similarity_scan must be a positive integer".into()),
         };
 
+        // Optional trailing `pool` — the HNSW beam width, independent of `top_k`.
+        // Omitting it keeps the default beam.
+        let pool = match tf.args.get(4) {
+            None => None,
+            Some(expr) => match eval_expr_to_value(expr) {
+                Some(Value::Int64(p)) if p > 0 => Some(p as u64),
+                _ => return Err("Fifth argument to vector_similarity_scan (pool) must be a positive integer".into()),
+            },
+        };
+
         // Find the vector index on this table
         let tc = self
             .table_catalog
@@ -628,6 +638,7 @@ impl QueryProcessor {
             index_id: 0,
             query_vector,
             top_k,
+            pool,
             table_name,
             table_catalog: Some(tc),
         };

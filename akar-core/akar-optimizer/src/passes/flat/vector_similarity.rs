@@ -79,6 +79,11 @@ impl OptimizationPass for VectorSimilarityDetection {
                     column_name: column,
                     query_vector: query,
                     top_k: lim.limit.max(1),
+                    // The rewritten form has no pool source — the SQL pattern it
+                    // matches carries only a threshold, an ORDER BY and a LIMIT.
+                    // The default beam applies; `CALL vector_similarity_scan`
+                    // can still pass one explicitly.
+                    pool: None,
                     alias: sn.alias.clone(),
                     cardinality: sn.cardinality.max(1),
                 }));

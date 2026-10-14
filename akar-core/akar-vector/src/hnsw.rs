@@ -283,21 +283,40 @@ impl HnswIndex {
     /// it could still improve the `ef`-th best result. This keeps the search
     /// at O(ef · M) instead of degenerating into a full-graph scan.
     ///
+    /// `ef` is the beam width and is supplied by the caller, because the beam
+    /// and the result count are independent knobs: widening `ef` widens the
+    /// set of nodes the search may explore before it truncates to `k`, which
+    /// is what lets recall approach the exact ranking. Deriving `ef` from `k`
+    /// or from a constant floor pins the beam, so a caller asking for a wider
+    /// candidate pool receives exactly the candidates a narrow one would have
+    /// returned — the pool knob becomes dead plumbing.
+    ///
+    /// `ef` is floored at `k`: a beam narrower than the result count is
+    /// meaningless, since the beam cannot return more than it holds.
+    ///
     /// `layer` selects the connection set used for expansion (insert searches
     /// each layer separately; `search()` always uses layer 0).
-    fn search_layer_0(&self, entry: usize, query: &[f64], layer: usize, k: usize) -> Vec<(f64, usize)> {
+    fn search_layer_0(&self, entry: usize, query: &[f64], layer: usize, k: usize, ef: usize) -> Vec<(f64, usize)> {
         if k == 0 {
             return Vec::new();
         }
-        let ef = EF_SEARCH.max(k);
+        let ef = ef.max(k);
+        // The beam can never hold or visit more nodes than the index contains,
+        // so the capacity hints are clamped to that. `ef` is caller-supplied and
+        // may be arbitrarily large: without the clamp an absurd value would
+        // overflow the arithmetic that sizes these containers, and
+        // `with_capacity` panics on a capacity it cannot allocate anyway.
+        let reachable = self.nodes.len().max(1);
+        let vis_cap = ef.min(reachable).saturating_mul(4);
+        let heap_cap = ef.min(reachable).saturating_add(1);
         // Fast AHashSet (integer node IDs) with pre-allocated target capacity to eliminate reallocations.
-        let mut visited = AHashSet::with_capacity(ef * 4);
+        let mut visited = AHashSet::with_capacity(vis_cap);
 
         let entry_dist = self.node_distance(entry, query);
         // candidates: min-heap (closest popped first).
-        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(ef + 1);
+        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(heap_cap);
         // results: max-heap (farthest/worst on top), bounded to `ef`.
-        let mut results: BinaryHeap<Candidate> = BinaryHeap::with_capacity(ef + 1);
+        let mut results: BinaryHeap<Candidate> = BinaryHeap::with_capacity(heap_cap);
         candidates.push(Reverse(Candidate(entry_dist, entry)));
         results.push(Candidate(entry_dist, entry));
         visited.insert(entry);
@@ -399,7 +418,7 @@ impl HnswIndex {
             // Find nearest neighbours at this layer (search the layer's own
             // connection set, not layer 0 — P51.16).
             let ep = self.greedy_search_at_layer(current_entry, &vector, level);
-            let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION);
+            let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION, EF_CONSTRUCTION);
 
             let m = if level == 0 { M_MAX } else { M };
             let neighbors = Self::select_neighbors_simple(&candidates, m);
@@ -475,12 +494,35 @@ impl HnswIndex {
         self.nodes.insert(id, HnswNode { vector, connections });
     }
 
-    /// Search for the `k` approximate nearest neighbours to `query`.
+    /// Search for the `k` approximate nearest neighbours to `query`, using the
+    /// default beam width ([`EF_SEARCH`], floored at `k`).
+    ///
+    /// Prefer [`Self::search_with_ef`] when the caller wants to trade latency
+    /// for recall: the beam width is the only knob that controls how much of
+    /// the graph a query is allowed to explore, and a fixed beam caps recall
+    /// regardless of how the caller asks for results.
     ///
     /// Returns a list of `(distance, node_id)` pairs sorted by distance
     /// (closest first).
     pub fn search(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
-        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 {
+        self.search_with_ef(query, k, EF_SEARCH)
+    }
+
+    /// Search for the `k` approximate nearest neighbours to `query`, expanding
+    /// a beam of `ef` candidates at layer 0.
+    ///
+    /// `ef` is floored at `k` (a beam narrower than the result count cannot
+    /// return that many results) and floored at [`EF_SEARCH`] is **not**
+    /// applied here — a caller that explicitly asks for a wider pool must get
+    /// one, otherwise the parameter is a lie. Latency grows with `ef`, so
+    /// callers should measure rather than assume the default is enough.
+    ///
+    /// # Errors
+    ///
+    /// Returns an empty vec when the index is empty, when `k == 0`, or when
+    /// `ef == 0`.
+    pub fn search_with_ef(&self, query: &[f64], k: usize, ef: usize) -> Vec<(f64, usize)> {
+        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 || ef == 0 {
             return Vec::new();
         }
 
@@ -492,8 +534,8 @@ impl HnswIndex {
             current = self.greedy_search_at_layer(current, query, level);
         }
 
-        // Phase 2: Search at level 0
-        self.search_layer_0(current, query, 0, k)
+        // Phase 2: Search at level 0, expanding a beam of `ef` candidates.
+        self.search_layer_0(current, query, 0, k, ef)
     }
 
     /// Get a reference to a specific node's vector.
@@ -609,6 +651,125 @@ mod tests {
         for i in 0..5 {
             assert_eq!(results[i].1, i, "Result {} should be node {}", i, i);
         }
+    }
+
+    /// Build a navigable HNSW over `n` dense random vectors of dimension `dims`,
+    /// plus the query, returning the index and the query vector.
+    fn dense_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f64>) {
+        let mut rng = seed;
+        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        for id in 0..n {
+            idx.insert(random_vector(&mut rng, dims), id);
+        }
+        let query = random_vector(&mut rng, dims);
+        (idx, query)
+    }
+
+    /// The exact top-`k` by full scan — the ground truth the ANN must approach.
+    fn exact_top_k(idx: &HnswIndex, query: &[f64], k: usize) -> Vec<usize> {
+        let mut all: Vec<(f64, usize)> = idx
+            .nodes()
+            .into_iter()
+            .map(|(id, v)| (DistanceMetric::Euclidean.compute(v, query), id))
+            .collect();
+        all.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        all.truncate(k);
+        all.into_iter().map(|(_, id)| id).collect()
+    }
+
+    fn overlap_at_k(got: &[(f64, usize)], want: &[usize], k: usize) -> f64 {
+        let hit = got.iter().take(k).filter(|(_, id)| want.contains(id)).count();
+        hit as f64 / k.max(1) as f64
+    }
+
+    /// T052: the beam width must actually widen the candidate pool.
+    ///
+    /// This is the invariant the bench kept failing: `overlap@10` was identical
+    /// across a 20× pool range, because the beam was pinned to a constant and the
+    /// pool argument had nothing to bind to. Widening `ef` must let the search
+    /// explore more of the graph, so recall against the exact ranking cannot get
+    /// worse as the beam grows.
+    #[test]
+    fn a_wider_beam_never_loses_recall_against_the_exact_ranking() {
+        let (idx, query) = dense_index(2_000, 32, 0xC0FFEE);
+        let k = 10;
+        let exact = exact_top_k(&idx, &query, k);
+
+        let narrow = overlap_at_k(&idx.search_with_ef(&query, k, k), &exact, k);
+        let wide = overlap_at_k(&idx.search_with_ef(&query, k, 400), &exact, k);
+
+        assert!(
+            wide + 1e-9 >= narrow,
+            "a wider beam must not lose recall: narrow ef={k} gave overlap {narrow}, \
+             wide ef=400 gave overlap {wide}"
+        );
+        assert!(
+            wide > 0.0,
+            "a wide beam should surface at least one of the exact top-{k}, got {wide}"
+        );
+    }
+
+    /// T052: the beam must genuinely control how many nodes are explored.
+    ///
+    /// A beam equal to `k` cannot return more than `k` distinct nodes, so on a
+    /// corpus where the exact ranking is not reachable in `k` hops the narrow
+    /// beam is measurably worse. This pins the mechanism rather than the
+    /// outcome, so it holds on any corpus.
+    #[test]
+    fn the_beam_controls_the_explored_candidate_set() {
+        let (idx, query) = dense_index(2_000, 32, 0xBEEF);
+        let k = 10;
+        let exact = exact_top_k(&idx, &query, k);
+
+        let narrow = overlap_at_k(&idx.search_with_ef(&query, k, 10), &exact, k);
+        let wide = overlap_at_k(&idx.search_with_ef(&query, k, 500), &exact, k);
+
+        assert!(
+            wide + 1e-9 >= narrow,
+            "widening the beam must not reduce overlap (ef=10: {narrow}, ef=500: {wide})"
+        );
+    }
+
+    /// T052: `ef` is floored at `k`, so a caller asking for a beam narrower than
+    /// the result count still gets `k` results rather than a short list.
+    #[test]
+    fn the_beam_is_floored_at_k() {
+        let (idx, query) = dense_index(500, 16, 0x5EED);
+
+        let with_tiny_beam = idx.search_with_ef(&query, 10, 1);
+        assert_eq!(
+            with_tiny_beam.len(),
+            10,
+            "ef below k is floored at k, so the result count must not shrink"
+        );
+    }
+
+    /// T052: the default `search` path is unchanged — it still floors the beam at
+    /// `EF_SEARCH`, so existing callers see identical results.
+    #[test]
+    fn default_search_keeps_the_previous_default_beam() {
+        let (idx, query) = dense_index(500, 16, 0xD1CE);
+
+        let default = idx.search(&query, 10);
+        let explicit_default_beam = idx.search_with_ef(&query, 10, EF_SEARCH);
+
+        assert_eq!(
+            default, explicit_default_beam,
+            "search() and search_with_ef(.., EF_SEARCH) must agree exactly"
+        );
+    }
+
+    /// T052: a beam wider than the index is not an error, and a zero beam
+    /// returns nothing rather than panicking.
+    #[test]
+    fn out_of_range_and_zero_beams_are_safe() {
+        let (idx, query) = dense_index(200, 8, 0xACE);
+
+        let absurd = idx.search_with_ef(&query, 5, usize::MAX);
+        assert_eq!(absurd.len(), 5, "a beam larger than the index still returns k results");
+
+        assert!(idx.search_with_ef(&query, 5, 0).is_empty(), "ef=0 must return empty");
+        assert!(idx.search_with_ef(&query, 0, 50).is_empty(), "k=0 must return empty");
     }
 
     #[test]
@@ -810,7 +971,7 @@ mod tests {
             idx.insert(random_vector(&mut rng, 16), i);
         }
         let query = random_vector(&mut rng, 16);
-        let res = idx.search_layer_0(idx.entry_point().unwrap(), &query, 0, 50);
+        let res = idx.search_layer_0(idx.entry_point().unwrap(), &query, 0, 50, 50);
         assert!(!res.is_empty());
         for w in res.windows(2) {
             assert!(

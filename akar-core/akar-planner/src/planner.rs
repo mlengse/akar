@@ -218,15 +218,27 @@ impl QueryPlanner {
         })])
     }
 
-    /// Plan `CALL vector_similarity_scan(table, column, query_vector, top_k)`
+    /// Plan `CALL vector_similarity_scan(table, column, query_vector, top_k [, pool])`
     /// into a `LogicalOperator::VectorSimilarityScan` so the scan flows through
     /// the normal operator pipeline (mapper → `PhysicalVectorSimilarityScan`)
     /// instead of a bespoke standalone-call handler build.
+    ///
+    /// The trailing `pool` is optional. It is the beam width and is independent
+    /// of `top_k` — widening it widens the candidate set explored before the
+    /// result is truncated, which is what lets recall approach the exact
+    /// ranking at the cost of latency. Omitting it keeps the HNSW default beam.
     fn plan_vector_similarity_scan_call(&self, args: Vec<Expression>) -> Result<Vec<LogicalOperator>, PlannerError> {
         if args.len() < 4 {
             return Err(
-                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k".into(),
+                "vector_similarity_scan requires 4 arguments: table_name, column_name, query_vector, top_k [optional: pool]".into(),
             );
+        }
+        if args.len() > 5 {
+            return Err(format!(
+                "vector_similarity_scan takes at most 5 arguments (table_name, column_name, query_vector, top_k, pool), got {}",
+                args.len()
+            )
+            .into());
         }
         let table_name = match eval_standalone_expr(&args[0]) {
             Some(Value::String(s)) => s,
@@ -246,12 +258,20 @@ impl QueryPlanner {
             Some(Value::Int64(k)) if k > 0 => k as u64,
             _ => return Err("Fourth argument to vector_similarity_scan must be a positive integer".into()),
         };
+        let pool = match args.get(4) {
+            None => None,
+            Some(expr) => match eval_standalone_expr(expr) {
+                Some(Value::Int64(p)) if p > 0 => Some(p as u64),
+                _ => return Err("Fifth argument to vector_similarity_scan (pool) must be a positive integer".into()),
+            },
+        };
         Ok(vec![LogicalOperator::VectorSimilarityScan(
             LogicalVectorSimilarityScan {
                 table_name,
                 column_name,
                 query_vector,
                 top_k,
+                pool,
                 alias: None,
                 cardinality: top_k,
             },
