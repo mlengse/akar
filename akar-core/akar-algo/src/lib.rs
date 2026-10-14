@@ -918,29 +918,40 @@ pub fn compute_wcc(csr: &CSRAdjacency) -> AlgoResult {
 /// Returns component ID (0-based) for each node.
 pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
-    let mut indices = vec![None; n];
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
+    // Bolt Optimization: Replace `Vec<Option<usize>>` with flat primitive `Vec<usize>` initialized
+    // to `usize::MAX` to reduce element size (16b -> 8b) and eliminate Option discriminant overhead.
+    // Hoisting `dfs_stack` outside the root traversal loop and reusing it via `dfs_stack.clear()`
+    // eliminates stack re-allocations on root nodes in disconnected graphs. Direct CSR slice
+    // access (`&adjacency[start..end]`) avoids iterator and slice construction during graph traversal.
+    let mut indices = vec![usize::MAX; n];
     let mut lowlink = vec![0usize; n];
     let mut on_stack = vec![false; n];
-    let mut stack: Vec<usize> = Vec::new();
+    let mut stack: Vec<usize> = Vec::with_capacity(n);
     let mut component = vec![0usize; n];
     let mut comp_id = 0usize;
     let mut next_index = 0usize;
+    let mut dfs_stack: Vec<(usize, usize)> = Vec::with_capacity(n);
 
-    // Iterative Tarjan (P52.47): the recursive strongconnect overflowed the
-    // stack on large/deep graphs. DFS stack holds (node, next neighbor pos).
     for start in 0..n {
-        if indices[start].is_some() {
+        if indices[start] != usize::MAX {
             continue;
         }
-        indices[start] = Some(next_index);
+        indices[start] = next_index;
         lowlink[start] = next_index;
         next_index += 1;
         stack.push(start);
         on_stack[start] = true;
-        let mut dfs_stack: Vec<(usize, usize)> = vec![(start, 0)];
+        dfs_stack.clear();
+        dfs_stack.push((start, 0));
 
         while let Some(&(v, npos)) = dfs_stack.last() {
-            let neighbors = csr.neighbors(v);
+            let start_idx = offsets[v];
+            let end_idx = offsets[v + 1];
+            let neighbors = &adjacency[start_idx..end_idx];
+
             if npos < neighbors.len() {
                 let (_, dst) = neighbors[npos];
                 dfs_stack.last_mut().unwrap().1 += 1;
@@ -948,15 +959,15 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
                 if w >= n {
                     continue;
                 }
-                if indices[w].is_none() {
-                    indices[w] = Some(next_index);
+                if indices[w] == usize::MAX {
+                    indices[w] = next_index;
                     lowlink[w] = next_index;
                     next_index += 1;
                     stack.push(w);
                     on_stack[w] = true;
                     dfs_stack.push((w, 0));
                 } else if on_stack[w] {
-                    lowlink[v] = lowlink[v].min(indices[w].unwrap());
+                    lowlink[v] = lowlink[v].min(indices[w]);
                 }
             } else {
                 // v's neighbors exhausted: unwind v, propagate lowlink to the
@@ -966,7 +977,7 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
                 if let Some(&(parent, _)) = dfs_stack.last() {
                     lowlink[parent] = lowlink[parent].min(lowlink[v]);
                 }
-                if lowlink[v] == indices[v].unwrap() {
+                if lowlink[v] == indices[v] {
                     loop {
                         let w = stack.pop().unwrap();
                         on_stack[w] = false;
@@ -1112,7 +1123,14 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
 /// per-level scan of all active nodes was O(V²)).
 pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
-    let mut degree: Vec<usize> = (0..n).map(|i| csr.neighbors(i).len()).collect();
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
+    // Bolt Optimization: Calculate initial degrees directly using `offsets[i+1] - offsets[i]`
+    // to avoid constructing `CSRNeighborIterator` for all N nodes. Iterate directly over
+    // contiguous CSR adjacency slices `&adjacency[start..end]` inside the core maintenance
+    // loop to eliminate per-node iterator construction overhead.
+    let mut degree: Vec<usize> = (0..n).map(|i| offsets[i + 1] - offsets[i]).collect();
     let mut core = vec![0usize; n];
 
     // Bucket sort nodes by degree: bin[d] = start position of degree-d bucket.
@@ -1144,7 +1162,9 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
     for i in 0..n {
         let v = vert[i];
         core[v] = degree[v];
-        for (_, dst) in csr.neighbors(v) {
+        let start_idx = offsets[v];
+        let end_idx = offsets[v + 1];
+        for (_, dst) in &adjacency[start_idx..end_idx] {
             let w = dst.offset as usize;
             if w >= n {
                 continue;
@@ -2202,11 +2222,14 @@ pub fn compute_weighted_shortest_path(csr: &CSRAdjacency, source: usize) -> Algo
 /// Returns the number of reachable nodes from each source (destination count).
 pub fn compute_all_sp_destinations(csr: &CSRAdjacency) -> AlgoResult {
     let n = csr.num_nodes();
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
     let mut values = vec![0.0; n];
 
     // Bolt Optimization: Hoist BFS scratch vectors outside the source node loop and reset
     // state lazily only on visited nodes in `queue`. Replaces O(N) heap allocations per source
     // node and O(N) array filtering with O(|R(s)|) queue-length counting and lazy cleanup.
+    // Direct CSR slice access (`&adjacency[start..end]`) avoids neighbor iterator overhead in inner BFS loops.
     let mut distance = vec![usize::MAX; n];
     let mut queue = Vec::with_capacity(n);
 
@@ -2219,11 +2242,14 @@ pub fn compute_all_sp_destinations(csr: &CSRAdjacency) -> AlgoResult {
         while head < queue.len() {
             let u = queue[head];
             head += 1;
+            let next_d = distance[u] + 1;
 
-            for (_, dst) in csr.neighbors(u) {
+            let start = offsets[u];
+            let end = offsets[u + 1];
+            for (_, dst) in &adjacency[start..end] {
                 let neighbor = dst.offset as usize;
                 if neighbor < n && distance[neighbor] == usize::MAX {
-                    distance[neighbor] = distance[u] + 1;
+                    distance[neighbor] = next_d;
                     queue.push(neighbor);
                 }
             }
