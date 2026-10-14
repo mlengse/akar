@@ -9,6 +9,20 @@
 
 ### Changed
 
+- **P71.5 / T052 — the ANN candidate pool now reaches the beam search.** `CALL vector_similarity_scan(table, column, query_vector, top_k [, pool])` accepts an optional trailing **pool** argument, and the beam width is finally the caller's to choose.
+
+  Root cause of the flat-`overlap@10` symptom the sulur bench recorded (overlap identical across a 20× pool range, 50→1000, on the non-degenerate corpus): `HnswIndex::search(query, k)` forwarded `k` straight into `search_layer_0(.., k)`, which computed `ef` as `EF_SEARCH.max(k)` — a **constant floor**. The effective beam was therefore a fixed 50 for any `k <= 50`, and the operator struct carried no pool field at all, so a pool argument had nothing to bind to. Both halves of that defect statement were one bug: the plumbing did not exist.
+
+  - `search_layer_0` now takes `ef` as an explicit parameter, floored at `k` (a beam narrower than the result count cannot return that many results). The insertion path passes `EF_CONSTRUCTION` for both, which is exactly what `EF_SEARCH.max(EF_CONSTRUCTION)` evaluated to before — construction is unchanged.
+  - New `HnswIndex::search_with_ef(query, k, ef)`. Unlike the old path it does **not** re-apply the `EF_SEARCH` floor: a caller that explicitly asks for a wider pool must get one, otherwise the parameter is a lie. `search()` delegates to it with the previous default, so existing callers see byte-identical results (pinned by `default_search_keeps_the_previous_default_beam`).
+  - `LogicalVectorSimilarityScan` and `PhysicalVectorSimilarityScan` gain `pool: Option<u64>`; `map_scan`, `processor/mod.rs`, `standalone_call.rs` and the optimizer's rewrite path all thread it. The rewrite path has no pool source (its SQL pattern carries only threshold / ORDER BY / LIMIT) and passes `None`. `pool == 0` and `Some(0)` are treated as unset and rejected with a message naming the argument.
+  - Capacity hints inside `search_layer_0` are clamped to the index size: `ef` is now caller-supplied and may be arbitrarily large, and `ef * 4` / `ef + 1` overflowed while `AHashSet::with_capacity` panics on a capacity it cannot allocate. Found by the new `out_of_range_and_zero_beams_are_safe` test, not by review.
+  - **Not claimed:** FR-008 is still unmet. A reachable knob is not a measured verdict. Overlap must now approach the exact ranking as the pool widens, on the sulur bench corpus, before the net-loss decision recorded in `sulur/CHANGELOG.md` `[Unreleased]` can be reversed. Until then the exact bounded scan remains the recall source.
+
+  Tests: 5 new `akar-vector` unit tests (`a_wider_beam_never_loses_recall_against_the_exact_ranking`, `the_beam_controls_the_explored_candidate_set`, `the_beam_is_floored_at_k`, `default_search_keeps_the_previous_default_beam`, `out_of_range_and_zero_beams_are_safe`) + 1 end-to-end `vector_similarity_scan_accepts_a_pool_argument` (`akar-main`, `--features vector-extension`) that pins the argument through SQL, so a regression that drops it anywhere between the CALL and `search_layer_0` fails there. Gates: `cargo test --manifest-path akar-core/Cargo.toml` **2,315 passed / 0 failed / 0 ignored** (+5); `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+
+### Fixed
+
 - **P135 withdrawal completed on crates.io; `akar` 0.2.5 wheel published to PyPI (workspace backlog T043/T046, 2026-10-14)** · `CHANGELOG.md` · release-owner external actions, no code change
   - **Yank done:** `cargo yank akar-server --version <v>` applied to every published version (0.1.0–0.1.3, 0.1.12–0.1.21, 0.2.0–0.2.4) — 19 OK / 0 FAIL. crates.io reports `0.2.4` `yanked: true` and no non-yanked version remains (`latest` = 0.0.0); reversible via `cargo yank --undo`. This closes the P135 distribution-shape removal that the 0.2.5 release left as an external action.
   - **PyPI wheel:** `akar-core/akar-python/pyproject.toml` bumped `0.2.4` → `0.2.5`; `maturin build --release` produced `akar-0.2.5-cp39-abi3-win_amd64.whl`, uploaded to PyPI — `akar 0.2.5` confirmed live (unblocks the sulur `akar` pin, workspace T039).
