@@ -284,9 +284,15 @@ pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> V
 // ==================== Degree Centrality ====================
 
 /// Compute degree centrality for all nodes.
+// Bolt Optimization: Directly iterating over adjacent CSR offset windows (`windows(2)`)
+// computes node degrees via `(w[1] - w[0]) as f64`, eliminating per-node slice slicing,
+// method call overhead, and bounds checks across graph traversal sweeps.
 pub fn degree_centrality(csr: &CSRAdjacency) -> AlgorithmResult {
-    let n = csr.num_nodes();
-    let values: Vec<f64> = (0..n).map(|i| csr.neighbors(i).len() as f64).collect();
+    let values: Vec<f64> = csr
+        .offsets
+        .windows(2)
+        .map(|w| (w[1] - w[0]) as f64)
+        .collect();
 
     AlgorithmResult {
         values,
