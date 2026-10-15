@@ -2373,4 +2373,28 @@ mod tests {
         let err = Binder::parse_type("UNKNOWN_TYPE").unwrap_err();
         assert!(err.to_string().contains("Unknown type: UNKNOWN_TYPE"));
     }
+
+    #[test]
+    fn parse_compression_none_and_valid() {
+        use akar_common::enums::CompressionType;
+
+        assert_eq!(Binder::parse_compression(None).unwrap(), CompressionType::Uncompressed);
+        assert_eq!(Binder::parse_compression(Some("UNCOMPRESSED")).unwrap(), CompressionType::Uncompressed);
+        assert_eq!(Binder::parse_compression(Some("uncompressed")).unwrap(), CompressionType::Uncompressed);
+        assert_eq!(Binder::parse_compression(Some("Constant")).unwrap(), CompressionType::Constant);
+        assert_eq!(Binder::parse_compression(Some("ONEVALUE")).unwrap(), CompressionType::OneValue);
+        assert_eq!(Binder::parse_compression(Some("boolean")).unwrap(), CompressionType::Boolean);
+        assert_eq!(Binder::parse_compression(Some("INTEGER_BITPACKING")).unwrap(), CompressionType::IntegerBitpacking);
+        assert_eq!(Binder::parse_compression(Some("string_dictionary")).unwrap(), CompressionType::StringDictionary);
+        assert_eq!(Binder::parse_compression(Some("Float")).unwrap(), CompressionType::Float);
+        assert_eq!(Binder::parse_compression(Some("list_delta")).unwrap(), CompressionType::ListDelta);
+    }
+
+    #[test]
+    fn parse_compression_invalid() {
+        assert!(Binder::parse_compression(Some("INVALID")).is_err());
+        assert!(Binder::parse_compression(Some("GZIP")).is_err());
+        let err = Binder::parse_compression(Some("UNKNOWN")).unwrap_err();
+        assert!(err.to_string().contains("Unknown compression type: UNKNOWN"));
+    }
 }
