@@ -92,15 +92,14 @@ where
 ///
 /// # Returns
 /// A vector of `(T, f64)` pairs sorted by RRF score descending.
-// Bolt Optimization: Consolidate scores and reference pointers into a single HashMap<I, (f64, &'a T)>.
-// Maintains deterministic first-seen ordering via `order` while reducing HashMap entry lookups to 1 per item and eliminating redundant key cloning.
+// Bolt Optimization: Extract results via `map.into_values()` and sort by `total_cmp`.
+// Eliminates secondary `order` vector tracking, key cloning on entry insertion, and O(N) map.remove lookups.
 pub fn rrf_fuse_ref<'a, T, I, F>(sets: &'a [Vec<T>], id_fn: F, k: usize, limit: usize) -> Vec<(&'a T, f64)>
 where
-    I: Eq + std::hash::Hash + Clone,
+    I: Eq + std::hash::Hash,
     F: Fn(&T) -> I,
 {
     let mut map: HashMap<I, (f64, &'a T)> = HashMap::new();
-    let mut order: Vec<I> = Vec::new();
 
     for set in sets {
         for (rank, item) in set.iter().enumerate() {
@@ -109,22 +108,16 @@ where
 
             map.entry(id)
                 .and_modify(|(score, _)| *score += rrf)
-                .or_insert_with_key(|k| {
-                    order.push(k.clone());
-                    (rrf, item)
-                });
+                .or_insert((rrf, item));
         }
     }
 
-    let mut results: Vec<(&'a T, f64)> = order
-        .into_iter()
-        .filter_map(|id| {
-            let (score, item) = map.remove(&id)?;
-            Some((item, score))
-        })
+    let mut results: Vec<(&'a T, f64)> = map
+        .into_values()
+        .map(|(score, item)| (item, score))
         .collect();
 
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    results.sort_by(|a, b| b.1.total_cmp(&a.1));
     results.truncate(limit);
     results
 }
