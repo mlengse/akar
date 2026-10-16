@@ -5,7 +5,7 @@
 //! dependency-free in-memory inverted index with a standard Okapi BM25 scorer
 //! so hybrid scans can rank full-text hits without touching Tantivy.
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 /// Okapi BM25 tuning parameters. The defaults are the classic ones.
 #[derive(Debug, Clone, Copy)]
@@ -29,8 +29,8 @@ pub struct Bm25Doc {
     pub doc_len: usize,
 }
 
-/// Postings for a single term: document id → term frequency.
-type Postings = HashMap<u64, u32>;
+/// Postings for a single term: document id → (term frequency, doc_len).
+type Postings = HashMap<u64, (u32, u32)>;
 
 /// A single term's inverted entry.
 #[derive(Debug)]
@@ -53,16 +53,18 @@ pub struct NativeBm25Index {
 /// Lowercase + split on non-alphanumeric characters. A lightweight tokenizer
 /// suitable for the native path (fuzzy tokenization parity with Tantivy is
 /// the job of `akar-fts`, not the fused path).
+// Bolt Optimization: Pre-allocate initial token String buffer with capacity and
+// use `std::mem::replace` to avoid resetting to 0 capacity and reallocating on every word.
 pub fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
-    let mut current = String::new();
+    let mut current = String::with_capacity(16);
     for ch in text.chars() {
         if ch.is_alphanumeric() {
             for lower in ch.to_lowercase() {
                 current.push(lower);
             }
         } else if !current.is_empty() {
-            tokens.push(std::mem::take(&mut current));
+            tokens.push(std::mem::replace(&mut current, String::with_capacity(16)));
         }
     }
     if !current.is_empty() {
@@ -78,11 +80,16 @@ impl NativeBm25Index {
     }
 
     /// Add a pre-tokenized document.
+    // Bolt Optimization: Use `hashbrown::HashMap` for AHash fast lookup and store
+    // `doc_len` directly in posting entries `(tf, doc_len as u32)` to eliminate
+    // per-posting hash table lookups during BM25 document scoring.
     pub fn add_document(&mut self, id: u64, tokens: &[String]) {
         let mut local: HashMap<String, u32> = HashMap::new();
         for t in tokens {
             *local.entry(t.clone()).or_insert(0) += 1;
         }
+        let doc_len = tokens.len();
+        let doc_len_u32 = doc_len as u32;
         for (term, tf) in local {
             let entry = self.terms.entry(term).or_insert_with(|| TermIndex {
                 df: 0,
@@ -91,9 +98,8 @@ impl NativeBm25Index {
             if !entry.postings.contains_key(&id) {
                 entry.df += 1;
             }
-            entry.postings.insert(id, tf);
+            entry.postings.insert(id, (tf, doc_len_u32));
         }
-        let doc_len = tokens.len();
         self.total_tokens += doc_len as u64;
         self.doc_lens.insert(id, doc_len);
         self.num_docs += 1;
@@ -123,9 +129,16 @@ impl NativeBm25Index {
     ///
     /// Returns `(doc_id, score)` pairs sorted by descending score. Documents
     /// that match no query term are omitted.
+    // Bolt Optimization: Direct access to `(tf, doc_len)` in postings avoids O(|P|)
+    // hash table lookups into `doc_lens`. Hoisting BM25 constant terms (`k1_plus_1`,
+    // `k1_1_minus_b`, `k1_b_over_avg_dl`) outside posting loop minimizes per-posting arithmetic.
     pub fn score_docs(&self, query_terms: &[String], params: Bm25Params) -> Vec<(u64, f64)> {
         let n = self.num_docs.max(1) as f64;
         let avg_dl = if self.avg_doc_len > 0.0 { self.avg_doc_len } else { 1.0 };
+
+        let k1_plus_1 = params.k1 + 1.0;
+        let k1_1_minus_b = params.k1 * (1.0 - params.b);
+        let k1_b_over_avg_dl = params.k1 * params.b / avg_dl;
 
         let mut scores: HashMap<u64, f64> = HashMap::new();
         for term in query_terms {
@@ -136,10 +149,10 @@ impl NativeBm25Index {
             // BM25+ idf (additive smoothing avoids negative idf on dense terms).
             let df = entry.df as f64;
             let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
-            for (&doc_id, &tf) in &entry.postings {
-                let dl = *self.doc_lens.get(&doc_id).unwrap_or(&1) as f64;
-                let tf_norm =
-                    tf as f64 * (params.k1 + 1.0) / (tf as f64 + params.k1 * (1.0 - params.b + params.b * dl / avg_dl));
+            for (&doc_id, &(tf, doc_len)) in &entry.postings {
+                let tf_f = tf as f64;
+                let denom = tf_f + k1_1_minus_b + k1_b_over_avg_dl * (doc_len as f64);
+                let tf_norm = tf_f * k1_plus_1 / denom;
                 *scores.entry(doc_id).or_insert(0.0) += idf * tf_norm;
             }
         }
