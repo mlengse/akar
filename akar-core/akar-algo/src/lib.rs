@@ -1203,21 +1203,27 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
 
     // Bolt Optimization: Replace per-node dynamic HashMap allocations with a single
     // hoisted generation-stamped scratch array (`stamp[lbl] == generation`).
-    // This achieves O(1) indexed label frequency counting and zero allocations inside
-    // the node propagation loop.
+    // Direct CSR slice access (`&adjacency[start..end]`) avoids per-node `CSRNeighborIterator`
+    // tuple and iterator creation overhead during community propagation sweeps.
     let mut counts_scratch = vec![0usize; n];
     let mut stamp = vec![0usize; n];
     let mut touched = Vec::with_capacity(16);
     let mut generation = 0usize;
 
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     for _ in 0..max_iters {
         let mut changed = false;
+
         for v in 0..n {
-            let neighbors = csr.neighbors(v);
-            if neighbors.is_empty() {
+            let start = offsets[v];
+            let end = offsets[v + 1];
+            if start == end {
                 continue;
             }
 
+            let neighbors = &adjacency[start..end];
             generation += 1;
             touched.clear();
             for (_, dst) in neighbors {
