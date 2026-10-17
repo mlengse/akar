@@ -46,6 +46,7 @@ impl CSRAdjacency {
     }
 
     /// Get neighbors for a node by its position.
+    #[inline]
     pub fn neighbors(&self, node_pos: usize) -> &[(u64, InternalID)] {
         let start = self.offsets[node_pos];
         let end = self.offsets[node_pos + 1];
