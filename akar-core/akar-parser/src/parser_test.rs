@@ -1339,9 +1339,175 @@ mod tests {
         let expected_single = "a\nb\tc'd\"e\\f";
         assert_eq!(unescape_string(single_quoted), expected_single);
     }
-}
-#[test]
-fn probe_import_options_debug() {
-    let stmt = parse("IMPORT DATABASE '/tmp/export' (format='parquet', schema_only='false')").unwrap();
-    println!("AST: {:?}", stmt);
+
+    // ==================== parse_merge_clause tests ====================
+
+    #[test]
+    fn test_parse_merge_clause_basic_node() {
+        let sql = "MERGE (a:Person {id: 1})";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Merge(m) => {
+                assert_eq!(m.patterns.len(), 1);
+                let node = m.patterns[0].node.as_ref().unwrap();
+                assert_eq!(node.variable.as_deref(), Some("a"));
+                assert_eq!(node.labels, vec!["Person"]);
+                assert_eq!(node.properties.len(), 1);
+                assert_eq!(node.properties[0].0, "id");
+                assert_eq!(node.properties[0].1, Expression::Constant(Constant::Integer(1)));
+                assert!(m.on_create.is_empty());
+                assert!(m.on_match.is_empty());
+            }
+            _ => panic!("Expected Statement::Merge"),
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_clause_multiple_patterns_and_rel() {
+        let sql = "MERGE (a:Person {id: 1})-[r:KNOWS {since: 2020}]->(b:Person {id: 2}), (c:City {name: 'NYC'})";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Merge(m) => {
+                assert_eq!(m.patterns.len(), 3);
+
+                // Pattern 0: node a with edge r
+                let p0 = &m.patterns[0];
+                let node_a = p0.node.as_ref().unwrap();
+                assert_eq!(node_a.variable.as_deref(), Some("a"));
+                let edge_r = p0.edge.as_ref().unwrap();
+                assert_eq!(edge_r.variable.as_deref(), Some("r"));
+                assert_eq!(edge_r.labels, vec!["KNOWS"]);
+                assert_eq!(edge_r.direction, EdgeDirection::LeftToRight);
+                assert_eq!(edge_r.properties.len(), 1);
+                assert_eq!(edge_r.properties[0].0, "since");
+
+                // Pattern 1: node b
+                let p1 = &m.patterns[1];
+                let node_b = p1.node.as_ref().unwrap();
+                assert_eq!(node_b.variable.as_deref(), Some("b"));
+
+                // Pattern 2: node c
+                let p2 = &m.patterns[2];
+                let node_c = p2.node.as_ref().unwrap();
+                assert_eq!(node_c.variable.as_deref(), Some("c"));
+                assert_eq!(node_c.labels, vec!["City"]);
+
+                assert!(m.on_create.is_empty());
+                assert!(m.on_match.is_empty());
+            }
+            _ => panic!("Expected Statement::Merge"),
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_clause_on_create_set() {
+        let sql = "MERGE (a:Person {id: 1}) ON CREATE SET a.created = true, a.count = 0";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Merge(m) => {
+                assert_eq!(m.patterns.len(), 1);
+                assert_eq!(m.on_create.len(), 2);
+                assert!(m.on_match.is_empty());
+
+                assert_eq!(
+                    m.on_create[0].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "created".into())
+                );
+                assert_eq!(m.on_create[0].value, Expression::Constant(Constant::Bool(true)));
+
+                assert_eq!(
+                    m.on_create[1].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "count".into())
+                );
+                assert_eq!(m.on_create[1].value, Expression::Constant(Constant::Integer(0)));
+            }
+            _ => panic!("Expected Statement::Merge"),
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_clause_on_match_set() {
+        let sql = "MERGE (a:Person {id: 1}) ON MATCH SET a.updated = true, a.visits = a.visits + 1";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Merge(m) => {
+                assert_eq!(m.patterns.len(), 1);
+                assert!(m.on_create.is_empty());
+                assert_eq!(m.on_match.len(), 2);
+
+                assert_eq!(
+                    m.on_match[0].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "updated".into())
+                );
+                assert_eq!(m.on_match[0].value, Expression::Constant(Constant::Bool(true)));
+
+                assert_eq!(
+                    m.on_match[1].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "visits".into())
+                );
+                assert_eq!(
+                    m.on_match[1].value,
+                    Expression::BinaryOp(
+                        BinaryOp::Add,
+                        Box::new(Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "visits".into())),
+                        Box::new(Expression::Constant(Constant::Integer(1))),
+                    )
+                );
+            }
+            _ => panic!("Expected Statement::Merge"),
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_clause_on_create_and_on_match_combined() {
+        let sql = "MERGE (a:Person {id: $id}) ON CREATE SET a.created_at = '2024-01-01' ON MATCH SET a.updated_at = '2024-01-02'";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Merge(m) => {
+                assert_eq!(m.patterns.len(), 1);
+                assert_eq!(m.on_create.len(), 1);
+                assert_eq!(m.on_match.len(), 1);
+
+                assert_eq!(
+                    m.on_create[0].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "created_at".into())
+                );
+                assert_eq!(
+                    m.on_create[0].value,
+                    Expression::Constant(Constant::String("2024-01-01".into()))
+                );
+
+                assert_eq!(
+                    m.on_match[0].property,
+                    Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "updated_at".into())
+                );
+                assert_eq!(
+                    m.on_match[0].value,
+                    Expression::Constant(Constant::String("2024-01-02".into()))
+                );
+            }
+            _ => panic!("Expected Statement::Merge"),
+        }
+    }
+
+    #[test]
+    fn test_parse_merge_clause_direct_invocation() {
+        use pest::Parser;
+
+        let input = "MERGE (n:Node {key: 'k'}) ON CREATE SET n.flag = true ON MATCH SET n.flag = false";
+        let mut pairs = CypherParser::parse(Rule::merge_clause, input).unwrap();
+        let pair = pairs.next().unwrap();
+
+        let m = dml::parse_merge_clause(pair).unwrap();
+        assert_eq!(m.patterns.len(), 1);
+        let node = m.patterns[0].node.as_ref().unwrap();
+        assert_eq!(node.variable.as_deref(), Some("n"));
+        assert_eq!(node.labels, vec!["Node"]);
+
+        assert_eq!(m.on_create.len(), 1);
+        assert_eq!(m.on_create[0].value, Expression::Constant(Constant::Bool(true)));
+
+        assert_eq!(m.on_match.len(), 1);
+        assert_eq!(m.on_match[0].value, Expression::Constant(Constant::Bool(false)));
+    }
 }

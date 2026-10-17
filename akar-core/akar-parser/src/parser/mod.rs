@@ -90,6 +90,6 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement, Strin
     }
 }
 
-mod ddl;
-mod dml;
+pub(crate) mod ddl;
+pub(crate) mod dml;
 pub mod expression;
