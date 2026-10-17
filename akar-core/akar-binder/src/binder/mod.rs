@@ -2397,4 +2397,56 @@ mod tests {
         let err = Binder::parse_compression(Some("UNKNOWN")).unwrap_err();
         assert!(err.to_string().contains("Unknown compression type: UNKNOWN"));
     }
+
+    #[test]
+    fn parse_type_resolved_builtin_types() {
+        let b = binder();
+        assert_eq!(b.parse_type_resolved("INT64").unwrap(), LogicalTypeID::Int64);
+        assert_eq!(b.parse_type_resolved("string").unwrap(), LogicalTypeID::String);
+        assert_eq!(b.parse_type_resolved("BOOL").unwrap(), LogicalTypeID::Bool);
+        assert_eq!(b.parse_type_resolved("DOUBLE").unwrap(), LogicalTypeID::Double);
+        assert_eq!(b.parse_type_resolved("INT64[]").unwrap(), LogicalTypeID::List);
+    }
+
+    #[test]
+    fn parse_type_resolved_user_defined_aliases() {
+        let catalog = Arc::new(Mutex::new(Catalog::new()));
+        {
+            let mut cat = catalog.lock().unwrap();
+            cat.create_type_alias("MY_INT".to_string(), "INT64".to_string()).unwrap();
+            cat.create_type_alias("MY_STRING".to_string(), "STRING".to_string()).unwrap();
+            // Alias chain: ALIAS_1 -> ALIAS_2 -> INT32
+            cat.create_type_alias("ALIAS_2".to_string(), "INT32".to_string()).unwrap();
+            cat.create_type_alias("ALIAS_1".to_string(), "ALIAS_2".to_string()).unwrap();
+        }
+        let b = Binder::new(catalog);
+
+        assert_eq!(b.parse_type_resolved("MY_INT").unwrap(), LogicalTypeID::Int64);
+        assert_eq!(b.parse_type_resolved("my_string").unwrap(), LogicalTypeID::String);
+        assert_eq!(b.parse_type_resolved("ALIAS_1").unwrap(), LogicalTypeID::Int32);
+        assert_eq!(b.parse_type_resolved("ALIAS_2").unwrap(), LogicalTypeID::Int32);
+    }
+
+    #[test]
+    fn parse_type_resolved_unknown_type_error() {
+        let b = binder();
+        let err = b.parse_type_resolved("NON_EXISTENT_TYPE").unwrap_err();
+        assert!(err.to_string().contains("Unknown type: NON_EXISTENT_TYPE"));
+    }
+
+    #[test]
+    fn parse_type_resolved_poisoned_lock_error() {
+        let catalog = Arc::new(Mutex::new(Catalog::new()));
+        let catalog_clone = catalog.clone();
+
+        let _ = std::thread::spawn(move || {
+            let _guard = catalog_clone.lock().unwrap();
+            panic!("Poisoning lock intentionally");
+        })
+        .join();
+
+        let b = Binder::new(catalog);
+        let err = b.parse_type_resolved("MY_ALIAS").unwrap_err();
+        assert!(err.to_string().contains("Lock poisoned"));
+    }
 }
