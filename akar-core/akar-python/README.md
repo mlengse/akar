@@ -157,7 +157,7 @@ cd akar-core/akar-python
 cargo test --lib
 ```
 
-39 tests covering: translation layer, parameter interpolation, value conversion, schema bootstrap, vector index / kNN, community detection (Louvain), LSTM bindings, spread activation, lock management, connection lifecycle.
+Rust unit tests covering: translation layer, parameter interpolation, value conversion, schema bootstrap, vector index / kNN, community detection (Louvain), lock management, connection lifecycle.
 
 ### Python compatibility harness (pytest)
 

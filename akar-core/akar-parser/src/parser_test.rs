@@ -1449,7 +1449,10 @@ mod tests {
                     m.on_match[1].value,
                     Expression::BinaryOp(
                         BinaryOp::Add,
-                        Box::new(Expression::PropertyAccess(Box::new(Expression::Variable("a".into())), "visits".into())),
+                        Box::new(Expression::PropertyAccess(
+                            Box::new(Expression::Variable("a".into())),
+                            "visits".into()
+                        )),
                         Box::new(Expression::Constant(Constant::Integer(1))),
                     )
                 );

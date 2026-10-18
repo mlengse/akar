@@ -2,7 +2,7 @@
 //!
 //! This module is the bridge between the optional [`akar-ml`] extension and the
 //! rest of the engine. It exposes the process-wide embedding provider built by
-//! the ML extension so in-process consumers (e.g. a host's dream engine) can
+//! the ML extension so in-process consumers can
 //! reuse the same model that backs the `embed_text` UDF.
 //!
 //! Gated behind the `ml-extension` feature and excluded from the WASM build

@@ -288,11 +288,7 @@ pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> V
 // computes node degrees via `(w[1] - w[0]) as f64`, eliminating per-node slice slicing,
 // method call overhead, and bounds checks across graph traversal sweeps.
 pub fn degree_centrality(csr: &CSRAdjacency) -> AlgorithmResult {
-    let values: Vec<f64> = csr
-        .offsets
-        .windows(2)
-        .map(|w| (w[1] - w[0]) as f64)
-        .collect();
+    let values: Vec<f64> = csr.offsets.windows(2).map(|w| (w[1] - w[0]) as f64).collect();
 
     AlgorithmResult {
         values,

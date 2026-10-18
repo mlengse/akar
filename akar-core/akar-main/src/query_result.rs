@@ -148,8 +148,7 @@ impl QueryResult {
     }
 }
 
-/// Shared head logic for result summaries (local [`QueryResult`] and remote
-/// [`crate::remote::WireResponse`], DRY P51.43).
+/// Shared head logic for result summaries (single source of truth, DRY P51.43).
 ///
 /// Precedence: message → error → empty-result marker. Returns `Some(summary)`
 /// when the result carries no data rows; `None` means the caller should append
@@ -273,49 +272,6 @@ mod tests {
         rows.num_rows = 3;
         rows.num_columns = 2;
         assert_eq!(rows.result_summary(), "Returned 3 rows in 2 columns");
-    }
-
-    fn remote(
-        success: bool,
-        message: Option<&str>,
-        error: Option<&str>,
-        columns: usize,
-        row_count: usize,
-    ) -> crate::remote::WireResponse {
-        crate::remote::WireResponse {
-            success,
-            message: message.map(str::to_string),
-            error_message: error.map(str::to_string),
-            column_names: (0..columns).map(|i| format!("c{i}")).collect(),
-            rows: vec![Vec::new(); row_count],
-            stats: None,
-        }
-    }
-
-    /// Local and remote results must produce byte-identical summaries for the
-    /// same logical outcome (P51.43 — single shared head logic).
-    #[test]
-    fn test_local_remote_summary_parity() {
-        // Message case.
-        assert_eq!(
-            QueryResult::success_message("Table created".into()).result_summary(),
-            remote(true, Some("Table created"), None, 0, 0).result_summary()
-        );
-        // Error case.
-        assert_eq!(
-            QueryResult::error("boom".into()).result_summary(),
-            remote(false, None, Some("boom"), 0, 0).result_summary()
-        );
-        // Empty case.
-        assert_eq!(
-            QueryResult::new(Vec::new()).result_summary(),
-            remote(true, None, None, 0, 0).result_summary()
-        );
-        // Data case.
-        let mut local = QueryResult::new(Vec::new());
-        local.num_rows = 2;
-        local.num_columns = 3;
-        assert_eq!(local.result_summary(), remote(true, None, None, 3, 2).result_summary());
     }
 
     /// P139 regression: `Display` must render the actual rows under real column

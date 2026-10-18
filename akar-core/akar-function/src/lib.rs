@@ -11,7 +11,6 @@ pub use registry::{
     MapOp, ResolvedFunction, ScalarFunction, SchemaOp, StringOp, StructOp, TableFunction, UtilityOp,
 };
 pub use scalar::evaluate_scalar;
-pub use scalar::retention::retention_score;
 
 pub use graph::{GraphDataSource, GraphEdge};
 

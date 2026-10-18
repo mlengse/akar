@@ -5,7 +5,6 @@ use pyo3::types::PyDict;
 
 use akar_search::hierarchical::{apply_authority, fuse_hierarchical, AuthorityConfig, HierarchicalRrfConfig};
 use akar_search::hybrid::{hybrid_search, SearchResult};
-use akar_search::multi::multi_perspective_recall_with_id;
 use akar_search::rrf::{rrf_fuse_owned, weighted_rrf_fuse, FusedItem, DEFAULT_K};
 use std::collections::HashMap;
 
@@ -101,48 +100,6 @@ fn weighted_rrf_fuse_py(
     }
     let input: Vec<(Vec<(u64, f64)>, f64)> = sets.into_iter().zip(weights).collect();
     let fused: Vec<FusedItem<(u64, f64)>> = weighted_rrf_fuse(input, |&(id, _)| id, k, limit);
-
-    let mut result = Vec::with_capacity(fused.len());
-    for f in fused {
-        let d = PyDict::new(py);
-        d.set_item("id", f.item.0)?;
-        d.set_item("score", f.rrf_score)?;
-        result.push(d.unbind().into_any());
-    }
-    Ok(result)
-}
-
-/// Multi-perspective recall: run N search queries and fuse results via RRF.
-///
-/// - `queries`: list of query strings.
-/// - `search_fn`: a callable that takes a query string and returns a list of `(id, score)` tuples.
-/// - `k`: RRF constant (default 60).
-/// - `limit`: max results to return (default 20).
-///
-/// Returns list of `{id: int, score: float}` dicts sorted by descending RRF score.
-#[pyfunction]
-#[pyo3(signature = (queries, search_fn, k=DEFAULT_K as usize, limit=20))]
-fn multi_perspective_recall(
-    py: Python<'_>,
-    queries: Vec<String>,
-    search_fn: Py<PyAny>,
-    k: usize,
-    limit: usize,
-) -> PyResult<Vec<Py<PyAny>>> {
-    let search_fn_ref = &search_fn;
-    let borrowed: Vec<&str> = queries.iter().map(|s| s.as_str()).collect();
-    let fused: Vec<FusedItem<(u64, f64)>> = multi_perspective_recall_with_id(
-        &borrowed,
-        |q: &str| -> Vec<(u64, f64)> {
-            search_fn_ref
-                .call1(py, (q,))
-                .and_then(|r| r.extract(py))
-                .unwrap_or_default()
-        },
-        |&(id, _)| id,
-        k,
-        limit,
-    );
 
     let mut result = Vec::with_capacity(fused.len());
     for f in fused {
@@ -272,7 +229,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     sub.add_function(wrap_pyfunction!(rrf_fuse, &sub)?)?;
     sub.add_function(wrap_pyfunction!(hybrid_search_py, &sub)?)?;
     sub.add_function(wrap_pyfunction!(weighted_rrf_fuse_py, &sub)?)?;
-    sub.add_function(wrap_pyfunction!(multi_perspective_recall, &sub)?)?;
     sub.add_function(wrap_pyfunction!(hierarchical_rrf, &sub)?)?;
     sub.add_function(wrap_pyfunction!(apply_authority_py, &sub)?)?;
     m.add_submodule(&sub)?;

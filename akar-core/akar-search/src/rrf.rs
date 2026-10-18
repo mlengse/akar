@@ -112,10 +112,7 @@ where
         }
     }
 
-    let mut results: Vec<(&'a T, f64)> = map
-        .into_values()
-        .map(|(score, item)| (item, score))
-        .collect();
+    let mut results: Vec<(&'a T, f64)> = map.into_values().map(|(score, item)| (item, score)).collect();
 
     results.sort_by(|a, b| b.1.total_cmp(&a.1));
     results.truncate(limit);
@@ -205,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rrf_multi_perspective_3_queries() {
+    fn test_rrf_fuses_three_query_lists() {
         let q1 = vec![1, 2, 3];
         let q2 = vec![2, 3, 4];
         let q3 = vec![3, 4, 5];

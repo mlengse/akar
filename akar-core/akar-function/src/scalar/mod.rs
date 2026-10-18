@@ -26,7 +26,6 @@ pub mod interval;
 pub mod list;
 pub mod map_struct;
 pub mod path;
-pub mod retention;
 pub mod schema;
 pub mod string;
 pub mod union_funcs;
@@ -45,7 +44,6 @@ pub(crate) use interval::evaluate_interval;
 pub(crate) use list::evaluate_list;
 pub(crate) use map_struct::{evaluate_map, evaluate_struct};
 pub(crate) use path::{evaluate_path, evaluate_uuid};
-pub(crate) use retention::evaluate_retention;
 pub(crate) use schema::evaluate_schema;
 pub(crate) use string::{evaluate_string, get_string};
 pub(crate) use union_funcs::evaluate_union;
@@ -91,7 +89,6 @@ pub fn evaluate_scalar(func: &ScalarFunction, args: &[Value]) -> Result<Value, S
         ScalarFunction::Interval { op } => evaluate_interval(*op, args),
         ScalarFunction::Blob { op } => evaluate_blob(*op, args),
         ScalarFunction::Union { op } => evaluate_union(*op, args),
-        ScalarFunction::Retention { op } => evaluate_retention(*op, args),
         ScalarFunction::Uuid => evaluate_uuid(args),
         ScalarFunction::CustomScalar { execute, .. } => (execute)(args),
         ScalarFunction::SequenceOp { .. } => Err(

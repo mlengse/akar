@@ -1,14 +1,9 @@
-//! Local ML inference and training for Akar.
+//! Local ML inference for Akar.
 //!
-//! Provides a multi-layer LSTM implementation (f64 or f32 via generic
-//! precision) for sequence prediction, fully self-contained (pure Rust, no FFI).
-//!
-//! # Components
-//!
-//! - `LstmCell` — single LSTM gate computation (forget/input/candidate/output)
-//! - `LstmModel` — 1-layer LSTM with input→hidden→output projection
-//! - `train` — BPTT training loop with configurable epochs/learning rate
-//! - `save_model` / `load_model` — serde JSON serialization
+//! In-process embeddings and cross-encoder re-ranking over ONNX Runtime
+//! (feature `onnx-embedding`) — dense, sparse and ColBERT output plus
+//! reranking — fully self-contained (pure Rust, no FFI). The LSTM sequence
+//! predictor was relocated to `sulur-core` (feature 009).
 //!
 //! # Embeddings (ONNX, feature `onnx-embedding`)
 //!
@@ -49,8 +44,6 @@
 //! [`assets::bundled_model_dir`]. No staged assets at build time degrades to
 //! `None` (the feature is additive; the default gate is unaffected).
 
-pub mod lstm;
-
 #[cfg(feature = "onnx-embedding")]
 pub mod embed;
 
@@ -70,5 +63,3 @@ mod sparse;
 
 #[cfg(feature = "extension")]
 pub mod extension;
-
-pub use lstm::{LstmCell, LstmConfig, LstmModel, LstmModelF32, LstmModelF64, TrainingResult, train};

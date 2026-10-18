@@ -2379,15 +2379,42 @@ mod tests {
         use akar_common::enums::CompressionType;
 
         assert_eq!(Binder::parse_compression(None).unwrap(), CompressionType::Uncompressed);
-        assert_eq!(Binder::parse_compression(Some("UNCOMPRESSED")).unwrap(), CompressionType::Uncompressed);
-        assert_eq!(Binder::parse_compression(Some("uncompressed")).unwrap(), CompressionType::Uncompressed);
-        assert_eq!(Binder::parse_compression(Some("Constant")).unwrap(), CompressionType::Constant);
-        assert_eq!(Binder::parse_compression(Some("ONEVALUE")).unwrap(), CompressionType::OneValue);
-        assert_eq!(Binder::parse_compression(Some("boolean")).unwrap(), CompressionType::Boolean);
-        assert_eq!(Binder::parse_compression(Some("INTEGER_BITPACKING")).unwrap(), CompressionType::IntegerBitpacking);
-        assert_eq!(Binder::parse_compression(Some("string_dictionary")).unwrap(), CompressionType::StringDictionary);
-        assert_eq!(Binder::parse_compression(Some("Float")).unwrap(), CompressionType::Float);
-        assert_eq!(Binder::parse_compression(Some("list_delta")).unwrap(), CompressionType::ListDelta);
+        assert_eq!(
+            Binder::parse_compression(Some("UNCOMPRESSED")).unwrap(),
+            CompressionType::Uncompressed
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("uncompressed")).unwrap(),
+            CompressionType::Uncompressed
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("Constant")).unwrap(),
+            CompressionType::Constant
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("ONEVALUE")).unwrap(),
+            CompressionType::OneValue
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("boolean")).unwrap(),
+            CompressionType::Boolean
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("INTEGER_BITPACKING")).unwrap(),
+            CompressionType::IntegerBitpacking
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("string_dictionary")).unwrap(),
+            CompressionType::StringDictionary
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("Float")).unwrap(),
+            CompressionType::Float
+        );
+        assert_eq!(
+            Binder::parse_compression(Some("list_delta")).unwrap(),
+            CompressionType::ListDelta
+        );
     }
 
     #[test]
@@ -2413,11 +2440,15 @@ mod tests {
         let catalog = Arc::new(Mutex::new(Catalog::new()));
         {
             let mut cat = catalog.lock().unwrap();
-            cat.create_type_alias("MY_INT".to_string(), "INT64".to_string()).unwrap();
-            cat.create_type_alias("MY_STRING".to_string(), "STRING".to_string()).unwrap();
+            cat.create_type_alias("MY_INT".to_string(), "INT64".to_string())
+                .unwrap();
+            cat.create_type_alias("MY_STRING".to_string(), "STRING".to_string())
+                .unwrap();
             // Alias chain: ALIAS_1 -> ALIAS_2 -> INT32
-            cat.create_type_alias("ALIAS_2".to_string(), "INT32".to_string()).unwrap();
-            cat.create_type_alias("ALIAS_1".to_string(), "ALIAS_2".to_string()).unwrap();
+            cat.create_type_alias("ALIAS_2".to_string(), "INT32".to_string())
+                .unwrap();
+            cat.create_type_alias("ALIAS_1".to_string(), "ALIAS_2".to_string())
+                .unwrap();
         }
         let b = Binder::new(catalog);
 

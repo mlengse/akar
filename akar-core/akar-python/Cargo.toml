@@ -30,7 +30,6 @@ akar-main = { path = "../akar-main", version = "0.2.5", features = [
 akar-vector = { path = "../akar-vector", version = "0.2.5" }
 akar-graph = { path = "../akar-graph", version = "0.2.5" }
 akar-algo = { path = "../akar-algo", version = "0.2.5" }
-akar-ml = { path = "../akar-ml", version = "0.2.5" }
 akar-search = { path = "../akar-search", version = "0.2.5" }
 [profile.release]
 opt-level = 3

@@ -6,7 +6,6 @@ pub mod database;
 pub mod pool;
 pub mod prepared_statement;
 pub mod query_result;
-pub mod remote;
 pub mod storage_driver;
 
 #[cfg(feature = "adbc")]
@@ -31,5 +30,4 @@ pub use database::{Database, SystemConfig};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use prepared_statement::PreparedStatement;
 pub use query_result::QueryResult;
-pub use remote::RemoteDatabase;
 pub use storage_driver::StorageDriver;

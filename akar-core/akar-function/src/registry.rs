@@ -85,10 +85,6 @@ pub enum ScalarFunction {
     Union {
         op: UnionOp,
     },
-    /// Memory-retention scoring — the cognitive decay primitive (P119).
-    Retention {
-        op: RetentionOp,
-    },
 }
 
 impl std::fmt::Debug for ScalarFunction {
@@ -114,7 +110,6 @@ impl std::fmt::Debug for ScalarFunction {
             Self::Interval { op } => f.debug_struct("Interval").field("op", op).finish(),
             Self::Blob { op } => f.debug_struct("Blob").field("op", op).finish(),
             Self::Union { op } => f.debug_struct("Union").field("op", op).finish(),
-            Self::Retention { op } => f.debug_struct("Retention").field("op", op).finish(),
         }
     }
 }
@@ -464,14 +459,6 @@ pub enum UnionOp {
     UnionValue,
     UnionTag,
     UnionExtract,
-}
-
-/// Memory-retention scoring (P119).
-#[derive(Debug, Clone, Copy)]
-pub enum RetentionOp {
-    /// `retention_score(age_days, access_count, days_since_access, salience, distinct_actors[, breadth_weight])`
-    /// → `(0, 1]`, the Ebbinghaus retention of the memory.
-    Score,
 }
 
 // ==================== Aggregate Function Types ====================
@@ -1195,8 +1182,6 @@ impl FunctionRegistry {
         );
         self.register_scalar("least", ScalarFunction::Utility { op: UtilityOp::Least });
 
-        // --- Memory retention (P119) ---
-        self.register_scalar("retention_score", ScalarFunction::Retention { op: RetentionOp::Score });
         self.register_scalar(
             "constant_or_null",
             ScalarFunction::Utility {

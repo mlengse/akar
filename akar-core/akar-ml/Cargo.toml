@@ -4,7 +4,7 @@ version = "0.2.5"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Local ML inference and training for Akar (LSTM)"
+description = "Local ML inference for Akar (ONNX embeddings)"
 
 [dependencies]
 serde.workspace = true

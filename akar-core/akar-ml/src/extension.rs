@@ -68,8 +68,8 @@ fn shared_provider() -> Result<&'static Arc<dyn EmbeddingProvider>, String> {
 
 /// Return the process-wide shared embedding provider, if it can be initialised.
 ///
-/// This is used by the dream engine and other in-process consumers to reuse the
-/// same model that backs the `embed_text` UDF. It never panics: if the model
+/// This is used by in-process consumers to reuse the same model that backs the
+/// `embed_text` UDF. It never panics: if the model
 /// cannot be built (e.g. no ONNX Runtime or a bad `AKAR_EMBED_MODEL`), it
 /// returns `None` so callers degrade gracefully.
 pub fn shared_embedding_provider() -> Option<Arc<dyn EmbeddingProvider>> {

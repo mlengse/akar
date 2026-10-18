@@ -18,10 +18,8 @@
 
 mod knn;
 mod louvain;
-mod lstm;
 mod param_interp;
 mod search;
-mod spread;
 mod translation;
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -631,8 +629,6 @@ fn akar(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Connection>()?;
     m.add_class::<QueryResult>()?;
     knn::register(m)?;
-    lstm::register(m)?;
-    spread::register(m)?;
     louvain::register(m)?;
     search::register(m)?;
     Ok(())

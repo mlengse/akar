@@ -350,7 +350,7 @@ mod tests {
         // P53.18 regression: WITH resets scope to its projection; the alias
         // `cnt` (aggregate) must be visible to the trailing WHERE and RETURN.
         // Previously this failed with `Variable 'cnt' not in scope` (kairos
-        // Finding #13 — dream REM phase).
+        // Finding #13).
         let binder = setup_binder();
         let sql = "MATCH (a:Person)-[e:Knows]-(:Person) \
                    WITH a, COUNT(e) AS cnt WHERE cnt < $max_conn \

@@ -87,8 +87,8 @@ pub enum EmbeddingError {
 
 /// Generic interface for text embedding providers, decoupled from fastembed.
 ///
-/// This trait enables the dream engine and other consumers to use embeddings
-/// without depending on a specific ONNX runtime or model library.
+/// This trait lets in-process consumers use embeddings without depending on a
+/// specific ONNX runtime or model library.
 pub trait EmbeddingProvider: Send + Sync {
     /// Compute dense embeddings for a batch of texts.
     ///

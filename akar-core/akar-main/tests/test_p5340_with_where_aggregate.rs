@@ -1,7 +1,7 @@
 //! P53.40 regression tests — kairos Finding #22: WHERE on a WITH-aggregate
 //! alias must filter the aggregated pipeline (`HAVING` semantics), not fail.
 //!
-//! Repro shape from the kairos dream REM phase:
+//! Repro shape from a downstream consumer's aggregation query:
 //!   MATCH (m:T) OPTIONAL MATCH (m)-[r:R]-(:T)
 //!   WITH m, COUNT(r) AS cnt WHERE cnt < $n RETURN ...
 //!
