@@ -1510,4 +1510,73 @@ mod tests {
         assert_eq!(m.on_match.len(), 1);
         assert_eq!(m.on_match[0].value, Expression::Constant(Constant::Bool(false)));
     }
+
+    // ==================== parse_call tests ====================
+
+    #[test]
+    fn test_parse_call_no_args() {
+        let sql = "CALL show_tables()";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::StandaloneCall(c) => {
+                assert_eq!(c.function_name, "show_tables");
+                assert!(c.args.is_empty());
+            }
+            _ => panic!("Expected Statement::StandaloneCall"),
+        }
+    }
+
+    #[test]
+    fn test_parse_call_with_args() {
+        let sql = "CALL table_info('Person')";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::StandaloneCall(c) => {
+                assert_eq!(c.function_name, "table_info");
+                assert_eq!(c.args.len(), 1);
+                assert_eq!(c.args[0], Expression::Constant(Constant::String("Person".into())));
+            }
+            _ => panic!("Expected Statement::StandaloneCall"),
+        }
+    }
+
+    #[test]
+    fn test_parse_call_multiple_args_and_params() {
+        let sql = "CALL my_proc(1, 'abc', $param)";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::StandaloneCall(c) => {
+                assert_eq!(c.function_name, "my_proc");
+                assert_eq!(c.args.len(), 3);
+                assert_eq!(c.args[0], Expression::Constant(Constant::Integer(1)));
+                assert_eq!(c.args[1], Expression::Constant(Constant::String("abc".into())));
+                assert_eq!(c.args[2], Expression::Parameter("param".into()));
+            }
+            _ => panic!("Expected Statement::StandaloneCall"),
+        }
+    }
+
+    #[test]
+    fn test_parse_call_direct_invocation() {
+        use pest::Parser;
+
+        let input = "CALL custom_func('arg1', 42)";
+        let mut pairs = CypherParser::parse(Rule::call_statement, input).unwrap();
+        let pair = pairs.next().unwrap();
+
+        let call = dml::parse_call(pair).unwrap();
+        assert_eq!(call.function_name, "custom_func");
+        assert_eq!(call.args.len(), 2);
+        assert_eq!(call.args[0], Expression::Constant(Constant::String("arg1".into())));
+        assert_eq!(call.args[1], Expression::Constant(Constant::Integer(42)));
+    }
+
+    #[test]
+    fn test_parse_call_error_missing_function_name() {
+        use pest::Parser;
+
+        let input = "CALL ()";
+        let pairs = CypherParser::parse(Rule::call_statement, input);
+        assert!(pairs.is_err());
+    }
 }
