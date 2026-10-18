@@ -87,7 +87,7 @@ name = "storage_bench"
 harness = false
 
 [[bench]]
-name = "ladybug_suite"
+name = "akar_suite"
 harness = false
 
 [[bench]]
