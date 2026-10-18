@@ -88,7 +88,7 @@ No server. No Docker. Just `cargo add akar-main` and query.
 ## Architecture
 
 Akar is a **complete from-scratch Rust reimplementation**. The Rust workspace (`akar-core/`)
-contains 35 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
+contains 34 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
 
 | Crate | Purpose |
 |-------|---------|

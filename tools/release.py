@@ -74,7 +74,7 @@ PUBLISH_ORDER_EXTENSIONS = [
     "akar-httpfs",       # common, function, extension
     "akar-markdown",     # common, function, extension
     "akar-duckdb",       # common, function, extension  (must precede delta/iceberg/azure/unity-catalog)
-    "akar-algo",         # common, function, extension, graph, catalog  (must precede dream)
+    "akar-algo",         # common, function, extension, graph, catalog
     "akar-neo4j",        # function, extension
     "akar-llm",          # common, function, extension
     "akar-sqlite",       # common, function, extension
@@ -83,7 +83,6 @@ PUBLISH_ORDER_EXTENSIONS = [
     "akar-iceberg",      # common, function, extension, duckdb
     "akar-azure",        # common, function, extension, duckdb
     "akar-unity-catalog",# common, function, extension, duckdb
-    "akar-dream",        # algo, ml (algo in extensions, ml in core)
     "akar-search",       # no deps
     "akar-main",         # depends on ALL core + json/httpfs/duckdb/algo/llm/sqlite/delta/iceberg/azure/postgres
     "akar-migrate",      # main, storage, common
