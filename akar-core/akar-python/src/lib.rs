@@ -628,9 +628,6 @@ fn akar(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Database>()?;
     m.add_class::<Connection>()?;
     m.add_class::<QueryResult>()?;
-    knn::register(m)?;
-    louvain::register(m)?;
-    search::register(m)?;
     Ok(())
 }
 
