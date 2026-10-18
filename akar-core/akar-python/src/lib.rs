@@ -16,7 +16,6 @@
 //! dan interpolasi parameter sisi-Python (P53.x) — lihat `translation.rs`,
 //! `param_interp.rs`, dan `docs/audits/audit-python-bindings-kairos.md`.
 
-mod dream;
 mod knn;
 mod louvain;
 mod lstm;
@@ -636,7 +635,6 @@ fn akar(m: &Bound<'_, PyModule>) -> PyResult<()> {
     spread::register(m)?;
     louvain::register(m)?;
     search::register(m)?;
-    dream::register(m)?;
     Ok(())
 }
 

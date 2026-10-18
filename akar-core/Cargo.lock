@@ -128,15 +128,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akar-dream"
-version = "0.2.5"
-dependencies = [
- "akar-algo",
- "akar-function",
- "akar-ml",
-]
-
-[[package]]
 name = "akar-duckdb"
 version = "0.2.5"
 dependencies = [

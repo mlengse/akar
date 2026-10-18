@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "akar-search",
-    "akar-dream",
     "akar-common",
     "akar-storage",
     "akar-transaction",

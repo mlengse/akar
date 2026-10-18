@@ -75,14 +75,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akar-dream"
-version = "0.2.5"
-dependencies = [
- "akar-algo",
- "akar-function",
-]
-
-[[package]]
 name = "akar-extension"
 version = "0.2.5"
 dependencies = [
@@ -234,7 +226,6 @@ version = "0.2.3"
 dependencies = [
  "akar-algo",
  "akar-common",
- "akar-dream",
  "akar-graph",
  "akar-main",
  "akar-ml",
