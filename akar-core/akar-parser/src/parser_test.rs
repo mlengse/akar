@@ -1582,4 +1582,103 @@ mod tests {
         let pairs = CypherParser::parse(Rule::call_statement, input);
         assert!(pairs.is_err());
     }
+
+    #[test]
+    fn test_parse_case_expr_searched_with_else() {
+        let sql = "MATCH (n) RETURN CASE WHEN n.age > 18 THEN 'adult' ELSE 'minor' END";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let clause = &q.clauses[1];
+                match clause {
+                    Clause::Return(ret) => {
+                        assert_eq!(ret.expressions.len(), 1);
+                        if let Expression::Case(case_expr) = &ret.expressions[0].expression {
+                            assert!(case_expr.subject.is_none());
+                            assert_eq!(case_expr.alternatives.len(), 1);
+                            assert_eq!(
+                                case_expr.alternatives[0].then,
+                                Expression::Constant(Constant::String("adult".into()))
+                            );
+                            assert_eq!(
+                                case_expr.else_expr,
+                                Some(Box::new(Expression::Constant(Constant::String("minor".into()))))
+                            );
+                        } else {
+                            panic!("Expected Expression::Case, got {:?}", ret.expressions[0].expression);
+                        }
+                    }
+                    _ => panic!("Expected Clause::Return"),
+                }
+            }
+            _ => panic!("Expected Statement::Query"),
+        }
+    }
+
+    #[test]
+    fn test_parse_case_expr_simple_multiple_when_no_else() {
+        let sql = "MATCH (n) RETURN CASE n.status WHEN 1 THEN 'active' WHEN 2 THEN 'pending' END";
+        let stmt = parse(sql).unwrap();
+        match stmt {
+            Statement::Query(q) => {
+                let clause = &q.clauses[1];
+                match clause {
+                    Clause::Return(ret) => {
+                        assert_eq!(ret.expressions.len(), 1);
+                        if let Expression::Case(case_expr) = &ret.expressions[0].expression {
+                            assert!(case_expr.subject.is_some());
+                            if let Expression::PropertyAccess(_, prop_name) = case_expr.subject.as_ref().unwrap().as_ref() {
+                                assert_eq!(prop_name, "status");
+                            } else {
+                                panic!("Expected PropertyAccess as subject");
+                            }
+                            assert_eq!(case_expr.alternatives.len(), 2);
+                            assert_eq!(
+                                case_expr.alternatives[0].when,
+                                Expression::Constant(Constant::Integer(1))
+                            );
+                            assert_eq!(
+                                case_expr.alternatives[0].then,
+                                Expression::Constant(Constant::String("active".into()))
+                            );
+                            assert_eq!(
+                                case_expr.alternatives[1].when,
+                                Expression::Constant(Constant::Integer(2))
+                            );
+                            assert_eq!(
+                                case_expr.alternatives[1].then,
+                                Expression::Constant(Constant::String("pending".into()))
+                            );
+                            assert!(case_expr.else_expr.is_none());
+                        } else {
+                            panic!("Expected Expression::Case, got {:?}", ret.expressions[0].expression);
+                        }
+                    }
+                    _ => panic!("Expected Clause::Return"),
+                }
+            }
+            _ => panic!("Expected Statement::Query"),
+        }
+    }
+
+    #[test]
+    fn test_parse_case_expr_direct_invocation() {
+        use pest::Parser;
+
+        let input = "CASE x WHEN 10 THEN 100 ELSE 0 END";
+        let mut pairs = CypherParser::parse(Rule::case_expr, input).unwrap();
+        let pair = pairs.next().unwrap();
+
+        let expr = expression::parse_case_expr(pair).unwrap();
+        if let Expression::Case(case_expr) = expr {
+            assert!(case_expr.subject.is_some());
+            assert_eq!(case_expr.alternatives.len(), 1);
+            assert_eq!(
+                case_expr.else_expr,
+                Some(Box::new(Expression::Constant(Constant::Integer(0))))
+            );
+        } else {
+            panic!("Expected Expression::Case");
+        }
+    }
 }
