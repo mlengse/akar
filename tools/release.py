@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib  # Python 3.11+ built-in
 from pathlib import Path
 
@@ -557,6 +558,7 @@ def publish_all(version: str, dry: bool = False) -> bool:
         return False
 
     published = []
+    last_publish_time: float | None = None
     for crate in PUBLISH_ORDER:
         if crate in SKIP_CRATES:
             print(f"  SKIP {crate}: excluded")
@@ -572,10 +574,13 @@ def publish_all(version: str, dry: bool = False) -> bool:
             return False
         published.append(crate)
         # Rate limit: crates.io allows burst of ~30 then ~1/min
-        if len(published) > 10:
-            import time
-            print(f"    waiting {RATE_LIMIT_SECONDS}s (rate limit) ...")
-            time.sleep(RATE_LIMIT_SECONDS)
+        if len(published) > 10 and last_publish_time is not None:
+            elapsed = time.time() - last_publish_time
+            sleep_needed = RATE_LIMIT_SECONDS - elapsed
+            if sleep_needed > 0:
+                print(f"    waiting {sleep_needed:.1f}s (rate limit) ...")
+                time.sleep(sleep_needed)
+        last_publish_time = time.time()
 
     print(f"\n  all {len(published)} crates published successfully")
     return True
