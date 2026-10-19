@@ -37,13 +37,18 @@ pub fn bfs(csr: &CSRAdjacency, source: usize) -> (Vec<Option<usize>>, Vec<Option
     distance[source] = 0;
     queue.push(source);
 
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     let mut head = 0;
     while head < queue.len() {
         let node = queue[head];
         head += 1;
         let next_dist = distance[node] + 1;
 
-        for (_rel, dst) in csr.neighbors(node) {
+        let start = offsets[node];
+        let end = offsets[node + 1];
+        for (_rel, dst) in &adjacency[start..end] {
             let neighbor = dst.offset as usize;
             if neighbor < n && distance[neighbor] == usize::MAX {
                 distance[neighbor] = next_dist;
@@ -222,13 +227,18 @@ pub fn shortest_path(csr: &CSRAdjacency, source: usize, target: usize) -> Option
     distance[source] = 0;
     queue.push(source);
 
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     let mut head = 0;
     while head < queue.len() {
         let node = queue[head];
         head += 1;
         let next_dist = distance[node] + 1;
 
-        for (_rel, dst) in csr.neighbors(node) {
+        let start = offsets[node];
+        let end = offsets[node + 1];
+        for (_rel, dst) in &adjacency[start..end] {
             let neighbor = dst.offset as usize;
             if neighbor < n && distance[neighbor] == usize::MAX {
                 if neighbor == target {
@@ -258,6 +268,9 @@ pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> V
     distance[source] = 0;
     queue.push(source);
 
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     let mut head = 0;
     while head < queue.len() {
         let node = queue[head];
@@ -269,7 +282,9 @@ pub fn reachable_within(csr: &CSRAdjacency, source: usize, max_dist: usize) -> V
         }
 
         let next_dist = dist + 1;
-        for (_rel, dst) in csr.neighbors(node) {
+        let start = offsets[node];
+        let end = offsets[node + 1];
+        for (_rel, dst) in &adjacency[start..end] {
             let neighbor = dst.offset as usize;
             if neighbor < n && distance[neighbor] == usize::MAX {
                 distance[neighbor] = next_dist;
