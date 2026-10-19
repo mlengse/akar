@@ -33,7 +33,9 @@ fn generate_walks(
             let mut prev = start;
 
             for _ in 1..window {
-                let neighbors = csr.neighbors(current);
+                let start_off = csr.offsets[current];
+                let end_off = csr.offsets[current + 1];
+                let neighbors = &csr.adjacency[start_off..end_off];
                 if neighbors.is_empty() {
                     break;
                 }
@@ -46,7 +48,9 @@ fn generate_walks(
                     weights.clear();
                     weights.reserve(neighbors.len());
                     let mut total_weight = 0.0;
-                    let prev_neighbors = if prev == current { &[][..] } else { csr.neighbors(prev) };
+                    let prev_start = csr.offsets[prev];
+                    let prev_end = csr.offsets[prev + 1];
+                    let prev_neighbors = if prev == current { &[][..] } else { &csr.adjacency[prev_start..prev_end] };
 
                     for (_, dst) in neighbors {
                         let next = dst.offset as usize;

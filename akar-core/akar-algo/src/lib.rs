@@ -1280,27 +1280,36 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
 
     // Bolt Optimization: Hoist Brandes' algorithm scratch buffers outside the per-source
     // iteration loop and reset state only on visited nodes upon popping from `stack`.
-    // This eliminates O(N²) dynamic heap allocations (N x N inner predecessor vectors and
-    // N distance/sigma/delta/queue allocations), making Brandes traversal zero-allocation
-    // across all source node iterations.
+    // Use direct CSR slice access `&adjacency[start..end]` and a contiguous `queue` with
+    // a cursor head index to eliminate `CSRNeighborIterator` construction and `VecDeque` ring-buffer overhead.
     let mut stack = Vec::with_capacity(n);
     let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
     let mut sigma = vec![0.0; n];
     let mut dist = vec![-1i64; n];
     let mut delta = vec![0.0; n];
-    let mut q = std::collections::VecDeque::with_capacity(n);
+    let mut queue = Vec::with_capacity(n);
+
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
 
     for s in 0..n {
+        queue.clear();
         sigma[s] = 1.0;
         dist[s] = 0;
-        q.push_back(s);
+        queue.push(s);
 
-        while let Some(v) = q.pop_front() {
+        let mut head = 0usize;
+        while head < queue.len() {
+            let v = queue[head];
+            head += 1;
             stack.push(v);
             let dist_v = dist[v];
             let sigma_v = sigma[v];
 
-            for (_, dst) in csr.neighbors(v) {
+            let start = offsets[v];
+            let end = offsets[v + 1];
+
+            for (_, dst) in &adjacency[start..end] {
                 let w = dst.offset as usize;
                 if w >= n {
                     continue;
@@ -1309,7 +1318,7 @@ pub fn compute_betweenness_centrality(csr: &CSRAdjacency) -> AlgoResult {
                 // Path discovery
                 if dist[w] < 0 {
                     dist[w] = dist_v + 1;
-                    q.push_back(w);
+                    queue.push(w);
                 }
 
                 // Path counting
@@ -1439,21 +1448,25 @@ pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
 
     // Bolt Optimization: Consolidate deduplicated and sorted neighbor adjacency lists into a single
     // contiguous flat array (`flat_adj` and `offsets`) to eliminate N dynamic heap allocations.
+    // Use `csr.adjacency.len()` for total degree and direct CSR slice iteration to avoid
+    // per-node `CSRNeighborIterator` construction.
     // Restrict intersection scans to neighbors w > u > v (canonical triangle ordering v < u < w).
     // This discovers each triangle exactly once, eliminates redundant checks in the inner loop,
     // avoids division operations, and drastically shortens intersection scan lengths.
-    let mut total_degree = 0usize;
-    for v in 0..n {
-        total_degree += csr.neighbors(v).len();
-    }
+    let total_degree = csr.adjacency.len();
 
     let mut offsets = Vec::with_capacity(n + 1);
     let mut flat_adj = Vec::with_capacity(total_degree);
 
+    let csr_offsets = &csr.offsets;
+    let csr_adjacency = &csr.adjacency;
+
     for v in 0..n {
         offsets.push(flat_adj.len());
         let start_len = flat_adj.len();
-        for (_, dst) in csr.neighbors(v) {
+        let v_start = csr_offsets[v];
+        let v_end = csr_offsets[v + 1];
+        for (_, dst) in &csr_adjacency[v_start..v_end] {
             let neighbor = dst.offset as usize;
             if neighbor < n && neighbor != v {
                 flat_adj.push(neighbor);
@@ -1832,6 +1845,9 @@ where
     let mut touched: Vec<usize> = Vec::with_capacity(16);
     let mut next_frontier: Vec<(usize, f64)> = Vec::with_capacity(current_frontier.len() * 2);
 
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     // Propagate hop by hop
     for hop in 1..=max_hops {
         touched.clear();
@@ -1839,7 +1855,9 @@ where
 
         for &(node, _node_act) in &current_frontier {
             let total_act = activation[node];
-            for (_rel, dst) in csr.neighbors(node) {
+            let start = offsets[node];
+            let end = offsets[node + 1];
+            for (_rel, dst) in &adjacency[start..end] {
                 let w = dst.offset as usize;
                 if w >= n {
                     continue;
