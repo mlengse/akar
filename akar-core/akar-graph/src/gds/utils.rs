@@ -26,27 +26,39 @@ impl GDSUtils {
     ) -> u64 {
         let _n = graph.num_nodes() as u64;
 
+        let n = graph.num_nodes();
+
         let mut cur_frontier: Vec<u64> = vec![source];
         let mut next_frontier: Vec<u64> = Vec::new();
-        let mut visited = vec![false; graph.num_nodes()];
-        if (source as usize) < graph.num_nodes() {
+        let mut visited = vec![false; n];
+        if (source as usize) < n {
             visited[source as usize] = true;
         }
         let mut iter = 0u16;
+
+        // Bolt Optimization: Direct CSR slice access avoids iterator/tuple construction
+        // and bounds-check method call overhead in graph search inner loops.
+        let offsets = &graph.offsets;
+        let adjacency = &graph.adjacency;
 
         while !cur_frontier.is_empty() && iter < max_iteration {
             next_frontier.clear();
 
             for &node_offset in &cur_frontier {
+                let node_pos = node_offset as usize;
+                if node_pos >= n {
+                    continue;
+                }
                 let bound_node_id = InternalID {
                     table_id: 0,
                     offset: node_offset,
                 };
-                let neighbors = graph.neighbors(node_offset as usize);
+                let start = offsets[node_pos];
+                let end = offsets[node_pos + 1];
 
-                for &(edge_id, ref dst) in neighbors {
+                for &(edge_id, ref dst) in &adjacency[start..end] {
                     let nbr_offset = dst.offset as usize;
-                    if nbr_offset >= graph.num_nodes() {
+                    if nbr_offset >= n {
                         continue;
                     }
 
@@ -75,12 +87,13 @@ impl GDSUtils {
         bfs_graph: &mut dyn crate::gds::bfs_graph::BaseBFSGraph,
         max_iteration: u16,
     ) -> u64 {
-        let n = graph.num_nodes() as u64;
+        let n_nodes = graph.num_nodes();
+        let n = n_nodes as u64;
 
         // Track which iteration each node was first discovered in
-        let mut discovered_at: Vec<Option<u16>> = vec![None; graph.num_nodes()];
+        let mut discovered_at: Vec<Option<u16>> = vec![None; n_nodes];
 
-        if (source as usize) < graph.num_nodes() {
+        if (source as usize) < n_nodes {
             discovered_at[source as usize] = Some(0);
         }
 
@@ -88,28 +101,39 @@ impl GDSUtils {
         let mut next_frontier: Vec<u64> = Vec::new();
         let mut iter = 0u16;
 
+        // Bolt Optimization: Direct CSR slice access avoids iterator/tuple construction
+        // and bounds-check method call overhead in graph search inner loops.
+        let offsets = &graph.offsets;
+        let adjacency = &graph.adjacency;
+
         while !cur_frontier.is_empty() && iter < max_iteration {
             next_frontier.clear();
 
             for &node_offset in &cur_frontier {
+                let node_pos = node_offset as usize;
+                if node_pos >= n_nodes {
+                    continue;
+                }
                 let bound_node_id = InternalID {
                     table_id: 0,
                     offset: node_offset,
                 };
-                let neighbors = graph.neighbors(node_offset as usize);
+                let start = offsets[node_pos];
+                let end = offsets[node_pos + 1];
 
-                for &(edge_id, ref dst) in neighbors {
+                for &(edge_id, ref dst) in &adjacency[start..end] {
                     let nbr_offset = dst.offset;
                     if nbr_offset >= n {
                         continue;
                     }
 
+                    let nbr_pos = nbr_offset as usize;
                     // First visit: record and add to next frontier
-                    if discovered_at[nbr_offset as usize].is_none() {
-                        discovered_at[nbr_offset as usize] = Some(iter + 1);
+                    if discovered_at[nbr_pos].is_none() {
+                        discovered_at[nbr_pos] = Some(iter + 1);
                         bfs_graph.add_parent(iter + 1, bound_node_id, edge_id, *dst, true);
                         next_frontier.push(nbr_offset);
-                    } else if discovered_at[nbr_offset as usize] == Some(iter + 1) {
+                    } else if discovered_at[nbr_pos] == Some(iter + 1) {
                         // Same iteration: add as alternative parent
                         bfs_graph.add_parent(iter + 1, bound_node_id, edge_id, *dst, true);
                     }
@@ -155,6 +179,11 @@ impl GDSUtils {
             node: source,
         }));
 
+        // Bolt Optimization: Direct CSR slice access avoids iterator/tuple construction
+        // and bounds-check method call overhead in graph search inner loops.
+        let offsets = &graph.offsets;
+        let adjacency = &graph.adjacency;
+
         while let Some(std::cmp::Reverse(HeapNode { cost, node })) = heap.pop() {
             if cost > dist[node as usize] {
                 continue;
@@ -165,9 +194,11 @@ impl GDSUtils {
                 table_id: 0,
                 offset: node,
             };
-            let neighbors = graph.neighbors(node as usize);
+            let node_pos = node as usize;
+            let start = offsets[node_pos];
+            let end = offsets[node_pos + 1];
 
-            for &(edge_id, ref dst) in neighbors {
+            for &(edge_id, ref dst) in &adjacency[start..end] {
                 let nbr = dst.offset;
                 if nbr as usize >= n {
                     continue;
@@ -229,6 +260,11 @@ impl GDSUtils {
             node: source,
         }));
 
+        // Bolt Optimization: Direct CSR slice access avoids iterator/tuple construction
+        // and bounds-check method call overhead in graph search inner loops.
+        let offsets = &graph.offsets;
+        let adjacency = &graph.adjacency;
+
         while let Some(std::cmp::Reverse(HeapNode { cost, node })) = heap.pop() {
             if cost > dist[node as usize] {
                 continue;
@@ -239,9 +275,11 @@ impl GDSUtils {
                 table_id: 0,
                 offset: node,
             };
-            let neighbors = graph.neighbors(node as usize);
+            let node_pos = node as usize;
+            let start = offsets[node_pos];
+            let end = offsets[node_pos + 1];
 
-            for &(edge_id, ref dst) in neighbors {
+            for &(edge_id, ref dst) in &adjacency[start..end] {
                 let nbr = dst.offset;
                 if nbr as usize >= n {
                     continue;

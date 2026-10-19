@@ -107,3 +107,7 @@
 ## 2026-10-17 - Direct CSR slice iteration in LPA community detection
 **Learning:** In Label Propagation Algorithm (`compute_lpa`), calling `csr.neighbors(v)` on every inner node loop constructs a `CSRNeighborIterator` wrapper and `InternalID` structs on every edge visit. Direct CSR slice access `&adjacency[start..end]` over contiguous offsets `&offsets[v..v+1]` avoids per-node iterator construction overhead and allows tighter loop compilation, reducing LPA execution time by ~2.5%-3.0% across small to large graphs (2K to 40K nodes).
 **Action:** Use direct CSR offset-slice iteration (`&adjacency[start..end]`) instead of constructing iterator wrappers in graph community detection and propagation sweeps.
+
+## 2026-10-18 - Direct CSR slice iteration in BFS and GDS shortest path traversals
+**Learning:** In graph traversal and shortest path algorithms (`bfs`, `shortest_path`, `reachable_within`, `run_single_shortest_path`, `run_all_shortest_paths`, `run_weighted_shortest_path`, `run_all_weighted_shortest_paths`), invoking `csr.neighbors(node)` inside inner frontier loops introduces method call dispatch and slice range indexing overhead. Hoisting references to `&csr.offsets` and `&csr.adjacency` outside frontier loops and directly indexing `&adjacency[offsets[node]..offsets[node + 1]]` eliminates method call and bounds-check overhead per visited node in graph search inner loops.
+**Action:** Hoist CSR offsets and adjacency slice references outside frontier loops and slice `&adjacency[start..end]` directly in graph traversal algorithms.
