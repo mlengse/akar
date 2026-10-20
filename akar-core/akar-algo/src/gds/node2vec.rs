@@ -3,31 +3,52 @@ use akar_graph::CSRAdjacency;
 
 use super::rng::SimpleRng;
 
+/// Contiguous flat buffer representation of generated random walks.
+pub struct FlatWalks {
+    pub walks: Vec<usize>,
+    pub offsets: Vec<usize>,
+}
+
+impl FlatWalks {
+    pub fn len(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&[usize]> {
+        if idx < self.len() {
+            let start = self.offsets[idx];
+            let end = self.offsets[idx + 1];
+            Some(&self.walks[start..end])
+        } else {
+            None
+        }
+    }
+}
+
 /// Generate `walks` biased random walks per start node from a seeded RNG.
-fn generate_walks(
-    csr: &CSRAdjacency,
-    p: f64,
-    q: f64,
-    walks: usize,
-    window: usize,
-    rng: &mut SimpleRng,
-) -> Vec<Vec<usize>> {
+fn generate_walks(csr: &CSRAdjacency, p: f64, q: f64, walks: usize, window: usize, rng: &mut SimpleRng) -> FlatWalks {
     let n = csr.num_nodes();
     let inv_p = 1.0 / p;
     let inv_q = 1.0 / q;
     let is_unbiased = (inv_p - 1.0).abs() < 1e-9 && (inv_q - 1.0).abs() < 1e-9;
-    let mut all_walks = Vec::with_capacity(n * walks);
+    let total_walks = n * walks;
 
-    // Bolt Optimization: Fast-path unbiased random walk sampling (p=1, q=1) via direct O(1)
-    // uniform neighbor index calculation while preserving the RNG sequence draw count.
-    // In biased mode, avoid fetching `csr.neighbors(prev)` on step 1 (when prev == current)
-    // and reuse the scratch buffer `weights` across step iterations to eliminate allocations.
+    // Bolt Optimization: Consolidate random walks into flat contiguous `walks` and `offsets` buffers.
+    // Pre-allocating `walks` (capacity `total_walks * window`) and `offsets` (capacity `total_walks + 1`)
+    // eliminates `N * walks` individual heap vector allocations and optimizes CPU cache locality.
+    let mut walks_buf = Vec::with_capacity(total_walks * window);
+    let mut offsets = Vec::with_capacity(total_walks + 1);
+    offsets.push(0);
+
     let mut weights = Vec::new();
 
     for start in 0..n {
         for _ in 0..walks {
-            let mut walk = Vec::with_capacity(window);
-            walk.push(start);
+            walks_buf.push(start);
 
             let mut current = start;
             let mut prev = start;
@@ -50,7 +71,11 @@ fn generate_walks(
                     let mut total_weight = 0.0;
                     let prev_start = csr.offsets[prev];
                     let prev_end = csr.offsets[prev + 1];
-                    let prev_neighbors = if prev == current { &[][..] } else { &csr.adjacency[prev_start..prev_end] };
+                    let prev_neighbors = if prev == current {
+                        &[][..]
+                    } else {
+                        &csr.adjacency[prev_start..prev_end]
+                    };
 
                     for (_, dst) in neighbors {
                         let next = dst.offset as usize;
@@ -80,29 +105,37 @@ fn generate_walks(
                 prev = current;
                 current = next_node;
                 if current < n {
-                    walk.push(current);
+                    walks_buf.push(current);
                 } else {
                     break;
                 }
             }
-            all_walks.push(walk);
+            offsets.push(walks_buf.len());
         }
     }
-    all_walks
+    FlatWalks {
+        walks: walks_buf,
+        offsets,
+    }
 }
 
 /// Skip-gram SGD over the generated walks; mutates `embeddings` in place.
 fn train_embeddings(
     embeddings: &mut [f64],
-    all_walks: &[Vec<usize>],
+    all_walks: &FlatWalks,
     n: usize,
     dimensions: usize,
     window: usize,
     rng: &mut SimpleRng,
 ) {
     let lr = 0.025;
+    let num_walks = all_walks.len();
 
-    for walk in all_walks {
+    for i in 0..num_walks {
+        let start_off = all_walks.offsets[i];
+        let end_off = all_walks.offsets[i + 1];
+        let walk = &all_walks.walks[start_off..end_off];
+
         for (pos, &u) in walk.iter().enumerate() {
             let start = pos.saturating_sub(window / 2);
             let end = (pos + window / 2 + 1).min(walk.len());
@@ -354,7 +387,8 @@ mod tests {
         let walks = generate_walks(&csr, 1.0, 1.0, 4, 5, &mut rng);
         assert_eq!(walks.len(), 3 * 4);
         let mut starts_seen = vec![0usize; 3];
-        for walk in walks.iter() {
+        for i in 0..walks.len() {
+            let walk = walks.get(i).unwrap();
             starts_seen[walk[0]] += 1;
             assert!(walk.len() <= 5);
             for pair in walk.windows(2) {
@@ -370,8 +404,8 @@ mod tests {
         let csr = csr_from_edges(&[(1, 2)], 3);
         let mut rng = SimpleRng::new(9);
         let walks = generate_walks(&csr, 1.0, 1.0, 2, 4, &mut rng);
-        assert_eq!(walks[0], vec![0]);
-        assert_eq!(walks[1], vec![0]);
+        assert_eq!(walks.get(0).unwrap(), &[0]);
+        assert_eq!(walks.get(1).unwrap(), &[0]);
     }
 
     #[test]
@@ -379,7 +413,10 @@ mod tests {
         // Opposing vectors (dot=-1) must move toward each other under the
         // positive-skipgram update; skipping training leaves dot at exactly -1.
         let mut embeddings = vec![1.0, 0.0, -1.0, 0.0];
-        let walks = vec![vec![0usize, 1]];
+        let walks = FlatWalks {
+            walks: vec![0, 1],
+            offsets: vec![0, 2],
+        };
         let mut rng = SimpleRng::new(3);
         train_embeddings(&mut embeddings, &walks, 2, 2, 2, &mut rng);
         let dot_after = embeddings[0] * embeddings[2] + embeddings[1] * embeddings[3];
