@@ -38,5 +38,9 @@ harness = false
 name = "k_core"
 harness = false
 
+[[bench]]
+name = "node2vec"
+harness = false
+
 [lints]
 workspace = true
