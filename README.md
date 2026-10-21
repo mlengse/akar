@@ -36,8 +36,9 @@ cargo add akar-main
 ```
 
 ```bash
-# Python bindings (PyPI)
-pip install akar
+# Python bindings: the PyPI package `akar` is frozen at its last published
+# version and no longer receives new releases (feature 018). Use the Rust
+# crate below, or the CLI binaries attached to GitHub Releases.
 ```
 
 Akar is an **embedded library** — it ships no server. The broker/daemon lifecycle used by

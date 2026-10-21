@@ -1627,7 +1627,9 @@ mod tests {
                         assert_eq!(ret.expressions.len(), 1);
                         if let Expression::Case(case_expr) = &ret.expressions[0].expression {
                             assert!(case_expr.subject.is_some());
-                            if let Expression::PropertyAccess(_, prop_name) = case_expr.subject.as_ref().unwrap().as_ref() {
+                            if let Expression::PropertyAccess(_, prop_name) =
+                                case_expr.subject.as_ref().unwrap().as_ref()
+                            {
                                 assert_eq!(prop_name, "status");
                             } else {
                                 panic!("Expected PropertyAccess as subject");

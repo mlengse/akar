@@ -27,6 +27,8 @@ import sys
 import tempfile
 import time
 import tomllib  # Python 3.11+ built-in
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower().startswith("cp"):
@@ -97,6 +99,7 @@ SKIP_CRATES = {"akar-c", "akar-python", "akar-fuzz"}
 PUBLISH_ORDER = PUBLISH_ORDER_CORE + PUBLISH_ORDER_EXTENSIONS
 
 RATE_LIMIT_SECONDS = 8  # crates.io rate limit buffer
+VERIFY_TIMEOUT_SECONDS = 180.0  # crates.io index propagation budget per crate
 
 
 def run(
@@ -147,6 +150,62 @@ def load_toml(path):
 def parse_workspace_version() -> str:
     data = load_toml(WORKSPACE_TOML)
     return data["workspace"]["package"]["version"]
+
+
+def parse_semver(value: str) -> tuple[int, int, int]:
+    """Parse `X.Y.Z` (ignoring a pre-release suffix) for ordering checks."""
+    core = value.split("-", 1)[0]
+    parts = core.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return (0, 0, 0)
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
+
+
+def validate_target_version(version: str, workspace_version: str) -> str | None:
+    """Return an error message when the target version cannot be released."""
+    if parse_semver(version) <= parse_semver(workspace_version):
+        return (
+            f"target {version} must be greater than workspace {workspace_version}; "
+            "a release never reuses or lowers the published version"
+        )
+    return None
+
+
+def unresolved_changelog_markers() -> list[str]:
+    """Placeholders left in [Unreleased] that would leak into release notes."""
+    text = CHANGELOG.read_text(encoding="utf-8")
+    match = re.search(r"## \[Unreleased\]\s*\n(.*?)(?=\n## \[|\Z)", text, re.DOTALL)
+    if not match:
+        return []
+    section = match.group(1)
+    found = re.findall(r"\[Uncommitted\]|\[NEEDS CLARIFICATION[^\]]*\]", section)
+    return sorted(set(found))
+
+
+def crate_version_exists(crate: str, version: str, timeout: float = 15.0) -> bool:
+    """Single-shot check: does crates.io already serve this exact version?"""
+    url = f"https://crates.io/api/v1/crates/{crate}/{version}"
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "akar-release-script (github.com/mlengse/akar)"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def verify_crate_published(crate: str, version: str, timeout: float = VERIFY_TIMEOUT_SECONDS) -> bool:
+    """Poll crates.io until the version resolves, or the timeout expires."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if crate_version_exists(crate, version):
+            return True
+        time.sleep(3)
+    return False
 
 
 def parse_crate_version(crate_name: str) -> str | None:
@@ -547,7 +606,7 @@ def publish_crate(crate_name: str, version: str) -> bool:
     return True
 
 
-def publish_all(version: str, dry: bool = False) -> bool:
+def publish_all(version: str, dry: bool = False, verify: bool = True) -> bool:
     """Publish all crates bottom-up. Returns True on success."""
     print(f"\n[publish] crates.io bottom-up (v{version})")
     issues = check_dep_alignment()
@@ -566,6 +625,10 @@ def publish_all(version: str, dry: bool = False) -> bool:
         if dry:
             print(f"  DRY: would publish {crate}@{version}")
             continue
+        if crate_version_exists(crate, version):
+            print(f"  SKIP {crate}@{version}: already published")
+            published.append(crate)
+            continue
         if not publish_crate(crate, version):
             print(f"FAIL: {crate} publish failed. Aborting.")
             print("  Already published (safe to re-run):")
@@ -583,6 +646,23 @@ def publish_all(version: str, dry: bool = False) -> bool:
         last_publish_time = time.time()
 
     print(f"\n  all {len(published)} crates published successfully")
+
+    if verify and published:
+        print(f"\n[verify] crates.io availability (budget {VERIFY_TIMEOUT_SECONDS:.0f}s per crate)")
+        missing = []
+        for crate in published:
+            ok = verify_crate_published(crate, version)
+            print(f"  {'OK  ' if ok else 'FAIL'} {crate}@{version}")
+            if not ok:
+                missing.append(crate)
+        if missing:
+            print("FAIL: published but not resolvable from crates.io:")
+            for crate in missing:
+                print(f"  {crate}")
+            print("  Re-run --publish-only once propagation completes.")
+            return False
+        print(f"  all {len(published)} crates verified")
+
     return True
 
 
@@ -618,6 +698,7 @@ def main() -> None:
     parser.add_argument("--skip-deps", action="store_true", help="skip dep alignment")
     parser.add_argument("--allow-dirty", action="store_true", help="proceed with dirty tree")
     parser.add_argument("--publish-only", action="store_true", help="only run crates.io publish")
+    parser.add_argument("--skip-verify", action="store_true", help="skip post-publish crates.io verification")
     parser.add_argument("--skip-github", action="store_true", help="skip GitHub release creation")
     args = parser.parse_args()
 
@@ -638,7 +719,7 @@ def main() -> None:
 
     # ── publish-only mode ──
     if args.publish_only:
-        ok = publish_all(version)
+        ok = publish_all(version, verify=not args.skip_verify)
         sys.exit(0 if ok else 1)
 
     # ── pre-flight ──
@@ -648,6 +729,19 @@ def main() -> None:
 
     if git_tag_exists(tag):
         print(f"FAIL: tag {tag} already exists.")
+        sys.exit(1)
+
+    version_error = validate_target_version(version, ws_ver)
+    if version_error:
+        print(f"FAIL: {version_error}")
+        sys.exit(1)
+
+    markers = unresolved_changelog_markers()
+    if markers:
+        print("FAIL: release notes still contain unresolved placeholders:")
+        for marker in markers:
+            print(f"  {marker}")
+        print("  Replace them with real commit hashes before releasing.")
         sys.exit(1)
 
     # ── gate ──
@@ -699,6 +793,11 @@ def main() -> None:
     print("  done")
 
     # ── changelog ──
+    if args.dry:
+        print("\n=== DRY RUN: stopping before changelog/commit/tag/push/publish ===")
+        print("  Review `git diff`, then revert (git checkout -- .) or re-run without --dry.")
+        return
+
     print("\n=== CHANGELOG ===\n")
     finalize_changelog(version, tag)
 
@@ -712,9 +811,9 @@ def main() -> None:
 
     # ── crates.io publish ──
     if not args.dry:
-        ok = publish_all(version)
+        ok = publish_all(version, verify=not args.skip_verify)
         if not ok:
-            print("\nWARN: some crates failed to publish. Fix manually.")
+            print("\nWARN: some crates failed to publish or verify. Fix manually.")
             sys.exit(1)
     else:
         print("\n=== DRY RUN: skipping crates.io publish ===")

@@ -9,7 +9,7 @@
 
 ### Removed
 
-- **Feature `009-relocate-sulur-cognitive-logic` — agent-memory logic and the Sulur daemon protocol left Akar; Akar is now a pure embedded graph database (§13)** · `[Uncommitted]` · `cargo test --workspace` 0 failed · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
+- **Feature `009-relocate-sulur-cognitive-logic` — agent-memory logic and the Sulur daemon protocol left Akar; Akar is now a pure embedded graph database (§13)** · `bf41492` · `cargo test --workspace` 0 failed · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
   - Crate `akar-dream` deleted from the workspace (dream-phase kernels NREM/REM/AFE/DAE/insights/supersedes/synthesis); relocated to `sulur-core::dream` (Sulur feature 009).
   - `akar-ml/src/lstm.rs`, `akar-function/src/scalar/retention.rs`, `akar-search/src/multi.rs` deleted. `akar-ml` keeps ONNX embed/rerank, `akar-function`/`akar-search` keep generic primitives; LSTM, the Ebbinghaus `retention_score`, and multi-perspective recall now live in `sulur-core`.
   - `akar-main/src/remote.rs` deleted — the `WireRequest`/`WireResponse`/`ServerStats` envelope and `Database::connect_tcp` belong to Sulur; the canonical protocol is `sulur-server/src/wire/`. The `test_remote_server.rs` + `server_fixture/` + `test_retention_score.rs` harnesses went with it.
