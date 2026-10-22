@@ -1126,12 +1126,12 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
     let offsets = &csr.offsets;
     let adjacency = &csr.adjacency;
 
-    // Bolt Optimization: Calculate initial degrees directly using `offsets[i+1] - offsets[i]`
-    // to avoid constructing `CSRNeighborIterator` for all N nodes. Iterate directly over
-    // contiguous CSR adjacency slices `&adjacency[start..end]` inside the core maintenance
-    // loop to eliminate per-node iterator construction overhead.
-    let mut degree: Vec<usize> = (0..n).map(|i| offsets[i + 1] - offsets[i]).collect();
-    let mut core = vec![0usize; n];
+    // Bolt Optimization: Pre-allocate `core` directly as `Vec<f64>` to eliminate secondary
+    // heap vector allocations and conversion loops (`core.iter().map(...).collect()`). Use
+    // `offsets.windows(2)` to eliminate bounds checks during degree calculation, and hoist `deg_v`
+    // outside the inner neighbor loop to avoid repeated array lookups.
+    let mut degree: Vec<usize> = offsets.windows(2).map(|w| w[1] - w[0]).collect();
+    let mut core = vec![0.0f64; n];
 
     // Bucket sort nodes by degree: bin[d] = start position of degree-d bucket.
     let max_deg = degree.iter().copied().max().unwrap_or(0);
@@ -1161,7 +1161,8 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
 
     for i in 0..n {
         let v = vert[i];
-        core[v] = degree[v];
+        let deg_v = degree[v];
+        core[v] = deg_v as f64;
         let start_idx = offsets[v];
         let end_idx = offsets[v + 1];
         for (_, dst) in &adjacency[start_idx..end_idx] {
@@ -1169,7 +1170,7 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
             if w >= n {
                 continue;
             }
-            if degree[w] > degree[v] {
+            if degree[w] > deg_v {
                 let du = degree[w];
                 let pw = pos[w];
                 let pu = bin[du];
@@ -1188,7 +1189,7 @@ pub fn compute_k_core(csr: &CSRAdjacency) -> AlgoResult {
 
     AlgoResult {
         name: "k_core".into(),
-        values: core.iter().map(|&c| c as f64).collect(),
+        values: core,
         metadata: None,
     }
 }
