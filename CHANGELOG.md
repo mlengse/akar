@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
 ### Removed
 
 - **Feature `009-relocate-sulur-cognitive-logic` — agent-memory logic and the Sulur daemon protocol left Akar; Akar is now a pure embedded graph database (§13)** · `bf41492` · `cargo test --workspace` 0 failed · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
@@ -895,6 +897,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.3.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.0
 [0.2.5]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.5
 [0.2.4]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.4
 [0.2.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.3
