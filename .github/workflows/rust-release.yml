@@ -19,6 +19,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'Existing tag to (re)build release assets for'
+        type: string
+        default: ''
       dry_run:
         description: 'Dry run (run tests + build without creating release)'
         type: boolean
@@ -36,7 +40,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: '1.96.1'
       - run: cargo test --workspace --no-fail-fast
         working-directory: akar-core
 
@@ -61,7 +69,11 @@ jobs:
             asset_name: akar-cli-windows-amd64.exe
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: '1.96.1'
       - run: rustup target add ${{ matrix.target }}
         if: matrix.target != 'x86_64-unknown-linux-gnu'
       - name: Build release binary
@@ -82,21 +94,26 @@ jobs:
     name: Create GitHub Release
     needs: [build-cli]
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
       - name: Generate changelog
         id: changelog
         run: |
-          echo "## Release ${{ github.ref_name }}" > CHANGELOG.md
+          echo "## Release ${{ inputs.tag || github.ref_name }}" > CHANGELOG.md
           echo "" >> CHANGELOG.md
           echo "### Changes since previous release" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
-          git log --oneline --no-decorate $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD >> CHANGELOG.md || true
+          # Resolve the previous tag from the release commit's parent. Using HEAD
+          # here returns the tag being released, which would make the range empty
+          # and overwrite an existing release body with headings only.
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          git log --oneline --no-decorate "$PREV..HEAD" >> CHANGELOG.md || true
       - name: Download all binaries
         uses: actions/download-artifact@v8
         with:
@@ -105,7 +122,8 @@ jobs:
       - name: Create Release with assets
         uses: softprops/action-gh-release@v3
         with:
-          name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
           body_path: CHANGELOG.md
           files: binaries/*
           draft: false
@@ -122,7 +140,11 @@ jobs:
     if: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: '1.96.1'
       - name: Build release (verify compilation)
         run: cargo build --release -p akar-cli
         working-directory: akar-core

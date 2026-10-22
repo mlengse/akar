@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import shutil
@@ -686,6 +687,49 @@ def create_github_release(version: str, tag: str) -> None:
         print(f"  GitHub release created: {result.stdout.strip()}")
 
 
+# Assets rust-release.yml attaches to the GitHub release. A release is not
+# complete until every one of them can be downloaded (contract §5, FR-004).
+EXPECTED_RELEASE_ASSETS = [
+    "akar-cli-linux-amd64",
+    "akar-cli-macos-arm64",
+    "akar-cli-windows-amd64.exe",
+]
+
+
+def verify_github_assets(
+    tag: str,
+    expected: list[str],
+    timeout: float = 900.0,
+) -> bool:
+    """Poll the GitHub release until every expected asset is attached.
+
+    `gh release create` returns as soon as the release object exists; the
+    binaries arrive later from rust-release.yml. Without this check the tool
+    prints DONE while the CLI artifacts are still missing.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        proc = run(
+            ["gh", "release", "view", tag, "--json", "assets"],
+            check=False,
+            capture=True,
+        )
+        names: set[str] = set()
+        if proc.returncode == 0:
+            try:
+                payload = json.loads(proc.stdout or "{}")
+                names = {a["name"] for a in payload.get("assets", [])}
+            except (json.JSONDecodeError, KeyError, TypeError):
+                names = set()
+        missing = [n for n in expected if n not in names]
+        if not missing:
+            print(f"  all {len(expected)} release assets verified")
+            return True
+        print(f"  waiting for: {', '.join(missing)}")
+        time.sleep(30)
+    return False
+
+
 # ── main ────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -821,6 +865,11 @@ def main() -> None:
     # ── GitHub release ──
     if not args.skip_github and not args.dry:
         create_github_release(version, tag)
+        if not args.skip_verify and not verify_github_assets(tag, EXPECTED_RELEASE_ASSETS):
+            print("\nFAIL: GitHub release assets are incomplete — release is NOT complete.")
+            print("  The CLI binaries are built by rust-release.yml after the tag push.")
+            print(f"  Re-run it: gh workflow run rust-release.yml -f tag={tag}")
+            sys.exit(1)
 
     print(f"\n=== DONE: v{version} ===")
     print(f"  Tag: {tag}")

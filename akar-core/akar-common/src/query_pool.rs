@@ -156,7 +156,7 @@ impl QueryMemoryPool {
     /// make reservations negative).
     pub fn release(&self, bytes: u64) {
         self.reserved_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
                 Some(prev.saturating_sub(bytes))
             })
             .ok();
