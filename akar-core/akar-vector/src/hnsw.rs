@@ -583,7 +583,122 @@ impl HnswIndex {
         self.search_layer_0(current, query, 0, k, ef)
     }
 
-    /// Get a reference to a specific node's vector.
+    /// Search for the `k` approximate nearest neighbours to `query` that satisfy
+    /// `filter`, expanding a beam of `ef` candidates at layer 0.
+    ///
+    /// The filter predicate is applied during beam search: candidates that don't
+    /// pass the filter are not added to the candidate pool, and results that
+    /// don't pass are not counted toward `k`. This means more candidates may
+    /// need to be explored than `k` to find `k` passing results.
+    ///
+    /// Returns a list of `(distance, node_id)` pairs sorted by distance
+    /// (closest first). Returns an empty vec when the index is empty, when
+    /// `k == 0`, or when `ef == 0`.
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef: usize,
+        filter: impl Fn(usize) -> bool,
+    ) -> Vec<(f32, usize)> {
+        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 || ef == 0 {
+            return Vec::new();
+        }
+
+        let entry = self.entry_point.unwrap();
+
+        // Phase 1: Greedy descent from top level to level 1.
+        // The entry point descent does NOT apply the filter — it's just a
+        // starting point for the layer-0 search where filtering happens.
+        let mut current = entry;
+        for level in (1..=self.max_level).rev() {
+            current = self.greedy_search_at_layer(current, query, level);
+        }
+
+        // Phase 2: Search at level 0 with filtering.
+        self.search_layer_0_filtered(current, query, 0, k, ef, filter)
+    }
+
+    /// Search at a single layer with a filter predicate applied during
+    /// candidate expansion and result selection.
+    ///
+    /// Neighbors that don't pass the filter are not added to the candidate
+    /// pool. Only candidates that pass the filter are added to results.
+    /// The search continues until `k` passing results are found or the beam
+    /// is exhausted.
+    fn search_layer_0_filtered(
+        &self,
+        entry: usize,
+        query: &[f32],
+        layer: usize,
+        k: usize,
+        ef: usize,
+        filter: impl Fn(usize) -> bool,
+    ) -> Vec<(f32, usize)> {
+        if k == 0 {
+            return Vec::new();
+        }
+        let ef = ef.max(k);
+        let reachable = self.nodes.len().max(1);
+        let vis_cap = ef.min(reachable).saturating_mul(4);
+        let heap_cap = ef.min(reachable).saturating_add(1);
+        let mut visited = AHashSet::with_capacity(vis_cap);
+
+        let entry_dist = self.node_distance(entry, query);
+        let mut candidates: BinaryHeap<Reverse<Candidate>> = BinaryHeap::with_capacity(heap_cap);
+        let mut results: BinaryHeap<Candidate> = BinaryHeap::with_capacity(heap_cap);
+        candidates.push(Reverse(Candidate(entry_dist, entry)));
+        results.push(Candidate(entry_dist, entry));
+        visited.insert(entry);
+
+        let mut worst_dist = entry_dist;
+
+        while let Some(Reverse(c)) = candidates.pop() {
+            if results.len() >= ef && c.0 > worst_dist {
+                break;
+            }
+            let node = match self.nodes.get(&c.1) {
+                Some(n) => n,
+                None => continue,
+            };
+            if layer >= node.connections.len() {
+                continue;
+            }
+            for &neighbor in &node.connections[layer] {
+                if !visited.insert(neighbor) {
+                    continue;
+                }
+                let neighbor_node = match self.nodes.get(&neighbor) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                // FILTER: Only add neighbors that pass the filter predicate.
+                // Filtered-out neighbors are never added to candidates or results.
+                if !filter(neighbor) {
+                    continue;
+                }
+                let nd = self.metric.compute(&neighbor_node.vector, query);
+                if nd < worst_dist || results.len() < ef {
+                    results.push(Candidate(nd, neighbor));
+                    candidates.push(Reverse(Candidate(nd, neighbor)));
+                    if results.len() > ef {
+                        results.pop();
+                    }
+                    if let Some(worst) = results.peek() {
+                        worst_dist = worst.0;
+                    }
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(results.len());
+        while let Some(c) = results.pop() {
+            out.push((c.0, c.1));
+        }
+        out.reverse();
+        out.truncate(k);
+        out
+    }
     pub fn get_vector(&self, id: usize) -> Option<&[f32]> {
         self.nodes.get(&id).map(|n| n.vector.as_slice())
     }
