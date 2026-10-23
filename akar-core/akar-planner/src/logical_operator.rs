@@ -123,6 +123,7 @@ pub enum LogicalOperator {
     MultiplicityReducer(LogicalMultiplicityReducer),
     Skip(LogicalSkip),
     Insert(LogicalInsert),
+    IndexScan(LogicalIndexScan),
     ExtensionClause(LogicalExtensionClause),
 }
 
@@ -149,6 +150,7 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(s) => s.cardinality,
             LogicalOperator::BatchInsert(s) => s.cardinality,
             LogicalOperator::IndexLookup(s) => s.cardinality,
+            LogicalOperator::IndexScan(s) => s.cardinality,
             LogicalOperator::Delete(s) => s.cardinality,
             LogicalOperator::Set(s) => s.cardinality,
             LogicalOperator::OptionalMatch(s) => s.cardinality,
@@ -215,6 +217,7 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(s) => s.cardinality = card,
             LogicalOperator::BatchInsert(s) => s.cardinality = card,
             LogicalOperator::IndexLookup(s) => s.cardinality = card,
+            LogicalOperator::IndexScan(s) => s.cardinality = card,
             LogicalOperator::Delete(s) => s.cardinality = card,
             LogicalOperator::Set(s) => s.cardinality = card,
             LogicalOperator::OptionalMatch(s) => s.cardinality = card,
@@ -298,13 +301,13 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::IndexLookup(_)
+            | LogicalOperator::IndexScan(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
             | LogicalOperator::Foreach(_)
             | LogicalOperator::Merge(_)
             | LogicalOperator::MergeRel(_) => vec![],
-            // Leaf operators have no children
             LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ScanNode(_)
@@ -364,6 +367,7 @@ impl LogicalOperator {
             LogicalOperator::CopyFrom(_)
             | LogicalOperator::BatchInsert(_)
             | LogicalOperator::IndexLookup(_)
+            | LogicalOperator::IndexScan(_)
             | LogicalOperator::Delete(_)
             | LogicalOperator::Set(_)
             | LogicalOperator::Unwind(_)
@@ -771,6 +775,20 @@ pub struct LogicalIndexLookup {
     pub table_name: String,
     pub table_id: u64,
     pub key_value: akar_common::types::Value,
+    pub cardinality: u64,
+}
+
+/// Index scan operator — equality/set-membership lookup via a secondary index
+/// on a non-primary-key column. Used when a WHERE predicate targets a property
+/// that has a declared secondary index, avoiding a full table scan.
+#[derive(Debug, Clone)]
+pub struct LogicalIndexScan {
+    pub table_name: String,
+    pub table_id: u64,
+    pub alias: Option<String>,
+    pub column_name: String,
+    pub index_name: String,
+    pub values: Vec<akar_common::types::Value>,
     pub cardinality: u64,
 }
 

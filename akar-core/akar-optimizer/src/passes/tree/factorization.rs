@@ -155,7 +155,7 @@ impl TreeOptimizationPass for FactorizationRewriting {
                 | LogicalOperator::EmptyResult(_)
                 | LogicalOperator::Insert(_)
                 | LogicalOperator::ExtensionClause(_)
-                | LogicalOperator::Partitioner(_) => {}
+                | LogicalOperator::Partitioner(_) | LogicalOperator::IndexScan(_) => {}
             }
         });
     }

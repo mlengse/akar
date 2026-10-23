@@ -69,6 +69,8 @@ pub struct NodeTableEntry {
     pub index_type: Option<IndexType>,
     /// Name of the index (if any).
     pub index_name: Option<String>,
+    /// Column the secondary index is built on (if any).
+    pub index_column: Option<String>,
 }
 
 impl NodeTableEntry {
@@ -557,6 +559,7 @@ impl Catalog {
             primary_key_column: pk_col,
             index_type: None,
             index_name: None,
+            index_column: None,
         };
         self.entries.insert(table_id, CatalogEntry::NodeTable(entry));
         self.name_to_id.insert(name, table_id);
@@ -736,13 +739,14 @@ impl Catalog {
                         "Cannot create index on primary key column '{column_name}'. Secondary indexes must be on non-PK properties."
                     )));
                 }
-                // IF NOT EXISTS: if an index already exists on this table, succeed silently.
-                if t.index_name.is_some() && if_not_exists {
-                    return Ok(());
-                }
-                t.index_type = Some(index_type);
-                t.index_name = Some(index_name);
-                Ok(())
+            // IF NOT EXISTS: if an index already exists on this table, succeed silently.
+            if t.index_name.is_some() && if_not_exists {
+                return Ok(());
+            }
+            t.index_type = Some(index_type);
+            t.index_name = Some(index_name);
+            t.index_column = Some(column_name.to_string());
+            Ok(())
             }
             _ => Err(CatalogError::InvalidOperation(format!(
                 "Table '{table_name}' is not a node table"
@@ -1039,9 +1043,10 @@ impl Catalog {
                         "Index '{index_name}' not found on table '{table_name}'"
                     )));
                 }
-                t.index_type = None;
-                t.index_name = None;
-                Ok(())
+            t.index_type = None;
+            t.index_name = None;
+            t.index_column = None;
+            Ok(())
             }
             _ => Err(CatalogError::InvalidOperation(format!(
                 "Table '{table_name}' is not a node table"
@@ -1057,6 +1062,14 @@ impl Catalog {
                 let idx_name = t.index_name.clone()?;
                 Some((idx_type, idx_name))
             }
+            _ => None,
+        }
+    }
+
+    /// Get the column a secondary index is built on for a table, if any.
+    pub fn get_secondary_index_column(&self, table_name: &str) -> Option<String> {
+        match self.get_entry_by_name(table_name)? {
+            CatalogEntry::NodeTable(t) => t.index_column.clone(),
             _ => None,
         }
     }

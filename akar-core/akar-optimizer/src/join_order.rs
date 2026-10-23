@@ -29,6 +29,9 @@ fn collect_scans_recursive(op: &LogicalOperator, scans: &mut Vec<(u64, LogicalOp
         LogicalOperator::ScanNode(s) => {
             scans.push((s.cardinality, op.clone()));
         }
+        LogicalOperator::IndexScan(s) => {
+            scans.push((s.cardinality, op.clone()));
+        }
         LogicalOperator::ScanRel(s) => {
             scans.push((s.cardinality, op.clone()));
         }

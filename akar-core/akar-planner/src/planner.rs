@@ -9,10 +9,12 @@
 use crate::join_order::{build_join_tree, build_wcoj_intersect, flatten_join_plan};
 use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
+use akar_catalog::Catalog;
 use akar_common::error::PlannerError;
 use akar_common::types::{Value, extract_f32_list};
 use akar_parser::ast::Expression;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 /// Evaluate a constant expression (or list literal of constants) to a `Value`
 /// for planning standalone calls that take literal arguments (e.g.
@@ -39,6 +41,100 @@ fn take_fts_if_table(fts: &mut Option<LogicalFtsScan>, table: &str) -> Option<Lo
         fts.take()
     } else {
         None
+    }
+}
+
+/// Try to extract an equality predicate `(variable, column, value)` from an
+/// expression. Handles a single equality or an AND of equalities.
+/// Returns the first matching equality found, or `None`.
+fn extract_equality_predicate(expr: &Expression) -> Option<(String, String, Value)> {
+    match expr {
+        Expression::BinaryOp(op, left, right) => match op {
+            akar_parser::ast::BinaryOp::Equal => {
+                match (left.as_ref(), right.as_ref()) {
+                    (
+                        Expression::PropertyAccess(box_var, col),
+                        Expression::Constant(_),
+                    ) => {
+                        if let Expression::Variable(var) = box_var.as_ref() {
+                            return Some((
+                                var.clone(),
+                                col.clone(),
+                                eval_standalone_expr(right)?,
+                            ));
+                        }
+                    }
+                    (
+                        Expression::Constant(_),
+                        Expression::PropertyAccess(box_var, col),
+                    ) => {
+                        if let Expression::Variable(var) = box_var.as_ref() {
+                            return Some((
+                                var.clone(),
+                                col.clone(),
+                                eval_standalone_expr(left)?,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+                None
+            }
+            akar_parser::ast::BinaryOp::And => {
+                extract_equality_predicate(left.as_ref())
+                    .or_else(|| extract_equality_predicate(right.as_ref()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Remove an equality predicate on `(variable, column)` from an expression.
+/// Returns `None` if the expression was entirely that predicate, otherwise the
+/// expression with the predicate removed (AND branches flattened).
+fn remove_equality_predicate(
+    expr: Expression,
+    var: &str,
+    col: &str,
+) -> Option<Expression> {
+    match expr {
+        Expression::BinaryOp(op, ref left, ref right) => match op {
+            akar_parser::ast::BinaryOp::Equal => {
+                let is_match = matches!((left.as_ref(), right.as_ref()),
+                    (
+                        Expression::PropertyAccess(box_v, c),
+                        Expression::Constant(_),
+                    ) if matches!(box_v.as_ref(), Expression::Variable(v) if v == var && c == col)
+                ) || matches!((left.as_ref(), right.as_ref()),
+                    (
+                        Expression::Constant(_),
+                        Expression::PropertyAccess(box_v, c),
+                    ) if matches!(box_v.as_ref(), Expression::Variable(v) if v == var && c == col)
+                );
+                if is_match {
+                    None
+                } else {
+                    Some(Expression::BinaryOp(op, left.clone(), right.clone()))
+                }
+            }
+            akar_parser::ast::BinaryOp::And => {
+                let new_left = remove_equality_predicate(left.as_ref().clone(), var, col);
+                let new_right = remove_equality_predicate(right.as_ref().clone(), var, col);
+                match (new_left, new_right) {
+                    (Some(l), Some(r)) => Some(Expression::BinaryOp(
+                        akar_parser::ast::BinaryOp::And,
+                        Box::new(l),
+                        Box::new(r),
+                    )),
+                    (Some(l), None) => Some(l),
+                    (None, Some(r)) => Some(r),
+                    (None, None) => None,
+                }
+            }
+            _ => Some(expr),
+        },
+        _ => Some(expr),
     }
 }
 
@@ -129,11 +225,18 @@ fn combine_filter_expr(prev: Option<BoundExpression>, next: BoundExpression) -> 
 }
 
 /// The query planner transforms bound statements into logical query plans.
-pub struct QueryPlanner;
+pub struct QueryPlanner {
+    catalog: Option<Arc<Mutex<Catalog>>>,
+}
 
 impl QueryPlanner {
     pub fn new() -> Self {
-        Self
+        Self { catalog: None }
+    }
+
+    /// Create a planner with catalog access for secondary-index planning (FR-002).
+    pub fn with_catalog(catalog: Arc<Mutex<Catalog>>) -> Self {
+        Self { catalog: Some(catalog) }
     }
 
     pub fn plan(&self, statement: BoundStatement) -> Result<Vec<LogicalOperator>, PlannerError> {
@@ -1111,6 +1214,60 @@ impl QueryPlanner {
                     delete_exprs.extend(self.build_merge_operators(&m));
                 }
             }
+        }
+
+        // Secondary-index planning (FR-002): consult the catalog for secondary
+        // indexes on scanned tables and convert equality/set-membership
+        // predicates on indexed non-PK columns to index scans.
+        if let Some(catalog) = &self.catalog {
+            let cat = catalog.lock().map_err(|e| format!("Catalog lock error: {e}"))?;
+            let mut new_scan_ops = Vec::with_capacity(scan_ops.len());
+            for scan in scan_ops {
+                let mut replaced = false;
+                if let LogicalOperator::ScanNode(s) = &scan {
+                    if let Some(index_column) = cat.get_secondary_index_column(&s.table_name) {
+                        if let Some(filter) = filter_expr.as_ref() {
+                            if let Some((var, column, value)) =
+                                extract_equality_predicate(&filter.expression)
+                            {
+                                if var.as_str() == s.alias.as_deref().unwrap_or("")
+                                    && column.as_str() == index_column
+                                {
+                                    let index_name = cat
+                                        .get_index_info(&s.table_name)
+                                        .map(|(_, n)| n)
+                                        .unwrap_or_default();
+                                    new_scan_ops.push(LogicalOperator::IndexScan(
+                                        LogicalIndexScan {
+                                            table_name: s.table_name.clone(),
+                                            table_id: s.table_id,
+                                            alias: s.alias.clone(),
+                                            column_name: column.clone(),
+                                            index_name,
+                                            values: vec![value],
+                                            cardinality: s.cardinality,
+                                        },
+                                    ));
+                                    filter_expr = filter_expr.take().and_then(|f| {
+                                        remove_equality_predicate(f.expression, &var, &column)
+                                            .map(|e| BoundExpression {
+                                                expression: e,
+                                                resolved_type: f.resolved_type,
+                                                is_constant: f.is_constant,
+                                                alias: f.alias,
+                                            })
+                                    });
+                                    replaced = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !replaced {
+                    new_scan_ops.push(scan);
+                }
+            }
+            scan_ops = new_scan_ops;
         }
 
         // Collect delete/set clauses (added after the main pipeline)

@@ -212,6 +212,7 @@ impl PlanMapper {
             | LogicalOperator::VectorSimilarityScan(_)
             | LogicalOperator::ArtIndexRangeScan(_)
             | LogicalOperator::IndexLookup(_)
+            | LogicalOperator::IndexScan(_)
             | LogicalOperator::ExpressionsScan(_)
             | LogicalOperator::PathPropertyProbe(_) => map_scan::map_and_execute_scan(op, current_input, ctx),
 
