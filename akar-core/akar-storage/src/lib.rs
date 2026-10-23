@@ -45,7 +45,7 @@ pub mod wal_replayer;
 
 use akar_common::error::StorageError;
 use akar_common::memory::MemoryManager;
-use akar_common::types::Value;
+use akar_common::types::{Value, pk_value_to_string};
 use akar_vector::hnsw::DistanceMetric;
 use buffer_manager::{BufferManager, BufferManagerConfig};
 use checkpoint::checkpoint;
@@ -561,7 +561,78 @@ impl StorageManager {
         Ok(result)
     }
 
-    /// Get the ART index for a node table (cloned copy for read-only access).
+    /// Insert a row with secondary-index deduplication on `content_identity_fingerprint`.
+    ///
+    /// Returns `(row_id, is_duplicate)`. If a secondary index exists on
+    /// `content_identity_fingerprint` for this table and is `Available`, the
+    /// fingerprint is looked up first. If found, the existing row offset is
+    /// returned with `is_duplicate = true` and no insert occurs (FR-006 —
+    /// duplicate fingerprints are recognised as duplicates, not re-stored).
+    /// Otherwise the row is inserted, the fingerprint is added to the
+    /// secondary index, and `is_duplicate = false` is returned.
+    pub fn insert_row_with_dedup(
+        &self,
+        table_name: &str,
+        values: Vec<Value>,
+        txn_id: Option<u64>,
+    ) -> Result<(u64, bool), StorageError> {
+        // Find the content_identity_fingerprint column index.
+        let fingerprint_col_idx = {
+            let node_table = self
+                .table_catalog
+                .get_node_table_by_name(table_name)
+                .ok_or_else(|| {
+                    StorageError::TableNotFound(format!("Table '{table_name}' not found"))
+                })?;
+            node_table
+                .columns
+                .iter()
+                .position(|c| c.name == "content_identity_fingerprint")
+        };
+
+        let fingerprint_key = fingerprint_col_idx.map(|col_idx| pk_value_to_string(&values[col_idx]));
+
+        // If a secondary index exists on the fingerprint column, check for duplicates.
+        if let Some(key) = &fingerprint_key {
+            if self
+                .table_catalog
+                .find_secondary_index_for_column(table_name, "content_identity_fingerprint")
+                .is_some()
+            {
+                if let Some(existing_row_id) = self.lookup_secondary_index(
+                    table_name,
+                    "content_identity_fingerprint",
+                    key,
+                )? {
+                    // Duplicate fingerprint — return existing row, do not insert.
+                    return Ok((existing_row_id, true));
+                }
+            }
+        }
+
+        // Not a duplicate — insert the row.
+        let mut node_table = self
+            .table_catalog
+            .get_node_table_by_name_mut(table_name)
+            .ok_or_else(|| {
+                StorageError::TableNotFound(format!("Table '{table_name}' not found"))
+            })?;
+        let row_id = node_table.insert_row_with_txn(values, txn_id)?;
+
+        // Add the fingerprint to the secondary index if one exists.
+        if let (_, Some(key)) = (fingerprint_col_idx, fingerprint_key) {
+            if let Some(index_name) = self
+                .table_catalog
+                .find_secondary_index_for_column(table_name, "content_identity_fingerprint")
+            {
+                if let Some(mut idx) = self.table_catalog.get_secondary_index_mut(&index_name) {
+                    idx.insert(key, row_id);
+                }
+            }
+        }
+
+        Ok((row_id, false))
+    }
     pub fn get_art_index(&self, table_name: &str) -> Option<crate::ArtPrimaryKeyIndex> {
         self.table_catalog.get_art_index(table_name)
     }

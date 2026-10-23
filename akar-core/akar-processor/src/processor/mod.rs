@@ -50,6 +50,7 @@ fn forward_limit_budget(tail: &[LogicalOperator]) -> Option<u64> {
     }
     None
 }
+use akar_storage::StorageManager;
 use akar_storage::table::TableCatalog;
 use akar_storage::wal::{WALRecord, WalSink};
 use akar_transaction::UndoRecord;
@@ -131,6 +132,7 @@ impl StandaloneCallRegistry {
 pub struct QueryProcessor {
     function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     table_catalog: Option<Arc<TableCatalog>>,
+    storage_manager: Option<Arc<StorageManager>>,
     vfs: Option<Arc<akar_common::file_system::VirtualFileSystemRegistry>>,
     standalone_call_handler: Option<Arc<dyn StandaloneCallHandler>>,
     /// Callback for sequence operations (nextval/currval).
@@ -175,6 +177,7 @@ impl QueryProcessor {
         Self {
             function_registry: None,
             table_catalog: None,
+            storage_manager: None,
             vfs: None,
             standalone_call_handler: None,
             sequence_fn: None,
@@ -196,6 +199,7 @@ impl QueryProcessor {
         Self {
             function_registry: Some(registry),
             table_catalog: None,
+            storage_manager: None,
             vfs: None,
             standalone_call_handler: None,
             sequence_fn: None,
@@ -212,15 +216,17 @@ impl QueryProcessor {
         }
     }
 
-    /// Create a processor with function registry, table catalog access, and VFS.
+    /// Create a processor with function registry, table catalog access, storage manager, and VFS.
     pub fn with_catalog(
         registry: Arc<Mutex<FunctionRegistry>>,
         table_catalog: Arc<TableCatalog>,
+        storage_manager: Option<Arc<StorageManager>>,
         vfs: Arc<akar_common::file_system::VirtualFileSystemRegistry>,
     ) -> Self {
         Self {
             function_registry: Some(registry),
             table_catalog: Some(table_catalog),
+            storage_manager,
             vfs: Some(vfs),
             standalone_call_handler: None,
             sequence_fn: None,
@@ -257,6 +263,17 @@ impl QueryProcessor {
     /// The spill directory bound to this processor, if any.
     pub fn spill_dir(&self) -> Option<&std::path::Path> {
         self.spill_dir.as_deref()
+    }
+
+    /// Set the storage manager for dedup-aware inserts and secondary-index access.
+    pub fn with_storage_manager(mut self, storage_manager: Arc<StorageManager>) -> Self {
+        self.storage_manager = Some(storage_manager);
+        self
+    }
+
+    /// The storage manager bound to this processor, if any.
+    pub fn storage_manager(&self) -> Option<&Arc<StorageManager>> {
+        self.storage_manager.as_ref()
     }
 
     /// Set the sequence operation callback (for nextval/currval).
@@ -433,6 +450,7 @@ impl QueryProcessor {
                 processor: self,
                 function_registry: self.function_registry.clone(),
                 table_catalog: self.table_catalog.clone(),
+                storage_manager: self.storage_manager.clone(),
                 vfs: self.vfs.clone(),
                 standalone_call_handler: self.standalone_call_handler.clone(),
                 sequence_fn: self.sequence_fn.clone(),

@@ -12,6 +12,7 @@ use akar_common::types::{Value, physical_type_from_logical};
 use akar_common::vector::DataChunk;
 use akar_function::registry::FunctionRegistry;
 use akar_planner::logical_operator::LogicalOperator;
+use akar_storage::StorageManager;
 use akar_storage::table::TableCatalog;
 use arrow::array::ArrayRef;
 use std::collections::HashMap;
@@ -24,6 +25,7 @@ pub struct ExecutionContext<'p> {
     pub processor: &'p QueryProcessor,
     pub function_registry: Option<Arc<Mutex<FunctionRegistry>>>,
     pub table_catalog: Option<Arc<TableCatalog>>,
+    pub storage_manager: Option<Arc<StorageManager>>,
     pub vfs: Option<Arc<akar_common::file_system::VirtualFileSystemRegistry>>,
     pub standalone_call_handler: Option<Arc<dyn StandaloneCallHandler>>,
     pub sequence_fn: Option<SequenceFn>,

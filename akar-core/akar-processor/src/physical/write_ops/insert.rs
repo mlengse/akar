@@ -4,6 +4,7 @@ use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::set::evaluate_expression_for_row;
 use akar_common::types::{PhysicalTypeID, Value, physical_type_from_logical};
 use akar_common::vector::{DataChunk, ValueVector};
+use akar_storage::StorageManager;
 use akar_storage::table::TableCatalog;
 use akar_storage::wal::{WalSink, log_insert_record, log_rel_insert_record};
 use akar_transaction::UndoRecord;
@@ -15,7 +16,7 @@ pub struct PhysicalInsertNode {
     pub table_id: u64,
     pub out_var_name: String,
     pub properties: Vec<(String, akar_parser::ast::Expression)>,
-    pub table_catalog: Arc<TableCatalog>,
+    pub storage_manager: Arc<StorageManager>,
     /// Active transaction id — inserts are recorded in `VersionInfo` for MVCC (P52.18).
     pub txn_id: Option<u64>,
     /// Undo sink for rollback records (P52.18).
@@ -38,10 +39,16 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
 
         let mut assigned_row_ids: Vec<i64> = Vec::new();
         let mut output_rows: Vec<Vec<Value>> = Vec::new();
-        let mut table = self
-            .table_catalog
-            .get_node_table_by_name_mut(&self.table_name)
-            .ok_or_else(|| format!("Node table '{}' not found for INSERT", self.table_name))?;
+
+        // Get column definitions from catalog (immutable borrow, dropped after).
+        let column_defs: Vec<akar_storage::table::ColumnDefinition> = {
+            let catalog = self.storage_manager.table_catalog();
+            let table = catalog
+                .get_node_table_by_name(&self.table_name)
+                .ok_or_else(|| format!("Node table '{}' not found for INSERT", self.table_name))?;
+            table.columns.clone()
+        };
+        let num_cols = column_defs.len();
 
         // If input is empty (no previous pipeline), we insert exactly one node.
         // Otherwise, we insert a node for each row in the input.
@@ -55,32 +62,35 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
             input
         };
 
-        let num_cols = table.columns.len();
         for chunk in &chunks {
             for row in 0..chunk.size {
                 let mut row_values = vec![Value::Null; num_cols];
 
                 for (prop_name, expr) in &self.properties {
-                    if let Some(col_idx) = table.columns.iter().position(|c| c.name == *prop_name) {
+                    if let Some(col_idx) = column_defs.iter().position(|c| c.name == *prop_name) {
                         let val = evaluate_expression_for_row(expr, chunk, row);
                         row_values[col_idx] = val;
                     }
                 }
 
-                // Add the row to the node table; capture assigned row_id for OCC.
-                // Errors (e.g. NULL primary key) must surface, not silently skip
-                // the row — otherwise UNWIND+CREATE drops input rows (P53.27).
-                let logged_row = self.wal_sink.is_some().then(|| row_values.clone());
-                let row_id = table
-                    .insert_row_with_txn(row_values.clone(), self.txn_id)
+                // Dedup-aware insert: returns (row_id, is_duplicate).
+                // On a duplicate fingerprint, the existing row offset is
+                // returned and no WAL / undo record is written (FR-006).
+                let (row_id, is_duplicate) = self
+                    .storage_manager
+                    .insert_row_with_dedup(&self.table_name, row_values.clone(), self.txn_id)
                     .map_err(|e| format!("INSERT NODE row {row} failed in '{}': {e}", self.table_name))?;
                 assigned_row_ids.push(row_id as i64);
-                output_rows.push(row_values);
-                log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
-                if let Some(sink) = self.undo_sink.as_ref()
-                    && let Ok(mut u) = sink.lock()
-                {
-                    u.push(UndoRecord::insert(self.table_id, row_id));
+                output_rows.push(row_values.clone());
+
+                if !is_duplicate {
+                    let logged_row = self.wal_sink.is_some().then(|| row_values.clone());
+                    log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
+                    if let Some(sink) = self.undo_sink.as_ref()
+                        && let Ok(mut u) = sink.lock()
+                    {
+                        u.push(UndoRecord::insert(self.table_id, row_id));
+                    }
                 }
             }
         }
@@ -114,7 +124,7 @@ impl PhysicalOperatorExec for PhysicalInsertNode {
         // maps 1:1 to one inserted node. Complex-typed columns (List/Struct) that
         // the plain ValueVector cannot materialise are skipped to avoid regressing
         // write-only CREATE of vector/struct node columns.
-        for (col_idx, col) in table.columns.iter().enumerate() {
+        for (col_idx, col) in column_defs.iter().enumerate() {
             let ptype = physical_type_from_logical(col.logical_type);
             let mut cv = ValueVector::new(ptype, n);
             cv.resize(n);

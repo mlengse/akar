@@ -74,6 +74,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                 let processor = crate::processor::QueryProcessor::with_catalog(
                     self.function_registry.clone().unwrap(),
                     self.table_catalog.clone().unwrap(),
+                    None,
                     self.vfs.clone().unwrap(),
                 );
                 let _result = processor.execute(sub_plan)?;

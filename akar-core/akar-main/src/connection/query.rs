@@ -566,6 +566,7 @@ impl Connection {
         Ok(QueryProcessor::with_catalog(
             self.database.function_registry.clone(),
             self.database.table_catalog(),
+            Some(self.database.storage_manager.clone()),
             self.database.vfs.clone(),
         )
         .with_memory_pool(pool)
@@ -711,6 +712,7 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let processor = QueryProcessor::with_catalog(
                 db_qf.function_registry.clone(),
                 db_qf.table_catalog(),
+                Some(db_qf.storage_manager.clone()),
                 db_qf.vfs.clone(),
             )
             .with_schema_ddl_fn(schema_ddl_qf.clone())
@@ -761,6 +763,7 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let processor = QueryProcessor::with_catalog(
                 db_sq.function_registry.clone(),
                 db_sq.table_catalog(),
+                Some(db_sq.storage_manager.clone()),
                 db_sq.vfs.clone(),
             )
             .with_sequence_fn(seq_fn_inner)

@@ -59,17 +59,17 @@ pub fn map_and_execute_update(
             Ok(result)
         }
         LogicalOperator::CreateNode(cn) => {
-            let table_catalog = ctx
-                .table_catalog
+            let storage_manager = ctx
+                .storage_manager
                 .clone()
-                .ok_or_else(|| "No table catalog available for CREATE".to_string())?;
+                .ok_or_else(|| "No storage manager available for CREATE".to_string())?;
 
             let create_node_op = PhysicalInsertNode {
                 table_name: cn.table_name.clone(),
                 table_id: cn.table_id,
                 out_var_name: cn.out_var_name.clone(),
                 properties: cn.properties.clone(),
-                table_catalog,
+                storage_manager,
                 txn_id: ctx.txn_id,
                 undo_sink: Some(ctx.processor.undo_sink()),
                 wal_sink: Some(ctx.processor.wal_sink()),

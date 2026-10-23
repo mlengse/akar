@@ -92,6 +92,7 @@ mod tests {
         QueryProcessor::with_catalog(
             registry,
             catalog,
+            None,
             std::sync::Arc::new(akar_common::file_system::VirtualFileSystemRegistry::new()),
         )
     }
