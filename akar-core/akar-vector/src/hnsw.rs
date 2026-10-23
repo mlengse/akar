@@ -37,13 +37,13 @@ const M: usize = 16;
 const M_MAX: usize = 32;
 
 /// Maximum number of candidates to keep during the search for neighbours.
-const EF_CONSTRUCTION: usize = 200;
+const EF_CONSTRUCTION: usize = 400;
 
 /// Number of iterations for the multi-element pruning procedure.
 const MAX_M: usize = M_MAX;
 
 /// Size of the dynamic candidate list during search.
-const EF_SEARCH: usize = 50;
+const EF_SEARCH: usize = 200;
 
 /// Maximum level generation factor: `1 / ln(M_max)`.
 fn ml() -> f64 {
@@ -374,8 +374,53 @@ impl HnswIndex {
     }
 
     /// Select the `M` closest neighbours from a pre-sorted candidate list.
-    fn select_neighbors_simple(candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
-        candidates.iter().take(m).map(|&(_, id)| id).collect()
+    ///
+    /// Uses the HNSW heuristic neighbor selection: candidates are chosen to be
+    /// both close to the query *and* well-distributed across the space, avoiding
+    /// the "clique" problem where all selected neighbors are clustered together.
+    /// For each candidate we compute its distance to the query and its minimum
+    /// distance to already-selected neighbors; the candidate maximizing
+    /// `min(dist_to_query, dist_to_nearest_selected)` wins each slot.
+    fn select_neighbors_simple(&self, candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
+        if candidates.is_empty() || m == 0 {
+            return Vec::new();
+        }
+        let m = m.min(candidates.len());
+        let mut selected: Vec<usize> = Vec::with_capacity(m);
+        let mut remaining: Vec<(f32, usize)> = candidates.to_vec();
+
+        // First selection: closest to the query.
+        selected.push(remaining[0].1);
+        remaining.remove(0);
+
+        while selected.len() < m && !remaining.is_empty() {
+            let mut best_idx = 0;
+            let mut best_score = f32::NEG_INFINITY;
+
+            for (idx, &(cand_dist, cand_id)) in remaining.iter().enumerate() {
+                // Minimum distance from this candidate to any already-selected neighbor.
+                let mut min_neighbor_dist = f32::INFINITY;
+                for &sel_id in &selected {
+                    let sel_node = self.nodes.get(&sel_id).expect("selected node exists");
+                    let cand_node = self.nodes.get(&cand_id).expect("candidate node exists");
+                    let d = self.metric.compute(&cand_node.vector, &sel_node.vector);
+                    if d < min_neighbor_dist {
+                        min_neighbor_dist = d;
+                    }
+                }
+                // Score: close to query AND far from selected neighbors.
+                let score = cand_dist.min(min_neighbor_dist);
+                if score > best_score {
+                    best_score = score;
+                    best_idx = idx;
+                }
+            }
+
+            selected.push(remaining[best_idx].1);
+            remaining.remove(best_idx);
+        }
+
+        selected
     }
 
     // ---- Public API ----
@@ -421,7 +466,7 @@ impl HnswIndex {
             let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION, EF_CONSTRUCTION);
 
             let m = if level == 0 { M_MAX } else { M };
-            let neighbors = Self::select_neighbors_simple(&candidates, m);
+            let neighbors = self.select_neighbors_simple(&candidates, m);
 
             // Add connections from new node to neighbours
             connections[level] = neighbors.clone();
