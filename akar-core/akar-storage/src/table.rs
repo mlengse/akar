@@ -964,6 +964,32 @@ impl RelTable {
             )));
         }
 
+        // FR-017: Reject empty relationship type. Null type is allowed for legacy rows.
+        if let Some(type_idx) = self.columns.iter().position(|c| c.name == "type") {
+            if let Some(Value::String(s)) = values.get(type_idx) {
+                if s.is_empty() {
+                    return Err(StorageError::Page(
+                        "Relationship type cannot be empty".to_string(),
+                    ));
+                }
+            }
+        }
+
+        // FR-017: Reject inverted validity windows (valid_from > valid_to).
+        let valid_from_idx = self.columns.iter().position(|c| c.name == "valid_from");
+        let valid_to_idx = self.columns.iter().position(|c| c.name == "valid_to");
+        if let (Some(vf_idx), Some(vt_idx)) = (valid_from_idx, valid_to_idx) {
+            if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) =
+                (values.get(vf_idx), values.get(vt_idx))
+            {
+                if vf > vt {
+                    return Err(StorageError::Page(
+                        "Validity window is inverted: valid_from > valid_to".to_string(),
+                    ));
+                }
+            }
+        }
+
         let edge_idx = self.edges.len();
         self.edges.push((from, to));
 
@@ -1001,6 +1027,32 @@ impl RelTable {
                     num_cols,
                     vals.len()
                 )));
+            }
+
+            // FR-017: Reject empty relationship type. Null type is allowed for legacy rows.
+            if let Some(type_idx) = self.columns.iter().position(|c| c.name == "type") {
+                if let Some(Value::String(s)) = vals.get(type_idx) {
+                    if s.is_empty() {
+                        return Err(StorageError::Page(format!(
+                            "Rel {}: relationship type cannot be empty", i
+                        )));
+                    }
+                }
+            }
+
+            // FR-017: Reject inverted validity windows (valid_from > valid_to).
+            let valid_from_idx = self.columns.iter().position(|c| c.name == "valid_from");
+            let valid_to_idx = self.columns.iter().position(|c| c.name == "valid_to");
+            if let (Some(vf_idx), Some(vt_idx)) = (valid_from_idx, valid_to_idx) {
+                if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) =
+                    (vals.get(vf_idx), vals.get(vt_idx))
+                {
+                    if vf > vt {
+                        return Err(StorageError::Page(format!(
+                            "Rel {}: Validity window is inverted: valid_from > valid_to", i
+                        )));
+                    }
+                }
             }
         }
 
@@ -1193,6 +1245,46 @@ impl RelTable {
             .map(|&(src, edge_idx)| {
                 let props = self.get_edge_properties(edge_idx);
                 (src, props)
+            })
+            .collect()
+    }
+
+    /// Get outgoing edges from a source node filtered by relationship type.
+    ///
+    /// Returns `(dst_offset, property_values)` pairs for edges where the
+    /// `type_column_idx` column equals `type_value`. This enables type-filtered
+    /// traversal (FR-016) while retaining all stored types in the table.
+    pub fn get_outgoing_edges_by_type(
+        &self,
+        src_offset: u64,
+        type_column_idx: usize,
+        type_value: &Value,
+    ) -> Vec<(u64, Vec<Value>)> {
+        self.scan_adj_list(src_offset)
+            .iter()
+            .filter_map(|&(dst, edge_idx)| {
+                let props = self.get_edge_properties(edge_idx);
+                (props.get(type_column_idx) == Some(type_value)).then_some((dst, props))
+            })
+            .collect()
+    }
+
+    /// Get incoming edges to a destination node filtered by relationship type.
+    ///
+    /// Returns `(src_offset, property_values)` pairs for edges where the
+    /// `type_column_idx` column equals `type_value`. This enables type-filtered
+    /// traversal (FR-016) while retaining all stored types in the table.
+    pub fn get_incoming_edges_by_type(
+        &self,
+        dst_offset: u64,
+        type_column_idx: usize,
+        type_value: &Value,
+    ) -> Vec<(u64, Vec<Value>)> {
+        self.scan_rev_adj_list(dst_offset)
+            .iter()
+            .filter_map(|&(src, edge_idx)| {
+                let props = self.get_edge_properties(edge_idx);
+                (props.get(type_column_idx) == Some(type_value)).then_some((src, props))
             })
             .collect()
     }
@@ -2175,6 +2267,255 @@ mod tests {
         assert_eq!(data.len(), 2);
         assert_eq!(data[0], vec![Value::Int64(2020), Value::Int64(2021)]);
         assert_eq!(data[1], vec![Value::Double(0.5), Value::Double(0.9)]);
+    }
+
+    fn make_typed_rel_table() -> RelTable {
+        RelTable::new(
+            1,
+            "Knows".into(),
+            0,
+            1,
+            vec![
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "type".into(),
+                    logical_type: LogicalTypeID::String,
+                    is_primary_key: false,
+                },
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "created_at".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "valid_from".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+                ColumnDefinition {
+                    compression: akar_common::enums::CompressionType::Uncompressed,
+                    name: "valid_to".into(),
+                    logical_type: LogicalTypeID::Int64,
+                    is_primary_key: false,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn test_rel_multi_edge_same_pair_different_types() {
+        // FR-013: Multiple relationships with distinct types for the same
+        // ordered pair must all survive.
+        let mut rel = make_typed_rel_table();
+        rel.insert_rel(
+            0,
+            1,
+            vec![
+                Value::String("similar".into()),
+                Value::Int64(2020),
+                Value::Int64(2021),
+                Value::Int64(2025),
+            ],
+        )
+        .unwrap();
+        rel.insert_rel(
+            0,
+            1,
+            vec![
+                Value::String("contradicts".into()),
+                Value::Int64(2022),
+                Value::Int64(2023),
+                Value::Int64(2024),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(rel.num_rows, 2);
+        assert_eq!(rel.edges.len(), 2);
+
+        let props0 = rel.get_edge_properties(0);
+        assert_eq!(
+            props0,
+            vec![
+                Value::String("similar".into()),
+                Value::Int64(2020),
+                Value::Int64(2021),
+                Value::Int64(2025),
+            ]
+        );
+
+        let props1 = rel.get_edge_properties(1);
+        assert_eq!(
+            props1,
+            vec![
+                Value::String("contradicts".into()),
+                Value::Int64(2022),
+                Value::Int64(2023),
+                Value::Int64(2024),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_rel_empty_type_rejected() {
+        // FR-017: Empty relationship type must be rejected.
+        let mut rel = make_typed_rel_table();
+        let result = rel.insert_rel(
+            0,
+            1,
+            vec![Value::String("".into()), Value::Int64(2020), Value::Int64(2021), Value::Int64(2025)],
+        );
+        assert!(result.is_err());
+        assert_eq!(rel.num_rows, 0);
+    }
+
+    #[test]
+    fn test_rel_null_type_rejected() {
+        // FR-017: Null relationship type is allowed for legacy rows.
+        let mut rel = make_typed_rel_table();
+        let result = rel.insert_rel(
+            0,
+            1,
+            vec![Value::Null, Value::Int64(2020), Value::Int64(2021), Value::Int64(2025)],
+        );
+        assert!(result.is_ok());
+        assert_eq!(rel.num_rows, 1);
+    }
+
+    #[test]
+    fn test_rel_inverted_validity_window_rejected() {
+        // FR-017: Inverted validity window (valid_from > valid_to) must be rejected.
+        let mut rel = make_typed_rel_table();
+        let result = rel.insert_rel(
+            0,
+            1,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(2020),
+                Value::Int64(2025), // valid_from > valid_to
+                Value::Int64(2020),
+            ],
+        );
+        assert!(result.is_err());
+        assert_eq!(rel.num_rows, 0);
+    }
+
+    #[test]
+    fn test_rel_typed_round_trip() {
+        // FR-017: type, created_at, valid_from, valid_to must round-trip unchanged.
+        let mut rel = make_typed_rel_table();
+        rel.insert_rel(
+            0,
+            1,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(1000000),
+                Value::Int64(2000000),
+                Value::Int64(3000000),
+            ],
+        )
+        .unwrap();
+
+        let props = rel.get_edge_properties(0);
+        assert_eq!(
+            props,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(1000000),
+                Value::Int64(2000000),
+                Value::Int64(3000000),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_rel_outgoing_edges_by_type() {
+        // FR-016: Type-filtered traversal returns only edges of the given type.
+        let mut rel = make_typed_rel_table();
+        rel.insert_rel(
+            0,
+            1,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(2020),
+                Value::Int64(2021),
+                Value::Int64(2025),
+            ],
+        )
+        .unwrap();
+        rel.insert_rel(
+            0,
+            2,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(2021),
+                Value::Int64(2022),
+                Value::Int64(2026),
+            ],
+        )
+        .unwrap();
+        rel.insert_rel(
+            0,
+            3,
+            vec![
+                Value::String("contradicts".into()),
+                Value::Int64(2022),
+                Value::Int64(2023),
+                Value::Int64(2024),
+            ],
+        )
+        .unwrap();
+
+        let type_idx = 0; // "type" is the first column
+        let knows = Value::String("knows".into());
+
+        let outgoing = rel.get_outgoing_edges_by_type(0, type_idx, &knows);
+        assert_eq!(outgoing.len(), 2);
+        let targets: Vec<u64> = outgoing.iter().map(|(d, _)| *d).collect();
+        assert!(targets.contains(&1));
+        assert!(targets.contains(&2));
+
+        let contradicts = Value::String("contradicts".into());
+        let outgoing_c = rel.get_outgoing_edges_by_type(0, type_idx, &contradicts);
+        assert_eq!(outgoing_c.len(), 1);
+        assert_eq!(outgoing_c[0].0, 3);
+    }
+
+    #[test]
+    fn test_rel_incoming_edges_by_type() {
+        // FR-016: Type-filtered reverse traversal.
+        let mut rel = make_typed_rel_table();
+        rel.insert_rel(
+            1,
+            0,
+            vec![
+                Value::String("knows".into()),
+                Value::Int64(2020),
+                Value::Int64(2021),
+                Value::Int64(2025),
+            ],
+        )
+        .unwrap();
+        rel.insert_rel(
+            2,
+            0,
+            vec![
+                Value::String("contradicts".into()),
+                Value::Int64(2022),
+                Value::Int64(2023),
+                Value::Int64(2024),
+            ],
+        )
+        .unwrap();
+
+        let type_idx = 0;
+        let knows = Value::String("knows".into());
+
+        let incoming = rel.get_incoming_edges_by_type(0, type_idx, &knows);
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(incoming[0].0, 1);
     }
 
     // ==================== TableCatalog tests ====================

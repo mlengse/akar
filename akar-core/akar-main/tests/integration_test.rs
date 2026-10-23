@@ -1623,3 +1623,258 @@ fn test_p5314_plain_set_after_merge_executes() {
     let rows = query_rows(&conn, "MATCH (m:Meta) RETURN m.key");
     assert_eq!(rows.len(), 1, "MERGE should create the Meta row, got: {rows:?}");
 }
+
+#[test]
+fn test_typed_multi_edge_same_pair() {
+    // FR-013: Multiple relationships with distinct types for the same ordered pair
+    // must all survive.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING, weight DOUBLE)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1, content: 'a'})");
+    exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
+
+    // Two different types between the same pair (1 -> 2)
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'similar', weight: 0.9}]->(b)",
+    );
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'contradicts', weight: 0.3}]->(b)",
+    );
+
+    // Both edges should be queryable
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected]->(b:Memory {id: 2}) \
+         RETURN r.type, r.weight ORDER BY r.type",
+    );
+    assert_eq!(rows.len(), 2, "Both relationship types should survive");
+    let types: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+    assert!(
+        types.iter().any(|t| t.contains("contradicts")),
+        "Expected 'contradicts' type, got: {types:?}"
+    );
+    assert!(
+        types.iter().any(|t| t.contains("similar")),
+        "Expected 'similar' type, got: {types:?}"
+    );
+}
+
+#[test]
+fn test_typed_idempotent_rewrite() {
+    // FR-014: Re-writing the same relationship (same endpoints + type) must be
+    // idempotent — no duplicate edge created.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING, weight DOUBLE)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1, content: 'a'})");
+    exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
+
+    // Write the same relationship twice
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         MERGE (a)-[r:Connected {type: 'knows'}]->(b) \
+         SET r.weight = 0.9",
+    );
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         MERGE (a)-[r:Connected {type: 'knows'}]->(b) \
+         SET r.weight = 0.95",
+    );
+
+    // Only one edge should exist between the pair
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected]->(b:Memory {id: 2}) \
+         RETURN r.type, r.weight",
+    );
+    assert_eq!(
+        rows.len(),
+        1,
+        "Same relationship written twice should not create duplicate, got {rows:?}"
+    );
+    assert_eq!(rows[0][0], "String(\"knows\")");
+    assert_eq!(rows[0][1], "Double(0.95)");
+}
+
+#[test]
+fn test_merge_update_existing_pk() {
+    // FR-015: MERGE on an existing primary key takes the update path,
+    // no duplicate-primary-key error.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Meta(key STRING, value STRING, PRIMARY KEY (key))",
+    );
+
+    // First create via MERGE
+    exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v1'");
+
+    // Merge again with different value — should update, not duplicate
+    exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v2'");
+
+    let rows = query_rows(&conn, "MATCH (m:Meta {key: 'k'}) RETURN m.value");
+    assert_eq!(rows.len(), 1, "MERGE should update, not duplicate");
+    assert_eq!(rows[0][0], "String(\"v2\")");
+}
+
+#[test]
+fn test_typed_edge_filter_traversal() {
+    // FR-016: Edge traversal with type filter returns only the requested type.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1, content: 'a'})");
+    exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
+    exec(&conn, "CREATE (c:Memory {id: 3, content: 'c'})");
+
+    // Two different types between 1 -> 2
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'knows'}]->(b)",
+    );
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'contradicts'}]->(b)",
+    );
+    // One edge from 1 -> 3
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (c:Memory {id: 3}) \
+         CREATE (a)-[:Connected {type: 'knows'}]->(c)",
+    );
+
+    // Filter by type = 'knows'
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected {type: 'knows'}]->(b:Memory) \
+         RETURN b.id ORDER BY b.id",
+    );
+    assert_eq!(
+        rows.len(),
+        2,
+        "Type-filtered traversal should return only 'knows' edges, got {rows:?}"
+    );
+    assert_eq!(rows[0][0], "Int64(2)");
+    assert_eq!(rows[1][0], "Int64(3)");
+
+    // Filter by type = 'contradicts'
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected {type: 'contradicts'}]->(b:Memory) \
+         RETURN b.id",
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], "Int64(2)");
+}
+
+#[test]
+fn test_typed_round_trip() {
+    // FR-017: type, created_at, valid_from, valid_to must round-trip unchanged.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING, created_at INT64, valid_from INT64, valid_to INT64)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1})");
+    exec(&conn, "CREATE (b:Memory {id: 2})");
+
+    exec_ok(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'knows', created_at: 1000000, valid_from: 2000000, valid_to: 3000000}]->(b)",
+    );
+
+    let rows = query_rows(
+        &conn,
+        "MATCH (a:Memory {id: 1})-[r:Connected]->(b:Memory {id: 2}) \
+         RETURN r.type, r.created_at, r.valid_from, r.valid_to",
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], "String(\"knows\")");
+    assert_eq!(rows[0][1], "Int64(1000000)");
+    assert_eq!(rows[0][2], "Int64(2000000)");
+    assert_eq!(rows[0][3], "Int64(3000000)");
+}
+
+#[test]
+fn test_rel_empty_type_rejected_via_cypher() {
+    // FR-017: Empty relationship type must be rejected.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1})");
+    exec(&conn, "CREATE (b:Memory {id: 2})");
+
+    let err = exec_err(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: ''}]->(b)",
+    );
+    assert!(
+        err.contains("type cannot be empty"),
+        "Expected 'type cannot be empty' error, got: {err}"
+    );
+}
+
+#[test]
+fn test_rel_inverted_validity_rejected_via_cypher() {
+    // FR-017: Inverted validity window must be rejected.
+    let (_db, conn) = setup_db();
+    exec(
+        &conn,
+        "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
+    );
+    exec(
+        &conn,
+        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING, valid_from INT64, valid_to INT64)",
+    );
+    exec(&conn, "CREATE (a:Memory {id: 1})");
+    exec(&conn, "CREATE (b:Memory {id: 2})");
+
+    let err = exec_err(
+        &conn,
+        "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
+         CREATE (a)-[:Connected {type: 'knows', valid_from: 3000000, valid_to: 2000000}]->(b)",
+    );
+    assert!(
+        err.contains("Validity window is inverted"),
+        "Expected 'Validity window is inverted' error, got: {err}"
+    );
+}
