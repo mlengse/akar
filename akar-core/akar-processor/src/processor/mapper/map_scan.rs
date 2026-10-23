@@ -197,6 +197,28 @@ pub fn map_and_execute_scan(
             let result = lookup_op.execute(current_input)?;
             Ok(result)
         }
+        LogicalOperator::IndexScan(is) => {
+            let table_catalog = ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| "No table catalog available for INDEX SCAN".to_string())?;
+            let storage_manager = ctx
+                .storage_manager
+                .clone()
+                .ok_or_else(|| "No storage manager available for INDEX SCAN".to_string())?;
+            let scan_op = PhysicalIndexScan {
+                table_name: is.table_name.clone(),
+                table_id: is.table_id,
+                alias: is.alias.clone(),
+                column_name: is.column_name.clone(),
+                index_name: is.index_name.clone(),
+                values: is.values.clone(),
+                table_catalog,
+                storage_manager,
+            };
+            let result = scan_op.execute(current_input)?;
+            Ok(result)
+        }
         LogicalOperator::ExpressionsScan(_es) => Ok(vec![DataChunk::new(vec![], vec![])]),
         LogicalOperator::PathPropertyProbe(p) => {
             let properties = p

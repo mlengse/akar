@@ -3,6 +3,7 @@
 pub mod batch_insert;
 pub mod common;
 pub mod index_lookup;
+pub mod index_scan;
 pub mod join_ops;
 pub mod join_spill;
 pub mod misc;
@@ -14,6 +15,7 @@ pub mod write_ops;
 
 pub use batch_insert::*;
 pub use index_lookup::*;
+pub use index_scan::*;
 pub use join_ops::*;
 pub use join_spill::*;
 pub use misc::*;
