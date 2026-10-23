@@ -119,7 +119,7 @@ impl MemoryAccountant {
     /// over-release can never make totals negative).
     pub fn deallocate(&self, attr: MemoryAttribution, amount: u64) {
         self.total
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
                 Some(prev.saturating_sub(amount))
             })
             .ok();
