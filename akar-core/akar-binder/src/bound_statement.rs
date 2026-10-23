@@ -333,6 +333,7 @@ pub struct BoundCreateIndex {
     pub index_name: String,
     pub table_name: String,
     pub column_name: String,
+    pub if_not_exists: bool,
 }
 
 /// Bound `DROP INDEX` statement.

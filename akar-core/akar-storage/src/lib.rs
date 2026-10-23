@@ -57,7 +57,7 @@ pub use art_index::ArtPrimaryKeyIndex;
 pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
 pub use group_commit::{GroupCommitResult, GroupCommitStats, WalLike};
-pub use index::{HashIndex, IndexKey, OnDiskHashIndex};
+pub use index::{HashIndex, IndexKey, OnDiskHashIndex, SecondaryIndex};
 pub use local_storage::LocalStorage;
 pub use local_wal::LocalWAL;
 pub use node_group::NodeGroup;
@@ -463,6 +463,102 @@ impl StorageManager {
     /// Drop an ART index from a node table.
     pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), StorageError> {
         self.table_catalog.drop_art_index(table_name)
+    }
+
+    // ==================== Secondary Indexes ====================
+
+    /// Create a secondary index on a non-PK column and register its file with
+    /// the BufferManager. If `if_not_exists` is true and an index with the same
+    /// name already exists, succeeds silently (FR-001 / FR-003).
+    pub fn create_secondary_index(
+        &self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        index_type: akar_catalog::IndexType,
+        if_not_exists: bool,
+    ) -> Result<(), StorageError> {
+        // If-not-exists: check if already registered in TableCatalog
+        if if_not_exists && self.table_catalog.get_secondary_index(&name).is_some() {
+            return Ok(());
+        }
+
+        let db_path = self.db_path.clone();
+        let file_name = format!("si_{name}");
+        let full_path = db_path.join(format!("{file_name}.idx"));
+
+        // Register the index file with the BufferManager
+        {
+            let mut bm = self
+                .buffer_manager
+                .lock()
+                .map_err(|e| StorageError::BufferManager(format!("Lock poisoned: {e}")))?;
+            if !bm.is_file_registered(&file_name) {
+                bm.register_file(&file_name, full_path);
+            }
+            drop(bm);
+        }
+
+        // Create in TableCatalog
+        self.table_catalog
+            .create_secondary_index(name, table_name, column_name, index_type, file_name)
+            .map_err(|e| StorageError::Index(e))
+    }
+
+    /// Get a reference to a secondary index by name.
+    pub fn get_secondary_index(
+        &self,
+        name: &str,
+    ) -> Option<dashmap::mapref::one::Ref<'_, String, SecondaryIndex>> {
+        self.table_catalog.get_secondary_index(name)
+    }
+
+    /// Drop a secondary index by name, releasing its storage.
+    pub fn drop_secondary_index(&self, name: &str, _table_name: &str) -> Result<(), StorageError> {
+        self.table_catalog
+            .drop_secondary_index(name)
+            .ok_or_else(|| StorageError::Index(format!("Secondary index '{name}' not found")))?;
+        Ok(())
+    }
+
+    /// List all secondary indexes.
+    pub fn list_secondary_indexes(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, String, SecondaryIndex>> {
+        self.table_catalog.all_secondary_indexes()
+    }
+
+    /// Look up a row offset by fingerprint key through the secondary index on
+    /// the given table+column. Returns `None` if no index exists, the index is
+    /// not `Available`, or the key is not present (scan fallback path).
+    pub fn lookup_secondary_index(
+        &self,
+        table_name: &str,
+        column_name: &str,
+        key: &str,
+    ) -> Result<Option<u64>, StorageError> {
+        let index_name = match self
+            .table_catalog
+            .find_secondary_index_for_column(table_name, column_name)
+        {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+        let idx = self
+            .table_catalog
+            .get_secondary_index(&index_name)
+            .ok_or_else(|| StorageError::Index(format!("Secondary index '{index_name}' not found")))?;
+        if !idx.is_available() {
+            return Ok(None);
+        }
+        let mut bm = self
+            .buffer_manager
+            .lock()
+            .map_err(|e| StorageError::BufferManager(format!("Lock poisoned: {e}")))?;
+        let key_owned = key.to_string();
+        let result = idx
+            .lookup(&key_owned, &mut bm)
+            .map_err(|e| StorageError::Index(format!("lookup failed: {e}")))?;
+        drop(bm);
+        Ok(result)
     }
 
     /// Get the ART index for a node table (cloned copy for read-only access).

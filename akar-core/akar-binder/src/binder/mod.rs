@@ -1074,6 +1074,9 @@ impl Binder {
         let index_type = IndexType::from_str(&v.index_type)
             .ok_or_else(|| format!("Unknown index type '{}'. Use ART or HASH", v.index_type))?;
 
+        // Resolve conflict action (IF NOT EXISTS)
+        let if_not_exists = matches!(v.conflict_action.as_deref(), Some("IF_NOT_EXISTS"));
+
         // Validate table and column exist
         {
             let catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
@@ -1081,16 +1084,17 @@ impl Binder {
                 .get_entry_by_name(&v.table_name)
                 .ok_or_else(|| format!("Table '{}' not found", v.table_name))?;
 
-            // Validate column exists and is PK
+            // Validate column exists
             let col_exists = entry.columns().iter().any(|c| c.name == v.property);
             if !col_exists {
                 return Err(format!("Column '{}' not found in table '{}'", v.property, v.table_name).into());
             }
 
+            // Secondary indexes MUST be on non-PK columns (FR-001).
             let pk_col = entry.columns().iter().find(|c| c.is_primary_key);
-            if pk_col.map(|c| c.name.as_str()) != Some(v.property.as_str()) {
+            if pk_col.map(|c| c.name.as_str()) == Some(v.property.as_str()) {
                 return Err(format!(
-                    "Cannot create index on non-PK column '{}'. Only PK columns are supported.",
+                    "Cannot create index on primary key column '{}'. Secondary indexes must be on non-PK properties.",
                     v.property
                 )
                 .into());
@@ -1099,13 +1103,20 @@ impl Binder {
 
         // Register with catalog (separate lock for mutable access)
         let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-        catalog.create_index(&v.table_name, v.index_name.clone(), index_type, &v.property)?;
+        catalog.create_index(
+            &v.table_name,
+            v.index_name.clone(),
+            index_type,
+            &v.property,
+            if_not_exists,
+        )?;
 
         Ok(BoundStatement::BoundCreateIndex(BoundCreateIndex {
             index_type,
             index_name: v.index_name,
             table_name: v.table_name,
             column_name: v.property,
+            if_not_exists,
         }))
     }
 

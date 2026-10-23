@@ -716,6 +716,7 @@ impl Catalog {
         index_name: String,
         index_type: IndexType,
         column_name: &str,
+        if_not_exists: bool,
     ) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
@@ -728,11 +729,16 @@ impl Catalog {
                         column: column_name.to_string(),
                     });
                 }
+                // Secondary indexes MUST be on non-PK columns (FR-001).
                 let pk_col = t.primary_key_column();
-                if pk_col.map(|c| c.name.as_str()) != Some(column_name) {
+                if pk_col.map(|c| c.name.as_str()) == Some(column_name) {
                     return Err(CatalogError::InvalidOperation(format!(
-                        "Cannot create index on non-PK column '{column_name}'. Only PK columns are supported."
+                        "Cannot create index on primary key column '{column_name}'. Secondary indexes must be on non-PK properties."
                     )));
+                }
+                // IF NOT EXISTS: if an index already exists on this table, succeed silently.
+                if t.index_name.is_some() && if_not_exists {
+                    return Ok(());
                 }
                 t.index_type = Some(index_type);
                 t.index_name = Some(index_name);

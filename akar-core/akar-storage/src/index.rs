@@ -206,7 +206,7 @@ impl IndexKey for i32 {
 /// # Thread Safety
 ///
 /// This struct is `Send + Sync` when wrapped in `Arc<Mutex<...>>`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OnDiskHashIndex<K: IndexKey> {
     /// Name of the index file (used as BufferManager file identifier).
     file_name: String,
@@ -557,6 +557,86 @@ impl<K: IndexKey + Hash + Eq> Default for OnDiskHashIndex<K> {
     }
 }
 
+/// Lifecycle state of a secondary index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexState {
+    /// Index is being built (backfilling existing rows). Queries fall back to scan.
+    Building,
+    /// Index is fully built and available for lookups.
+    Available,
+    /// Index has been dropped; storage released.
+    Dropped,
+}
+
+/// A persistent secondary index over a non-primary-key column.
+///
+/// Wraps `OnDiskHashIndex<String>` (keys are hex-encoded fingerprint bytes)
+/// with a lifecycle state machine. Queries against a `Building` or `Dropped`
+/// index fall back to a full table scan (FR-004).
+#[derive(Debug, Clone)]
+pub struct SecondaryIndex {
+    pub name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub index_type: akar_catalog::IndexType,
+    pub state: IndexState,
+    /// On-disk hash index backing store. Keys are hex-encoded fingerprint bytes.
+    pub index: OnDiskHashIndex<String>,
+}
+
+impl SecondaryIndex {
+    /// Create a new secondary index in `Building` state.
+    pub fn new(
+        name: String,
+        table_name: String,
+        column_name: String,
+        index_type: akar_catalog::IndexType,
+        file_name: String,
+    ) -> Self {
+        Self {
+            name,
+            table_name,
+            column_name,
+            index_type,
+            state: IndexState::Building,
+            index: OnDiskHashIndex::new(&file_name),
+        }
+    }
+
+    /// Mark the index as `Available` after backfill completes.
+    pub fn mark_available(&mut self) {
+        self.state = IndexState::Available;
+    }
+
+    /// Mark the index as `Dropped` (storage released).
+    pub fn mark_dropped(&mut self) {
+        self.state = IndexState::Dropped;
+    }
+
+    /// Returns `true` if the index can serve lookups (state == `Available`).
+    pub fn is_available(&self) -> bool {
+        self.state == IndexState::Available
+    }
+
+    /// Flush the in-memory cache to durable storage via the BufferManager.
+    pub fn flush(&mut self, bm: &mut BufferManager) -> std::io::Result<()> {
+        self.index.flush(bm)
+    }
+
+    /// Look up a row offset by key. Returns `None` if the index is not `Available`.
+    pub fn lookup(&self, key: &String, bm: &mut BufferManager) -> std::io::Result<Option<u64>> {
+        if !self.is_available() {
+            return Ok(None);
+        }
+        self.index.lookup(key, bm)
+    }
+
+    /// Insert a key → row offset mapping into the L1 cache.
+    pub fn insert(&mut self, key: String, offset: u64) {
+        self.index.insert(key, offset);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -756,5 +836,121 @@ mod tests {
         for i in 0..100u64 {
             assert_eq!(idx.lookup_cached(&i), Some(i * 10));
         }
+    }
+
+    #[test]
+    fn test_secondary_index_lifecycle() {
+        let (mut bm, _dir) = create_test_bm();
+        let mut idx = SecondaryIndex::new(
+            "si_dedup".to_string(),
+            "Memory".to_string(),
+            "content_identity_fingerprint".to_string(),
+            akar_catalog::IndexType::Hash,
+            "si_dedup".to_string(),
+        );
+
+        // Initially Building, not available
+        assert_eq!(idx.state, IndexState::Building);
+        assert!(!idx.is_available());
+
+        // Insert entries
+        idx.insert("fp-a".to_string(), 0);
+        idx.insert("fp-b".to_string(), 1);
+        idx.flush(&mut bm).unwrap();
+
+        // Mark available
+        idx.mark_available();
+        assert_eq!(idx.state, IndexState::Available);
+        assert!(idx.is_available());
+
+        // Lookup via disk
+        assert_eq!(
+            idx.lookup(&"fp-a".to_string(), &mut bm).unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            idx.lookup(&"fp-b".to_string(), &mut bm).unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            idx.lookup(&"fp-c".to_string(), &mut bm).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_secondary_index_lookup_unavailable() {
+        let (mut bm, _dir) = create_test_bm();
+        let mut idx = SecondaryIndex::new(
+            "si_unavail".to_string(),
+            "Memory".to_string(),
+            "fp".to_string(),
+            akar_catalog::IndexType::Hash,
+            "si_unavail".to_string(),
+        );
+        // Still Building — lookup returns None (scan fallback)
+        idx.insert("fp-x".to_string(), 5);
+        assert_eq!(
+            idx.lookup(&"fp-x".to_string(), &mut bm).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_secondary_index_mark_dropped() {
+        let (mut bm, _dir) = create_test_bm();
+        let mut idx = SecondaryIndex::new(
+            "si_drop".to_string(),
+            "Memory".to_string(),
+            "fp".to_string(),
+            akar_catalog::IndexType::Hash,
+            "si_drop".to_string(),
+        );
+        idx.mark_available();
+        assert!(idx.is_available());
+        idx.mark_dropped();
+        assert_eq!(idx.state, IndexState::Dropped);
+        assert!(!idx.is_available());
+    }
+
+    #[test]
+    fn test_secondary_index_dedup_flow() {
+        let (mut bm, _dir) = create_test_bm();
+        let mut idx = SecondaryIndex::new(
+            "si_dedup_flow".to_string(),
+            "Memory".to_string(),
+            "content_identity_fingerprint".to_string(),
+            akar_catalog::IndexType::Hash,
+            "si_dedup_flow".to_string(),
+        );
+
+        // First insert of fingerprint "fp-1" → row 100
+        idx.insert("fp-1".to_string(), 100);
+        idx.flush(&mut bm).unwrap();
+        idx.mark_available();
+
+        // Lookup returns existing row (duplicate detected by application layer)
+        assert_eq!(
+            idx.lookup(&"fp-1".to_string(), &mut bm).unwrap(),
+            Some(100),
+            "duplicate fingerprint should resolve to existing row"
+        );
+
+        // Different fingerprint → not found (new row)
+        assert_eq!(
+            idx.lookup(&"fp-2".to_string(), &mut bm).unwrap(),
+            None,
+            "new fingerprint should not be found"
+        );
+
+        // Application layer checks lookup BEFORE insert: since "fp-1" exists,
+        // the write path skips the insert (idempotent dedup).
+        // If the application incorrectly re-inserts, the index overwrites —
+        // that's the application's responsibility to prevent.
+        assert_eq!(
+            idx.lookup(&"fp-1".to_string(), &mut bm).unwrap(),
+            Some(100),
+            "existing fingerprint still resolves to original row"
+        );
     }
 }

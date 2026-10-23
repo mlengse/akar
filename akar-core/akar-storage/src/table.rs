@@ -5,7 +5,7 @@ use crate::art_key::ArtKey;
 use crate::column::Column;
 use crate::column_chunk::ColumnChunk;
 use crate::csr::CsrIndex;
-use crate::index::HashIndex;
+use crate::index::{HashIndex, SecondaryIndex};
 use crate::node_group::NodeGroup;
 use crate::spiller::Spiller;
 use crate::vector_index::VectorIndexTable;
@@ -1237,6 +1237,9 @@ pub struct TableCatalog {
     rel_name_to_id: DashMap<String, u64>,
     /// Map from index name to index ID for vector indexes.
     vector_index_name_to_id: DashMap<String, u64>,
+    /// Secondary indexes keyed by index name. Values own their on-disk hash
+    /// storage via `OnDiskHashIndex` (registered with the BufferManager).
+    secondary_indexes: DashMap<String, SecondaryIndex>,
     next_table_id: std::sync::atomic::AtomicU64,
     /// Filesystem root of the owning database, set once by
     /// [`crate::StorageManager::new`]. Extensions that keep side-car indexes on
@@ -1265,6 +1268,7 @@ impl std::fmt::Debug for TableCatalog {
             .field("next_table_id", &self.next_table_id)
             .field("db_path", &self.db_path)
             .field("fts_runtime_handles", &self.fts_runtime_handles.len())
+            .field("secondary_indexes", &self.secondary_indexes.len())
             .finish()
     }
 }
@@ -1559,6 +1563,63 @@ impl TableCatalog {
     /// Get all vector indexes.
     pub fn all_vector_indexes(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, u64, VectorIndexTable>> {
         self.vector_indexes.iter().collect()
+    }
+
+    // ==================== Secondary Indexes ====================
+
+    /// Create and register a secondary index. Returns error if an index with
+    /// the same name already exists.
+    pub fn create_secondary_index(
+        &self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        index_type: akar_catalog::IndexType,
+        file_name: String,
+    ) -> Result<(), String> {
+        if self.secondary_indexes.contains_key(&name) {
+            return Err(format!("Secondary index '{name}' already exists"));
+        }
+        let idx = SecondaryIndex::new(name.clone(), table_name, column_name, index_type, file_name);
+        self.secondary_indexes.insert(name, idx);
+        Ok(())
+    }
+
+    /// Get a reference to a secondary index by name.
+    pub fn get_secondary_index(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, String, SecondaryIndex>> {
+        self.secondary_indexes.get(name)
+    }
+
+    /// Get a mutable reference to a secondary index by name.
+    pub fn get_secondary_index_mut(
+        &self,
+        name: &str,
+    ) -> Option<dashmap::mapref::one::RefMut<'_, String, SecondaryIndex>> {
+        self.secondary_indexes.get_mut(name)
+    }
+
+    /// Drop a secondary index by name. Returns the dropped index if it existed.
+    pub fn drop_secondary_index(&self, name: &str) -> Option<SecondaryIndex> {
+        self.secondary_indexes.remove(name).map(|(_, idx)| idx)
+    }
+
+    /// Get all secondary indexes.
+    pub fn all_secondary_indexes(&self) -> Vec<dashmap::mapref::multiple::RefMulti<'_, String, SecondaryIndex>> {
+        self.secondary_indexes.iter().collect()
+    }
+
+    /// Find the name of a secondary index on the given table+column, if any.
+    pub fn find_secondary_index_for_column(
+        &self,
+        table_name: &str,
+        column_name: &str,
+    ) -> Option<String> {
+        self.secondary_indexes
+            .iter()
+            .find(|entry| {
+                entry.value().table_name == table_name && entry.value().column_name == column_name
+            })
+            .map(|entry| entry.key().clone())
     }
 
     /// Rebuild a vector index from the current contents of its node table.
